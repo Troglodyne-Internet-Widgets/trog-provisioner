@@ -878,7 +878,7 @@ Returns an array reference of the expanded list, a hash reference of the
 builders that it made, keyed by recipe name, and a hash reference of what
 requires what: each recipe that something required, to a sorted array
 reference of the recipes that required it.  C<bin/new_config> writes those as
-edges in the makefile, so that each dependency runs after the recipes that
+order-only prerequisites in the makefile, so that each dependency runs after the recipes that
 required it, whatever order make picks.  Reuse the builders, so that
 nothing loads every recipe a second time.  C<domain_conf> changes in place.
 The configuration of each dependency becomes the merge of what the domain wrote

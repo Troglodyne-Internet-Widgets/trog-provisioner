@@ -117,7 +117,7 @@ whether it already did so.
 
 The guest runs C<make -j> with one job for each processor: see the C<make> line
 in F<ubuntu.setup.sh.tt>.  So targets that do not depend on each other run at
-the same time, and only these edges order them:
+the same time, and only these dependencies order them:
 
 =over 4
 
@@ -125,7 +125,7 @@ the same time, and only these edges order them:
 C<ssl>.
 
 =item * A recipe runs after each recipe that names it in C<required_recipes>.
-C<resolve_dependencies> in L<Provisioner::Cookbook> returns those edges, and
+C<resolve_dependencies> in L<Provisioner::Cookbook> returns those dependencies, and
 F<bin/new_config> writes them as order-only prerequisites.
 
 =item * C<ufw> runs after every recipe.

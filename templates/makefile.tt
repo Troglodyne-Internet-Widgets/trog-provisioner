@@ -14,16 +14,6 @@ unexport MAKEFLAGS
 [% var %] := [% vars.$var | mark_raw %]
 [% END -%]
 
-[% global_targets = ['sysctl', 'packages', 'scripts', 'data', 'ssl', 'ssh', 'sendmail', 'testdeps'] -%]
-[% IF user -%]
-[% IF user == admin_user -%]
-[% global_targets.unshift('admin_user') -%]
-[% ELSE -%]
-[% global_targets.unshift('service_user') -%]
-[% END -%]
-[% END -%]
-[% global_targets.unshift('state') -%]
-
 .PHONY: all
 [%# ufw runs last, after every module.  setup-ufw-rules allows each profile
     that `ufw app list` shows, so the firewall never opens a profile that a
@@ -32,9 +22,9 @@ unexport MAKEFLAGS
     written into it.  Application profiles survive the reset, so a recipe can
     install one at any time and ufw allows it here.
 
-    bin/new_config takes ufw out of modules_ordered, so only this line decides
-    its position, and not alphabetical order. -%]
-all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% IF fetch_hosts %] [% state_dir %]/fetch_via_cache[% END %][% FOR module IN modules_ordered %] [% module %][% END %][% IF ufw_fragment %] [% state_dir %]/ufw[% END %]
+    targets_in_order in bin/new_config puts ufw last, so only that decides its
+    position, and not alphabetical order. -%]
+all:[% FOR t IN targets %] [% t.target %][% END %]
 	[%# The tests run even when the deferred work fails, and the build fails
 	    after them.  A guest with a broken postrun task is the guest whose test
 	    results you want to read. -%]
@@ -50,39 +40,18 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 	test ! -f /root/.postrun_failed || { echo "post_install: some deferred work failed; see above" >&2; exit 1; }
 	touch /root/install_complete
 
-[%# The order, as order-only prerequisites.  The prerequisites of all run in
-    their order only when make runs one target at a time.  These say the same
-    order under make -j: each global target after the one before it, every
-    recipe after the global targets, each dependency after the recipes that
-    required it, as bin/new_config works out, and ufw after every recipe.
+[%# The order of all, stated as order-only prerequisites, so that make -j keeps
+    it.  targets_in_order in bin/new_config says what waits for what.
     Order-only, because a target that ran must not make the next one run again.
 
     Each target also exports its place in that order as POSTRUN_SLOT, and
     scripts/queue_postrun_task tags each task it queues with it.  So the
     deferred work runs in this order too, whichever target finished first. -%]
-[% SET anchor = '' -%]
-[% SET slot = 0 -%]
-[% FOR target IN global_targets -%]
-[% SET slot = slot + 1 -%]
-[% state_dir %]/[% target %]: export POSTRUN_SLOT := [% slot %]
-[% IF anchor %][% state_dir %]/[% target %]: | [% state_dir %]/[% anchor %]
-[% END %][% SET anchor = target -%]
+[% FOR t IN targets -%]
+[% t.target %]: export POSTRUN_SLOT := [% t.slot %]
+[% IF t.after.size() -%]
+[% t.target %]: | [% t.after.join(' ') %]
 [% END -%]
-[% IF fetch_hosts -%]
-[% SET slot = slot + 1 -%]
-[% state_dir %]/fetch_via_cache: export POSTRUN_SLOT := [% slot %]
-[% state_dir %]/fetch_via_cache: | [% state_dir %]/[% anchor %]
-[% SET anchor = 'fetch_via_cache' -%]
-[% END -%]
-[% FOR module IN modules_ordered -%]
-[% SET slot = slot + 1 -%]
-[% module %]: export POSTRUN_SLOT := [% slot %]
-[% module %]: | [% state_dir %]/[% anchor %][% FOR before IN order_only.$module %] [% before %][% END %]
-[% END -%]
-[% IF ufw_fragment -%]
-[% SET slot = slot + 1 -%]
-[% state_dir %]/ufw: export POSTRUN_SLOT := [% slot %]
-[% state_dir %]/ufw: | [% state_dir %]/[% anchor %][% FOR module IN modules_ordered %] [% module %][% END %]
 [% END -%]
 
 [% state_dir %]/state:

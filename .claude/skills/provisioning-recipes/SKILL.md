@@ -240,8 +240,8 @@ Prints a directory holding whichever of these it found:
 | `$DOMAIN.setup.log` | the Makefile: every target, in order, and which one failed |
 | `cloud-init.log`, `cloud-init-output.log` | everything before the Makefile — seed, packages, users, network |
 | `new-outblocked.log` | egress the firewall stopped, as `SPT=`/`DPT=` pairs |
-| `post_install.sh` | deferred work still waiting — there only if the build stopped before `post_install` ran |
-| `post_install.ran.sh` | the deferred work as it actually ran, from the copy `post_install` moves aside |
+| `post_install.sh` | deferred work still waiting — empty unless the build stopped before `post_install` ran |
+| `post_install.ran.sh` | the deferred work as it actually ran, with what each task exited with |
 
 **Which ones are absent is itself the finding.** No `setup.log` means the guest
 never got as far as running a Makefile — read `cloud-init-output.log` instead,
@@ -249,13 +249,16 @@ the answer is in there. "not there" means the file genuinely is not there: the
 collector proves the connection before it reads anything, and dies rather than
 reporting a guest it could not reach as a guest with no logs.
 
+Both come out of `/root/post_install.db`, the queue that `post_install` keeps.
 Each line of `post_install.sh` is the slot of the target that queued it, a tab,
-and the task. `post_install` runs the tasks in slot order, which is the serial
-order of the targets, because under `make -j` they finish in any order.
+and the task, and `post_install.ran.sh` has what the task exited with between
+the two. `post_install` runs the tasks in slot order, which is the serial order
+of the targets, because under `make -j` they finish in any order. On the guest,
+`sqlite3 /root/post_install.db 'SELECT * FROM tasks'` shows all of it.
 
-`post_install.sh` is the one to read backwards. It is absent on a build that got
-through its deferred work, and present when something stopped before that —
-holding exactly what did not happen.
+`post_install.sh` is the one to read backwards. It is empty on a build that got
+through its deferred work, and holds lines when something stopped before that —
+exactly what did not happen.
 
 **Then ask whether the build finished, before you read anything else into what
 the guest looks like.** The guest records what make exited with in
@@ -268,7 +271,7 @@ above. Until you have checked, every conclusion you draw from the guest's state
 is a conclusion about a half-built machine.
 
 That matters most for the work a recipe defers. `queue_postrun_task` puts a
-command in `/root/post_install.sh` to be run after the targets, so a build that
+command in `/root/post_install.db` to be run after the targets, so a build that
 failed runs **none** of it: services never restarted, units never enabled, rules
 never loaded. Absence there belongs to the failed build rather than to the
 recipe, and a report naming the recipe sends the next person after a bug that is
@@ -277,8 +280,8 @@ not there.
 **A state stamp does not mean the recipe is done.** `/etc/provisioner/state/`
 gets a file per target, written by `touch $@` as the target's last line -- so a
 stamp says the fragment's commands all ran, not that what they set out to do has
-happened. `queue_postrun_task` succeeds the moment it appends to
-`post_install.sh`, which is why `auditd` stamps itself while `augenrules --load`
+happened. `queue_postrun_task` succeeds the moment it adds the task to the
+queue, which is why `auditd` stamps itself while `augenrules --load`
 has not run at all: on a build that died further down, the stamp is there, the
 rules are on disk, and nothing has loaded them. That pair reads exactly like a
 broken recipe and was reported here as one. Read the stamps for which targets

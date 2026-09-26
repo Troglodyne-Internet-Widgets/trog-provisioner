@@ -18,7 +18,6 @@ use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
-use File::Slurper::Temp();
 use IPC::Run3();
 
 use FindBin;
@@ -61,9 +60,9 @@ require_ok("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/collect
 
 subtest 'a file inside the home directory of root comes back, rather than being reported absent' => sub {
     my $into  = tempdir( CLEANUP => 1 );
-    my $guest = FakeGuest->new( content => "systemctl restart chrony\n" );
+    my $guest = FakeGuest->new( content => "SPT=40000 DPT=443\n" );
 
-    my $got = Trog::Skill::CollectArtifacts::fetch( $guest, 'vm.test', '/root/post_install.sh', $into );
+    my $got = Trog::Skill::CollectArtifacts::fetch( $guest, 'vm.test', '/root/new-outblocked.log', $into );
 
     ok( $got->{ok}, 'the collector came away with it' )
       or diag "why not: " . ( $got->{why} // 'no reason given' );
@@ -71,48 +70,40 @@ subtest 'a file inside the home directory of root comes back, rather than being 
     # Read only if there is one, so that a collector which decided the file was
     # missing fails here saying so, rather than dying on the read and taking the
     # rest of the file with it.
-    my $local = "$into/post_install.sh";
-    is( -e $local ? File::Slurper::read_text($local) : undef, "systemctl restart chrony\n", 'and wrote what was in it' );
+    my $local = "$into/new-outblocked.log";
+    is( -e $local ? File::Slurper::read_text($local) : undef, "SPT=40000 DPT=443\n", 'and wrote what was in it' );
 
     # Asked without sudo, every file under root's home reads as absent -- which
-    # is also what a build that queued no deferred work looks like, so the
+    # is also what a guest whose firewall stopped nothing looks like, so the
     # collector reported one as the other and said nothing was wrong.
-    is_deeply( $guest->{asked}[0], [qw{test -f /root/post_install.sh}], 'having asked as root, like the read that follows it' );
+    is_deeply( $guest->{asked}[0], [qw{test -f /root/new-outblocked.log}], 'having asked as root, like the read that follows it' );
 };
 
-# post_install moves its queue aside to post_install.sh.ran_at_<when> once it has
-# run, so the deferred work of a finished build is only readable from that copy.
-# fetch takes a literal path and cannot resolve a name with a timestamp in it,
-# which is why this one is asked rather than read.
-#
-# The command itself is run rather than matched against, because what is worth
-# pinning is which copy it chooses when mtime and name disagree -- a /root that
-# has been salvaged or rsynced is one where they do.
-subtest 'the deferred work comes back from the copy post_install left' => sub {
-    my ($probe) = grep { $_->[1] eq 'post_install.ran.sh' } Trog::Skill::CollectArtifacts::probes();
-    ok( $probe, 'the collector asks for it at all' ) or return;
+# The queue is a database, so the collector asks sqlite3 for what waits and
+# what ran.  The commands are run here, over a queue that post_install made.
+subtest 'the deferred work comes back out of the queue' => sub {
+    my %probe = map { $_->[1] => $_->[0] } Trog::Skill::CollectArtifacts::probes();
+    ok( $probe{'post_install.sh'} && $probe{'post_install.ran.sh'}, 'the collector asks for what waits and for what ran' ) or return;
 
     my $dir = tempdir( CLEANUP => 1 );
-    ( my $here = $probe->[0] ) =~ s{/root}{$dir}g;
-
     my $ask = sub {
-        IPC::Run3::run3( [ 'bash', '-c', $here ], \undef, \my $out, \my $err );
+        my ($name) = @_;
+        IPC::Run3::run3( [ 'bash', '-c', $probe{$name} =~ s{/root}{$dir}gr ], \undef, \my $out, \my $err );
         return $out // q{};
     };
+    is( $ask->('post_install.ran.sh'), "no deferred work has run here\n", 'a guest that never queued any says so, rather than coming back empty' );
 
-    is( $ask->(), "no deferred work has run here\n", 'a guest that never ran any says so, rather than coming back empty' );
+    my $post_install = "$FindBin::Bin/../scripts/post_install";
+    local $ENV{POST_INSTALL_DB} = "$dir/post_install.db";
+    foreach my $task ( [ 20, 'exit 3' ], [ 10, 'true' ] ) {
+        local $ENV{POSTRUN_SLOT} = $task->[0];
+        IPC::Run3::run3( [ $^X, $post_install, '--queue', $task->[1] ], \undef, \undef, \undef );
+    }
+    is( $ask->('post_install.sh'), "10\ttrue\n20\texit 3\n", 'what waits, by slot, before post_install runs' );
 
-    File::Slurper::Temp::write_text( "$dir/post_install.sh.ran_at_20260917-120000", "systemctl restart chrony\n" );
-    File::Slurper::Temp::write_text( "$dir/post_install.sh.ran_at_20260101-000000", "an older run\n" );
-
-    # Mtimes set the other way round from the names, on purpose: choosing by
-    # mtime picks the older copy the moment a salvaged or rsynced /root
-    # disagrees with its own filenames.
-    my $now = time;
-    utime( $now - 100, $now - 100, "$dir/post_install.sh.ran_at_20260917-120000" );
-    utime( $now,       $now,       "$dir/post_install.sh.ran_at_20260101-000000" );
-
-    is( $ask->(), "systemctl restart chrony\n", 'and the newest is the one by name, not the one touched last' );
+    IPC::Run3::run3( [ $^X, $post_install ], \undef, \undef, \undef );
+    is( $ask->('post_install.sh'),     q{},                            'and nothing once it has' );
+    is( $ask->('post_install.ran.sh'), "10\t0\ttrue\n20\t3\texit 3\n", 'what ran, with what each exited with' );
 };
 
 subtest 'a file that is genuinely not there is still reported missing' => sub {

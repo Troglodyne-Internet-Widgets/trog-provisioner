@@ -12,8 +12,8 @@
 ## Makefile target execution order is not guaranteed
 
 * When you need to restart services or interact with things which may or may not be present and functioning at the time your recipe's target runs, be sure to queue it as a postrun task.
-* The guest runs `make -j`, so a recipe runs at the same time as every recipe that it has no edge with.  The edges come from `required_recipes`: a recipe runs after each recipe that requires it.  If your fragment needs what another recipe installs, name that recipe in `required_recipes`.  Its position in the list of a domain orders nothing.
-* The postrun queue runs in the serial order of the targets, whatever order they finished in.  So the order of the tasks within your recipe, and across recipes, is the same as before `-j`.
+* The guest runs `make -j`, so a recipe runs at the same time as every recipe that it has no dependency with.  The dependencies come from `required_recipes`: a recipe runs after each recipe that requires it.  If your fragment needs what another recipe installs, name that recipe in `required_recipes`.  Its position in the list of a domain orders nothing.
+* The postrun queue runs in the serial order of the targets, whatever order they finished in.  So the order of the tasks within your recipe, and across recipes, is the same as before `-j`.  In that order a dependency's tasks run after those of the recipes that required it, because its target does.  A task that needs another recipe's task done first cannot count on the other recipe coming first unless that recipe requires this one.
 
 ## Who owns the domain directory
 

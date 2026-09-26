@@ -604,7 +604,7 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
 
     is( scalar @$modules, scalar keys %at, 'and the list comes back deduplicated, so callers need not' );
 
-    # bin/new_config makes these the order-only edges of the makefile, which
+    # bin/new_config makes these the order-only prerequisites of the makefile, which
     # are the order under make -j.  Each must agree with the list, or make
     # would be told two orders at once.
     is_deeply( $required_by->{t_dep},  ['t_requirer'], 'what requires what comes back too' );

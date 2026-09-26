@@ -1,14 +1,6 @@
 #!/bin/bash
 
-# Queue a command for post_install to run after the makefile is done.
-#
-# "$*" and not $*, because a task is one line.  Without the quotes, the shell
-# splits the task into words and expands its globs.
-#
-# Each task goes in with the slot of the target that queued it, which the
-# makefile exports as POSTRUN_SLOT.  post_install runs the tasks by slot, so
-# their order is the order of the targets and not the order in which make -j
-# finished them.  A task queued outside the makefile has no slot, and runs last.
-# printf writes the line in one write to a file open for append, so two targets
-# queueing at once do not mix their lines.
-printf '%s\t%s\n' "${POSTRUN_SLOT:-999999}" "$*" >> "${POST_INSTALL_QUEUE:-/root/post_install.sh}"
+# Queue a command for post_install to run after the makefile is done.  The
+# fragments call it by this name, and post_install keeps the queue.  See
+# scripts/post_install for the order the tasks run in, and why.
+exec "$(dirname "$0")/post_install" --queue "$@"

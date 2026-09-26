@@ -45,11 +45,26 @@ my $tt = Text::Xslate->new(
 
 my $STATE = '/etc/provisioner/state/guest.test.test';
 
+# bin/new_config works out the order, and the template writes it.
+require_ok("$FindBin::Bin/../bin/new_config") or BAIL_OUT('bin/new_config does not load');
+
 sub makefile {
     my (%extra) = @_;
+    my %in = ( user => 'svc', admin_user => 'admin', modules_ordered => ["$STATE/perl"], %extra );
     return $tt->render(
         'makefile.tt',
         {
+            targets => [
+                Trog::Provisioner::Config::Generator::targets_in_order(
+                    state_dir  => $STATE,
+                    user       => $in{user},
+                    admin_user => $in{admin_user},
+                    fetch      => !!$in{fetch_hosts},
+                    modules    => $in{modules_ordered},
+                    order_only => $in{order_only} // {},
+                    ufw        => defined $in{ufw_fragment},
+                )
+            ],
             vars                   => {},
             user                   => 'svc',
             admin_user             => 'admin',
@@ -82,7 +97,7 @@ sub position {
 # Under make -j, the prerequisites of all no longer run in their order.  The
 # order-only prerequisites are what hold it, so each target must name what has
 # to finish before it, and none may contradict the order of all.
-subtest 'the order of all is stated as edges, so make -j keeps it' => sub {
+subtest 'the order of all is stated as prerequisites, so make -j keeps it' => sub {
     my $G  = '/etc/provisioner/state';
     my $mf = makefile(
         modules_ordered  => [ "$G/global_nginx", "$STATE/tcms", "$STATE/perl" ],

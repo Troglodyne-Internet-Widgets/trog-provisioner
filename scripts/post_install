@@ -1,42 +1,122 @@
-#!/bin/bash
-# Run the work that the recipes deferred, and report each task that fails.
-#
-# Every task runs, because a stop at the first failure leaves the deferred work
-# of later recipes undone.  The exit code gives the result at the end.
-# The queue.  Only a test puts it somewhere else.
-QUEUE=${POST_INSTALL_QUEUE:-/root/post_install.sh}
+#!/usr/bin/perl
 
-[ -s "$QUEUE" ] || exit 0
+use 5.014;
 
-# Each line is the slot of the target that queued it, a tab, and the task.
-# Run the tasks by slot, and in the order they were queued within one slot.  A
-# line with no slot runs after all of them.  queue_postrun_task says why.
-ORDERED=$(mktemp)
-awk -F'\t' '{ if ($0 ~ /^[0-9]+\t/) { slot = $1; sub(/^[0-9]+\t/, "") } else { slot = 999999 } printf "%d\t%d\t%s\n", slot, NR, $0 }' "$QUEUE" \
-    | sort -t "$(printf '\t')" -k1,1n -k2,2n | cut -f3- > "$ORDERED"
+use strict;
+use warnings FATAL => 'all';
 
-rc=0
-while IFS= read -r task; do
-    [ -n "$task" ] || continue
-    echo "postrun: $task"
-    # Close stdin.  The loop reads the queue on stdin and bash -c inherits it.
-    # A task that reads stdin, for example cpanm, then eats the rest of the
-    # queue, and no error shows.  Deferred work has no input to read.
-    if ! bash -c "$task" < /dev/null; then
-        echo "postrun FAILED: $task" >&2
-        rc=1
-    fi
-done < "$ORDERED"
-rm -f -- "$ORDERED"
+use DBI ();
 
-[ "$rc" -eq 0 ] || echo "postrun: some deferred work failed; see above" >&2
+=head1 NAME
 
-# Move the queue aside, because queue_postrun_task appends to it.  If the queue
-# stays, the next makefile run does these tasks again on top of its own.
-#
-# Do this whatever the tasks did.  If the queue stays after a failure, the next
-# run replays all of it and does not retry only the failed part.  The failed
-# lines stay in the copy, and the exit code below reports the failure.
-mv -- "$QUEUE" "$QUEUE.ran_at_$(date +%Y%m%d-%H%M%S)"
+post_install - queue the work that the recipes defer, and run it after the makefile
 
-exit "$rc"
+=head1 SYNOPSIS
+
+    post_install --queue COMMAND [ARG ...]
+    post_install
+
+=head1 DESCRIPTION
+
+C<--queue> adds C<COMMAND> to the queue, with the slot of the target that
+queued it, which the makefile exports as C<POSTRUN_SLOT>.  The makefile calls
+it as F<queue_postrun_task>.  Its arguments are joined with spaces into one
+task, which C<bash -c> runs.
+
+With no arguments, it runs every task that has not run, by slot, and in the
+order they were queued within one slot.  A task queued with no slot runs after
+all of them.  Each task runs even when one before it failed, because a stop at
+the first failure leaves the deferred work of later recipes undone.  It exits 1
+when any task failed, and says which.
+
+A task runs once.  It is marked as run whether it failed or not, so the next
+makefile run does not replay the work of this one on top of its own.
+
+=head2 Why the slots
+
+Under C<make -j>, targets finish in any order.  The slots put the tasks back in
+the order of the targets, which is the order a serial make ran them in, and the
+order every recipe was written and tested against.  In that order a dependency
+runs after the recipes that required it, so its tasks run after theirs.
+
+=head2 The queue
+
+The queue is an SQLite database, F</root/post_install.db>, or
+C<POST_INSTALL_DB>.  Two targets can queue at the same time, so it runs in WAL
+mode and waits for the other writer.  Each row keeps the task, its slot, when it
+was queued, when it ran and what it exited with:
+
+    sqlite3 /root/post_install.db 'SELECT slot, status, task FROM tasks ORDER BY slot, id'
+
+=cut
+
+my $DB      = $ENV{POST_INSTALL_DB} // '/root/post_install.db';
+my $NO_SLOT = 999_999;
+my $WAIT_MS = 60_000;
+
+sub queue_db {
+    my $dbh = DBI->connect( "dbi:SQLite:dbname=$DB", q{}, q{}, { RaiseError => 1, PrintError => 0, AutoCommit => 1 } );
+    $dbh->sqlite_busy_timeout($WAIT_MS);
+    $dbh->do('PRAGMA journal_mode = WAL');
+    $dbh->do(
+        <<'SQL'
+CREATE TABLE IF NOT EXISTS tasks (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    slot   INTEGER NOT NULL,
+    task   TEXT    NOT NULL,
+    queued TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ran    TEXT,
+    status INTEGER
+)
+SQL
+    );
+    return $dbh;
+}
+
+sub queue_task {
+    my (@command) = @_;
+    die "usage: queue_postrun_task COMMAND [ARG ...]\n" unless @command;
+
+    my $slot = $ENV{POSTRUN_SLOT} // $NO_SLOT;
+    die "POSTRUN_SLOT is '$slot', which is not a slot\n" unless $slot =~ m/\A\d+\z/;
+
+    queue_db()->do( 'INSERT INTO tasks (slot, task) VALUES (?, ?)', undef, $slot, join( q{ }, @command ) );
+    return 0;
+}
+
+# What a task exited with, or 128 and the signal that ended it, as a shell says.
+sub exit_status {
+    my ($wait) = @_;
+    return 127                   if $wait == -1;
+    return 128 + ( $wait & 127 ) if $wait & 127;
+    return $wait >> 8;
+}
+
+sub run_tasks {
+    return 0 unless -e $DB;
+
+    my $dbh   = queue_db();
+    my $tasks = $dbh->selectall_arrayref('SELECT id, task FROM tasks WHERE ran IS NULL ORDER BY slot, id');
+
+    # A task that reads stdin, such as cpanm, waits for input that deferred work
+    # never has.
+    open( STDIN, '<', '/dev/null' ) or die "Could not close stdin: $!\n";
+    local $| = 1;
+
+    my $failed = 0;
+    foreach my $row (@$tasks) {
+        my ( $id, $task ) = @$row;
+        print "postrun: $task\n";
+        my $status = exit_status( system( 'bash', '-c', $task ) );
+        if ($status) {
+            print {*STDERR} "postrun FAILED: $task\n";
+            $failed = 1;
+        }
+        $dbh->do( 'UPDATE tasks SET ran = CURRENT_TIMESTAMP, status = ? WHERE id = ?', undef, $status, $id );
+    }
+
+    print {*STDERR} "postrun: some deferred work failed; see above\n" if $failed;
+    return $failed;
+}
+
+exit( @ARGV && $ARGV[0] eq '--queue' ? queue_task( @ARGV[ 1 .. $#ARGV ] ) : run_tasks() );
