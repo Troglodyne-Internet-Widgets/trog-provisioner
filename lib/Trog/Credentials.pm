@@ -234,6 +234,21 @@ sub load {
     return 1;
 }
 
+=head2 block()
+
+The credentials that this process holds, in the form that C<load> reads: a line
+of C<name: value> for each, and a blank line after them.  F<bin/provision>
+writes it to the standard input of each C<bin/provision --credentials> that it
+starts, so that a guest built on the way to another is not a second prompt.
+Empty when this process holds none.
+
+=cut
+
+sub block {
+    return q{} unless %CREDENTIAL;
+    return join( q{}, map { "$_: $CREDENTIAL{$_}\n" } sort keys %CREDENTIAL ) . "\n";
+}
+
 =head2 forget()
 
 Drops every credential that C<load> or C<remember> kept.  Only tests need this.

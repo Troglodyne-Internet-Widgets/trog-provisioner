@@ -596,6 +596,29 @@ sub dep_conflicts {
     return ();
 }
 
+=head3 @domains = $recipe->upstream_guests(%config)
+
+The domains of this installation whose guests this recipe wants up before this
+guest builds, by name.  C<%config> is the C<_global> of the domain with the
+configuration of the recipe on top, as the recipe renders with.
+
+F<bin/provision> builds each of them first when it is missing.  See
+L<Provisioner::Cookbook/upstream_domains>.  A name that no domain of the
+installation has, a URL, and the domain itself are left out there, so a recipe
+can return what it was configured with.  An upstream guest that is down must
+cost this guest only a slower build, never a failed one, because a build that
+refuses a cycle of guests is the only other way out of one.
+
+Must answer from the configuration alone, with no network.
+
+Empty by default.
+
+=cut
+
+sub upstream_guests {
+    return ();
+}
+
 =head3 @hosts = $recipe->fetch_hosts(%recipe_config)
 
 The hosts that this recipe downloads from on the guest, by name, such as

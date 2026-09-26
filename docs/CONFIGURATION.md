@@ -310,9 +310,10 @@ every guest has had. Turn it off against a mirror that carries the archive's own
 signed indices -- one built by the `aptmirror` recipe does, being a byte-for-byte
 copy.
 
-Nothing depends on the `aptmirror` recipe. A fleet without a mirror builds
+A fleet does not need the `aptmirror` recipe. A fleet without a mirror builds
 exactly as it always has, only slower, and `bin/preflight` says so rather than
-failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
+failing. When `mirror` names a domain of this installation, `bin/provision`
+builds that guest first if it is not up. See [Upstream guests](#upstream-guests). `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
 `cache` names a fetch cache for guests to provision through: a domain here,
@@ -513,6 +514,51 @@ running machine.
 A recipe that needs the machine rather than the domain -- the DNS server's
 credential belongs to one guest however many domains it serves -- asks
 `Provisioner::Cookbook->host_of`, which is this list read back.
+
+## Upstream guests
+
+Some settings name another guest of this installation, which a guest wants up
+before it builds:
+
+- `cache` in `_global`, the fetch cache that it downloads through.
+- `mirror` in `_global`, the package mirror that it installs from.
+- `host` of `logshipper`, where it ships its logs.
+
+`bin/provision` builds each of those guests first when no hypervisor has it,
+and each guest that they name in turn, in order, and then the domain you asked
+for. It leaves a guest that is up alone, unless you pass
+`--rebuild-upstream-guests`. So one line puts the whole fleet behind a cache,
+and the cache guest is built on the way to the first guest that needs it:
+
+```yaml
+_base:
+    _global:
+        cache: fetchcache.example.test
+```
+
+The cache guest names itself there too, and does not wait for itself.
+
+A setting that names a URL, an address, or a host that is not a domain here asks
+for nothing to be built. Each of these guests is one that a build can go on
+without: a guest downloads from upstream while the cache is down, installs from
+the archive while the mirror is down, and queues its logs while the collector is
+down.
+
+Two guests that each name the other are refused, because no order builds both.
+The one line above and a `logshipper` in `_base` make one such pair: the cache
+ships its logs to the collector, and the collector downloads through the cache.
+Break it on one of the two, for example with no cache for the collector:
+
+```yaml
+logs.example.test:
+    _global:
+        cache: ''
+```
+
+When a build fails, `bin/provision` offers to put that guest back to the
+snapshot it took before rebuilding it. `--on-failure rollback` or `keep` answers
+ahead of time, for a run with no terminal. A guest built for the first time has
+no snapshot to go back to.
 
 ## Data directories
 

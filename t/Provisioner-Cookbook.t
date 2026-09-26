@@ -1047,4 +1047,31 @@ subtest 'one alias is a list, as two already were' => sub {
     ok( !exists $aliases->{_base},             'nor is _base, which is not a domain' );
 };
 
+subtest 'upstream_domains: the guests a domain needs up first, in the order to build them' => sub {
+    my %conf = (
+        _base         => { _global      => { cache => 'cache.test', mirror => 'http://archive.test/ubuntu' } },
+        'cache.test'  => { fetchcache   => {} },
+        'logs.test'   => { logcollector => {} },
+        'web.test'    => { logshipper   => { host => 'logs.test' } },
+        'tenant.test' => { cron         => {} },
+        'plain.test'  => { _global      => { cache => q{} }, logshipper => { host => 'syslog.vendor.test' } },
+        'byip.test'   => { _global      => { cache => '192.0.2.9' } },
+        _shared       => { 'web.test'   => ['tenant.test'] },
+    );
+    my $up = sub { [ Provisioner::Cookbook->upstream_domains( $_[0], \%conf ) ] };
+
+    is_deeply( $up->('web.test'),    [qw{cache.test logs.test}], 'the cache first, which the collector needs too, then the collector' );
+    is_deeply( $up->('logs.test'),   ['cache.test'],             'the collector needs the cache' );
+    is_deeply( $up->('cache.test'),  [],                         'and the cache, which names itself, needs nothing' );
+    is_deeply( $up->('tenant.test'), [qw{cache.test logs.test}], 'a domain on the guest of another needs what that guest needs, and not the guest' );
+    is_deeply( $up->('plain.test'),  [],                         'an empty cache and a host outside the installation are nothing to build' );
+    is_deeply( $up->('byip.test'),   [],                         'and neither is a cache named by its address' );
+
+    $conf{'cache.test'}{logshipper} = { host => 'logs.test' };
+    my $cycle = exception { $up->('web.test') };
+    $cycle //= q{};
+    like( $cycle, qr/cache[.]test[ ]->[ ]logs[.]test[ ]->[ ]cache[.]test/, 'two guests that need each other are refused, naming the cycle' );
+    like( $cycle, qr/empty[ ]cache/,                                       'and saying how to break it' );
+};
+
 done_testing();

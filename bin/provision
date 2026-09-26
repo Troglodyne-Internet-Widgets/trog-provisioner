@@ -30,6 +30,8 @@ use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Trog::Utils();
+use IPC::Run3();
+use Cwd();
 
 use Carp::Always;
 
@@ -155,6 +157,30 @@ A dry run does not make F<domain.xml>.  That file names the storage pool, the
 base image, the disk of the guest and its seed.  To write the file, provision
 must make all four, and a dry run must not make them.
 
+=item B<--rebuild-upstream-guests>
+
+Rebuilds each upstream guest of DOMAIN as well, and not only the ones that are
+not up.  See L</Upstream guests>.
+
+=item B<--on-failure> rollback|keep|ask
+
+What to do when the build of a guest fails, for every guest this run builds.
+C<rollback> puts the guest back to the snapshot taken before this run rebuilt
+it, C<keep> leaves the failed guest for you to read, and C<ask>, the default,
+asks on the terminal and keeps the guest when there is none.  A guest built for
+the first time has no snapshot to go back to.  Either way, the run stops.
+
+=item B<--no-upstream>
+
+Builds DOMAIN alone, and none of its upstream guests.  A run passes it to the
+runs that build its upstream guests, because it has already put them in order.
+
+=item B<--only-if-missing>
+
+Builds DOMAIN only when no hypervisor has a guest of that name.  A run passes it
+to the runs that build its upstream guests, unless it was given
+B<--rebuild-upstream-guests>.
+
 =back
 
 =head1 DESCRIPTION
@@ -170,6 +196,24 @@ and waits for cloud-init and the makefile to finish.
 If F<provision.conf> names another domain in C<depends_on>, provision builds
 the guest of that domain first, and adds DOMAIN to it.  See L<Trog::HV> for what
 "the hypervisor" means when it is not this machine.
+
+=head2 Upstream guests
+
+Some guests need another guest up before they build.  A guest downloads through
+the fetch cache that C<cache> names, installs from the mirror that C<mirror>
+names, and ships its logs to the host of C<logshipper>.  One line in the
+C<_global> of C<_base> points every guest at the same cache, the cache guest
+too.  L<Provisioner::Cookbook/upstream_domains> works out which guests DOMAIN
+needs, and each guest that they need, in order.
+
+Before it builds DOMAIN, provision builds each of them that no hypervisor has,
+each in a run of its own, with the same options, B<--hypervisor> too, and leaves
+each that is up alone.  B<--rebuild-upstream-guests> rebuilds those too.  When one fails, the
+run stops, and DOMAIN is not built.
+
+Two guests that each need the other are refused before anything is built,
+because no order builds both.  One line in the configuration of one of them
+breaks it, for example an empty C<cache> in the C<_global> of the log collector.
 
 =cut
 
@@ -414,6 +458,20 @@ sub _public_half {
 # What to do about a rebuild that destroys the guest, as the
 # --*-on-nonreusable options set it.  `ask` means that no option gave an
 # answer.  It is not a fourth action.
+# The snapshot that provision_domain took of each guest before it rebuilt it,
+# for offer_rollback.  A guest built for the first time has none.
+our %SNAPSHOT;
+
+# What --on-failure takes.
+our %ON_FAILURE = map { $_ => 1 } qw{rollback keep ask};
+
+# Where offer_rollback asks, which a test points at a file.
+our $TERMINAL = '/dev/tty';
+
+# This program, for build_upstream to run again.  Not $FindBin::Bin, which is
+# the directory of whatever loaded it, such as a test.
+our $SELF = Cwd::abs_path(__FILE__);
+
 our %NONREUSABLE = (
     ask     => 0,
     clone   => 1,
@@ -426,21 +484,26 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse, $hv_name, $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse,                $hv_name,                $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
+    my ( $rebuild_upstream,     $no_upstream,            $only_if_missing, $on_failure );
     GetOptionsFromArray(
         \@args,
-        'existing=s'             => \$reuse,
-        'domaindir=s'            => \$domain_dir,
-        'dryrun'                 => \$dryrun,
-        'hypervisor=s'           => \$hv_name,
-        'hvconf=s'               => \$hvconf,
-        'recipes=s'              => \$recipes,
-        'credentials'            => \$credentials,
-        'salvage-gaps-ok'        => \$salvage_gaps_ok,
-        'clone-on-nonreusable'   => \$clone_on_nonreusable,
-        'destroy-on-nonreusable' => \$destroy_on_nonreusable,
-        'die-on-nonreusable'     => \$die_on_nonreusable,
+        'existing=s'              => \$reuse,
+        'domaindir=s'             => \$domain_dir,
+        'dryrun'                  => \$dryrun,
+        'hypervisor=s'            => \$hv_name,
+        'hvconf=s'                => \$hvconf,
+        'recipes=s'               => \$recipes,
+        'credentials'             => \$credentials,
+        'salvage-gaps-ok'         => \$salvage_gaps_ok,
+        'clone-on-nonreusable'    => \$clone_on_nonreusable,
+        'destroy-on-nonreusable'  => \$destroy_on_nonreusable,
+        'die-on-nonreusable'      => \$die_on_nonreusable,
+        'rebuild-upstream-guests' => \$rebuild_upstream,
+        'no-upstream'             => \$no_upstream,
+        'only-if-missing'         => \$only_if_missing,
+        'on-failure=s'            => \$on_failure,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     my @said = grep { $_ } ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
@@ -448,6 +511,12 @@ sub main {
         -exitval => 2, -verbose => 1, -input => __FILE__,
         -message => 'the --*-on-nonreusable options say different things; pass one'
     ) if scalar @said > 1;
+
+    $on_failure //= 'ask';
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => "--on-failure takes rollback, keep or ask, not '$on_failure'"
+    ) unless $ON_FAILURE{$on_failure};
 
     my $nonreusable = $NONREUSABLE{ask};
     $nonreusable = $NONREUSABLE{clone}   if $clone_on_nonreusable;
@@ -472,6 +541,39 @@ sub main {
     my $domain_dir_from_cli = $domain_dir;
     $domain_dir //= Trog::HV->default_domain_dir;
     $domain =~ s/\///g;
+
+    # An upstream guest that is up already is left alone, unless the run that
+    # started this one was told to rebuild its upstream guests.
+    if ($only_if_missing) {
+        my $there = Trog::Hypervisors->find( $domain, hypervisor => $hv_name, hvconf => $hvconf, domain_dir => $domain_dir_from_cli, missing_ok => 1 );
+        if ( $there && $there->domain_exists($domain) ) {
+            print "$domain is up on " . $there->name . ", so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
+            return 0;
+        }
+    }
+
+    # The guests this one needs up first, each in a run of its own.  A run has
+    # one hypervisor and one domain directory, and an upstream guest can be on
+    # another hypervisor.
+    unless ($no_upstream) {
+        my @upstream = Provisioner::Cookbook->upstream_domains( $domain, Provisioner::Cookbook->configuration($recipes) );
+        my @pass     = (
+            '--no-upstream',
+            ( $rebuild_upstream ? () : '--only-if-missing' ),
+            '--on-failure', $on_failure,
+            ( $dryrun                 ? '--dryrun'                 : () ),
+            ( $credentials            ? '--credentials'            : () ),
+            ( $clone_on_nonreusable   ? '--clone-on-nonreusable'   : () ),
+            ( $destroy_on_nonreusable ? '--destroy-on-nonreusable' : () ),
+            ( $die_on_nonreusable     ? '--die-on-nonreusable'     : () ),
+            ( map { defined $_->[1] ? @$_ : () } [ '--hypervisor', $hv_name ], [ '--hvconf', $hvconf ], [ '--recipes', $recipes ], [ '--domaindir', $domain_dir_from_cli ] ),
+        );
+        foreach my $upstream (@upstream) {
+            print "$domain needs $upstream up first.\n";
+            build_upstream( $upstream, @pass )
+              or die "The build of $upstream, which $domain needs up first, failed, so $domain was not built.\n";
+        }
+    }
 
     # Generate the configuration of the domain first.  It writes provision.conf
     # and packs data.tar.gz, and it needs the hypervisor to write them.  So it
@@ -543,58 +645,162 @@ sub main {
 
         #XXX Perhaps die here if the admin_user settings differ.
 
-        ( $reuser, $reuse ) = provision_domain( config => $dconfig, domain => $depends, reuse => $reuse, reuser => $reuser, dryrun => $dryrun, nonreusable => $nonreusable );
+        with_rollback(
+            $depends, $on_failure,
+            sub {
+                ( $reuser, $reuse ) = provision_domain( config => $dconfig, domain => $depends, reuse => $reuse, reuser => $reuser, dryrun => $dryrun, nonreusable => $nonreusable );
 
-        # After provision_domain, because it makes this key and puts it in the
-        # store.  Before it, this gets the key of the old guest.
-        $skey = Trog::Guest->key_path( $depends, "$domain_dir/$depends/key.rsa" );
-        if ( !$dryrun ) {
-            my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
+                # After provision_domain, because it makes this key and puts it
+                # in the store.  Before it, this gets the key of the old guest.
+                $skey = Trog::Guest->key_path( $depends, "$domain_dir/$depends/key.rsa" );
+                return if $dryrun;
+                my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
+                $guest->wait_for_ssh();
+                $guest->wait_for_cloud_init($depends);
+                $hv->release_seed($depends);
+                $guest->wait_for_makefile($depends)
+                  or die "The build for $depends failed; read /var/log/$depends.setup.log on the guest\n";
+            }
+        );
+
+    }
+
+    with_rollback(
+        $domain, $on_failure,
+        sub {
+            my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun, nonreusable => $nonreusable );
+            return if $dryrun;
+
+            # After provision_domain, for the reason above.  A domain with a dependency
+            # already has the key of that guest.
+            $skey //= Trog::Guest->key_path( $domain, "$domain_dir/$domain/key.rsa" );
+
+            # --out, not a $(...) substitution.  Without --out, bin/guest_key writes a
+            # temporary file and removes it when it exits.  So ssh gets a path that is
+            # already gone.
+            print "bin/guest_key --out $domain.key $domain && ssh -i $domain.key $user\@$ip\n";
+            my $guest = Trog::Guest->new( name => $domain, host => $ip, user => $user, key_path => $skey );
             $guest->wait_for_ssh();
-            $guest->wait_for_cloud_init($depends);
-            $hv->release_seed($depends);
-            $guest->wait_for_makefile($depends)
-              or die "The build for $depends failed; read /var/log/$depends.setup.log on the guest\n";
+
+            my $map = "$domain_dir/$domain/devices.map";
+            if ( -f $map ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one to send; put_file dies if it has gone since
+                print "Syncing disk map\n";
+                $guest->put_file( $map, '/root/devices.map', sudo => 1 )
+                  or die "could not sync devices map!";
+            }
+
+            # Before cloud-init finishes, so before the makefile that it schedules
+            # starts.  A recipe reads these files and does not generate them.
+            place_guest_secrets( $guest, $domain );
+
+            $guest->wait_for_cloud_init($domain);
+
+            # Only now.  cloud-init reads the seed ISO until it finishes, and without
+            # the ISO the guest gets no user, no keys and no netplan.  The ISO comes
+            # out only so that the guest does not boot from it next time.
+            $hv->release_seed($domain);
+
+            $guest->wait_for_makefile($domain)
+              or die "The build for $domain failed; read /var/log/$domain.setup.log on the guest\n";
+
         }
-
-    }
-
-    my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun, nonreusable => $nonreusable );
-    return 0 if $dryrun;
-
-    # After provision_domain, for the reason above.  A domain with a dependency
-    # already has the key of that guest.
-    $skey //= Trog::Guest->key_path( $domain, "$domain_dir/$domain/key.rsa" );
-
-    # --out, not a $(...) substitution.  Without --out, bin/guest_key writes a
-    # temporary file and removes it when it exits.  So ssh gets a path that is
-    # already gone.
-    print "bin/guest_key --out $domain.key $domain && ssh -i $domain.key $user\@$ip\n";
-    my $guest = Trog::Guest->new( name => $domain, host => $ip, user => $user, key_path => $skey );
-    $guest->wait_for_ssh();
-
-    my $map = "$domain_dir/$domain/devices.map";
-    if ( -f $map ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one to send; put_file dies if it has gone since
-        print "Syncing disk map\n";
-        $guest->put_file( $map, '/root/devices.map', sudo => 1 )
-          or die "could not sync devices map!";
-    }
-
-    # Before cloud-init finishes, so before the makefile that it schedules
-    # starts.  A recipe reads these files and does not generate them.
-    place_guest_secrets( $guest, $domain );
-
-    $guest->wait_for_cloud_init($domain);
-
-    # Only now.  cloud-init reads the seed ISO until it finishes, and without
-    # the ISO the guest gets no user, no keys and no netplan.  The ISO comes
-    # out only so that the guest does not boot from it next time.
-    $hv->release_seed($domain);
-
-    $guest->wait_for_makefile($domain)
-      or die "The build for $domain failed; read /var/log/$domain.setup.log on the guest\n";
+    );
 
     return 0;
+}
+
+=head2 $ok = build_upstream($domain, @options)
+
+Runs this program again for C<$domain>, with C<@options>, and returns true when
+it succeeded.  Its output is this one's.  With C<--credentials>, it writes what
+L<Trog::Credentials/block> holds to the standard input of the run, so a guest
+built on the way to another asks for nothing twice.
+
+=cut
+
+sub build_upstream {
+    my ( $domain, @options ) = @_;
+
+    my $credentials = Trog::Credentials->block();
+    IPC::Run3::run3( [ $^X, $SELF, @options, $domain ], \$credentials, undef, undef );
+    return $? == 0;
+}
+
+=head2 @result = with_rollback($domain, $on_failure, $code)
+
+Runs C<$code>, which builds the guest of C<$domain>, and returns what it
+returns.  When it dies, this calls C<offer_rollback> and then dies with the
+same error, so a failed build stops the run after the offer.
+
+=cut
+
+sub with_rollback {
+    my ( $domain, $on_failure, $code ) = @_;
+
+    my @result = eval { $code->() };
+    if ( my $error = $@ ) {
+        offer_rollback( $domain, $on_failure );
+        die $error;
+    }
+    return @result;
+}
+
+=head2 $rolled_back = offer_rollback($domain, $on_failure)
+
+Offers to put the guest of C<$domain> back to the snapshot that
+C<provision_domain> took before this run rebuilt it.  Returns true when it did.
+
+C<$on_failure> is C<rollback>, C<keep> or C<ask>, as C<--on-failure> says.
+C<ask> asks on the terminal, and keeps the failed guest when there is no
+terminal to ask on, so a run with nobody to answer changes nothing it was not
+told to.  A guest built for the first time has no snapshot, and this says so.
+
+The snapshot is of the guest before the rebuild, and the store holds the guest
+key of the rebuild.  So after a rollback the stored key does not open the
+guest, and the keys of the administrator still do.
+
+=cut
+
+sub offer_rollback {
+    my ( $domain, $on_failure ) = @_;
+
+    my $snapshot = $SNAPSHOT{$domain};
+    unless ($snapshot) {
+        print "$domain had no guest before this run, so there is nothing to roll it back to.\n";
+        return 0;
+    }
+
+    my $answer = $on_failure eq 'ask' ? ask_rollback( $domain, $snapshot ) : $on_failure;
+    unless ( $answer eq 'rollback' ) {
+        print "The failed build of $domain is left as it is.  To go back: bin/restore --name $snapshot $domain\n";
+        return 0;
+    }
+
+    print "Rolling $domain back to $snapshot...\n";
+    unless ( Trog::HV->new()->revert_snapshot( $domain, $snapshot ) ) {
+        warn "Could not roll $domain back to $snapshot.  bin/restore --name $snapshot $domain tries again.\n";
+        return 0;
+    }
+    print "$domain is back as it was before this run.  The guest key in the store is the one of the failed\n" . "build, so reach it with the keys of the administrator.\n";
+    return 1;
+}
+
+# rollback or keep, as the operator answers on the terminal.
+sub ask_rollback {
+    my ( $domain, $snapshot ) = @_;
+
+    # Written and read apart, as Trog::Credentials does, so an answer already
+    # there is not written over.
+    my $no_terminal = "There is no terminal to ask on, so the failed build of $domain is kept.\n" . "--on-failure rollback rolls it back without asking.\n";
+    open( my $out, '>>', $TERMINAL ) or do { print $no_terminal; return 'keep' };
+    print {$out} "The build of $domain failed.  Roll it back to $snapshot? [y/N] ";
+    close($out) or warn "Could not close $TERMINAL: $!\n";
+
+    open( my $in, '<', $TERMINAL ) or do { print $no_terminal; return 'keep' };
+    my $said = <$in> // q{};
+    close($in) or warn "Could not close $TERMINAL: $!\n";
+
+    return $said =~ m/\A\s*y/i ? 'rollback' : 'keep';
 }
 
 =head2 generate_config($domain, $opts)
@@ -775,6 +981,7 @@ sub provision_domain (%args) {
     # keep the disk deletes it, so a snapshot in it has no use.  The backend
     # decides which case this is, and what a snapshot needs.
     my $rollback = $hv->snapshot_before_rebuild( $domain, capacity => $settings{size} );
+    $SNAPSHOT{$domain} = $rollback;
     print "Snapshotted $domain as $rollback before rebuilding it.\n" . "If this goes badly: bin/restore --name $rollback $domain\n" if $rollback;
 
     # The backend decides what each step does.  libvirt removes a domain and

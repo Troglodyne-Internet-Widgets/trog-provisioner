@@ -13,6 +13,7 @@ use Cwd();
 use File::Basename();
 use File::Find();
 use List::Util qw{any uniq};
+use feature 'current_sub';
 use Provisioner::Utils();
 use File::Slurper();
 use File::Slurper::Temp();
@@ -1220,6 +1221,66 @@ sub host_of {
     }
 
     return;
+}
+
+=head2 @domains = $class->upstream_domains($domain, $conf)
+
+The domains whose guests must be up before the guest of C<$domain> builds, in
+the order to build them: each after the ones it needs itself.  C<$domain> is
+not among them.  C<$conf> is as in C<domain_config>.
+
+Each recipe of a domain, and its distro recipe, answers
+L<Provisioner::Recipe/upstream_guests> with the C<_global> of the domain and
+its own configuration.  A name counts only when it is a domain of this
+configuration, and not the domain itself, so a URL, an address and a guest that
+is its own cache ask for nothing.  A domain built onto the guest of another, see
+C<host_of>, also needs what that guest needs, but not the guest itself, which
+F<bin/provision> builds as the host.
+
+Dies on a cycle, naming each domain in it, because no order builds every guest
+after the ones it needs.  The configuration breaks it: one of the guests in the
+cycle sets the setting that points at the next one to empty in its own
+C<_global> or recipe.
+
+=cut
+
+sub upstream_domains {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
+    my ( @order, %done );
+    my $visit = sub {
+        my ( $name, @path ) = @_;
+        if ( my ($at) = grep { $path[$_] eq $name } 0 .. $#path ) {
+            my @cycle = ( @path[ $at .. $#path ], $name );
+            die 'These guests each need the next one up before they build: ' . join( ' -> ', @cycle ) . "\n" . "No order builds all of them.  Set the setting that points at the next one to empty\n" . "for one of them, in its own _global or recipe, such as an empty cache.\n";
+        }
+        return if $done{$name};
+        __SUB__->( $_, @path, $name ) for $class->_upstreams_of( $name, $conf, \%configured );
+        $done{$name} = 1;
+        push( @order, $name );
+    };
+    $visit->($domain);
+
+    return grep { $_ ne $domain } @order;
+}
+
+# What one domain names, and the guest it is built onto, before the walk.
+sub _upstreams_of {
+    my ( $class, $domain, $conf, $configured ) = @_;
+
+    my $host = $class->host_of( $domain, $conf );
+    my @names;
+    foreach my $guest ( $domain, $host // () ) {
+        my %global = ( %{ $class->global_config( $guest, $conf ) }, domain => $guest );
+        my $config = $class->domain_config( $guest, $conf );
+        push( @names, $class->load( $global{distro} // 'ubuntu' )->upstream_guests(%global) );
+        foreach my $recipe ( grep { $class->has($_) } sort keys %$config ) {
+            push( @names, $class->load($recipe)->upstream_guests( %global, %{ $config->{$recipe} // {} } ) );
+        }
+    }
+    return grep { $configured->{$_} && $_ ne $domain && $_ ne ( $host // q{} ) } uniq @names;
 }
 
 =head2 global_config($domain, $conf)
