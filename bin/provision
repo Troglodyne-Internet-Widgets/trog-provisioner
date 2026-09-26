@@ -177,9 +177,11 @@ runs that build its upstream guests, because it has already put them in order.
 
 =item B<--only-if-missing>
 
-Builds DOMAIN only when no hypervisor has a guest of that name.  A run passes it
-to the runs that build its upstream guests, unless it was given
-B<--rebuild-upstream-guests>.
+Builds DOMAIN only when no hypervisor of the fleet has a guest of that name,
+whichever one B<--hypervisor> names.  A run passes it to the runs that build its
+upstream guests, unless it was given B<--rebuild-upstream-guests>.  A
+hypervisor that cannot be asked is warned about and skipped, as when a guest is
+placed.
 
 =back
 
@@ -543,9 +545,11 @@ sub main {
     $domain =~ s/\///g;
 
     # An upstream guest that is up already is left alone, unless the run that
-    # started this one was told to rebuild its upstream guests.
+    # started this one was told to rebuild its upstream guests.  Asked of the
+    # whole fleet, not only the hypervisor that --hypervisor names, which is
+    # where a missing guest is built and not the only place one can be.
     if ($only_if_missing) {
-        my $there = Trog::Hypervisors->find( $domain, hypervisor => $hv_name, hvconf => $hvconf, domain_dir => $domain_dir_from_cli, missing_ok => 1 );
+        my $there = Trog::Hypervisors->find( $domain, hvconf => $hvconf, domain_dir => $domain_dir_from_cli, missing_ok => 1 );
         if ( $there && $there->domain_exists($domain) ) {
             print "$domain is up on " . $there->name . ", so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
             return 0;

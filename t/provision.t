@@ -1137,7 +1137,8 @@ subtest 'an upstream guest that is up is left alone' => sub {
 
     my $exists = 1;
     my $fleet  = Test::MockModule->new('Trog::Hypervisors');
-    $fleet->redefine( find => sub { return bless { exists => $exists }, 'UpstreamProbe' } );
+    my %asked;
+    $fleet->redefine( find => sub { ( undef, undef, %asked ) = @_; return bless { exists => $exists }, 'UpstreamProbe' } );
     no warnings 'once';
     local *UpstreamProbe::domain_exists = sub { $_[0]{exists} };
     local *UpstreamProbe::name          = sub { 'hv1' };
@@ -1145,6 +1146,11 @@ subtest 'an upstream guest that is up is left alone' => sub {
 
     my $out = capture_stdout { is( Trog::Bin::Provisioner::main(qw{--only-if-missing --no-upstream cache.test}), 0, 'without building it' ) };
     like( $out, qr/cache[.]test[ ]is[ ]up[ ]on[ ]hv1/, 'and says where it is' );
+
+    # --hypervisor says where a missing guest goes, not the only place one can
+    # be.  Asking only there would build a second cache beside the first.
+    capture_stdout { Trog::Bin::Provisioner::main(qw{--only-if-missing --no-upstream --hypervisor hv2 cache.test}) };
+    ok( !exists $asked{hypervisor}, 'the whole fleet is asked, whatever --hypervisor names' );
 
     $exists = 0;
     like(
