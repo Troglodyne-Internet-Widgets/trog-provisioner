@@ -265,10 +265,10 @@ sub salvage_gaps { return %SALVAGE_GAPS }
 sub main {
     my @args = @_;
 
-    # Clear the gaps and the hypervisor options of the last run, because a
-    # process can call main() more than once.
+    # Clear the gaps and the options of the last run, because a process can call
+    # main() more than once: bin/provision does, once for each guest it builds.
     %SALVAGE_GAPS = ();
-    undef $_ for $hvconf, $hv_name, $domaindir;
+    undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh;
 
     my $credentials;
     GetOptionsFromArray(

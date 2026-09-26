@@ -408,7 +408,9 @@ sub config_value {
 
 =head2 forget()
 
-Drop the stored instance.  Only the tests call this.
+Drop the stored instance, so that the next C<new> or C<Trog::Hypervisors>
+choice makes a new one.  F<bin/provision> calls it before each guest it builds,
+because the guests of one run can be on different hypervisors.
 
 =cut
 

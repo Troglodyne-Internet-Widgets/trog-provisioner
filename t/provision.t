@@ -1088,12 +1088,12 @@ sub upstream_fixture {
     return $file;
 }
 
-subtest 'upstream guests are built first, in order, each in a run of its own' => sub {
+subtest 'upstream guests are built first, in order, in this run' => sub {
     my $recipes = upstream_fixture();
     my $bin     = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
-    my @built;
-    $bin->redefine( build_upstream  => sub { push( @built, [@_] ); 1 } );
-    $bin->redefine( generate_config => sub { die "far enough\n" } );
+    my ( @built, %up );
+    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); return 0 } );
+    $bin->redefine( guest_is_up => sub { return $up{ $_[0] } } );
 
     my $run = sub {
         my @args = @_;
@@ -1103,83 +1103,49 @@ subtest 'upstream guests are built first, in order, each in a run of its own' =>
         };
     };
 
-    like( $run->('web.test'), qr/\Afar[ ]enough$/m, 'and then the domain itself' );
-    is_deeply( [ map { $_->[0] } @built ], [qw{cache.test logs.test}], 'the cache, and the collector, which needs the cache' );
-    my %given = map { $_ => 1 } @{ $built[0] }[ 1 .. $#{ $built[0] } ];
-    ok( $given{'--no-upstream'},     'each run is told that the order is worked out' );
-    ok( $given{'--only-if-missing'}, 'and to leave a guest that is up alone' );
-    ok( $given{$recipes},            'with the same configuration' );
+    is( $run->(qw{--hypervisor hv1 --salvage-gaps-ok --existing 192.0.2.5 web.test}), undef, 'it runs to the end' );
+    is_deeply( [ map { $_->{domain} } @built ],     [qw{cache.test logs.test web.test}], 'the cache, the collector that needs it, and then the domain' );
+    is_deeply( [ map { $_->{hypervisor} } @built ], [qw{hv1 hv1 hv1}],                   'each on the hypervisor this run was told to use' );
+    is_deeply( [ map { $_->{recipes} } @built ],    [ ($recipes) x 3 ],                  'from the same configuration' );
+    ok( !$built[0]{salvage_gaps_ok} && !$built[0]{reuse}, '--salvage-gaps-ok and --existing are not for an upstream guest' );
+    is_deeply( [ @{ $built[-1] }{qw{salvage_gaps_ok reuse}} ], [ 1, '192.0.2.5' ], 'but for the domain asked for' );
 
-    $run->(qw{--hypervisor hv1 web.test});
-    ok( ( grep { $_ eq 'hv1' } @{ $built[0] } ), 'and on the hypervisor this run was told to use' );
+    %up = ( 'cache.test' => 'hv9' );
+    $run->('web.test');
+    is_deeply( [ map { $_->{domain} } @built ], [qw{logs.test web.test}], 'a guest that is up is left alone, wherever it is' );
 
-    $run->( '--rebuild-upstream-guests', 'web.test' );
-    ok( !( grep { $_ eq '--only-if-missing' } @{ $built[0] } ), '--rebuild-upstream-guests rebuilds them' );
+    $run->(qw{--rebuild-upstream-guests web.test});
+    is_deeply( [ map { $_->{domain} } @built ], [qw{cache.test logs.test web.test}], 'and --rebuild-upstream-guests rebuilds it' );
+    %up = ();
 
-    $run->( '--no-upstream', 'web.test' );
-    is_deeply( \@built, [], '--no-upstream builds none' );
-
-    $bin->redefine( build_upstream => sub { push( @built, [@_] ); 0 } );
+    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); die "makefile failed\n" if $args{domain} eq 'cache.test'; return 0 } );
     my $failed = $run->('web.test') // q{};
     like( $failed, qr/The[ ]build[ ]of[ ]cache[.]test,/,        'a failed upstream stops the run' );
     like( $failed, qr/which[ ]web[.]test[ ]needs[ ]up[ ]first/, 'saying which domain needed it' );
+    like( $failed, qr/makefile[ ]failed/,                       'and why it failed' );
     is( scalar @built, 1, 'before the next one' );
 
-    $bin->redefine( build_upstream => sub { push( @built, [@_] ); 1 } );
     $recipes = upstream_fixture( 'cache.test' => { fetchcache => {}, logshipper => { host => 'logs.test' } } );
     like( $run->('web.test'), qr/cache[.]test[ ]->[ ]logs[.]test[ ]->[ ]cache[.]test/, 'two guests that need each other are refused' );
     is_deeply( \@built, [], 'before anything is built' );
 };
 
-subtest 'an upstream guest that is up is left alone' => sub {
-    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
-    $bin->redefine( generate_config => sub { die "far enough\n" } );
-
-    my $exists = 1;
-    my $fleet  = Test::MockModule->new('Trog::Hypervisors');
-    my %asked;
-    $fleet->redefine( find => sub { ( undef, undef, %asked ) = @_; return bless { exists => $exists }, 'UpstreamProbe' } );
+subtest 'guest_is_up asks the whole fleet, whatever --hypervisor names' => sub {
+    my ( %asked, $exists );
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { ( undef, undef, %asked ) = @_; return bless {}, 'UpstreamProbe' } );
     no warnings 'once';
-    local *UpstreamProbe::domain_exists = sub { $_[0]{exists} };
-    local *UpstreamProbe::name          = sub { 'hv1' };
+    local *UpstreamProbe::domain_exists = sub { $exists };
+    local *UpstreamProbe::name          = sub { 'hv2' };
     use warnings;
 
-    my $out = capture_stdout { is( Trog::Bin::Provisioner::main(qw{--only-if-missing --no-upstream cache.test}), 0, 'without building it' ) };
-    like( $out, qr/cache[.]test[ ]is[ ]up[ ]on[ ]hv1/, 'and says where it is' );
-
-    # --hypervisor says where a missing guest goes, not the only place one can
-    # be.  Asking only there would build a second cache beside the first.
-    capture_stdout { Trog::Bin::Provisioner::main(qw{--only-if-missing --no-upstream --hypervisor hv2 cache.test}) };
-    ok( !exists $asked{hypervisor}, 'the whole fleet is asked, whatever --hypervisor names' );
+    $exists = 1;
+    is( Trog::Bin::Provisioner::guest_is_up( 'cache.test', hypervisor => 'hv1', hvconf => '/bogus/hypervisors.conf' ), 'hv2', 'the hypervisor that has it' );
+    ok( !exists $asked{hypervisor}, 'asking the fleet, and not only the hypervisor a missing guest goes to' );
+    is( $asked{hvconf}, '/bogus/hypervisors.conf', 'the fleet of this run' );
 
     $exists = 0;
-    like(
-        exception {
-            quietly( sub { Trog::Bin::Provisioner::main(qw{--only-if-missing --no-upstream cache.test}) } )
-        },
-        qr/\Afar[ ]enough$/m,
-        'one that is not up is built'
-    );
-};
-
-subtest 'build_upstream runs this program again, with the credentials on its standard input' => sub {
-    my @ran;
-    my $run3 = Test::MockModule->new('IPC::Run3');
-    $run3->redefine( run3 => sub { my ( $argv, $in ) = @_; push( @ran, [ $argv, ${$in} ] ); $? = 0; return 1 } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- run3 sets it, and so does this stand-in
-
-    open( my $block, '<', \"keepass: store pass\n\n" ) or die;
-    Trog::Credentials->load($block);
-    close($block) or die;
-    ok( Trog::Bin::Provisioner::build_upstream( 'cache.test', '--no-upstream' ), 'true when it succeeds' );
-    Trog::Credentials->forget();
-
-    my ( $argv, $stdin ) = @{ $ran[0] };
-    is_deeply( [ @$argv[ 2 .. $#$argv ] ], [ '--no-upstream', 'cache.test' ], 'with the options, and the domain last' );
-    like( $argv->[1], qr{bin/provision\z}, 'this program' );
-    is( $stdin, "keepass: store pass\n\n", 'the credentials, in the form --credentials reads' );
-
-    $run3->redefine( run3 => sub { $? = 256; return 1 } );    ## no critic (Variables::RequireLocalizedPunctuationVars)
-    ok( !Trog::Bin::Provisioner::build_upstream('cache.test'), 'false when it fails' );
+    is( Trog::Bin::Provisioner::guest_is_up('cache.test'), undef, 'and nothing when none has it' );
 };
 
 subtest 'a failed build offers to go back to its snapshot' => sub {

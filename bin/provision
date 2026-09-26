@@ -30,8 +30,6 @@ use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Trog::Utils();
-use IPC::Run3();
-use Cwd();
 
 use Carp::Always;
 
@@ -170,19 +168,6 @@ it, C<keep> leaves the failed guest for you to read, and C<ask>, the default,
 asks on the terminal and keeps the guest when there is none.  A guest built for
 the first time has no snapshot to go back to.  Either way, the run stops.
 
-=item B<--no-upstream>
-
-Builds DOMAIN alone, and none of its upstream guests.  A run passes it to the
-runs that build its upstream guests, because it has already put them in order.
-
-=item B<--only-if-missing>
-
-Builds DOMAIN only when no hypervisor of the fleet has a guest of that name,
-whichever one B<--hypervisor> names.  A run passes it to the runs that build its
-upstream guests, unless it was given B<--rebuild-upstream-guests>.  A
-hypervisor that cannot be asked is warned about and skipped, as when a guest is
-placed.
-
 =back
 
 =head1 DESCRIPTION
@@ -208,10 +193,11 @@ C<_global> of C<_base> points every guest at the same cache, the cache guest
 too.  L<Provisioner::Cookbook/upstream_domains> works out which guests DOMAIN
 needs, and each guest that they need, in order.
 
-Before it builds DOMAIN, provision builds each of them that no hypervisor has,
-each in a run of its own, with the same options, B<--hypervisor> too, and leaves
-each that is up alone.  B<--rebuild-upstream-guests> rebuilds those too.  When one fails, the
-run stops, and DOMAIN is not built.
+Before it builds DOMAIN, provision builds each of them that no hypervisor of
+the fleet has, one after another, with the same options, B<--hypervisor> too,
+and leaves each that is up alone, wherever it is.  B<--rebuild-upstream-guests>
+rebuilds those too.  B<--existing> and B<--salvage-gaps-ok> are for DOMAIN
+only.  When one fails, the run stops, and DOMAIN is not built.
 
 Two guests that each need the other are refused before anything is built,
 because no order builds both.  One line in the configuration of one of them
@@ -470,10 +456,6 @@ our %ON_FAILURE = map { $_ => 1 } qw{rollback keep ask};
 # Where offer_rollback asks, which a test points at a file.
 our $TERMINAL = '/dev/tty';
 
-# This program, for build_upstream to run again.  Not $FindBin::Bin, which is
-# the directory of whatever loaded it, such as a test.
-our $SELF = Cwd::abs_path(__FILE__);
-
 our %NONREUSABLE = (
     ask     => 0,
     clone   => 1,
@@ -486,9 +468,9 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse,                $hv_name,                $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse,                $hv_name, $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
-    my ( $rebuild_upstream,     $no_upstream,            $only_if_missing, $on_failure );
+    my ( $rebuild_upstream,     $on_failure );
     GetOptionsFromArray(
         \@args,
         'existing=s'              => \$reuse,
@@ -503,8 +485,6 @@ sub main {
         'destroy-on-nonreusable'  => \$destroy_on_nonreusable,
         'die-on-nonreusable'      => \$die_on_nonreusable,
         'rebuild-upstream-guests' => \$rebuild_upstream,
-        'no-upstream'             => \$no_upstream,
-        'only-if-missing'         => \$only_if_missing,
         'on-failure=s'            => \$on_failure,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
@@ -533,6 +513,76 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
+    $domain =~ s/\///g;
+
+    my %build = (
+        hypervisor  => $hv_name,
+        hvconf      => $hvconf,
+        recipes     => $recipes,
+        domain_dir  => $domain_dir,
+        dryrun      => $dryrun,
+        nonreusable => $nonreusable,
+        on_failure  => $on_failure,
+    );
+
+    # The guests this one needs up first, in order, each built like this one.
+    # One that is up is left alone, wherever in the fleet it is, and not only
+    # on the hypervisor that --hypervisor names, where a missing one is built.
+    foreach my $upstream ( Provisioner::Cookbook->upstream_domains( $domain, Provisioner::Cookbook->configuration($recipes) ) ) {
+        if ( !$rebuild_upstream && ( my $there = guest_is_up( $upstream, %build ) ) ) {
+            print "$upstream is up on $there, so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
+            next;
+        }
+        print "$domain needs $upstream up first.\n";
+        eval { build_guest( %build, domain => $upstream ); 1 }
+          or die "The build of $upstream, which $domain needs up first, failed, so $domain was not built.\n$@";
+    }
+
+    # Only the guest asked for takes --existing and --salvage-gaps-ok.
+    return build_guest( %build, domain => $domain, reuse => $reuse, salvage_gaps_ok => $salvage_gaps_ok );
+}
+
+=head2 $name = guest_is_up($domain, %args)
+
+The name of the hypervisor of the fleet that has a guest of C<$domain>, or
+undef when none does.  It asks every hypervisor, whichever one C<hypervisor>
+in C<%args> names, and warns about one that it cannot ask and skips it, as when
+a guest is placed.  C<hvconf> and C<domain_dir> in C<%args> are as for
+C<build_guest>.
+
+=cut
+
+sub guest_is_up {
+    my ( $domain, %args ) = @_;
+
+    my $there = Trog::Hypervisors->find( $domain, hvconf => $args{hvconf}, domain_dir => $args{domain_dir}, missing_ok => 1 );
+    my $name  = $there && $there->domain_exists($domain) ? $there->name : undef;
+
+    # find made that hypervisor current, and the next build chooses its own.
+    Trog::HV->forget();
+    return $name;
+}
+
+=head2 build_guest(%args)
+
+Builds the guest of C<domain> in C<%args> and waits for its makefile, and
+returns 0.  The other keys are the options of the command line that apply to
+every guest a run builds: C<hypervisor>, C<hvconf>, C<recipes>, C<domain_dir>,
+C<dryrun>, C<nonreusable> and C<on_failure>, and for the guest asked for,
+C<reuse> and C<salvage_gaps_ok>.  Dies when the build fails, after
+C<with_rollback> has made its offer.
+
+Each call chooses its own hypervisor, because a run builds several guests, and
+they can be on different ones.
+
+=cut
+
+sub build_guest {
+    my (%args) = @_;
+    my ( $domain, $reuse, $hv_name, $hvconf, $recipes, $dryrun, $nonreusable, $on_failure, $salvage_gaps_ok ) = @args{qw{domain reuse hypervisor hvconf recipes dryrun nonreusable on_failure salvage_gaps_ok}};
+
+    Trog::HV->forget();
+
     # The choice of hypervisor reads provision.conf, so find that file first.
     # Do not ask Trog::HV for an object here, because that fixes the singleton
     # before generate_config chooses the hypervisor.  The class gives the
@@ -540,44 +590,8 @@ sub main {
     #
     # Keep the value from the command line.  After the default, a given value
     # and a default look the same, and only a given value beats the hypervisor.
-    my $domain_dir_from_cli = $domain_dir;
-    $domain_dir //= Trog::HV->default_domain_dir;
-    $domain =~ s/\///g;
-
-    # An upstream guest that is up already is left alone, unless the run that
-    # started this one was told to rebuild its upstream guests.  Asked of the
-    # whole fleet, not only the hypervisor that --hypervisor names, which is
-    # where a missing guest is built and not the only place one can be.
-    if ($only_if_missing) {
-        my $there = Trog::Hypervisors->find( $domain, hvconf => $hvconf, domain_dir => $domain_dir_from_cli, missing_ok => 1 );
-        if ( $there && $there->domain_exists($domain) ) {
-            print "$domain is up on " . $there->name . ", so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
-            return 0;
-        }
-    }
-
-    # The guests this one needs up first, each in a run of its own.  A run has
-    # one hypervisor and one domain directory, and an upstream guest can be on
-    # another hypervisor.
-    unless ($no_upstream) {
-        my @upstream = Provisioner::Cookbook->upstream_domains( $domain, Provisioner::Cookbook->configuration($recipes) );
-        my @pass     = (
-            '--no-upstream',
-            ( $rebuild_upstream ? () : '--only-if-missing' ),
-            '--on-failure', $on_failure,
-            ( $dryrun                 ? '--dryrun'                 : () ),
-            ( $credentials            ? '--credentials'            : () ),
-            ( $clone_on_nonreusable   ? '--clone-on-nonreusable'   : () ),
-            ( $destroy_on_nonreusable ? '--destroy-on-nonreusable' : () ),
-            ( $die_on_nonreusable     ? '--die-on-nonreusable'     : () ),
-            ( map { defined $_->[1] ? @$_ : () } [ '--hypervisor', $hv_name ], [ '--hvconf', $hvconf ], [ '--recipes', $recipes ], [ '--domaindir', $domain_dir_from_cli ] ),
-        );
-        foreach my $upstream (@upstream) {
-            print "$domain needs $upstream up first.\n";
-            build_upstream( $upstream, @pass )
-              or die "The build of $upstream, which $domain needs up first, failed, so $domain was not built.\n";
-        }
-    }
+    my $domain_dir_from_cli = $args{domain_dir};
+    my $domain_dir          = $domain_dir_from_cli // Trog::HV->default_domain_dir;
 
     # Generate the configuration of the domain first.  It writes provision.conf
     # and packs data.tar.gz, and it needs the hypervisor to write them.  So it
@@ -711,23 +725,6 @@ sub main {
     );
 
     return 0;
-}
-
-=head2 $ok = build_upstream($domain, @options)
-
-Runs this program again for C<$domain>, with C<@options>, and returns true when
-it succeeded.  Its output is this one's.  With C<--credentials>, it writes what
-L<Trog::Credentials/block> holds to the standard input of the run, so a guest
-built on the way to another asks for nothing twice.
-
-=cut
-
-sub build_upstream {
-    my ( $domain, @options ) = @_;
-
-    my $credentials = Trog::Credentials->block();
-    IPC::Run3::run3( [ $^X, $SELF, @options, $domain ], \$credentials, undef, undef );
-    return $? == 0;
 }
 
 =head2 @result = with_rollback($domain, $on_failure, $code)
