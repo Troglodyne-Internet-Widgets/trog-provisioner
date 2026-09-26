@@ -19,7 +19,7 @@ Provisioner::Recipe::Ubuntu::matrix - Ubuntu's C<deps> and archive for L<Provisi
 =head2 @pkgs = $recipe->deps()
 
 The synapse package, C<matrix-synapse-py3>, from the archive of matrix.org that
-C<apt_sources> below names, and the Python libraries of synapse from Ubuntu.
+C<package_sources> below names, and the Python libraries of synapse from Ubuntu.
 
 =cut
 
@@ -51,7 +51,7 @@ sub deps {
     };
 }
 
-=head2 @sources = $recipe->apt_sources()
+=head2 @sources = $recipe->package_sources()
 
 The archive of matrix.org.  It has the synapse package and its keyring, and
 nothing else.  The package carries its own Python dependencies, so
@@ -59,7 +59,7 @@ C<txredisapi>, which synapse uses for redis, is inside it.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     return {
         name       => 'matrix-org',
         uri        => 'https://packages.matrix.org/debian',
@@ -69,7 +69,7 @@ sub apt_sources {
     };
 }
 
-=head2 @lines = $recipe->debconf_selections(%opts)
+=head2 @lines = $recipe->package_answers(%opts)
 
 The two questions that the package asks.  Without the answers, its install
 stops at a prompt for the server name.  The unit that this recipe installs reads
@@ -77,7 +77,7 @@ only F<homeserver.yaml>, so the name here reaches nothing that runs.
 
 =cut
 
-sub debconf_selections {
+sub package_answers {
     my ( $self, %opts ) = @_;
     return (
         "matrix-synapse-py3 matrix-synapse/server-name string $opts{server_name}",

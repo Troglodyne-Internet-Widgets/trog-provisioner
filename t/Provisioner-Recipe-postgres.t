@@ -150,7 +150,7 @@ subtest 'the version it installs' => sub {
     # a dbgsym or a client alone is not a server.
     my $index = "Package: postgresql-17\n\nPackage: postgresql-18\n\nPackage: postgresql-18-dbgsym\n\nPackage: postgresql-client-19\n";
     my ( $answer, @asked );
-    my $mock = Test::MockModule->new('Provisioner::AptSources');
+    my $mock = Test::MockModule->new('Provisioner::Packager::Deb');
     $mock->redefine( fetch => sub { push @asked, $_[0]; return $answer } );
 
     $answer = { success => 0, status => 503, reason => 'Service Unavailable' };

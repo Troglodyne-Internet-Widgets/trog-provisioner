@@ -24,17 +24,17 @@ sub deps {
     return qw{mariadb-server mariadb-client mariadb-backup libmariadb-dev libmariadb-dev-compat pigz};
 }
 
-=head2 @sources = $recipe->apt_sources(%opts)
+=head2 @sources = $recipe->package_sources(%opts)
 
 The archive of MariaDB for C<version>, pinned above 1000.  The pin lets apt
 install a version below the one in Ubuntu, which ships 10.11.14.  MariaDB
 publishes an archive for a release only for the distributions that existed when
 it made the release.  For example, 11.4.4 and 10.11.10 have noble, and 10.11.7
-does not.  L<Provisioner::AptSources> asks for the suite, and says so.
+does not.  L<Provisioner::Packager::Deb> asks for the suite, and says so.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     my ( $self, %opts ) = @_;
     return {
         name          => 'mariadb',

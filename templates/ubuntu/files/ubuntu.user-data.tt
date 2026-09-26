@@ -68,10 +68,10 @@ apt:
             Timeout "600";
         }
     }
-[% IF debconf_selections.size() -%]
+[% IF answers.size() -%]
   debconf_selections:
     provisioner: |
-[% FOR line IN debconf_selections -%]
+[% FOR line IN answers -%]
       [% line | mark_raw %]
 [% END -%]
 [% END -%]
@@ -79,10 +79,10 @@ apt:
 users:
 [% users | yaml %]
 
-[%# Everything here is deferred except the mirrorlist and the apt_files.  apt
-    needs them before it installs the packages above.  The mirrorlist is only
-    written when a mirror is configured.  Provisioner::AptSources makes the
-    apt_files. -%]
+[%# Everything here is deferred except the mirrorlist and the first_boot_files.
+    apt needs them before it installs the packages above.  The mirrorlist is
+    only written when a mirror is configured.  The packager of the distribution
+    makes the first_boot_files. -%]
 write_files:
   - path: /root/.ssh/id_rsa
     owner: root:root
@@ -113,7 +113,7 @@ write_files:
       http://archive.ubuntu.com/ubuntu	priority:2
       http://security.ubuntu.com/ubuntu	priority:3
 [% END -%]
-[% FOR file IN apt_files -%]
+[% FOR file IN first_boot_files -%]
   - path: [% file.path | yaml %]
     owner: root:root
     permissions: [% file.permissions | yaml %]

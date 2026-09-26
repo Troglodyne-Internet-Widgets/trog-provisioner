@@ -555,6 +555,8 @@ subtest 'a mirror whose indices are signed can be verified' => sub {
 # cloud-init writes the archives before it installs, and answers the questions
 # the packages ask.  A file that is deferred, or an answer that arrives after
 # the install, is a package that does not install or a prompt that nobody sees.
+# The files are whatever the packager of the distribution makes of what the
+# recipes named, so it stands in here.
 subtest 'the vendor archives and their answers are there before the packages' => sub {
     my @apt_files = (
         { path => '/etc/apt/keyrings/vendor.asc',           permissions => '0644', content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n" },
@@ -563,7 +565,14 @@ subtest 'the vendor archives and their answers are there before the packages' =>
     );
     my @answers = ( 'vendor-pkg vendor/name string it: is quoted', 'vendor-pkg vendor/stats boolean false' );
 
-    my ( $dir, undef ) = generated( apt_files => \@apt_files, debconf_selections => \@answers );
+    my %asked;
+    my $packager = Test::MockModule->new('Provisioner::Packager::Deb');
+    $packager->redefine( first_boot_files => sub { my ( undef, %args ) = @_; %asked = %args; return @apt_files } );
+
+    my @sources = ( { name => 'vendor' } );
+    my ( $dir, undef ) = generated( package_sources => \@sources, package_conflicts => ['apache2'], package_answers => [ @answers, $answers[0] ] );
+
+    is_deeply( \%asked, { domain => $DOMAIN, sources => \@sources, conflicts => ['apache2'] }, 'the recipe asks its packager, with what the recipes named' );
     my $user_data = loaded( $dir, 'user-data' );
     my %written   = map { $_->{path} => $_ } @{ $user_data->{write_files} };
 
@@ -575,7 +584,7 @@ subtest 'the vendor archives and their answers are there before the packages' =>
     is( $written{'/etc/apt/keyrings/binary.gpg'}{encoding}, 'b64', 'a binary key says it is base64, so cloud-init decodes it' );
     ok( !exists $written{'/etc/apt/keyrings/vendor.asc'}{encoding}, 'and a text one says nothing' );
 
-    is( $user_data->{apt}{debconf_selections}{provisioner}, join( q{}, map { "$_\n" } @answers ), 'the answers go to apt, one per line, colon and all' );
+    is( $user_data->{apt}{debconf_selections}{provisioner}, join( q{}, map { "$_\n" } @answers ), 'the answers go to apt once each, one per line, colon and all' );
     ok( !exists $user_data->{bootcmd}, 'and with no cache, nothing runs at boot' );
 };
 

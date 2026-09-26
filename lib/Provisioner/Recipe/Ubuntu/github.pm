@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::github - Ubuntu's C<deps> and archive for L<Provisi
 
 =head2 @pkgs = $recipe->deps()
 
-C<gh> comes from the archive of GitHub, which C<apt_sources> below names.  Noble
+C<gh> comes from the archive of GitHub, which C<package_sources> below names.  Noble
 ships gh 2.45.0, which is older than the removal of the Projects-classic
 GraphQL field.  So C<gh pr edit> fails there with a deprecation notice about
 C<projectCards>, and edits nothing.
@@ -27,13 +27,13 @@ sub deps {
     return qw{gh curl ca-certificates};
 }
 
-=head2 @sources = $recipe->apt_sources()
+=head2 @sources = $recipe->package_sources()
 
 The archive of the GitHub CLI.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     return {
         name       => 'github-cli',
         uri        => 'https://cli.github.com/packages',

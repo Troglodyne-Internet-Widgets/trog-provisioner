@@ -72,7 +72,7 @@ service does not start.  C<t/recipes.t> catches it: it asserts that every recipe
 with packages has them for every distribution.  If you add a distribution and
 forget a recipe, that test fails before a guest does.
 
-C<apt_sources> and C<debconf_selections> go in the distro subclass for the same
+C<package_sources> and C<package_answers> go in the distro subclass for the same
 reason.  An archive publishes for one distribution and names its releases.
 
 =head3 The fragment is a makefile, not a shell script
@@ -547,35 +547,37 @@ sub deps {
     return ();
 }
 
-=head3 @sources = $recipe->apt_sources(%recipe_config)
+=head3 @sources = $recipe->package_sources(%recipe_config)
 
-The vendor archives that C<deps> installs from, as described in
-L<Provisioner::AptSources/A source>.  Override it in the distro subclass, beside
-C<deps>.
+The vendor archives that C<deps> installs from, in the terms of the packager of
+the distribution, which L<Provisioner::Packager> chooses.  For Ubuntu that is
+L<Provisioner::Packager::Deb/A source>.  Override it in the distro subclass,
+beside C<deps>.
 
-cloud-init writes these archives and their keys before it installs the
-packages, so a package from a vendor goes in C<deps> like any other.  A fragment
-does not add an archive or call apt for one.
+The guest has these archives before it installs its packages at first boot, so
+a package from a vendor goes in C<deps> like any other.  A fragment does not
+add an archive, or install from one.
 
 Empty by default.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     return ();
 }
 
-=head3 @lines = $recipe->debconf_selections(%recipe_config)
+=head3 @answers = $recipe->package_answers(%recipe_config)
 
 Answers for the questions that the packages of C<deps> ask when they install,
-in the form that C<debconf-set-selections> reads.  cloud-init sets them before
-it installs anything.
+in the form that the packager takes them.  For Ubuntu that is a line that
+C<debconf-set-selections> reads.  The guest has them before it installs
+anything.  A packager whose packages ask nothing ignores them.
 
 Empty by default.
 
 =cut
 
-sub debconf_selections {
+sub package_answers {
     return ();
 }
 
@@ -584,9 +586,9 @@ sub debconf_selections {
 Packages that conflict with this recipe.  They come from another recipe, or
 the distribution installs them by default, such as sendmail against postfix.
 
-Every package returned here is removed from the dependency list, and pinned so
-that no other package brings it in at first boot.  See
-L<Provisioner::AptSources/forbid>.  So a fragment does not remove it.
+Every package returned here is removed from the dependency list, and the
+packager keeps any other package from bringing it in at first boot.  So a
+fragment does not remove it.
 
 =cut
 

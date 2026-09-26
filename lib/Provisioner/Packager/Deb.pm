@@ -1,6 +1,6 @@
-package Provisioner::AptSources;
+package Provisioner::Packager::Deb;
 
-#ABSTRACT: The apt repositories that recipes name, as the files apt reads.
+#ABSTRACT: Packages for the Debian family: apt archives, pins and debconf answers.
 
 use 5.041;
 
@@ -10,28 +10,32 @@ use re '/aasx';
 
 use feature 'state';
 
+use parent qw{Provisioner::Packager};
+
 use HTTP::Tiny();
 use JSON::Validator();
+use List::Util   qw{uniq};
 use MIME::Base64 qw{encode_base64};
 use URI();
 
 =head1 NAME
 
-Provisioner::AptSources - The apt repositories that recipes name, as the files
-apt reads.
+Provisioner::Packager::Deb - Packages for the Debian family: apt archives, pins
+and debconf answers.
 
 =head1 SYNOPSIS
 
-    my @sources = Provisioner::AptSources->merge( map { $_->apt_sources(%conf) } @recipes );
-    my @files   = Provisioner::AptSources->files(@sources);
+    my @files = Provisioner::Packager::Deb->first_boot_files( domain => $fqdn, sources => \@sources, conflicts => \@conflicts );
 
 =head1 DESCRIPTION
 
-A recipe that installs from a vendor archive names the archive in
-L<Provisioner::Recipe/apt_sources>.  This module turns those names into three
-kinds of file: the signing key, a F<.sources> file in deb822 form, and a pin.
-The distribution recipe writes the files into the user-data of the guest, so
-cloud-init has the archives before it installs the packages.
+The packager of L<Provisioner::Packager> for Ubuntu and Debian.  A source is an
+apt archive, as below, and a recipe names it in
+L<Provisioner::Recipe/package_sources>.  This module turns the sources into
+three kinds of file: the signing key, a F<.sources> file in deb822 form, and a
+pin.  It keeps a conflict out with a pin of its own.  The distro recipe writes
+the files into the user-data of the guest, so cloud-init has the archives
+before it installs the packages.
 
 The keys are fetched here, on the machine that generates the configuration,
 because cloud-init cannot fetch a key from a URL.
@@ -97,7 +101,45 @@ my %SCHEMA = (
 
 =head1 METHODS
 
-=head2 @sources = Provisioner::AptSources->merge(@sources)
+=head2 @files = Provisioner::Packager::Deb->first_boot_files(%args)
+
+The files of C<files> for the C<sources> in C<%args>, and the pin of C<forbid>
+for its C<conflicts>, for C<domain>.  See L<Provisioner::Packager>.
+
+=cut
+
+sub first_boot_files {
+    my ( $class, %args ) = @_;
+    return (
+        $class->files( $class->merge( @{ $args{sources} // [] } ) ),
+        $class->forbid( $args{domain}, sort( uniq( @{ $args{conflicts} // [] } ) ) ),
+    );
+}
+
+=head2 @answers = Provisioner::Packager::Deb->answers(@answers)
+
+The answers once each, as lines that C<debconf-set-selections> reads.
+cloud-init gives them to debconf before it installs anything.
+
+=cut
+
+sub answers {
+    my ( $class, @answers ) = @_;
+    return uniq @answers;
+}
+
+=head2 @modules = Provisioner::Packager::Deb->cloud_init_modules()
+
+C<cc_apt_configure>, which sets the debconf answers.  The archives are files,
+which C<cc_write_files> writes for every packager.
+
+=cut
+
+sub cloud_init_modules {
+    return qw{cc_apt_configure};
+}
+
+=head2 @sources = Provisioner::Packager::Deb->merge(@sources)
 
 Returns C<@sources> validated, with one entry for each C<name>.  Two recipes can
 name the same archive, and then they must describe it the same way.
@@ -141,7 +183,7 @@ sub _canonical {
     return $value // q{};
 }
 
-=head2 @files = Provisioner::AptSources->files(@sources)
+=head2 @files = Provisioner::Packager::Deb->files(@sources)
 
 Fetches the key of each source, asks the archive for each suite, and returns
 the files for them.  Each file is a hash reference with C<path>, C<content>,
@@ -197,7 +239,7 @@ sub files {
     return @files;
 }
 
-=head2 @files = Provisioner::AptSources->forbid($domain, @packages)
+=head2 @files = Provisioner::Packager::Deb->forbid($domain, @packages)
 
 A pin that keeps apt from installing C<@packages> at all, from any archive, as
 the one file in a list, or no file when C<@packages> is empty.  The file is

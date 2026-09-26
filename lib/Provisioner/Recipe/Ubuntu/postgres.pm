@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::postgres};
 
 use IO::Uncompress::Gunzip();
 use List::Util();
-use Provisioner::AptSources();
+use Provisioner::Packager::Deb();
 use Provisioner::Recipe::ubuntu();    ## no critic (ProhibitUnusedImports) -- release() is called on it by its quoted name
 
 =head1 NAME
@@ -30,14 +30,14 @@ sub deps {
     return ( qw{postgresql-common pigz}, map { "$_-$major" } qw{postgresql postgresql-client postgresql-server-dev postgresql-plperl} );
 }
 
-=head2 @sources = $recipe->apt_sources()
+=head2 @sources = $recipe->package_sources()
 
 The apt repository of the PostgreSQL project, PGDG, for this release.  Its
 packages carry the major version in their names, so it needs no pin.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     return {
         name       => 'pgdg',
         uri        => 'https://apt.postgresql.org/pub/repos/apt',
@@ -62,7 +62,7 @@ sub newest_version {
     state $major;
     $major //= do {
         my $url = "https://apt.postgresql.org/pub/repos/apt/dists/@{[ _suite() ]}/main/binary-amd64/Packages.gz";
-        my $res = Provisioner::AptSources::fetch($url);
+        my $res = Provisioner::Packager::Deb::fetch($url);
         die "Could not read the package index of PGDG at $url to find its newest postgres: $res->{status} $res->{reason}\n"
           unless $res->{success};
 

@@ -7,7 +7,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/Provisioner-AptSources.t - a vendor archive, from what a recipe names to the
+t/Provisioner-Packager-Deb.t - a vendor archive, from what a recipe names to the
 files that apt reads
 
 =cut
@@ -20,7 +20,7 @@ use MIME::Base64     qw{decode_base64};
 
 use FindBin::libs;
 
-use_ok('Provisioner::AptSources');
+use_ok('Provisioner::Packager::Deb');
 
 my $ARMORED = "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmQINBGbogus\n-----END PGP PUBLIC KEY BLOCK-----\n";
 
@@ -30,7 +30,7 @@ my $BINARY = pack( 'C*', 0x99, 0x01, 0x0d ) . 'bogus-binary-key';
 # What the network answers, by URL.  A URL that is not here is a 404, and every
 # request is counted.
 my ( %answer, %asked );
-my $mock = Test::MockModule->new('Provisioner::AptSources');
+my $mock = Test::MockModule->new('Provisioner::Packager::Deb');
 $mock->redefine(
     fetch => sub {
         my ( $url, $method ) = @_;
@@ -54,28 +54,28 @@ sub source {
 }
 
 subtest 'merge: what a source must say' => sub {
-    my @ok = Provisioner::AptSources->merge( source() );
+    my @ok = Provisioner::Packager::Deb->merge( source() );
     is( scalar @ok, 1, 'a whole source passes' );
 
-    like( exception { Provisioner::AptSources->merge( source( name   => 'Vendor Archive' ) ) },        qr/Vendor[ ]Archive[ ]is[ ]not[ ]a[ ]valid[ ]apt[ ]source/, 'a name that is not a file name is refused, by name' );
-    like( exception { Provisioner::AptSources->merge( source( key    => undef ) ) },                   qr/not[ ]a[ ]valid/,                                        'a source with no key is refused' );
-    like( exception { Provisioner::AptSources->merge( source( uri    => 'ftp://apt.vendor.test' ) ) }, qr/uri/,                                                    'and one that apt cannot fetch over http' );
-    like( exception { Provisioner::AptSources->merge( source( suites => [] ) ) },                      qr/suites/,                                                 'and one with no suite' );
-    like( exception { Provisioner::AptSources->merge( source( pin    => { packages => 'x' } ) ) },     qr/priority/,                                               'and a pin with no priority' );
-    like( exception { Provisioner::AptSources->merge( source( signed => 1 ) ) },                       qr/signed/,                                                 'and a key it does not know' );
+    like( exception { Provisioner::Packager::Deb->merge( source( name   => 'Vendor Archive' ) ) },        qr/Vendor[ ]Archive[ ]is[ ]not[ ]a[ ]valid[ ]apt[ ]source/, 'a name that is not a file name is refused, by name' );
+    like( exception { Provisioner::Packager::Deb->merge( source( key    => undef ) ) },                   qr/not[ ]a[ ]valid/,                                        'a source with no key is refused' );
+    like( exception { Provisioner::Packager::Deb->merge( source( uri    => 'ftp://apt.vendor.test' ) ) }, qr/uri/,                                                    'and one that apt cannot fetch over http' );
+    like( exception { Provisioner::Packager::Deb->merge( source( suites => [] ) ) },                      qr/suites/,                                                 'and one with no suite' );
+    like( exception { Provisioner::Packager::Deb->merge( source( pin    => { packages => 'x' } ) ) },     qr/priority/,                                               'and a pin with no priority' );
+    like( exception { Provisioner::Packager::Deb->merge( source( signed => 1 ) ) },                       qr/signed/,                                                 'and a key it does not know' );
 };
 
 subtest 'merge: two recipes can name one archive' => sub {
-    my @same = Provisioner::AptSources->merge( source(), source() );
+    my @same = Provisioner::Packager::Deb->merge( source(), source() );
     is( scalar @same, 1, 'the same archive twice is one source' );
 
     like(
-        exception { Provisioner::AptSources->merge( source(), source( suites => ['testing'] ) ) },
+        exception { Provisioner::Packager::Deb->merge( source(), source( suites => ['testing'] ) ) },
         qr/Two[ ]recipes[ ]name[ ]the[ ]apt[ ]source[ ]vendor/,
         'and one name for two different archives is refused'
     );
 
-    my ($pinned) = Provisioner::AptSources->merge( source( pin => { priority => 600 } ) );
+    my ($pinned) = Provisioner::Packager::Deb->merge( source( pin => { priority => 600 } ) );
     is( $pinned->{pin}{packages}, q{*}, 'a pin with no packages pins every package' );
 };
 
@@ -85,8 +85,8 @@ subtest 'files: an armored key, a source and a pin' => sub {
         'https://apt.vendor.test/debian/dists/stable/InRelease'   => q{},
         'https://apt.vendor.test/debian/dists/unstable/InRelease' => q{},
     );
-    my @files = Provisioner::AptSources->files(
-        Provisioner::AptSources->merge(
+    my @files = Provisioner::Packager::Deb->files(
+        Provisioner::Packager::Deb->merge(
             source(
                 uri           => 'https://apt.vendor.test/debian/',
                 suites        => [qw{stable unstable}],
@@ -119,7 +119,7 @@ subtest 'files: a binary key' => sub {
         'https://apt.binary.test/key.gpg'                => $BINARY,
         'https://apt.binary.test/dists/stable/InRelease' => q{},
     );
-    my @files = Provisioner::AptSources->files( source( name => 'binary', uri => 'https://apt.binary.test', key => 'https://apt.binary.test/key.gpg' ) );
+    my @files = Provisioner::Packager::Deb->files( source( name => 'binary', uri => 'https://apt.binary.test', key => 'https://apt.binary.test/key.gpg' ) );
     my ($key) = grep { $_->{path} =~ m{keyrings} } @files;
 
     is( $key->{path},                     '/etc/apt/keyrings/binary.gpg', 'a binary key goes in a .gpg' );
@@ -130,19 +130,19 @@ subtest 'files: a binary key' => sub {
 
 subtest 'files: what stops the build' => sub {
     %answer = ( 'https://apt.portal.test/key' => "<html>Please log in</html>\n" );
-    my $page = exception { Provisioner::AptSources->files( source( name => 'portal', key => 'https://apt.portal.test/key' ) ) };
+    my $page = exception { Provisioner::Packager::Deb->files( source( name => 'portal', key => 'https://apt.portal.test/key' ) ) };
     $page //= q{};
     like( $page, qr/is[ ]not[ ]a[ ]PGP[ ]key/, 'a page in place of a key' );
     like( $page, qr{apt[.]portal[.]test/key},  'names where it came from' );
 
     %answer = ();
-    my $gone = exception { Provisioner::AptSources->files( source( name => 'gone', key => 'https://apt.gone.test/key' ) ) };
+    my $gone = exception { Provisioner::Packager::Deb->files( source( name => 'gone', key => 'https://apt.gone.test/key' ) ) };
     $gone //= q{};
     like( $gone, qr/Could[ ]not[ ]fetch[ ]the[ ]signing[ ]key/, 'a key that is not there' );
     like( $gone, qr/apt[ ]source[ ]gone[ ]from[ ]\S+:[ ]404/,   'names the source and the answer' );
 
     %answer = ( 'https://apt.nosuite.test/key' => $ARMORED );
-    my $suite = exception { Provisioner::AptSources->files( source( name => 'nosuite', uri => 'https://apt.nosuite.test', key => 'https://apt.nosuite.test/key', suites => ['noble'] ) ) };
+    my $suite = exception { Provisioner::Packager::Deb->files( source( name => 'nosuite', uri => 'https://apt.nosuite.test', key => 'https://apt.nosuite.test/key', suites => ['noble'] ) ) };
     $suite //= q{};
     like( $suite, qr/The[ ]apt[ ]source[ ]nosuite[ ]has[ ]no[ ]suite[ ]noble/, 'an archive with no index for the suite' );
     like( $suite, qr{/dists/noble/InRelease[ ]answered[ ]404},                 'names what it asked for' );
@@ -153,15 +153,15 @@ subtest 'files: a key is fetched once' => sub {
         'https://apt.once.test/key'                    => $ARMORED,
         'https://apt.once.test/dists/stable/InRelease' => q{},
     );
-    Provisioner::AptSources->files( source( name => 'once', uri => 'https://apt.once.test', key => 'https://apt.once.test/key' ) ) for 1 .. 2;
+    Provisioner::Packager::Deb->files( source( name => 'once', uri => 'https://apt.once.test', key => 'https://apt.once.test/key' ) ) for 1 .. 2;
     is( $asked{'GET https://apt.once.test/key'},                     1, 'for two domains that name it' );
     is( $asked{'HEAD https://apt.once.test/dists/stable/InRelease'}, 1, 'and so is each suite' );
 };
 
 subtest 'forbid: a pin that keeps packages out, for one domain' => sub {
-    is_deeply( [ Provisioner::AptSources->forbid('one.test') ], [], 'no packages, no file' );
+    is_deeply( [ Provisioner::Packager::Deb->forbid('one.test') ], [], 'no packages, no file' );
 
-    my ($pin) = Provisioner::AptSources->forbid( 'one.test', qw{apache2 ntp} );
+    my ($pin) = Provisioner::Packager::Deb->forbid( 'one.test', qw{apache2 ntp} );
     is( $pin->{path},    '/etc/apt/preferences.d/one.test-conflicts.pref',             'named for the domain, so a second domain on the guest keeps it' );
     is( $pin->{content}, "Package: apache2 ntp\nPin: release a=*\nPin-Priority: -1\n", 'below zero, from every archive' );
 };

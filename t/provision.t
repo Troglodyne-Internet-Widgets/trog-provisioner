@@ -1051,11 +1051,20 @@ subtest 'refresh_cloud_init gives the package install what first boot had' => su
     $guest->redefine( put_file    => sub { 1 } );
     $guest->redefine( capture_cmd => sub { push( @ran, $_[1] ); q{} } );
 
-    quietly( sub { Trog::Bin::Provisioner::refresh_cloud_init( bless( {}, 'Trog::Guest' ), '/bogus/domains', 'layered.test' ) } );
+    my $fake = bless {}, 'Trog::Guest';
+    quietly( sub { Trog::Bin::Provisioner::refresh_cloud_init( $fake, qw{/bogus/domains layered.test ubuntu} ) } );
     my @modules = map { m/--name[ ](\S+)/ ? $1 : () } @ran;
 
     is_deeply( \@modules, [qw{cc_bootcmd cc_write_files cc_apt_configure cc_package_update_upgrade_install cc_users_groups}], 'the cache, the archives and the answers, then the packages' );
     is( scalar( grep { m/-f[ ]cloud-config[.]txt/ } @ran ), scalar @ran, 'each from the user-data of the domain' );
+
+    # The modules are the distro recipe's to name, so a distribution of another
+    # family changes them without a change here.
+    my $distro = Test::MockModule->new('Provisioner::Recipe::ubuntu');
+    $distro->redefine( rerun_modules => sub { qw{cc_other_repos} } );
+    @ran = ();
+    quietly( sub { Trog::Bin::Provisioner::refresh_cloud_init( bless( {}, 'Trog::Guest' ), '/bogus/domains', 'layered.test', undef ) } );
+    is_deeply( [ map { m/--name[ ](\S+)/ ? $1 : () } @ran ], ['cc_other_repos'], 'the modules come from the distro recipe, ubuntu when provision.conf names none' );
 };
 
 done_testing;

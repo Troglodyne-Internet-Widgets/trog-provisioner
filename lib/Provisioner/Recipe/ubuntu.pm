@@ -16,6 +16,7 @@ my $RSA_BITS = 3072;
 use File::Slurper();
 use HTTP::Tiny();
 use List::Util qw{any uniq};
+use Provisioner::Packager();
 use Provisioner::Utils();
 use Text::Xslate();
 use YAML::XS();
@@ -325,9 +326,17 @@ sub enrich {
     $opts{users}     = $self->_users(%opts);
     $opts{packages}  = _first_boot_packages( $opts{packages} );
 
-    $opts{apt_files}          = Provisioner::Utils::coerce_arrayref( $opts{apt_files} );
-    $opts{debconf_selections} = Provisioner::Utils::coerce_arrayref( $opts{debconf_selections} );
-    $opts{bootcmd}            = $opts{fetch_cache} ? [ _fetch_cache_bootcmd( $opts{domain}, $opts{fetch_cache} ) ] : [];
+    # What the recipes named, as its packager gives it to first boot.
+    my $packager = Provisioner::Packager->named( $self->packager );
+    $opts{first_boot_files} = [
+        $packager->first_boot_files(
+            domain    => $opts{domain},
+            sources   => Provisioner::Utils::coerce_arrayref( $opts{package_sources} ),
+            conflicts => Provisioner::Utils::coerce_arrayref( $opts{package_conflicts} ),
+        )
+    ];
+    $opts{answers} = [ $packager->answers( @{ Provisioner::Utils::coerce_arrayref( $opts{package_answers} ) } ) ];
+    $opts{bootcmd} = $opts{fetch_cache} ? [ _fetch_cache_bootcmd( $opts{domain}, $opts{fetch_cache} ) ] : [];
 
     # A list, not two lines of the template, because the first item has a
     # newline in it.  A YAML sequence item written by hand cannot carry one.

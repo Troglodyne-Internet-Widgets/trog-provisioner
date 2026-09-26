@@ -33,7 +33,7 @@ use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
 use List::Util       qw{any};
 use File::Find();
-use Provisioner::AptSources();
+use Provisioner::Packager();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
 use Trog::Secrets();
@@ -1730,7 +1730,7 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
     # version, and the pin is what keeps Ubuntu's newer one out.
     my $ubuntu = Provisioner::Cookbook->load( 'mariadb', distro => $DISTRO )->new(%PROV);
     ok( ( grep { $_ eq 'mariadb-server' } $ubuntu->deps() ), 'mariadb-server is a cloud-init dep' );
-    my ($source) = $ubuntu->apt_sources( %{ $required_config{mariadb} } );
+    my ($source) = $ubuntu->package_sources( %{ $required_config{mariadb} } );
     like( $source->{uri}, qr{/mariadb-11[.]4[.]4/}, 'from the archive of the version it was given' );
     cmp_ok( $source->{pin}{priority}, '>', 1000, 'pinned high enough to go below the version in Ubuntu' );
 };
@@ -2284,18 +2284,19 @@ subtest 'every recipe that needs packages has them, for every distribution' => s
     }
 };
 
-# A vendor archive is named in apt_sources, and cloud-init writes it before the
+# A vendor archive is named in package_sources, and cloud-init writes it before the
 # packages install.  A fragment that adds one itself runs apt beside every other
 # target, and installs after first boot has already failed to.
-subtest 'every archive a recipe names is one apt can use, and no fragment adds one' => sub {
+subtest 'every archive a recipe names is one its packager can use, and no fragment adds one' => sub {
     my $named = 0;
     foreach my $distro ( Provisioner::Cookbook->distros() ) {
         my %provisioner = ( %PROV, distro => $distro, template_dirs => Provisioner::Cookbook->template_dirs($distro) );
         foreach my $recipe ( sort @available ) {
-            my @sources = Provisioner::Cookbook->load( $recipe, distro => $distro )->new(%provisioner)->apt_sources( %{ $required_config{$recipe} // {} } );
+            my @sources = Provisioner::Cookbook->load( $recipe, distro => $distro )->new(%provisioner)->package_sources( %{ $required_config{$recipe} // {} } );
             next unless @sources;
             $named += @sources;
-            is( exception { Provisioner::AptSources->merge(@sources) }, undef, "$recipe names archives that apt can use on $distro" );
+            my $packager = Provisioner::Packager->named( Provisioner::Cookbook->load($distro)->packager );
+            is( exception { $packager->merge(@sources) }, undef, "$recipe names archives that the packager of $distro can use" );
         }
     }
     cmp_ok( $named, '>=', 7, 'and the seven vendor archives are among them' );

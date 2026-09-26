@@ -826,7 +826,7 @@ sub reprovision_guest (%args) {
     print "Attempting to access Machine\n";
     my $guest = Trog::Guest->new( name => $domain, host => $reuse, user => $reuser, key_path => $key );
 
-    refresh_cloud_init( $guest, $domain_dir, $domain );
+    refresh_cloud_init( $guest, $domain_dir, $domain, $config->param('distro') );
     merge_guest_addresses( guest => $guest, hv => $hv, config => $config, domain_dir => $domain_dir, domain => $domain, built_for => $built_for );
 
     print "Syncing setup script\n";
@@ -840,15 +840,15 @@ sub reprovision_guest (%args) {
     return ( $reuser, $reuse );
 }
 
-=head2 refresh_cloud_init($guest, $domain_dir, $domain)
+=head2 refresh_cloud_init($guest, $domain_dir, $domain, $distro)
 
-Ships the F<user-data> of $domain to the guest, and runs the cloud-init modules
-C<cc_bootcmd>, C<cc_write_files>, C<cc_apt_configure>,
-C<cc_package_update_upgrade_install> and C<cc_users_groups> again, in that
-order.  It returns 1, and dies if it cannot ship the file.
+Ships the F<user-data> of $domain to the guest, and runs again the cloud-init
+modules that C<rerun_modules> of the recipe of C<$distro> names, in its order.
+C<$distro> defaults to C<ubuntu>, as in F<bin/new_config>.  It returns 1, and
+dies if it cannot ship the file.
 
-The three before the package install give it what first boot had: the fetch
-cache, the vendor archives with their keys, and the debconf answers.
+The modules before the package install give it what first boot had: the fetch
+cache, and the archives and answers of the recipes, in the form of the packager.
 
 cloud-init runs once and remembers that it ran.  A module that you name runs
 again anyway.  That applies the new configuration to a guest that booted from
@@ -857,13 +857,13 @@ an older one.
 =cut
 
 sub refresh_cloud_init {
-    my ( $guest, $domain_dir, $domain ) = @_;
+    my ( $guest, $domain_dir, $domain, $distro ) = @_;
 
     print "Installing Updated cloud-init and forcing re-run...\n";
     my $init = "$domain_dir/$domain/user-data";
     $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
 
-    foreach my $module (qw{cc_bootcmd cc_write_files cc_apt_configure cc_package_update_upgrade_install cc_users_groups}) {
+    foreach my $module ( Provisioner::Cookbook->load( $distro // 'ubuntu' )->rerun_modules() ) {
         print $guest->capture_cmd("sudo cloud-init single --name $module -f cloud-config.txt") . "\n";
     }
 

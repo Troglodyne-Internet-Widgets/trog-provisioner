@@ -20,7 +20,7 @@ sub deps {
     return qw{plexmediaserver};
 }
 
-=head2 @sources = $recipe->apt_sources()
+=head2 @sources = $recipe->package_sources()
 
 The archive of Plex at C<repo.plex.tv>, with the v2 signing key.  Plex retired
 C<downloads.plex.tv/repos/deb>, where every path answers 403.  The v2 key is a
@@ -28,7 +28,7 @@ different key, not the old key at a new URL.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     return {
         name       => 'plexmediaserver',
         uri        => 'https://repo.plex.tv/deb/',

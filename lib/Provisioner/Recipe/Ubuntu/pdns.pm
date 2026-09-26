@@ -22,7 +22,7 @@ sub deps {
     return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libconfig-simple-perl libnet-dns-perl libjson-perl};
 }
 
-=head2 @sources = $recipe->apt_sources(%opts)
+=head2 @sources = $recipe->package_sources(%opts)
 
 The release train of the authoritative server that C<repo_branch> names, from
 C<repo.powerdns.com>.  It pins C<pdns-*> above Ubuntu, as PowerDNS says to, so
@@ -31,7 +31,7 @@ archive, and comes from Ubuntu.
 
 =cut
 
-sub apt_sources {
+sub package_sources {
     my ( $self, %opts ) = @_;
 
     my %args   = $self->args;
