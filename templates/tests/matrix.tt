@@ -44,8 +44,8 @@ foreach my $pkg (qw{matrix-synapse-py3 python3-pil python3-attr}) {
 }
 
 # synapse comes from the matrix.org repository, not from Ubuntu.
-ok(-f '/etc/apt/sources.list.d/matrix-org.list', 'the matrix.org repository is configured');
-ok(-s '/usr/share/keyrings/matrix-org-archive-keyring.gpg', 'and its signing key is installed');
+ok(-f '/etc/apt/sources.list.d/matrix-org.sources', 'the matrix.org repository is configured');
+ok(-s '/etc/apt/keyrings/matrix-org.gpg', 'and its signing key is installed');
 
 # The admin registration script, installed as a file and valid shell.
 ok(-x '[% script_dir %]/matrix_register_admin.sh', 'the register-admin script is installed');

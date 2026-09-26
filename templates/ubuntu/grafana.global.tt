@@ -1,38 +1,8 @@
 [%# The machine has one grafana, one influxd and one telegraf.  So all of this
     is the global half, and it runs once for all the domains on the guest.
 
-    No Ubuntu component has grafana or telegraf, so each comes from its vendor
-    archive.  Provisioner::Recipe::grafana explains why influxdb is in deps. -%]
-install -d -m 0755 /usr/share/keyrings
-[%# pipefail on both key fetches.  A pipeline reports the exit status of its
-    last command.  Without pipefail, a failed key download lets gpg succeed on
-    empty input.  The result is an empty keyring and a line that passes.  The
-    failure then shows later, when the archive does not verify, and names the
-    wrong thing.  Make runs these under bash, which has pipefail. -%]
-set -o pipefail; curl -fsS https://apt.grafana.com/gpg.key | gpg --dearmor -o /usr/share/keyrings/grafana.gpg
-chmod 0644 /usr/share/keyrings/grafana.gpg
-echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
-[%# influxdata-archive.key, not influxdata-archive_compat.key.  Much of the
-    published guidance still names the compat key, which expired in January
-    2026. -%]
-set -o pipefail; curl -fsS https://repos.influxdata.com/influxdata-archive.key | gpg --dearmor -o /usr/share/keyrings/influxdata.gpg
-chmod 0644 /usr/share/keyrings/influxdata.gpg
-echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/influxdata.gpg] https://repos.influxdata.com/debian stable main" > /etc/apt/sources.list.d/influxdata.list
-[%# Update each archive on its own before the general update.  Then an archive
-    that refuses us fails here and names itself, not as apt noise and a bare
-    error from the install. -%]
-@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
-    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/grafana.list \
-    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
-  || { echo "grafana: apt.grafana.com would not serve its repository, so there is no grafana to install" >&2; exit 1; }
-@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
-    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/influxdata.list \
-    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
-  || { echo "grafana: repos.influxdata.com would not serve its repository, so there is no telegraf to install" >&2; exit 1; }
-DEBIAN_FRONTEND="noninteractive" apt-get update -q
-[% packager_invocation | mark_raw %] grafana telegraf
-[%# After the packages, because they create the grafana and telegraf accounts
-    that these files are given to. -%]
+    cloud-init installs the three packages at first boot.
+    Provisioner::Recipe::Ubuntu::grafana names the archives. -%]
 install -o root -g grafana -m 0640 grafana.ini /etc/grafana/grafana.ini
 install -d -o root -g grafana -m 0750 /etc/grafana/provisioning/datasources
 install -d -o root -g grafana -m 0750 /etc/grafana/provisioning/dashboards

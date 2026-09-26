@@ -1,18 +1,5 @@
-[%# repo.plex.tv, and the v2 signing key.  Plex retired
-    downloads.plex.tv/repos/deb, where every path answers 403.  The v2 key is a
-    different key, not the old key at a new URL. -%]
-# Add the official Plex apt repository
-curl -fsS https://downloads.plex.tv/plex-keys/PlexSign.v2.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
-echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://repo.plex.tv/deb/ public main" > /etc/apt/sources.list.d/plexmediaserver.list
-[%# Update from the Plex repository alone, before the general update.  If the
-    repository refuses us, the failure then names it.  Inside the general update,
-    the only sign is an "Error 100" from the install. -%]
-@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
-    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/plexmediaserver.list \
-    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
-  || { echo "plexmediaserver: repo.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
-DEBIAN_FRONTEND="noninteractive" apt-get update -q
-[% packager_invocation | mark_raw %] plexmediaserver
+[%# cloud-init installs plexmediaserver at first boot, from the archive that
+    Provisioner::Recipe::Ubuntu::plexmediaserver names. -%]
 # Make sure that the plex service user exists.  The package makes it, but guard anyway.
 id plex > /dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /var/lib/plexmediaserver plex
 [%# Stop Plex before anything below touches the library or the preferences.

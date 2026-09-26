@@ -1,6 +1,6 @@
-[%# The login state of gh for one account.  The CLI itself is installed by
-    github.global.tt, which runs before every per-domain target, and the ssh
-    key that pushes and signs is Provisioner::Recipe::git.
+[%# The login state of gh for one account.  cloud-init installs the CLI
+    itself at first boot, and the ssh key that pushes and signs is
+    Provisioner::Recipe::git.
 
     Each block works out the home of the account with getent rather than
     assuming one: the service user of a domain lives under install_dir, and an

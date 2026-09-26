@@ -10,6 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Packager();
 use Provisioner::Utils();
 
 use Scalar::Util();
@@ -87,7 +88,8 @@ error is better than a guest built from the answer of a different distribution.
 =head2 $packager = $distro->packager()
 
 The packaging system that the recipes name packages for, for example C<deb> or
-C<rpm>.
+C<rpm>.  It also names the L<Provisioner::Packager> that turns the archives,
+answers and conflicts of the recipes into what first boot needs.
 
 No recipe in this checkout branches on it.  The packages of a recipe are in the
 subclass of that recipe for each distribution.  Every recipe still gets this
@@ -105,6 +107,25 @@ parent class.  See L<Provisioner::Recipe/Where the packages are named>.
 =cut
 
 sub packager { return shift->_unanswered('packager') }
+
+=head2 @modules = $distro->rerun_modules()
+
+The cloud-init modules that a domain added to a guest that is up runs again,
+in order, from its own user-data.  The first ones point the downloads at the
+fetch cache and write the files that the packager needs, then the packager
+applies what it has to, and then the packages install and the accounts are
+made.
+
+=cut
+
+sub rerun_modules {
+    my ($self) = @_;
+    return (
+        qw{cc_bootcmd cc_write_files},
+        Provisioner::Packager->named( $self->packager )->cloud_init_modules(),
+        qw{cc_package_update_upgrade_install cc_users_groups},
+    );
+}
 
 =head2 $url = $distro->base_image()
 
@@ -260,11 +281,26 @@ sub args {
             # bin/new_config computes these for the first boot of the guest, and
             # this recipe writes them into the seed.  They are readOnly because
             # no operator sets them.
-            packages      => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Every package the domain recipes asked for, installed before the makefile runs.' },
-            ips           => { type => 'array', items => { type => 'string' }, readOnly => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
-            contact_email => { type => 'string', nullable => 1, readOnly => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
-            payload_dir   => { type => 'string',  readOnly => 1, description => 'Where on this machine the payload the guest fetches was built.' },
-            dryrun        => { type => 'boolean', readOnly => 1, description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
+            packages          => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Every package the domain recipes asked for, installed before the makefile runs.' },
+            package_sources   => { type => 'array', items => { type => 'object' }, readOnly => 1, description => 'The vendor archives that the domain recipes name, in the terms of the packager, which gives the guest them before its packages install.' },
+            package_answers   => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Answers for the questions the packages ask as they install, in the terms of the packager, given before they do.' },
+            package_conflicts => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Packages that the domain recipes conflict with, which the packager keeps off the guest.' },
+            fetch_cache       => {
+                type        => 'object',
+                readOnly    => 1,
+                description => 'The fetch cache that first boot installs through: its address, the certificate of its authority, the hosts to point at it, and scripts/fetch_via_cache.  Absent when there is no cache.',
+                required    => [qw{address authority hosts script}],
+                properties  => {
+                    address   => { type => 'string' },
+                    authority => { type => 'string' },
+                    hosts     => { type => 'array', items => { type => 'string' } },
+                    script    => { type => 'string' },
+                },
+            },
+            ips           => { type => 'array',   items    => { type => 'string' }, readOnly    => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
+            contact_email => { type => 'string',  nullable => 1,                    readOnly    => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
+            payload_dir   => { type => 'string',  readOnly => 1,                    description => 'Where on this machine the payload the guest fetches was built.' },
+            dryrun        => { type => 'boolean', readOnly => 1,                    description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
 
             # The network configuration of the guest matches its interfaces by MAC,
             # because the kernel can choose any device name.  The hypervisor

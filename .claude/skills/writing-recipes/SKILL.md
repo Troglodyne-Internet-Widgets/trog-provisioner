@@ -133,6 +133,13 @@ nothing at all.  `t/recipes.t` asserts every recipe that needs packages has them
 for every distribution there is, which is what turns that into a test failure
 rather than a service that will not start twenty minutes into a build.
 
+A vendor archive is a fact about a distribution too.  Name it in
+`package_sources()` in the same subclass, in the terms of that distribution's
+packager (`perldoc Provisioner::Packager`), and put its packages in `deps()`.
+First boot adds the archive and installs from it.  A package that must stay off
+the guest goes in `dep_conflicts()`, which the packager keeps out.  A fragment
+that adds an archive, or installs or removes a package, fails `t/recipes.t`.
+
 ## The rest of writing a recipe
 
 Not repeated here, because it is written down:

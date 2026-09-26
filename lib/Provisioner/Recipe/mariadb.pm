@@ -183,24 +183,20 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-C<mariadb.org> serves the release signing key, which is a plain file fetch.
-C<archive.mariadb.org> is the apt repository of the packages.  It is a
+C<archive.mariadb.org>, the apt repository of the packages.  It is a
 third-party repository, so the cache serves it, not the mirrorlist of
-L<Provisioner::Recipe::aptmirror>.
-
-F<scripts/install_mariadb.sh> makes sure that the key is really a PGP key,
-because a cache can answer in place of mariadb.org.
+L<Provisioner::Recipe::aptmirror>.  The signing key comes from C<mariadb.org>,
+which F<bin/new_config> fetches, and the guest does not.
 
 =cut
 
 sub fetch_hosts {
-    return qw{mariadb.org archive.mariadb.org};
+    return qw{archive.mariadb.org};
 }
 
 =head2 @classes = $recipe->cache_classes()
 
 The apt classes for C<archive.mariadb.org>, where the packages come from.
-C<mariadb.org> serves only the signing key, and the default freshness suits it.
 
 =cut
 

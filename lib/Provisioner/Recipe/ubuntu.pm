@@ -16,6 +16,7 @@ my $RSA_BITS = 3072;
 use File::Slurper();
 use HTTP::Tiny();
 use List::Util qw{any uniq};
+use Provisioner::Packager();
 use Provisioner::Utils();
 use Text::Xslate();
 use YAML::XS();
@@ -325,6 +326,18 @@ sub enrich {
     $opts{users}     = $self->_users(%opts);
     $opts{packages}  = _first_boot_packages( $opts{packages} );
 
+    # What the recipes named, as its packager gives it to first boot.
+    my $packager = Provisioner::Packager->named( $self->packager );
+    $opts{first_boot_files} = [
+        $packager->first_boot_files(
+            domain    => $opts{domain},
+            sources   => Provisioner::Utils::coerce_arrayref( $opts{package_sources} ),
+            conflicts => Provisioner::Utils::coerce_arrayref( $opts{package_conflicts} ),
+        )
+    ];
+    $opts{answers} = [ $packager->answers( @{ Provisioner::Utils::coerce_arrayref( $opts{package_answers} ) } ) ];
+    $opts{bootcmd} = $opts{fetch_cache} ? [ _fetch_cache_bootcmd( $opts{domain}, $opts{fetch_cache} ) ] : [];
+
     # A list, not two lines of the template, because the first item has a
     # newline in it.  A YAML sequence item written by hand cannot carry one.
     $opts{runcmd} = [
@@ -336,6 +349,41 @@ sub enrich {
     $opts{setup_script} = $self->render_raw( "files/$sub.setup.sh.tt", %opts );
 
     return %opts;
+}
+
+=head2 $cmd = _fetch_cache_bootcmd($domain, $fetch_cache)
+
+The C<bootcmd> that points the hosts of C<$fetch_cache> at the cache before
+cloud-init installs the packages.  It writes F<scripts/fetch_via_cache> and the
+certificate of the authority under F</run>, and runs the script, so first boot
+and the makefile decide in one way which hosts go to the cache.  The
+C<fetch_via_cache off> at the end of the makefile undoes both.
+
+C<bootcmd> is the one module that runs before the package install and can run a
+command.  It runs at every boot, so the command stands down once the makefile of
+C<$domain> has made its first state file.  A reboot of a built guest then leaves
+its hosts alone.  C<refresh_cloud_init> in F<bin/provision> runs it again for a
+domain added to a guest that is up, whose state directory is not there yet.
+
+=cut
+
+sub _fetch_cache_bootcmd {
+    my ( $domain, $cache ) = @_;
+
+    my $script = $cache->{script}    =~ s/\n?\z/\n/r;
+    my $cert   = $cache->{authority} =~ s/\n?\z/\n/r;
+    return join(
+        q{},
+        "if [ ! -e /etc/provisioner/state/$domain/state ]; then\n",
+        "cat > /run/trog-fetch_via_cache <<'TROG_FETCH_VIA_CACHE'\n",
+        $script,
+        "TROG_FETCH_VIA_CACHE\n",
+        "cat > /run/trog-fetchcache-ca.crt <<'TROG_FETCHCACHE_CA'\n",
+        $cert,
+        "TROG_FETCHCACHE_CA\n",
+        "bash /run/trog-fetch_via_cache on $cache->{address} /run/trog-fetchcache-ca.crt @{ $cache->{hosts} }\n",
+        "fi\n",
+    );
 }
 
 =head2 $pkgs = _first_boot_packages($packages)

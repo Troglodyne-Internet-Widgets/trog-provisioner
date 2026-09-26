@@ -8,5 +8,3 @@ sed -i -E 's/worker_connections\s+[0-9]+/worker_connections [% backlog %]/' /etc
 # Install the global configuration.
 mv nginx.global.conf /etc/nginx/conf.d/global.conf
 systemctl restart nginx
-# Remove apache2, which some other dependencies pull in.
-[% packager_remove_invocation | mark_raw %] apache2

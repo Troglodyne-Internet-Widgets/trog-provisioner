@@ -49,6 +49,10 @@ my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
 $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
 $hv_mock->redefine( sshd_port => sub { 22 } );
 
+# pdns names a vendor archive, whose key and suite the generator asks for.
+my $apt_mock = Test::MockModule->new('Provisioner::Packager::Deb');
+$apt_mock->redefine( fetch => sub { { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
 # Reserved, so the guest holds its own zone; public, so somebody else does.
@@ -193,6 +197,20 @@ subtest 'a reserved name resolves the interface to the server on the guest' => s
     # is only ever the one candidate and nothing has to say which.
     ok( builds( $makefile,  'pdns' ),      'pdns is built, because the guest answers for itself' );
     ok( !builds( $makefile, 'registrar' ), 'and the registrar recipe is not' );
+};
+
+# The generator is what carries a recipe's archive, and the pin of what the
+# recipes conflict with, into the file that the guest first boots from.
+subtest 'first boot gets the archive of pdns, and the pin of what conflicts' => sub {
+    my ( $err, undef, $dir ) = generate( $LOCAL, letsencrypt => undef, nginx => undef );
+    is( $err, undef, 'the generation runs to the end' ) or diag $err;
+
+    my $user_data = YAML::XS::Load( File::Slurper::read_binary("$dir/user-data") );
+    my %written   = map { $_->{path} => $_ } @{ $user_data->{write_files} // [] };
+
+    like( $written{'/etc/apt/sources.list.d/powerdns.sources'}{content} // q{}, qr{^URIs:[ ]https://repo[.]powerdns[.]com/ubuntu$}m, 'the archive of pdns' );
+    ok( $written{'/etc/apt/keyrings/powerdns.asc'}, 'and its key' );
+    like( $written{"/etc/apt/preferences.d/$LOCAL-conflicts.pref"}{content} // q{}, qr{^Package:[ ].*\bapache2\b}m, 'and nginx keeps apache2 out, by a pin named for the domain' );
 };
 
 subtest 'a name somebody else holds resolves it to the registrar' => sub {

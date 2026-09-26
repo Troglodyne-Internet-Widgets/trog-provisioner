@@ -22,6 +22,8 @@ use File::Slurper();
 use File::Slurper::Temp();
 use File::Basename qw{basename};
 use IPC::Run3();
+use IO::Compress::Gzip();
+use Test::MockModule qw{strict};
 
 use FindBin::libs;
 
@@ -136,10 +138,31 @@ subtest 'the restore asks for a database whose name has a quote in it' => sub {
     like( $log, qr{^pg_restore[ ].*/o'k$}m, 'and restores it' )                            or diag $log;
 };
 
-subtest 'a pinned major version' => sub {
-    like( recipe()->render_global( %BASE, version => 16 ), qr/^\@PG_VERSION='16';/m, 'is the one installed' );
-    unlike( recipe()->render_global(%BASE), qr/^\@?PG_VERSION='/m, 'and without one the newest is looked up' );
+subtest 'the version it installs' => sub {
+    is_deeply(
+        [ sort grep { m/-16\z/ } recipe()->deps( version => 16 ) ],
+        [qw{postgresql-16 postgresql-client-16 postgresql-plperl-16 postgresql-server-dev-16}],
+        'a pinned major version, for the server and everything built against it'
+    );
     like( exception { recipe()->validate( %BASE, version => 'latest' ) }, qr{/version}, 'and a version that is not a number is refused' );
+
+    # Without one, the newest in main.  A beta has a component of its own, and
+    # a dbgsym or a client alone is not a server.
+    my $index = "Package: postgresql-17\n\nPackage: postgresql-18\n\nPackage: postgresql-18-dbgsym\n\nPackage: postgresql-client-19\n";
+    my ( $answer, @asked );
+    my $mock = Test::MockModule->new('Provisioner::Packager::Deb');
+    $mock->redefine( fetch => sub { push @asked, $_[0]; return $answer } );
+
+    $answer = { success => 0, status => 503, reason => 'Service Unavailable' };
+    like( exception { recipe()->deps() }, qr/Could[ ]not[ ]read[ ]the[ ]package[ ]index[ ]of[ ]PGDG\N*503/, 'an index that cannot be read stops the build, with the answer' );
+
+    IO::Compress::Gzip::gzip( \$index => \my $gzipped ) or die $IO::Compress::Gzip::GzipError;
+    $answer = { success => 1, status => 200, content => $gzipped };
+    ok( ( grep { $_ eq 'postgresql-18' } recipe()->deps() ), 'the newest server in the index' );
+    like( $asked[-1], qr{/dists/noble-pgdg/main/binary-amd64/Packages[.]gz\z}, 'which is the main index of this release' );
+
+    recipe()->deps() for 1 .. 2;
+    is( scalar @asked, 2, 'asked once, however many times the packages are' );
 };
 
 Test::NoWarnings::had_no_warnings();

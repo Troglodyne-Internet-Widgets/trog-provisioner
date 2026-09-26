@@ -56,6 +56,12 @@ subtest 'the checkouts are smoked only on a guest that builds a perl' => sub {
     like( $built, qr/smoke_perl_modules/, 'a guest with the perl recipe does' );
 };
 
+subtest 'the extra packages install at first boot, with the rest' => sub {
+    my @deps = fresh()->deps( extra_pkgs => [qw{tig tmux}] );
+    ok( ( grep { $_ eq 'tig' } @deps ) && ( grep { $_ eq 'tmux' } @deps ), 'the extra_pkgs of the operator are deps' );
+    ok( ( grep { $_ eq 'git' } fresh()->deps() ),                          'and with none, what the clone needs still is' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

@@ -33,6 +33,7 @@ use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
 use List::Util       qw{any};
 use File::Find();
+use Provisioner::Packager();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
 use Trog::Secrets();
@@ -1725,10 +1726,13 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
         'the config and the secure-installation sql are handed to it'
     );
 
-    # Asking for the mariadb packages up front would have cloud-init install
-    # Ubuntu's before the makefile runs, only for the pin to downgrade them.
-    my @deps = $r->deps();
-    is_deeply( [ grep { index( $_, 'maria' ) >= 0 } @deps ], [], 'the mariadb packages are not cloud-init deps' );
+    # cloud-init installs the packages, from the archive of the configured
+    # version, and the pin is what keeps Ubuntu's newer one out.
+    my $ubuntu = Provisioner::Cookbook->load( 'mariadb', distro => $DISTRO )->new(%PROV);
+    ok( ( grep { $_ eq 'mariadb-server' } $ubuntu->deps() ), 'mariadb-server is a cloud-init dep' );
+    my ($source) = $ubuntu->package_sources( %{ $required_config{mariadb} } );
+    like( $source->{uri}, qr{/mariadb-11[.]4[.]4/}, 'from the archive of the version it was given' );
+    cmp_ok( $source->{pin}{priority}, '>', 1000, 'pinned high enough to go below the version in Ubuntu' );
 };
 
 subtest 'mariadb writes credentials the accounts that need them can use' => sub {
@@ -1802,10 +1806,8 @@ subtest 'install_mariadb.sh keeps the version it was handed' => sub {
 
     # /etc/os-release defines VERSION -- and NAME, and ID -- so sourcing it into
     # the script's own scope renamed the release we were asked for to
-    # "24.04.4 LTS (Noble Numbat)" and sent it looking for a repository under
-    # that.  A guest found this; nothing here could have.
-    like( $script, qr/CODENAME=\$\(\.[ ]\/etc\/os-release/, 'the codename is read in a subshell instead' );
-    like( $script, qr/^MARIADB_VERSION=\$1$/m,              'and what it was handed keeps a name of its own' );
+    # "24.04.4 LTS (Noble Numbat)".  A guest found this; nothing here could have.
+    like( $script, qr/^MARIADB_VERSION=\$1$/m, 'what it was handed keeps a name of its own' );
 };
 
 subtest 'the root password survives being put in a SQL string' => sub {
@@ -2279,6 +2281,49 @@ subtest 'every recipe that needs packages has them, for every distribution' => s
             isnt( $specific, $generic, "$recipe names its $distro packages in a $distro subclass" );
             ok( $specific->isa($generic), "which is a $generic" );
         }
+    }
+};
+
+# A vendor archive is named in package_sources, and cloud-init writes it before the
+# packages install.  A fragment that adds one itself runs apt beside every other
+# target, and installs after first boot has already failed to.
+subtest 'every archive a recipe names is one its packager can use, and no fragment adds one' => sub {
+    my $named = 0;
+    foreach my $distro ( Provisioner::Cookbook->distros() ) {
+        my %provisioner = ( %PROV, distro => $distro, template_dirs => Provisioner::Cookbook->template_dirs($distro) );
+        foreach my $recipe ( sort @available ) {
+            my @sources = Provisioner::Cookbook->load( $recipe, distro => $distro )->new(%provisioner)->package_sources( %{ $required_config{$recipe} // {} } );
+            next unless @sources;
+            $named += @sources;
+            my $packager = Provisioner::Packager->named( Provisioner::Cookbook->load($distro)->packager );
+            is( exception { $packager->merge(@sources) }, undef, "$recipe names archives that the packager of $distro can use" );
+        }
+    }
+    cmp_ok( $named, '>=', 7, 'and the seven vendor archives are among them' );
+
+    my @found = fragments();
+    ok( scalar @found, 'there are fragments to read' );
+    foreach my $tt (@found) {
+        my $body = File::Slurper::read_text($tt) =~ s/\[%[#].*?%\]//gr;
+        unlike( $body, qr{sources[.]list|apt-key|add-apt-repository|/keyrings/}, ( $tt =~ s{.*/}{}r ) . ' adds no archive of its own' );
+    }
+};
+
+# Every package goes in deps, and every package that must stay out in
+# dep_conflicts, so cloud-init does the work once, before the makefile runs apt
+# beside itself.  Two cannot: nosnap takes out a package that the image ships,
+# and claude installs a .deb that no archive has.
+subtest 'no fragment installs or removes a package, but the two that must' => sub {
+    my %may      = map { $_ => 1 } qw{nosnap.global.tt claude.tt};
+    my $packager = qr{packager_(?:remove_)?invocation};
+    my $apt      = qr{\bapt(?:-get)?[ ]+(?:-\S+[ ]+)*(?:install|remove|purge)\b};
+    my @found    = fragments();
+    ok( scalar @found, 'there are fragments to read' );
+    foreach my $tt (@found) {
+        my $name = $tt =~ s{.*/}{}r;
+        next if $may{$name};
+        my $body = File::Slurper::read_text($tt) =~ s/\[%[#].*?%\]//gr;
+        unlike( $body, qr{$packager|$apt}, "$name leaves packages to cloud-init" );
     }
 };
 

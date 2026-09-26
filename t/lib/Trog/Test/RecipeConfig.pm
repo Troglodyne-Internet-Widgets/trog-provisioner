@@ -153,7 +153,7 @@ sub required_config {
             key_file    => 'backup.rsa',
             data_source => "$dir/data",
         },
-        postgres => { dumps => [] },
+        postgres => { dumps => [], version => 16 },
         sssd     => {
             ldap_uri => 'ldaps://ldap.test.test.test',
             base_dn  => 'dc=test,dc=test',
