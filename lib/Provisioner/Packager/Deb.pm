@@ -76,6 +76,9 @@ to C<*>.  It pins by the host of C<uri>.
 
 =cut
 
+# The first line of an armored key, which apt reads from a .asc.
+my $ARMORED = qr/\A\s*-----BEGIN[ ]PGP[ ]PUBLIC[ ]KEY[ ]BLOCK-----/;
+
 my %SCHEMA = (
     type                 => 'object',
     required             => [qw{name uri suites components key}],
@@ -209,7 +212,7 @@ sub files {
             check_suite( $source->{uri}, $suite, $name );
         }
 
-        my $armored = $key =~ m/\A\s*-----BEGIN[ ]PGP[ ]PUBLIC[ ]KEY[ ]BLOCK-----/;
+        my $armored = $key =~ $ARMORED;
         my $keyring = "/etc/apt/keyrings/$name." . ( $armored ? 'asc' : 'gpg' );
         push @files, {
             path        => $keyring,
@@ -280,7 +283,7 @@ sub key {
         die "Could not fetch the signing key of the apt source $name from $url: $res->{status} $res->{reason}\n"
           unless $res->{success};
         my $body    = $res->{content} // q{};
-        my $armored = $body =~ m/\A\s*-----BEGIN[ ]PGP[ ]PUBLIC[ ]KEY[ ]BLOCK-----/;
+        my $armored = $body =~ $ARMORED;
 
         # Bit 7 is set on the first byte of every OpenPGP packet.
         my $binary = length $body && ( ord($body) & 0x80 );
