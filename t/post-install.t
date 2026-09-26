@@ -18,6 +18,7 @@ use File::Temp qw{tempdir};
 use File::Slurper();
 use IPC::Run3();
 use DBI();
+use Cpanel::JSON::XS qw{decode_json};
 
 use FindBin;
 use FindBin::libs;
@@ -44,7 +45,7 @@ sub post_install {
 sub rows {
     my ($db) = @_;
     my $dbh = DBI->connect( "dbi:SQLite:dbname=$db", q{}, q{}, { RaiseError => 1 } );
-    return $dbh->selectall_arrayref( 'SELECT slot, task, ran, status FROM tasks ORDER BY id', { Slice => {} } );
+    return $dbh->selectall_arrayref( 'SELECT slot, task, argv, ran, status FROM tasks ORDER BY id', { Slice => {} } );
 }
 
 # Queue each task, as [slot, task] or a task with no slot, and run the queue.
@@ -58,10 +59,11 @@ sub run_queue {
     my $ran = "$dir/ran";
     foreach my $task (@tasks) {
         my ( $slot, $command ) = ref $task ? @$task : ( undef, $task );
+        my @argv = map { s/%RAN%/$ran/gr } ref $command ? @$command : ($command);
         local $ENV{POSTRUN_SLOT} = $slot;
         delete $ENV{POSTRUN_SLOT} unless defined $slot;
-        my $queued = post_install( $db, '--queue', $command =~ s/%RAN%/$ran/gr );
-        die "could not queue $command: $queued->{err}" if $queued->{status};
+        my $queued = post_install( $db, '--queue', @argv );
+        die "could not queue @argv: $queued->{err}" if $queued->{status};
     }
 
     my $r    = post_install($db);
@@ -94,6 +96,15 @@ subtest 'a task that reads stdin has nothing to read' => sub {
 subtest 'the queue runs by slot, and in queued order within one' => sub {
     my $r = run_queue( [ 30, 'echo c >> %RAN%' ], [ 10, 'echo a >> %RAN%' ], [ 30, 'echo d >> %RAN%' ], 'echo e >> %RAN%', [ 20, 'echo b >> %RAN%' ] );
     is_deeply( $r->{ran}, [qw{a b c d e}], 'by slot, ties in the order queued, and a task with no slot last' );
+};
+
+# The shell of the makefile has already split and expanded the words of a task
+# that comes as several arguments.  A second shell would split them again, and
+# expand what the first one left literal.
+subtest 'a task of several arguments runs as them, with no shell' => sub {
+    my $r = run_queue( [ 5, [ '/bin/sh', '-c', 'printf "%s\n" "$0" >> "$1"', 'semi;colon $HOME `id`', '%RAN%' ] ] );
+    is_deeply( $r->{ran},                                       ['semi;colon $HOME `id`'], 'each argument arrives as it was given' ) or diag "out: $r->{out}\nerr: $r->{err}";
+    is_deeply( decode_json( rows( $r->{db} )->[0]{argv} )->[3], 'semi;colon $HOME `id`',   'and is kept as one, in a JSON array' );
 };
 
 subtest 'a task runs once, and the queue says how it went' => sub {

@@ -5,7 +5,8 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use DBI ();
+use DBI      ();
+use JSON::PP ();
 
 =head1 NAME
 
@@ -20,8 +21,10 @@ post_install - queue the work that the recipes defer, and run it after the makef
 
 C<--queue> adds C<COMMAND> to the queue, with the slot of the target that
 queued it, which the makefile exports as C<POSTRUN_SLOT>.  The makefile calls
-it as F<queue_postrun_task>.  Its arguments are joined with spaces into one
-task, which C<bash -c> runs.
+it as F<queue_postrun_task>.  A command of one argument is a line of shell,
+which C<bash -c> runs, such as C<"test -f $key && chmod 0600 $key">.  A command
+of several arguments runs as those arguments, with no shell, as the shell of
+the makefile already split and expanded them.
 
 With no arguments, it runs every task that has not run, by slot, and in the
 order they were queued within one slot.  A task queued with no slot runs after
@@ -42,9 +45,10 @@ runs after the recipes that required it, so its tasks run after theirs.
 =head2 The queue
 
 The queue is an SQLite database, F</root/post_install.db>, or
-C<POST_INSTALL_DB>.  Two targets can queue at the same time, so it runs in WAL
-mode and waits for the other writer.  Each row keeps the task, its slot, when it
-was queued, when it ran and what it exited with:
+C<POST_INSTALL_DB>.  Two targets can queue at the same time, so it takes the
+pragmas of L<Trog::SQLite>, which make a writer wait for the other.  Each row
+keeps the command as a JSON array, the same as a line of text to read, its slot,
+when it was queued, when it ran and what it exited with:
 
     sqlite3 /root/post_install.db 'SELECT slot, status, task FROM tasks ORDER BY slot, id'
 
@@ -52,18 +56,20 @@ was queued, when it ran and what it exited with:
 
 my $DB      = $ENV{POST_INSTALL_DB} // '/root/post_install.db';
 my $NO_SLOT = 999_999;
-my $WAIT_MS = 60_000;
+my $JSON    = JSON::PP->new->canonical;
 
 sub queue_db {
     my $dbh = DBI->connect( "dbi:SQLite:dbname=$DB", q{}, q{}, { RaiseError => 1, PrintError => 0, AutoCommit => 1 } );
-    $dbh->sqlite_busy_timeout($WAIT_MS);
     $dbh->do('PRAGMA journal_mode = WAL');
+    $dbh->do('PRAGMA synchronous = NORMAL');
+    $dbh->do('PRAGMA busy_timeout = 5000');
     $dbh->do(
         <<'SQL'
 CREATE TABLE IF NOT EXISTS tasks (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     slot   INTEGER NOT NULL,
     task   TEXT    NOT NULL,
+    argv   TEXT    NOT NULL,
     queued TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ran    TEXT,
     status INTEGER
@@ -80,11 +86,10 @@ sub queue_task {
     my $slot = $ENV{POSTRUN_SLOT} // $NO_SLOT;
     die "POSTRUN_SLOT is '$slot', which is not a slot\n" unless $slot =~ m/\A\d+\z/;
 
-    queue_db()->do( 'INSERT INTO tasks (slot, task) VALUES (?, ?)', undef, $slot, join( q{ }, @command ) );
+    queue_db()->do( 'INSERT INTO tasks (slot, task, argv) VALUES (?, ?, ?)', undef, $slot, join( q{ }, @command ), $JSON->encode( \@command ) );
     return 0;
 }
 
-# What a task exited with, or 128 and the signal that ended it, as a shell says.
 sub exit_status {
     my ($wait) = @_;
     return 127                   if $wait == -1;
@@ -96,18 +101,20 @@ sub run_tasks {
     return 0 unless -e $DB;
 
     my $dbh   = queue_db();
-    my $tasks = $dbh->selectall_arrayref('SELECT id, task FROM tasks WHERE ran IS NULL ORDER BY slot, id');
+    my $tasks = $dbh->selectall_arrayref('SELECT id, task, argv FROM tasks WHERE ran IS NULL ORDER BY slot, id');
 
-    # A task that reads stdin, such as cpanm, waits for input that deferred work
-    # never has.
-    open( STDIN, '<', '/dev/null' ) or die "Could not close stdin: $!\n";
+    # A task that reads stdin, such as cpanm, gets the end of input at once.
+    # Reopened and not closed: the next file opened after a close takes
+    # descriptor 0, and here that is a file of the database.
+    open( STDIN, '<', '/dev/null' ) or die "Could not reopen stdin: $!\n";
     local $| = 1;
 
     my $failed = 0;
     foreach my $row (@$tasks) {
-        my ( $id, $task ) = @$row;
+        my ( $id, $task, $argv ) = @$row;
+        my @command = @{ $JSON->decode($argv) };
         print "postrun: $task\n";
-        my $status = exit_status( system( 'bash', '-c', $task ) );
+        my $status = exit_status( @command > 1 ? system { $command[0] } @command : system( 'bash', '-c', $command[0] ) );
         if ($status) {
             print {*STDERR} "postrun FAILED: $task\n";
             $failed = 1;
