@@ -197,6 +197,30 @@ sub files {
     return @files;
 }
 
+=head2 @files = Provisioner::AptSources->forbid($domain, @packages)
+
+A pin that keeps apt from installing C<@packages> at all, from any archive, as
+the one file in a list, or no file when C<@packages> is empty.  The file is
+named for C<$domain>, because a domain added to a guest that is up writes its
+own, and must not replace the pin of the domain that the guest was built for.
+
+A pin does not remove a package that is installed.  It keeps a package that
+another one merely recommends, or offers as one of several choices, from being
+installed.  A package that depends on a forbidden one outright cannot install
+either, and apt says so.
+
+=cut
+
+sub forbid {
+    my ( $class, $domain, @packages ) = @_;
+    return () unless @packages;
+    return {
+        path        => "/etc/apt/preferences.d/$domain-conflicts.pref",
+        permissions => '0644',
+        content     => "Package: @packages\nPin: release a=*\nPin-Priority: -1\n",
+    };
+}
+
 =head2 $key = key($url, $name)
 
 The key at C<$url>, as bytes.  C<$name> is the source that wants it, for the

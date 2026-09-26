@@ -21,7 +21,6 @@ cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /hom
 [% END -%]
 rm -f [% install_dir %]/[% domain %]/.repos_for.token
 [% END -%]
-[% packager_invocation | mark_raw %] [% FOR pkg IN extra_pkgs %] [% pkg %][% END %]
 [% IF modules.grep('^perl$').size() %]
 [%# --notest always, because this smokes the suites of the repositories and not
     the suites of their dependencies.  smoke_perl_modules.pl runs those suites

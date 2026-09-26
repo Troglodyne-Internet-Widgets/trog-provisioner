@@ -135,8 +135,10 @@ rather than a service that will not start twenty minutes into a build.
 
 A vendor archive is a fact about a distribution too.  Name it in
 `apt_sources()` in the same subclass, and put its packages in `deps()`.
-cloud-init adds the archive and installs from it at first boot.  A fragment
-that adds an archive itself fails `t/recipes.t`.
+cloud-init adds the archive and installs from it at first boot.  A package
+that must stay off the guest goes in `dep_conflicts()`, which pins it out.  A
+fragment that adds an archive, or installs or removes a package, fails
+`t/recipes.t`.
 
 ## The rest of writing a recipe
 

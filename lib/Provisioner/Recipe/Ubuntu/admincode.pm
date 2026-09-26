@@ -14,10 +14,16 @@ use parent qw{Provisioner::Recipe::admincode};
 
 Provisioner::Recipe::Ubuntu::admincode - Ubuntu's C<deps> for L<Provisioner::Recipe::admincode>.
 
+=head2 @pkgs = $recipe->deps(%opts)
+
+What the clone script needs, and the C<extra_pkgs> of the operator, which
+cloud-init installs with the rest at first boot.
+
 =cut
 
 sub deps {
-    return qw{libpithub-perl libfile-pushd-perl git};
+    my ( $self, %opts ) = @_;
+    return ( qw{libpithub-perl libfile-pushd-perl git}, @{ $opts{extra_pkgs} // [] } );
 }
 
 1;

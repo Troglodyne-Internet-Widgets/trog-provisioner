@@ -16,8 +16,7 @@ if ($pg_hba && -f $pg_hba) {
     like($hba_content, qr/host all all 127\.0\.0\.1\/32 md5/, 'local TCP md5 auth configured');
 }
 
-# The packages that match the server version.  If the global fragment gets an
-# empty version, apt removes these packages and reports no error.
+# The packages that match the server version.
 my $ver = `pg_config --version 2>/dev/null` || `psql --version 2>/dev/null`;
 my ($major) = $ver =~ m/(\d+)/;
 ok($major, 'postgres reports a version') or diag "got: $ver";

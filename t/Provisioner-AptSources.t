@@ -158,5 +158,13 @@ subtest 'files: a key is fetched once' => sub {
     is( $asked{'HEAD https://apt.once.test/dists/stable/InRelease'}, 1, 'and so is each suite' );
 };
 
+subtest 'forbid: a pin that keeps packages out, for one domain' => sub {
+    is_deeply( [ Provisioner::AptSources->forbid('one.test') ], [], 'no packages, no file' );
+
+    my ($pin) = Provisioner::AptSources->forbid( 'one.test', qw{apache2 ntp} );
+    is( $pin->{path},    '/etc/apt/preferences.d/one.test-conflicts.pref',             'named for the domain, so a second domain on the guest keeps it' );
+    is( $pin->{content}, "Package: apache2 ntp\nPin: release a=*\nPin-Priority: -1\n", 'below zero, from every archive' );
+};
+
 had_no_warnings();
 done_testing();

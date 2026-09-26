@@ -22,7 +22,8 @@ use parent qw{Provisioner::Recipe};
 =head2 DESCRIPTION
 
 This recipe installs the newest postgres in the apt repository of the
-PostgreSQL project, or the major version that C<version> names.  It puts back
+PostgreSQL project, or the major version that C<version> names.
+L<Provisioner::Recipe::Ubuntu::postgres> says how it finds the newest.  It puts back
 the databases that the replaced guest had.  If a domain never had a database,
 it loads the configured dumps instead.
 
@@ -117,6 +118,28 @@ sub remote_files {
 
 sub tests {
     return qw{postgres.tt};
+}
+
+=head2 @hosts = $recipe->fetch_hosts()
+
+C<apt.postgresql.org>, the apt repository of the PostgreSQL project.
+
+=cut
+
+sub fetch_hosts {
+    return qw{apt.postgresql.org};
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+The classes for that apt repository.  See C<apt_repo_classes> in
+L<Provisioner::Recipe>.
+
+=cut
+
+sub cache_classes {
+    my ($self) = @_;
+    return $self->apt_repo_classes('apt.postgresql.org');
 }
 
 1;

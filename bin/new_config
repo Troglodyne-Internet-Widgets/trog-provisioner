@@ -1061,9 +1061,13 @@ sub handle_domain {
     # from any directory.
     my $checkout = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/..' );
 
-    # The vendor archives, which cloud-init writes before it installs @pkgs.
-    # See Provisioner::Recipe/apt_sources.
-    my @apt_files = Provisioner::AptSources->files( Provisioner::AptSources->merge(@apt_sources) );
+    # The vendor archives, which cloud-init writes before it installs @pkgs,
+    # and the pin that keeps out what the recipes conflict with.  See
+    # Provisioner::Recipe/apt_sources and dep_conflicts.
+    my @apt_files = (
+        Provisioner::AptSources->files( Provisioner::AptSources->merge(@apt_sources) ),
+        Provisioner::AptSources->forbid( $fqdn, sort @conflicts ),
+    );
 
     # First boot installs through the cache as the makefile does, so the
     # packages of a vendor archive come from the cache too.

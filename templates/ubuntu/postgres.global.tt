@@ -1,15 +1,5 @@
-yes | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
-# Find the version and install against it, on one logical line.  Make runs each
-# recipe line in its own shell, so the backslashes carry PG_VERSION to the
-# install.  Each shell $ is $$, because make eats a single $.  If the version is
-# empty, apt removes the packages, because a trailing - means "remove".
-[% IF version -%]
-@PG_VERSION='[% version %]'; \
-[% ELSE -%]
-@PG_VERSION=$$(apt-cache search '^postgresql-[0-9]' | awk '{print $$1}' | grep -oP '[0-9]+$$' | sort -rn | head -1); \
-[% END -%]
-test -n "$$PG_VERSION" || { echo "could not work out a postgres version" >&2; exit 1; }; \
-[% packager_invocation | mark_raw %] postgresql-client-$${PG_VERSION} postgresql-$${PG_VERSION} postgresql-server-dev-$${PG_VERSION} postgresql-plperl-$${PG_VERSION}
+[%# cloud-init installs postgres at first boot, from the archive that
+    Provisioner::Recipe::Ubuntu::postgres names, at the version it chose. -%]
 systemctl enable postgresql
 [% script_dir %]/queue_postrun_task systemctl restart postgresql
 # Allow local TCP connections with md5 auth

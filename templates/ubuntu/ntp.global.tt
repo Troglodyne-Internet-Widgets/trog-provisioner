@@ -1,5 +1,3 @@
-# Remove the other NTP daemons, which compete with chrony
-[% packager_remove_invocation | mark_raw %] ntp ntpdate; /bin/true
 # chrony replaces systemd-timesyncd, so stop, disable and mask it if it is present
 systemctl stop systemd-timesyncd; /bin/true
 systemctl disable systemd-timesyncd; /bin/true

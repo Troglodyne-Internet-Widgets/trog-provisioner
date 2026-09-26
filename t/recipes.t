@@ -2308,6 +2308,24 @@ subtest 'every archive a recipe names is one apt can use, and no fragment adds o
     }
 };
 
+# Every package goes in deps, and every package that must stay out in
+# dep_conflicts, so cloud-init does the work once, before the makefile runs apt
+# beside itself.  Two cannot: nosnap takes out a package that the image ships,
+# and claude installs a .deb that no archive has.
+subtest 'no fragment installs or removes a package, but the two that must' => sub {
+    my %may      = map { $_ => 1 } qw{nosnap.global.tt claude.tt};
+    my $packager = qr{packager_(?:remove_)?invocation};
+    my $apt      = qr{\bapt(?:-get)?[ ]+(?:-\S+[ ]+)*(?:install|remove|purge)\b};
+    my @found    = fragments();
+    ok( scalar @found, 'there are fragments to read' );
+    foreach my $tt (@found) {
+        my $name = $tt =~ s{.*/}{}r;
+        next if $may{$name};
+        my $body = File::Slurper::read_text($tt) =~ s/\[%[#].*?%\]//gr;
+        unlike( $body, qr{$packager|$apt}, "$name leaves packages to cloud-init" );
+    }
+};
+
 subtest 'no recipe still asks which packager it is being built for' => sub {
 
     # The subclass is the answer now, so nothing should still be asking.

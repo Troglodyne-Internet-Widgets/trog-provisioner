@@ -584,7 +584,9 @@ sub debconf_selections {
 Packages that conflict with this recipe.  They come from another recipe, or
 the distribution installs them by default, such as sendmail against postfix.
 
-Every package returned here is removed from the dependency list.
+Every package returned here is removed from the dependency list, and pinned so
+that no other package brings it in at first boot.  See
+L<Provisioner::AptSources/forbid>.  So a fragment does not remove it.
 
 =cut
 
