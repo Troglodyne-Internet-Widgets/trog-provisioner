@@ -115,8 +115,33 @@ that guest.  That is also the purpose of C<deps>: what a recipe needs is declare
 front and installed in one pass, rather than by a target that has to ask
 whether it already did so.
 
-The guest runs plain C<make>, one target after another: see the C<make> line in
-F<ubuntu.setup.sh.tt>.  Issue #252 has what running it with C<-j> would take.
+The guest runs C<make -j> with one job for each processor: see the C<make> line
+in F<ubuntu.setup.sh.tt>.  So targets that do not depend on each other run at
+the same time, and only these dependencies order them:
+
+=over 4
+
+=item * Every recipe runs after the global targets, such as C<packages> and
+C<ssl>.
+
+=item * A recipe runs after each recipe that names it in C<required_recipes>.
+C<resolve_dependencies> in L<Provisioner::Cookbook> returns those dependencies, and
+F<bin/new_config> writes them as order-only prerequisites.
+
+=item * C<ufw> runs after every recipe.
+
+=back
+
+Name what a fragment needs in C<required_recipes>.  A recipe that needs another
+without saying so runs beside it, and at best it wins the race.
+
+The deferred work keeps the serial order: each target exports its place in it
+as C<POSTRUN_SLOT>, and F<scripts/post_install> runs the tasks by that slot.
+apt waits for its lock rather than failing, because two targets can call it at
+once.
+
+A fragment does not see C<MAKEFLAGS>.  A C<make>, C<cargo> or C<rustc> that it
+runs takes its own C<-j>, if it wants one, as it did under a serial C<make>.
 
 =head3 Global and per-domain parts
 

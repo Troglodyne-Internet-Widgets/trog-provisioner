@@ -874,8 +874,12 @@ need more.  So the list is walked while it grows, not once.  Each dependency is
 added and configured from what the recipes that depend on it asked for.  Where
 two of them asked for different values, the dependency C<reconcile>s them.
 
-Returns an array reference of the expanded list, and a hash reference of the
-builders that it made, keyed by recipe name.  Reuse the builders, so that
+Returns an array reference of the expanded list, a hash reference of the
+builders that it made, keyed by recipe name, and a hash reference of what
+requires what: each recipe that something required, to a sorted array
+reference of the recipes that required it.  C<bin/new_config> writes those as
+order-only prerequisites in the makefile, so that each dependency runs after the recipes that
+required it, whatever order make picks.  Reuse the builders, so that
 nothing loads every recipe a second time.  C<domain_conf> changes in place.
 The configuration of each dependency becomes the merge of what the domain wrote
 and what each dependent gave it.
@@ -941,6 +945,7 @@ sub resolve_dependencies {
 
     my $depmod_conf = {};
     my %builders;
+    my %required_by;
 
     # The configuration of each recipe as the domain wrote it, taken on the
     # first visit.  A recipe is visited once for each recipe that depends on
@@ -1003,6 +1008,7 @@ sub resolve_dependencies {
             # Push it each time something names it.  lastuniq keeps the last
             # mention, which puts a dependency after everything that requires it.
             push( @modules, $required );
+            $required_by{$required}{$module} = 1;
             $depmod_conf = $class->_dep_merger->merge( $depmod_conf, \%cur_args );
 
             # Hash::Merge picks a side where two dependents disagree.  Only the
@@ -1022,7 +1028,7 @@ sub resolve_dependencies {
         }
     }
 
-    return ( [ Provisioner::Utils::lastuniq(@modules) ], \%builders );
+    return ( [ Provisioner::Utils::lastuniq(@modules) ], \%builders, { map { $_ => [ sort keys %{ $required_by{$_} } ] } keys %required_by } );
 }
 
 # Two merges that want opposite things, so two mergers.  Each is an object, so

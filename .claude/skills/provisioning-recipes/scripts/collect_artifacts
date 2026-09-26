@@ -81,16 +81,16 @@ sentence saying why is in the journal, and C<nginx -t> will say it on demand.
 Three recipes sat on one nginx message for a whole sweep because none of this
 was collected.
 
-=item F</root/post_install.sh>
+=item F<post_install.sh>
 
-What is still queued to run after the Makefile.  Recipes append to this, and
-C<post_install> moves it aside once it has run -- so a build that finished has
-nothing here, and a file that is present is work that never ran.
+What is still queued to run after the Makefile, out of
+F</root/post_install.db>, as the slot and the task on each line.  A build that
+finished has nothing here, and a line here is work that never ran.
 
 =item F<post_install.ran.sh>
 
-The deferred half of the work as it was actually run, read back from the
-C<ran_at_> copy C<post_install> leaves behind.  This is the one to read on a
+The deferred half of the work as it was actually run, as the slot, what the task
+exited with, and the task, in the order it ran.  This is the one to read on a
 build that completed.
 
 =back
@@ -175,7 +175,6 @@ sub artifacts {
           /var/log/cloud-init.log
           /var/log/cloud-init-output.log
           /root/new-outblocked.log
-          /root/post_install.sh
 
           /var/log/pdns.log
           /var/log/autoupdate.log
@@ -210,20 +209,15 @@ sub probes {
             'nginx-t.log'
         ],
 
-        # The deferred work, after post_install has moved the queue aside.
-        #
-        # Asked rather than read: post_install renames the queue to
-        # post_install.sh.ran_at_<when> once it has run, so the canonical path
-        # holds something only on a build that never got that far -- and fetch()
-        # takes a literal path, which cannot resolve a name with a timestamp in
-        # it.
-        #
-        # Newest by name rather than by mtime: the name carries %Y%m%d-%H%M%S,
-        # which sorts chronologically as text, where a /root that has been
-        # salvaged or rsynced can have timestamps that no longer agree with the
-        # names they sit on.
+        # The deferred work, out of the queue that post_install keeps: what is
+        # still waiting, and what ran, with what it exited with.  Asked rather
+        # than read, because the queue is a database.
         [
-            q{f=$(ls -1 /root/post_install.sh.ran_at_* 2>/dev/null | tail -n1); } . q{[ -n "$f" ] && cat "$f" || echo "no deferred work has run here"},
+            q{[ -e /root/post_install.db ] && sqlite3 -separator "$(printf '\t')" /root/post_install.db } . q{'SELECT slot, task FROM tasks WHERE ran IS NULL ORDER BY slot, id'},
+            'post_install.sh'
+        ],
+        [
+            q{[ -e /root/post_install.db ] && sqlite3 -separator "$(printf '\t')" /root/post_install.db } . q{'SELECT slot, status, task FROM tasks WHERE ran IS NOT NULL ORDER BY slot, id' } . q{|| echo "no deferred work has run here"},
             'post_install.ran.sh'
         ],
     );

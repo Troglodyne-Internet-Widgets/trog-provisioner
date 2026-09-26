@@ -1584,7 +1584,7 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # `make | tee` exits with tee's status, which is always 0, so the guest
     # records make's own and bin/provision reads that rather than guessing.
     like( $setup, qr{^rm[ ]-f[ ]/var/log/vm[.]example[.]test[.]setup[.]status$}m, 'a result from a previous build is cleared first' );
-    my $records = '{ make 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
+    my $records = '{ make -j"$(nproc)" -Otarget 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
     like( $setup, qr/\Q$records\E/, "and make's own exit code is what gets recorded" );
 
     # at(1) runs this script, and at(1) runs jobs under /bin/sh -- dash on
@@ -2138,13 +2138,10 @@ subtest 'the ufw target runs after every recipe that installs a profile' => sub 
     # setup-ufw-rules allows whatever `ufw app list` reports and opens with a
     # reset that restores before.rules from the packaged copy.  A recipe whose
     # target runs after it gets a profile nothing allowed, and rules nothing
-    # kept.  This held by alphabet alone until makefile.tt was made to say it.
-    my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
-
-    like( $mf, qr/\Qall:\E.*\Qmodules_ordered\E.*ufw_fragment/, 'ufw is named after the ordered modules' );
-    like( $mf, qr/\QIF ufw_fragment\E/,                         'and only when there is a ufw target to name' );
-
-    # And bin/new_config is what takes it out of the ordered set, or there would
+    # kept.  targets_in_order in bin/new_config puts it last, and after every
+    # recipe target, which t/new_config-order.t and t/makefile.t check.
+    #
+    # bin/new_config is also what takes it out of the ordered set, or there would
     # be two targets of the same name and make would keep the second.
     my $gen = File::Slurper::read_text("$FindBin::Bin/../bin/new_config");
     like( $gen, qr/my[ ]\$ufw_fragment[ ]=[ ]delete[ ]\$fragments\{ufw\}/,           'the fragment is lifted out of the module set' );

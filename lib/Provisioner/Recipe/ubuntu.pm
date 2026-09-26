@@ -170,11 +170,12 @@ sub current_release {
 Returns what every guest needs, whatever else goes on it.  That is C<openssl> to
 make a certificate, ssh as server and client, rsync for the payload, and retry
 for the recipes that use it.  It also has sendmail, so that cron and the
-makefile can send failures somewhere.
+makefile can send failures somewhere.  F<scripts/post_install> keeps its queue
+in SQLite, through the C<DBI> of the system perl, and C<sqlite3> reads it.
 
 =cut
 
-sub deps { return qw{openssl openssh-server openssh-client rsync retry sendmail} }
+sub deps { return qw{openssl openssh-server openssh-client rsync retry sendmail sqlite3 libdbd-sqlite3-perl} }
 
 =head1 METHODS
 

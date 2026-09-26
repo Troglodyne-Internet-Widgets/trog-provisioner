@@ -384,6 +384,82 @@ sub placement_lines {
     return @lines ? "\n" . join( "\n", @lines ) . "\n" : q{};
 }
 
+=head2 %order_only = order_only(\@modules, \%targets_of, \%required_by, \@ordered)
+
+The order-only prerequisites of each recipe target in C<@ordered>, as a hash of
+target to an array reference of the targets that must finish before it.  A
+recipe's global target comes before its per-domain one.  A dependency comes
+after each recipe that required it, as C<resolve_dependencies> in
+L<Provisioner::Cookbook> orders them.  C<%required_by> is what that method
+returns third, and C<%targets_of> holds each recipe's targets in the order they
+run.
+
+A target outside C<@ordered>, such as that of C<data> or C<ufw>, has its place
+set by C<targets_in_order>, and is left out here.  Under C<make -j> these
+prerequisites are the order.
+
+=cut
+
+sub order_only {
+    my ( $modules, $targets_of, $required_by, $ordered ) = @_;
+
+    my %in_order = map { $_ => 1 } @$ordered;
+    my %before;
+    foreach my $module (@$modules) {
+        my @mine = grep { $in_order{$_} } @{ $targets_of->{$module} // [] };
+        next if !@mine;
+
+        push( @{ $before{ $mine[1] } }, $mine[0] ) if @mine == 2;
+
+        my @after = grep { $in_order{$_} } map { @{ $targets_of->{$_} // [] } } @{ $required_by->{$module} // [] };
+        push( @{ $before{ $mine[0] } }, @after ) if @after;
+    }
+    return %before;
+}
+
+=head2 @targets = targets_in_order(%args)
+
+Every target that C<all> builds, in the order that a serial make runs them.
+Each is a hash reference with C<target>, the path of its state file, C<slot>,
+its place in that order counted from 1, and C<after>, the targets that must
+finish before it.  The template writes C<all> and the order-only prerequisites
+out of it.
+
+Takes C<state_dir>, C<user>, C<admin_user>, C<fetch>, which is true when the
+guest fetches through a cache, C<modules>, the recipe targets in order,
+C<order_only>, what C<order_only> returns for them, and C<ufw>, which is true
+when the guest runs ufw.
+
+The global targets wait for one another.  The cache waits for the last of them,
+every recipe target waits for the cache, or for the last global target without
+one, and for what C<order_only> says.  ufw waits for every recipe target.
+
+=cut
+
+sub targets_in_order {
+    my (%args) = @_;
+    my $state = $args{state_dir};
+
+    my @global = qw{sysctl packages scripts data ssl ssh sendmail testdeps};
+    unshift( @global, $args{user} eq $args{admin_user} ? 'admin_user' : 'service_user' ) if $args{user};
+    unshift( @global, 'state' );
+
+    my @targets;
+    my $last;
+    foreach my $target ( map { "$state/$_" } @global, ( $args{fetch} ? 'fetch_via_cache' : () ) ) {
+        push( @targets, { target => $target, after => [ $last // () ] } );
+        $last = $target;
+    }
+    foreach my $module ( @{ $args{modules} } ) {
+        push( @targets, { target => $module, after => [ $last, @{ $args{order_only}{$module} // [] } ] } );
+    }
+    push( @targets, { target => "$state/ufw", after => [ $last, @{ $args{modules} } ] } ) if $args{ufw};
+
+    my $slot = 0;
+    $_->{slot} = ++$slot for @targets;
+    return @targets;
+}
+
 =head2 ($ips, $port, $user) = transfer_to($hv, $this_machine, $global_config, $fqdn, @towards)
 
 Returns where a guest of C<$hv> fetches its payload from: every address of this
@@ -673,7 +749,11 @@ sub handle_domain {
     $global_config->{cache_ip}  = $distro->cache_address(%$global_config);
     $global_config->{resolvers} = $resolvers;
 
-    mkdir "$cfg_dir/t";
+    # Emptied, not only made, because every file in it goes to the guest and
+    # runs there.  A recipe taken off the domain would otherwise leave its test,
+    # which fails the build on a guest that no longer has it.
+    remove_tree("$cfg_dir/t");
+    make_path("$cfg_dir/t");
 
     $global_config->{script_dir} = $root_scripts;
 
@@ -705,10 +785,13 @@ sub handle_domain {
     my @conflicts;
     my @modules_ordered;
 
+    # The targets of each recipe, in the order they run: global, then per domain.
+    my %targets_of;
+
     my %builders;
 
     # In Provisioner::Cookbook, so that bin/new_guest gets the same answer.
-    my ( $solved, $built ) = Provisioner::Cookbook->resolve_dependencies(
+    my ( $solved, $built, $required_by ) = Provisioner::Cookbook->resolve_dependencies(
         modules       => \@modules,
         domain_conf   => $rconf->{$domain},
         global_config => $global_config,
@@ -778,7 +861,8 @@ sub handle_domain {
                 ),
                 @secret_values
             );
-            push( @modules_ordered, "/etc/provisioner/state/global_$module" );
+            push( @modules_ordered,          "/etc/provisioner/state/global_$module" );
+            push( @{ $targets_of{$module} }, "/etc/provisioner/state/global_$module" );
         }
         if ( $builder->has_template() ) {
             $fragments{$module} = Provisioner::Recipe->quiet_secrets(
@@ -790,7 +874,8 @@ sub handle_domain {
                 ),
                 @secret_values
             );
-            push( @modules_ordered, "/etc/provisioner/state/$fqdn/$module" );
+            push( @modules_ordered,          "/etc/provisioner/state/$fqdn/$module" );
+            push( @{ $targets_of{$module} }, "/etc/provisioner/state/$fqdn/$module" );
         }
         push( @pkgs,      ( $builder->deps(%$pconf) ) );
         push( @conflicts, ( $builder->dep_conflicts(%$pconf) ) );
@@ -902,6 +987,8 @@ sub handle_domain {
     my $ufw_fragment = delete $fragments{ufw};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/ufw" } @modules_ordered;
 
+    my %order_only = order_only( \@modules, \%targets_of, $required_by, \@modules_ordered );
+
     # The hosts that the guest downloads from through the fetch cache, and the
     # certificate of the authority that the guest trusts meanwhile.  See
     # Provisioner::Recipe/fetch_hosts and scripts/fetch_via_cache.
@@ -928,7 +1015,17 @@ sub handle_domain {
             ufw_fragment     => $ufw_fragment,
             fragments        => \%fragments,
             global_fragments => \%global_fragments,
-            modules_ordered  => \@modules_ordered,
+            targets          => [
+                targets_in_order(
+                    state_dir  => "/etc/provisioner/state/$fqdn",
+                    user       => $global_config->{user},
+                    admin_user => $global_config->{admin_user},
+                    fetch      => scalar @fetch_hosts,
+                    modules    => \@modules_ordered,
+                    order_only => \%order_only,
+                    ufw        => defined $ufw_fragment,
+                )
+            ],
 
             # The ssl target puts each of these names in its certificate.
             full_aliases     => $alias_conf->{$fqdn} // [],

@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Queue a command for post_install to run after the makefile is done.
-#
-# "$*" and not $*, because a task is one line.  Without the quotes, the shell
-# splits the task into words and expands its globs.
-echo "$*" >> /root/post_install.sh
+# Queue a command for post_install to run after the makefile is done.  The
+# fragments call it by this name, and post_install keeps the queue.  See
+# scripts/post_install for the order the tasks run in, and why.
+exec "$(dirname "$0")/post_install" --queue "$@"

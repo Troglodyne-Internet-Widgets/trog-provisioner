@@ -27,7 +27,10 @@ packages:
     picked.  A list of only the main archive adds nothing and loses that choice.
 
     conf must stay outside the condition.  apt with no keys under it is an empty
-    mapping, which is a different document. -%]
+    mapping, which is a different document.
+
+    DPkg::Lock::Timeout makes apt wait for the dpkg lock, rather than fail.
+    Under make -j, two targets can call apt at once. -%]
 apt:
 [% IF mirror_uri -%]
   primary:
@@ -51,6 +54,11 @@ apt:
         Get {
             Assume-Yes "true";
             Fix-Broken "true";
+        }
+    }
+    DPkg {
+        Lock {
+            Timeout "600";
         }
     }
 
