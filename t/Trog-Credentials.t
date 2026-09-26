@@ -202,4 +202,23 @@ subtest 'remember keeps what was typed for the rest of the run' => sub {
     ok( !Trog::Credentials->have('keepass'), 'and forget clears it like any other' );
 };
 
+# bin/provision hands this to each run it starts for an upstream guest.
+subtest 'block gives back what load reads' => sub {
+    Trog::Credentials->forget();
+    is( Trog::Credentials->block(), q{}, 'nothing held, nothing to give' );
+
+    open( my $in, '<', \"sudo: the sudo one\nkeepass: the store one\n\n" ) or die;
+    Trog::Credentials->load($in);
+    close($in) or die;
+    my $block = Trog::Credentials->block();
+    is( $block, "keepass: the store one\nsudo: the sudo one\n\n", 'a line for each, and the blank line that ends it' );
+
+    Trog::Credentials->forget();
+    open( my $again, '<', \$block ) or die;
+    Trog::Credentials->load($again);
+    close($again) or die;
+    is( Trog::Credentials->get('sudo'), 'the sudo one', 'and load reads it back' );
+    Trog::Credentials->forget();
+};
+
 done_testing();

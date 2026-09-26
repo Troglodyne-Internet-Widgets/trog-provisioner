@@ -201,6 +201,17 @@ sub enrich {
     return %opts;
 }
 
+=head2 @domains = $recipe->upstream_guests(%opts)
+
+C<host>, which the guest ships its logs to.  While it is down, rsyslog queues.
+
+=cut
+
+sub upstream_guests {
+    my ( $self, %opts ) = @_;
+    return grep { ( $_ // q{} ) ne q{} } $opts{host};
+}
+
 =head2 $target = $recipe->target(%opts)
 
 Takes C<host>, C<domain> and C<ipmap> (domain name to address).  Returns the
