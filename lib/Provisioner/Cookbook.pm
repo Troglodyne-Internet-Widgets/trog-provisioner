@@ -13,7 +13,6 @@ use Cwd();
 use File::Basename();
 use File::Find();
 use List::Util qw{any uniq};
-use feature 'current_sub';
 use Provisioner::Utils();
 use File::Slurper();
 use File::Slurper::Temp();
@@ -1247,23 +1246,51 @@ C<_global> or recipe.
 sub upstream_domains {
     my ( $class, $domain, $conf ) = @_;
     $conf //= $class->configuration();
-
     my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
-    my ( @order, %done );
-    my $visit = sub {
-        my ( $name, @path ) = @_;
-        if ( my ($at) = grep { $path[$_] eq $name } 0 .. $#path ) {
-            my @cycle = ( @path[ $at .. $#path ], $name );
-            die 'These guests each need the next one up before they build: ' . join( ' -> ', @cycle ) . "\n" . "No order builds all of them.  Set the setting that points at the next one to empty\n" . "for one of them, in its own _global or recipe, such as an empty cache.\n";
-        }
-        return if $done{$name};
-        __SUB__->( $_, @path, $name ) for $class->_upstreams_of( $name, $conf, \%configured );
-        $done{$name} = 1;
-        push( @order, $name );
-    };
-    $visit->($domain);
+
+    # Every guest that the domain needs, however far down, in the order found.
+    # A c-style loop, because the list grows while it is walked.
+    my @found = ($domain);
+    my %seen  = ( $domain => 1 );
+    my %needs;
+    for ( my $i = 0; $i < scalar(@found); $i++ ) {
+        my $guest = $found[$i];
+        $needs{$guest} = [ $class->_upstreams_of( $guest, $conf, \%configured ) ];
+        push( @found, grep { !$seen{$_}++ } @{ $needs{$guest} } );
+    }
+
+    # Each guest once all it needs is out, in the order found, until none is left
+    # or none can go: then what is left needs itself, round a cycle.
+    my ( @order, %out );
+    while (
+        my @ready = grep {
+                 !$out{$_}
+              && !( any { !$out{$_} } @{ $needs{$_} } )
+        } @found
+    ) {
+        $out{$_} = 1 for @ready;
+        push( @order, @ready );
+    }
+    if ( my @left = grep { !$out{$_} } @found ) {
+        die 'These guests each need the next one up before they build: ' . join( ' -> ', _cycle( $left[0], \%needs, \%out ) ) . "\n" . "No order builds all of them.  Set the setting that points at the next one to empty\n" . "for one of them, in its own _global or recipe, such as an empty cache.\n";
+    }
 
     return grep { $_ ne $domain } @order;
+}
+
+# The cycle that $from reaches, by what each guest in it still needs.
+sub _cycle {
+    my ( $from, $needs, $out ) = @_;
+
+    # Every guest left needs one that is left, so the path meets itself.
+    my @path = ($from);
+    my $at;
+    while ( !defined $at ) {
+        my ($next) = grep { !$out->{$_} } @{ $needs->{ $path[-1] } };
+        $at = List::Util::first { $path[$_] eq $next } 0 .. $#path;
+        push( @path, $next );
+    }
+    return @path[ $at .. $#path ];
 }
 
 =head2 @domains = $class->direct_upstream_domains($domain, $conf)

@@ -1067,6 +1067,12 @@ subtest 'upstream_domains: the guests a domain needs up first, in the order to b
     is_deeply( $up->('plain.test'),  [],                         'an empty cache and a host outside the installation are nothing to build' );
     is_deeply( $up->('byip.test'),   [],                         'and neither is a cache named by its address' );
 
+    $conf{'mirror.test'} = { aptmirror => {} };
+    $conf{'apt.test'}    = { _global   => { cache => q{}, mirror => 'http://mirror.test/ubuntu' } };
+    is_deeply( $up->('apt.test'), [qw{cache.test mirror.test}], 'a URL whose host is a guest here names that guest, after the cache that it needs' );
+    $conf{'apt.test'}{_global}{mirror} = 'http://archive.elsewhere.test/ubuntu';
+    is_deeply( $up->('apt.test'), [], 'and one whose host is not, nothing' );
+
     $conf{'cache.test'}{logshipper} = { host => 'logs.test' };
     my $cycle = exception { $up->('web.test') };
     $cycle //= q{};

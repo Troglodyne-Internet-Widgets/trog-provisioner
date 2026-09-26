@@ -7,7 +7,7 @@ individually.
 
 | | |
 |---|---|
-| `hypervisors.conf` | the machines you can build on, and what to spare on each |
+| `hypervisors.conf` | the machines you can build on, what to spare on each, and which reach each other |
 | `admin_authorized_keys` | the administrator's public keys, written into every guest cloud-init builds |
 | `recipes.yaml` | the settings every guest shares, and the base recipe every guest gets |
 | `recipes.d/` | one file per guest, named for it |
@@ -515,6 +515,44 @@ A recipe that needs the machine rather than the domain -- the DNS server's
 credential belongs to one guest however many domains it serves -- asks
 `Provisioner::Cookbook->host_of`, which is this list read back.
 
+## Networks
+
+A block of `hypervisors.conf` can name the network that its guests are on:
+
+```ini
+[home1]
+libvirt_uri = qemu+ssh://root@home1.example.test/system
+network     = home
+
+[home2]
+libvirt_uri = qemu+ssh://root@home2.example.test/system
+network     = home
+
+[linode]
+linode_token = secret:linode/api/password
+region       = us-east
+network      = linode-us-east
+```
+
+The guests of hypervisors with the same `network` reach each other, and the
+guests of two different ones do not. So `network` is the machines on one LAN,
+or one region of one cloud. Every block that names no network is on one network
+with the others that name none, so a fleet that names none behaves as it did
+before this setting existed.
+
+It matters to a guest that needs another guest up; see
+[Upstream guests](#upstream-guests). `bin/new_config` looks up where each guest
+that it needs is, and places it only on a hypervisor of that guest's network:
+
+- A guest that is up on a hypervisor of another network is refused, because it
+  cannot move, and so is a guest pinned to one, with `--hypervisor` or
+  `hypervisor=` in `provision.conf`.
+- A guest that needs guests on two networks is refused, because no hypervisor
+  reaches both.
+- A guest that it needs and that is not up yet limits nothing, and it says so.
+  `bin/provision` builds that guest first, so it is up by the time the guest
+  that needs it is placed.
+
 ## Upstream guests
 
 Some settings name another guest of this installation, which a guest wants up
@@ -555,14 +593,9 @@ logs.example.test:
         cache: ''
 ```
 
-A guest reaches only the guests on its own network. Give each block of
-`hypervisors.conf` a `network` name, and the hypervisors with the same name
-are one network, such as the machines at home, or one cloud region. A guest
-that needs another guest is placed on that guest's network, and one that is up
-elsewhere, or pinned elsewhere with `--hypervisor` or `provision.conf`, is
-refused. Blocks that name no network are one network together, so a fleet that
-names none behaves as before. A guest that should run somewhere else, such as a
-cloud with caches of its own, needs a configuration of its own without those
+A guest is placed only on the network of the guests it needs; see
+[Networks](#networks). A guest that should run somewhere else, such as a cloud
+with caches of its own, needs a configuration of its own without those
 settings:
 
 ```yaml

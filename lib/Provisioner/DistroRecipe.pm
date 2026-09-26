@@ -394,17 +394,16 @@ A mirror anywhere else is named as a URL instead:
 NOPE
 }
 
-=head2 @domains = $distro->upstream_guests(%opts)
+=head2 @settings = $distro->guest_settings()
 
-The C<cache> and the C<mirror>, when each names a domain rather than a URL or
-an address.  A guest downloads through the one and installs from the other,
-and falls back to upstream and to the archive when either is down.
+C<cache> and C<mirror>.  A guest downloads through the one and installs from the
+other, and falls back to upstream and to the archive when either is down.  See
+L<Provisioner::Recipe/upstream_guests>.
 
 =cut
 
-sub upstream_guests {
-    my ( $self, %opts ) = @_;
-    return grep { $_ ne q{} && !m{://} && !m/\A(?:\d{1,3}[.]){3}\d{1,3}\z/ } map { $_ // q{} } @opts{qw{cache mirror}};
+sub guest_settings {
+    return qw{cache mirror};
 }
 
 =head2 $address = $distro->cache_address(%opts)

@@ -201,15 +201,15 @@ sub enrich {
     return %opts;
 }
 
-=head2 @domains = $recipe->upstream_guests(%opts)
+=head2 @settings = $recipe->guest_settings()
 
 C<host>, which the guest ships its logs to.  While it is down, rsyslog queues.
+See L<Provisioner::Recipe/upstream_guests>.
 
 =cut
 
-sub upstream_guests {
-    my ( $self, %opts ) = @_;
-    return grep { ( $_ // q{} ) ne q{} } $opts{host};
+sub guest_settings {
+    return qw{host};
 }
 
 =head2 $target = $recipe->target(%opts)
