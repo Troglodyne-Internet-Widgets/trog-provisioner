@@ -349,6 +349,9 @@ my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_over
 # Where a guest of this hypervisor reaches us, which is any backend's question.
 my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
+# Which guests the guests of this hypervisor can reach.  See network.
+my @NETWORK_KEYS = qw{network};
+
 sub options_from_block {
     my ( $class, $block ) = @_;
 
@@ -361,7 +364,7 @@ sub options_from_block {
         }
     }
 
-    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS;
+    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS, @NETWORK_KEYS;
 
     return %opts;
 }
@@ -488,6 +491,22 @@ Dies when C<transfer_port> is not a port number.
 =cut
 
 sub configured_transfer_ip ($self) { return $self->setting('transfer_ip') }
+
+=head2 network
+
+The name of the network that the guests of this hypervisor are on, from
+C<network> in its block of F<hypervisors.conf>, or empty when the block names
+none.  The guests of two hypervisors on one network can reach each other, and
+the guests of two on different networks cannot.  Every block that names none is
+on the one empty network, so a fleet that names no network is one network.
+
+L<Trog::Hypervisors/select_for> places a guest that needs another guest up on
+the network of that guest.  For example, the hypervisors of a home network
+share a label, and a block for a cloud region has a label of its own.
+
+=cut
+
+sub network ($self) { return $self->setting('network') // q{} }
 
 sub configured_transfer_port ($self) {
     my $port = $self->setting('transfer_port');

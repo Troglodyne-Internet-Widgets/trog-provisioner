@@ -555,6 +555,24 @@ logs.example.test:
         cache: ''
 ```
 
+A guest reaches only the guests on its own network. Give each block of
+`hypervisors.conf` a `network` name, and the hypervisors with the same name
+are one network, such as the machines at home, or one cloud region. A guest
+that needs another guest is placed on that guest's network, and one that is up
+elsewhere, or pinned elsewhere with `--hypervisor` or `provision.conf`, is
+refused. Blocks that name no network are one network together, so a fleet that
+names none behaves as before. A guest that should run somewhere else, such as a
+cloud with caches of its own, needs a configuration of its own without those
+settings:
+
+```yaml
+prod.example.test:
+    _global:
+        cache: ''
+    logshipper:
+        host: logs.provider.example
+```
+
 When a build fails, `bin/provision` offers to put that guest back to the
 snapshot it took before rebuilding it. `--on-failure rollback` or `keep` answers
 ahead of time, for a run with no terminal. A guest built for the first time has

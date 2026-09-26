@@ -1266,6 +1266,20 @@ sub upstream_domains {
     return grep { $_ ne $domain } @order;
 }
 
+=head2 @domains = $class->direct_upstream_domains($domain, $conf)
+
+The domains whose guests C<$domain> itself names, as in C<upstream_domains>,
+without the ones those guests need in turn.  The guest of C<$domain> has to
+reach these, and only these.
+
+=cut
+
+sub direct_upstream_domains {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+    return $class->_upstreams_of( $domain, $conf, { map { $_ => 1 } grep { !m/\A_/ } keys %$conf } );
+}
+
 # What one domain names, and the guest it is built onto, before the walk.
 sub _upstreams_of {
     my ( $class, $domain, $conf, $configured ) = @_;
