@@ -19,6 +19,7 @@ use File::Slurper::Temp();
 use File::Temp();
 use Hash::Merge();
 use JSON::Validator::Schema::Troglodyne;
+use URI();
 use YAML::XS();
 
 use Trog::Config();
@@ -1247,35 +1248,31 @@ The domains whose guests must be up before the guest of C<$domain> builds, in
 the order to build them: each after the ones it needs itself.  C<$domain> is
 not among them.  C<$conf> is as in C<domain_config>.
 
-Each recipe of a domain, and its distro recipe, answers
-L<Provisioner::Recipe/upstream_guests> with the C<_global> of the domain and
-its own configuration.  A name counts only when it is a domain of this
-configuration, and not the domain itself, so a URL, an address and a guest that
-is its own cache ask for nothing.  A domain built onto the guest of another, see
-C<host_of>, also needs what that guest needs, but not the guest itself, which
-F<bin/provision> builds as the host.
+A domain needs every other domain of the configuration that one of its settings
+names, as C<named_guests> finds them, and each domain that those need in turn.
+A domain built onto the guest of another, see C<host_of>, also needs what that
+guest needs, but not the guest itself, which F<bin/provision> builds as the
+host.
 
-Dies on a cycle, naming each domain in it, because no order builds every guest
-after the ones it needs.  The configuration breaks it: one of the guests in the
-cycle sets the setting that points at the next one to empty in its own
-C<_global> or recipe.
+Dies on a cycle, because no order builds each guest after the ones it needs.
+The message names each guest in the cycle and the setting that names the next
+one, so that a person can change one of those settings.
 
 =cut
 
 sub upstream_domains {
     my ( $class, $domain, $conf ) = @_;
     $conf //= $class->configuration();
-    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
 
     # Every guest that the domain needs, however far down, in the order found.
     # A c-style loop, because the list grows while it is walked.
     my @found = ($domain);
     my %seen  = ( $domain => 1 );
-    my %needs;
+    my %named;
     for ( my $i = 0; $i < scalar(@found); $i++ ) {
         my $guest = $found[$i];
-        $needs{$guest} = [ $class->_upstreams_of( $guest, $conf, \%configured ) ];
-        push( @found, grep { !$seen{$_}++ } @{ $needs{$guest} } );
+        $named{$guest} = [ $class->named_guests( $guest, $conf ) ];
+        push( @found, grep { !$seen{$_}++ } map { $_->{domain} } @{ $named{$guest} } );
     }
 
     # Each guest once all it needs is out, in the order found, until none is left
@@ -1284,32 +1281,34 @@ sub upstream_domains {
     while (
         my @ready = grep {
                  !$out{$_}
-              && !( any { !$out{$_} } @{ $needs{$_} } )
+              && !( any { !$out{ $_->{domain} } } @{ $named{$_} } )
         } @found
     ) {
         $out{$_} = 1 for @ready;
         push( @order, @ready );
     }
     if ( my @left = grep { !$out{$_} } @found ) {
-        die 'These guests each need the next one up before they build: ' . join( ' -> ', _cycle( $left[0], \%needs, \%out ) ) . "\n" . "No order builds all of them.  Set the setting that points at the next one to empty\n" . "for one of them, in its own _global or recipe, such as an empty cache.\n";
+        die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } _cycle( $left[0], \%named, \%out ) ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n";
     }
 
     return grep { $_ ne $domain } @order;
 }
 
-# The cycle that $from reaches, by what each guest in it still needs.
+# The cycle that $from reaches, as the names that lead round it.
 sub _cycle {
-    my ( $from, $needs, $out ) = @_;
+    my ( $from, $named, $out ) = @_;
 
     # Every guest left needs one that is left, so the path meets itself.
     my @path = ($from);
+    my @steps;
     my $at;
     while ( !defined $at ) {
-        my ($next) = grep { !$out->{$_} } @{ $needs->{ $path[-1] } };
-        $at = List::Util::first { $path[$_] eq $next } 0 .. $#path;
-        push( @path, $next );
+        my ($next) = grep { !$out->{ $_->{domain} } } @{ $named->{ $path[-1] } };
+        push( @steps, $next );
+        $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
+        push( @path, $next->{domain} );
     }
-    return @path[ $at .. $#path ];
+    return @steps[ $at .. $#steps ];
 }
 
 =head2 @domains = $class->direct_upstream_domains($domain, $conf)
@@ -1322,25 +1321,65 @@ reach these, and only these.
 
 sub direct_upstream_domains {
     my ( $class, $domain, $conf ) = @_;
-    $conf //= $class->configuration();
-    return $class->_upstreams_of( $domain, $conf, { map { $_ => 1 } grep { !m/\A_/ } keys %$conf } );
+    return uniq( map { $_->{domain} } $class->named_guests( $domain, $conf ) );
 }
 
-# What one domain names, and the guest it is built onto, before the walk.
-sub _upstreams_of {
-    my ( $class, $domain, $conf, $configured ) = @_;
+=head2 @named = $class->named_guests($domain, $conf)
 
-    my $host = $class->host_of( $domain, $conf );
-    my @names;
-    foreach my $guest ( $domain, $host // () ) {
-        my %global = ( %{ $class->global_config( $guest, $conf ) }, domain => $guest );
+Each place in the configuration of C<$domain> that names the guest of another
+domain of C<$conf>, as a hash reference: C<domain> is the guest that is named,
+C<setting> is the path of the setting, such as C<_global.cache> or
+C<logshipper.host>, and C<by> is the domain whose configuration holds it.
+C<$conf> is as in C<domain_config>.
+
+It reads every setting of the C<_global> of the domain and of each of its
+recipes.  A value names a guest when it is that domain, the domain with a port,
+such as C<logs.example.test:514>, or a URL whose host is that domain.  An
+address, an email address, a C<secret:> reference and a host outside the
+configuration name nothing.  Neither does the domain itself.
+
+A domain built onto the guest of another, see C<host_of>, also names what the
+settings of that guest name, with C<by> set to that guest.  The guest itself
+does not count.
+
+=cut
+
+sub named_guests {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
+    my $host       = $class->host_of( $domain, $conf ) // q{};
+
+    my @named;
+    foreach my $guest ( $domain, $host || () ) {
         my $config = $class->domain_config( $guest, $conf );
-        push( @names, $class->load( $global{distro} // 'ubuntu' )->upstream_guests(%global) );
-        foreach my $recipe ( grep { $class->has($_) } sort keys %$config ) {
-            push( @names, $class->load($recipe)->upstream_guests( %global, %{ $config->{$recipe} // {} } ) );
+        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
+
+        foreach my $block ( sort keys %blocks ) {
+            foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
+                my $name = _guest_named( ${ $slot->[1] } );
+                next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
+                push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
+            }
         }
     }
-    return grep { $configured->{$_} && $_ ne $domain && $_ ne ( $host // q{} ) } uniq @names;
+    return @named;
+}
+
+# The host that a value names, if it names one: the host of a URL, or a value
+# that is a host alone, with or without a port.
+sub _guest_named {
+    my ($value) = @_;
+    return if !defined $value || ref $value || $value eq q{};
+
+    my $uri = URI->new($value);
+    return $uri->host if $uri->can('host') && defined $uri->host && $uri->host ne q{};
+
+    # A host alone is the whole authority of a URI, with no user in it.
+    my $bare = URI->new("ssh://$value");
+    return $bare->host if $bare->authority eq $value && !defined $bare->userinfo;
+    return;
 }
 
 =head2 global_config($domain, $conf)

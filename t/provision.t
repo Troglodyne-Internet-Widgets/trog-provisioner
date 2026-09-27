@@ -1110,6 +1110,10 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     ok( !$built[0]{salvage_gaps_ok} && !$built[0]{reuse}, '--salvage-gaps-ok and --existing are not for an upstream guest' );
     is_deeply( [ @{ $built[-1] }{qw{salvage_gaps_ok reuse}} ], [ 1, '192.0.2.5' ], 'but for the domain asked for' );
 
+    my $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
+    like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'it says which setting makes a guest needed' );
+    like( $said, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/, 'for the guests needed in turn too' );
+
     %up = ( 'cache.test' => 'hv9' );
     $run->('web.test');
     is_deeply( [ map { $_->{domain} } @built ], [qw{logs.test web.test}], 'a guest that is up is left alone, wherever it is' );
@@ -1126,7 +1130,7 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     is( scalar @built, 1, 'before the next one' );
 
     $recipes = upstream_fixture( 'cache.test' => { fetchcache => {}, logshipper => { host => 'logs.test' } } );
-    like( $run->('web.test'), qr/cache[.]test[ ]->[ ]logs[.]test[ ]->[ ]cache[.]test/, 'two guests that need each other are refused' );
+    like( $run->('web.test'), qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming the setting' );
     is_deeply( \@built, [], 'before anything is built' );
 };
 

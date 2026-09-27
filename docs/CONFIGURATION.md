@@ -555,12 +555,28 @@ that it needs is, and places it only on a hypervisor of that guest's network:
 
 ## Upstream guests
 
-Some settings name another guest of this installation, which a guest wants up
-before it builds:
+A guest needs every other guest of this installation that one of its settings
+names. `bin/provision` and `bin/new_config` read every setting of the domain:
+its `_global`, with what it takes from `_base`, and each of its recipes. You do
+not list what a guest needs anywhere else. A setting names a guest when its value
+is one of these:
 
-- `cache` in `_global`, the fetch cache that it downloads through.
-- `mirror` in `_global`, the package mirror that it installs from.
-- `host` of `logshipper`, where it ships its logs.
+- A domain of this installation, such as `cache: fetchcache.example.test`.
+- That domain with a port, such as `logs.example.test:514`.
+- A URL whose host is that domain, such as `http://mirror.example.test/ubuntu`.
+
+An address, an email address, a `secret:` reference, a path and a host outside
+this installation name nothing. So does a setting that names the domain itself.
+In practice the settings that name guests are `cache` and `mirror` in `_global`,
+the `host` of `logshipper`, and the `hosts` of `backupdestination`. A new recipe
+whose setting names a guest takes part with no extra code.
+
+Before it builds anything, `bin/provision` prints each setting that it found,
+for example:
+
+```
+web.example.test names logs.example.test in logshipper.host, so it needs that guest up first.
+```
 
 `bin/provision` builds each of those guests first when no hypervisor has it,
 and each guest that they name in turn, in order, and then the domain you asked
@@ -576,16 +592,18 @@ _base:
 
 The cache guest names itself there too, and does not wait for itself.
 
-A setting that names a URL, an address, or a host that is not a domain here asks
-for nothing to be built. Each of these guests is one that a build can go on
-without: a guest downloads from upstream while the cache is down, installs from
-the archive while the mirror is down, and queues its logs while the collector is
-down.
+A named guest must be one that a build can go on without. A guest downloads
+from upstream while the cache is down, installs from the archive while the
+mirror is down, and queues its logs while the collector is down. A backup
+destination pulls from its hosts at night, so it needs none of them to build.
+They are built first all the same, and `--rebuild-upstream-guests` on the
+destination rebuilds each of them.
 
 Two guests that each name the other are refused, because no order builds both.
-The one line above and a `logshipper` in `_base` make one such pair: the cache
-ships its logs to the collector, and the collector downloads through the cache.
-Break it on one of the two, for example with no cache for the collector:
+The message names each setting in the loop. The one line above and a
+`logshipper` in `_base` make one such pair: the cache ships its logs to the
+collector, and the collector downloads through the cache. Break it on one of the
+two, for example with no cache for the collector:
 
 ```yaml
 logs.example.test:

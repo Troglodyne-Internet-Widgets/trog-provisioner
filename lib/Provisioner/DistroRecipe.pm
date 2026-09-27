@@ -394,18 +394,6 @@ A mirror anywhere else is named as a URL instead:
 NOPE
 }
 
-=head2 @settings = $distro->guest_settings()
-
-C<cache> and C<mirror>.  A guest downloads through the one and installs from the
-other, and falls back to upstream and to the archive when either is down.  See
-L<Provisioner::Recipe/upstream_guests>.
-
-=cut
-
-sub guest_settings {
-    return qw{cache mirror};
-}
-
 =head2 $address = $distro->cache_address(%opts)
 
 Takes C<cache>, C<domain> and C<ipmap>.  Returns the address of the fetch cache

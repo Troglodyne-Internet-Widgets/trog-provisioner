@@ -1071,8 +1071,42 @@ subtest 'upstream_domains: the guests a domain needs up first, in the order to b
     $conf{'cache.test'}{logshipper} = { host => 'logs.test' };
     my $cycle = exception { $up->('web.test') };
     $cycle //= q{};
-    like( $cycle, qr/cache[.]test[ ]->[ ]logs[.]test[ ]->[ ]cache[.]test/, 'two guests that need each other are refused, naming the cycle' );
-    like( $cycle, qr/empty[ ]cache/,                                       'and saying how to break it' );
+    like( $cycle, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming each setting in the cycle' );
+    like( $cycle, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/,   'both of them' );
+    unlike( $cycle, qr/web[.]test[ ]names/, 'and not the guest that only leads into it' );
+    like( $cycle, qr/set[ ]cache[ ]to[ ]empty/, 'saying how to break it' );
+};
+
+subtest 'named_guests: each setting that names a guest here, and which' => sub {
+    my %conf = (
+        _base        => { _global      => { cache => 'cache.test' } },
+        'cache.test' => { fetchcache   => {} },
+        'logs.test'  => { logcollector => {} },
+        'web.test'   => {
+            _global           => { admin_email => 'root@logs.test', contact => 'mailto:root@logs.test', note => 'secret:logs.test/x/y', path => 'logs.test/var' },
+            backupdestination => { hosts       => [ 'elsewhere.test', 'logs.test:2222' ] },
+            logshipper        => { host        => 'https://logs.test/in' },
+        },
+        'tenant.test' => { cron       => {} },
+        _shared       => { 'web.test' => ['tenant.test'] },
+    );
+
+    is_deeply(
+        [ Provisioner::Cookbook->named_guests( 'web.test', \%conf ) ],
+        [
+            { domain => 'cache.test', setting => '_global.cache',              by => 'web.test' },
+            { domain => 'logs.test',  setting => 'backupdestination.hosts[1]', by => 'web.test' },
+            { domain => 'logs.test',  setting => 'logshipper.host',            by => 'web.test' },
+        ],
+        'a domain, a domain with a port and a URL name a guest, and an address, a reference, a path and a host elsewhere do not'
+    );
+    is_deeply( [ Provisioner::Cookbook->direct_upstream_domains( 'web.test', \%conf ) ], [qw{cache.test logs.test}], 'each guest once' );
+    is_deeply(
+        [ map { $_->{by} } Provisioner::Cookbook->named_guests( 'tenant.test', \%conf ) ],
+        [qw{tenant.test web.test web.test web.test}],
+        'a domain on the guest of another names what that guest names, and says whose setting it is'
+    );
+    is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
 };
 
 done_testing();

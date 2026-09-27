@@ -14,7 +14,6 @@ use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
 use Scalar::Util();
 use Socket();
-use URI();
 use File::Copy();
 use File::Slurper::Temp();
 
@@ -595,51 +594,6 @@ fragment does not remove it.
 
 sub dep_conflicts {
     return ();
-}
-
-=head3 @settings = $recipe->guest_settings()
-
-The settings of this recipe whose value can name another guest of this
-installation: a domain, or a URL whose host is one.  The distro recipe names
-C<cache> and C<mirror>, and logshipper names C<host>.
-
-Empty by default.
-
-=cut
-
-sub guest_settings {
-    return ();
-}
-
-=head3 @names = $recipe->upstream_guests(%config)
-
-The names that the C<guest_settings> of this recipe hold in C<%config>, which is
-the C<_global> of the domain with the configuration of the recipe on top.  A URL
-gives its host, as L<URI> reads it, and a value with no scheme is taken as a
-name.  Only a name that a domain of the installation has counts, and not the
-domain itself, which L<Provisioner::Cookbook/upstream_domains> decides, because
-it has the configuration.
-
-F<bin/provision> builds the guest of each of them first when it is missing.
-An upstream guest that is down must cost this guest only a slower build, never a
-failed one, because refusing a cycle of guests is the only other way out of one.
-
-=cut
-
-sub upstream_guests {
-    my ( $self, %config ) = @_;
-
-    my @names;
-    foreach my $value ( grep { defined && $_ ne q{} } @config{ $self->guest_settings } ) {
-        my $uri = URI->new($value);
-        if ( !defined $uri->scheme ) {
-            push( @names, $value );
-        }
-        elsif ( $uri->can('host') ) {
-            push( @names, $uri->host );
-        }
-    }
-    return @names;
 }
 
 =head3 @hosts = $recipe->fetch_hosts(%recipe_config)

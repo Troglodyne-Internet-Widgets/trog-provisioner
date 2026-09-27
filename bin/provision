@@ -186,12 +186,13 @@ the guest of that domain first, and adds DOMAIN to it.  See L<Trog::HV> for what
 
 =head2 Upstream guests
 
-Some guests need another guest up before they build.  A guest downloads through
-the fetch cache that C<cache> names, installs from the mirror that C<mirror>
-names, and ships its logs to the host of C<logshipper>.  One line in the
-C<_global> of C<_base> points every guest at the same cache, the cache guest
-too.  L<Provisioner::Cookbook/upstream_domains> works out which guests DOMAIN
-needs, and each guest that they need, in order.
+A guest needs each other guest of the installation that one of its settings
+names, such as the fetch cache that C<cache> names or the host of
+C<logshipper>.  L<Provisioner::Cookbook/named_guests> says what names a guest,
+and L<Provisioner::Cookbook/upstream_domains> works out which guests DOMAIN
+needs, and each guest that they need, in order.  Before anything is built,
+provision prints each setting that names a guest.  F<docs/CONFIGURATION.md> has
+the whole of it.
 
 Before it builds DOMAIN, provision builds each of them that no hypervisor of
 the fleet has, one after another, with the same options, B<--hypervisor> too,
@@ -528,7 +529,14 @@ sub main {
     # The guests this one needs up first, in order, each built like this one.
     # One that is up is left alone, wherever in the fleet it is, and not only
     # on the hypervisor that --hypervisor names, where a missing one is built.
-    foreach my $upstream ( Provisioner::Cookbook->upstream_domains( $domain, Provisioner::Cookbook->configuration($recipes) ) ) {
+    # Said up front, because a setting that names a guest is enough to make it
+    # needed, and nobody writes that down as a dependency.
+    my $conf     = Provisioner::Cookbook->configuration($recipes);
+    my @upstream = Provisioner::Cookbook->upstream_domains( $domain, $conf );
+    foreach my $named ( map { Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
+        print "$named->{by} names $named->{domain} in $named->{setting}, so it needs that guest up first.\n";
+    }
+    foreach my $upstream (@upstream) {
         if ( !$rebuild_upstream && ( my $there = guest_is_up( $upstream, %build ) ) ) {
             print "$upstream is up on $there, so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
             next;
