@@ -6,6 +6,23 @@
 # guest in write_files.  So it is not in the payload that it fetches.
 
 cloud-init status --wait
+[% IF secrets_marker -%]
+
+# The recipes read files that bin/provision copies from the secret store, and
+# it writes the marker after the last of them.  cloud-init can finish first, so
+# wait for the marker, and remove it so the next build waits for its own.
+waited=0
+while [ ! -e [% secrets_marker %] ]; do
+    if [ "$waited" -ge 1800 ]; then
+        echo "The secrets of [% domain %] did not arrive: bin/provision writes [% secrets_marker %] after it places them, and it did not within 30 minutes." > /var/log/[% domain %].setup.log
+        echo 1 > /var/log/[% domain %].setup.status
+        exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+rm -f [% secrets_marker %]
+[% END -%]
 
 # Let root connect with SSH to the host that holds the payload of this guest.
 cat > /root/.ssh/config << EOF

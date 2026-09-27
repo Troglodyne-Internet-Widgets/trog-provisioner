@@ -250,6 +250,20 @@ sub wait_for_makefile {
     return $result eq '0';
 }
 
+=head2 $path = Trog::Guest->secrets_marker($domain)
+
+The file that F<bin/provision> writes on the guest after it places the secrets
+of C<$domain>, the files that F<guest-secrets.yaml> names.  When the domain has
+any, F<setup.sh> waits for this file before it starts make, and removes it when
+it has seen it, so that the next build of the domain waits for its own.
+
+=cut
+
+sub secrets_marker {
+    my ( undef, $domain ) = @_;
+    return "/root/.guest-secrets-$domain";
+}
+
 =head1 THE KEY
 
 A guest is reached with an SSH key.  The private half is the credential for

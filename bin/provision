@@ -284,8 +284,10 @@ backup of it.
 
 Most guests ask for no secret, and F<bin/new_config> writes no manifest for
 them.  With no manifest, this sub does nothing and returns an empty list.  It
-also returns an empty list on a second call for the same domain.  It returns 1 after it places the files and
-calls C<authorize_runner_key>.
+also returns an empty list on a second call for the same domain.  It returns 1
+after it places the files, calls C<authorize_runner_key>, and writes the file
+that L<Trog::Guest/secrets_marker> names.  F<setup.sh> waits for that file
+before it starts make, so the makefile never runs without the secrets.
 
 It asks for the password of the store through L<Trog::Credentials>.  It dies if
 it cannot open the store, if the store has no value for a reference, or if it
@@ -338,6 +340,10 @@ sub place_guest_secrets {
     }
 
     authorize_runner_key( $domain, \%values );
+
+    my $marker = Trog::Guest->secrets_marker($domain);
+    $guest->write_text( $marker, "placed\n", sudo => 1, mode => '0600' )
+      or die "Could not write $marker on $domain, which its build waits for\n";
     return 1;
 }
 
@@ -715,8 +721,8 @@ sub build_guest {
                   or die "could not sync devices map!";
             }
 
-            # Before cloud-init finishes, so before the makefile that it schedules
-            # starts.  A recipe reads these files and does not generate them.
+            # setup.sh waits for the marker that this writes last, so the makefile
+            # that cloud-init schedules does not start without these files.
             place_guest_secrets( $guest, $domain );
 
             $guest->wait_for_cloud_init($domain);
