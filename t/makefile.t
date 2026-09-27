@@ -16,6 +16,9 @@ use Test::More;
 use Test::NoWarnings;
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
+use File::Temp();
+use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin;
 use FindBin::libs;
@@ -215,6 +218,29 @@ subtest 'the sendmail target makes a certificate before it turns starttls on' =>
     ok( $widened > $made,  'the address cap is widened' ) or diag $sendmail;
     ok( $again > $widened, 'and the certificate retried once it is' )
       or diag "widened at $widened, last update_tls at $again";
+};
+
+# The packages target is the upgrade, and runs before every recipe.  make runs
+# it here, so what the test sees is what a guest does with a failed upgrade.
+subtest 'a failed upgrade stops the build at the packages target' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    my $run = sub {
+        my ($upgrade) = @_;
+        File::Slurper::Temp::write_text( "$dir/Makefile", makefile( state_dir => $dir, packager_up_invocation => $upgrade ) );
+        unlink "$dir/packages";
+        my $out = q{};
+        IPC::Run3::run3( [ 'make', '-C', $dir, "$dir/packages" ], \undef, \$out, \$out );
+        return ( $? >> 8, $out );
+    };
+
+    my ( $status, $out ) = $run->('echo upgraded');
+    is( $status, 0, 'an upgrade that works lets the build go on' ) or diag $out;
+    ok( -e "$dir/packages", 'and marks the target done' );
+
+    ( $status, $out ) = $run->(q{sh -c 'echo "E: the upgrade failed" >&2; exit 100'});
+    isnt( $status, 0, 'one that fails stops make' );
+    like( $out, qr/E:[ ]the[ ]upgrade[ ]failed/, 'with what the packager said' );
+    ok( !-e "$dir/packages", 'and the target is not marked done, so the next run upgrades again' );
 };
 
 Test::NoWarnings::had_no_warnings();

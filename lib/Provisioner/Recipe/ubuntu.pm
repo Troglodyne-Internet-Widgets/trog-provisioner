@@ -73,7 +73,11 @@ The install invocation accepts as much as it can:
 drops a request.
 
 =item * C<--force-confdef> and C<--force-confold>, because nobody is there to
-answer when a package asks which configuration file to keep.
+answer when a package asks which configuration file to keep.  The upgrade
+invocation passes them too.  An upgrade of a package whose configuration file
+the guest changed keeps the change, and leaves the packaged file beside it as
+F<.dpkg-dist>.  apt passes an option to C<dpkg> only as C<Dpkg::Options::=>, with
+the second pair of colons.
 
 =item * C<--force-overwrite>, because two packages often ship the same path,
 and that is not a reason to fail a build.
@@ -91,11 +95,11 @@ sub packager                   { return 'deb' }
 sub release                    { return 'noble' }
 sub mirror_path                { return '/ubuntu' }
 sub base_image                 { my ($self) = @_; return $self->image_for( $self->release ) }
-sub packager_up_invocation     { return 'DEBIAN_FRONTEND="noninteractive" apt-get upgrade -Uy' }
+sub packager_up_invocation     { return 'DEBIAN_FRONTEND="noninteractive" apt-get upgrade -Uy -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold' }
 sub packager_remove_invocation { return 'DEBIAN_FRONTEND="noninteractive" apt-get remove -y' }
 
 sub packager_invocation {
-    return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options=--force-confdef -o Dpkg::Options=--force-confold -o Dpkg::Options=--force-overwrite --autoremove';
+    return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-overwrite --autoremove';
 }
 
 =head2 $version = $recipe->release_version()
