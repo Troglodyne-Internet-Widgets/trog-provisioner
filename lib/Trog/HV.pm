@@ -14,6 +14,7 @@ use Trog::Config();
 use Trog::Local();
 use Trog::Credentials();
 use Trog::Secrets();
+use Trog::Utils();
 use Provisioner::Cookbook();
 use File::Slurper();
 use YAML::XS();
@@ -1443,26 +1444,28 @@ So a key pasted into a field with another name is found too.
 
 sub _plaintext_in {
     my ( $node, $path ) = @_;
+    return map { $_->[0] } grep { _is_plaintext( ${ $_->[1] }, $_->[0] ) } Trog::Utils::slots_in( \$node, $path );
+}
 
-    return map { _plaintext_in( $node->[$_], "$path\[$_]" ) } 0 .. $#$node                if ref $node eq 'ARRAY';
-    return map { _plaintext_in( $node->{$_}, $path ? "$path.$_" : $_ ) } sort keys %$node if ref $node eq 'HASH';
-    return () if ref $node || !$node;
+sub _is_plaintext {
+    my ( $value, $path ) = @_;
+    return 0 if ref $value || !$value;
 
     # A reference is not a secret.  Neither is a placeholder from bin/new_guest,
     # because new_config refuses to build from one.
-    return ()      if $node =~ m/\Asecret:/;
-    return ($path) if $node =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
-    return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
+    return 0 if $value =~ m/\Asecret:/;
+    return 1 if $value =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
+    return 0 if $value eq Provisioner::Cookbook->PLACEHOLDER;
 
     my ($field) = $path =~ m/([^.\[\]]+)\z/;
-    return () unless defined $field;
+    return 0 unless defined $field;
 
     # _file and _path name a location, not a secret: the key_file of backup
     # holds a filename such as "backup.rsa".
-    return ()      if $field =~ m/_(?:file|path)\z/;
-    return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/;
+    return 0 if $field =~ m/_(?:file|path)\z/;
+    return 1 if $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/;
 
-    return ();
+    return 0;
 }
 
 sub _readable {

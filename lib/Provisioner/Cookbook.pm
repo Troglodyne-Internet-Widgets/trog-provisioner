@@ -23,6 +23,7 @@ use YAML::XS();
 
 use Trog::Config();
 use Trog::Secrets();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -610,43 +611,70 @@ sub scaffold {
     return ( $config, @todo );
 }
 
+# What to write for an object of the schema, and the paths left to fill in.  A
+# node is an object, or a value in one; each is decided after all under it.
 sub _scaffold_object {
     my ( $class, $spec, $path, $opts ) = @_;
 
-    my $props    = $class->properties($spec);
-    my %required = map { $_ => 1 } @{ $spec->{required} // [] };
+    my @nodes = ( { object => 1, prop => $spec, path => $path, opts => $opts } );
+    for ( my $i = 0; $i < scalar(@nodes); $i++ ) {
+        $nodes[$i]{under} = [ $class->_scaffold_under( $nodes[$i] ) ];
+        push( @nodes, @{ $nodes[$i]{under} } );
+    }
+    $_->{result} = [ $class->_scaffold_result($_) ] foreach reverse @nodes;
 
+    return @{ $nodes[0]{result} };
+}
+
+sub _scaffold_under {
+    my ( $class, $node ) = @_;
+    my ( $prop, $path, $opts ) = @$node{qw{prop path opts}};
+
+    if ( !$node->{object} ) {
+        return () if exists $prop->{default};
+
+        my $type = $prop->{type} // '';
+        return ( { object => 1, prop => $prop, path => $path, opts => $opts } ) if $type eq 'object';
+        return ( { prop => $prop->{items} // {}, path => "$path\[0]", opts => $opts } ) if $type eq 'array';
+        return ();
+    }
+
+    my $props    = $class->properties($prop);
+    my %required = map { $_ => 1 } @{ $prop->{required} // [] };
     my $provided = ref $opts->{provided} eq 'HASH' ? $opts->{provided} : {};
 
-    my ( %out, @todo );
+    my @under;
     foreach my $key ( sort keys %$props ) {
-        my $prop = $props->{$key};
-        next unless ref $prop eq 'HASH';
+        my $field = $props->{$key};
+        next unless ref $field eq 'HASH';
 
         next if exists $provided->{$key};
 
         # The build fills in a readOnly field, so an operator writes nothing
         # there.
-        next if $prop->{readOnly};
+        next if $field->{readOnly};
+        next unless $required{$key} || $opts->{all};
 
-        my $wanted = $required{$key} || $opts->{all};
-        next unless $wanted;
-
-        my ( $value, @sub ) = $class->_scaffold_value(
-            $prop, "$path.$key",
-            { %$opts, provided => $provided->{$key} }
-        );
-        next unless defined $value;
-
-        $out{$key} = $value;
-        push @todo, @sub;
+        push( @under, { key => $key, prop => $field, path => "$path.$key", opts => { %$opts, provided => $provided->{$key} } } );
     }
-
-    return ( \%out, @todo );
+    return @under;
 }
 
-sub _scaffold_value {
-    my ( $class, $prop, $path, $opts ) = @_;
+sub _scaffold_result {
+    my ( $class, $node ) = @_;
+    my ( $prop,  $path ) = @$node{qw{prop path}};
+
+    if ( $node->{object} ) {
+        my ( %out, @todo );
+        foreach my $field ( @{ $node->{under} } ) {
+            my ( $value, @sub ) = @{ $field->{result} };
+            next unless defined $value;
+
+            $out{ $field->{key} } = $value;
+            push @todo, @sub;
+        }
+        return ( \%out, @todo );
+    }
 
     return ( clone( $prop->{default} ), () ) if exists $prop->{default};
 
@@ -657,14 +685,14 @@ sub _scaffold_value {
         # An object with only additionalProperties has nothing to scaffold.  It
         # is left out, unless it must have a property, and then a person must
         # choose one.
-        my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
+        my ( $sub, @todo ) = @{ $node->{under}[0]{result} };
         return ( $sub,                @todo ) if %$sub;
         return ( $class->PLACEHOLDER, $path ) if ( $prop->{minProperties} // 0 ) > 0;
         return ( undef,               () );
     }
 
     if ( $type eq 'array' ) {
-        my ( $item, @todo ) = $class->_scaffold_value( $prop->{items} // {}, "$path\[0]", $opts );
+        my ( $item, @todo ) = @{ $node->{under}[0]{result} };
         return ( [],      () ) unless defined $item;
         return ( [$item], @todo );
     }
@@ -774,20 +802,11 @@ look at.
 
 sub placeholders_in {
     my ( $class, $config, $path ) = @_;
-    $path //= '';
 
-    my $ref = ref $config;
-
-    if ( $ref eq 'HASH' ) {
-        return map { $class->placeholders_in( $config->{$_}, $path eq '' ? $_ : "$path.$_" ) }
-          sort keys %$config;
-    }
-    if ( $ref eq 'ARRAY' ) {
-        return map { $class->placeholders_in( $config->[$_], "$path\[$_]" ) } 0 .. $#$config;
-    }
-
-    return ($path) if defined $config && !$ref && $config eq $class->PLACEHOLDER;
-    return ();
+    return map { $_->[0] } grep {
+        my $value = ${ $_->[1] };
+        defined $value && !ref $value && $value eq $class->PLACEHOLDER
+    } Trog::Utils::slots_in( \$config, $path );
 }
 
 =head2 resolve_substitutable_dependency(%args)

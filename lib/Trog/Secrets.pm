@@ -474,7 +474,7 @@ what was meant and cannot be read two ways.
 sub _group_named {
     my ( $class, $kdbx, $title ) = @_;
 
-    my @found = _groups_under( $kdbx->groups, $title, q{} );
+    my @found = _groups_under( $kdbx->groups, $title );
     die "More than one group is called '$title': " . join( ', ', map { $_->{path} } @found ) . ".\n" . "A reference names one group, so give them different names.\n"
       if @found > 1;
 
@@ -483,14 +483,16 @@ sub _group_named {
 
 # Every group of that name in the forest, with the path that reached it.
 sub _groups_under {
-    my ( $groups, $title, $path ) = @_;
+    my ( $groups, $title ) = @_;
 
+    # Pushed in reverse, so the groups are found in the order the store lists them.
+    my @stack = reverse map { [ $_, $_->{title} ] } @{ $groups // [] };
     my @found;
-    foreach my $group ( @{ $groups // [] } ) {
-        my $here = $path ? "$path/$group->{title}" : $group->{title};
+    while ( my $at = pop @stack ) {
+        my ( $group, $here ) = @$at;
 
         push( @found, { group => $group, path => $here } ) if defined $group->{title} && $group->{title} eq $title;
-        push( @found, _groups_under( $group->{groups}, $title, $here ) );
+        push( @stack, reverse map { [ $_, $here ? "$here/$_->{title}" : $_->{title} ] } @{ $group->{groups} // [] } );
     }
 
     return @found;
