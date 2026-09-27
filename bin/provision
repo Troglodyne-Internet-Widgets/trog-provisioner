@@ -180,11 +180,14 @@ F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> in the domain directory,
 chooses the hypervisor, and asks the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
 and waits for cloud-init and the makefile to finish.
 
-If F<provision.conf> names another domain in C<depends_on>, which C<_shared>
-sets, DOMAIN goes onto the guest of that domain.  When that guest is up on its
-hypervisor, provision leaves it as it is.  It connects to it, runs the new
-cloud-init of DOMAIN again, and runs the makefile of DOMAIN.  When the guest is
-not up, provision builds it first.  To rebuild it, provision that domain itself.
+When C<_shared> in the configuration lists DOMAIN under another domain, DOMAIN
+goes onto the guest of that domain.  F<bin/new_config> writes that domain into
+the F<provision.conf> of DOMAIN as C<depends_on>, and nothing else sets it.
+
+When that guest is up on its hypervisor, provision leaves it as it is.  It
+connects to it, runs the new cloud-init of DOMAIN again, and runs the makefile
+of DOMAIN.  When the guest is not up, provision builds it first.  To rebuild it,
+provision that domain itself.
 See L<Trog::HV> for what "the hypervisor" means when it is not this machine.
 
 =head2 Upstream guests
