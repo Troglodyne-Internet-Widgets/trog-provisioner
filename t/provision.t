@@ -750,6 +750,75 @@ subtest 'a dependency with no configuration is named as the one that is missing'
     unlike( $err, qr{\Q$dir/tenant.test/provision.conf\E}, 'rather than the one that is present' );
 };
 
+# _shared puts a domain onto the guest of another.  A host that is up is used as
+# it is: rebuilding it would take away every other domain on it.
+subtest 'a domain goes onto its shared host as it is, and the host is built only when it is not up' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    foreach my $d (qw{host.test tenant.test}) {
+        mkdir "$dir/$d";
+        File::Slurper::Temp::write_text( "$dir/$d/users.yaml",  "users: []\n" );
+        File::Slurper::Temp::write_text( "$dir/$d/data.tar.gz", "not really a tarball\n" );
+        File::Slurper::Temp::write_text( "$dir/$d/key.rsa",     "PRIVATE\n" );
+    }
+    File::Slurper::Temp::write_text( "$dir/host.test/provision.conf",   "ips=203.0.113.10\nadmin_user=hostadmin\n" );
+    File::Slurper::Temp::write_text( "$dir/tenant.test/provision.conf", "ips=203.0.113.11\ndepends_on=host.test\n" );
+    my $no_fleet = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
+
+    my $up = 1;
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( mkpath             => sub { 1 } );
+    $hv->redefine( file_exists        => sub { 1 } );
+    $hv->redefine( prepare_host       => sub { 1 } );
+    $hv->redefine( release_seed       => sub { 1 } );
+    $hv->redefine( domain_exists      => sub { my ( undef, $d ) = @_; return $up && $d eq 'host.test' } );
+    $hv->redefine( inspection_address => sub { '192.168.122.10' } );
+    $hv->redefine( guest_ssh_ip       => sub { my ( undef, $config ) = @_; return ( $config->param('ips') )[0] } );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( configuration    => sub { {} } );
+    $cookbook->redefine( upstream_domains => sub { () } );
+
+    my @provisioned;
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    $bin->redefine( generate_config     => sub { 1 } );
+    $bin->redefine( place_guest_secrets => sub { 1 } );
+    $bin->redefine(
+        provision_domain => sub {
+            my (%args) = @_;
+            push( @provisioned, { map { $_ => $args{$_} } qw{domain reuse reuser depends} } );
+            return ( $args{reuser} // 'admin', $args{reuse} // '203.0.113.99' );
+        }
+    );
+
+    my %opened;
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path            => sub { my ( undef, $d, $file ) = @_; return $file } );
+    $guest->redefine( new                 => sub { my ( $class, %a ) = @_; $opened{ $a{name} } = $a{key_path}; return bless {%a}, $class } );
+    $guest->redefine( wait_for_ssh        => sub { 1 } );
+    $guest->redefine( wait_for_cloud_init => sub { 1 } );
+    $guest->redefine( wait_for_makefile   => sub { 1 } );
+
+    my $run = sub {
+        @provisioned = ();
+        Trog::HV->forget();
+        return exception {
+            quietly( sub { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, '--domaindir', $dir, qw{--on-failure keep tenant.test} ) } )
+        };
+    };
+
+    is( $run->(), undef, 'with the host up, the run goes to the end' );
+    is_deeply(
+        \@provisioned,
+        [ { domain => 'tenant.test', reuse => '203.0.113.10', reuser => 'hostadmin', depends => 'host.test' } ],
+        'only the tenant is provisioned, onto the host where it is, as its administrator'
+    );
+    like( $opened{'tenant.test'}, qr{/host[.]test/key[.]rsa\z}, 'with the key of the host' );
+
+    $up = 0;
+    is( $run->(), undef, 'with the host not up, the run goes to the end too' );
+    is_deeply( [ map { $_->{domain} } @provisioned ], [qw{host.test tenant.test}], 'but the host is built first' );
+};
+
 # What a reprovision did, without doing any of it: which machine it connected
 # to, with whose key, and what it asked the hypervisor to destroy on the way.
 sub _layered {
