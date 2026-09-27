@@ -180,9 +180,15 @@ F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> in the domain directory,
 chooses the hypervisor, and asks the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
 and waits for cloud-init and the makefile to finish.
 
-If F<provision.conf> names another domain in C<depends_on>, provision builds
-the guest of that domain first, and adds DOMAIN to it.  See L<Trog::HV> for what
-"the hypervisor" means when it is not this machine.
+When C<_shared> in the configuration lists DOMAIN under another domain, DOMAIN
+goes onto the guest of that domain.  F<bin/new_config> writes that domain into
+the F<provision.conf> of DOMAIN as C<depends_on>, and nothing else sets it.
+
+When that guest is up on its hypervisor, provision leaves it as it is.  It
+connects to it, runs the new cloud-init of DOMAIN again, and runs the makefile
+of DOMAIN.  When the guest is not up, provision builds it first.  To rebuild it,
+provision that domain itself.
+See L<Trog::HV> for what "the hypervisor" means when it is not this machine.
 
 =head2 Upstream guests
 
@@ -648,6 +654,16 @@ sub build_guest {
         $dconfig = Config::Simple->new($dcfile);
     }
 
+    # A domain that moves onto a shared host can still have a guest of its own,
+    # on any hypervisor of the fleet.  generate_config has salvaged its files,
+    # and reprovision_guest takes that guest away before its addresses move.
+    my $own_hv;
+    if ( $depends && !$dryrun ) {
+        $own_hv = Trog::Hypervisors->find( $domain, hvconf => $hvconf, domain_dir => $domain_dir_from_cli, missing_ok => 1 );
+        undef $own_hv unless $own_hv && $own_hv->domain_exists($domain);
+        Trog::HV->forget();
+    }
+
     # Choose the hypervisor before anything changes.  Every other sub gets the
     # same object back from Trog::HV->new().
     my $hv = Trog::Hypervisors->choose(
@@ -669,10 +685,17 @@ sub build_guest {
     # directory of the hypervisor.  A hypervisor that has neither does nothing.
     $hv->prepare_host("$FindBin::Bin/../virtiofs-better");
 
-    # If this domain depends on another, build that guest first.  With
-    # --existing, this only adds configuration to a guest that is up.
+    # If this domain depends on another, it goes onto the guest of that one:
+    # the guest as it is, when it is up, and a guest built first, when not.
+    # With --existing, this only adds configuration to a guest that is up.
     my $skey;
-    if ($depends) {
+    if ( $depends && !$reuse && $hv->domain_exists($depends) ) {
+        $reuse  = $hv->guest_ssh_ip( $dconfig, $hv->inspection_address($depends) );
+        $reuser = $dconfig->param('admin_user') // $reuser;
+        $skey   = Trog::Guest->key_path( $depends, "$domain_dir/$depends/key.rsa" );
+        print "$domain goes onto $depends, which is up on " . $hv->describe . " at $reuse, so $depends is left as it is.\n" . "To rebuild $depends, provision $depends itself.\n";
+    }
+    elsif ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
 
         #XXX Perhaps die here if the admin_user settings differ.
@@ -700,7 +723,7 @@ sub build_guest {
     with_rollback(
         $domain, $on_failure,
         sub {
-            my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun, nonreusable => $nonreusable );
+            my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, own_hv => $own_hv, dryrun => $dryrun, nonreusable => $nonreusable );
             return if $dryrun;
 
             # After provision_domain, for the reason above.  A domain with a dependency
@@ -945,7 +968,7 @@ sub ask_about_nonreusable {
 }
 
 sub provision_domain (%args) {
-    my ( $config, $domain, $reuse, $reuser, $depends, $dryrun, $nonreusable ) = @args{qw{config domain reuse reuser depends dryrun nonreusable}};
+    my ( $config, $domain, $reuse, $reuser, $depends, $own_hv, $dryrun, $nonreusable ) = @args{qw{config domain reuse reuser depends own_hv dryrun nonreusable}};
 
     my $hv = Trog::HV->new();
 
@@ -963,7 +986,7 @@ sub provision_domain (%args) {
         return ( $config->param('admin_user'), $hv->would_provision( $config, reuse => $reuse ) );
     }
 
-    return reprovision_guest( hv => $hv, config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends ) if $reuse;
+    return reprovision_guest( hv => $hv, config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, own_hv => $own_hv ) if $reuse;
 
     # The guest fetches its payload from this machine, so let its key in.
     my %seed = read_seed($config);
@@ -1015,8 +1038,11 @@ sub provision_domain (%args) {
 =head2 ($user, $host) = reprovision_guest(%args)
 
 Adds a domain to a guest that is up, and does not build a guest.  It takes the
-keys C<hv>, C<config>, C<domain>, C<reuse>, C<reuser> and C<depends>.  It
-returns C<reuser> and C<reuse>, the user and the address to connect with.
+keys C<hv>, C<config>, C<domain>, C<reuse>, C<reuser>, C<depends> and C<own_hv>.
+It returns C<reuser> and C<reuse>, the user and the address to connect with.
+C<own_hv> is the hypervisor that has a guest of C<domain> of its own, when
+C<domain> moves onto the guest of C<depends>.  That guest is removed there, and
+on C<hv> when there is no C<own_hv>.
 
 The machine is C<reuse>.  That is the address from C<--existing>, or the guest
 that was built for the dependency.  This is how a shared host works: bar.test
@@ -1030,7 +1056,7 @@ schedules F<setup.sh> with C<at>.  It dies if it cannot ship a file.
 =cut
 
 sub reprovision_guest (%args) {
-    my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @args{qw{hv config domain reuse reuser depends}};
+    my ( $hv, $config, $domain, $reuse, $reuser, $depends, $own_hv ) = @args{qw{hv config domain reuse reuser depends own_hv}};
 
     # The machine belongs to $built_for.  With a dependency, that is the
     # domain that was built, and its key opens the machine.  Without one, this
@@ -1041,9 +1067,10 @@ sub reprovision_guest (%args) {
     my $key        = Trog::Guest->key_path( $built_for, "$domain_dir/$built_for/key.rsa" );
 
     # With a dependency, remove any guest that still has the name of this
-    # domain.  That is the guest this domain had before it moved to the shared
-    # one.  Without a dependency, that name is the machine this connects to.
-    $hv->clear_guest($domain) if $depends;
+    # domain, on the hypervisor that has it.  That is the guest this domain had
+    # before it moved to the shared one.  Without a dependency, that name is the
+    # machine this connects to.
+    ( $own_hv // $hv )->clear_guest($domain) if $depends;
 
     print "Attempting to access Machine\n";
     my $guest = Trog::Guest->new( name => $domain, host => $reuse, user => $reuser, key_path => $key );

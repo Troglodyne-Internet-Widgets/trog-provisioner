@@ -508,8 +508,10 @@ my.client.on.shared.host:
     ...
 ```
 
-The shared host is built first, then each guest on it is built against the
-running machine.
+A guest on the shared host is added to the running machine. `bin/provision`
+connects to it, runs the new cloud-init of the guest again, and runs its makefile.
+The host is left as it is. It is built first only when no hypervisor has it up.
+To rebuild the host, provision the host itself.
 
 A recipe that needs the machine rather than the domain -- the DNS server's
 credential belongs to one guest however many domains it serves -- asks
