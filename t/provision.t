@@ -819,6 +819,80 @@ subtest 'a domain goes onto its shared host as it is, and the host is built only
     is_deeply( [ map { $_->{domain} } @provisioned ], [qw{host.test tenant.test}], 'but the host is built first' );
 };
 
+# Two guests become one: tenant.test has a guest of its own, and _shared now puts
+# it onto host.test.  Its files come off its own guest first, which new_config
+# does inside generate_config.  Then that guest goes, wherever in the fleet it
+# is, before its addresses move onto the host, which is left as it is.
+subtest 'two guests consolidated with _shared: salvaged, then the old one goes, then onto the host' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    foreach my $d (qw{host.test tenant.test}) {
+        mkdir "$dir/$d";
+        File::Slurper::Temp::write_text( "$dir/$d/users.yaml",  "users: []\n" );
+        File::Slurper::Temp::write_text( "$dir/$d/data.tar.gz", "not really a tarball\n" );
+        File::Slurper::Temp::write_text( "$dir/$d/key.rsa",     "PRIVATE\n" );
+        File::Slurper::Temp::write_text( "$dir/$d/setup.sh",    "#!/bin/sh\n" );
+    }
+    File::Slurper::Temp::write_text( "$dir/host.test/provision.conf",   "ips=203.0.113.10\nadmin_user=hostadmin\n" );
+    File::Slurper::Temp::write_text( "$dir/tenant.test/provision.conf", "ips=203.0.113.11\ndepends_on=host.test\n" );
+    my $no_fleet = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
+
+    my @did;
+    my $old = bless { name => 'old' }, 'Trog::HV::Libvirt';
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( mkpath             => sub { 1 } );
+    $hv->redefine( file_exists        => sub { 1 } );
+    $hv->redefine( prepare_host       => sub { 1 } );
+    $hv->redefine( release_seed       => sub { 1 } );
+    $hv->redefine( guest_mac          => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( inspection_address => sub { '192.168.122.10' } );
+    $hv->redefine( guest_ssh_ip       => sub { my ( undef, $config ) = @_; return ( $config->param('ips') )[0] } );
+    $hv->redefine( domain_exists      => sub { my ( $self, $d ) = @_; return $self == $old ? $d eq 'tenant.test' : $d eq 'host.test' } );
+    $hv->redefine( clear_guest        => sub { my ( $self, $d ) = @_; push( @did, ( $self == $old ? 'old hypervisor' : 'host hypervisor' ) . " clears $d" ); return 1 } );
+    $hv->redefine( provision_guest    => sub { die "built a guest\n" } );
+
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { my ( undef, $d ) = @_; return $d eq 'tenant.test' ? $old : undef } );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( configuration    => sub { {} } );
+    $cookbook->redefine( upstream_domains => sub { () } );
+
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    $bin->redefine( generate_config       => sub { my ($d) = @_; push( @did, "salvage and configure $d" ); return 1 } );
+    $bin->redefine( read_seed             => sub { () } );
+    $bin->redefine( authorize_guest_key   => sub { 1 } );
+    $bin->redefine( refresh_cloud_init    => sub { my ( undef, undef, $d ) = @_; push( @did, "cloud-init of $d again" ); return 1 } );
+    $bin->redefine( merge_guest_addresses => sub { my (%a) = @_; push( @did, "addresses of $a{domain} onto $a{built_for}" ); return 1 } );
+    $bin->redefine( place_guest_secrets   => sub { 1 } );
+
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path            => sub { my ( undef, $d, $file ) = @_; return $file } );
+    $guest->redefine( new                 => sub { my ( $class, %a ) = @_; return bless {%a}, $class } );
+    $guest->redefine( put_file            => sub { 1 } );
+    $guest->redefine( capture_cmd         => sub { my ( $self, $cmd ) = @_; push( @did, "run $1" ) if $cmd =~ m{at[ ]now[ ]-f[ ]/root/(setup-\S+)}; return q{} } );
+    $guest->redefine( wait_for_ssh        => sub { 1 } );
+    $guest->redefine( wait_for_cloud_init => sub { 1 } );
+    $guest->redefine( wait_for_makefile   => sub { my ( $self, $d ) = @_; push( @did, "makefile of $d" ); return 1 } );
+
+    Trog::HV->forget();
+    my $err = exception {
+        quietly( sub { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, '--domaindir', $dir, qw{--on-failure keep tenant.test} ) } )
+    };
+    is( $err, undef, 'the run goes to the end' );
+    is_deeply(
+        \@did,
+        [
+            'salvage and configure tenant.test',
+            'old hypervisor clears tenant.test',
+            'cloud-init of tenant.test again',
+            'addresses of tenant.test onto host.test',
+            'run setup-tenant.test.sh',
+            'makefile of tenant.test',
+        ],
+        'the files come off the old guest, it goes from its own hypervisor, and only then does the domain move onto the host, which is not rebuilt'
+    ) or diag explain \@did;
+};
+
 # What a reprovision did, without doing any of it: which machine it connected
 # to, with whose key, and what it asked the hypervisor to destroy on the way.
 sub _layered {
