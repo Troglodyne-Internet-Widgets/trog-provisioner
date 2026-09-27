@@ -18,6 +18,8 @@ use List::Util   qw{uniq};
 use MIME::Base64 qw{encode_base64};
 use URI();
 
+use Trog::Utils();
+
 =head1 NAME
 
 Provisioner::Packager::Deb - Packages for the Debian family: apt archives, pins
@@ -181,9 +183,7 @@ sub _same {
 
 sub _canonical {
     my ($value) = @_;
-    return join( ',', map { "$_=" . _canonical( $value->{$_} ) } sort keys %$value ) if ref $value eq 'HASH';
-    return join( ',', map { _canonical($_) } @$value )                               if ref $value eq 'ARRAY';
-    return $value // q{};
+    return join( ',', map { "$_->[0]=" . ( ${ $_->[1] } // q{} ) } grep { !ref ${ $_->[1] } } Trog::Utils::slots_in( \$value ) );
 }
 
 =head2 @files = Provisioner::Packager::Deb->files(@sources)

@@ -25,6 +25,7 @@ use File::Temp();
 use File::Slurper::Temp();
 
 use Provisioner::Cookbook();
+use Trog::Utils();
 
 subtest 'configuration() reads recipes.yaml and the recipes.d beside it' => sub {
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
@@ -792,23 +793,17 @@ subtest 'no recipe declares its fields somewhere the validator will not look' =>
     my @wrong;
     foreach my $name ( Provisioner::Cookbook->names() ) {
         my %spec = Provisioner::Cookbook->spec($name);
-        push @wrong, map { "$name: $_" } stray_parameters( \%spec, q{} );
+        push @wrong, map { "$name: $_" } stray_parameters( \%spec );
     }
     is_deeply( \@wrong, [], 'every schema says properties' ) or diag join "\n", @wrong;
 };
 
 # Anywhere in a schema that a "parameters" key sits where "properties" belongs.
 sub stray_parameters {
-    my ( $node, $path ) = @_;
+    my ($node) = @_;
 
-    my $ref = ref $node;
-    return map { stray_parameters( $node->[$_], "$path\[$_]" ) } 0 .. $#$node if $ref eq 'ARRAY';
-    return () unless $ref eq 'HASH';
-
-    my @found;
-    push @found, ( $path eq q{} ? '(top level)' : $path ) if exists $node->{parameters};
-    push @found, map { stray_parameters( $node->{$_}, $path eq q{} ? $_ : "$path.$_" ) } sort keys %$node;
-    return @found;
+    return map { $_->[0] eq q{} ? '(top level)' : $_->[0] }
+      grep { ref ${ $_->[1] } eq 'HASH' && exists ${ $_->[1] }->{parameters} } Trog::Utils::slots_in( \$node );
 }
 
 subtest 'where a domain lives is _global to say, not the data recipe' => sub {
@@ -1045,6 +1040,73 @@ subtest 'one alias is a list, as two already were' => sub {
     is_deeply( $aliases->{'two.test.local'}, [ 'first.test.local', 'second.test.local' ], 'and a pair is left as the list it already was' );
     ok( !exists $aliases->{'none.test.local'}, 'and a domain naming none is not in the map at all' );
     ok( !exists $aliases->{_base},             'nor is _base, which is not a domain' );
+};
+
+subtest 'upstream_domains: the guests a domain needs up first, in the order to build them' => sub {
+    my %conf = (
+        _base         => { _global      => { cache => 'cache.test', mirror => 'http://archive.test/ubuntu' } },
+        'cache.test'  => { fetchcache   => {} },
+        'logs.test'   => { logcollector => {} },
+        'web.test'    => { logshipper   => { host => 'logs.test' } },
+        'tenant.test' => { cron         => {} },
+        'plain.test'  => { _global      => { cache => q{} }, logshipper => { host => 'syslog.vendor.test' } },
+        'byip.test'   => { _global      => { cache => '192.0.2.9' } },
+        _shared       => { 'web.test'   => ['tenant.test'] },
+    );
+    my $up = sub { [ Provisioner::Cookbook->upstream_domains( $_[0], \%conf ) ] };
+
+    is_deeply( $up->('web.test'),    [qw{cache.test logs.test}], 'the cache first, which the collector needs too, then the collector' );
+    is_deeply( $up->('logs.test'),   ['cache.test'],             'the collector needs the cache' );
+    is_deeply( $up->('cache.test'),  [],                         'and the cache, which names itself, needs nothing' );
+    is_deeply( $up->('tenant.test'), [qw{cache.test logs.test}], 'a domain on the guest of another needs what that guest needs, and not the guest' );
+    is_deeply( $up->('plain.test'),  [],                         'an empty cache and a host outside the installation are nothing to build' );
+    is_deeply( $up->('byip.test'),   [],                         'and neither is a cache named by its address' );
+
+    $conf{'mirror.test'} = { aptmirror => {} };
+    $conf{'apt.test'}    = { _global   => { cache => q{}, mirror => 'http://mirror.test/ubuntu' } };
+    is_deeply( $up->('apt.test'), [qw{cache.test mirror.test}], 'a URL whose host is a guest here names that guest, after the cache that it needs' );
+    $conf{'apt.test'}{_global}{mirror} = 'http://archive.elsewhere.test/ubuntu';
+    is_deeply( $up->('apt.test'), [], 'and one whose host is not, nothing' );
+
+    $conf{'cache.test'}{logshipper} = { host => 'logs.test' };
+    my $cycle = exception { $up->('web.test') };
+    $cycle //= q{};
+    like( $cycle, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming each setting in the cycle' );
+    like( $cycle, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/,   'both of them' );
+    unlike( $cycle, qr/web[.]test[ ]names/, 'and not the guest that only leads into it' );
+    like( $cycle, qr/set[ ]cache[ ]to[ ]empty/, 'saying how to break it' );
+};
+
+subtest 'named_guests: each setting that names a guest here, and which' => sub {
+    my %conf = (
+        _base        => { _global      => { cache => 'cache.test' } },
+        'cache.test' => { fetchcache   => {} },
+        'logs.test'  => { logcollector => {} },
+        'web.test'   => {
+            _global           => { admin_email => 'root@logs.test', contact => 'mailto:root@logs.test', note => 'secret:logs.test/x/y', path => 'logs.test/var' },
+            backupdestination => { hosts       => [ 'elsewhere.test', 'logs.test:2222' ] },
+            logshipper        => { host        => 'https://logs.test/in' },
+        },
+        'tenant.test' => { cron       => {} },
+        _shared       => { 'web.test' => ['tenant.test'] },
+    );
+
+    is_deeply(
+        [ Provisioner::Cookbook->named_guests( 'web.test', \%conf ) ],
+        [
+            { domain => 'cache.test', setting => '_global.cache',              by => 'web.test' },
+            { domain => 'logs.test',  setting => 'backupdestination.hosts[1]', by => 'web.test' },
+            { domain => 'logs.test',  setting => 'logshipper.host',            by => 'web.test' },
+        ],
+        'a domain, a domain with a port and a URL name a guest, and an address, a reference, a path and a host elsewhere do not'
+    );
+    is_deeply( [ Provisioner::Cookbook->direct_upstream_domains( 'web.test', \%conf ) ], [qw{cache.test logs.test}], 'each guest once' );
+    is_deeply(
+        [ map { $_->{by} } Provisioner::Cookbook->named_guests( 'tenant.test', \%conf ) ],
+        [qw{tenant.test web.test web.test web.test}],
+        'a domain on the guest of another names what that guest names, and says whose setting it is'
+    );
+    is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
 };
 
 done_testing();

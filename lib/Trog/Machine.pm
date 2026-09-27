@@ -397,38 +397,34 @@ sub run_sudo {
 
     # A local sudo can ask at our own terminal.
     return $self->run_cmd( 'sudo', @argv ) if $self->is_local;
-    return $self->_run_sudo_attempt( 0, @argv );
-}
 
-sub _run_sudo_attempt {
-    my ( $self, $attempts, @argv ) = @_;
+    # The first go is with the password we have, if any.  Three tries, then stop.
+    foreach my $attempt ( 0 .. 3 ) {
+        my $password = $self->sudo_password;
+        my @sudo     = defined $password ? ( qw{sudo -S -p}, q{} )         : (qw{sudo -n});
+        my %stdin    = defined $password ? ( stdin_data => "$password\n" ) : ();
 
-    my $password = $self->sudo_password;
-    my @sudo     = defined $password ? ( qw{sudo -S -p}, q{} )         : (qw{sudo -n});
-    my %stdin    = defined $password ? ( stdin_data => "$password\n" ) : ();
+        my ( $out, $err ) = $self->_unhang(
+            join( ' ', 'sudo', @argv ),
+            sub {
+                $self->ssh->capture2( { timeout => $TIMEOUT, %stdin }, @sudo, @argv );
+            }
+        );
+        my $rc = $? >> 8;
+        return 0 unless $rc;
 
-    my ( $out, $err ) = $self->_unhang(
-        join( ' ', 'sudo', @argv ),
-        sub {
-            $self->ssh->capture2( { timeout => $TIMEOUT, %stdin }, @sudo, @argv );
-        }
-    );
-    my $rc = $? >> 8;
-    return 0 unless $rc;
+        my $said = ( $out // '' ) . ( $err // '' );
+        return $rc unless _wants_password($said) || _wrong_password($said);
+        last if $attempt == 3;
 
-    my $said = ( $out // '' ) . ( $err // '' );
-    return $rc unless _wants_password($said) || _wrong_password($said);
+        # Not warn: this is part of a password prompt, and a source location in it
+        # is noise to somebody who is typing the password again.
+        print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);    ## no critic (ProhibitPrintSTDERR)
+        delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
+        $self->_ask_for_sudo_password();
+    }
 
-    # Three tries, then stop.
-    die 'Could not authenticate sudo on ' . $self->describe . "\n" if $attempts >= 3;
-
-    # Not warn: this is part of a password prompt, and a source location in it
-    # is noise to somebody who is typing the password again.
-    print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);    ## no critic (ProhibitPrintSTDERR)
-    delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
-    $self->_ask_for_sudo_password();
-
-    return $self->_run_sudo_attempt( $attempts + 1, @argv );
+    die 'Could not authenticate sudo on ' . $self->describe . "\n";
 }
 
 =head1 FILES

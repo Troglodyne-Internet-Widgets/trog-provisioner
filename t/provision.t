@@ -1067,4 +1067,136 @@ subtest 'refresh_cloud_init gives the package install what first boot had' => su
     is_deeply( [ map { m/--name[ ](\S+)/ ? $1 : () } @ran ], ['cc_other_repos'], 'the modules come from the distro recipe, ubuntu when provision.conf names none' );
 };
 
+# --- Upstream guests ---------------------------------------------------------
+# The guests a domain needs up first, from a configuration of its own.
+sub upstream_fixture {
+    my (%extra) = @_;
+    my $dir     = tempdir( CLEANUP => 1 );
+    my $file    = "$dir/recipes.yaml";
+    File::Slurper::Temp::write_text(
+        $file,
+        YAML::XS::Dump(
+            {
+                _base        => { _global      => { cache => 'cache.test' } },
+                'cache.test' => { fetchcache   => {} },
+                'logs.test'  => { logcollector => {} },
+                'web.test'   => { logshipper   => { host => 'logs.test' } },
+                %extra,
+            }
+        )
+    );
+    return $file;
+}
+
+subtest 'upstream guests are built first, in order, in this run' => sub {
+    my $recipes = upstream_fixture();
+    my $bin     = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my ( @built, %up );
+    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); return 0 } );
+    $bin->redefine( guest_is_up => sub { return $up{ $_[0] } } );
+
+    my $run = sub {
+        my @args = @_;
+        @built = ();
+        return exception {
+            quietly( sub { Trog::Bin::Provisioner::main( '--recipes', $recipes, @args ) } )
+        };
+    };
+
+    is( $run->(qw{--hypervisor hv1 --salvage-gaps-ok --existing 192.0.2.5 web.test}), undef, 'it runs to the end' );
+    is_deeply( [ map { $_->{domain} } @built ],     [qw{cache.test logs.test web.test}], 'the cache, the collector that needs it, and then the domain' );
+    is_deeply( [ map { $_->{hypervisor} } @built ], [qw{hv1 hv1 hv1}],                   'each on the hypervisor this run was told to use' );
+    is_deeply( [ map { $_->{recipes} } @built ],    [ ($recipes) x 3 ],                  'from the same configuration' );
+    ok( !$built[0]{salvage_gaps_ok} && !$built[0]{reuse}, '--salvage-gaps-ok and --existing are not for an upstream guest' );
+    is_deeply( [ @{ $built[-1] }{qw{salvage_gaps_ok reuse}} ], [ 1, '192.0.2.5' ], 'but for the domain asked for' );
+
+    my $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
+    like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'it says which setting makes a guest needed' );
+    like( $said, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/, 'for the guests needed in turn too' );
+
+    %up = ( 'cache.test' => 'hv9' );
+    $run->('web.test');
+    is_deeply( [ map { $_->{domain} } @built ], [qw{logs.test web.test}], 'a guest that is up is left alone, wherever it is' );
+
+    $run->(qw{--rebuild-upstream-guests web.test});
+    is_deeply( [ map { $_->{domain} } @built ], [qw{cache.test logs.test web.test}], 'and --rebuild-upstream-guests rebuilds it' );
+    %up = ();
+
+    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); die "makefile failed\n" if $args{domain} eq 'cache.test'; return 0 } );
+    my $failed = $run->('web.test') // q{};
+    like( $failed, qr/The[ ]build[ ]of[ ]cache[.]test,/,        'a failed upstream stops the run' );
+    like( $failed, qr/which[ ]web[.]test[ ]needs[ ]up[ ]first/, 'saying which domain needed it' );
+    like( $failed, qr/makefile[ ]failed/,                       'and why it failed' );
+    is( scalar @built, 1, 'before the next one' );
+
+    $recipes = upstream_fixture( 'cache.test' => { fetchcache => {}, logshipper => { host => 'logs.test' } } );
+    like( $run->('web.test'), qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming the setting' );
+    is_deeply( \@built, [], 'before anything is built' );
+};
+
+subtest 'guest_is_up asks the whole fleet, whatever --hypervisor names' => sub {
+    my ( %asked, $exists );
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { ( undef, undef, %asked ) = @_; return bless {}, 'UpstreamProbe' } );
+    no warnings 'once';
+    local *UpstreamProbe::domain_exists = sub { $exists };
+    local *UpstreamProbe::name          = sub { 'hv2' };
+    use warnings;
+
+    $exists = 1;
+    is( Trog::Bin::Provisioner::guest_is_up( 'cache.test', hypervisor => 'hv1', hvconf => '/bogus/hypervisors.conf' ), 'hv2', 'the hypervisor that has it' );
+    ok( !exists $asked{hypervisor}, 'asking the fleet, and not only the hypervisor a missing guest goes to' );
+    is( $asked{hvconf}, '/bogus/hypervisors.conf', 'the fleet of this run' );
+
+    $exists = 0;
+    is( Trog::Bin::Provisioner::guest_is_up('cache.test'), undef, 'and nothing when none has it' );
+};
+
+subtest 'a failed build offers to go back to its snapshot' => sub {
+    my @reverted;
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( new => sub { bless {}, 'RollbackProbe' } );
+    no warnings 'once';
+    local *RollbackProbe::revert_snapshot = sub { push( @reverted, [ @_[ 1, 2 ] ] ); 1 };
+    use warnings;
+
+    local %Trog::Bin::Provisioner::SNAPSHOT = ( 'web.test' => 'before-reprovision-1' );
+    my $offer = sub {
+        my @args = @_;
+        return capture_stdout { Trog::Bin::Provisioner::offer_rollback(@args) }
+    };
+
+    like( $offer->( 'new.test', 'rollback' ), qr/no[ ]guest[ ]before[ ]this[ ]run/,                          'a first build has nothing to go back to' );
+    like( $offer->( 'web.test', 'keep' ),     qr/bin\/restore[ ]--name[ ]before-reprovision-1[ ]web[.]test/, 'keep leaves it, and says how to go back' );
+    is_deeply( \@reverted, [], 'and reverts nothing' );
+
+    like( $offer->( 'web.test', 'rollback' ), qr/back[ ]as[ ]it[ ]was/, 'rollback reverts' );
+    is_deeply( \@reverted, [ [ 'web.test', 'before-reprovision-1' ] ], 'to the snapshot taken before the rebuild' );
+
+    my $tty = tempdir( CLEANUP => 1 ) . '/tty';
+    File::Slurper::Temp::write_text( $tty, "y\n" );
+    local $Trog::Bin::Provisioner::TERMINAL = $tty;
+    @reverted = ();
+    $offer->( 'web.test', 'ask' );
+    is( scalar @reverted, 1, 'ask reverts when the answer is yes' );
+
+    local $Trog::Bin::Provisioner::TERMINAL = '/bogus/no-terminal';
+    @reverted = ();
+    like( $offer->( 'web.test', 'ask' ), qr/no[ ]terminal[ ]to[ ]ask[ ]on/, 'and with nobody to ask, it keeps the guest' );
+    is_deeply( \@reverted, [], 'reverting nothing' );
+
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my @offered;
+    $bin->redefine( offer_rollback => sub { push( @offered, [@_] ); 0 } );
+    like(
+        exception {
+            Trog::Bin::Provisioner::with_rollback( 'web.test', 'keep', sub { die "makefile failed\n" } )
+        },
+        qr/\Amakefile[ ]failed$/m,
+        'with_rollback dies with the error'
+    );
+    is_deeply( \@offered,                                                                         [ [ 'web.test', 'keep' ] ], 'after the offer' );
+    is_deeply( [ Trog::Bin::Provisioner::with_rollback( 'web.test', 'keep', sub { ( 1, 2 ) } ) ], [ 1, 2 ],                   'and a build that works returns what it returned' );
+};
+
 done_testing;

@@ -787,4 +787,68 @@ CONF
     ok( !$fleet->{built}{cloud}, 'and nothing was built to answer' );
 };
 
+# --- Networks -----------------------------------------------------------------
+# A guest that needs another up goes on the network of that guest, because the
+# guests of one network reach each other and those of two do not.
+subtest 'network: the label of a block, and one network for those that name none' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file( hv1 => 'network=home' ) );
+    is( $fleet->hypervisor('hv1')->network, 'home', 'the label that the block names' );
+    is( $fleet->hypervisor('hv2')->network, q{},    'and empty for one that names none' );
+};
+
+subtest 'a guest that must be on a network is placed on it, and only there' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file( hv1 => 'network=home', hv2 => 'network=cloud' ) );
+    my $mock  = with_capacity(
+        hv1 => capacity( memory_free => 8192 ),
+        hv2 => capacity( memory_free => 40000 ),
+    );
+    $mock->redefine( domain_exists => sub { 0 } );
+    my $conf = guest_conf( memory => 4096, cpus => 2, size => 40 * $GB );
+
+    is( quietly( sub { $fleet->select_for( 'vm.example.test', $conf ) } )->name, 'hv2', 'with nothing needed, the roomiest' );
+    is( quietly( sub { $fleet->select_for( 'vm.example.test', $conf, network => 'home', network_why => 'it needs cache.test' ) } )->name, 'hv1', 'with a network needed, the one on it' );
+
+    my $err = exception {
+        quietly( sub { $fleet->select_for( 'vm.example.test', $conf, network => 'office', network_why => 'it needs cache.test' ) } )
+    };
+
+    $err //= q{};
+    like( $err, qr/hv2:[ ]network[ ]'cloud',/,            'and nowhere, when none is on it, naming the network of each' );
+    like( $err, qr/must[ ]be[ ]on[ ]network[ ]'office',/, 'the one it must be on' );
+    like( $err, qr/because[ ]it[ ]needs[ ]cache[.]test/,  'and why' );
+};
+
+subtest 'a guest that is on, or pinned to, the wrong network is refused' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file( hv1 => 'network=home', hv2 => 'network=cloud' ) );
+    my $mock  = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( capacity => sub { capacity() } );
+    my %need = ( network => 'home', network_why => 'it needs cache.test' );
+
+    $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
+    my $err = exception {
+        quietly( sub { $fleet->select_for( 'vm.example.test', guest_conf( memory => 4096 ), %need ) } )
+    };
+    $err //= q{};
+    like( $err, qr/must[ ]be[ ]on[ ]network[ ]'home',/,  'a guest that is up on the other network' );
+    like( $err, qr/because[ ]it[ ]needs[ ]cache[.]test/, 'saying why' );
+    like( $err, qr/hv2[ ]is[ ]on[ ]network[ ]'cloud'/,   'naming where it is' );
+
+    $mock->redefine( domain_exists => sub { 0 } );
+    $err = exception {
+        quietly( sub { $fleet->select_for( 'vm.example.test', guest_conf( memory => 4096, hypervisor => 'hv2' ), %need ) } )
+    };
+    $err //= q{};
+    like( $err, qr/hv2[ ]is[ ]on[ ]network[ ]'cloud'/, 'and one pinned there' );
+
+    is( quietly( sub { $fleet->select_for( 'vm.example.test', guest_conf( memory => 4096, hypervisor => 'hv1' ), %need ) } )->name, 'hv1', 'but a pin on the right network holds' );
+};
+
+subtest 'choose refuses --hypervisor on the wrong network' => sub {
+    my $file = fleet_file( hv1 => 'network=home', hv2 => 'network=cloud' );
+    my $err  = exception { Trog::Hypervisors->choose( 'vm.example.test', hvconf => $file, hypervisor => 'hv2', network => 'home', network_why => 'it needs cache.test' ) };
+    $err //= q{};
+    like( $err, qr/hv2[ ]is[ ]on[ ]network[ ]'cloud'/, 'naming the hypervisor and its network' );
+    is( Trog::Hypervisors->choose( 'vm.example.test', hvconf => $file, hypervisor => 'hv1', network => 'home', network_why => 'it needs cache.test' )->name, 'hv1', 'and takes one on the right network' );
+};
+
 done_testing;

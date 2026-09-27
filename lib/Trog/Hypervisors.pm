@@ -63,6 +63,9 @@ fall through to libvirt's default connection, which is this machine -- so a
 block with two, or with none, is refused and named.  Every other key is
 optional.  L<Trog::HV> says what each key means and what its default is.
 
+C<network> names the network that the guests of a hypervisor are on.  See
+L<Trog::HV/network>.
+
 Know two keys before you need them.  C<pool_name> beside C<pool_path> gives a
 hypervisor a storage pool of its own.  On a filesystem with a quota, that pool
 is the only limit a guest can be held to.  C<partition> puts every guest built
@@ -211,11 +214,11 @@ rebuilt.  F<bin/new_config> and F<bin/provision> both call it.  Takes
 C<hypervisor>, C<hvconf>, C<domain_dir>, C<config>, C<host> and C<host_config>,
 all optional.
 
-A named C<hypervisor> (that is, C<--hypervisor>) wins.  With no fleet
+A named C<hypervisor> (that is, C<--hypervisor>) wins, unless C<network> says
+the guest must be on another network, and then this dies.  With no fleet
 configured, this returns C<< Trog::HV->from_config($config) >>.  Otherwise it
-returns what
-C<select_for> answers, and it warns if C<config> names a C<libvirt_uri>, which
-the fleet overrides.
+returns what C<select_for> answers, with C<network> and C<network_why>, and it
+warns if C<config> names a C<libvirt_uri>, which the fleet overrides.
 
 C<config> is the configuration of the guest, as C<select_for> takes it.  A
 domain that goes onto the guest of another domain names that domain as
@@ -229,12 +232,16 @@ sub choose {
     my ( $class, $domain, %opts ) = @_;
 
     my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
-    return $given if $given;
+    if ($given) {
+        _check_network( $domain, $given, %opts );
+        return $given;
+    }
 
     warn "hypervisors.conf decides which hypervisor $domain lands on; the libvirt_uri in its configuration is ignored\n"
       if defined Trog::HV->config_value( $opts{config}, 'libvirt_uri' );
 
-    my $hv = defined $opts{host} ? $fleet->select_for( $opts{host}, $opts{host_config} ) : $fleet->select_for( $domain, $opts{config} );
+    my %network = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{network network_why};
+    my $hv      = defined $opts{host} ? $fleet->select_for( $opts{host}, $opts{host_config}, %network ) : $fleet->select_for( $domain, $opts{config}, %network );
 
     $hv->{$_} = $paths{$_} for keys %paths;
     return $hv;
@@ -407,8 +414,14 @@ is in that list as unreachable.
 sub place {
     my ( $self, $domain, %needs ) = @_;
 
+    my ( $network, $network_why ) = delete @needs{qw{network network_why}};
     my ( @fits, @why_not );
     foreach my $hv ( $self->hypervisors ) {
+        if ( defined $network && $hv->network ne $network ) {
+            push @why_not, '  ' . $hv->name . ': ' . _network_name( $hv->network ) . ", and $domain must be on " . _network_name($network) . ", because $network_why";
+            next;
+        }
+
         my @reasons = eval { $hv->shortfalls(%needs) };
         if ($@) {
             push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline($@);
@@ -448,12 +461,17 @@ sub place {
     return $best;
 }
 
-=head2 select_for($domain, $config)
+=head2 select_for($domain, $config, %opts)
 
 Returns the hypervisor for a guest, made current (see C<find>).  That is the
 hypervisor where the guest already lives.  If it lives nowhere, it is the one
 that F<provision.conf> pins with C<hypervisor=>.  With no pin, it is the one
 where the guest fits best.
+
+C<network> in C<%opts> is the network that the guest must be on, see
+L<Trog::HV/network>, and C<network_why> says why, for the errors.  Placement
+then takes only a hypervisor on that network.  A guest that already lives on
+another network, or is pinned to one, is refused, because it cannot move.
 
 C<$config> is the F<provision.conf> of the guest, or the C<_global> block of its
 recipe as a plain hashref.  F<bin/new_config> passes the block, because it
@@ -461,16 +479,19 @@ knows these values before there is a F<provision.conf>.  Either way, this reads
 C<memory>, C<cpus>, C<size> and C<hypervisor> from it.
 
 Dies when the pinned hypervisor is not in the file or cannot take the guest.
-Also dies when no hypervisor can take it.  See C<place>.
+Also dies when no hypervisor can take it.  See C<place>.  C<place> and C<offer>
+also take C<network> and C<network_why> among the needs, and consider only the
+hypervisors on that network.
 
 =cut
 
 sub select_for {
-    my ( $self, $domain, $config ) = @_;
+    my ( $self, $domain, $config, %opts ) = @_;
 
     my $existing = $self->hosting($domain);
     if ($existing) {
         print 'Found ' . $domain . ' already on ' . $existing->name . ' (' . $existing->uri . ")\n";
+        _check_network( $domain, $existing, %opts );
         return $existing->activate();
     }
 
@@ -480,10 +501,11 @@ sub select_for {
         my @reasons = $hv->shortfalls( _needs($config) );
         die "$domain is pinned to $pinned, which cannot take it:\n" . join( '', map { "  $_\n" } @reasons )
           if @reasons;
+        _check_network( $domain, $hv, %opts );
         return $hv->activate();
     }
 
-    my %needs  = _needs($config);
+    my %needs  = ( _needs($config), ( defined $opts{network} ? ( network => $opts{network}, network_why => $opts{network_why} ) : () ) );
     my $placed = eval { $self->place( $domain, %needs ) };
     return $placed->activate() if $placed;
 
@@ -514,6 +536,7 @@ cron and CI, which drive this with no terminal.
 sub offer {
     my ( $self, $domain, $config, $why, %needs ) = @_;
 
+    my ( $network, undef ) = delete @needs{qw{network network_why}};
     my @offers =
       sort { $a->{monthly_cost} <=> $b->{monthly_cost} }
       grep { $_ }
@@ -521,7 +544,7 @@ sub offer {
         my $hv    = $_;
         my $offer = eval { $hv->cheapest_for(%needs) };
         $offer ? { %$offer, hv => $hv } : undef
-      } $self->hypervisors;
+      } grep { !defined $network || $_->network eq $network } $self->hypervisors;
 
     die $why unless @offers;
 
@@ -551,6 +574,19 @@ sub offer {
     $config->{ $best->{key} } = $best->{value} if ref $config eq 'HASH';
 
     return $best->{hv};
+}
+
+# Dies when $hv is not on the network that %opts says $domain must be on: a
+# guest that is already there, or pinned there, cannot be placed elsewhere.
+sub _check_network {
+    my ( $domain, $hv, %opts ) = @_;
+    return 1 if !defined $opts{network} || $hv->network eq $opts{network};
+    die "$domain must be on " . _network_name( $opts{network} ) . ", because $opts{network_why}.\n" . $hv->name . ' is on ' . _network_name( $hv->network ) . ", and $domain is there already or pinned there, so it would not reach it.\n" . "Build it elsewhere, or give it a configuration that needs nothing on the other network.\n";
+}
+
+sub _network_name {
+    my ($network) = @_;
+    return $network eq q{} ? 'the network of the hypervisors that name none' : "network '$network'";
 }
 
 =head2 _needs($config)

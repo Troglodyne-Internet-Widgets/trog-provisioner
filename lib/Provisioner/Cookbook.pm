@@ -19,10 +19,12 @@ use File::Slurper::Temp();
 use File::Temp();
 use Hash::Merge();
 use JSON::Validator::Schema::Troglodyne;
+use URI();
 use YAML::XS();
 
 use Trog::Config();
 use Trog::Secrets();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -610,43 +612,70 @@ sub scaffold {
     return ( $config, @todo );
 }
 
+# What to write for an object of the schema, and the paths left to fill in.  A
+# node is an object, or a value in one; each is decided after all under it.
 sub _scaffold_object {
     my ( $class, $spec, $path, $opts ) = @_;
 
-    my $props    = $class->properties($spec);
-    my %required = map { $_ => 1 } @{ $spec->{required} // [] };
+    my @nodes = ( { object => 1, prop => $spec, path => $path, opts => $opts } );
+    for ( my $i = 0; $i < scalar(@nodes); $i++ ) {
+        $nodes[$i]{under} = [ $class->_scaffold_under( $nodes[$i] ) ];
+        push( @nodes, @{ $nodes[$i]{under} } );
+    }
+    $_->{result} = [ $class->_scaffold_result($_) ] foreach reverse @nodes;
 
+    return @{ $nodes[0]{result} };
+}
+
+sub _scaffold_under {
+    my ( $class, $node ) = @_;
+    my ( $prop, $path, $opts ) = @$node{qw{prop path opts}};
+
+    if ( !$node->{object} ) {
+        return () if exists $prop->{default};
+
+        my $type = $prop->{type} // '';
+        return ( { object => 1, prop => $prop, path => $path, opts => $opts } ) if $type eq 'object';
+        return ( { prop => $prop->{items} // {}, path => "$path\[0]", opts => $opts } ) if $type eq 'array';
+        return ();
+    }
+
+    my $props    = $class->properties($prop);
+    my %required = map { $_ => 1 } @{ $prop->{required} // [] };
     my $provided = ref $opts->{provided} eq 'HASH' ? $opts->{provided} : {};
 
-    my ( %out, @todo );
+    my @under;
     foreach my $key ( sort keys %$props ) {
-        my $prop = $props->{$key};
-        next unless ref $prop eq 'HASH';
+        my $field = $props->{$key};
+        next unless ref $field eq 'HASH';
 
         next if exists $provided->{$key};
 
         # The build fills in a readOnly field, so an operator writes nothing
         # there.
-        next if $prop->{readOnly};
+        next if $field->{readOnly};
+        next unless $required{$key} || $opts->{all};
 
-        my $wanted = $required{$key} || $opts->{all};
-        next unless $wanted;
-
-        my ( $value, @sub ) = $class->_scaffold_value(
-            $prop, "$path.$key",
-            { %$opts, provided => $provided->{$key} }
-        );
-        next unless defined $value;
-
-        $out{$key} = $value;
-        push @todo, @sub;
+        push( @under, { key => $key, prop => $field, path => "$path.$key", opts => { %$opts, provided => $provided->{$key} } } );
     }
-
-    return ( \%out, @todo );
+    return @under;
 }
 
-sub _scaffold_value {
-    my ( $class, $prop, $path, $opts ) = @_;
+sub _scaffold_result {
+    my ( $class, $node ) = @_;
+    my ( $prop,  $path ) = @$node{qw{prop path}};
+
+    if ( $node->{object} ) {
+        my ( %out, @todo );
+        foreach my $field ( @{ $node->{under} } ) {
+            my ( $value, @sub ) = @{ $field->{result} };
+            next unless defined $value;
+
+            $out{ $field->{key} } = $value;
+            push @todo, @sub;
+        }
+        return ( \%out, @todo );
+    }
 
     return ( clone( $prop->{default} ), () ) if exists $prop->{default};
 
@@ -657,14 +686,14 @@ sub _scaffold_value {
         # An object with only additionalProperties has nothing to scaffold.  It
         # is left out, unless it must have a property, and then a person must
         # choose one.
-        my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
+        my ( $sub, @todo ) = @{ $node->{under}[0]{result} };
         return ( $sub,                @todo ) if %$sub;
         return ( $class->PLACEHOLDER, $path ) if ( $prop->{minProperties} // 0 ) > 0;
         return ( undef,               () );
     }
 
     if ( $type eq 'array' ) {
-        my ( $item, @todo ) = $class->_scaffold_value( $prop->{items} // {}, "$path\[0]", $opts );
+        my ( $item, @todo ) = @{ $node->{under}[0]{result} };
         return ( [],      () ) unless defined $item;
         return ( [$item], @todo );
     }
@@ -774,20 +803,11 @@ look at.
 
 sub placeholders_in {
     my ( $class, $config, $path ) = @_;
-    $path //= '';
 
-    my $ref = ref $config;
-
-    if ( $ref eq 'HASH' ) {
-        return map { $class->placeholders_in( $config->{$_}, $path eq '' ? $_ : "$path.$_" ) }
-          sort keys %$config;
-    }
-    if ( $ref eq 'ARRAY' ) {
-        return map { $class->placeholders_in( $config->[$_], "$path\[$_]" ) } 0 .. $#$config;
-    }
-
-    return ($path) if defined $config && !$ref && $config eq $class->PLACEHOLDER;
-    return ();
+    return map { $_->[0] } grep {
+        my $value = ${ $_->[1] };
+        defined $value && !ref $value && $value eq $class->PLACEHOLDER
+    } Trog::Utils::slots_in( \$config, $path );
 }
 
 =head2 resolve_substitutable_dependency(%args)
@@ -1219,6 +1239,146 @@ sub host_of {
         return $host if List::Util::any { $_ eq $domain } @{ $shared->{$host} };
     }
 
+    return;
+}
+
+=head2 @domains = $class->upstream_domains($domain, $conf)
+
+The domains whose guests must be up before the guest of C<$domain> builds, in
+the order to build them: each after the ones it needs itself.  C<$domain> is
+not among them.  C<$conf> is as in C<domain_config>.
+
+A domain needs every other domain of the configuration that one of its settings
+names, as C<named_guests> finds them, and each domain that those need in turn.
+A domain built onto the guest of another, see C<host_of>, also needs what that
+guest needs, but not the guest itself, which F<bin/provision> builds as the
+host.
+
+Dies on a cycle, because no order builds each guest after the ones it needs.
+The message names each guest in the cycle and the setting that names the next
+one, so that a person can change one of those settings.
+
+=cut
+
+sub upstream_domains {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    # Every guest that the domain needs, however far down, in the order found.
+    # A c-style loop, because the list grows while it is walked.
+    my @found = ($domain);
+    my %seen  = ( $domain => 1 );
+    my %named;
+    for ( my $i = 0; $i < scalar(@found); $i++ ) {
+        my $guest = $found[$i];
+        $named{$guest} = [ $class->named_guests( $guest, $conf ) ];
+        push( @found, grep { !$seen{$_}++ } map { $_->{domain} } @{ $named{$guest} } );
+    }
+
+    # Each guest once all it needs is out, in the order found, until none is left
+    # or none can go: then what is left needs itself, round a cycle.
+    my ( @order, %out );
+    while (
+        my @ready = grep {
+                 !$out{$_}
+              && !( any { !$out{ $_->{domain} } } @{ $named{$_} } )
+        } @found
+    ) {
+        $out{$_} = 1 for @ready;
+        push( @order, @ready );
+    }
+    if ( my @left = grep { !$out{$_} } @found ) {
+        die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } _cycle( $left[0], \%named, \%out ) ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n";
+    }
+
+    return grep { $_ ne $domain } @order;
+}
+
+# The cycle that $from reaches, as the names that lead round it.
+sub _cycle {
+    my ( $from, $named, $out ) = @_;
+
+    # Every guest left needs one that is left, so the path meets itself.
+    my @path = ($from);
+    my @steps;
+    my $at;
+    while ( !defined $at ) {
+        my ($next) = grep { !$out->{ $_->{domain} } } @{ $named->{ $path[-1] } };
+        push( @steps, $next );
+        $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
+        push( @path, $next->{domain} );
+    }
+    return @steps[ $at .. $#steps ];
+}
+
+=head2 @domains = $class->direct_upstream_domains($domain, $conf)
+
+The domains whose guests C<$domain> itself names, as in C<upstream_domains>,
+without the ones those guests need in turn.  The guest of C<$domain> has to
+reach these, and only these.
+
+=cut
+
+sub direct_upstream_domains {
+    my ( $class, $domain, $conf ) = @_;
+    return uniq( map { $_->{domain} } $class->named_guests( $domain, $conf ) );
+}
+
+=head2 @named = $class->named_guests($domain, $conf)
+
+Each place in the configuration of C<$domain> that names the guest of another
+domain of C<$conf>, as a hash reference: C<domain> is the guest that is named,
+C<setting> is the path of the setting, such as C<_global.cache> or
+C<logshipper.host>, and C<by> is the domain whose configuration holds it.
+C<$conf> is as in C<domain_config>.
+
+It reads every setting of the C<_global> of the domain and of each of its
+recipes.  A value names a guest when it is that domain, the domain with a port,
+such as C<logs.example.test:514>, or a URL whose host is that domain.  An
+address, an email address, a C<secret:> reference and a host outside the
+configuration name nothing.  Neither does the domain itself.
+
+A domain built onto the guest of another, see C<host_of>, also names what the
+settings of that guest name, with C<by> set to that guest.  The guest itself
+does not count.
+
+=cut
+
+sub named_guests {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
+    my $host       = $class->host_of( $domain, $conf ) // q{};
+
+    my @named;
+    foreach my $guest ( $domain, $host || () ) {
+        my $config = $class->domain_config( $guest, $conf );
+        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
+
+        foreach my $block ( sort keys %blocks ) {
+            foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
+                my $name = _guest_named( ${ $slot->[1] } );
+                next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
+                push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
+            }
+        }
+    }
+    return @named;
+}
+
+# The host that a value names, if it names one: the host of a URL, or a value
+# that is a host alone, with or without a port.
+sub _guest_named {
+    my ($value) = @_;
+    return if !defined $value || ref $value || $value eq q{};
+
+    my $uri = URI->new($value);
+    return $uri->host if $uri->can('host') && defined $uri->host && $uri->host ne q{};
+
+    # A host alone is the whole authority of a URI, with no user in it.
+    my $bare = URI->new("ssh://$value");
+    return $bare->host if $bare->authority eq $value && !defined $bare->userinfo;
     return;
 }
 

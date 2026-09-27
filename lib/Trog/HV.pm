@@ -14,6 +14,7 @@ use Trog::Config();
 use Trog::Local();
 use Trog::Credentials();
 use Trog::Secrets();
+use Trog::Utils();
 use Provisioner::Cookbook();
 use File::Slurper();
 use YAML::XS();
@@ -349,6 +350,9 @@ my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_over
 # Where a guest of this hypervisor reaches us, which is any backend's question.
 my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
+# Which guests the guests of this hypervisor can reach.  See network.
+my @NETWORK_KEYS = qw{network};
+
 sub options_from_block {
     my ( $class, $block ) = @_;
 
@@ -361,7 +365,7 @@ sub options_from_block {
         }
     }
 
-    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS;
+    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS, @NETWORK_KEYS;
 
     return %opts;
 }
@@ -408,7 +412,9 @@ sub config_value {
 
 =head2 forget()
 
-Drop the stored instance.  Only the tests call this.
+Drop the stored instance, so that the next C<new> or C<Trog::Hypervisors>
+choice makes a new one.  F<bin/provision> calls it before each guest it builds,
+because the guests of one run can be on different hypervisors.
 
 =cut
 
@@ -486,6 +492,22 @@ Dies when C<transfer_port> is not a port number.
 =cut
 
 sub configured_transfer_ip ($self) { return $self->setting('transfer_ip') }
+
+=head2 network
+
+The name of the network that the guests of this hypervisor are on, from
+C<network> in its block of F<hypervisors.conf>, or empty when the block names
+none.  The guests of two hypervisors on one network can reach each other, and
+the guests of two on different networks cannot.  Every block that names none is
+on the one empty network, so a fleet that names no network is one network.
+
+L<Trog::Hypervisors/select_for> places a guest that needs another guest up on
+the network of that guest.  For example, the hypervisors of a home network
+share a label, and a block for a cloud region has a label of its own.
+
+=cut
+
+sub network ($self) { return $self->setting('network') // q{} }
 
 sub configured_transfer_port ($self) {
     my $port = $self->setting('transfer_port');
@@ -1422,26 +1444,28 @@ So a key pasted into a field with another name is found too.
 
 sub _plaintext_in {
     my ( $node, $path ) = @_;
+    return map { $_->[0] } grep { _is_plaintext( ${ $_->[1] }, $_->[0] ) } Trog::Utils::slots_in( \$node, $path );
+}
 
-    return map { _plaintext_in( $node->[$_], "$path\[$_]" ) } 0 .. $#$node                if ref $node eq 'ARRAY';
-    return map { _plaintext_in( $node->{$_}, $path ? "$path.$_" : $_ ) } sort keys %$node if ref $node eq 'HASH';
-    return () if ref $node || !$node;
+sub _is_plaintext {
+    my ( $value, $path ) = @_;
+    return 0 if ref $value || !$value;
 
     # A reference is not a secret.  Neither is a placeholder from bin/new_guest,
     # because new_config refuses to build from one.
-    return ()      if $node =~ m/\Asecret:/;
-    return ($path) if $node =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
-    return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
+    return 0 if $value =~ m/\Asecret:/;
+    return 1 if $value =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
+    return 0 if $value eq Provisioner::Cookbook->PLACEHOLDER;
 
     my ($field) = $path =~ m/([^.\[\]]+)\z/;
-    return () unless defined $field;
+    return 0 unless defined $field;
 
     # _file and _path name a location, not a secret: the key_file of backup
     # holds a filename such as "backup.rsa".
-    return ()      if $field =~ m/_(?:file|path)\z/;
-    return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/;
+    return 0 if $field =~ m/_(?:file|path)\z/;
+    return 1 if $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/;
 
-    return ();
+    return 0;
 }
 
 sub _readable {

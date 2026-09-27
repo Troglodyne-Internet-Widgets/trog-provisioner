@@ -265,10 +265,10 @@ sub salvage_gaps { return %SALVAGE_GAPS }
 sub main {
     my @args = @_;
 
-    # Clear the gaps and the hypervisor options of the last run, because a
-    # process can call main() more than once.
+    # Clear the gaps and the options of the last run, because a process can call
+    # main() more than once: bin/provision does, once for each guest it builds.
     %SALVAGE_GAPS = ();
-    undef $_ for $hvconf, $hv_name, $domaindir;
+    undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh;
 
     my $credentials;
     GetOptionsFromArray(
@@ -382,6 +382,50 @@ sub placement_lines {
     push @lines, "$key=" . $global_config->{$key} if $key && defined $global_config->{$key};
 
     return @lines ? "\n" . join( "\n", @lines ) . "\n" : q{};
+}
+
+=head2 %network = required_network($domain, $rconf, $hvconf)
+
+The network that the guest of C<$domain> must be on, as C<network> and
+C<network_why> for L<Trog::Hypervisors/choose>, or an empty list when it may go
+anywhere.  It is the network of the hypervisor that has each guest that
+C<$domain> names, see L<Provisioner::Cookbook/direct_upstream_domains>, because
+a guest reaches only the guests on its own network.  See L<Trog::HV/network>.
+
+A guest that is not up does not limit the choice, and this says so.
+F<bin/provision> builds it first, so it is up when the domain is placed, except
+on a dry run.  Nothing limits a fleet that is not configured, which has one
+hypervisor.
+
+Dies when two of those guests are on different networks, because no
+hypervisor reaches both.
+
+=cut
+
+sub required_network {
+    my ( $domain, $rconf, $fleet_file ) = @_;
+
+    my @upstream = Provisioner::Cookbook->direct_upstream_domains( $domain, $rconf );
+    return () unless @upstream;
+    my $fleet = Trog::Hypervisors->load( $fleet_file // Trog::Hypervisors->default_path );
+    return () unless $fleet->configured;
+
+    my %on;
+    foreach my $upstream (@upstream) {
+        my $hv = $fleet->hosting($upstream);
+        unless ($hv) {
+            print "$upstream is not up, so it does not limit where $domain goes.\n";
+            next;
+        }
+        push( @{ $on{ $hv->network } }, "$upstream, which is on " . $hv->name );
+    }
+    return () unless %on;
+
+    die "$domain needs guests that are on different networks, and no hypervisor reaches all of them:\n" . join( q{}, map { "  network '$_': " . join( ', ', @{ $on{$_} } ) . "\n" } sort keys %on ) . "Give it a configuration that needs guests on one network only.\n"
+      if keys %on > 1;
+
+    my ($network) = keys %on;
+    return ( network => $network, network_why => "it needs " . join( ' and ', @{ $on{$network} } ) );
 }
 
 =head2 %order_only = order_only(\@modules, \%targets_of, \%required_by, \@ordered)
@@ -588,6 +632,7 @@ sub handle_domain {
         config      => $global_config,
         host        => $depends_on,
         host_config => defined $depends_on ? Provisioner::Cookbook->global_config( $depends_on, $rconf ) : undef,
+        required_network( $domain, $rconf, $hvconf ),
     );
 
     # No pool when the hypervisor gives its guests their addresses, because an

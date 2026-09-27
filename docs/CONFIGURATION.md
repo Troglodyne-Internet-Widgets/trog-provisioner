@@ -7,7 +7,7 @@ individually.
 
 | | |
 |---|---|
-| `hypervisors.conf` | the machines you can build on, and what to spare on each |
+| `hypervisors.conf` | the machines you can build on, what to spare on each, and which reach each other |
 | `admin_authorized_keys` | the administrator's public keys, written into every guest cloud-init builds |
 | `recipes.yaml` | the settings every guest shares, and the base recipe every guest gets |
 | `recipes.d/` | one file per guest, named for it |
@@ -310,9 +310,10 @@ every guest has had. Turn it off against a mirror that carries the archive's own
 signed indices -- one built by the `aptmirror` recipe does, being a byte-for-byte
 copy.
 
-Nothing depends on the `aptmirror` recipe. A fleet without a mirror builds
+A fleet does not need the `aptmirror` recipe. A fleet without a mirror builds
 exactly as it always has, only slower, and `bin/preflight` says so rather than
-failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
+failing. When `mirror` names a domain of this installation, `bin/provision`
+builds that guest first if it is not up. See [Upstream guests](#upstream-guests). `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
 `cache` names a fetch cache for guests to provision through: a domain here,
@@ -513,6 +514,120 @@ running machine.
 A recipe that needs the machine rather than the domain -- the DNS server's
 credential belongs to one guest however many domains it serves -- asks
 `Provisioner::Cookbook->host_of`, which is this list read back.
+
+## Networks
+
+A block of `hypervisors.conf` can name the network that its guests are on:
+
+```ini
+[home1]
+libvirt_uri = qemu+ssh://root@home1.example.test/system
+network     = home
+
+[home2]
+libvirt_uri = qemu+ssh://root@home2.example.test/system
+network     = home
+
+[linode]
+linode_token = secret:linode/api/password
+region       = us-east
+network      = linode-us-east
+```
+
+The guests of hypervisors with the same `network` reach each other, and the
+guests of two different ones do not. So `network` is the machines on one LAN,
+or one region of one cloud. Every block that names no network is on one network
+with the others that name none, so a fleet that names none behaves as it did
+before this setting existed.
+
+It matters to a guest that needs another guest up; see
+[Upstream guests](#upstream-guests). `bin/new_config` looks up where each guest
+that it needs is, and places it only on a hypervisor of that guest's network:
+
+- A guest that is up on a hypervisor of another network is refused, because it
+  cannot move, and so is a guest pinned to one, with `--hypervisor` or
+  `hypervisor=` in `provision.conf`.
+- A guest that needs guests on two networks is refused, because no hypervisor
+  reaches both.
+- A guest that it needs and that is not up yet limits nothing, and it says so.
+  `bin/provision` builds that guest first, so it is up by the time the guest
+  that needs it is placed.
+
+## Upstream guests
+
+A guest needs every other guest of this installation that one of its settings
+names. `bin/provision` and `bin/new_config` read every setting of the domain:
+its `_global`, with what it takes from `_base`, and each of its recipes. You do
+not list what a guest needs anywhere else. A setting names a guest when its value
+is one of these:
+
+- A domain of this installation, such as `cache: fetchcache.example.test`.
+- That domain with a port, such as `logs.example.test:514`.
+- A URL whose host is that domain, such as `http://mirror.example.test/ubuntu`.
+
+An address, an email address, a `secret:` reference, a path and a host outside
+this installation name nothing. So does a setting that names the domain itself.
+In practice the settings that name guests are `cache` and `mirror` in `_global`,
+the `host` of `logshipper`, and the `hosts` of `backupdestination`. A new recipe
+whose setting names a guest takes part with no extra code.
+
+Before it builds anything, `bin/provision` prints each setting that it found,
+for example:
+
+```
+web.example.test names logs.example.test in logshipper.host, so it needs that guest up first.
+```
+
+`bin/provision` builds each of those guests first when no hypervisor has it,
+and each guest that they name in turn, in order, and then the domain you asked
+for. It leaves a guest that is up alone, unless you pass
+`--rebuild-upstream-guests`. So one line puts the whole fleet behind a cache,
+and the cache guest is built on the way to the first guest that needs it:
+
+```yaml
+_base:
+    _global:
+        cache: fetchcache.example.test
+```
+
+The cache guest names itself there too, and does not wait for itself.
+
+A named guest must be one that a build can go on without. A guest downloads
+from upstream while the cache is down, installs from the archive while the
+mirror is down, and queues its logs while the collector is down. A backup
+destination pulls from its hosts at night, so it needs none of them to build.
+They are built first all the same, and `--rebuild-upstream-guests` on the
+destination rebuilds each of them.
+
+Two guests that each name the other are refused, because no order builds both.
+The message names each setting in the loop. The one line above and a
+`logshipper` in `_base` make one such pair: the cache ships its logs to the
+collector, and the collector downloads through the cache. Break it on one of the
+two, for example with no cache for the collector:
+
+```yaml
+logs.example.test:
+    _global:
+        cache: ''
+```
+
+A guest is placed only on the network of the guests it needs; see
+[Networks](#networks). A guest that should run somewhere else, such as a cloud
+with caches of its own, needs a configuration of its own without those
+settings:
+
+```yaml
+prod.example.test:
+    _global:
+        cache: ''
+    logshipper:
+        host: logs.provider.example
+```
+
+When a build fails, `bin/provision` offers to put that guest back to the
+snapshot it took before rebuilding it. `--on-failure rollback` or `keep` answers
+ahead of time, for a run with no terminal. A guest built for the first time has
+no snapshot to go back to.
 
 ## Data directories
 

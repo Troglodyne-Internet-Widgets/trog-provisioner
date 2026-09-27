@@ -185,3 +185,9 @@ monthly_budget = 200
 ; the _global of recipes.yaml for the guests built on it.
 transfer_ip    = 192.0.2.10
 transfer_port  = 2222
+
+; The network that the guests of this hypervisor are on.  Guests of hypervisors
+; with the same network reach each other, and a guest that needs another guest
+; up, such as its fetch cache, is only placed on that guest's network.  Every
+; block that names none is on one network together.
+network        = linode-us-east

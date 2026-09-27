@@ -605,6 +605,36 @@ subtest 'a sudo password is asked for once and then remembered' => sub {
     is( $attempts[-1]{stdin},                      "hunter2\n", 'the remembered password was reused' );
 };
 
+subtest 'a sudo password that is wrong three times stops the command' => sub {
+    Trog::Machine::forget_sudo_passwords();
+    my $hv = fresh( uri => 'qemu+ssh://root@wrongpass/system' );
+
+    my @attempts;
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine( new => sub { bless {}, shift } );
+    $mock->redefine(
+        capture2 => sub {
+            my ( $self, $opts, @cmd ) = @_;
+            push @attempts, $opts->{stdin_data};
+            $? = 1 << 8;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+            return ( '', defined $opts->{stdin_data} ? "Sorry, try again.\n" : "sudo: a password is required\n" );
+        }
+    );
+    my $asked   = 0;
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( _ask_for_sudo_password => sub { $asked++; return $_[0]->_remember("guess$asked") } );
+
+    my ( $said, $err ) = Capture::Tiny::capture_stderr(
+        sub {
+            exception { $hv->run_sudo(qw{systemctl restart rsyslog}) }
+        }
+    );
+    like( $err, qr/Could[ ]not[ ]authenticate[ ]sudo/, 'it gives up' );
+    is( $asked, 3, 'after asking for a password three times' );
+    is_deeply( \@attempts, [ undef, "guess1\n", "guess2\n", "guess3\n" ], 'and trying each, after the first go with none' );
+    is( scalar( () = $said =~ m/Sorry,[ ]try[ ]again/g ), 2, 'saying so between the wrong ones' );
+};
+
 subtest 'with no terminal to ask at, say what to configure' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@noterminal/system' );
     Trog::Machine::forget_sudo_passwords();
