@@ -66,10 +66,7 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
 
 [%# Only the upgrade: cloud-init installs the packages, out of the user-data the distro recipe renders. -%]
 [% state_dir %]/packages:
-	# Ignore a failed upgrade.  Some packages depend on software that conflicts,
-	# forget to list a dependency, or need a curses UI to install.  So the exit
-	# status cannot tell a broken kit from a good one.
-	[% packager_up_invocation | mark_raw %]; /bin/true
+	[% packager_up_invocation | mark_raw %]
 	touch $@
 
 [% state_dir %]/testdeps:

@@ -231,6 +231,19 @@ subtest 'setup.sh waits for the secrets of a domain that has any' => sub {
     like( File::Slurper::read_text("$tmp/$DOMAIN.setup.log"), qr/\Q$marker\E/, 'with a log that names the marker it waited for' );
 };
 
+# apt hands an option to dpkg only when it is spelled Dpkg::Options::=.  With one
+# pair of colons apt takes it and dpkg never sees it, so a changed conffile
+# stops the upgrade with exit 100, which a guest showed.
+subtest 'the packager commands hand their options to dpkg' => sub {
+    my $ubuntu = Provisioner::Cookbook->load('ubuntu');
+    foreach my $method (qw{packager_invocation packager_up_invocation}) {
+        my $cmd     = $ubuntu->$method();
+        my @options = $cmd =~ m/-o[ ](Dpkg::Options\S*)/g;
+        like( $cmd, qr/--force-confold/, "$method keeps the configuration a guest changed" );
+        is_deeply( [ grep { !m/\ADpkg::Options::=/ } @options ], [], "and every option of $method reaches dpkg" ) or diag $cmd;
+    }
+};
+
 # The documents a guest with no mirror configured gets, written out rather than
 # derived so that this compares against something which is not the code under
 # test.  Everything but the apt block is what has always been produced; the apt
