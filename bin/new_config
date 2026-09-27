@@ -1139,7 +1139,8 @@ sub handle_domain {
         gateway       => $gateway,
         contact_email => $admin_email,
         payload_dir   => $basedir,
-        ( defined $dryrun ? ( dryrun => $dryrun ) : () ),
+        ( defined $dryrun ? ( dryrun         => $dryrun )                            : () ),
+        ( %guest_secrets  ? ( secrets_marker => Trog::Guest->secrets_marker($fqdn) ) : () ),
         modules => \@modules,
     );
 

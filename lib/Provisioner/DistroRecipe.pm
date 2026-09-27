@@ -297,10 +297,11 @@ sub args {
                     script    => { type => 'string' },
                 },
             },
-            ips           => { type => 'array',   items    => { type => 'string' }, readOnly    => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
-            contact_email => { type => 'string',  nullable => 1,                    readOnly    => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
-            payload_dir   => { type => 'string',  readOnly => 1,                    description => 'Where on this machine the payload the guest fetches was built.' },
-            dryrun        => { type => 'boolean', readOnly => 1,                    description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
+            ips            => { type => 'array',   items    => { type => 'string' }, readOnly    => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
+            contact_email  => { type => 'string',  nullable => 1,                    readOnly    => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
+            payload_dir    => { type => 'string',  readOnly => 1,                    description => 'Where on this machine the payload the guest fetches was built.' },
+            dryrun         => { type => 'boolean', readOnly => 1,                    description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
+            secrets_marker => { type => 'string',  readOnly => 1,                    description => 'The file that bin/provision writes on the guest after it places the secrets of the domain, which setup.sh waits for before make.  Absent when the domain has no secrets.  See Trog::Guest->secrets_marker.' },
 
             # The network configuration of the guest matches its interfaces by MAC,
             # because the kernel can choose any device name.  The hypervisor

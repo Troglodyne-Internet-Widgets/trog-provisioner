@@ -19,6 +19,7 @@ use IPC::Run3();
 use File::Temp qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
+use YAML::XS();
 use Test::MockModule qw{strict};
 use Pod::Usage();
 use Config::Simple();
@@ -906,6 +907,49 @@ subtest 'a domain that asked for no secret has nothing to place' => sub {
     # undef for the guest on purpose: anything carrying on past the manifest
     # reaches the store or the guest, and both of those are a method call on it.
     is( exception { Trog::Bin::Provisioner::place_guest_secrets( undef, $domain ) }, undef, 'so placing secrets does nothing, rather than dying on the way to a guest that wanted none' );
+};
+
+subtest 'the marker that setup.sh waits for is written after every secret' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $domain = 'withsecrets.test.test';
+    mkdir "$dir/$domain";
+    my $manifest = YAML::XS::Dump( { '/bogus/signing.key' => { ref => 'secret:g/signing/key', mode => '0600', owner => 'root:root' } } );
+    File::Slurper::Temp::write_text( "$dir/$domain/guest-secrets.yaml", $manifest );
+
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $secrets->redefine( lookup => sub { return ( '/bogus/signing.key' => 'the key' ) } );
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { 'throwaway' } );
+
+    my @did;
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    $bin->redefine( authorize_runner_key => sub { push( @did, 'runner key' ); return 0 } );
+
+    my $written = 1;
+    no warnings 'once';
+    local *SecretsProbe::run_sudo   = sub { return 0 };
+    local *SecretsProbe::write_text = sub { my ( undef, $path ) = @_; push( @did, $path ); return $written || $path ne Trog::Guest->secrets_marker('third.test.test') };
+    use warnings;
+    my $guest = bless {}, 'SecretsProbe';
+
+    is( _quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, $domain ) } ), 1, 'the secrets are placed' );
+    is_deeply( \@did, [ '/bogus/signing.key', 'runner key', Trog::Guest->secrets_marker($domain) ], 'the files, then the runner key, and the marker last' );
+
+    is( exception { Trog::Bin::Provisioner::place_guest_secrets( undef, 'none.test.test' ) }, undef, 'a domain with no manifest writes no marker, and touches no guest' );
+
+    mkdir "$dir/third.test.test";
+    File::Slurper::Temp::write_text( "$dir/third.test.test/guest-secrets.yaml", $manifest );
+    $written = 0;
+    like(
+        exception {
+            _quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, 'third.test.test' ) } )
+        },
+        qr/which[ ]its[ ]build[ ]waits[ ]for/,
+        'and a marker that cannot be written stops the run, rather than a build that waits half an hour'
+    );
 };
 
 # --- Letting a runner in to a hypervisor --------------------------------------

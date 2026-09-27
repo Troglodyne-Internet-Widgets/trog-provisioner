@@ -34,8 +34,10 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use YAML::XS();
+use IPC::Run3();
 
 use FindBin::libs;
 use Provisioner::Utils();
@@ -190,6 +192,43 @@ subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     # which has been the wrong machine since the guest stopped fetching from
     # there -- the same path only by both of them defaulting to /opt/domains.
     like( $setup, qr{transfer\N\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+};
+
+# bin/provision places the secrets over ssh while cloud-init runs, so setup.sh
+# has to wait for them.  The wait is run here under sh, as at(1) would run it,
+# with its limit cut to a few seconds and its logs moved into a temporary dir.
+subtest 'setup.sh waits for the secrets of a domain that has any' => sub {
+    my $tmp    = tempdir( CLEANUP => 1 );
+    my $marker = "$tmp/guest-secrets-marker";
+
+    my ( $plain_dir, undef ) = generated();
+    unlike( File::Slurper::read_text("$plain_dir/setup.sh"), qr/waited=/, 'a domain with no secrets starts make at once' );
+
+    my ( $dir, undef ) = generated( secrets_marker => $marker );
+    my $setup = File::Slurper::read_text("$dir/setup.sh");
+    my ($wait) = $setup =~ m/^(waited=0\n.*?^rm[ ]-f[ ]\Q$marker\E\n)/ms;
+    ok( defined $wait,                                       'one with secrets waits for the marker, and then removes it' ) or return diag $setup;
+    ok( index( $setup, $wait ) < index( $setup, 'make -j' ), 'before make' );
+
+    $wait =~ s/\b1800\b/3/;
+    $wait =~ s{/var/log/}{$tmp/}g;
+    my $run = sub {
+        my ($before) = @_;
+        my $out = q{};
+        IPC::Run3::run3( [ 'sh', '-c', "$before\n$wait" ], \undef, \$out, \$out );
+        return ( $? >> 8, $out );
+    };
+
+    File::Slurper::Temp::write_text( $marker, "placed\n" );
+    is( ( $run->(q{}) )[0], 0, 'a marker already there lets it go on' );
+    ok( !-e $marker, 'and it is removed, so the next build waits for its own' );
+
+    is( ( $run->("( sleep 1; touch $marker ) &") )[0], 0, 'a marker that comes a second later lets it go on then' );
+    ok( !-e $marker, 'and that one is removed too' );
+
+    is( ( $run->(q{}) )[0],                                    1,     'no marker at all stops it at the limit' );
+    is( File::Slurper::read_text("$tmp/$DOMAIN.setup.status"), "1\n", 'recording a failed build, which bin/provision reads' );
+    like( File::Slurper::read_text("$tmp/$DOMAIN.setup.log"), qr/\Q$marker\E/, 'with a log that names the marker it waited for' );
 };
 
 # The documents a guest with no mirror configured gets, written out rather than
