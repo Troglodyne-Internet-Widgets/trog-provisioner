@@ -56,4 +56,31 @@ subtest 'a prompt is asked with nothing left in @ARGV for it to open' => sub {
     ok( exists $asked[1]{opts}{-in}, 'including the handle to ask at' );
 };
 
+subtest 'slots_in: every place in a structure, with its path' => sub {
+    my $config = { nginx => { listen => [ { port => 80 }, 443 ] }, bare => undef, empty => {} };
+    my @slots  = Trog::Utils::slots_in( \$config );
+
+    is_deeply(
+        [ map { $_->[0] } @slots ],
+        [ q{}, qw{bare empty nginx nginx.listen nginx.listen[0] nginx.listen[0].port nginx.listen[1]} ],
+        'the root first, then each parent before what is under it, keys sorted and lists in order'
+    );
+    my %at = map { $_->[0] => $_->[1] } @slots;
+    is( ${ $at{'nginx.listen[1]'} }, 443, 'a slot refers to the value at its path' );
+    ok( exists $at{bare} && !defined ${ $at{bare} }, 'an undef is a place too' );
+
+    ${ $at{'nginx.listen[0].port'} } = 8080;
+    is( $config->{nginx}{listen}[0]{port}, 8080, 'and an assignment through a slot changes the structure' );
+
+    is_deeply( [ map { $_->[0] } Trog::Utils::slots_in( \{ a => 1 }, 'top' ) ], [qw{top top.a}], 'a path for the root is the prefix of every path' );
+    is_deeply( [ map { $_->[0] } Trog::Utils::slots_in( \'plain' ) ],           [q{}],           'a plain value is one place' );
+
+    # A call for each level would warn Deep recursion at a hundred, which the
+    # FATAL warnings of this file make a death.
+    my $deep = [];
+    my $at   = $deep;
+    $at = ( $at->[0] = [] ) for 1 .. 500;
+    is( scalar( () = Trog::Utils::slots_in( \$deep ) ), 501, 'five hundred levels deep, without a call for each' );
+};
+
 done_testing();

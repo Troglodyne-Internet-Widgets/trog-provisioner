@@ -25,6 +25,7 @@ use File::Temp();
 use File::Slurper::Temp();
 
 use Provisioner::Cookbook();
+use Trog::Utils();
 
 subtest 'configuration() reads recipes.yaml and the recipes.d beside it' => sub {
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
@@ -792,23 +793,17 @@ subtest 'no recipe declares its fields somewhere the validator will not look' =>
     my @wrong;
     foreach my $name ( Provisioner::Cookbook->names() ) {
         my %spec = Provisioner::Cookbook->spec($name);
-        push @wrong, map { "$name: $_" } stray_parameters( \%spec, q{} );
+        push @wrong, map { "$name: $_" } stray_parameters( \%spec );
     }
     is_deeply( \@wrong, [], 'every schema says properties' ) or diag join "\n", @wrong;
 };
 
 # Anywhere in a schema that a "parameters" key sits where "properties" belongs.
 sub stray_parameters {
-    my ( $node, $path ) = @_;
+    my ($node) = @_;
 
-    my $ref = ref $node;
-    return map { stray_parameters( $node->[$_], "$path\[$_]" ) } 0 .. $#$node if $ref eq 'ARRAY';
-    return () unless $ref eq 'HASH';
-
-    my @found;
-    push @found, ( $path eq q{} ? '(top level)' : $path ) if exists $node->{parameters};
-    push @found, map { stray_parameters( $node->{$_}, $path eq q{} ? $_ : "$path.$_" ) } sort keys %$node;
-    return @found;
+    return map { $_->[0] eq q{} ? '(top level)' : $_->[0] }
+      grep { ref ${ $_->[1] } eq 'HASH' && exists ${ $_->[1] }->{parameters} } Trog::Utils::slots_in( \$node );
 }
 
 subtest 'where a domain lives is _global to say, not the data recipe' => sub {

@@ -822,28 +822,29 @@ same answer as a look at all of them at once.
 sub reconcile {
     my ( $self, $merged, $incoming ) = @_;
     return $merged unless ref $merged eq 'HASH' && ref $incoming eq 'HASH';
-    return $self->_reconcile_into( $merged, $incoming, [] );
-}
 
-sub _reconcile_into {
-    my ( $self, $merged, $incoming, $path ) = @_;
+    # Each pair of hashes at one path, the nested ones added as they are found.
+    my @todo = ( [ $merged, $incoming, [] ] );
+    for ( my $i = 0; $i < scalar(@todo); $i++ ) {
+        my ( $into, $from, $path ) = @{ $todo[$i] };
 
-    foreach my $field ( sort keys %$incoming ) {
-        my $theirs = $incoming->{$field};
-        my $mine   = $merged->{$field};
+        foreach my $field ( sort keys %$from ) {
+            my $theirs = $from->{$field};
+            my $mine   = $into->{$field};
 
-        if ( ref $theirs eq 'HASH' && ref $mine eq 'HASH' ) {
-            $self->_reconcile_into( $mine, $theirs, [ @$path, $field ] );
-            next;
+            if ( ref $theirs eq 'HASH' && ref $mine eq 'HASH' ) {
+                push( @todo, [ $mine, $theirs, [ @$path, $field ] ] );
+                next;
+            }
+
+            # The merge already kept one of the two, so a field that only one of
+            # them named needs nothing done to it.
+            next if !defined $theirs || !defined $mine;
+            next if ref $theirs      || ref $mine;
+            next if $theirs eq $mine;
+
+            $into->{$field} = $self->resolve_conflict( [ @$path, $field ], $mine, $theirs );
         }
-
-        # The merge already kept one of the two, so a field that only one of
-        # them named needs nothing done to it.
-        next if !defined $theirs || !defined $mine;
-        next if ref $theirs      || ref $mine;
-        next if $theirs eq $mine;
-
-        $merged->{$field} = $self->resolve_conflict( [ @$path, $field ], $mine, $theirs );
     }
 
     return $merged;
@@ -1072,19 +1073,25 @@ the difference between unset and absent.
 
 sub forget_undefs {
     my ( $opts, $schema ) = @_;
-    return $opts unless ref $opts eq 'HASH' && ref $schema eq 'HASH';
 
-    my $props = $schema->{properties};
-    return $opts unless ref $props eq 'HASH';
+    # Each object in the options with the schema that describes it.
+    my @todo = ( [ $opts, $schema ] );
+    for ( my $i = 0; $i < scalar(@todo); $i++ ) {
+        my ( $here, $spec ) = @{ $todo[$i] };
+        next unless ref $here eq 'HASH' && ref $spec eq 'HASH';
 
-    foreach my $key ( keys %$props ) {
-        my $prop = $props->{$key};
-        next unless ref $prop eq 'HASH';
+        my $props = $spec->{properties};
+        next unless ref $props eq 'HASH';
 
-        delete $opts->{$key}
-          if exists $opts->{$key} && !defined $opts->{$key} && exists $prop->{default};
+        foreach my $key ( keys %$props ) {
+            my $prop = $props->{$key};
+            next unless ref $prop eq 'HASH';
 
-        forget_undefs( $opts->{$key}, $prop ) if ref $opts->{$key} eq 'HASH';
+            delete $here->{$key}
+              if exists $here->{$key} && !defined $here->{$key} && exists $prop->{default};
+
+            push( @todo, [ $here->{$key}, $prop ] ) if ref $here->{$key} eq 'HASH';
+        }
     }
 
     return $opts;

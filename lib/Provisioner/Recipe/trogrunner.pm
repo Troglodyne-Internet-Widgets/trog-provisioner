@@ -21,6 +21,8 @@ use URI();
 use URI::Split();
 use File::Temp();
 use List::Util qw{any};
+use Clone      qw{clone};
+use Trog::Utils();
 
 =head1 Provisioner::Recipe::trogrunner
 
@@ -441,15 +443,15 @@ L</SECRETS IN recipes>.
 sub _restore_refs {
     my ($node) = @_;
 
-    return [ map { _restore_refs($_) } @$node ]                       if ref $node eq 'ARRAY';
-    return { map { $_ => _restore_refs( $node->{$_} ) } keys %$node } if ref $node eq 'HASH';
-    return $node                                                      if ref $node || !defined $node;
+    my $copy = clone($node);
+    foreach my $slot ( map { $_->[1] } Trog::Utils::slots_in( \$copy ) ) {
 
-    return $node unless index( $node, 'store:' ) == 0;
-
-    # The same test that Trog::Secrets::needed makes of a secret: reference, a
-    # prefix at the start and nothing more.
-    return 'secret:' . substr( $node, length 'store:' );
+        # The same test that Trog::Secrets::needed makes of a secret: reference,
+        # a prefix at the start and nothing more.
+        next if ref $$slot || !defined $$slot || index( $$slot, 'store:' ) != 0;
+        $$slot = 'secret:' . substr( $$slot, length 'store:' );
+    }
+    return $copy;
 }
 
 =head3 $parts = _ssh_parts($uri)

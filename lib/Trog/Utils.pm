@@ -42,4 +42,38 @@ sub prompt {
     return IO::Prompter::prompt( $message, %opts );
 }
 
+=head2 @slots = slots_in(\$root, $path)
+
+Returns every place in the structure that C<$root> refers to, the root too,
+each as an array reference of its path and a reference to the place.  Read
+the value as C<${ $slot->[1] }>, and assign through it to change the
+structure.
+
+A path is dotted, with a list item as C<[n]>: C<nginx.listen[0].port>.
+C<$path> is the path of the root, and is empty by default.  The places come
+parent first, the keys of a hash in sorted order and a list in its own
+order, so the answer is the same on every run.
+
+It walks with a list and not with a call for each level.  A call for each level
+warns C<Deep recursion> at a hundred levels, and a warning is fatal here.
+
+=cut
+
+sub slots_in {
+    my ( $root, $path ) = @_;
+
+    my @stack = ( [ $path // q{}, $root ] );
+    my @found;
+    while ( my $at = pop @stack ) {
+        push( @found, $at );
+        my ( $here, $slot ) = @$at;
+        my $node = $$slot;
+
+        # Pushed in reverse, so the first child is the next one popped.
+        push( @stack, reverse map { [ $here eq q{} ? $_ : "$here.$_", \$node->{$_} ] } sort keys %$node ) if ref $node eq 'HASH';
+        push( @stack, reverse map { [ "$here\[$_]", \$node->[$_] ] } 0 .. $#$node ) if ref $node eq 'ARRAY';
+    }
+    return @found;
+}
+
 1;
