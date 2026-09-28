@@ -77,6 +77,10 @@ our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 # closes.  A missing file does not come later, so a longer wait only hangs.
 our $STATUS_GRACE = '60s';
 
+# The keys that key_path fetched from the store in this run, by domain, each
+# with the temporary file that holds it.
+my %MATERIALISED;
+
 sub new {
     my ( $class, %opts ) = @_;
 
@@ -335,6 +339,9 @@ sub seal_key {
         $class->ref_for_key($domain) => $private,
     );
 
+    # The copy that key_path fetched earlier in this run is the old key now.
+    delete $MATERIALISED{$domain};
+
     unlink $path;
     return 1;
 }
@@ -352,7 +359,8 @@ the answer.  See L</A key on disk still works>.
 
 Otherwise the key comes from the store.  It goes into a temporary file that this
 process owns, and the file goes away when the process exits.  A second call for
-the same domain in one run does not fetch it again.
+the same domain in one run does not fetch it again, unless C<seal_key> has put
+a new key for the domain in the store since.
 
 Returns undef, and does not die, for a domain the store does not know or a store
 that cannot be read.  A first build has no key yet, and without a key the
@@ -367,8 +375,7 @@ sub key_path {
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- asking whether the old location still holds one
     return $on_disk if defined $on_disk && -f $on_disk;
 
-    state %materialised;
-    return $materialised{$domain}{path} if $materialised{$domain};
+    return $MATERIALISED{$domain}{path} if $MATERIALISED{$domain};
 
     my $store = _store() or return undef;
 
@@ -388,8 +395,8 @@ sub key_path {
     print {$tmp} $got{key} =~ m/\n\z/ ? $got{key} : "$got{key}\n";
     close($tmp) or die "Could not close $tmp: $!\n";
 
-    $materialised{$domain} = { handle => $tmp, path => "$tmp" };
-    return $materialised{$domain}{path};
+    $MATERIALISED{$domain} = { handle => $tmp, path => "$tmp" };
+    return $MATERIALISED{$domain}{path};
 }
 
 =head2 _store

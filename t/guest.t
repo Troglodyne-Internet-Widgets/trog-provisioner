@@ -386,6 +386,33 @@ subtest 'a sealed key is fetched once and lands somewhere private' => sub {
     unlink $store;
 };
 
+# bin/new_config runs inside bin/provision, and fetches the key of a domain for
+# the salvage before the build seals the key of the new guest.  The copy it
+# fetched must not then be the one that the rest of the run connects with.
+subtest 'a key sealed in a run replaces the copy fetched earlier in it' => sub {
+    my $dir   = File::Temp::tempdir( CLEANUP => 1 );
+    my $store = Trog::Config->path('secrets.kdbx');
+    File::Slurper::Temp::write_binary( $store, 'pretend this is a kdbx' );
+
+    my $held    = 'OLD KEY';
+    my $creds   = Test::MockModule->new('Trog::Credentials');
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $creds->redefine( prompt => sub { return 'hunter2' } );
+    $secrets->redefine( lookup  => sub { return ( key => $held ) } );
+    $secrets->redefine( replace => sub { my ( undef, undef, undef, %new ) = @_; ($held) = values %new; return 1 } );
+
+    my $before = Trog::Guest->key_path( 'resealed.test.test', '/bogus/nothing/key.rsa' );
+    is( File::Slurper::read_text($before), "OLD KEY\n", 'the key of the old guest, for the salvage' );
+
+    File::Slurper::Temp::write_text( "$dir/key.rsa", "NEW KEY\n" );
+    ok( Trog::Guest->seal_key( 'resealed.test.test', "$dir/key.rsa" ), 'the key of the new guest is sealed' );
+
+    my $after = Trog::Guest->key_path( 'resealed.test.test', '/bogus/nothing/key.rsa' );
+    is( File::Slurper::read_text($after), "NEW KEY\n", 'and that is the key the run connects with from then on' );
+
+    unlink $store;
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
