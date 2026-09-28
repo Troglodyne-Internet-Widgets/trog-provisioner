@@ -16,7 +16,7 @@ t/skills-teardown.t - the provisioning-recipes teardown: what a throwaway run le
 use Test::More;
 use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
-use File::Path       qw{make_path};
+use File::Path       qw{make_path remove_tree};
 use File::Temp       qw{tempdir};
 use File::Slurper::Temp();
 
@@ -119,6 +119,44 @@ subtest 'tearing one guest down keeps the configuration the others are built fro
     ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'consumer.test', 0 ) } );
     is( $rc, 0, 'the last one out' );
     ok( !-e $scratch, 'takes the configuration with it' );
+};
+
+# The data source of a scratch configuration is inside it, so removing the
+# configuration with its last domain took the data that --keep-data had kept.
+subtest 'data kept with --keep-data keeps the configuration that it is in' => sub {
+    my $scratch = tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $scratch;
+    make_path( "$scratch/recipes.d", "$scratch/data/one.test", "$scratch/data/two.test" );
+    File::Slurper::Temp::write_text( "$scratch/recipes.yaml",      "_base:\n    _global:\n        data_source: $scratch/data\n" );
+    File::Slurper::Temp::write_text( "$scratch/recipes.d/$_.yaml", "$_:\n    ntp:\n" ) for qw{one.test two.test};
+    File::Slurper::Temp::write_text( "$scratch/data/$_/state",     "kept\n" )          for qw{one.test two.test};
+    scratch_marker(1);
+
+    # Both torn down with --keep-data: bin/destroy left their data directories.
+    says( sub { Trog::Skill::Teardown::remove_config( 'one.test', 0 ) } );
+    my ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'two.test', 0 ) } );
+    is( $rc, 0, 'the last domain out' );
+    ok( -e "$scratch/data/two.test/state",      'leaves the data that was kept' );
+    ok( !-e "$scratch/recipes.d/two.test.yaml", 'and takes the domain out of the configuration' );
+    like( $said, qr/holds[ ]the[ ]data[ ]kept[ ]for[ ]one\.test,[ ]two\.test/, 'saying whose data keeps it' );
+
+    ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'two.test', 1 ) } );
+    like( $said, qr/Would[ ]remove\N*keep[ ]the[ ]scratch[ ]config\N*one\.test/, 'a dry run says the same' );
+
+    # Torn down again without --keep-data: bin/destroy took its data first.
+    remove_tree("$scratch/data/one.test");
+    says( sub { Trog::Skill::Teardown::remove_config( 'one.test', 0 ) } );
+    ok( -e "$scratch/data/two.test/state", 'while any kept data is left, the configuration stays' );
+
+    remove_tree("$scratch/data/two.test");
+    ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'two.test', 0 ) } );
+    is( $rc, 0, 'and the teardown that takes the last of it' );
+    ok( !-e $scratch, 'takes the configuration too' );
+
+    my $elsewhere = tempdir( CLEANUP => 1 );
+    make_path("$elsewhere/one.test");
+    is_deeply( [ Trog::Skill::Teardown::kept_data( $scratch, $elsewhere ) ], [], 'a data source outside the configuration keeps nothing, because removing it loses nothing' );
+    is_deeply( [ Trog::Skill::Teardown::kept_data( $scratch, undef ) ],      [], 'and neither does none' );
 };
 
 subtest 'the POD documents the interface' => sub {
