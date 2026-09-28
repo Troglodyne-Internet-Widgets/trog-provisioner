@@ -1092,14 +1092,7 @@ sub handle_domain {
 
     my $r_text = join( ', ', @$resolvers );
 
-    # Put the sealed key back beside the recipe, because seal_key took the
-    # private half off the disk.  A recipe that finds no pair makes a new one.
-    my $sealed = Trog::Guest->key_path( $fqdn, "$cfg_dir/key.rsa" );
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether it is already the file we want
-    if ( defined $sealed && $sealed ne "$cfg_dir/key.rsa" && !-f "$cfg_dir/key.rsa" ) {
-        File::Slurper::Temp::write_binary( "$cfg_dir/key.rsa", File::Slurper::read_binary($sealed) );
-        chmod 0600, "$cfg_dir/key.rsa";
-    }
+    restore_sealed_key( $fqdn, $cfg_dir );
 
     # From the checkout, not the working directory, so that this program runs
     # from any directory.
@@ -1390,6 +1383,34 @@ sub write_guest_secrets {
     print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- $manifest{$_}{ref}\n" } sort keys %manifest );
 
     return \%held;
+}
+
+=head2 restore_sealed_key($fqdn, $cfg_dir)
+
+Puts the key of C<$fqdn> that the store holds back into C<$cfg_dir>, as
+F<key.rsa> and F<key.rsa.pub>, so that
+L<Provisioner::Recipe::ubuntu/guest_keypair> finds the pair and keeps it.  It
+makes a new key when either half is missing.  C<seal_key> took the private half
+off the disk, and a teardown purges the public half with the domain directory.
+A new key then locks out every connection in the run that already holds the
+old one.  Does nothing for a domain with no key, or one whose key is on disk.
+
+=cut
+
+sub restore_sealed_key {
+    my ( $fqdn, $cfg_dir ) = @_;
+    my $private = "$cfg_dir/key.rsa";
+
+    my $sealed = Trog::Guest->key_path( $fqdn, $private );
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether each half is already the file we want
+    if ( defined $sealed && $sealed ne $private && !-f $private ) {
+        File::Slurper::Temp::write_binary( $private, File::Slurper::read_binary($sealed) );
+        chmod 0600, $private;
+    }
+    if ( -f $private && !-f "$private.pub" ) {
+        File::Slurper::Temp::write_text( "$private.pub", Provisioner::Utils::ssh_pubkey_from_private($private) . " $fqdn\n" );
+    }
+    return;
 }
 
 =head2 @packed = pack_scripts($checkout, $cfg_dir)
