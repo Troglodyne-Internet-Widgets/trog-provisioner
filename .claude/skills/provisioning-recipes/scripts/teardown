@@ -17,6 +17,7 @@ use Getopt::Long qw{GetOptionsFromArray};
 use IPC::Run3();
 use Pod::Usage qw{pod2usage};
 
+use Provisioner::Cookbook();
 use Trog::Config();
 
 =head1 NAME
@@ -78,7 +79,9 @@ building another.  It is left anyway while another domain in it remains.
 =item B<--keep-data>
 
 Leave the domain's data directory where it is, here and on the hypervisor.  For
-when the next run should start from what this one produced.
+when the next run should start from what this one produced.  The data source of
+a scratch configuration is inside it, so the configuration stays while any data
+that was kept is in it, and goes with the teardown that removes the last of it.
 
 =item B<--hypervisor> NAME, B<--hvconf> FILE
 
@@ -181,7 +184,8 @@ sub is_scratch {
 =head2 remove_config($domain, $dryrun)
 
 Take the domain out of the scratch configuration: its file in C<recipes.d>, and
-the whole directory once that was the last one.
+the whole directory once that was the last one and no data that C<--keep-data>
+kept is left in its data source.
 
 Nothing at all unless the directory carries scratch_config's marker, which is
 what stops an unset or mistaken C<TROG_PROVISIONER_CONFIG> costing a real
@@ -208,17 +212,25 @@ sub remove_config {
         return 1;
     }
 
+    # Asked before this domain leaves the configuration, which says where it is.
+    my @kept = kept_data( $dir, Provisioner::Cookbook->data_source($domain) );
+
     # Another domain in it may still have a guest, built out of this same
-    # secret store and address pool.
-    my @others = sort grep { $_ ne $domain } map { File::Basename::basename( $_, '.yaml' ) } glob("$dir/recipes.d/*.yaml");
-    if (@others) {
+    # secret store and address pool.  And the data that --keep-data kept is
+    # inside it, so it stays until that data is torn down without --keep-data.
+    my @others = sort grep { $_ ne $domain } map { File::Basename::basename( $_, q{.yaml} ) } glob("$dir/recipes.d/*.yaml");
+    my $why =
+        @others ? q{which still configures } . join( q{, }, @others ) . qq{\n}
+      : @kept   ? q{which holds the data kept for } . join( q{, }, @kept ) . qq{.  Tear each of them down without --keep-data to remove it.\n}
+      :           undef;
+    if ($why) {
         my $mine = "$dir/recipes.d/$domain.yaml";
         if ($dryrun) {
-            print {*STDERR} "Would remove $mine, and keep the scratch config at $dir for " . join( ', ', @others ) . "\n";
+            print {*STDERR} "Would remove $mine, and keep the scratch config at $dir, $why";
             return 0;
         }
         unlink $mine;
-        print {*STDERR} "Kept the scratch config at $dir, which still configures " . join( ', ', @others ) . "\n";
+        print {*STDERR} "Kept the scratch config at $dir, $why";
         return 0;
     }
 
@@ -232,6 +244,25 @@ sub remove_config {
 
     IPC::Run3::run3( [ $^X, $scratch, '--remove', $dir ], \undef, undef, undef );
     return $? >> 8;
+}
+
+=head2 @domains = kept_data($dir, $source)
+
+The domains whose data directory is still in C<$source>, the data source, when
+that is inside C<$dir>, the scratch configuration.  Removing C<$dir> would
+remove them, and C<--keep-data> kept them.  Empty when C<$source> is undef or
+somewhere else.
+
+=cut
+
+sub kept_data {
+    my ( $dir, $source ) = @_;
+    return () unless defined $source && index( "$source/", "$dir/" ) == 0 && -d $source;
+
+    opendir( my $dh, $source ) or die "Could not read $source: $!\n";
+    my @kept = sort grep { !m/\A[.]/ && -d "$source/$_" } readdir $dh;
+    closedir $dh;
+    return @kept;
 }
 
 exit main(@ARGV) unless caller;
