@@ -117,6 +117,7 @@ RECIPES
         qr/No[ ]recipe[ ]configuration\N*testdomain\.test\.local/i,
         'dies with helpful message when domain is missing from recipe config',
     );
+    like( $result, qr{bin/new_guest[ ]--hostname[ ]testdomain\.test\.local}, 'and names the command that writes one' );
 
 };
 

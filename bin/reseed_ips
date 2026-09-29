@@ -16,7 +16,6 @@ use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
-use Trog::Config();
 use Provisioner::IPPool();
 
 =head1 USAGE
@@ -78,7 +77,7 @@ transaction back.  The command asks the hypervisors, but it writes nothing.
 sub main {
     my @args = @_;
 
-    my $rfile = Trog::Config->path('recipes.yaml');
+    my $rfile;
     my ( $dryrun, $prune, $help );
     GetOptionsFromArray(
         \@args,
@@ -89,6 +88,7 @@ sub main {
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    $rfile = Provisioner::Cookbook->recipes_file($rfile);
 
     my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
     my $pool    = $globals->{ip_pool} // {};

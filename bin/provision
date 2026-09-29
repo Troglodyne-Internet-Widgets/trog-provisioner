@@ -502,6 +502,7 @@ sub main {
         'help'                    => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    $recipes = Provisioner::Cookbook->recipes_file($recipes);
 
     my @said = grep { $_ } ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     pod2usage(

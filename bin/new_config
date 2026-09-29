@@ -271,11 +271,11 @@ sub main {
     %SALVAGE_GAPS = ();
     undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh;
 
-    my ( $credentials, $help );
+    my ( $credentials, $recipes, $help );
     GetOptionsFromArray(
         \@args,
         'secrets=s'    => \$sfile,
-        'recipes=s'    => \$pfile,
+        'recipes=s'    => \$recipes,
         'hvconf=s'     => \$hvconf,
         'hypervisor=s' => \$hv_name,
         'domaindir=s'  => \$domaindir,
@@ -293,7 +293,7 @@ sub main {
     Trog::Credentials->load() if $credentials;
     $skip_ssh //= 0;
     $sfile    //= Trog::Config->path('secrets.kdbx');
-    $pfile    //= Trog::Config->path('recipes.yaml');
+    $pfile = Provisioner::Cookbook->recipes_file($recipes);
 
     @args = uniq map { expand_dependent_domains($_) } @args;
 
@@ -562,7 +562,7 @@ sub handle_domain {
 
     my $rconf = clone( get_recipe_config() );
 
-    die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
+    die "No recipe configuration found for '$domain' in $pfile or the recipes.d/ beside it.\n" . "bin/new_guest writes one:\n" . "  bin/new_guest --hostname $domain RECIPE [RECIPE ...]\n"
       unless exists $rconf->{$domain};
 
     # Only prompt if we have to

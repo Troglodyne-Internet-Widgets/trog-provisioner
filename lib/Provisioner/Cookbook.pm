@@ -1095,6 +1095,26 @@ sub _file_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return
 # sides and settles it.
 sub _dep_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
 
+=head2 recipes_file($named)
+
+Returns the F<recipes.yaml> that a script reads.  C<$named> is the C<--recipes>
+option of the script, and without it this returns the default of
+L</"configuration($path)">, which need not exist.  Dies if C<$named> is not a file,
+because L</"configuration($path)"> reads a missing file as an empty configuration, and
+the error then blames the domain instead of the option.
+
+=cut
+
+sub recipes_file {
+    my ( $class, $named ) = @_;
+    return Trog::Config->path('recipes.yaml') unless defined $named;
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    die "--recipes takes the path of a recipes.yaml, and '$named' is not a file.  bin/recipes lists the recipes.\n"
+      unless -f $named;
+    return $named;
+}
+
 =head2 configuration($path)
 
 Returns the recipe configuration of an installation as a hash reference, keyed

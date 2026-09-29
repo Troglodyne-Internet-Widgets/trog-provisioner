@@ -15,7 +15,6 @@ use FindBin::libs;
 use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
-use Trog::Config();
 use Cpanel::JSON::XS;
 
 use Provisioner::IPPool;
@@ -51,7 +50,7 @@ IP in the pool that is not in the database is available for a new guest.
 sub main {
     my @args = @_;
 
-    my $rfile = Trog::Config->path('recipes.yaml');
+    my $rfile;
     my ( $assigned, $available, $json, $help );
 
     GetOptionsFromArray(
@@ -63,6 +62,7 @@ sub main {
         'help'      => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    $rfile = Provisioner::Cookbook->recipes_file($rfile);
 
     # Without --assigned or --available, show both.
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;

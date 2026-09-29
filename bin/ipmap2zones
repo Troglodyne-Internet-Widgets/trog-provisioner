@@ -21,7 +21,6 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Provisioner::Cookbook();
 use Provisioner::Utils();
-use Trog::Config();
 use Provisioner::IPPool();
 use File::Slurper::Temp;
 
@@ -80,7 +79,7 @@ sub main {
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
-    $rfile      //= Trog::Config->path('recipes.yaml');
+    $rfile = Provisioner::Cookbook->recipes_file($rfile);
     $output_dir //= '.';
 
     die "Output directory $output_dir does not exist\n" unless -d $output_dir;

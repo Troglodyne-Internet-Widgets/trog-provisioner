@@ -64,6 +64,17 @@ YAML
     is_deeply( Provisioner::Cookbook->configuration("$dir/nosuch.yaml"), {}, 'a configuration that is not there is empty, not fatal' );
 };
 
+subtest 'recipes_file() takes a file that is there, and refuses one that is not' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "one.test:\n    ntp:\n" );
+
+    is( Provisioner::Cookbook->recipes_file("$dir/recipes.yaml"), "$dir/recipes.yaml",                          'a file that is there is the one read' );
+    is( Provisioner::Cookbook->recipes_file(undef),               "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", 'without one, the default of the configuration directory, which need not exist' );
+
+    like( exception { Provisioner::Cookbook->recipes_file('openvpn') }, qr/'openvpn'[ ]is[ ]not[ ]a[ ]file/, 'a recipe given where a file goes is refused, naming it' );
+    like( exception { Provisioner::Cookbook->recipes_file($dir) },      qr/is[ ]not[ ]a[ ]file/,             'and so is a directory' );
+};
+
 subtest 'a domain file adds to recipes.yaml rather than overruling it' => sub {
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "one.test:\n    ntp:\n        pool: base.pool\n" );
