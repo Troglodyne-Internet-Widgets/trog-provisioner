@@ -110,6 +110,7 @@ formats = #!/usr/bin/perl
 [ProhibitPipeOpen]
 [ProhibitRegexForSimpleSubstring]
 [RegularExpressions::ProhibitRegexToStripAffix]
+[RegularExpressions::ProhibitRegexToChomp]
 [BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [RequireQwForLiteralLists]

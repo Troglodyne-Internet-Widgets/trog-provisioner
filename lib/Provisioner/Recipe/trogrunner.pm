@@ -587,7 +587,8 @@ sub _hypervisor_key {
 
     Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => $ED25519_BITS, 'trog-provisioner runner' );
 
-    return ( File::Slurper::read_text($path) =~ s/\n\z//r );
+    chomp( my $key = File::Slurper::read_text($path) );
+    return $key;
 }
 
 =head3 remote_files
