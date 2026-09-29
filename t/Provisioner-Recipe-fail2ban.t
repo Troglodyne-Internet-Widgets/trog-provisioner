@@ -76,7 +76,7 @@ subtest 'each recipe that takes a login from the public declares a jail for it' 
         grafana   => { 'grafana-login'  => 'auto' },
         matrix    => { 'matrix-login'   => 'auto' },
         garage    => { 'garage-auth'    => 'systemd' },
-        openvpn   => { 'openvpn-tls'    => 'auto' },
+        openvpn   => { 'openvpn-tls'    => 'systemd' },
         deluged   => {},
     );
     for my $name ( sort keys %want ) {
@@ -88,6 +88,7 @@ subtest 'each recipe that takes a login from the public declares a jail for it' 
     is( $garage{'garage-auth'}{port}, '4900,3903', 'garage bans on the ports it is configured with' );
     my %vpn = recipe('openvpn')->jails( %G, port => 11194, proto => 'tcp' );
     is_deeply( [ @{ $vpn{'openvpn-tls'} }{qw{port protocol}} ], [ 11194, 'tcp' ], 'and openvpn on its port and protocol' );
+    is( $vpn{'openvpn-tls'}{journalmatch}, '_SYSTEMD_UNIT=openvpn-server@server.service', 'from the journal of the unit that openvpn.tt enables' );
 };
 
 # Lines that each service wrote on a guest, as fail2ban hands them to a

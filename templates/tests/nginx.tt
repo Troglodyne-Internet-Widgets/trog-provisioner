@@ -31,4 +31,29 @@ ok($bucket && $bucket >= 253, "server_names_hash_bucket_size is $bucket") or dia
 my $conf = do { local (@ARGV, $/) = '/etc/nginx/nginx.conf'; <> } // '';
 like($conf, qr/worker_connections\s+\d{4,}/, 'worker_connections was tuned up');
 
+[% IF syslog -%]
+subtest 'nginx sends its access log to syslog too' => sub {
+    require IO::Socket::INET;
+
+    # A Host that no server block names goes to the default site of Ubuntu,
+    # which keeps the access log of the http block.  A server block with an
+    # access_log of its own, such as the mirror of aptmirror, would not.
+    my $marker = "syslog-check-$$-" . time;
+    my $sock   = IO::Socket::INET->new( PeerAddr => '127.0.0.1', PeerPort => 80, Proto => 'tcp', Timeout => 10 );
+    ok( $sock, 'nginx answers on port 80' ) or return;
+    print $sock "GET /$marker HTTP/1.0\r\nHost: nosuch.test.test\r\n\r\n";
+    1 while <$sock>;
+    close($sock);
+
+    # journald has the line within a moment, but not always before the reply.
+    my $journal = '';
+    for ( 1 .. 5 ) {
+        $journal = `journalctl --no-pager -t nginx_access --since '-5min' 2>&1`;
+        last if $journal =~ m/\Q$marker\E/;
+        sleep 1;
+    }
+    like( $journal, qr/\Q$marker\E/, 'the request is in the journal, tagged nginx_access' ) or diag $journal;
+};
+[% END -%]
+
 done_testing();

@@ -82,6 +82,11 @@ sub args {
         properties => {
             basedir => { type => 'string' },
             routers => { type => 'array', items => { type => 'string' } },
+            loggers => {
+                type        => 'array',
+                items       => { type => 'string', pattern => '^\\w+(?:::\\w+)*$' },
+                description => 'Log::Dispatch output classes that tPSGI adds to its log, and that it hands to the application.  It loads each by name, so a class can live beside a router.',
+            },
         },
     );
 }

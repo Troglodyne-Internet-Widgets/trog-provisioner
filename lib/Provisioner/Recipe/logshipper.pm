@@ -87,6 +87,20 @@ about any of it.
 So the guest test opens a TCP connection to C<host:port> and fails if nothing
 answers.  That one assertion is the only one that catches a dead destination.
 
+=head2 Which logs arrive
+
+Everything that reaches rsyslog.  journald forwards the journal to rsyslog, so
+a service that logs to the journal arrives: sshd, postfix, dovecot, roundcube,
+garage, openvpn, and grafana and synapse, which log to the console as well as to
+their files.
+
+rsyslog does not read other files.  So a service that writes only to a file
+also sends its lines to syslog, where its recipe can make it: nginx with
+C<syslog> in L<Provisioner::Recipe::nginx>, and tCMS with C<loggers> in
+L<Provisioner::Recipe::tpsgi>.  Their jails still read the files.  A service
+that can write only to a file is not forwarded.  Issue #321 says how it could
+be.
+
 =cut
 
 =head1 METHODS
