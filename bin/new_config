@@ -29,6 +29,7 @@ use Net::SFTP::Foreign;
 use Archive::Tar();
 use File::Path   qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
 use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
@@ -270,7 +271,7 @@ sub main {
     %SALVAGE_GAPS = ();
     undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh;
 
-    my $credentials;
+    my ( $credentials, $help );
     GetOptionsFromArray(
         \@args,
         'secrets=s'    => \$sfile,
@@ -281,7 +282,11 @@ sub main {
         'skip_ssh'     => \$skip_ssh,
         'credentials'  => \$credentials,
         'dryrun'       => \$dryrun,
-    );
+        'help'         => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
+      unless @args;
 
     # The password of the secrets database, for a run with no terminal.  See
     # Trog::Credentials.
@@ -1559,4 +1564,4 @@ sub _get_sftp {
     return ( $ssh, $target_is_up );
 }
 
-main(@ARGV) unless caller;
+exit main(@ARGV) unless caller;

@@ -56,7 +56,8 @@ sub main {
 
     my $rfile = Trog::Config->path('recipes.yaml');
     my $help;
-    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'help' => \$help );
+    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'help' => \$help )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 

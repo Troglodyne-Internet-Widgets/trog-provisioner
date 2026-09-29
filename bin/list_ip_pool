@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
 use Trog::Config();
 use Cpanel::JSON::XS;
 
@@ -51,7 +52,7 @@ sub main {
     my @args = @_;
 
     my $rfile = Trog::Config->path('recipes.yaml');
-    my ( $assigned, $available, $json );
+    my ( $assigned, $available, $json, $help );
 
     GetOptionsFromArray(
         \@args,
@@ -59,7 +60,9 @@ sub main {
         'assigned'  => \$assigned,
         'available' => \$available,
         'json'      => \$json,
-    );
+        'help'      => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     # Without --assigned or --available, show both.
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;

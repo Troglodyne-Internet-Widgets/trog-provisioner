@@ -86,7 +86,7 @@ its snapshot as it is, and leaves it off.
 sub main {
     my @args = @_;
 
-    my ( $name, $hv_name, $domain_dir, $hvconf, $disk_only );
+    my ( $name, $hv_name, $domain_dir, $hvconf, $disk_only, $help );
     GetOptionsFromArray(
         \@args,
         'name=s'       => \$name,
@@ -94,7 +94,9 @@ sub main {
         'domaindir=s'  => \$domain_dir,
         'hvconf=s'     => \$hvconf,
         'disk-only'    => \$disk_only,
-    );
+        'help'         => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )

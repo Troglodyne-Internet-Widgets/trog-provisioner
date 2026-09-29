@@ -126,7 +126,7 @@ sub main {
         'stdout'     => \$stdout,
         'force'      => \$force,
         'help'       => \$help,
-    );
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
     pod2usage(

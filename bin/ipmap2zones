@@ -18,6 +18,7 @@ use Text::Xslate::Bridge::TT2;
 use Net::IP;
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
 use Provisioner::Cookbook();
 use Provisioner::Utils();
 use Trog::Config();
@@ -67,17 +68,17 @@ directory must already exist.
 
 =cut
 
-my $USAGE = "usage: ipmap2zones [--recipes=file] [--output-dir=dir] DOMAIN [DOMAIN ...]\n";
-
 sub main {
     my @args = @_;
 
-    my ( $rfile, $output_dir );
+    my ( $rfile, $output_dir, $help );
     GetOptionsFromArray(
         \@args,
         'recipes=s'    => \$rfile,
         'output-dir=s' => \$output_dir,
-    ) or die $USAGE;
+        'help'         => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     $rfile      //= Trog::Config->path('recipes.yaml');
     $output_dir //= '.';
@@ -91,7 +92,7 @@ sub main {
     my $ns_conf     = $global_conf->{nameservers} // {};
 
     my @domains = @args;
-    die "Name at least one domain to generate a zone for.\n" . $USAGE unless @domains;
+    die "Name at least one domain to generate a zone for.  See ipmap2zones --help.\n" unless @domains;
 
     my $template_dir = "$FindBin::Bin/../templates";
     my $tt           = Text::Xslate->new(
