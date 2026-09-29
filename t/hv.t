@@ -605,6 +605,47 @@ subtest 'a sudo password is asked for once and then remembered' => sub {
     is( $attempts[-1]{stdin},                      "hunter2\n", 'the remembered password was reused' );
 };
 
+# Provisions that run at once share the storage pool, and libvirt refuses a
+# refresh while one of them has a volume job on it.
+subtest 'a refresh waits out the jobs of another provision on the pool' => sub {
+    my $busy   = 0;
+    my $calls  = 0;
+    my $answer = sub { $calls++; die "libvirt error code: 1, message: internal error: pool 'tf_disks' has asynchronous jobs running.\n" if $calls <= $busy; return 1 };
+    no warnings 'once';
+    local *BusyPool::refresh = sub { return $answer->() };
+    use warnings;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( pool => sub { bless {}, 'BusyPool' } );
+
+    local $Trog::HV::Libvirt::POOL_BUSY_INTERVAL = 0;
+    my $hv = fresh( uri => 'qemu+ssh://hv/system' );
+
+    $busy = 2;
+    my ( $said, $done ) = ( capture_stdout { $hv->refresh_pool } );
+    ok( $done, 'a pool that is busy twice is refreshed on the third try' );
+    is( $calls,                                3, 'asked three times' );
+    is( scalar( () = $said =~ m/is[ ]busy/g ), 1, 'saying once that it waits' );
+
+    ( $busy, $calls ) = ( 1000, 0 );
+    local $Trog::HV::Libvirt::POOL_BUSY_WAIT = 0;
+    my $err = exception {
+        quietly( sub { $hv->refresh_pool } )
+    };
+    like( $err, qr/Could[ ]not[ ]refresh[ ]the[ ]storage[ ]pool[ ]tf_disks:/, 'a pool still busy at the limit is an error' );
+    like( $err, qr/asynchronous[ ]jobs[ ]running/,                            'with the reason' );
+
+    ( $busy, $calls ) = ( 0, 0 );
+    $answer = sub { $calls++; die "libvirt error code: 38, message: cannot open directory\n" };
+    like(
+        exception {
+            quietly( sub { $hv->refresh_pool } )
+        },
+        qr/cannot[ ]open[ ]directory/,
+        'any other refusal is an error'
+    );
+    is( $calls, 1, 'at once' );
+};
+
 subtest 'a sudo password that is wrong three times stops the command' => sub {
     Trog::Machine::forget_sudo_passwords();
     my $hv = fresh( uri => 'qemu+ssh://root@wrongpass/system' );

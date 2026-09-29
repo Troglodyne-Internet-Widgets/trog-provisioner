@@ -63,6 +63,11 @@ our $DEFAULT_URI = 'qemu:///system';
 our $CONSOLE_LOG_DIR = '/tmp';
 my $RESTART_SETTLE = 2;
 
+# How long refresh_pool waits out the jobs of another provision on the pool, and
+# how often it asks again.
+our $POOL_BUSY_WAIT     = 600;
+our $POOL_BUSY_INTERVAL = 2;
+
 # The transports that also give us a shell on the hypervisor.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
@@ -872,6 +877,12 @@ Makes libvirt read the pool directory again.  Use it after something other than
 libvirt adds a file there.  C<$name> defaults to L</pool_name>.  Returns 1, and
 dies if the refresh fails.
 
+libvirt refuses a refresh while a job of its own runs on the pool, such as the
+volume that another provision is creating.  That refusal says that the pool is
+busy, not broken, so this says so once, asks again every C<$POOL_BUSY_INTERVAL>
+seconds, and dies only after C<$POOL_BUSY_WAIT> seconds.  Any other refusal
+dies at once.
+
 =cut
 
 sub delete_volume {
@@ -883,9 +894,17 @@ sub delete_volume {
 
 sub refresh_pool {
     my ( $self, $name ) = @_;
-    eval { $self->pool($name)->refresh(); 1 } or do {
-        die 'Could not refresh the storage pool ' . ( $name // $self->pool_name ) . ": $@";
-    };
+    my $pool     = $name // $self->pool_name;
+    my $deadline = time + $POOL_BUSY_WAIT;
+    my $said;
+
+    while ( !eval { $self->pool($name)->refresh(); 1 } ) {
+        my $error = $@;
+        die "Could not refresh the storage pool $pool: $error" if $error !~ m/asynchronous[ ]jobs[ ]running/ || time >= $deadline;
+
+        print "The storage pool $pool is busy with another job, so the refresh waits for it\n" unless $said++;
+        sleep $POOL_BUSY_INTERVAL;
+    }
     return 1;
 }
 
