@@ -904,6 +904,9 @@ nothing loads every recipe a second time.  C<domain_conf> changes in place.
 The configuration of each dependency becomes the merge of what the domain wrote
 and what each dependent gave it.
 
+Dies when two recipes of the list cannot be on one domain, as
+L<Provisioner::Recipe/exclusive_with> says, and names what required each.
+
 The list comes back in build order.  A dependency is added again each time
 something requires it.  The last mention counts, because the dependency must
 run after everything that requires it.  So the list goes through C<lastuniq>
@@ -1048,7 +1051,29 @@ sub resolve_dependencies {
         }
     }
 
-    return ( [ Provisioner::Utils::lastuniq(@modules) ], \%builders, { map { $_ => [ sort keys %{ $required_by{$_} } ] } keys %required_by } );
+    my @resolved = Provisioner::Utils::lastuniq(@modules);
+    _refuse_exclusive( $domain, \@resolved, \%builders, \%required_by );
+
+    return ( \@resolved, \%builders, { map { $_ => [ sort keys %{ $required_by{$_} } ] } keys %required_by } );
+}
+
+# Dies when two recipes of the domain cannot be on one domain, as
+# exclusive_with in Provisioner::Recipe says, naming what brought each in.
+sub _refuse_exclusive {
+    my ( $domain, $modules, $builders, $required_by ) = @_;
+    my %on = map { $_ => 1 } @$modules;
+
+    my $named = sub {
+        my ($recipe) = @_;
+        my @by = sort keys %{ $required_by->{$recipe} // {} };
+        return @by ? "$recipe (required by " . join( q{, }, @by ) . q{)} : $recipe;
+    };
+    foreach my $module ( grep { $builders->{$_} } @$modules ) {
+        foreach my $other ( grep { $on{$_} } $builders->{$module}->exclusive_with ) {
+            die "$domain has both " . $named->($module) . ' and ' . $named->($other) . ".\n" . "They cannot be on one domain; see exclusive_with in Provisioner::Recipe::$module.\n" . "Remove one of them, or the recipe that requires it, or give one of them a domain of its own.\n";
+        }
+    }
+    return;
 }
 
 # Two merges that want opposite things, so two mergers.  Each is an object, so

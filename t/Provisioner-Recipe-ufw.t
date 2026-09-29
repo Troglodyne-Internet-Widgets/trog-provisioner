@@ -90,7 +90,7 @@ subtest 'the claims of recipes on one domain meet in ufw' => sub {
     is_deeply( $clash->{listeners}{3000}, { '127.0.0.1' => { gogs => 1, grafana => 1 } }, 'gogs and grafana both claim 127.0.0.1:3000' );
     like( exception { recipe('ufw')->validate( %G, %$clash ) }, qr{/listeners/3000/127\.0\.0\.1:.*\(gogs,[ ]grafana\)}, 'and ufw refuses it' );
 
-    my $shared = listeners_of( gogs => {}, nginxdirindex => {} );
+    my $shared = listeners_of( gogs => {}, roundcube => { version => '1.6.9' } );
     is_deeply( $shared->{listeners}{80}, { q{::} => { nginx => 1 } }, 'two recipes behind nginx leave 80 to nginx alone' );
     ok( !exception { recipe('ufw')->validate( %G, %$shared ) }, 'which ufw accepts' );
 };

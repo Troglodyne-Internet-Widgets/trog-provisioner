@@ -321,6 +321,20 @@ all.
 
 sub is_multi_tenant { return 1 }
 
+=head3 @names = $recipe->exclusive_with()
+
+The recipes that cannot be on one domain with this one, because both write the
+same thing, such as the vhost of the domain.  One of them would silently
+replace the other.  L<Provisioner::Cookbook/resolve_dependencies> refuses a
+domain whose recipes, dependencies included, have both.  One side says it, and
+the check reads both.
+
+Empty by default.
+
+=cut
+
+sub exclusive_with { return () }
+
 =head3 %args = $recipe->args()
 
 Declares the arguments of the recipe as a hash for the schema() method of

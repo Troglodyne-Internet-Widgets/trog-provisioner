@@ -35,6 +35,11 @@ It requires L<Provisioner::Recipe::nginx>, which does the global tuning of the
 kernel and nginx (sysctl backlog, worker_connections,
 server_names_hash_bucket_size).
 
+It cannot be on one domain with L<Provisioner::Recipe::nginxproxy>.  Both write
+the vhost of the domain, to the same file, so the one that ran last would
+replace the other.  A recipe that requires nginxproxy, such as matrix, brings it
+in too.
+
 =cut
 
 sub required_recipes {
@@ -62,6 +67,8 @@ sub template_files {
         'nginxdirindex.domain.conf.tt' => 'nginxdirindex.domain.conf',
     );
 }
+
+sub exclusive_with { return qw{nginxproxy} }
 
 sub tests {
     return qw{nginxdirindex.tt};

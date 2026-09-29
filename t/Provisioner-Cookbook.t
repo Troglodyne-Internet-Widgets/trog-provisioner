@@ -481,6 +481,14 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
 
 {
 
+    package Provisioner::Recipe::t_loner;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub exclusive_with { return qw{t_deep} }
+}
+
+{
+
     package Provisioner::Recipe::t_satisfied;
     our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
 
@@ -702,6 +710,32 @@ subtest 'an interface is resolved rather than passed along' => sub {
         );
     };
     like( $err, qr/will[ ]not[ ]load/, 'and an interface that is not one says so' );
+};
+
+subtest 'two recipes that cannot share a domain are refused, however they got there' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+    my $resolve = sub {
+        my (@named) = @_;
+        return Provisioner::Cookbook->resolve_dependencies(
+            modules     => \@named,
+            domain_conf => { t_dep => { secret => 'x' } },
+            distro      => 'ubuntu',
+            provisioner => { template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => File::Temp::tempdir( CLEANUP => 1 ) },
+            domain      => 'd.test',
+        );
+    };
+
+    # t_deep comes in two levels down, through t_requirer and then t_dep.
+    my $err = exception { $resolve->(qw{t_loner t_requirer}) };
+    $err //= q{};
+    like( $err, qr/d[.]test[ ]has[ ]both[ ]t_loner[ ]and[ ]t_deep/, 'a domain with both is refused' );
+    like( $err, qr/t_deep[ ][(]required[ ]by[ ]t_dep[)]/,           'saying what brought in the one that nobody named' );
+
+    is( exception { $resolve->(qw{t_loner}) },    undef, 'either alone is fine' );
+    is( exception { $resolve->(qw{t_requirer}) }, undef, 'and so is the other' );
+
+    is_deeply( [ 'Provisioner::Recipe::nginxdirindex'->exclusive_with() ], [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
 };
 
 subtest 'a recipe the caller already named is left to the caller' => sub {
