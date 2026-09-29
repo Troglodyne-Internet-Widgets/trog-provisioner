@@ -481,9 +481,9 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse,                $hv_name, $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse,                $hv_name,                $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
-    my ( $rebuild_upstream,     $on_failure );
+    my ( $rebuild_upstream,     $on_failure,             $help );
     GetOptionsFromArray(
         \@args,
         'existing=s'              => \$reuse,
@@ -499,7 +499,9 @@ sub main {
         'die-on-nonreusable'      => \$die_on_nonreusable,
         'rebuild-upstream-guests' => \$rebuild_upstream,
         'on-failure=s'            => \$on_failure,
+        'help'                    => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my @said = grep { $_ } ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     pod2usage(

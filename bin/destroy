@@ -144,7 +144,7 @@ sub main {
 
     umask 0022;
 
-    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $hv_name, $domain_dir, $hvconf, $credentials );
+    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $hv_name, $domain_dir, $hvconf, $credentials, $help );
     GetOptionsFromArray(
         \@args,
         'domaindir=s'  => \$domain_dir,
@@ -156,7 +156,9 @@ sub main {
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
         'credentials'  => \$credentials,
-    );
+        'help'         => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     # Before anything asks for a password, and only with --credentials.  See
     # Trog::Credentials for why it has to be asked for.

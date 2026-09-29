@@ -9,6 +9,9 @@ use warnings FATAL => 'all';
 
 use re '/aasx';
 
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
 #TODO ship all of this as a configuration package (rpm or deb).
 
 =head1 NAME
@@ -44,6 +47,13 @@ it.
 =cut
 
 sub main {
+    my @args = @_;
+
+    my $help;
+    GetOptionsFromArray( \@args, 'help' => \$help )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
     setup_kvm()           or return 1;
     setup_public_bridge() or return 2;
     setup_iso_builder()   or return 3;

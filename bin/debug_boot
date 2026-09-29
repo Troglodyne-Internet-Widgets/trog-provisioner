@@ -160,7 +160,7 @@ sub main {
         \@args, \%opt,
         qw{console fetch hold shot vnc keys restore cat ls single
           wait=i timeout=i into=s hypervisor=s hvconf=s help}
-    );
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
 
