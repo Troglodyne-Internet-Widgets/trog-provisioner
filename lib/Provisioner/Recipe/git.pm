@@ -205,10 +205,9 @@ sub guest_secrets {
                 my $path = "$dir/id_git";
                 Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, "git-$account" );
 
-                # Remove the trailing newline.  bin/provision adds one, and
-                # ssh-keygen refuses a key that ends with a blank line.
-                my $key = File::Slurper::read_binary($path);
-                $key =~ s/\n\z//;
+                # bin/provision adds a newline, and ssh-keygen refuses a key
+                # that ends with a blank line.
+                chomp( my $key = File::Slurper::read_binary($path) );
                 return $key;
             },
 

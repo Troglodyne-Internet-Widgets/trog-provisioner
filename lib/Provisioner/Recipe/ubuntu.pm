@@ -238,7 +238,7 @@ sub _yaml {
 
     my $text = YAML::XS::Dump($value);
     $text =~ s/\A---[ \t]*\n?//;
-    $text =~ s/\n\z//;
+    chomp $text;
 
     return "'$text'" if !ref $value && $text =~ $SEXAGESIMAL;
     return $text;
@@ -479,10 +479,11 @@ sub guest_keypair {
         chmod 0600, $half;
     }
 
+    chomp( my $public = File::Slurper::read_text("$path.pub") );
     return {
         path    => $path,
         private => File::Slurper::read_text($path),
-        public  => ( File::Slurper::read_text("$path.pub") =~ s/\n\z//r ),
+        public  => $public,
     };
 }
 

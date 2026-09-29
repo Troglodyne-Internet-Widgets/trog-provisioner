@@ -27,6 +27,7 @@ strict = 1
 [Subroutines::ProhibitAmbiguousFunctionCalls]
 [ValuesAndExpressions::ProhibitSingleArgArraySlice]
 [Bangs::ProhibitUselessRegexModifiers]
+[RegularExpressions::PreventUselessMetacharacterEscapes]
 [Bangs::ProhibitCommentedOutCode]
 [Tics::ProhibitUseBase]
 [ProhibitLeadingZeros]
@@ -53,6 +54,9 @@ formats = #!/usr/bin/env perl
 [logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]
 [ProhibitRegexForSimpleSubstring]
+[RegularExpressions::ProhibitRegexToStripAffix]
+[RegularExpressions::ProhibitRegexToChomp]
+[BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [ProhibitUsageSubs]
 [RequireQwForLiteralLists]
@@ -63,6 +67,10 @@ formats = #!/usr/bin/env perl
 allow = re
 [ProhibitUnusedDefinitions]
 [ProhibitPrintSTDERR]
+[InputOutput::ProhibitRepeatedPrints]
+[ValuesAndExpressions::ProhibitDefinedBeforeLength]
+[Subroutines::ProhibitTailRecursion]
+[Variables::ProhibitUselessVarClearing]
 # The policies of Perl::Critic itself.  only = 1 loads only the policies named
 # here, so each one must be named.
 ;
@@ -186,7 +194,14 @@ exclude_functions = print
 [Variables::ProhibitLocalVars]
 [Variables::ProhibitMatchVars]
 [Variables::ProhibitReusedNames]
-[Variables::ProhibitUnusedVariables]
+# Stricter than the core ProhibitUnusedVariables, which reports only a bare
+# `my $x;` and misses a variable that is assigned and never read.
+[Variables::ProhibitUnusedVarsStricter]
+# A method takes the arguments of its interface, whether it reads them or not.
+allow_unused_subroutine_arguments = 1
+# Each of these returns a guard, which does its work by being held until the
+# end of its scope: a mock, a mocked file, or a change of directory.
+allow_if_computed_by = Test::MockModule->new Test::MockFile->file Test::MockFile->new_dir pushd
 [Variables::ProtectPrivateVars]
 [Variables::RequireLexicalLoopIterators]
 [Variables::RequireLocalizedPunctuationVars]
