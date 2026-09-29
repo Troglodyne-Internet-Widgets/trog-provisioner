@@ -98,6 +98,10 @@ sub required_recipes {
             return (
                 routers => [qq{tCMS/lib/TCMS.pm}],
                 basedir => 'tCMS',
+
+                # Beside tpsgi.log, so that logshipper forwards the lines that
+                # the tpsgi jail reads.
+                loggers => ['Trog::Log::Syslog'],
             );
         },
     );

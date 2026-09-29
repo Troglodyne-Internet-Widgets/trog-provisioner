@@ -123,8 +123,10 @@ a host is not a client of this server, and openvpn logs it as one of these:
     TLS Error: cannot locate HMAC in incoming packet from [AF_INET]192.168.122.186:51342
     TLS Error: incoming packet authentication failed from [AF_INET]192.168.122.50:36431
 
-Its log has no timestamps, so the jail reads each line as happening when it is
-read.
+openvpn logs to the journal, and the jail reads it there, so
+L<Provisioner::Recipe::logshipper> forwards the same lines.  A line in the
+journal starts with the host name and the unit, and so the expression is not
+anchored at the start.
 
 =cut
 
@@ -134,13 +136,12 @@ sub jails {
     # Defaulted here as well as in args, as rate_limits does.
     return (
         'openvpn-tls' => {
-            filter      => '',
-            backend     => 'auto',
-            port        => $opts{port}  // 1194,
-            protocol    => $opts{proto} // 'udp',
-            logpath     => '/var/log/openvpn/openvpn.log',
-            datepattern => '{NONE}',
-            failregex   => '^TLS Error: (?:cannot locate HMAC in incoming packet|incoming packet authentication failed) from \[AF_INET6?\]<HOST>:\d+',
+            filter       => '',
+            backend      => 'systemd',
+            journalmatch => '_SYSTEMD_UNIT=openvpn-server@server.service',
+            port         => $opts{port}  // 1194,
+            protocol     => $opts{proto} // 'udp',
+            failregex    => 'TLS Error: (?:cannot locate HMAC in incoming packet|incoming packet authentication failed) from \[AF_INET6?\]<HOST>:\d+',
         },
     );
 }

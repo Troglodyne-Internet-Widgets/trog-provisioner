@@ -11,3 +11,12 @@ map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
 }
+[% IF syslog -%]
+
+[%# Beside the files that /etc/nginx/nginx.conf names, not in place of them.
+    The jails of fail2ban read those.  A tag takes letters, digits and
+    underscores only.  nohostname, because journald reads the first word after
+    the timestamp as the program, and with a host name there the tag is lost. -%]
+access_log syslog:server=unix:/dev/log,nohostname,tag=nginx_access combined;
+error_log  syslog:server=unix:/dev/log,nohostname,tag=nginx_error warn;
+[% END -%]
