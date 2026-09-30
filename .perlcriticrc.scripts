@@ -112,6 +112,10 @@ formats = #!/usr/bin/perl
 [RegularExpressions::ProhibitRegexToStripAffix]
 [RegularExpressions::ProhibitRegexToChomp]
 [RegularExpressions::ProhibitRegexForStringEquality]
+# Private means lexical: a leading underscore is a request that nothing
+# enforces, and a lexical sub that one place uses belongs at that place.
+[Subroutines::ProhibitUnderscorePrivateSubs]
+[Subroutines::ProhibitSingleUseLexicalSubs]
 [BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [RequireQwForLiteralLists]
