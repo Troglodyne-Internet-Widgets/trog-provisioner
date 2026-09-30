@@ -13,6 +13,7 @@ t/Provisioner-IPPool.t - the static address pool: parsing it, and handing out of
 
 use Test::More;
 use Test::Fatal;
+use Test::MockModule qw{strict};
 use File::Temp();
 use POSIX();
 
@@ -147,47 +148,110 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
 };
 
 {
-    # A stand-in hypervisor: _live_addresses only asks it two things.
+    # A stand-in hypervisor, which is also its own libvirt connection.  The
+    # sweep is the command that pings, and the other command lists the guests.
     package FakeHV;
-    sub new                      { my ( $class, $said ) = @_; return bless { said => $said }, $class }
-    sub bridge_device            { return 'br0' }
-    sub capture_cmd ( $self, $ ) { return $self->{said} }
+    sub new ( $class, %said ) { return bless {%said}, $class }
+    sub manages_addresses     { return 0 }
+    sub bridge_device ($self)         { return $self->{bridge} // die "no bridge\n" }
+    sub capture_cmd   ( $self, $cmd ) { return $cmd =~ m/ping/ ? $self->{sweep} : $self->{guests} }
+    sub vmm           ($self)         { return $self }
+
+    sub list_all_domains ($self) {
+        return map { FakeDomain->new($_) } @{ $self->{names} };
+    }
+    sub domain_dir       { return '/bogus' }
+    sub ssh_host ($self) { return $self->{host} }
+
+    package FakeDomain;
+    sub new      ( $class, $name ) { return bless { name => $name }, $class }
+    sub get_name ($self)           { return $self->{name} }
+
+    package FakeFleet;
+    sub new ( $class, %hvs ) { return bless {%hvs}, $class }
+    sub configured           { return 1 }
+    sub names      ($self)       { my @names = sort keys %$self; return @names }
+    sub hypervisor ( $self, $n ) { return $self->{$n} }
 }
 
-subtest 'what is answering on the wire' => sub {
+# Seeds from one stand-in hypervisor named hv1, and returns what seed returned.
+sub seed_from ( $pool, $gateway, %said ) {
+    my $mock = Test::MockModule->new('Trog::Hypervisors');
+    $mock->redefine( load => sub { return FakeFleet->new( hv1 => FakeHV->new(%said) ) } );
+    return Provisioner::IPPool::seed( $pool, $gateway );
+}
+
+subtest 'seed: what is answering on the wire' => sub {
     fresh_db();
 
     # Two signals, because one is not trustworthy alone.  The sweep says which
     # addresses answered, which is deterministic; the neighbour table is
     # consulted for a second opinion and for the hardware address, because its
     # entries decay to STALE between the sweep and the read.
-    my $hv = FakeHV->new(<<'SAID');
+    my $recorded = seed_from(
+        { cidr => '192.0.2.32/27' },
+        '192.0.2.62',
+        bridge => 'br0',
+        host   => '192.0.2.33',
+        names  => [qw{guest.test quiet.test}],
+        guests => "guest.test\t192.0.2.40\nquiet.test\t\nguest.test\t10.0.0.9\nguest.test\t192.0.2.40\n",
+        sweep  => <<'SAID',
+LIVE 192.0.2.40
 LIVE 192.0.2.43
+LIVE 192.0.2.50
 LIVE 192.0.2.54
 192.0.2.1 FAILED
+192.0.2.40 lladdr 52:54:00:12:34:56 REACHABLE
 192.0.2.43 lladdr 52:54:00:e7:46:8f REACHABLE
 192.0.2.54 lladdr ce:f9:56:8c:db:2b STALE
 192.0.2.55 lladdr 52:54:00:aa:bb:cc REACHABLE
 192.0.2.59 lladdr 52:54:00:de:ad:01 STALE
-192.0.2.62 lladdr 52:54:00:00:00:01 INCOMPLETE
+192.0.2.61 lladdr 52:54:00:00:00:01 INCOMPLETE
 SAID
+    );
 
-    my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.0.2.43'] );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $taken = Provisioner::IPPool::taken();
+
+    is( $taken->{'192.0.2.62'}, 'gateway:192.0.2.62', 'the gateway is reserved as the gateway' );
+    is( $taken->{'192.0.2.33'}, 'hv:hv1',             'the hypervisor is reserved under its name' );
+
+    # The NAT address of a guest is libvirt's to give out, and a guest named
+    # twice, from its provision.conf and from libvirt, is one row.
+    is( $taken->{'192.0.2.40'}, 'guest.test', 'a guest is recorded at its address, which is not a machine that answered' );
+    ok( !exists $taken->{'10.0.0.9'}, 'and an address outside the pool is not recorded' );
 
     # .43 answered and is REACHABLE.  .54 answered but has gone STALE, which is
     # exactly the decay the ping result is there to survive.  .55 did not answer
     # but is REACHABLE, so something is there that does not speak ICMP.
-    is_deeply( [ map { $_->{ip} } @live ], [qw{192.0.2.43 192.0.2.54 192.0.2.55}], 'answered, or reachable' );
+    is( $taken->{'192.0.2.43'}, 'insitu:52:54:00:e7:46:8f', 'what answered and is reachable is reserved' );
+    is( $taken->{'192.0.2.54'}, 'insitu:ce:f9:56:8c:db:2b', 'and the hardware address comes off the table even when the entry is stale' );
+    is( $taken->{'192.0.2.55'}, 'insitu:52:54:00:aa:bb:cc', 'what is reachable and did not answer is reserved' );
+    is( $taken->{'192.0.2.50'}, 'insitu:unknown',           'and what answered with no entry in the table has no hardware address' );
 
     # STALE without an answer is not a signal: it outlives the machine that put
     # it there, and .59 is an address a guest destroyed days ago used to have.
-    unlike( join( ',', map { $_->{ip} } @live ), qr/192[.]0[.]2[.]59/, 'and a leftover entry is not read as occupied' );
+    ok( !exists $taken->{'192.0.2.59'}, 'a leftover entry is not read as occupied' );
+    ok( !exists $taken->{'192.0.2.61'}, 'nor is one that never completed' );
 
-    is( $live[1]{mac}, 'ce:f9:56:8c:db:2b', 'the hardware address comes off the table even when the entry is stale' );
+    is( $recorded, scalar keys %$taken, 'and it counts each row it wrote' );
+    is_deeply( Provisioner::IPPool::dbh()->selectall_arrayref('SELECT source FROM seeded'), [ ['hv:hv1'] ], 'the hypervisor is marked as seeded' );
+};
+
+subtest 'seed: a hypervisor with no bridge is not swept' => sub {
+    fresh_db();
 
     # A hypervisor that will not say what bridge it is on cannot be asked what
     # is on it, and that is not a reason to stop seeding.
-    is_deeply( [ Provisioner::IPPool::_live_addresses( FakeHV->new(q{}), [] ) ], [], 'nothing to sweep is nothing to report' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $recorded = seed_from(
+        { cidr => '192.0.2.32/27' },
+        undef,
+        names  => ['guest.test'],
+        guests => "guest.test\t192.0.2.40\n",
+        sweep  => "LIVE 192.0.2.43\n",
+    );
+
+    is( $recorded, 1, 'one row' );
+    is_deeply( Provisioner::IPPool::taken(), { '192.0.2.40' => 'guest.test' }, 'the guest, and no sweep' );
 };
 
 subtest 'a seed that could not finish is retried, not remembered' => sub {
