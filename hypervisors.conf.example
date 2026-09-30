@@ -218,7 +218,7 @@ solusvm_location = qa
 
 ; Which project to build in.  Only needed where the account has more than one;
 ; where it has exactly one, that is the one.
-;solusvm_project  = 34
+;solusvm_project  = 69
 
 ; No plan: what size a guest is is the guest's to say.  It names one in its
 ; _global, as solusvm_plan, and a guest that names none is not built here at
