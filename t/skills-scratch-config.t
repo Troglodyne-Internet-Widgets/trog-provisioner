@@ -15,13 +15,16 @@ it builds, and what it refuses to take from the installation
 =cut
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use YAML::XS();
 
 use FindBin;
 use FindBin::libs;
+
+use Trog::Secrets();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -165,6 +168,40 @@ subtest 'CPAN suites and a fetch cache, when they are asked for' => sub {
     ($recipes) = scratch( cache => 'fetchcache.test', cpan_tests => 1 );
     is( $recipes->{_base}{_global}{cache},       'fetchcache.test', 'both together: the cache' );
     is( $recipes->{_base}{_global}{cpan_notest}, 0,                 'and the suites' );
+};
+
+subtest 'a hypervisor\'s credential is the real one, and nothing else is' => sub {
+    my $source = installation();
+    Trog::Secrets->create(
+        "$source/secrets.kdbx", 'the-real-one',
+        'secret:solusvm/api/password' => 'a token that works',
+        'secret:group/entry/field'    => 'a registrar key that works',
+    );
+    File::Slurper::Temp::write_text( "$source/hypervisors.conf", "[node1]\nsolusvm = node.test.test\nsolusvm_token = secret:solusvm/api/password\n" );
+
+    my $asked = 0;
+    my $dir   = tempdir( CLEANUP => 1 );
+    my ( $password, undef, undef, $real ) = Trog::Skill::ScratchConfig::build( $source, $dir, store_password => sub { $asked++; 'the-real-one' } );
+
+    is( $asked, 1, 'the installation\'s store is opened, once, because the fleet names a secret' );
+    is_deeply( $real, ['secret:solusvm/api/password'], 'and what came out of it is said' );
+
+    my %held = Trog::Secrets->lookup( "$dir/secrets.kdbx", $password, token => 'secret:solusvm/api/password' );
+    is( $held{token}, 'a token that works', 'so a scratch guest can be built on the real hypervisor' );
+    like(
+        exception { Trog::Secrets->lookup( "$dir/secrets.kdbx", $password, key => 'secret:group/entry/field' ) }, qr/No[ ]group[ ]'group'/,
+        'while a credential only the recipes of the installation name stays behind'
+    );
+
+    like(
+        exception { Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ) ) }, qr/names[ ]secret:solusvm\/api\/password/,
+        'without a way to ask for the password, it stops naming what it needed'
+    );
+
+    unlink "$source/hypervisors.conf";
+    $asked = 0;
+    Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ), store_password => sub { $asked++; 'the-real-one' } );
+    is( $asked, 0, 'and with no fleet naming a secret, the installation\'s store is never opened' );
 };
 
 done_testing();

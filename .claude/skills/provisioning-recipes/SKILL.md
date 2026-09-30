@@ -3,8 +3,9 @@ name: provisioning-recipes
 trigger: Writing, changing or debugging a Provisioner::Recipe, when you need to know what it actually does on a real guest.
 description: |
   Build a throwaway guest, run the recipe on it, and read back what happened.
-  Uses a scratch configuration and a throwaway secret store so the real one is
-  never opened, and collects the four logs that say what a recipe actually did.
+  Uses a scratch configuration and a throwaway secret store, so the real one is
+  opened only for a hypervisor's own credential, and collects the four logs that
+  say what a recipe actually did.
 ---
 
 I'm using the provisioning-recipes skill to check a recipe on a real guest.
@@ -73,6 +74,18 @@ its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
 `recipes.d/` empty, and builds a KeePass DB holding a made-up value for every
 `secret:` reference in that file.
 
+**A fleet whose blocks name a secret** -- the token of a Linode or SolusVM
+block -- needs the real value of it, because a scratch guest is built on the
+real hypervisor.  That is copied out of the installation's store, which is the
+one thing that opens it, so give it the store's password:
+
+```
+eval "$(printf 'keepass: %s\n\n' "$STORE_PASS" | .claude/skills/provisioning-recipes/scripts/scratch_config --credentials)"
+```
+
+It stops naming the references if it has no way to ask.  A fleet of libvirt
+machines names none, and nothing is asked.
+
 Three things about it worth understanding:
 
 - **Addresses look after themselves.** They come out of `ips.db` beside the rest
@@ -96,7 +109,9 @@ Three things about it worth understanding:
 - **The values are visibly fake** — `throwaway:group/entry/field`. A recipe that
   talks to a registrar or an API will fail at the point it tries. That is the
   intent. If a recipe needs a credential that actually works, that is a thing to
-  tell the user about, not to solve by opening the real store.
+  tell the user about, not to solve by opening the real store.  The hypervisor's
+  credential above is the one exception, and the scratch configuration makes it
+  itself.
 
 The password is printed because `new_config` prompts for it. Feed it on stdin:
 
