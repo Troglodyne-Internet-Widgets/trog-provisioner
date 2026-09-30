@@ -462,8 +462,13 @@ subtest 'rebuild_guest' => sub {
 
     @ASKED = ();
     $STATE{busy} = 2;
-    is( $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' )->{status}, 'running', 'a Linode still busy with the last thing is asked again until it is not' );
-    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ),                                                     3,         'twice refused, and the third time taken' );
+    {
+        # What this counts is the asking, not the waiting, so the deadline
+        # must not be what ends it on a loaded machine.
+        local $Trog::HV::Linode::BUSY_TIMEOUT = 30;
+        is( $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' )->{status}, 'running', 'a Linode still busy with the last thing is asked again until it is not' );
+    }
+    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ), 3, 'twice refused, and the third time taken' );
 
     $STATE{busy} = 1_000_000;
     like( exception { $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' ) }, qr/400[ ]Linode[ ]busy/, 'and one still busy after BUSY_TIMEOUT is said' );

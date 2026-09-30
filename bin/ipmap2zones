@@ -10,6 +10,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Time::HiRes qw{time};
 use FindBin;
 use FindBin::libs;
 
@@ -133,7 +134,7 @@ sub main {
             aliases       => $alias_conf,
             nameservers   => $ns_conf,
             admin_email   => $global_conf->{admin_email},
-            serial        => time(),
+            serial        => int time,
             extra_records => '',
 
             # The zone needs this for more than the names: the mail records are

@@ -16,6 +16,7 @@ use File::Slurper();
 use IPC::Run3();
 use File::Slurper::Temp();
 use Net::OpenSSH::More();
+use Time::HiRes qw{alarm};
 use Trog::Credentials();
 
 =head1 NAME
