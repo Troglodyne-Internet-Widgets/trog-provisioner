@@ -62,10 +62,14 @@ subtest 'the configuration of the tools reaches no test' => sub {
         is_deeply( [ $map->($path) ], [q{}], "$path reaches no test" );
     }
 
-    # The hooks are shell, and no test loads one.  Left unexplained they ran
-    # every test, which answers nothing about a change to a hook.
-    is_deeply( [ $map->('git-hooks/pre-commit') ],  [q{}], 'and so does the pre-commit hook' );
-    is_deeply( [ $map->('git-hooks/post-commit') ], [q{}], 'and the post-commit one' );
+    # The pre-commit hook is shell, and no test loads it.  Left unexplained it
+    # ran every test, which answers nothing about a change to it.
+    is_deeply( [ $map->('git-hooks/pre-commit') ], [q{}], 'and so does the pre-commit hook' );
+};
+
+subtest 'the post-commit hook stands for the test that runs it' => sub {
+    my @tests = $map->('git-hooks/post-commit');
+    ok( ( grep { $_ eq 't/post-commit.t' } @tests ), 't/post-commit.t' ) or diag "got: @tests";
 };
 
 subtest 'documentation reaches no test, and anything else is left to the caller' => sub {
