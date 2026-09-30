@@ -94,14 +94,14 @@ added to a guest that is up runs again before its packages install.
 
 =cut
 
-sub merge              { my ($class) = @_; return $class->_unanswered('merge') }
-sub first_boot_files   { my ($class) = @_; return $class->_unanswered('first_boot_files') }
-sub answers            { my ($class) = @_; return $class->_unanswered('answers') }
-sub cloud_init_modules { my ($class) = @_; return $class->_unanswered('cloud_init_modules') }
-
-sub _unanswered {
-    my ( $class, $what ) = @_;
+# Dies, naming the packager $class and the $what that it does not answer.
+my sub unanswered ( $class, $what ) {
     die( ( ref $class || $class ) . " does not say $what, which every packager must.\n" );
 }
+
+sub merge              { my ($class) = @_; return unanswered( $class, 'merge' ) }
+sub first_boot_files   { my ($class) = @_; return unanswered( $class, 'first_boot_files' ) }
+sub answers            { my ($class) = @_; return unanswered( $class, 'answers' ) }
+sub cloud_init_modules { my ($class) = @_; return unanswered( $class, 'cloud_init_modules' ) }
 
 1;

@@ -109,7 +109,14 @@ nothing and fails in the middle of an order.  An early failure is better.
 
 =cut
 
-sub lexicon_credentials { return shift->_unanswered('lexicon_credentials') }
+sub lexicon_credentials {
+    my ($self) = @_;
+
+    my $recipe = Scalar::Util::blessed($self) || $self;
+    $recipe =~ s/\AProvisioner::Recipe::(?:\w+::)?//;
+
+    die "The $recipe recipe does not say what its lexicon_credentials is.\n" . "Every recipe that can answer a dns-01 challenge has to answer that before\n" . "anything can write a record through it; see perldoc Provisioner::DNSRecipe.\n";
+}
 
 =head2 $name = $recipe->local_implementation()
 
@@ -148,6 +155,16 @@ the list with this method.  Do not keep a second copy of it.
 =cut
 
 sub reserved_tlds { return @RESERVED_TLDS }
+
+# 1 if $recipe is a key of one of the hashes in @where, and 0 if not.  See
+# implementation_for for why the caller passes the configurations in.
+my sub configures ( $recipe, @where ) {
+    foreach my $conf ( grep { ref $_ eq 'HASH' } @where ) {
+        return 1 if exists $conf->{$recipe};
+    }
+
+    return 0;
+}
 
 =head2 $name = $recipe->implementation_for(%opts)
 
@@ -220,8 +237,8 @@ sub implementation_for {
     # Look in the host configuration too, because the guest that a domain is
     # layered onto serves it.
     my @where     = ( $opts{configured}, $opts{host_configured} );
-    my $local     = ( $reserved || _configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
-    my $registrar = _configures( 'registrar', @where );
+    my $local     = ( $reserved || configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
+    my $registrar = configures( 'registrar', @where );
 
     my $stated = $opts{ $class->tiebreaker_key };
     if ($stated) {
@@ -278,6 +295,12 @@ Returns what lexicon needs to get to the server that holds the zone of
 C<$opts{domain}>.  It asks C<provider_for> for the provider, and then asks that
 provider for its C<lexicon_credentials>.
 
+It passes C<lexicon_credentials> the configuration block of the provider for
+C<$opts{domain}>, and C<domain>.  If the domain has no block, it passes the
+block of the guest that the domain is layered onto.  That is only what the
+operator configured.  If a credential is missing, the implementation decides
+what to do.  See C<api_key_for> in L<Provisioner::Recipe::pdns>.
+
 It dies as C<provider_for> does.  It also dies, with the name of the provider,
 if this installation has no recipe for that provider, or if that recipe cannot
 answer a challenge.
@@ -289,79 +312,19 @@ sub credentials_for {
 
     my $provider = $class->provider_for(%opts);
 
-    return $class->_implementation($provider)->lexicon_credentials( _provider_config( $provider, %opts ) );
-}
-
-=head2 $class = $recipe->_implementation($provider)
-
-Returns the class of the recipe that implements C<$provider>.  It loads the
-class and does not make an object.  An object needs C<template_dirs>, which a
-caller of this method has no reason to know.  C<lexicon_credentials> reads only
-its arguments, so the class is enough.
-
-Dies if no recipe has that name, or if the recipe is not a
-Provisioner::DNSRecipe.
-
-=cut
-
-sub _implementation {
-    my ( $class, $provider ) = @_;
-
     die "$provider is not a recipe this installation has, so nothing can answer a dns-01 challenge through it.\n"
       unless Provisioner::Cookbook->has($provider);
 
+    # The class, and not an object: an object needs template_dirs, which a
+    # caller has no reason to know, and lexicon_credentials reads only its
+    # arguments.
     my $impl = Provisioner::Cookbook->load($provider);
     die "$provider cannot answer a dns-01 challenge: it is not a Provisioner::DNSRecipe.\n" unless $impl->isa('Provisioner::DNSRecipe');
-
-    return $impl;
-}
-
-=head2 %args = _provider_config($provider, %opts)
-
-Returns the arguments for C<lexicon_credentials>: the configuration block of
-C<$provider> for C<$opts{domain}>, and C<domain>.  If the domain has no block,
-it uses the block of the guest that the domain is layered onto.
-
-It returns only what the operator configured.  If a credential is missing, the
-implementation decides what to do.  See C<api_key_for> in
-L<Provisioner::Recipe::pdns>.
-
-=cut
-
-sub _provider_config {
-    my ( $provider, %opts ) = @_;
 
     my $server = Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain};
     my $conf   = Provisioner::Cookbook->domain_config( $opts{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
 
-    return ( %{$conf}, domain => $opts{domain} );
-}
-
-=head2 $bool = _configures($recipe, @where)
-
-Returns 1 if C<$recipe> is a key in one of the hash references in C<@where>,
-and 0 if not.  It ignores an element that is not a hash reference.  See
-C<implementation_for> for why the caller passes the configurations in.
-
-=cut
-
-sub _configures {
-    my ( $recipe, @where ) = @_;
-
-    foreach my $conf ( grep { ref $_ eq 'HASH' } @where ) {
-        return 1 if exists $conf->{$recipe};
-    }
-
-    return 0;
-}
-
-sub _unanswered {
-    my ( $self, $what ) = @_;
-
-    my $recipe = Scalar::Util::blessed($self) || $self;
-    $recipe =~ s/\AProvisioner::Recipe::(?:\w+::)?//;
-
-    die "The $recipe recipe does not say what its $what is.\n" . "Every recipe that can answer a dns-01 challenge has to answer that before\n" . "anything can write a record through it; see perldoc Provisioner::DNSRecipe.\n";
+    return $impl->lexicon_credentials( %{$conf}, domain => $opts{domain} );
 }
 
 1;

@@ -144,6 +144,12 @@ sub cloud_init_modules {
     return qw{cc_apt_configure};
 }
 
+# A source as one string of its scalar leaves, so that two sources compare
+# with eq whatever the order of their keys.
+my sub canonical ($value) {
+    return join( ',', map { "$_->[0]=" . ( ${ $_->[1] } // q{} ) } grep { !ref ${ $_->[1] } } Trog::Utils::slots_in( \$value ) );
+}
+
 =head2 @sources = Provisioner::Packager::Deb->merge(@sources)
 
 Returns C<@sources> validated, with one entry for each C<name>.  Two recipes can
@@ -167,23 +173,13 @@ sub merge {
         my %normal = ( %$source, ( $source->{pin} ? ( pin => { packages => q{*}, %{ $source->{pin} } } ) : () ) );
         my $name   = $normal{name};
         if ( my $had = $by_name{$name} ) {
-            die "Two recipes name the apt source $name, and they describe it differently.\n" unless _same( $had, \%normal );
+            die "Two recipes name the apt source $name, and they describe it differently.\n" unless canonical($had) eq canonical( \%normal );
             next;
         }
         $by_name{$name} = \%normal;
         push @order, $name;
     }
     return map { $by_name{$_} } @order;
-}
-
-sub _same {
-    my ( $one, $two ) = @_;
-    return _canonical($one) eq _canonical($two);
-}
-
-sub _canonical {
-    my ($value) = @_;
-    return join( ',', map { "$_->[0]=" . ( ${ $_->[1] } // q{} ) } grep { !ref ${ $_->[1] } } Trog::Utils::slots_in( \$value ) );
 }
 
 =head2 @files = Provisioner::Packager::Deb->files(@sources)
