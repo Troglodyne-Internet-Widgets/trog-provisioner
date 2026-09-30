@@ -900,6 +900,10 @@ sub handle_domain {
         push( @secret_values, map { $_->[1] } $builders{$module}->secrets_in( $rconf->{$domain}{$module} // {} ) );
     }
 
+    # A value the store resolved is also in its marked field, and one value can
+    # fill several, so each is looked for once per command.
+    @secret_values = uniq @secret_values;
+
     my %guest_secrets;
 
     foreach my $module (@modules) {
