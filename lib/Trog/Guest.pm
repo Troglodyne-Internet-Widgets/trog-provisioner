@@ -306,6 +306,15 @@ Returns the reference under which the store keeps the key of this domain.
 
 sub ref_for_key { my ( undef, $domain ) = @_; return "secret:guests/$domain/password" }
 
+# The path of the secret store, or undef when the installation has none.  Ask
+# this before any password prompt: with no store there is no key, and a prompt
+# with nobody to answer it waits instead of failing.
+my sub store_path () {
+    my $store = Trog::Config->path('secrets.kdbx');
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store at all
+    return defined $store && -f $store ? $store : undef;
+}
+
 =head2 Trog::Guest->seal_key($domain, $path)
 
 Puts the private key at C<$path> into the store, deletes the file, and returns
@@ -329,7 +338,7 @@ sub seal_key {
     my $private = eval { File::Slurper::read_binary($path) };
     return 0 unless $private;
 
-    my $store = _store() or return 0;
+    my $store = store_path() or return 0;
 
     # replace, not write.  write builds a new database from only what it gets,
     # and so deletes every other secret in the store.
@@ -377,7 +386,7 @@ sub key_path {
 
     return $MATERIALISED{$domain}{path} if $MATERIALISED{$domain};
 
-    my $store = _store() or return undef;
+    my $store = store_path() or return undef;
 
     my %got = eval {
         Trog::Secrets->lookup(
@@ -397,20 +406,6 @@ sub key_path {
 
     $MATERIALISED{$domain} = { handle => $tmp, path => "$tmp" };
     return $MATERIALISED{$domain}{path};
-}
-
-=head2 _store
-
-Returns the path of the secret store, or undef when the installation has none.
-Callers ask this before any password prompt.  With no store there is no key,
-and a prompt with nobody to answer it waits instead of failing.
-
-=cut
-
-sub _store {
-    my $store = Trog::Config->path('secrets.kdbx');
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store at all
-    return defined $store && -f $store ? $store : undef;
 }
 
 =head1 SEE ALSO
