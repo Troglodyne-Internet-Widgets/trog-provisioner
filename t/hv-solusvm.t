@@ -41,7 +41,7 @@ my ( %STATE, @ASKED );
 sub reset_node {
     %STATE = (
         account   => { email => 'you@example.test', roles => [ { name => 'CLIENT' } ], limit_usage => { servers => undef } },
-        projects  => [ { id => 34, name => 'The Bunker' } ],
+        projects  => [ { id => 69, name => 'A Project' } ],
         locations => [ { id => 8,  name => 'qa' } ],
         os_images => [
             { name => 'Debian', versions => [ { id => 28, version => '13' }, { id => 15, version => '12' } ] },
@@ -74,7 +74,8 @@ sub answer {
     return _page( $STATE{servers} ) if $method eq 'GET'  && $path =~ m{\A /projects/\d+/servers \z}x;
     return _create($body)           if $method eq 'POST' && $path =~ m{\A /projects/\d+/servers \z}x;
 
-    if ( my ($id) = $path =~ m{\A /servers/(\d+) \z}x ) {
+    if ( $path =~ m{\A /servers/\d+ \z}x ) {
+        my $id = substr( $path, length '/servers/' );
         return { data => _server($id) } if $method eq 'GET';
         return _delete($id)             if $method eq 'DELETE';
     }
@@ -118,10 +119,10 @@ sub _create {
     my ($body) = @_;
 
     my $made = {
-        id           => 24596,
+        id           => 1003,
         name         => $body->{name},
         status       => 'started',
-        ip_addresses => { ipv4 => [ { ip => '10.4.32.97', is_primary => 1 } ], ipv6 => [] },
+        ip_addresses => { ipv4 => [ { ip => '10.99.32.97', is_primary => 1 } ], ipv6 => [] },
     };
     push @{ $STATE{servers} }, $made;
     return { data => $made };
@@ -235,7 +236,7 @@ subtest 'which kind of thing it is' => sub {
 
 subtest 'the project is where the API answers' => sub {
     is node( solusvm_project => 12 )->project, 12, 'a project named in the file is the one';
-    is node()->project,                        34, 'and where the account has exactly one, that is the one';
+    is node()->project,                        69, 'and where the account has exactly one, that is the one';
 
     my $hv = node();
     $STATE{projects} = [ { id => 1, name => 'one' }, { id => 2, name => 'two' } ];
@@ -298,7 +299,7 @@ subtest 'capacity is the plan the guest named' => sub {
 
 subtest 'finding a guest by name' => sub {
     my $hv = node();
-    $STATE{servers} = [ { id => 21995, name => 'one.test' }, { id => 16668, name => 'two.test' } ];
+    $STATE{servers} = [ { id => 1001, name => 'one.test' }, { id => 1002, name => 'two.test' } ];
 
     is_deeply [ sort $hv->guest_names ], [qw{one.test two.test}], 'every server in the project, whatever built it';
     ok $hv->domain_exists('one.test'), 'a guest that is there';
@@ -311,11 +312,11 @@ subtest 'finding a guest by name' => sub {
 
 subtest 'the address a guest is reached at' => sub {
     my $hv = node();
-    $STATE{servers} = [ { id => 1, name => 'one.test', status => 'started', ip_addresses => { ipv4 => [ { ip => '10.4.32.98' }, { ip => '10.4.32.49', is_primary => 1 } ] } } ];
-    is $hv->guest_ssh_ip('one.test'), '10.4.32.49', 'the primary address, which is the one the node itself shows';
+    $STATE{servers} = [ { id => 1, name => 'one.test', status => 'started', ip_addresses => { ipv4 => [ { ip => '10.99.32.98' }, { ip => '10.99.32.49', is_primary => 1 } ] } } ];
+    is $hv->guest_ssh_ip('one.test'), '10.99.32.49', 'the primary address, which is the one the node itself shows';
 
-    $STATE{servers} = [ { id => 1, name => 'one.test', status => 'started', ip_addresses => { ipv4 => [ { ip => '10.4.32.98' } ] } } ];
-    is $hv->guest_ssh_ip('one.test'), '10.4.32.98', 'or the only one, where the node marked none of them';
+    $STATE{servers} = [ { id => 1, name => 'one.test', status => 'started', ip_addresses => { ipv4 => [ { ip => '10.99.32.98' } ] } } ];
+    is $hv->guest_ssh_ip('one.test'), '10.99.32.98', 'or the only one, where the node marked none of them';
 
     $STATE{servers} = [ { id => 1, name => 'one.test', status => 'processing', ip_addresses => { ipv4 => [] } } ];
     like exception { $hv->guest_ssh_ip('one.test') }, qr/no[ ]IPv4[ ]address[ ].*[ ]processing/xs,
@@ -325,30 +326,30 @@ subtest 'the address a guest is reached at' => sub {
 subtest 'which network of the guests an address is on' => sub {
     my $hv = node();
     $STATE{servers} = [
-        { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.4.32.98', netmask => '255.255.224.0' } ] } },
+        { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.99.32.98', netmask => '255.255.224.0' } ] } },
         { id => 2, name => 'bare.test' },
     ];
 
-    is $hv->guest_network_of('10.4.32.49'),    '10.4.32.0/19', 'an address on a guest\'s own network is on it, named as the network rather than the guest';
-    is $hv->guest_network_of('10.4.63.255'),   '10.4.32.0/19', 'up to the last address the netmask holds';
-    is $hv->guest_network_of('10.4.64.1'),     undef,          'and not one past it';
-    is $hv->guest_network_of('172.29.48.208'), undef,          'an address behind a NAT of its own is on none of them';
-    is $hv->guest_network_of('localhost'),     undef,          'and a name is not resolved into an address to compare';
+    is $hv->guest_network_of('10.99.32.49'),   '10.99.32.0/19', 'an address on a guest\'s own network is on it, named as the network rather than the guest';
+    is $hv->guest_network_of('10.99.63.255'),  '10.99.32.0/19', 'up to the last address the netmask holds';
+    is $hv->guest_network_of('10.99.64.1'),    undef,           'and not one past it';
+    is $hv->guest_network_of('172.29.48.208'), undef,           'an address behind a NAT of its own is on none of them';
+    is $hv->guest_network_of('localhost'),     undef,           'and a name is not resolved into an address to compare';
 
-    $STATE{servers} = [ { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.4.32.98', netmask => '0.0.0.0' } ] } } ];
-    is $hv->guest_network_of('10.4.32.49'), undef, 'a netmask of nothing puts every address on it, so it is no evidence of a shared network';
+    $STATE{servers} = [ { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.99.32.98', netmask => '0.0.0.0' } ] } } ];
+    is $hv->guest_network_of('10.99.32.49'), undef, 'a netmask of nothing puts every address on it, so it is no evidence of a shared network';
 
     $STATE{servers} = [];
-    is $hv->guest_network_of('10.4.32.49'), undef, 'with no guests, there is no network to be on';
+    is $hv->guest_network_of('10.99.32.49'), undef, 'with no guests, there is no network to be on';
 };
 
 subtest 'building a guest' => sub {
     my $hv = node();
 
     my $made = $hv->create_guest( name => 'new.test', image => 28, size => 2375, user_data => "#cloud-config\n" );
-    is $made->{id}, 24596, 'the server comes back, having been waited for';
+    is $made->{id}, 1003, 'the server comes back, having been waited for';
 
-    my ($asked) = asked_for( 'POST', '/projects/34/servers' );
+    my ($asked) = asked_for( 'POST', '/projects/69/servers' );
     is_deeply $asked->{body},
       {
         name                => 'new.test',
@@ -368,15 +369,15 @@ subtest 'building a guest' => sub {
 
 subtest 'reinstalling one that is already there' => sub {
     my $hv = node();
-    $STATE{servers} = [ { id => 21995, name => 'one.test', status => 'started', ip_addresses => { ipv4 => [ { ip => '10.4.32.49', is_primary => 1 } ] } } ];
+    $STATE{servers} = [ { id => 1001, name => 'one.test', status => 'started', ip_addresses => { ipv4 => [ { ip => '10.99.32.49', is_primary => 1 } ] } } ];
 
     $hv->rebuild_guest( 'one.test', image => 28, user_data => "#cloud-config\nkey\n" );
 
-    my ($asked) = asked_for( 'POST', '/servers/21995/reinstall' );
+    my ($asked) = asked_for( 'POST', '/servers/1001/reinstall' );
     is_deeply $asked->{body}, { os => 28, user_data => "#cloud-config\nkey\n" },
       "reinstall calls 'os' what create calls 'os_image_version_id', and the payload is why this is not a delete and a rebuild";
 
-    ok scalar( grep { $_->{method} eq 'GET' && $_->{path} eq '/servers/21995' } @ASKED ) > 1,
+    ok scalar( grep { $_->{method} eq 'GET' && $_->{path} eq '/servers/1001' } @ASKED ) > 1,
       'it waits for the node to stop saying started before waiting for it to say started again';
 
     like exception { $hv->rebuild_guest( 'gone.test', image => 28 ) }, qr/no[ ]guest[ ]called[ ]'gone.test'/, 'and there has to be one to reinstall';
@@ -412,10 +413,10 @@ subtest 'a snapshot before a reinstall, where the plan allows one' => sub {
 
 subtest 'taking one away' => sub {
     my $hv = node();
-    $STATE{servers} = [ { id => 21995, name => 'one.test' } ];
+    $STATE{servers} = [ { id => 1001, name => 'one.test' } ];
 
-    ok $hv->annihilate_domain('one.test'),                'a guest that was there is deleted';
-    ok scalar( asked_for( 'DELETE', '/servers/21995' ) ), 'by its id';
+    ok $hv->annihilate_domain('one.test'),               'a guest that was there is deleted';
+    ok scalar( asked_for( 'DELETE', '/servers/1001' ) ), 'by its id';
 
     is $hv->annihilate_domain('one.test'), 0, 'and asking again is false rather than fatal, so a teardown can be run twice';
 
@@ -438,7 +439,7 @@ subtest 'preflight' => sub {
 
     my $resources = $hv->check_solusvm_resources;
     ok $resources->{ok}, 'a project and a location that exist is a pass';
-    like $resources->{what}, qr/project[ ]34[ ]at[ ]location[ ]8/, 'said in the words somebody would recognise';
+    like $resources->{what}, qr/project[ ]69[ ]at[ ]location[ ]8/, 'said in the words somebody would recognise';
 
     my $wrong = node( solusvm_location => 'moon' );
     ok !$wrong->check_solusvm_resources->{ok}, 'a location the node does not have is a failure';
