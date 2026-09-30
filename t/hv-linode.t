@@ -286,14 +286,20 @@ subtest 'backend_for' => sub {
     );
 };
 
-subtest '_token' => sub {
+subtest 'the client is given the token out of the secret store' => sub {
     my %asked;
     my $secrets = Test::MockModule->new('Trog::Secrets');
     $secrets->redefine( lookup => sub ( $class, $file, $password, %needed ) { %asked = ( file => $file, password => $password, %needed ); return ( linode_token => 'the-token' ) } );
     my $credentials = Test::MockModule->new('Trog::Credentials');
     $credentials->redefine( prompt => sub ( $class, $message, $name, @ ) { return "passphrase for $name" } );
 
-    is( linode_hv()->_token,  'the-token',                  'the token comes out of the secret store' );
+    # The api the rest of this file replaces, which is what reads the token.
+    my %made;
+    my $client = Test::MockModule->new('Linode::API');
+    $client->redefine( new => sub ( $class, %args ) { %made = %args; return bless {}, $class } );
+    $mock->original('api')->( linode_hv() );
+
+    is( $made{token},         'the-token',                  'the token comes out of the secret store' );
     is( $asked{linode_token}, 'secret:linode/api/password', 'by the reference the block names' );
     is( $asked{password},     'passphrase for keepass',     'unlocked with the passphrase this run has for it' );
 };

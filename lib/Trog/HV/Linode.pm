@@ -180,19 +180,15 @@ store.
 
 sub api {
     my ($self) = @_;
-    return $self->{_api} //= do { $self->require_client; Linode::API->new( token => $self->_token ) };
+    return $self->{_api} //= do { $self->require_client; Linode::API->new( token => $self->setting('linode_token') ) };
 }
-
-sub _token { my ($self) = @_; return $self->setting('linode_token') }
 
 # One call, answered with Linode's JSON.  Dies with what Linode said, or with
 # what the specification said was wrong before anything was sent.
 #
 # Linode refuses an action on a Linode that is still doing the last one, as
 # "Linode busy.", and that passes: so it is asked again until $BUSY_TIMEOUT.
-sub _call {
-    my ( $self, $operation, $params, @body ) = @_;
-
+my sub call ( $self, $operation, $params = undef, @body ) {
     my $deadline = time + $BUSY_TIMEOUT;
     my ( $tx, $reasons );
     do {
@@ -214,12 +210,10 @@ sub _call {
 }
 
 # Every page of a list, which Linode hands out 500 at a time at most.
-sub _all {
-    my ( $self, $operation, $params ) = @_;
-
+my sub every_page ( $self, $operation, $params = {} ) {
     my ( @all, $page, $pages );
     do {
-        my $answer = $self->_call( $operation, { %{ $params // {} }, page => ++$page, page_size => 500 } );
+        my $answer = call( $self, $operation, { %$params, page => ++$page, page_size => 500 } );
         push @all, @{ $answer->{data} // [] };
         $pages = $answer->{pages} // 1;
     } while ( $page < $pages );
@@ -227,7 +221,31 @@ sub _all {
     return @all;
 }
 
-sub _filter ($query) { return Cpanel::JSON::XS::encode_json($query) }
+# Every type Linode sells, which does not change within a run.
+my sub type_of ( $self, $id ) {
+    $self->{_types} //= { map { $_->{id} => $_ } every_page( $self, 'get-linode-types' ) };
+    return $self->{_types}{$id} // die "Linode has no type '$id'\n";
+}
+
+# The monthly price of a type in a region, or of its backup service.  Linode
+# gives 30 of its 75 types an hourly price and no monthly one -- the GPU and
+# accelerated ones -- so a month of one of those is $HOURS_A_MONTH hours of it,
+# which is the most it can cost rather than what it will.
+my sub price ( $self, $type_id, $region, $addon = undef ) {
+    my $type = type_of( $self, $type_id );
+    my $item = $addon ? $type->{addons}{$addon} : $type;
+
+    my ($local) = grep { $_->{id} eq $region } @{ $item->{region_prices} // [] };
+    my $price = $local // $item->{price} // {};
+
+    return $price->{monthly}                 if defined $price->{monthly};
+    return $price->{hourly} * $HOURS_A_MONTH if defined $price->{hourly};
+
+    die "Linode reports no price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n";
+}
+
+# Every Linode on the account, whatever built it.
+my sub linodes ($self) { return every_page( $self, 'get-linode-instances' ) }
 
 =head1 WHAT A GUEST COSTS
 
@@ -252,7 +270,7 @@ sub monthly_cost {
     die 'Say which region to build in, in the block for ' . $self->describe . " in hypervisors.conf
 " unless $self->region;
 
-    return $self->_price( $type, $self->region );
+    return price( $self, $type, $self->region );
 }
 
 =head2 monthly_spend
@@ -269,47 +287,8 @@ sub monthly_spend {
 
     return sum0 map {
         my $linode = $_;
-        $self->_price( $linode->{type}, $linode->{region} ) + ( $linode->{backups}{enabled} ? $self->_price( $linode->{type}, $linode->{region}, 'backups' ) : 0 )
-    } $self->_linodes;
-}
-
-# The monthly price of a type in a region, or of its backup service.  Linode
-# gives 30 of its 75 types an hourly price and no monthly one -- the GPU and
-# accelerated ones -- so a month of one of those is $HOURS_A_MONTH hours of it,
-# which is the most it can cost rather than what it will.
-sub _price {
-    my ( $self, $type_id, $region, $addon ) = @_;
-
-    my $type = $self->_type($type_id);
-    my $item = $addon ? $type->{addons}{$addon} : $type;
-
-    my ($local) = grep { $_->{id} eq $region } @{ $item->{region_prices} // [] };
-    my $price = $local // $item->{price} // {};
-
-    return $price->{monthly}                 if defined $price->{monthly};
-    return $price->{hourly} * $HOURS_A_MONTH if defined $price->{hourly};
-
-    die "Linode reports no price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n";
-}
-
-# Whether Linode prices this type by the month, which is what it bills for one
-# that runs all month.  A type it prices by the hour alone is not offered: an
-# offer says what a guest costs, and for those there is only a ceiling.
-sub _priced_monthly {
-    my ( $self, $type_id, $region ) = @_;
-
-    my $type = $self->_type($type_id);
-    my ($local) = grep { $_->{id} eq $region } @{ $type->{region_prices} // [] };
-
-    return defined( ( $local // $type->{price} // {} )->{monthly} ) ? 1 : 0;
-}
-
-# Every type Linode sells, which does not change within a run.
-sub _type {
-    my ( $self, $id ) = @_;
-
-    $self->{_types} //= { map { $_->{id} => $_ } $self->_all('get-linode-types') };
-    return $self->{_types}{$id} // die "Linode has no type '$id'\n";
+        price( $self, $linode->{type}, $linode->{region} ) + ( $linode->{backups}{enabled} ? price( $self, $linode->{type}, $linode->{region}, 'backups' ) : 0 )
+    } linodes($self);
 }
 
 =head2 image_for_distro($distro)
@@ -343,7 +322,7 @@ sub cheapest_for {
     my ( $self, %needs ) = @_;
 
     my @fit = eval {
-        grep { $_->{memory} >= ( $needs{memory_mb} // 0 ) && $_->{vcpus} >= ( $needs{cpus} // 0 ) && $_->{disk} * $MB >= ( $needs{disk_bytes} // 0 ) } $self->_all('get-linode-types');
+        grep { $_->{memory} >= ( $needs{memory_mb} // 0 ) && $_->{vcpus} >= ( $needs{cpus} // 0 ) && $_->{disk} * $MB >= ( $needs{disk_bytes} // 0 ) } every_page( $self, 'get-linode-types' );
     };
     return undef unless @fit;
 
@@ -354,15 +333,22 @@ sub cheapest_for {
       grep { !defined $room                            || $_->{monthly_cost} <= $room }
       map {
         my $type = $_;
-        +{ %$type, monthly_cost => eval { $self->_price( $type->{id}, $self->region ) } // 0 }
+        +{ %$type, monthly_cost => eval { price( $self, $type->{id}, $self->region ) } // 0 }
       } @fit;
 
     return undef unless @priced;
+
+    # A type Linode prices by the hour alone has only a ceiling for a month, so
+    # the offer says the hourly rate too.
+    my $cheapest = $priced[0];
+    my ($local)  = grep { $_->{id} eq $self->region } @{ $cheapest->{region_prices} // [] };
+    my $monthly  = defined( ( $local // $cheapest->{price} // {} )->{monthly} );
+
     return {
         key          => $self->size_key,
-        value        => $priced[0]{id},
-        monthly_cost => $priced[0]{monthly_cost},
-        $self->_priced_monthly( $priced[0]{id}, $self->region ) ? () : ( hourly => $priced[0]{price}{hourly} ),
+        value        => $cheapest->{id},
+        monthly_cost => $cheapest->{monthly_cost},
+        $monthly ? () : ( hourly => $cheapest->{price}{hourly} ),
     };
 }
 
@@ -392,7 +378,7 @@ sub capacity {
     die 'A guest is built on ' . $self->describe . " as the type it names in linode_type, and this one names none
 " unless $named;
 
-    my $type = $self->_type($named);
+    my $type = type_of( $self, $named );
 
     return {
         memory_mb        => $type->{memory},
@@ -403,7 +389,7 @@ sub capacity {
         cpus_committed   => 0,
         cpus_free        => $type->{vcpus},
         disk_free        => $type->{disk} * $MB,
-        guests           => scalar $self->_linodes,
+        guests           => scalar linodes($self),
     };
 }
 
@@ -453,11 +439,9 @@ sub linode {
 
     die "linode() needs a name\n" unless $name;
 
-    my @found = grep { $_->{label} eq $name } $self->_all( 'get-linode-instances', { 'X-Filter' => _filter( { label => $name } ) } );
+    my @found = grep { $_->{label} eq $name } every_page( $self, 'get-linode-instances', { 'X-Filter' => Cpanel::JSON::XS::encode_json( { label => $name } ) } );
     return $found[0];
 }
-
-sub _linodes ($self) { return $self->_all('get-linode-instances') }
 
 =head2 guest_names
 
@@ -473,7 +457,7 @@ is not.
 =cut
 
 sub guest_names ($self) {
-    return map { $_->{label} } $self->_linodes;
+    return map { $_->{label} } linodes($self);
 }
 
 sub domain_exists ( $self, $name ) { return defined $self->linode($name) ? 1 : 0 }
@@ -496,13 +480,37 @@ sub guest_ssh_ip {
     my $linode = $self->linode($name)
       or die "There is no guest called '$name' on " . $self->describe . "\n";
 
-    my ($public) = grep { !_is_private($_) } @{ $linode->{ipv4} // [] };
+    # A private address routes only inside Linode's own network, and Linode
+    # takes them from 192.168.128.0/17.  The rest of RFC 1918 is here for a VPC.
+    my ($public) = grep { !m/\A(?:10[.]|192[.]168[.]|172[.](?:1[6-9]|2\d|3[01])[.])/ } @{ $linode->{ipv4} // [] };
     return $public // die "The guest '$name' has no public IPv4 address on " . $self->describe . "\n";
 }
 
-# A private address routes only inside Linode's own network, and Linode takes
-# them from 192.168.128.0/17.  The rest of RFC 1918 is here for a VPC.
-sub _is_private ($address) { return $address =~ m/\A(?:10[.]|192[.]168[.]|172[.](?:1[6-9]|2\d|3[01])[.])/ ? 1 : 0 }
+# Linode takes the payload base64 encoded, for its metadata service to hand to
+# cloud-init, and refuses one over 64KB before encoding.
+my sub metadata ($user_data) {
+    return () unless $user_data;
+    die 'The cloud-init payload is ' . length($user_data) . " bytes, and Linode takes 65535 at most\n" if length $user_data > 65535;
+    return ( metadata => { user_data => MIME::Base64::encode_base64( $user_data, q{} ) } );
+}
+
+# Linode requires one to deploy an image, and scores its strength.
+my sub root_pass { return Crypt::PRNG::random_string_from( join( q{}, 'a' .. 'z', 'A' .. 'Z', 0 .. 9, '-_.+=!@%' ), 48 ) }
+
+# Waits until the Linode is in the state wanted, and returns it.
+my sub wait_for ( $self, $id, $name, $want ) {
+    my $deadline = time + $BUILD_TIMEOUT;
+
+    while (1) {
+        my $linode = call( $self, 'get-linode-instance', { linodeId => $id } );
+        return $linode if ( $linode->{status} // q{} ) eq $want;
+
+        last if time >= $deadline;
+        sleep $POLL;
+    }
+
+    die "The guest '$name' was not $want ${BUILD_TIMEOUT}s later.\n" . "Check it in the Cloud Manager, and its console through Lish.\n";
+}
 
 =head1 BUILDING AND TEARING DOWN
 
@@ -548,16 +556,16 @@ Set it in the block in hypervisors.conf.
         region    => $spec{region},
         type      => $spec{size},
         image     => $spec{image},
-        root_pass => _root_pass(),
+        root_pass => root_pass(),
         tags      => [$MANAGED_BY],
         booted    => Cpanel::JSON::XS::true(),
-        _metadata( $spec{user_data} ),
+        metadata( $spec{user_data} ),
     );
     $body{firewall_id} = 0 + $self->firewall_id   if $self->firewall_id;
     $body{private_ip}  = Cpanel::JSON::XS::true() if $self->private_ip;
 
-    my $linode = $self->_call( 'post-linode-instance', {}, json => \%body );
-    return $self->_wait_for( $linode->{id}, $name, 'running' );
+    my $linode = call( $self, 'post-linode-instance', {}, json => \%body );
+    return wait_for( $self, $linode->{id}, $name, 'running' );
 }
 
 =head2 rebuild_guest($name, user_data => $seed, image => $image)
@@ -584,57 +592,22 @@ sub rebuild_guest {
     my $image = $spec{image};
     die "Rebuilding '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $image;
 
-    my %body = ( image => $image, root_pass => _root_pass(), booted => Cpanel::JSON::XS::true(), _metadata( $spec{user_data} ) );
+    my %body = ( image => $image, root_pass => root_pass(), booted => Cpanel::JSON::XS::true(), metadata( $spec{user_data} ) );
     $body{type} = $spec{size} if $spec{size} && $spec{size} ne $linode->{type};
 
-    $self->_call( 'post-rebuild-linode-instance', { linodeId => $linode->{id} }, json => \%body );
+    call( $self, 'post-rebuild-linode-instance', { linodeId => $linode->{id} }, json => \%body );
 
     # Linode still says running for a moment after it takes the request, so
     # waiting for running alone returns before the rebuild has begun.
-    $self->_wait_for_change( $linode->{id}, $name, 'running' );
-    return $self->_wait_for( $linode->{id}, $name, 'running' );
-}
-
-# Linode takes the payload base64 encoded, for its metadata service to hand to
-# cloud-init, and refuses one over 64KB before encoding.
-sub _metadata ($user_data) {
-    return () unless $user_data;
-    die 'The cloud-init payload is ' . length($user_data) . " bytes, and Linode takes 65535 at most\n" if length $user_data > 65535;
-    return ( metadata => { user_data => MIME::Base64::encode_base64( $user_data, q{} ) } );
-}
-
-# Linode requires one to deploy an image, and scores its strength.
-sub _root_pass { return Crypt::PRNG::random_string_from( join( q{}, 'a' .. 'z', 'A' .. 'Z', 0 .. 9, '-_.+=!@%' ), 48 ) }
-
-# Waits until the Linode is in the state wanted, and returns it.
-sub _wait_for {
-    my ( $self, $id, $name, $want, $timeout ) = @_;
-
-    $timeout //= $BUILD_TIMEOUT;
-    my $deadline = time + $timeout;
-
-    while (1) {
-        my $linode = $self->_call( 'get-linode-instance', { linodeId => $id } );
-        return $linode if ( $linode->{status} // q{} ) eq $want;
-
-        last if time >= $deadline;
-        sleep $POLL;
-    }
-
-    die "The guest '$name' was not $want ${timeout}s later.\n" . "Check it in the Cloud Manager, and its console through Lish.\n";
-}
-
-# Waits until the Linode is in any state but the one it was in.
-sub _wait_for_change {
-    my ( $self, $id, $name, $from ) = @_;
-
     my $deadline = time + $BUSY_TIMEOUT;
-    while ( time < $deadline ) {
-        return 1 if ( $self->_call( 'get-linode-instance', { linodeId => $id } )->{status} // q{} ) ne $from;
-        sleep $POLL;
+    my $changed  = 0;
+    while ( !$changed && time < $deadline ) {
+        $changed = ( call( $self, 'get-linode-instance', { linodeId => $linode->{id} } )->{status} // q{} ) ne 'running';
+        sleep $POLL unless $changed;
     }
+    die "The guest '$name' was still running ${BUSY_TIMEOUT}s after being asked to change\n" unless $changed;
 
-    die "The guest '$name' was still $from ${BUSY_TIMEOUT}s after being asked to change\n";
+    return wait_for( $self, $linode->{id}, $name, 'running' );
 }
 
 =head2 annihilate_domain($name)
@@ -656,9 +629,9 @@ sub annihilate_domain {
     my $linode = $self->linode($name);
     return 0 unless $linode;
 
-    my @volumes = $self->_all( 'get-linode-volumes', { linodeId => $linode->{id} } );
+    my @volumes = every_page( $self, 'get-linode-volumes', { linodeId => $linode->{id} } );
 
-    $self->_call( 'delete-linode-instance', { linodeId => $linode->{id} } );
+    call( $self, 'delete-linode-instance', { linodeId => $linode->{id} } );
 
     # Linode lists a deleted Linode for a while yet, and a caller that asks
     # again in that while is told it exists.
@@ -683,16 +656,16 @@ Returns the names of the snapshots of this guest, newest first.
 
 =cut
 
-sub snapshot_names {
-    my ( $self, $domain ) = @_;
-    return map { substr( $_->{description}, length("$domain\@") ) } $self->_snapshots($domain);
+# The private images whose description says they are of this guest, newest
+# first.
+my sub snapshots ( $self, $domain ) {
+    return reverse sort { $a->{created} cmp $b->{created} }
+      grep { index( $_->{id}, 'private/' ) == 0 && index( $_->{description} // q{}, "$domain\@" ) == 0 } every_page( $self, 'get-images' );
 }
 
-sub _snapshots {
+sub snapshot_names {
     my ( $self, $domain ) = @_;
-
-    return reverse sort { $a->{created} cmp $b->{created} }
-      grep { index( $_->{id}, 'private/' ) == 0 && index( $_->{description} // q{}, "$domain\@" ) == 0 } $self->_all('get-images');
+    return map { substr( $_->{description}, length("$domain\@") ) } snapshots( $self, $domain );
 }
 
 =head2 create_snapshot($domain, $name, leave_down => $bool)
@@ -717,14 +690,14 @@ sub create_snapshot {
       or die "There is no guest called '$domain' to snapshot\n";
 
     my $ok = eval {
-        my ($disk) = reverse sort { $a->{size} <=> $b->{size} } grep { $_->{filesystem} ne 'swap' } $self->_all( 'get-linode-disks', { linodeId => $linode->{id} } );
+        my ($disk) = reverse sort { $a->{size} <=> $b->{size} } grep { $_->{filesystem} ne 'swap' } every_page( $self, 'get-linode-disks', { linodeId => $linode->{id} } );
         die "$domain has no disk to capture\n" unless $disk;
 
-        $self->_call( 'post-shutdown-linode-instance', { linodeId => $linode->{id} } );
-        $self->_wait_for( $linode->{id}, $domain, 'offline' );
+        call( $self, 'post-shutdown-linode-instance', { linodeId => $linode->{id} } );
+        wait_for( $self, $linode->{id}, $domain, 'offline' );
 
-        my $image = $self->_call(
-            'post-image', {},
+        my $image = call(
+            $self, 'post-image', {},
             json => {
                 disk_id     => $disk->{id},
                 label       => $name,
@@ -733,7 +706,14 @@ sub create_snapshot {
                 cloud_init  => Cpanel::JSON::XS::true(),
             }
         );
-        $self->_wait_for_image( $image->{id}, $domain );
+
+        my $deadline = time + $IMAGE_TIMEOUT;
+        my $ready    = 0;
+        while ( !$ready && time < $deadline ) {
+            $ready = ( call( $self, 'get-image', { imageId => $image->{id} } )->{status} // q{} ) eq 'available';
+            sleep $POLL unless $ready;
+        }
+        die "The image of $domain was not ready ${IMAGE_TIMEOUT}s later\n" unless $ready;
         1;
     };
     my $error = $@;
@@ -741,25 +721,13 @@ sub create_snapshot {
     # Up again before this returns, so that what the caller does next is not
     # refused while it boots.
     unless ( $opts{leave_down} ) {
-        $self->_call( 'post-boot-linode-instance', { linodeId => $linode->{id} } );
-        $self->_wait_for( $linode->{id}, $domain, 'running' );
+        call( $self, 'post-boot-linode-instance', { linodeId => $linode->{id} } );
+        wait_for( $self, $linode->{id}, $domain, 'running' );
     }
 
     return 1 if $ok;
     warn "Could not snapshot $domain: $error";
     return 0;
-}
-
-sub _wait_for_image {
-    my ( $self, $id, $domain ) = @_;
-
-    my $deadline = time + $IMAGE_TIMEOUT;
-    while ( time < $deadline ) {
-        return 1 if ( $self->_call( 'get-image', { imageId => $id } )->{status} // q{} ) eq 'available';
-        sleep $POLL;
-    }
-
-    die "The image of $domain was not ready ${IMAGE_TIMEOUT}s later\n";
 }
 
 =head2 revert_snapshot($domain, $name)
@@ -775,7 +743,7 @@ Dies when there is no such guest, or no such snapshot.
 sub revert_snapshot {
     my ( $self, $domain, $name ) = @_;
 
-    my ($image) = grep { $_->{description} eq "$domain\@$name" } $self->_snapshots($domain);
+    my ($image) = grep { $_->{description} eq "$domain\@$name" } snapshots( $self, $domain );
     die "The guest '$domain' has no snapshot called '$name'\n" unless $image;
 
     $self->rebuild_guest( $domain, image => $image->{id} );
@@ -828,7 +796,7 @@ need this to pass.
 sub check_reachable {
     my ($self) = @_;
 
-    my $profile = eval { $self->_call('get-profile') };
+    my $profile = eval { call( $self, 'get-profile' ) };
     return $self->_verdict( 1, 'Authenticated to ' . $self->describe, q{} ) if $profile;
 
     return $self->_verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" );
@@ -863,8 +831,8 @@ FIX
     # without the thing in it.
     my ( %regions, %images );
     my $asked = eval {
-        %regions = map { $_->{id} => $_ } $self->_all('get-regions');
-        %images  = map { $_->{id} => $_ } $self->_all('get-images');
+        %regions = map { $_->{id} => $_ } every_page( $self, 'get-regions' );
+        %images  = map { $_->{id} => $_ } every_page( $self, 'get-images' );
         1;
     };
     return $self->_verdict( 0, 'Could not ask ' . $self->describe . ' what it has', "$@" ) unless $asked;
@@ -876,7 +844,7 @@ FIX
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };
     push @wrong, "no type '$_'" for grep {
-        !eval { $self->_type($_) }
+        !eval { type_of( $self, $_ ) }
     } @types;
     push @wrong, 'no metadata service in ' . $self->region
       if $regions{ $self->region } && !any { $_ eq 'Metadata' } @{ $regions{ $self->region }{capabilities} // [] };

@@ -341,26 +341,24 @@ sub refusals {
 
 # The message names the call and what to use instead, which "method not found"
 # does not.
-sub _refuse {
-    my ( $self, $method ) = @_;
-
+my sub refuse ( $self, $method ) {
     my %because = $self->refusals;
     die ref($self) . " has no $method: $because{$method}\n";
 }
 
-sub define_domain      ( $self, @ ) { return $self->_refuse('define_domain') }
-sub cloudinit_iso      ( $self, @ ) { return $self->_refuse('cloudinit_iso') }
-sub eject_cdrom        ( $self, @ ) { return $self->_refuse('eject_cdrom') }
-sub pool_path          ( $self, @ ) { return $self->_refuse('pool_path') }
-sub pool_target        ( $self, @ ) { return $self->_refuse('pool_target') }
-sub base_image         ( $self, @ ) { return $self->_refuse('base_image') }
-sub create_disk        ( $self, @ ) { return $self->_refuse('create_disk') }
-sub lease_ip           ( $self, @ ) { return $self->_refuse('lease_ip') }
-sub release_dhcp_lease ( $self, @ ) { return $self->_refuse('release_dhcp_lease') }
-sub guest_mac          ( $self, @ ) { return $self->_refuse('guest_mac') }
-sub nic_slots          ( $self, @ ) { return $self->_refuse('nic_slots') }
-sub nic_names          ( $self, @ ) { return $self->_refuse('nic_names') }
-sub has_tpm            ( $self, @ ) { return $self->_refuse('has_tpm') }
+sub define_domain      ( $self, @ ) { return refuse( $self, 'define_domain' ) }
+sub cloudinit_iso      ( $self, @ ) { return refuse( $self, 'cloudinit_iso' ) }
+sub eject_cdrom        ( $self, @ ) { return refuse( $self, 'eject_cdrom' ) }
+sub pool_path          ( $self, @ ) { return refuse( $self, 'pool_path' ) }
+sub pool_target        ( $self, @ ) { return refuse( $self, 'pool_target' ) }
+sub base_image         ( $self, @ ) { return refuse( $self, 'base_image' ) }
+sub create_disk        ( $self, @ ) { return refuse( $self, 'create_disk' ) }
+sub lease_ip           ( $self, @ ) { return refuse( $self, 'lease_ip' ) }
+sub release_dhcp_lease ( $self, @ ) { return refuse( $self, 'release_dhcp_lease' ) }
+sub guest_mac          ( $self, @ ) { return refuse( $self, 'guest_mac' ) }
+sub nic_slots          ( $self, @ ) { return refuse( $self, 'nic_slots' ) }
+sub nic_names          ( $self, @ ) { return refuse( $self, 'nic_names' ) }
+sub has_tpm            ( $self, @ ) { return refuse( $self, 'has_tpm' ) }
 
 =head1 SEE ALSO
 
