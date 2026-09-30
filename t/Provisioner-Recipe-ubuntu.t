@@ -118,7 +118,7 @@ sub loaded {
 }
 
 # bin/new_config hands the admin user the keys out of admin_authorized_keys, and
-# _users adds the guest's own to the same list.  Whichever of the two went in
+# enrich adds the guest's own to the same list.  Whichever of the two went in
 # first, losing the other is silent: the operator locked out of a guest that
 # built perfectly well, or a guest this machine cannot get back into to run the
 # makefile.
@@ -406,13 +406,16 @@ subtest 'a MAC with no hex letters in it survives the trip to PyYAML' => sub {
     like( $config, qr/^\s+mac_address:[ ]'52:54:00:11:44:22'$/m, 'an all-decimal MAC is quoted' );
     like( $config, qr/^\s+mac_address:[ ]52:54:00:f8:83:fc$/m,   'and one with hex letters is left alone' );
 
+    my %formatters = 'Provisioner::Recipe::ubuntu'->formatters();
+    my $yaml       = sub ($value) { return q{} . $formatters{yaml}->($value) };
+
     # 59 is the last sexagesimal digit, so the quoting stops at exactly the
     # point PyYAML stops misreading.
-    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:59:22'), q{'52:54:00:11:59:22'}, '59 is still a base-60 digit' );              ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:60:22'), '52:54:00:11:60:22',    'and 60 is not, so it needs no quoting' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( $yaml->('52:54:00:11:59:22'), q{'52:54:00:11:59:22'}, '59 is still a base-60 digit' );
+    is( $yaml->('52:54:00:11:60:22'), '52:54:00:11:60:22',    'and 60 is not, so it needs no quoting' );
 
     # It is a scalar rule, and must not reach into a structure being dumped.
-    is( Provisioner::Recipe::ubuntu::_yaml( [qw{a b}] ), "- a\n- b", 'a list is dumped as it always was' );                            ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( $yaml->( [qw{a b}] ), "- a\n- b", 'a list is dumped as it always was' );
 };
 
 subtest 'a guest with no addresses falls back to DHCP on both interfaces' => sub {

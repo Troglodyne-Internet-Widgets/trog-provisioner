@@ -19,7 +19,7 @@ packages:
 [% packages | yaml %]
 [% IF bootcmd.size() %]
 
-[%# Only with a fetch cache.  See _fetch_cache_bootcmd in
+[%# Only with a fetch cache.  See the bootcmd of enrich in
     Provisioner::Recipe::ubuntu. -%]
 bootcmd:
 [% bootcmd | yaml %]
