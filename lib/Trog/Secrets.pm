@@ -99,6 +99,43 @@ sub needed {
     return %found;
 }
 
+# The group called $title, anywhere in the database, or undef.  Dies when two
+# groups answer to the name, naming where each one is: a reference says which
+# group it wants and nothing can choose between them.
+#
+# This walks the tree rather than calling find_group or find_entry.  Those take
+# a group in their query, and File::KeePass::KDBX gives a group an id rather
+# than the gid that File::KeePass documents, so the query matched on the title
+# alone.
+my sub group_named ( $kdbx, $title ) {
+
+    # Pushed in reverse, so the groups are found in the order the store lists them.
+    my @stack = reverse map { [ $_, $_->{title} ] } @{ $kdbx->groups // [] };
+    my @found;
+    while ( my $at = pop @stack ) {
+        my ( $group, $here ) = @$at;
+
+        push( @found, { group => $group, path => $here } ) if defined $group->{title} && $group->{title} eq $title;
+        push( @stack, reverse map { [ $_, $here ? "$here/$_->{title}" : $_->{title} ] } @{ $group->{groups} // [] } );
+    }
+
+    die "More than one group is called '$title': " . join( ', ', map { $_->{path} } @found ) . ".\n" . "A reference names one group, so give them different names.\n"
+      if @found > 1;
+
+    return @found ? $found[0]{group} : undef;
+}
+
+# The entry called $title in $group, or undef.  Not in a subgroup of it: a
+# reference names one group, and an entry of the same name a level down is a
+# different entry.  Dies when the group holds two entries of that name.
+my sub entry_named ( $group, $title ) {
+    my @found = grep { defined $_->{title} && $_->{title} eq $title } @{ $group->{entries} // [] };
+    die "The group '$group->{title}' holds " . scalar(@found) . " entries called '$title'.\n" . "A reference names one entry, so delete the ones that are not wanted: bin/forget_secret does that.\n"
+      if @found > 1;
+
+    return @found ? $found[0] : undef;
+}
+
 =head2 lookup($file, $password, %needed)
 
 Resolves each reference in C<%needed> against the database in C<$file>.
@@ -130,11 +167,11 @@ sub lookup {
 
     my %values;
     foreach my $group ( keys %by_group ) {
-        my $g = $class->_group_named( $kdbx, $group )
+        my $g = group_named( $kdbx, $group )
           or die "No group '$group' in $file\n";
 
         foreach my $want ( @{ $by_group{$group} } ) {
-            my $entry = $class->_entry_named( $g, $want->{title} )
+            my $entry = entry_named( $g, $want->{title} )
               or die "No entry '$want->{title}' in group '$group' of $file\n";
 
             die "Entry '$want->{title}' in '$group' has no $want->{field}\n"
@@ -200,7 +237,7 @@ sub create {
         my ( $group, $title, $field ) = $class->parse($ref);
 
         $groups{$group} //= $kdbx->add_group( { title => $group } );
-        my $entry = $class->_entry_named( $groups{$group}, $title ) // $kdbx->add_entry( { group => $groups{$group}, title => $title } );
+        my $entry = entry_named( $groups{$group}, $title ) // $kdbx->add_entry( { group => $groups{$group}, title => $title } );
 
         $entry->{$field} = $value_by_ref{$ref};
     }
@@ -222,7 +259,8 @@ secret stays the same when the guest is rebuilt.  It is never written into the
 domain directory, where the data recipe would put it into each backup.
 
 Dies if the database cannot be opened or unlocked, or if a generator returns a
-false value.  Also dies if the database did not keep a new value.
+false value.  Also dies if the database did not keep a new value: after a save
+it opens the file again and makes sure that each new value is there.
 
 =cut
 
@@ -242,8 +280,8 @@ sub remember {
             foreach my $ref ( sort keys %generator_by_ref ) {
                 my ( $group, $title, $field ) = $class->parse($ref);
 
-                my $g     = $class->_group_named( $kdbx, $group );
-                my $entry = $g && $class->_entry_named( $g, $title );
+                my $g     = group_named( $kdbx, $group );
+                my $entry = $g && entry_named( $g, $title );
 
                 if ( $entry && length $entry->{$field} ) {    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
                     $values{$ref} = $entry->{$field};
@@ -267,47 +305,29 @@ sub remember {
 
             $kdbx->save_db( $file, $password );
             $kdbx->lock();
-            $class->_confirm_kept( $file, $password, \%values, \%made );
+
+            # Read it back, because the database drops a field it does not store
+            # when it saves, and then a secret that must stay the same changes on
+            # each provision.  See "The syntax of a reference".
+            my $kept = File::KeePass::KDBX->load_db( $file, $password )
+              or die "Could not re-open $file to check what was written to it\n";
+            $kept->unlock() or die "Could not unlock $file\n";
+
+            foreach my $ref ( sort keys %made ) {
+                my ( $group, $title, $field ) = $class->parse($ref);
+                my $g     = group_named( $kept, $group );
+                my $entry = $g && entry_named( $g, $title );
+
+                next if $entry && defined $entry->{$field} && $entry->{$field} eq $values{$ref};
+
+                $kept->lock();
+                die "$file did not keep $ref.  A reference has to name a field the database stores,\n" . "which is password or username; '$field' is not one and was dropped on save.\n";
+            }
+            $kept->lock();
 
             return %values;
         }
     );
-}
-
-=head2 _confirm_kept($file, $password, \%values, \%made)
-
-Opens C<$file> again and makes sure that it holds the value in C<%values> for
-each reference in C<%made>.  Returns 1.  C<remember> calls it after a save.
-
-It catches a field that the database drops when it saves.  See
-L</The syntax of a reference>.  Without this check, a secret that must stay the
-same changes on each provision.
-
-Dies if the database cannot be opened or unlocked, or if a reference did not
-keep its value.
-
-=cut
-
-sub _confirm_kept {
-    my ( $class, $file, $password, $values, $made ) = @_;
-
-    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
-      or die "Could not re-open $file to check what was written to it\n";
-    $kdbx->unlock() or die "Could not unlock $file\n";
-
-    foreach my $ref ( sort keys %$made ) {
-        my ( $group, $title, $field ) = $class->parse($ref);
-        my $g     = $class->_group_named( $kdbx, $group );
-        my $entry = $g && $class->_entry_named( $g, $title );
-
-        next if $entry && defined $entry->{$field} && $entry->{$field} eq $values->{$ref};
-
-        $kdbx->lock();
-        die "$file did not keep $ref.  A reference has to name a field the database stores,\n" . "which is password or username; '$field' is not one and was dropped on save.\n";
-    }
-
-    $kdbx->lock();
-    return 1;
 }
 
 =head2 replace($file, $password, %value_by_ref)
@@ -341,8 +361,8 @@ sub replace {
             foreach my $ref ( sort keys %value_by_ref ) {
                 my ( $group, $title, $field ) = $class->parse($ref);
 
-                my $g     = $class->_group_named( $kdbx, $group ) // $kdbx->add_group( { title => $group } );
-                my $entry = $class->_entry_named( $g, $title )    // $kdbx->add_entry( { group => $g, title => $title } );
+                my $g     = group_named( $kdbx, $group ) // $kdbx->add_group( { title => $group } );
+                my $entry = entry_named( $g, $title )    // $kdbx->add_entry( { group => $g, title => $title } );
 
                 $entry->{$field} = $value_by_ref{$ref};
             }
@@ -388,8 +408,8 @@ sub forget {
             foreach my $ref (@refs) {
                 my ( $group, $title ) = $class->parse($ref);
 
-                my $g     = $class->_group_named( $kdbx, $group ) or next;
-                my $entry = $class->_entry_named( $g, $title )    or next;
+                my $g     = group_named( $kdbx, $group ) or next;
+                my $entry = entry_named( $g, $title )    or next;
 
                 $kdbx->delete_entry( { id => $entry->{id} } );
                 push( @gone, $ref );
@@ -452,71 +472,6 @@ sub locked {
     }
 
     return $work->();
-}
-
-=head2 $group = _group_named($kdbx, $title)
-
-The group called C<$title>, anywhere in the database, or undef.  Dies when two
-groups answer to the name, naming where each one is: a reference says which
-group it wants and nothing can choose between them.
-
-C<find_group> is not used for this, nor C<find_entry> below.  Those take a
-C<group> in their query, and this database is opened through
-L<File::KeePass::KDBX>, whose groups carry an C<id> rather than the C<gid> that
-L<File::KeePass> documents.  So the query held C<group =E<gt> undef>, which
-matched on the title alone: every entry this module ever wrote went to the root
-group whatever its reference said, and a title that existed twice made every
-lookup of it die with two hash addresses and no name.  Walking the tree says
-what was meant and cannot be read two ways.
-
-=cut
-
-sub _group_named {
-    my ( $class, $kdbx, $title ) = @_;
-
-    my @found = _groups_under( $kdbx->groups, $title );
-    die "More than one group is called '$title': " . join( ', ', map { $_->{path} } @found ) . ".\n" . "A reference names one group, so give them different names.\n"
-      if @found > 1;
-
-    return @found ? $found[0]{group} : undef;
-}
-
-# Every group of that name in the forest, with the path that reached it.
-sub _groups_under {
-    my ( $groups, $title ) = @_;
-
-    # Pushed in reverse, so the groups are found in the order the store lists them.
-    my @stack = reverse map { [ $_, $_->{title} ] } @{ $groups // [] };
-    my @found;
-    while ( my $at = pop @stack ) {
-        my ( $group, $here ) = @$at;
-
-        push( @found, { group => $group, path => $here } ) if defined $group->{title} && $group->{title} eq $title;
-        push( @stack, reverse map { [ $_, $here ? "$here/$_->{title}" : $_->{title} ] } @{ $group->{groups} // [] } );
-    }
-
-    return @found;
-}
-
-=head2 $entry = _entry_named($group, $title)
-
-The entry called C<$title> in C<$group>, or undef.  Not in a subgroup of it: a
-reference names one group, and an entry of the same name a level down is a
-different entry.
-
-Dies when the group holds two entries of that name, because nothing can choose
-between them either.
-
-=cut
-
-sub _entry_named {
-    my ( $class, $group, $title ) = @_;
-
-    my @found = grep { defined $_->{title} && $_->{title} eq $title } @{ $group->{entries} // [] };
-    die "The group '$group->{title}' holds " . scalar(@found) . " entries called '$title'.\n" . "A reference names one entry, so delete the ones that are not wanted: bin/forget_secret does that.\n"
-      if @found > 1;
-
-    return @found ? $found[0] : undef;
 }
 
 =head2 parse($reference)
