@@ -1000,7 +1000,7 @@ sub check_reachable {
     my ($self) = @_;
 
     my @services = eval { $self->api->auth->services };
-    return $self->_verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" ) unless @services;
+    return $self->verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" ) unless @services;
 $@
 The cloud is named '@{[ $self->cloud ]}', so this is the entry of that name in
 clouds.yaml.  Check the application credential has not been revoked or expired:
@@ -1011,12 +1011,12 @@ FIX
     my %offered = map  { $_ => 1 } @services;
     my @missing = grep { !$offered{$_} } qw{compute image network};
 
-    return $self->_verdict( 0, 'The catalog is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
+    return $self->verdict( 0, 'The catalog is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
 A guest needs Nova to run on, Glance to boot from and Neutron to be addressed
 on.  A credential scoped to a project without all three cannot build one.
 FIX
 
-    return $self->_verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
+    return $self->verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
 }
 
 =head2 $result = $hv->check_cloud_resources()
@@ -1035,7 +1035,7 @@ sub check_cloud_resources {
     $wanted{floating_network} = $self->floating_network if defined $self->floating_network;
 
     my @unset = grep { !$wanted{$_} } sort keys %wanted;
-    return $self->_verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
+    return $self->verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
 The cloud's block in hypervisors.conf has to say what to build guests as.  What
 exists is the cloud's to say, so ask it rather than guessing:
 
@@ -1050,7 +1050,7 @@ FIX
       if exists $wanted{floating_network};
 
     my @absent = grep { !$found{$_} } sort keys %found;
-    return $self->_verdict( 0, 'The cloud has no ' . join( ', ', map { "$_ '$wanted{$_}'" } @absent ), <<'FIX' ) if @absent;
+    return $self->verdict( 0, 'The cloud has no ' . join( ', ', map { "$_ '$wanted{$_}'" } @absent ), <<'FIX' ) if @absent;
 Ask the cloud what it has:
 
     openstack flavor list
@@ -1063,15 +1063,15 @@ FIX
         my $image = eval { $self->image_for_distro($distro) };
         $image ? push( @images, $image ) : push( @no_image, $@ );
     }
-    return $self->_verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
+    return $self->verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
 
     my @flavors = $self->globals_in_use( $self->size_key );
     my @missing = grep {
         !eval { scalar $self->api->look_by_id_or_name( flavors => $_ ) }
     } @flavors;
-    return $self->_verdict( 0, 'The cloud has no flavor ' . join( ', ', map { "'$_'" } @missing ), "Ask the cloud what it has:\n\n    openstack flavor list\n" ) if @missing;
+    return $self->verdict( 0, 'The cloud has no flavor ' . join( ', ', map { "'$_'" } @missing ), "Ask the cloud what it has:\n\n    openstack flavor list\n" ) if @missing;
 
-    return $self->_verdict( 1, 'Builds from ' . join( ', ', @images ) . " on $wanted{network}" . ( @flavors ? ', as ' . join( ', ', @flavors ) : ', and no guest names an openstack_flavor yet' ), q{} );
+    return $self->verdict( 1, 'Builds from ' . join( ', ', @images ) . " on $wanted{network}" . ( @flavors ? ', as ' . join( ', ', @flavors ) : ', and no guest names an openstack_flavor yet' ), q{} );
 }
 
 =head2 $result = $hv->check_cloud_quota()
@@ -1086,7 +1086,7 @@ sub check_cloud_quota {
     my ($self) = @_;
 
     my $have = eval { $self->capacity };
-    return $self->_verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
+    return $self->verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
 
     # An undefined free is a quota with no limit in it, which is never full.
     my @full;
@@ -1094,7 +1094,7 @@ sub check_cloud_quota {
     push @full, 'memory'    if defined $have->{memory_free} && $have->{memory_free} <= 0;
     push @full, 'cpus'      if defined $have->{cpus_free}   && $have->{cpus_free} <= 0;
 
-    return $self->_verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
+    return $self->verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
 The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests || 'unlimited' ]} instances,
 @{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} // 'unlimited' ]}MB of memory and
 @{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} // 'unlimited' ]} cores.
@@ -1104,7 +1104,7 @@ reserves in hypervisors.conf are held back out of the quota, so a project that
 looks like it has room may not once they are counted.
 FIX
 
-    return $self->_verdict(
+    return $self->verdict(
         1,
         sprintf(
             'Quota: %s/%s instances used, %s of memory and %s cores free',

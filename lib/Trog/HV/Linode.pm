@@ -797,9 +797,9 @@ sub check_reachable {
     my ($self) = @_;
 
     my $profile = eval { call( $self, 'get-profile' ) };
-    return $self->_verdict( 1, 'Authenticated to ' . $self->describe, q{} ) if $profile;
+    return $self->verdict( 1, 'Authenticated to ' . $self->describe, q{} ) if $profile;
 
-    return $self->_verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" );
+    return $self->verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" );
 $@
 The token is $self->{linode_token} in the secret store.  It needs read_write on
 linodes and images, and it may have expired: a personal access token is minted
@@ -820,7 +820,7 @@ why until the wait for it runs out.
 sub check_linode_resources {
     my ($self) = @_;
 
-    return $self->_verdict( 0, 'Not configured: region', <<'FIX' ) unless $self->region;
+    return $self->verdict( 0, 'Not configured: region', <<'FIX' ) unless $self->region;
 The block in hypervisors.conf has to say where to build.  What exists is
 Linode's to say:
 
@@ -835,7 +835,7 @@ FIX
         %images  = map { $_->{id} => $_ } every_page( $self, 'get-images' );
         1;
     };
-    return $self->_verdict( 0, 'Could not ask ' . $self->describe . ' what it has', "$@" ) unless $asked;
+    return $self->verdict( 0, 'Could not ask ' . $self->describe . ' what it has', "$@" ) unless $asked;
 
     my @types = $self->globals_in_use( $self->size_key );
 
@@ -854,9 +854,9 @@ FIX
           if $images{$image} && !any { $_ eq 'cloud-init' } @{ $images{$image}{capabilities} // [] };
     }
 
-    return $self->_verdict( 1, 'Builds in ' . $self->region . ' from ' . join( ', ', @images ) . ( @types ? ', as ' . join( ', ', @types ) : ', and no guest names a linode_type yet' ), q{} ) unless @wrong;
+    return $self->verdict( 1, 'Builds in ' . $self->region . ' from ' . join( ', ', @images ) . ( @types ? ', as ' . join( ', ', @types ) : ', and no guest names a linode_type yet' ), q{} ) unless @wrong;
 
-    return $self->_verdict( 0, 'Linode has ' . join( ', ', @wrong ), <<'FIX' );
+    return $self->verdict( 0, 'Linode has ' . join( ', ', @wrong ), <<'FIX' );
 A guest gets its cloud-init payload from Linode's metadata service, so it has
 to be in a region that runs it, from an image whose capabilities include
 cloud-init.  Ask Linode:
@@ -878,7 +878,7 @@ sub check_linode_budget {
     my ($self) = @_;
 
     my $spend = eval { $self->monthly_spend };
-    return $self->_verdict( 0, 'Could not work out what the account costs', "$@" ) unless defined $spend;
+    return $self->verdict( 0, 'Could not work out what the account costs', "$@" ) unless defined $spend;
 
     # Per type rather than per guest: what a guest costs is the type it names,
     # and the configuration names as many as its guests do.
@@ -887,11 +887,11 @@ sub check_linode_budget {
     } $self->globals_in_use( $self->size_key );
     my $now = sprintf( 'The account costs %.2f a month', $spend ) . ( @each ? ', and a guest more: ' . join( ', ', @each ) : q{} );
 
-    return $self->_verdict( 1, "$now; no monthly_budget caps it",                                             q{} ) unless $self->monthly_budget;
-    return $self->_verdict( 1, sprintf( '%s, within a monthly_budget of %.2f', $now, $self->monthly_budget ), q{} )
+    return $self->verdict( 1, "$now; no monthly_budget caps it",                                             q{} ) unless $self->monthly_budget;
+    return $self->verdict( 1, sprintf( '%s, within a monthly_budget of %.2f', $now, $self->monthly_budget ), q{} )
       if $spend < $self->monthly_budget;
 
-    return $self->_verdict( 0, sprintf( '%s, at or over a monthly_budget of %.2f', $now, $self->monthly_budget ), <<'FIX' );
+    return $self->verdict( 0, sprintf( '%s, at or over a monthly_budget of %.2f', $now, $self->monthly_budget ), <<'FIX' );
 Destroy a guest you have finished with, or raise monthly_budget in the block in
 hypervisors.conf.  A guest placed without a pin goes to a machine with room
 first, so this only stops the guests that nothing else could take.

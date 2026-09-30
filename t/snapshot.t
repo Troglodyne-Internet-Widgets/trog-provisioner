@@ -145,10 +145,11 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 
     package FakeSnapDomain;
 
-    sub new       { my ( $class, $seen ) = @_; return bless { active => 1, seen => $seen }, $class }
-    sub is_active { my ($self) = @_; return $self->{active} }
-    sub destroy   { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
-    sub create    { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
+    sub new                { my ( $class, $seen ) = @_; return bless { active => 1, seen => $seen }, $class }
+    sub is_active          { my ($self) = @_; return $self->{active} }
+    sub get_domain_by_name { my ($self) = @_; return $self }
+    sub destroy            { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
+    sub create             { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
 
     sub create_snapshot {
         my ( $self, $xml, $flags ) = @_;
@@ -162,7 +163,7 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     my $dom     = FakeSnapDomain->new( \@seen );
     my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( _domain               => sub { $dom } );
+    $hv_mock->redefine( vmm                   => sub { $dom } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'live-snap' } );
 
     is( exception { main_snapshot('myvm.lan') }, undef, 'a default run snapshots a guest that is up' );
@@ -175,7 +176,7 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     my $dom     = FakeSnapDomain->new( \@seen );
     my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( _domain               => sub { $dom } );
+    $hv_mock->redefine( vmm                   => sub { $dom } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'disk-snap' } );
 
     my $said = capture_stdout { main_snapshot(qw{myvm.lan --disk-only}) };

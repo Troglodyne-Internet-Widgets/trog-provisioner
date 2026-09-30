@@ -259,9 +259,9 @@ sub check_transfer_ip {
     my $rfile = Trog::Config->path('recipes.yaml');
     my $named = $self->configured_transfer_ip // eval { Provisioner::Cookbook->global_config(undef)->{transfer_ip} };
 
-    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
+    return $self->verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
 
-    return $self->_verdict( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
+    return $self->verdict( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
 A guest scps its payload and rsyncs its data directory out of this machine, so
 it needs an address here that it can get to.  On a hypervisor that address is
 worked out by asking the routing table about the guest's network -- but

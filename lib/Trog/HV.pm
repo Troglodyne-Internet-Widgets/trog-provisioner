@@ -635,35 +635,34 @@ guest is gone.  Never the base image, because every other guest is built on it.
 =cut
 
 # Declared, so the error names the class and the method that it owes.
-sub _abstract {
-    my ( $self, $method ) = @_;
+my sub abstract ( $self, $method ) {
     die( ( ref($self) || $self ) . " does not implement $method, which every backend has to\n" );
 }
 
-sub build                 ( $self, @ ) { return $self->_abstract('build') }
-sub config_keys           ( $self, @ ) { return $self->_abstract('config_keys') }
-sub marker                ( $self, @ ) { return $self->_abstract('marker') }
-sub client_module         ( $self, @ ) { return $self->_abstract('client_module') }
-sub domain_exists         ( $self, @ ) { return $self->_abstract('domain_exists') }
-sub annihilate_domain     ( $self, @ ) { return $self->_abstract('annihilate_domain') }
-sub guest_names           ( $self, @ ) { return $self->_abstract('guest_names') }
-sub guest_ssh_ip          ( $self, @ ) { return $self->_abstract('guest_ssh_ip') }
-sub inspection_address    ( $self, @ ) { return $self->_abstract('inspection_address') }
-sub image_for_distro      ( $self, @ ) { return $self->_abstract('image_for_distro') }
-sub snapshot_names        ( $self, @ ) { return $self->_abstract('snapshot_names') }
-sub snapshot_current_name ( $self, @ ) { return $self->_abstract('snapshot_current_name') }
-sub create_snapshot       ( $self, @ ) { return $self->_abstract('create_snapshot') }
-sub revert_snapshot       ( $self, @ ) { return $self->_abstract('revert_snapshot') }
-sub prepare_host          ( $self, @ ) { return $self->_abstract('prepare_host') }
-sub release_seed          ( $self, @ ) { return $self->_abstract('release_seed') }
-sub guest_volumes         ( $self, @ ) { return $self->_abstract('guest_volumes') }
-sub clear_guest           ( $self, @ ) { return $self->_abstract('clear_guest') }
-sub rollback_possible     ( $self, @ ) { return $self->_abstract('rollback_possible') }
-sub provision_guest       ( $self, @ ) { return $self->_abstract('provision_guest') }
-sub would_provision       ( $self, @ ) { return $self->_abstract('would_provision') }
-sub console_capture       ( $self, @ ) { return $self->_abstract('console_capture') }
-sub console_output        ( $self, @ ) { return $self->_abstract('console_output') }
-sub vnc_access            ( $self, @ ) { return $self->_abstract('vnc_access') }
+sub build                 ( $self, @ ) { return abstract( $self, 'build' ) }
+sub config_keys           ( $self, @ ) { return abstract( $self, 'config_keys' ) }
+sub marker                ( $self, @ ) { return abstract( $self, 'marker' ) }
+sub client_module         ( $self, @ ) { return abstract( $self, 'client_module' ) }
+sub domain_exists         ( $self, @ ) { return abstract( $self, 'domain_exists' ) }
+sub annihilate_domain     ( $self, @ ) { return abstract( $self, 'annihilate_domain' ) }
+sub guest_names           ( $self, @ ) { return abstract( $self, 'guest_names' ) }
+sub guest_ssh_ip          ( $self, @ ) { return abstract( $self, 'guest_ssh_ip' ) }
+sub inspection_address    ( $self, @ ) { return abstract( $self, 'inspection_address' ) }
+sub image_for_distro      ( $self, @ ) { return abstract( $self, 'image_for_distro' ) }
+sub snapshot_names        ( $self, @ ) { return abstract( $self, 'snapshot_names' ) }
+sub snapshot_current_name ( $self, @ ) { return abstract( $self, 'snapshot_current_name' ) }
+sub create_snapshot       ( $self, @ ) { return abstract( $self, 'create_snapshot' ) }
+sub revert_snapshot       ( $self, @ ) { return abstract( $self, 'revert_snapshot' ) }
+sub prepare_host          ( $self, @ ) { return abstract( $self, 'prepare_host' ) }
+sub release_seed          ( $self, @ ) { return abstract( $self, 'release_seed' ) }
+sub guest_volumes         ( $self, @ ) { return abstract( $self, 'guest_volumes' ) }
+sub clear_guest           ( $self, @ ) { return abstract( $self, 'clear_guest' ) }
+sub rollback_possible     ( $self, @ ) { return abstract( $self, 'rollback_possible' ) }
+sub provision_guest       ( $self, @ ) { return abstract( $self, 'provision_guest' ) }
+sub would_provision       ( $self, @ ) { return abstract( $self, 'would_provision' ) }
+sub console_capture       ( $self, @ ) { return abstract( $self, 'console_capture' ) }
+sub console_output        ( $self, @ ) { return abstract( $self, 'console_output' ) }
+sub vnc_access            ( $self, @ ) { return abstract( $self, 'vnc_access' ) }
 
 =head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
 
@@ -763,7 +762,7 @@ C<size_key>.
 
 =cut
 
-sub capacity ( $self, @ ) { return $self->_abstract('capacity') }
+sub capacity ( $self, @ ) { return abstract( $self, 'capacity' ) }
 
 =head2 size_key
 
@@ -818,6 +817,9 @@ act on.  An empty list means that the guest fits.
 
 =cut
 
+# Whole gigabytes in a count of bytes, for a reason a person reads.
+my sub gb ($bytes) { return int( ( $bytes // 0 ) / ( 1024 * 1024 * 1024 ) ) }
+
 sub shortfalls {
     my ( $self, %needs ) = @_;
 
@@ -841,7 +843,7 @@ sub shortfalls {
 
     push @reasons, sprintf(
         'needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
-        _gb( $needs{disk_bytes} ), _gb( $have->{disk_free} ), _gb( $self->reserve_disk )
+        gb( $needs{disk_bytes} ), gb( $have->{disk_free} ), gb( $self->reserve_disk )
     ) if defined $have->{disk_free} && ( $needs{disk_bytes} // 0 ) > $have->{disk_free};
 
     push @reasons, sprintf( 'already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests )
@@ -849,8 +851,6 @@ sub shortfalls {
 
     return @reasons;
 }
-
-sub _gb ($bytes) { return int( ( $bytes // 0 ) / ( 1024 * 1024 * 1024 ) ) }
 
 =head2 headroom(%needs)
 
@@ -861,22 +861,8 @@ its disk while the fleet still has plenty of RAM.
 
 =cut
 
-sub headroom {
-    my ( $self, %needs ) = @_;
-
-    my $have = $self->capacity(%needs);
-    my @fractions;
-
-    push @fractions, _fraction( $have->{memory_free}, $have->{memory_mb},                                                                    $needs{memory_mb} );
-    push @fractions, _fraction( $have->{cpus_free},   $have->{cpus_allocatable},                                                             $needs{cpus} );
-    push @fractions, _fraction( $have->{disk_free},   defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
-
-    my ($tightest) = sort { $a <=> $b } @fractions;
-    return $tightest;
-}
-
-sub _fraction {
-    my ( $free, $total, $wanted ) = @_;
+# The share of $total that is still free once $wanted is taken out of $free.
+my sub fraction ( $free, $total, $wanted ) {
 
     # No limit is as empty as it gets, and nothing to divide by is as full.
     return 1 unless defined $free && defined $total;
@@ -884,6 +870,20 @@ sub _fraction {
 
     my $fraction = ( $free - ( $wanted // 0 ) ) / $total;
     return $fraction < 0 ? 0 : $fraction;
+}
+
+sub headroom {
+    my ( $self, %needs ) = @_;
+
+    my $have = $self->capacity(%needs);
+    my @fractions;
+
+    push @fractions, fraction( $have->{memory_free}, $have->{memory_mb},                                                                    $needs{memory_mb} );
+    push @fractions, fraction( $have->{cpus_free},   $have->{cpus_allocatable},                                                             $needs{cpus} );
+    push @fractions, fraction( $have->{disk_free},   defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
+
+    my ($tightest) = sort { $a <=> $b } @fractions;
+    return $tightest;
 }
 
 =head1 PREFLIGHT
@@ -927,18 +927,24 @@ fleet, and open the secret store, to preflight a run against one machine.
 
 =cut
 
-sub preflight_checks ( $self, @ ) { return $self->_abstract('preflight_checks') }
-sub preflight_notes  ( $self, @ ) { return $self->_abstract('preflight_notes') }
+sub preflight_checks ( $self, @ ) { return abstract( $self, 'preflight_checks' ) }
+sub preflight_notes  ( $self, @ ) { return abstract( $self, 'preflight_notes' ) }
 
 sub preflight_block_checks { return qw{check_client check_transfer_route} }
 
-=head2 $result = $hv->_verdict($ok, $what, $fix)
+=head2 $result = $hv->verdict($ok, $what, $fix)
 
-Returns the answer of one check, in the form that C<bin/preflight> prints.
+Returns the answer of one check, in the form that C<bin/preflight> prints:
+C<{ ok =E<gt> $ok, what =E<gt> $what, fix =E<gt> $fix }>.  C<$ok> is true when
+nothing is wrong.  C<$what> says what was found, and C<$fix> says what to do
+about it, or is empty when there is nothing to do.
+
+The checks of this class and of every backend answer through it, so that the
+form is written down in one place.
 
 =cut
 
-sub _verdict {
+sub verdict {
     my ( $self, $ok, $what, $fix ) = @_;
     return { ok => $ok, what => $what, fix => $fix };
 }
@@ -959,9 +965,9 @@ sub check_client {
     my ($self) = @_;
 
     my ($module) = $self->client_module;
-    return $self->_verdict( 0, "$module will not load here", $@ ) unless eval { $self->require_client; 1 };
+    return $self->verdict( 0, "$module will not load here", $@ ) unless eval { $self->require_client; 1 };
 
-    return $self->_verdict( 1, "$module " . $module->VERSION . ' is installed', q{} );
+    return $self->verdict( 1, "$module " . $module->VERSION . ' is installed', q{} );
 }
 
 =head2 $hv->check_reachable(), $hv->check_transfer_ip()
@@ -977,8 +983,8 @@ ask until the guest exists.
 
 =cut
 
-sub check_reachable   ( $self, @ ) { return $self->_abstract('check_reachable') }
-sub check_transfer_ip ( $self, @ ) { return $self->_abstract('check_transfer_ip') }
+sub check_reachable   ( $self, @ ) { return abstract( $self, 'check_reachable' ) }
+sub check_transfer_ip ( $self, @ ) { return abstract( $self, 'check_transfer_ip' ) }
 
 =head2 $result = $hv->check_transfer_route()
 
@@ -1019,10 +1025,10 @@ sub check_transfer_route {
     my $ip     = $self->configured_transfer_ip                        // $global->{transfer_ip};
     my $port   = $self->configured_transfer_port                      // $global->{transfer_port} // $here->sshd_port;
 
-    return $self->_verdict( 1, 'Guests here reach us across our own network, which the routing table settles', q{} )
+    return $self->verdict( 1, 'Guests here reach us across our own network, which the routing table settles', q{} )
       unless $self->manages_addresses;
 
-    return $self->_verdict( 0, 'Nothing says where guests on ' . $self->describe . ' fetch from', <<"FIX" ) unless $ip;
+    return $self->verdict( 0, 'Nothing says where guests on ' . $self->describe . ' fetch from', <<"FIX" ) unless $ip;
 A guest there is not on a network of ours, so the routing table cannot answer
 for it.  Name the address it reaches us at, and the port, in the block of this
 hypervisor in hypervisors.conf:
@@ -1031,7 +1037,10 @@ hypervisor in hypervisors.conf:
     transfer_port = 2222
 FIX
 
-    return $self->_verdict( 0, "Guests on " . $self->describe . " are told to fetch from $ip, which is a private address", <<"FIX" ) if _is_private($ip);
+    # The blocks nothing on the internet routes to.
+    my $private = any { $ip =~ $_ } qr/\A(?:10|127)[.]/, qr/\A(?:169[.]254|192[.]168)[.]/, qr/\A172[.](?:1[6-9]|2\d|3[01])[.]/;
+
+    return $self->verdict( 0, "Guests on " . $self->describe . " are told to fetch from $ip, which is a private address", <<"FIX" ) if $private;
 Nothing outside our network routes to $ip, so a guest there can never fetch its
 payload.  Put the address that reaches this machine from the internet in the
 block of this hypervisor in hypervisors.conf, with the port forwarded to the
@@ -1041,13 +1050,13 @@ sshd here:
     transfer_port = <the port it forwards to this machine>
 FIX
 
-    return $self->_verdict( 1, "Guests here fetch from $ip:$port, which is an address of this machine", q{} )
+    return $self->verdict( 1, "Guests here fetch from $ip:$port, which is an address of this machine", q{} )
       if $here->holds_address($ip);
 
     my $answered = $here->answers_on( $ip, $port );
-    return $self->_verdict( 1, "Guests here fetch from $ip:$port, which answers, so something forwards it here", q{} ) if $answered;
+    return $self->verdict( 1, "Guests here fetch from $ip:$port, which answers, so something forwards it here", q{} ) if $answered;
 
-    return $self->_verdict( 0, "Guests here fetch from $ip:$port, which is not ours and did not answer", <<"FIX" );
+    return $self->verdict( 0, "Guests here fetch from $ip:$port, which is not ours and did not answer", <<"FIX" );
 $ip is not an address of this machine, so something in front of us answers for
 it, and it has to forward $port to the sshd here.  Nothing answered when this
 tried, which means one of two things:
@@ -1061,15 +1070,6 @@ internet:
 
     nc -vz $ip $port
 FIX
-}
-
-# The blocks nothing on the internet routes to.
-sub _is_private {
-    my ($address) = @_;
-    return 1 if $address =~ m/\A(?:10|127)[.]/;
-    return 1 if $address =~ m/\A(?:169[.]254|192[.]168)[.]/;
-    return 1 if $address =~ m/\A172[.](?:1[6-9]|2\d|3[01])[.]/;
-    return 0;
 }
 
 =head2 $result = $hv->check_rsync()
@@ -1093,10 +1093,10 @@ sub check_rsync {
     push( @missing, 'this machine' ) unless File::Which::which('rsync');
     push( @missing, $self->describe ) if !$self->is_local && $self->run_cmd( 'sh', '-c', 'command -v rsync >/dev/null 2>&1' ) != 0;
 
-    return $self->_verdict( 1, 'rsync on both ends', q{} ) unless @missing;
+    return $self->verdict( 1, 'rsync on both ends', q{} ) unless @missing;
 
     my $where = join( ' and ', @missing );
-    return $self->_verdict( 0, "No rsync on $where", <<"FIX" );
+    return $self->verdict( 0, "No rsync on $where", <<"FIX" );
 A domain's data directory is shipped to the hypervisor and salvaged off the old
 guest with it, and both of those compare before they transfer -- which is what
 keeps a re-provision from moving twenty gigabytes of video it already has.
@@ -1147,13 +1147,13 @@ sub check_fetch_sources {
         }
     }
 
-    return $self->_verdict( 1, 'No recipe fetches a directory of yours', q{} ) unless %wanted;
+    return $self->verdict( 1, 'No recipe fetches a directory of yours', q{} ) unless %wanted;
 
     my @missing = grep { !-d } sort keys %wanted;
-    return $self->_verdict( 1, scalar( keys %wanted ) . ' fetched ' . ( keys %wanted == 1 ? 'directory is' : 'directories are' ) . ' here', q{} ) unless @missing;
+    return $self->verdict( 1, scalar( keys %wanted ) . ' fetched ' . ( keys %wanted == 1 ? 'directory is' : 'directories are' ) . ' here', q{} ) unless @missing;
 
     my $detail = join( q{}, map { "    $_ (" . join( ', ', sort keys %{ $wanted{$_} } ) . ")\n" } @missing );
-    return $self->_verdict( 0, scalar(@missing) . ' fetched ' . ( @missing == 1 ? 'directory is' : 'directories are' ) . ' not on this machine', <<"FIX" );
+    return $self->verdict( 0, scalar(@missing) . ' fetched ' . ( @missing == 1 ? 'directory is' : 'directories are' ) . ' not on this machine', <<"FIX" );
 A guest rsyncs these out of this machine, and the recipe that wants one fails
 when it is not there:
 
@@ -1180,7 +1180,7 @@ sub check_config {
 
     my $dir = Trog::Config->dir;
 
-    my @missing = grep { !_readable("$dir/$_") } qw{recipes.yaml admin_authorized_keys};
+    my @missing = grep { !-r "$dir/$_" } qw{recipes.yaml admin_authorized_keys};    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- the only question is whether it can be read, and what reads it opens it itself
 
     # An empty key file passes a check for existence and then stops
     # bin/new_config, which is the failure that this check prevents.
@@ -1193,12 +1193,12 @@ sub check_config {
             Provisioner::Cookbook->globals( $_, $conf ) foreach ( undef, grep { !m/\A_/ } sort keys %$conf );
             1;
         };
-        return $self->_verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;
+        return $self->verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;
 
         # Ten minutes into a build otherwise: bin/new_config reads these for
         # the first domain it generates, and every recipe that owns a file on
         # the guest wants one of them.
-        return $self->_verdict( 0, 'The settings every guest is built with are missing or wrong', "$@" . <<"FIX" );
+        return $self->verdict( 0, 'The settings every guest is built with are missing or wrong', "$@" . <<"FIX" );
 An installation that still has an ipmap.cfg in $dir has them
 in that file, and moves them across with:
 
@@ -1209,7 +1209,7 @@ docs/CONFIGURATION.md says what each one is.
 FIX
     }
 
-    return $self->_verdict( 0, "Missing or empty in $dir: " . join( ', ', @missing ), <<"FIX" );
+    return $self->verdict( 0, "Missing or empty in $dir: " . join( ', ', @missing ), <<"FIX" );
 These are where an installation says which machines exist, what every guest
 gets, and who may log in to one.  See Trog::Config for where this directory is
 and how to point it somewhere else.
@@ -1394,6 +1394,12 @@ they validate, they render, and they work.
 It names the file and the field, and never the value.  A note that prints a
 password to fix a printed password defeats itself.
 
+A secret is what the schema of its recipe marks C<x-secret>; see
+L<Provisioner::Recipe/secrets_in>.  A block for a recipe that does not load is
+skipped, because preflight has other checks for that.  Also, any value that is
+a private key is a secret wherever it is, so a key pasted into a field that no
+schema marks is found too.
+
 =cut
 
 sub note_plaintext_secrets {
@@ -1407,7 +1413,28 @@ sub note_plaintext_secrets {
     my @found;
     foreach my $file (@files) {
         my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($file) ) } or next;
-        push( @found, map { { file => $file, at => $_ } } _plaintext_in($conf) );
+        next if ref $conf ne 'HASH';
+
+        my %found;
+        foreach my $top ( sort keys %$conf ) {
+            my $recipes = $conf->{$top};
+            next if ref $recipes ne 'HASH';
+            foreach my $name ( sort grep { !m/\A_/ } keys %$recipes ) {
+                my $class = eval { Provisioner::Cookbook->load($name) } or next;
+
+                # A reference is not a secret.  Neither is a placeholder from
+                # bin/new_guest, because new_config refuses to build from one.
+                $found{"$top.$name.$_->[0]"} = 1
+                  for grep { $_->[1] !~ m/\Asecret:/ && $_->[1] ne Provisioner::Cookbook->PLACEHOLDER } $class->secrets_in( $recipes->{$name} );
+            }
+        }
+
+        $found{ $_->[0] } = 1 for grep {
+            my $value = ${ $_->[1] };
+            !ref $value && defined $value && $value =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/
+        } Trog::Utils::slots_in( \$conf, q{} );
+
+        push( @found, map { { file => $file, at => $_ } } sort keys %found );
     }
     return { ok => 1 } unless @found;
 
@@ -1428,59 +1455,6 @@ overwrite, so it is safe to run against a store that may already have one.
 
 Rotate anything that has been sitting in a file long enough to have been read.
 FIX
-}
-
-=head2 @paths = _plaintext_in($conf)
-
-Returns the path of each value in C<$conf>, one file of the configuration,
-that is a secret written out, not a reference.
-
-A secret is what the schema of its recipe marks C<x-secret>; see
-L<Provisioner::Recipe/secrets_in>.  A block for a recipe that does not load is
-skipped, because preflight has other checks for that.  Also, any value that is
-a private key is a secret wherever it is, so a key pasted into a field that no
-schema marks is found too.
-
-=cut
-
-sub _plaintext_in {
-    my ($conf) = @_;
-    return () if ref $conf ne 'HASH';
-
-    my %found;
-    foreach my $top ( sort keys %$conf ) {
-        my $recipes = $conf->{$top};
-        next if ref $recipes ne 'HASH';
-        foreach my $name ( sort grep { !m/\A_/ } keys %$recipes ) {
-            my $class = eval { Provisioner::Cookbook->load($name) } or next;
-            $found{"$top.$name.$_->[0]"} = 1 for grep { _is_plaintext( $_->[1] ) } $class->secrets_in( $recipes->{$name} );
-        }
-    }
-
-    $found{ $_->[0] } = 1 for grep { _is_private_key( ${ $_->[1] } ) } Trog::Utils::slots_in( \$conf, q{} );
-    my @paths = sort keys %found;
-    return @paths;
-}
-
-sub _is_plaintext {
-    my ($value) = @_;
-
-    # A reference is not a secret.  Neither is a placeholder from bin/new_guest,
-    # because new_config refuses to build from one.
-    return 0 if $value =~ m/\Asecret:/;
-    return 0 if $value eq Provisioner::Cookbook->PLACEHOLDER;
-    return 1;
-}
-
-sub _is_private_key {
-    my ($value) = @_;
-    return 0 if ref $value || !defined $value;
-    return $value =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/ ? 1 : 0;
-}
-
-sub _readable {
-    my ($path) = @_;
-    return -r $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- the only question is whether it can be read, and what reads it opens it itself
 }
 
 =head1 SEE ALSO
