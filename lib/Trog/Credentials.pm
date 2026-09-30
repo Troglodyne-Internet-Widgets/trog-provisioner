@@ -83,6 +83,18 @@ our %CREDENTIAL;
 # Where prompt asks when told to use the terminal.  A test points it at a file.
 our $TERMINAL = '/dev/tty';
 
+# Die unless $name is one a caller may ask for.  $where says where it came from.
+my sub known ( $name, $where ) {
+    return 1 if $KNOWN{$name};
+    die "Unknown credential '$name'$where.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n";
+}
+
+# Opens the terminal with $mode, for IO::Prompter to ask at.
+my sub terminal ( $mode, $what ) {
+    open( my $fh, $mode, $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n" . "Standard input is already spoken for, so it has to be typed there.\n";
+    return $fh;
+}
+
 =head2 prompt($message, $name, %opts)
 
 Returns the password.  It asks for the password only if this run does not
@@ -113,10 +125,10 @@ sub prompt {
 
     # Before asking, because remember would refuse the name after somebody had
     # already typed the answer.
-    _known( $name, q{} )      if defined $name;
+    known( $name, q{} )       if defined $name;
     return $class->get($name) if defined $name && $class->have($name);
 
-    my @at = $opts{terminal} ? ( -in => _terminal( '<', $what ), -out => _terminal( '>>', $what ) ) : ();
+    my @at = $opts{terminal} ? ( -in => terminal( '<', $what ), -out => terminal( '>>', $what ) ) : ();
 
     my $answer = Trog::Utils::prompt( $message, -echo => '*', @at );
 
@@ -127,13 +139,6 @@ sub prompt {
     $class->remember( $name, $typed ) if defined $name;
 
     return $typed;
-}
-
-# Opens the terminal with $mode, for IO::Prompter to ask at.
-sub _terminal {
-    my ( $mode, $what ) = @_;
-    open( my $fh, $mode, $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n" . "Standard input is already spoken for, so it has to be typed there.\n";
-    return $fh;
 }
 
 =head2 remember($name, $value)
@@ -153,17 +158,10 @@ Returns 1.  Dies if C<$name> is not a known name.
 sub remember {
     my ( $class, $name, $value ) = @_;
 
-    _known( $name, q{} );
+    known( $name, q{} );
 
     $CREDENTIAL{$name} = $value;
     return 1;
-}
-
-# Die unless $name is one a caller may ask for.  $where says where it came from.
-sub _known {
-    my ( $name, $where ) = @_;
-    return 1 if $KNOWN{$name};
-    die "Unknown credential '$name'$where.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n";
 }
 
 =head2 get($name)
@@ -226,7 +224,7 @@ sub load {
         die "Could not read the credentials given on standard input.\n" . "Expected 'name: value', got: $line\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
           unless defined $name;
 
-        _known( $name, ' given on standard input' );
+        known( $name, ' given on standard input' );
 
         $CREDENTIAL{$name} = $value;
     }
