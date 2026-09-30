@@ -23,6 +23,7 @@ use URI();
 use YAML::XS();
 
 use Trog::Config();
+use Trog::Hypervisors::Config();
 use Trog::Secrets();
 use Trog::Utils();
 
@@ -227,6 +228,9 @@ C<guest_secrets> names.
 =item * The key of each configured domain, which opens the guest and which
 L<Trog::Guest/ref_for_key> names.
 
+=item * What a block of F<hypervisors.conf> names, such as a hypervisor's API
+token, which L<Trog::Hypervisors::Config/secret_references> finds.
+
 =back
 
 F<bin/forget_secret> asks so that it can refuse to delete one that is still
@@ -245,7 +249,7 @@ sub secret_references {
     my $conf   = $class->configuration();
     my %needed = Trog::Secrets->needed($conf);
 
-    my @refs = values %needed;
+    my @refs = ( values %needed, Trog::Hypervisors::Config->load( Trog::Hypervisors::Config->default_path )->secret_references );
 
     foreach my $domain ( grep { $_ ne '_base' } sort keys %$conf ) {
         my $config  = $class->domain_config( $domain, $conf );

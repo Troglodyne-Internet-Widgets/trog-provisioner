@@ -6,10 +6,8 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
-use Config::Simple();
-use File::Slurper();
+use parent 'Trog::Hypervisors::Config';
 use List::Util qw{any reduce};
-use Trog::Config();
 use Trog::HV();
 use Trog::Local();
 use Trog::Utils();
@@ -94,65 +92,7 @@ A refusal is better than a guest on a machine that cannot run it.
 
 =head1 CLASS METHODS
 
-=head2 load($path)
-
-Reads a fleet from F<hypervisors.conf> and returns it.  No fleet is a normal
-state.  So when C<$path> is undef, does not exist or cannot be read, this
-returns an empty fleet, which means that no fleet is configured.
-
-Dies when a file it can read names no hypervisor.  That includes a file with
-keys but no C<[name]> header.
-
 =cut
-
-sub load {
-    my ( $class, $path ) = @_;
-
-    my $self = bless { path => $path, order => [], blocks => {} }, $class;
-    return $self unless defined $path;
-
-    my $config = eval { Config::Simple->new($path) } or return $self;
-
-    # Config::Simple returns "block.key" pairs in a hash and cannot list the
-    # block names, so the order must come from the file itself.
-    my %vars = $config->vars();
-    my %in_file;
-    foreach my $key ( keys %vars ) {
-        my ($block) = $key =~ m/\A([^.]+)\./ or next;
-        $in_file{$block} = 1;
-    }
-
-    # The [block] headers, in file order.  Config::Simple puts any key outside a
-    # header under default, which has no header line, so the names that this
-    # does not find follow them.
-    my $text  = eval { File::Slurper::read_text($path) } // q{};
-    my @order = map { m/\A\s*\[([^\]]+)\]/ ? $1 : () } split m/\n/, $text;
-
-    my %seen;
-    foreach my $block ( @order, sort keys %in_file ) {
-        next unless $in_file{$block};
-        next if $seen{$block}++;
-        push @{ $self->{order} }, $block;
-        $self->{blocks}{$block} = $config->get_block($block);
-    }
-
-    # Config::Simple puts any key outside a [block] under 'default', so a file
-    # with no headers looks like one hypervisor with that name.
-    die "$path names no hypervisors; every one needs a [name] header of its own\n"
-      if !@{ $self->{order} } || ( @{ $self->{order} } == 1 && $self->{order}[0] eq 'default' );
-
-    return $self;
-}
-
-=head2 default_path
-
-Returns the path of F<hypervisors.conf> when the caller names no other.  It is
-in the configuration directory, with the rest of the configuration of this
-installation.  See L<Trog::Config>.
-
-=cut
-
-sub default_path { return Trog::Config->path('hypervisors.conf') }
 
 # What find and choose share before they ask a fleet: the hypervisor when a
 # name or the lack of a fleet decides it, or else undef, the fleet to ask and
@@ -264,20 +204,6 @@ sub choose {
 }
 
 =head1 METHODS
-
-=head2 configured
-
-Returns true when there is a fleet.  When it is false, the other methods here
-have nothing to say, and the hypervisor comes from F<provision.conf>.
-
-=head2 names
-
-Returns the hypervisor names, in the order of the file.
-
-=cut
-
-sub configured ($self) { return scalar @{ $self->{order} } ? 1 : 0 }
-sub names      ($self) { return @{ $self->{order} } }
 
 =head2 hypervisor($name)
 
@@ -591,7 +517,8 @@ sub offer {
 
 =head1 SEE ALSO
 
-L<Trog::HV>
+L<Trog::HV>, and L<Trog::Hypervisors::Config>, which reads the file: C<load>,
+C<default_path>, C<configured>, C<names> and C<secret_references> are its.
 
 =cut
 

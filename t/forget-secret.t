@@ -76,6 +76,21 @@ subtest 'a secret this installation still asks for is refused' => sub {
     is( $held{probe}, 'the key of a guest that exists', 'and the secret is still there' );
 };
 
+subtest 'a hypervisor\'s credential is refused, being still wanted by the fleet' => sub {
+    my $file  = store();
+    my $fleet = "$ENV{TROG_PROVISIONER_CONFIG}/hypervisors.conf";
+    File::Slurper::Temp::write_text( $fleet, "[node1]\nsolusvm = node.test.test\nsolusvm_token = secret:old/retired/password\n" );
+
+    my ( $warned, $rc ) = capture_stderr { Provisioner::Bin::forget_secret::main( qw{--group old --title retired --secrets}, $file ) };
+    unlink $fleet;
+
+    is( $rc, 1, 'it refuses, though no recipe asks for it' );
+    like( $warned, qr/still[ ]asks[ ]for[ ]secret:old\/retired/, 'naming the reference that wants it' );
+
+    my %held = Trog::Secrets->lookup( $file, 'pw', probe => 'secret:old/retired/password' );
+    is( $held{probe}, 'nothing reads this', 'and the token is still there' );
+};
+
 subtest '--force means it anyway' => sub {
     my $file = store();
 
