@@ -11,6 +11,7 @@ use re '/aasx';
 use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
+use Socket();
 
 =head1 NAME
 
@@ -538,7 +539,35 @@ sub guest_ssh_ip {
     die "The guest '$name' has no IPv4 address to reach it at.\n" . 'It is ' . ( $server->{status} // 'in no state the node would name' ) . "; a server still being built has none yet.\n";
 }
 
-# A listing is abbreviated, and addresses are not on it.
+=head2 guest_network_of($address)
+
+Returns the network, as a CIDR, of a server in the project whose own IPv4
+address and netmask put C<$address> on the same network, or undef when none
+does.  The listing of the project's servers carries the netmask of every
+address the node issued, so this asks nothing else.
+
+=cut
+
+sub guest_network_of {
+    my ( $self, $address ) = @_;
+
+    # inet_pton rather than inet_aton, which would resolve a name.
+    my $wanted = Socket::inet_pton( Socket::AF_INET(), $address // q{} ) or return;
+
+    foreach my $issued ( map { @{ $_->{ip_addresses}{ipv4} // [] } } $self->servers ) {
+        my $ip   = Socket::inet_pton( Socket::AF_INET(), $issued->{ip}      // q{} ) or next;
+        my $mask = Socket::inet_pton( Socket::AF_INET(), $issued->{netmask} // q{} ) or next;
+
+        my $prefix = unpack( '%32B*', $mask );
+        next unless $prefix && ( $ip &. $mask ) eq ( $wanted &. $mask );
+
+        return Socket::inet_ntoa( $ip &. $mask ) . "/$prefix";
+    }
+
+    return;
+}
+
+# One server as the node records it, asked for by id.
 sub _detail {
     my ( $self, $name ) = @_;
 

@@ -986,6 +986,20 @@ ask until the guest exists.
 sub check_reachable   ( $self, @ ) { return abstract( $self, 'check_reachable' ) }
 sub check_transfer_ip ( $self, @ ) { return abstract( $self, 'check_transfer_ip' ) }
 
+=head2 $network = $hv->guest_network_of($address)
+
+Returns the network, as a CIDR, of a guest here whose own network holds
+C<$address>, or undef when none does.
+
+A backend that addresses its own guests may still put them on a private network
+this machine is also on, and then they reach us across it with no forward.
+Only the backend can say what networks its guests are on.  Undef here, which is
+the answer for a service on the internet.
+
+=cut
+
+sub guest_network_of { return }
+
 =head2 $result = $hv->check_transfer_route()
 
 Works out where a guest built here fetches its payload from, and says whether
@@ -1000,7 +1014,9 @@ things can be wrong with that, and each has its own answer:
 =over 4
 
 =item * The address is a private one.  Nothing on the internet routes to it, so
-a guest there can never fetch.
+a guest there can never fetch -- unless the address is ours and on the network
+of a guest here, which C<guest_network_of> answers for, and then the guest
+reaches it directly.
 
 =item * The address is not one of ours.  Then something in front of us answers
 for it, and it has to forward C<transfer_port> to the sshd of this machine.
@@ -1040,9 +1056,14 @@ FIX
     # The blocks nothing on the internet routes to.
     my $private = any { $ip =~ $_ } qr/\A(?:10|127)[.]/, qr/\A(?:169[.]254|192[.]168)[.]/, qr/\A172[.](?:1[6-9]|2\d|3[01])[.]/;
 
+    my $shared = $private && $here->holds_address($ip) ? $self->guest_network_of($ip) : undef;
+    return $self->verdict( 1, "Guests here fetch from $ip:$port, which is an address of this machine on $shared, a network of theirs", q{} ) if $shared;
+
     return $self->verdict( 0, "Guests on " . $self->describe . " are told to fetch from $ip, which is a private address", <<"FIX" ) if $private;
-Nothing outside our network routes to $ip, so a guest there can never fetch its
-payload.  Put the address that reaches this machine from the internet in the
+Nothing outside our network routes to $ip, and no guest there is on a network
+with it, so a guest there can never fetch its payload.  Where this machine is
+on the guests' own network, name its address on that network instead.
+Otherwise put the address that reaches this machine from the internet in the
 block of this hypervisor in hypervisors.conf, with the port forwarded to the
 sshd here:
 
