@@ -124,7 +124,7 @@ sub generate {
         $DOMAIN => { vendorthing => { vendor_setting => 'from-the-domain' } },
     );
 
-    my ( $rh, $recipe_file ) = tempfile();
+    my ( $rh, $recipe_file ) = tempfile( UNLINK => 1 );
     print {$rh} YAML::XS::Dump( \%recipes );
     close($rh) or die "Could not close $recipe_file: $!";
 
@@ -177,7 +177,7 @@ subtest 'a readOnly field in _global is refused' => sub {
 
 sub write_config {
     my ($conf) = @_;
-    my ( $fh, $file ) = tempfile();
+    my ( $fh, $file ) = tempfile( UNLINK => 1 );
     print {$fh} YAML::XS::Dump($conf);
     close($fh) or die "Could not close $file: $!";
     return $file;
