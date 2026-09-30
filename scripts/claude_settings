@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use Fcntl          ();
-use File::Basename qw{dirname};
+use File::Basename qw{basename dirname};
 use File::Glob     ();
 use File::Temp     ();
 use JSON::PP       ();
@@ -99,7 +99,14 @@ sub add_repos {
     my ( $basedir, $settings_file ) = @_;
 
     die "$basedir is not a directory.\n" unless -d $basedir;
-    my @repos = grep { !m{/[.][.]?\z} } map { dirname($_) } File::Glob::bsd_glob("$basedir/*/.git"), File::Glob::bsd_glob("$basedir/.*/.git");
+    my @repos;
+    foreach my $git ( File::Glob::bsd_glob("$basedir/*/.git"), File::Glob::bsd_glob("$basedir/.*/.git") ) {
+        my $repo = dirname($git);
+
+        # .* matches . and .., which are the basedir and its parent.
+        next if List::Util::any { basename($repo) eq $_ } qw{. ..};
+        push( @repos, $repo );
+    }
 
     my $settings = read_settings($settings_file);
     my $dirs     = $settings->{permissions}{additionalDirectories} //= [];
