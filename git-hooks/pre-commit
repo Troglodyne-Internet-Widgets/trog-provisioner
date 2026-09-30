@@ -213,6 +213,18 @@ else
     echo "pre-commit: perlcritic is not on PATH, skipping the critic pass."
 fi
 
+# The tests run without the GIT_ variables that git sets for this hook.  It sets
+# GIT_INDEX_FILE, and GIT_DIR too in a worktree, and git obeys them over -C.  So
+# a test that runs git in a repository of its own would add, commit and write
+# config in this one.  In a subshell, because the git commands of this hook need
+# them: under git commit -a, GIT_INDEX_FILE names the index being committed.
+run_tests() {
+    (
+        unset $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p')
+        prove -m -j8 "$@"
+    )
+}
+
 # Choosing tests by the lines they ran trusts that each changed file compiles.
 # A syntax error in a sub that no test runs chooses no test, and still breaks
 # every test that loads the file.  A .t is left out, because a test in the diff
@@ -249,7 +261,7 @@ fi
 if ! command -v tests-covering >/dev/null 2>&1
 then
     echo "Running every test, because tests-covering is not on PATH; install Perl::Tests::Covering..."
-    prove -m -j8 t/ || {
+    run_tests t/ || {
         echo "pre-commit: the tests above failed.  To see why, run each failing file"
         echo "on its own:  prove -v t/<file>.t"
         exit 1
@@ -269,7 +281,7 @@ fi
 echo "Running the tests that ran what this commit changes..."
 # No -l: each test finds lib/ itself, through FindBin::libs, and -l would hide
 # a test that loads from lib/ before it does.
-prove -m -j8 $tests || {
+run_tests $tests || {
     echo "pre-commit: the tests above failed.  To see why, run each failing file"
     echo "on its own:  prove -v t/<file>.t"
     exit 1

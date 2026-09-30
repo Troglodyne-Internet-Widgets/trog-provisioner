@@ -31,4 +31,9 @@ for state in rebase-merge rebase-apply sequencer; do
     [ -d "$(git rev-parse --git-path "$state")" ] && exit 0
 done
 
+# Without the GIT_ variables that git sets for this hook, for the reason the
+# pre-commit hook gives: the refresh runs the tests, and a test that runs git
+# in a repository of its own would otherwise work in this one.
+unset $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p')
+
 tests-covering --refresh --jobs "$(nproc 2>/dev/null || echo 1)" >/dev/null 2>&1 &

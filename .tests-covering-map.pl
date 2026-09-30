@@ -86,56 +86,6 @@ my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
 # it.  Built on the first call, because loading every recipe takes a second.
 my %stands_for;
 
-sub _templates_of_recipes {
-    my $scratch = File::Temp::tempdir( CLEANUP => 1 );
-    my @names   = ( Provisioner::Cookbook->names, Provisioner::Cookbook->distros, 'vm' );
-
-    my %found;
-    foreach my $distro ( Provisioner::Cookbook->distros ) {
-        my @dirs = map { File::Spec->abs2rel($_) } @{ Provisioner::Cookbook->template_dirs($distro) };
-
-        foreach my $name (@names) {
-            my $class  = Provisioner::Cookbook->load( $name, distro => $distro );
-            my $recipe = $class->new(
-                distro          => $distro,
-                target_packager => 'deb',
-                template_dirs   => Provisioner::Cookbook->template_dirs($distro),
-
-                # ufw clears a directory under this in template_files.
-                output_dir => $scratch,
-            );
-
-            # Every recipe, so that ufw names the profile of each.
-            my %files         = $recipe->template_files(@names);
-            my @names_in_dirs = ( @{$recipe}{qw{template global_template}}, map { "files/$_" } keys %files );
-
-            # The recipe and its distribution's subclass, if it has one.
-            my @modules = grep { -e } map { "lib/$_.pm" =~ s{::}{/}gr } $class, "Provisioner::Recipe::$name";
-
-            foreach my $dir (@dirs) {
-                push @{ $found{"$dir/$_"} }, @modules for @names_in_dirs;
-            }
-            push @{ $found{"templates/tests/$_"} }, @modules for $recipe->tests;
-        }
-    }
-
-    $found{'templates/makefile.tt'} = ['bin/new_config'];
-    return %found;
-}
-
-sub _tests_that_name {
-    my ($script) = @_;
-
-    my @tests;
-    foreach my $test ( glob 't/*.t' ) {
-        open( my $fh, '<', $test ) or die "Cannot read $test: $!";
-        my $source = do { local $/; <$fh> };
-        close($fh) or die "Cannot close $test: $!";
-        push @tests, $test if index( $source, $script ) >= 0;
-    }
-    return @tests;
-}
-
 return sub {
     my ($path) = @_;
 
@@ -147,13 +97,56 @@ return sub {
     return q{} if $TOOL_CONFIGURATION{$path};
 
     if ( $path =~ m{\Atemplates/} ) {
-        %stands_for = _templates_of_recipes() unless %stands_for;
+        unless (%stands_for) {
+            my $scratch = File::Temp::tempdir( CLEANUP => 1 );
+            my @names   = ( Provisioner::Cookbook->names, Provisioner::Cookbook->distros, 'vm' );
+
+            foreach my $distro ( Provisioner::Cookbook->distros ) {
+                my @dirs = map { File::Spec->abs2rel($_) } @{ Provisioner::Cookbook->template_dirs($distro) };
+
+                foreach my $name (@names) {
+                    my $class  = Provisioner::Cookbook->load( $name, distro => $distro );
+                    my $recipe = $class->new(
+                        distro          => $distro,
+                        target_packager => 'deb',
+                        template_dirs   => Provisioner::Cookbook->template_dirs($distro),
+
+                        # ufw clears a directory under this in template_files.
+                        output_dir => $scratch,
+                    );
+
+                    # Every recipe, so that ufw names the profile of each.
+                    my %files         = $recipe->template_files(@names);
+                    my @names_in_dirs = ( @{$recipe}{qw{template global_template}}, map { "files/$_" } keys %files );
+
+                    # The recipe and its distribution's subclass, if it has one.
+                    my @modules = grep { -e } map { "lib/$_.pm" =~ s{::}{/}gr } $class, "Provisioner::Recipe::$name";
+
+                    foreach my $dir (@dirs) {
+                        push @{ $stands_for{"$dir/$_"} }, @modules for @names_in_dirs;
+                    }
+                    push @{ $stands_for{"templates/tests/$_"} }, @modules for $recipe->tests;
+                }
+            }
+            $stands_for{'templates/makefile.tt'} = ['bin/new_config'];
+        }
         my %unique = map { $_ => 1 } @{ $stands_for{$path} // [] };
         my @unique = sort keys %unique;
         return @unique;
     }
 
-    return _tests_that_name($path) if $path =~ m{\Ascripts/[^/]+\z} || $path eq 'git-hooks/post-commit';
+    # The tests that name a script or the post-commit hook, because none of them
+    # loads it.
+    if ( $path =~ m{\Ascripts/[^/]+\z} || $path eq 'git-hooks/post-commit' ) {
+        my @tests;
+        foreach my $test ( glob 't/*.t' ) {
+            open( my $fh, '<', $test ) or die "Cannot read $test: $!";
+            my $source = do { local $/; <$fh> };
+            close($fh) or die "Cannot close $test: $!";
+            push @tests, $test if index( $source, $path ) >= 0;
+        }
+        return @tests;
+    }
 
     # bin/new_config copies it into the configuration of every domain.
     return 'bin/new_config' if $path eq 'openssl.conf';
