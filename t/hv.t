@@ -37,6 +37,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
+use Provisioner::Cookbook();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
@@ -154,6 +155,14 @@ subtest 'a backend that leaves something out is told what' => sub {
         my @missing = grep { $backend->can($_) == Trog::HV->can($_) } @owed;
         is_deeply( \@missing, [], "$backend implements every one of them" );
     }
+};
+
+subtest 'what a guest names to be sized on a backend is a setting the schema declares' => sub {
+    my %schema   = Provisioner::Cookbook->global_schema;
+    my @backends = grep { defined $_->size_key } Trog::HV->backends;
+
+    ok scalar @backends,                           'there are backends that size a guest by a key of their own, so this checks something';
+    ok exists $schema{properties}{ $_->size_key }, "$_ sizes a guest by " . $_->size_key . ', which _global accepts' foreach @backends;
 };
 
 subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
