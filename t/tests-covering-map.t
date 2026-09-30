@@ -45,9 +45,25 @@ subtest 'a template stands for the recipe that renders it' => sub {
     is_deeply( [ $map->('openssl.conf') ],                      ['bin/new_config'],                                                              'and the openssl.conf of its ssl target, for what copies it' );
 };
 
-subtest 'a script on the system perl stands for the tests that name it' => sub {
+subtest 'a script stands for the tests that name it, and the one that packs it' => sub {
     my @tests = $map->('scripts/setup-ufw-rules');
     ok( ( grep { $_ eq 't/setup-ufw-rules.t' } @tests ), 'its own test' ) or diag "got: @tests";
+
+    @tests = $map->('scripts/escalations.sh');
+    ok( ( grep { $_ eq 't/log-watchers.t' } @tests ), 'a test that names it by its file name alone' ) or diag "got: @tests";
+
+    # No test names it, and a script that stands for nothing ran every test.
+    is_deeply( [ $map->('scripts/add_to_fstab') ], ['t/new_config-packaging.t'], 'and every script, the test that packs it into the payload' );
+};
+
+subtest 'a file that the code reads at run time stands for what reads it' => sub {
+    is_deeply( [ $map->('schema/ips.sql') ], ['lib/Provisioner/IPPool.pm'], 'the schema of ips.db, for the pool' );
+
+    my @virtiofs = $map->('virtiofs-better');
+    ok( ( grep { $_ eq 'lib/Trog/HV/Libvirt.pm' } @virtiofs ), 'the wrapper of virtiofsd, for the libvirt backend that runs it' ) or diag "got: @virtiofs";
+
+    my @example = $map->('hypervisors.conf.example');
+    ok( ( grep { $_ eq 't/hypervisors.t' } @example ), 'and the example fleet, for the test that reads it' ) or diag "got: @example";
 };
 
 subtest 'a recipe that no test loads yet stands for the Cookbook that finds it' => sub {
@@ -73,9 +89,12 @@ subtest 'the post-commit hook stands for the test that runs it' => sub {
 };
 
 subtest 'documentation reaches no test, and anything else is left to the caller' => sub {
-    is_deeply( [ $map->('CLAUDE.md') ],        [q{}], 'markdown reaches no test' );
-    is_deeply( [ $map->('docs/APPROACH.md') ], [q{}], 'nor does docs/' );
-    is_deeply( [ $map->('.gitattributes') ],   [],    'and .gitattributes is unexplained, so every test runs' );
+    is_deeply( [ $map->('CLAUDE.md') ],                   [q{}], 'markdown reaches no test' );
+    is_deeply( [ $map->('docs/APPROACH.md') ],            [q{}], 'nor does docs/' );
+    is_deeply( [ $map->('example.test/provision.conf') ], [q{}], 'nor the example of the configuration of a domain' );
+    is_deeply( [ $map->('.gitignore') ],                  [q{}], 'nor .gitignore' );
+    is_deeply( [ $map->('.perl-slop.json') ],             [q{}], 'nor the configuration of the gates of perl-slop' );
+    is_deeply( [ $map->('.gitattributes') ],              [],    'and .gitattributes is unexplained, so every test runs' );
 };
 
 done_testing();
