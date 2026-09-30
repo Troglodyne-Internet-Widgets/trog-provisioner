@@ -75,27 +75,24 @@ sub enrich {
 
     foreach my $key (qw{root_scripts user_scripts}) {
         next unless ref $opts{$key} eq 'ARRAY';
-        $opts{$key} = [ map { _with_mailto( $_, \%opts ) } @{ $opts{$key} } ];
+
+        # A copy of each script, so that nothing here writes into the
+        # configuration that the caller owns.
+        my @scripts;
+        foreach my $script ( @{ $opts{$key} } ) {
+            if ( ref $script ne 'HASH' ) {
+                push( @scripts, $script );
+                next;
+            }
+
+            my $to     = $script->{mailto};
+            my $mailto = !defined $to ? $opts{admin_email} : $to eq 'none' ? '' : Provisioner::Utils::qualify_address( $to, $opts{domain} );
+            push( @scripts, { %$script, mailto => $mailto } );
+        }
+        $opts{$key} = \@scripts;
     }
 
     return %opts;
-}
-
-# Return a copy, because render_file calls enrich once per template and the
-# caller owns the recipe configuration.
-sub _with_mailto {
-    my ( $script, $opts ) = @_;
-    return $script unless ref $script eq 'HASH';
-
-    my %out = %$script;
-    my $to  = $out{mailto};
-
-    $out{mailto} =
-        !defined $to  ? $opts->{admin_email}
-      : $to eq 'none' ? ''
-      :                 Provisioner::Utils::qualify_address( $to, $opts->{domain} );
-
-    return \%out;
 }
 
 sub args {
