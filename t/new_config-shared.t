@@ -98,7 +98,7 @@ sub generate {
         $TENANT => $on{tenant} // { nosnap => undef },
     );
 
-    my ( $rh, $recipe_file ) = tempfile();
+    my ( $rh, $recipe_file ) = tempfile( UNLINK => 1 );
     print {$rh} YAML::XS::Dump( \%recipes );
     close($rh) or die "Could not close $recipe_file: $!";
 
