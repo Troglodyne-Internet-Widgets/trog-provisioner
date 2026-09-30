@@ -572,12 +572,36 @@ sub _snapshots {
     return reverse @newest_last;
 }
 
+=head2 rollback_possible($domain, %opts)
+
+Returns 1 if the guest exists and its plan allows snapshots, and 0 otherwise.
+A plan decides whether its servers can be snapshotted at all, and the node
+refuses a snapshot of a server on a plan that does not allow them.
+
+C<capacity> is accepted and ignored, as in L<Trog::HV::Cloud>.  Dies when the
+node cannot be asked, since that is not an answer about the guest.
+
+=cut
+
+sub rollback_possible {
+    my ( $self, $domain, %opts ) = @_;
+
+    my $server = $self->_detail($domain) or return 0;
+    return $server->{plan}{is_snapshots_enabled} ? 1 : 0;
+}
+
 =head2 create_snapshot($domain, $name)
+
+Takes one, and returns 1.  C<disk_only> and C<leave_down> are accepted and
+ignored, because the node's endpoint takes nothing but a name.
+
+Warns and returns 0 when the node will not take it, for example on a plan that
+does not allow snapshots.  Dies when there is no such guest.
 
 =head2 revert_snapshot($domain, $name)
 
-Take one, and put the guest back on one.  Reverting is by the snapshot's own id,
-which is what the node's endpoint takes, so the snapshot is found first.
+Puts the guest back on one.  Reverting is by the snapshot's own id, which is
+what the node's endpoint takes, so the snapshot is found first.
 
 =cut
 
@@ -587,8 +611,10 @@ sub create_snapshot {
     my $server = $self->server($domain)
       or die "There is no guest called '$domain' to snapshot\n";
 
-    $self->api->create_a_new_server_snapshot( id => $server->{id}, name => $name );
-    return 1;
+    return 1 if eval { $self->api->create_a_new_server_snapshot( id => $server->{id}, name => $name ); 1 };
+
+    warn "Could not snapshot $domain: $@";
+    return 0;
 }
 
 sub revert_snapshot {
