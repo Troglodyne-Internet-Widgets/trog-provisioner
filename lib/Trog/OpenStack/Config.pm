@@ -45,9 +45,12 @@ the hash has one level.
 
 =cut
 
-=head2 _candidates
+=head2 file
 
-Returns the paths where F<clouds.yaml> can be, in the order to try them:
+Returns C<($path, $text)>: the first F<clouds.yaml> that it can read, and its
+contents.
+
+It tries these paths, in this order:
 
 =over 4
 
@@ -76,27 +79,6 @@ F</etc/openstack/clouds.yaml>, the file for the whole system.
 
 =back
 
-=cut
-
-sub _candidates {
-    my @home =
-      $ENV{HOME}
-      ? ( "$ENV{HOME}/clouds.yaml", "$ENV{HOME}/.config/openstack/clouds.yaml" )
-      : ();
-
-    return grep { $_ } (
-        $ENV{OS_CLIENT_CONFIG_FILE},
-        Trog::Config->path('clouds.yaml'),
-        @home,
-        '/etc/openstack/clouds.yaml',
-    );
-}
-
-=head2 file
-
-Returns C<($path, $text)>: the first F<clouds.yaml> that it can read, and its
-contents.
-
 It opens each path and does not first test if the file exists.  A file that it
 cannot read is the same problem as a file that is not there.  Also, a test
 before the open gives the file time to change.
@@ -109,7 +91,12 @@ not tell you what to fix.
 sub file {
     my ($class) = @_;
 
-    my @tried = $class->_candidates;
+    my @tried = grep { $_ } (
+        $ENV{OS_CLIENT_CONFIG_FILE},
+        Trog::Config->path('clouds.yaml'),
+        ( $ENV{HOME} ? ( "$ENV{HOME}/clouds.yaml", "$ENV{HOME}/.config/openstack/clouds.yaml" ) : () ),
+        '/etc/openstack/clouds.yaml',
+    );
     foreach my $path (@tried) {
         my $text = eval { File::Slurper::read_binary($path) };
         return ( $path, $text ) if defined $text;
@@ -140,6 +127,14 @@ from the file.
 Dies when no file can be read or parsed, when the file has no clouds, when the
 cloud is not there or cannot be chosen, and when it has no C<auth_url>.
 
+It also dies when a value other than the application credential secret is a
+C<secret:> reference.  Nothing resolves those.  L<Trog::OpenStack::Auth>
+resolves the credential when it asks Keystone for a token, and every other value
+is used as it is written -- by this toolkit, and by every other reader of a
+F<clouds.yaml>, none of which has ever heard of a reference.  A region called
+C<secret:...> would go to Keystone as that string, so say so here rather than
+there.
+
 =cut
 
 sub load {
@@ -168,42 +163,6 @@ sub load {
     die "$path has no cloud named '$name'.  It has: " . join( ', ', @names ) . "\n"
       unless ref $cloud eq 'HASH';
 
-    return $class->_refuse_unresolved( $class->_flatten( $cloud, $name, $path ), $path );
-}
-
-=head2 _flatten($cloud, $name, $path)
-
-Returns C<$cloud> as the hash that C<load> describes.
-
-=cut
-
-=head2 _refuse_unresolved($cloud, $path)
-
-Returns the cloud, or dies when a value other than the application credential
-secret is a C<secret:> reference.
-
-Nothing resolves those.  L<Trog::OpenStack::Auth> resolves the credential when
-it asks Keystone for a token, and every other value is used as it is written --
-by this toolkit, and by every other reader of a F<clouds.yaml>, none of which
-has ever heard of a reference.  A region called C<secret:...> would go to
-Keystone as that string, so say so here rather than there.
-
-=cut
-
-sub _refuse_unresolved {
-    my ( $class, $cloud, $path ) = @_;
-
-    my @refs = grep { defined $cloud->{$_} && !ref $cloud->{$_} && index( $cloud->{$_}, 'secret:' ) == 0 && $_ ne 'application_credential_secret' } sort keys %$cloud;
-
-    die "In $path, " . join( ' and ', @refs ) . " is a secret: reference, and nothing resolves it.\n" . "Only application_credential_secret may be one, which Trog::OpenStack::Auth\n" . "resolves when it asks Keystone for a token.  Write the value out, or give it\n" . "in the environment.\n"
-      if @refs;
-
-    return $cloud;
-}
-
-sub _flatten {
-    my ( $class, $cloud, $name, $path ) = @_;
-
     my $auth = ref $cloud->{auth} eq 'HASH' ? $cloud->{auth} : {};
 
     my %out = (
@@ -231,6 +190,11 @@ sub _flatten {
 
     die "Cloud '$name' in $path has no auth_url\n"
       unless $out{auth_url};
+
+    my @refs = grep { defined $out{$_} && !ref $out{$_} && index( $out{$_}, 'secret:' ) == 0 && $_ ne 'application_credential_secret' } sort keys %out;
+
+    die "In $path, " . join( ' and ', @refs ) . " is a secret: reference, and nothing resolves it.\n" . "Only application_credential_secret may be one, which Trog::OpenStack::Auth\n" . "resolves when it asks Keystone for a token.  Write the value out, or give it\n" . "in the environment.\n"
+      if @refs;
 
     return \%out;
 }
