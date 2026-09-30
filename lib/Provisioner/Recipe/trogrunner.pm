@@ -314,47 +314,29 @@ sub args {
     );
 }
 
-=head2 \%global = _globals_of($config)
-
-The C<config> of this recipe as the C<_global> of a F<recipes.yaml>.  The pool
-is one key there rather than two, and a setting left empty is left out, so that
-the runner falls back to its own answer for it rather than to an empty string.
-
-=cut
-
-sub _globals_of {
-    my ($config) = @_;
-
-    my $said = sub {
-        my ($key) = @_;
-        my $value = $config->{$key};
-
-        return 0 unless defined $value;
-        return scalar @$value      if ref $value eq 'ARRAY';
-        return scalar keys %$value if ref $value eq 'HASH';
-        return $value ne q{};
-    };
-
-    my %is_pool = map { $_ => 1 } qw{addresses cidr};
-
-    my %global = map { $_ => $config->{$_} } grep { !$is_pool{$_} && $said->($_) } keys %$config;
-
-    my %pool = map { $_ => $config->{$_} } grep { $said->($_) } keys %is_pool;
-    $global{ip_pool} = \%pool if %pool;
-
-    return \%global;
-}
-
 =head3 formatters
 
-C<yaml>, which dumps a structure and writes its C<store:> references back as
-C<secret:>.  See L</SECRETS IN recipes> for the reason.
+C<yaml>, which dumps a copy of a structure with every C<store:GROUP/TITLE/FIELD>
+string in it, at any depth, written back as C<secret:GROUP/TITLE/FIELD>.  See
+L</SECRETS IN recipes> for the reason.
 
 =cut
 
 sub formatters {
     return (
-        yaml => Text::Xslate::html_builder( sub { return YAML::XS::Dump( _restore_refs( $_[0] ) ) } ),
+        yaml => Text::Xslate::html_builder(
+            sub ($node) {
+                my $copy = clone($node);
+                foreach my $slot ( map { $_->[1] } Trog::Utils::slots_in( \$copy ) ) {
+
+                    # The same test that Trog::Secrets::needed makes of a
+                    # secret: reference, a prefix at the start and nothing more.
+                    next if ref $$slot || !defined $$slot || index( $$slot, 'store:' ) != 0;
+                    $$slot = 'secret:' . substr( $$slot, length 'store:' );
+                }
+                return YAML::XS::Dump($copy);
+            }
+        ),
     );
 }
 
@@ -362,12 +344,27 @@ sub formatters {
 
 Fills in the identity of the runner from the identity of the guest, and folds
 C<config> into the C<_global> of C<_base> in C<recipes>, which is where the
-runner reads it.  Splits the
-URI of each hypervisor into the host, user and port that C<ssh-keyscan> needs.
-Dies if C<checkout_dir> or C<store> is not a relative path under the domain
-directory, or if a hypervisor URI has no host or is remote without ssh.
+runner reads it.  The pool is one key there, C<ip_pool>, rather than two, and a
+setting left empty is left out, so that the runner falls back to its own answer
+for it rather than to an empty string.
+
+Splits the URI of each hypervisor into the host, user and port that
+C<ssh-keyscan> needs.  Dies if C<checkout_dir> or C<store> is not a relative
+path under the domain directory, or if a hypervisor URI has no host or is
+remote without ssh.
 
 =cut
+
+# Dies unless $path, the value of $field, is a relative path that stays under
+# the domain directory.
+my sub under_the_domain ( $path, $field ) {
+    die "trogrunner: $field is relative to the domain directory, so '$path' cannot start with a slash\n"
+      if index( $path, '/' ) == 0;
+    die "trogrunner: $field is relative to the domain directory, and '$path' climbs out of it\n"
+      if any { $_ eq '..' } split( m{/}, $path );
+
+    return 1;
+}
 
 sub enrich {
     my ( $self, %opts ) = @_;
@@ -393,7 +390,20 @@ sub enrich {
 
     # The recipes on top, because a runner that names a setting of its own in
     # the file it is handed means it.
-    $opts{recipes}{_base}{_global} = { %{ _globals_of( $opts{config} ) }, %{ $opts{recipes}{_base}{_global} // {} } };
+    my $config = $opts{config};
+    my $said   = sub ($key) {
+        my $value = $config->{$key};
+
+        return 0 unless defined $value;
+        return scalar @$value      if ref $value eq 'ARRAY';
+        return scalar keys %$value if ref $value eq 'HASH';
+        return $value ne q{};
+    };
+    my %is_pool = map { $_ => 1 } qw{addresses cidr};
+    my %global  = map { $_ => $config->{$_} } grep { !$is_pool{$_} && $said->($_) } keys %$config;
+    my %pool    = map { $_ => $config->{$_} } grep { $said->($_) } keys %is_pool;
+    $global{ip_pool} = \%pool if %pool;
+    $opts{recipes}{_base}{_global} = { %global, %{ $opts{recipes}{_base}{_global} // {} } };
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !$opts{checkout_dir} || $opts{checkout_dir} eq '.' );
@@ -401,87 +411,30 @@ sub enrich {
     # Both go into a path under the domain directory, so an absolute path
     # points somewhere else.  `store: /etc/trog-provisioner/secrets.kdbx`
     # renders as /opt/domains/<domain>//etc/..., and fails as a missing file.
-    _under_the_domain( $opts{checkout_dir}, 'checkout_dir' ) if $opts{checkout};
-    _under_the_domain( $opts{store},        'store' )        if $opts{store};
+    under_the_domain( $opts{checkout_dir}, 'checkout_dir' ) if $opts{checkout};
+    under_the_domain( $opts{store},        'store' )        if $opts{store};
 
     foreach my $name ( sort keys %{ $opts{hypervisors} } ) {
         my $block = $opts{hypervisors}{$name};
-        my $parts = _ssh_parts( $block->{libvirt_uri} )
-          or die "trogrunner: could not read a host out of the libvirt_uri for hypervisor '$name': $block->{libvirt_uri}\n";
+        my ( $scheme, $authority ) = $block->{libvirt_uri} ? URI::Split::uri_split( $block->{libvirt_uri} ) : ();
+        die "trogrunner: could not read a host out of the libvirt_uri for hypervisor '$name': $block->{libvirt_uri}\n"
+          unless $scheme;
+
+        # URI does not know the driver+transport scheme of libvirt, and gives
+        # an object that cannot say the host, user or port, so the authority
+        # is parsed again under the ssh scheme, as Trog::HV does.
+        my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
+        my $server = $authority ? URI->new("ssh://$authority") : undef;
+        @{$block}{qw{ssh_host ssh_user ssh_port}} = $server ? ( $server->host, $server->user, $server->port ) : ();
 
         # Trog::HV needs the filesystem of a remote hypervisor as well as its
         # libvirt, so the runner must reach it over ssh.  Find that out here,
         # not on the guest.
-        die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$parts->{host}/system\n"
-          if $parts->{host} && !$parts->{ssh};
-
-        @{$block}{qw{ssh_host ssh_user ssh_port}} = @{$parts}{qw{host user port}};
+        die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$block->{ssh_host}/system\n"
+          if $block->{ssh_host} && ( $transport // q{} ) ne 'ssh';
     }
 
     return %opts;
-}
-
-sub _under_the_domain {
-    my ( $path, $field ) = @_;
-
-    die "trogrunner: $field is relative to the domain directory, so '$path' cannot start with a slash\n"
-      if index( $path, '/' ) == 0;
-    die "trogrunner: $field is relative to the domain directory, and '$path' climbs out of it\n"
-      if any { $_ eq '..' } split( m{/}, $path );
-
-    return 1;
-}
-
-=head3 $copy = _restore_refs($node)
-
-Returns a copy of C<$node> with every C<store:GROUP/TITLE/FIELD> string turned
-back into C<secret:GROUP/TITLE/FIELD>, at any depth.  See
-L</SECRETS IN recipes>.
-
-=cut
-
-sub _restore_refs {
-    my ($node) = @_;
-
-    my $copy = clone($node);
-    foreach my $slot ( map { $_->[1] } Trog::Utils::slots_in( \$copy ) ) {
-
-        # The same test that Trog::Secrets::needed makes of a secret: reference,
-        # a prefix at the start and nothing more.
-        next if ref $$slot || !defined $$slot || index( $$slot, 'store:' ) != 0;
-        $$slot = 'secret:' . substr( $$slot, length 'store:' );
-    }
-    return $copy;
-}
-
-=head3 $parts = _ssh_parts($uri)
-
-Returns the ssh half of a libvirt connection URI as a hash reference: C<ssh>
-(1 if the transport is ssh, else 0), C<host>, C<user> and C<port>.  Returns
-undef if C<$uri> is empty or has no scheme.
-
-URI does not know the driver+transport scheme, and returns an object that
-cannot give the host, user or port.  So this splits the URI generically, and
-parses the authority again under the ssh scheme.  Trog::HV::_parse_uri does the same.
-
-=cut
-
-sub _ssh_parts {
-    my ($uri) = @_;
-    return undef unless $uri;
-
-    my ( $scheme, $authority ) = URI::Split::uri_split($uri);
-    return undef unless $scheme;
-
-    my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
-    my $server = $authority ? URI->new("ssh://$authority") : undef;
-
-    return {
-        ssh  => ( defined $transport && $transport eq 'ssh' ) ? 1             : 0,
-        host => $server                                       ? $server->host : undef,
-        user => $server                                       ? $server->user : undef,
-        port => $server                                       ? $server->port : undef,
-    };
 }
 
 =head3 %grant = Provisioner::Recipe::trogrunner->grant($block)
@@ -556,6 +509,12 @@ no machine trusts opens nothing.
 The key stays in the store, and is not made again on each provision.  So a
 rebuild gets the same key, and the line that the hypervisor has still matches.
 
+The key is ed25519, which keeps an F<authorized_keys> line short enough to
+read, and is also why F<bin/preflight> suggests it.  The secret is the private
+key as text, without the last newline.
+L<Provisioner::Utils/write_ssh_keypair> makes it so that OpenSSH and CryptX can
+both read it.
+
 =cut
 
 sub guest_secrets {
@@ -564,31 +523,19 @@ sub guest_secrets {
     return (
         "$install_dir/$domain/.ssh/id_ed25519" => {
             ref      => "secret:trogrunner/$domain-hypervisor-key/password",
-            generate => \&_hypervisor_key,
-            owner    => 'root:root',
-            mode     => '0600',
+            generate => sub {
+                my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+                my $path = "$dir/id_ed25519";
+
+                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => $ED25519_BITS, 'trog-provisioner runner' );
+
+                chomp( my $key = File::Slurper::read_text($path) );
+                return $key;
+            },
+            owner => 'root:root',
+            mode  => '0600',
         },
     );
-}
-
-=head3 $private_key = _hypervisor_key()
-
-Makes a new ed25519 key pair and returns the private key as text, without the
-last newline.  Provisioner::Utils::write_ssh_keypair makes the key so that
-OpenSSH and CryptX can both read it.  See its POD.  ed25519 keeps an
-authorized_keys line short enough to read, which is also why bin/preflight
-suggests it.
-
-=cut
-
-sub _hypervisor_key {
-    my $dir  = File::Temp::tempdir( CLEANUP => 1 );
-    my $path = "$dir/id_ed25519";
-
-    Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => $ED25519_BITS, 'trog-provisioner runner' );
-
-    chomp( my $key = File::Slurper::read_text($path) );
-    return $key;
 }
 
 =head3 remote_files

@@ -47,7 +47,18 @@ my $NO_FLEET = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
 sub main_snapshot (@args) { return Trog::Bin::Snapshot::main( '--hvconf', $NO_FLEET, @args ) }
 
 # The interface is documented in POD now, and pod2usage prints that.
-my $synopsis = _pod_section( "$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS' );
+my $synopsis = do {
+    open( my $fh, '>', \my $text ) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => "$FindBin::Bin/../bin/snapshot",
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => 'SYNOPSIS|OPTIONS',
+    );
+    close($fh) or die "Could not close the POD read out of bin/snapshot: $!";
+    $text // '';
+};
 like( $synopsis, qr/--name/,       'POD documents --name' );
 like( $synopsis, qr/--hypervisor/, 'POD documents --hypervisor' );
 like( $synopsis, qr/--disk-only/,  'POD documents --disk-only' );
@@ -55,7 +66,9 @@ like( $synopsis, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
 
 # No domain -> usage, non-zero exit.  This one has to be a real run, since
 # pod2usage exits rather than dying.
-my ( $out, $rc ) = _run("$FindBin::Bin/../bin/snapshot");
+my $out = q{};
+IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/snapshot" ], \undef, \$out, \$out );
+my $rc = $?;
 isnt( $rc, 0, 'no arguments exits non-zero' );
 like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
 like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
@@ -132,10 +145,11 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 
     package FakeSnapDomain;
 
-    sub new       { my ( $class, $seen ) = @_; return bless { active => 1, seen => $seen }, $class }
-    sub is_active { my ($self) = @_; return $self->{active} }
-    sub destroy   { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
-    sub create    { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
+    sub new                { my ( $class, $seen ) = @_; return bless { active => 1, seen => $seen }, $class }
+    sub is_active          { my ($self) = @_; return $self->{active} }
+    sub get_domain_by_name { my ($self) = @_; return $self }
+    sub destroy            { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
+    sub create             { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
 
     sub create_snapshot {
         my ( $self, $xml, $flags ) = @_;
@@ -149,7 +163,7 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     my $dom     = FakeSnapDomain->new( \@seen );
     my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( _domain               => sub { $dom } );
+    $hv_mock->redefine( vmm                   => sub { $dom } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'live-snap' } );
 
     is( exception { main_snapshot('myvm.lan') }, undef, 'a default run snapshots a guest that is up' );
@@ -162,7 +176,7 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     my $dom     = FakeSnapDomain->new( \@seen );
     my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( _domain               => sub { $dom } );
+    $hv_mock->redefine( vmm                   => sub { $dom } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'disk-snap' } );
 
     my $said = capture_stdout { main_snapshot(qw{myvm.lan --disk-only}) };
@@ -172,27 +186,6 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     is( $seen[2], 'create', 'then starts it again, an operator having asked for a snapshot rather than a shutdown' );
     like( $said, qr/Stopping[ ]myvm[.]lan[ ]for[ ]this/,  'saying beforehand that the guest is going down' );
     like( $said, qr/back[ ]the[ ]way[ ]it[ ]was[ ]found/, 'and afterwards that it is back' );
-}
-
-sub _run {
-    my (@cmd) = @_;
-    my $said = q{};
-    IPC::Run3::run3( [ $^X, @cmd ], \undef, \$said, \$said );
-    return ( $said, $? );
-}
-
-sub _pod_section {
-    my ( $file, $sections ) = @_;
-    open( my $fh, '>', \my $text ) or die $!;
-    Pod::Usage::pod2usage(
-        -input    => $file,
-        -output   => $fh,
-        -exitval  => 'NOEXIT',
-        -verbose  => 99,
-        -sections => $sections,
-    );
-    close($fh) or die "Could not close the POD read out of $file: $!";
-    return $text // '';
 }
 
 done_testing;

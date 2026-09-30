@@ -104,14 +104,14 @@ sub main {
     Trog::Credentials->load() if $credentials;
 
     die "This prints the credential, so it refuses a terminal: pipe it, or --show.\n" . qq{    eval "\$(bin/openstack-env)"\n}
-      if _is_terminal() && !$show;
+      if -t *STDOUT && !$show;    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether the secret would land in somebody's scrollback is exactly the question
 
     my $cloud  = Trog::OpenStack::Config->load($name);
     my $secret = Trog::OpenStack::Auth->secret_for($cloud);
     $secret = $secret->() if ref $secret eq 'CODE';
 
     die "Cloud '$cloud->{name}' in $cloud->{source} has no application credential secret.\n"
-      unless length $secret;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
+      unless length $secret;      ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
 
     print exports(
         $cloud,
@@ -144,17 +144,10 @@ sub exports {
         %override,
     );
 
-    return join( q{}, map { "export $_=" . _quote( $from{$_} ) . "\n" } grep { defined $from{$_} && length $from{$_} } sort keys %from );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a value of "0" is still a value
+    # Single quotes, because a secret can hold anything a shell would read: a
+    # quote inside one closes it, escapes it, and opens another.
+    return join( q{}, map { "export $_='" . ( $from{$_} =~ s/'/'\\''/gr ) . "'\n" } grep { defined $from{$_} && length $from{$_} } sort keys %from );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a value of "0" is still a value
 }
-
-# Single quotes, because a secret can hold anything a shell would read: a
-# quote inside one closes it, escapes it, and opens another.
-sub _quote {
-    my ($value) = @_;
-    return q{'} . ( $value =~ s/'/'\\''/gr ) . q{'};
-}
-
-sub _is_terminal { return -t *STDOUT ? 1 : 0 }    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether the secret would land in somebody's scrollback is exactly the question
 
 =head1 SEE ALSO
 

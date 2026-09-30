@@ -100,7 +100,21 @@ sub main {
             path     => [$template_dir],
             syntax   => 'TTerse',
             module   => [qw{Text::Xslate::Bridge::TT2}],
-            function => { _formatters() },
+            function => {
+                reverse_ip => Text::Xslate::html_builder(
+                    sub {
+                        my $ip = shift;
+                        return Net::IP->new($ip)->reverse_ip();
+                    }
+                ),
+                email_for_dns => Text::Xslate::html_builder(
+                    sub {
+                        my $email = shift;
+                        $email =~ tr/@/./;
+                        return $email;
+                    }
+                ),
+            },
         }
     );
 
@@ -148,24 +162,6 @@ sub recipes_for {
     my @recipes = grep { Provisioner::Cookbook->has($_) } sort keys %$configured;
 
     return @recipes;
-}
-
-sub _formatters {
-    return (
-        reverse_ip => Text::Xslate::html_builder(
-            sub {
-                my $ip = shift;
-                return Net::IP->new($ip)->reverse_ip();
-            }
-        ),
-        email_for_dns => Text::Xslate::html_builder(
-            sub {
-                my $email = shift;
-                $email =~ tr/@/./;
-                return $email;
-            }
-        ),
-    );
 }
 
 exit main(@ARGV) unless caller;

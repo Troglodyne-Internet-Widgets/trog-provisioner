@@ -122,8 +122,14 @@ sub load {
         $in_file{$block} = 1;
     }
 
+    # The [block] headers, in file order.  Config::Simple puts any key outside a
+    # header under default, which has no header line, so the names that this
+    # does not find follow them.
+    my $text  = eval { File::Slurper::read_text($path) } // q{};
+    my @order = map { m/\A\s*\[([^\]]+)\]/ ? $1 : () } split m/\n/, $text;
+
     my %seen;
-    foreach my $block ( _block_order($path), sort keys %in_file ) {
+    foreach my $block ( @order, sort keys %in_file ) {
         next unless $in_file{$block};
         next if $seen{$block}++;
         push @{ $self->{order} }, $block;
@@ -138,30 +144,6 @@ sub load {
     return $self;
 }
 
-=head2 _block_order($path)
-
-Returns the names of the C<[block]> headers in C<$path>, in file order, or an
-empty list when the file cannot be read.  Config::Simple puts any key outside a
-header under C<default>, which has no header line.  So C<load> adds the names
-this does not find after these.
-
-=cut
-
-sub _block_order {
-    my ($path) = @_;
-
-    my $text = eval { File::Slurper::read_text($path) };
-    return () unless defined $text;
-
-    my @order;
-    foreach my $line ( split m/\n/, $text ) {
-        my ($block) = $line =~ m/\A\s*\[([^\]]+)\]/ or next;
-        push @order, $block;
-    }
-
-    return @order;
-}
-
 =head2 default_path
 
 Returns the path of F<hypervisors.conf> when the caller names no other.  It is
@@ -171,6 +153,40 @@ installation.  See L<Trog::Config>.
 =cut
 
 sub default_path { return Trog::Config->path('hypervisors.conf') }
+
+# What find and choose share before they ask a fleet: the hypervisor when a
+# name or the lack of a fleet decides it, or else undef, the fleet to ask and
+# the domain_dir pair.  A name with no fleet dies rather than falling back to
+# this machine, which is not what the name asked for.
+my sub before_fleet ( $class, %opts ) {
+    my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
+    my $fleet = $class->load( $opts{hvconf} // $class->default_path );
+
+    if ( defined $opts{hypervisor} ) {
+        die "No hypervisors are configured in " . $fleet->{path} . ", so there is no '$opts{hypervisor}' to name.\n"
+          unless $fleet->configured;
+
+        my $named = $fleet->hypervisor( $opts{hypervisor} )->activate();
+        $named->{$_} = $paths{$_} for keys %paths;
+        return $named;
+    }
+
+    return Trog::HV->from_config( $opts{config}, %paths ) unless $fleet->configured;
+
+    return ( undef, $fleet, %paths );
+}
+
+# How an error names a network, including the one that has no name.
+my sub network_name ($network) {
+    return $network eq q{} ? 'the network of the hypervisors that name none' : "network '$network'";
+}
+
+# Dies when $hv is not on the network that %opts says $domain must be on: a
+# guest that is already there, or pinned there, cannot be placed elsewhere.
+my sub check_network ( $domain, $hv, %opts ) {
+    return 1 if !defined $opts{network} || $hv->network eq $opts{network};
+    die "$domain must be on " . network_name( $opts{network} ) . ", because $opts{network_why}.\n" . $hv->name . ' is on ' . network_name( $hv->network ) . ", and $domain is there already or pinned there, so it would not reach it.\n" . "Build it elsewhere, or give it a configuration that needs nothing on the other network.\n";
+}
 
 =head2 find($domain, %opts)
 
@@ -193,7 +209,7 @@ With no fleet configured, this returns C<< Trog::HV->from_config >>.
 sub find {
     my ( $class, $domain, %opts ) = @_;
 
-    my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
+    my ( $given, $fleet, %paths ) = before_fleet( $class, %opts );
     return $given if $given;
 
     my $hv = $fleet->hosting( $domain, must_answer => $opts{must_answer} );
@@ -231,9 +247,9 @@ C<domain_dir> wins over the directory that the fleet names.
 sub choose {
     my ( $class, $domain, %opts ) = @_;
 
-    my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
+    my ( $given, $fleet, %paths ) = before_fleet( $class, %opts );
     if ($given) {
-        _check_network( $domain, $given, %opts );
+        check_network( $domain, $given, %opts );
         return $given;
     }
 
@@ -245,40 +261,6 @@ sub choose {
 
     $hv->{$_} = $paths{$_} for keys %paths;
     return $hv;
-}
-
-=head2 _before_fleet(%opts)
-
-The steps that C<find> and C<choose> take before they ask a fleet.  Takes their
-C<hypervisor>, C<hvconf>, C<domain_dir> and C<config>.  Returns the hypervisor
-when a name or the lack of a fleet decides it.  Otherwise returns undef, the
-fleet to ask, and the C<domain_dir> pair when one was given.
-
-A name is answered from the fleet, made current, so that a tool told which
-hypervisor to use skips the search and the capacity arithmetic both.  It dies
-when there is no fleet to name one in, rather than falling back to this
-machine, which is not what the name asked for.
-
-=cut
-
-sub _before_fleet {
-    my ( $class, %opts ) = @_;
-
-    my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
-    my $fleet = $class->load( $opts{hvconf} // $class->default_path );
-
-    if ( defined $opts{hypervisor} ) {
-        die "No hypervisors are configured in " . $fleet->{path} . ", so there is no '$opts{hypervisor}' to name.\n"
-          unless $fleet->configured;
-
-        my $named = $fleet->hypervisor( $opts{hypervisor} )->activate();
-        $named->{$_} = $paths{$_} for keys %paths;
-        return $named;
-    }
-
-    return Trog::HV->from_config( $opts{config}, %paths ) unless $fleet->configured;
-
-    return ( undef, $fleet, %paths );
 }
 
 =head1 METHODS
@@ -361,6 +343,14 @@ sub hypervisors {
     return map { $self->hypervisor($_) } $self->names;
 }
 
+# An error on one line, to go into a list of them.
+my sub oneline ($message) {
+    $message //= q{};
+    chomp $message;
+    $message =~ s/\s*\n\s*/ /g;
+    return $message;
+}
+
 =head2 hosting($domain, %opts)
 
 Returns the hypervisor that already runs C<$domain>, or undef when none does.
@@ -385,7 +375,7 @@ sub hosting {
         unless ( defined $has ) {
             my $why = $@;
             warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $why";
-            push @unasked, $hv->name . ': ' . _oneline($why);
+            push @unasked, $hv->name . ': ' . oneline($why);
             next;
         }
         return $hv if $has;
@@ -418,13 +408,13 @@ sub place {
     my ( @fits, @why_not );
     foreach my $hv ( $self->hypervisors ) {
         if ( defined $network && $hv->network ne $network ) {
-            push @why_not, '  ' . $hv->name . ': ' . _network_name( $hv->network ) . ", and $domain must be on " . _network_name($network) . ", because $network_why";
+            push @why_not, '  ' . $hv->name . ': ' . network_name( $hv->network ) . ", and $domain must be on " . network_name($network) . ", because $network_why";
             next;
         }
 
         my @reasons = eval { $hv->shortfalls(%needs) };
         if ($@) {
-            push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline($@);
+            push @why_not, '  ' . $hv->name . ': unreachable -- ' . oneline($@);
             next;
         }
 
@@ -435,7 +425,7 @@ sub place {
 
         my $cost = eval { $hv->monthly_cost(%needs) };
         if ( !defined $cost ) {
-            push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline( $@ || 'it could not say what the guest would cost' );
+            push @why_not, '  ' . $hv->name . ': unreachable -- ' . oneline( $@ || 'it could not say what the guest would cost' );
             next;
         }
 
@@ -459,6 +449,29 @@ sub place {
       :                             'the roomiest';
     printf( "Placing %s on %s (%s), %s of %d that fit\n", $domain, $best->name, $best->uri, $why, scalar @fits );
     return $best;
+}
+
+# What a guest asks for: memory_mb, cpus and disk_bytes, the distro it boots,
+# and the size_key of each backend that has one.  $config is as for select_for.
+my sub needs ($config) {
+    my %needs = (
+        memory_mb  => Trog::HV->config_value( $config, 'memory' ),
+        cpus       => Trog::HV->config_value( $config, 'cpus' ),
+        disk_bytes => Trog::HV->config_value( $config, 'size' ),
+
+        # What it boots, because what a hypervisor has to hold is the image of
+        # that distribution rather than the guest's own figures alone.
+        distro => Trog::HV->config_value( $config, 'distro' ) // 'ubuntu',
+    );
+
+    # And what the guest is on each kind of hypervisor that sells sizes by
+    # name, which is how it says which of them it may be built on at all.
+    foreach my $backend ( Trog::HV->backends ) {
+        my $key = $backend->size_key or next;
+        $needs{$key} = Trog::HV->config_value( $config, $key );
+    }
+
+    return %needs;
 }
 
 =head2 select_for($domain, $config, %opts)
@@ -491,21 +504,21 @@ sub select_for {
     my $existing = $self->hosting($domain);
     if ($existing) {
         print 'Found ' . $domain . ' already on ' . $existing->name . ' (' . $existing->uri . ")\n";
-        _check_network( $domain, $existing, %opts );
+        check_network( $domain, $existing, %opts );
         return $existing->activate();
     }
 
     my $pinned = Trog::HV->config_value( $config, 'hypervisor' );
     if ( defined $pinned ) {
         my $hv      = $self->hypervisor($pinned);
-        my @reasons = $hv->shortfalls( _needs($config) );
+        my @reasons = $hv->shortfalls( needs($config) );
         die "$domain is pinned to $pinned, which cannot take it:\n" . join( '', map { "  $_\n" } @reasons )
           if @reasons;
-        _check_network( $domain, $hv, %opts );
+        check_network( $domain, $hv, %opts );
         return $hv->activate();
     }
 
-    my %needs  = ( _needs($config), ( defined $opts{network} ? ( network => $opts{network}, network_why => $opts{network_why} ) : () ) );
+    my %needs  = ( needs($config), ( defined $opts{network} ? ( network => $opts{network}, network_why => $opts{network_why} ) : () ) );
     my $placed = eval { $self->place( $domain, %needs ) };
     return $placed->activate() if $placed;
 
@@ -574,59 +587,6 @@ sub offer {
     $config->{ $best->{key} } = $best->{value} if ref $config eq 'HASH';
 
     return $best->{hv};
-}
-
-# Dies when $hv is not on the network that %opts says $domain must be on: a
-# guest that is already there, or pinned there, cannot be placed elsewhere.
-sub _check_network {
-    my ( $domain, $hv, %opts ) = @_;
-    return 1 if !defined $opts{network} || $hv->network eq $opts{network};
-    die "$domain must be on " . _network_name( $opts{network} ) . ", because $opts{network_why}.\n" . $hv->name . ' is on ' . _network_name( $hv->network ) . ", and $domain is there already or pinned there, so it would not reach it.\n" . "Build it elsewhere, or give it a configuration that needs nothing on the other network.\n";
-}
-
-sub _network_name {
-    my ($network) = @_;
-    return $network eq q{} ? 'the network of the hypervisors that name none' : "network '$network'";
-}
-
-=head2 _needs($config)
-
-Returns what a guest asks for: C<memory_mb>, C<cpus> and C<disk_bytes>, the
-C<distro> it boots, and the C<size_key> of each backend that has one, such as
-C<linode_type>.
-C<$config> is as for C<select_for>.
-
-=cut
-
-sub _needs {
-    my ($config) = @_;
-
-    my %needs = (
-        memory_mb  => Trog::HV->config_value( $config, 'memory' ),
-        cpus       => Trog::HV->config_value( $config, 'cpus' ),
-        disk_bytes => Trog::HV->config_value( $config, 'size' ),
-
-        # What it boots, because what a hypervisor has to hold is the image of
-        # that distribution rather than the guest's own figures alone.
-        distro => Trog::HV->config_value( $config, 'distro' ) // 'ubuntu',
-    );
-
-    # And what the guest is on each kind of hypervisor that sells sizes by
-    # name, which is how it says which of them it may be built on at all.
-    foreach my $backend ( Trog::HV->backends ) {
-        my $key = $backend->size_key or next;
-        $needs{$key} = Trog::HV->config_value( $config, $key );
-    }
-
-    return %needs;
-}
-
-sub _oneline {
-    my ($message) = @_;
-    $message //= '';
-    chomp $message;
-    $message =~ s/\s*\n\s*/ /g;
-    return $message;
 }
 
 =head1 SEE ALSO

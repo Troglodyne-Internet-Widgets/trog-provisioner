@@ -118,6 +118,15 @@ another name.
 
 sub debug_actions { return qw{console fetch vnc} }
 
+# A call to Nova at a microversion.  The post in MetaAPI sends no version
+# header, so Nova treats it as 2.1, whose rebuild takes no user_data.
+my sub nova ( $self, $method, $path, $body, $microversion = undef ) {
+    my $compute = $self->api->route->service('compute');
+    my %headers = defined $microversion ? ( 'OpenStack-API-Version' => "compute $microversion" ) : ();
+
+    return $compute->client->call( $method, \%headers, $compute->root_uri($path), $body );
+}
+
 =head2 $restarted = $hv->console_capture($name, wait =E<gt> $seconds)
 
 Returns 0 and does nothing else.  Nova keeps the console of every server, so
@@ -142,7 +151,7 @@ sub console_output {
     my $server = $self->server($name)
       or die "There is no guest called '$name' on " . $self->describe . "\n";
 
-    my $answer = $self->_nova( POST => "/servers/$server->{id}/action", { 'os-getConsoleOutput' => { length => $CONSOLE_LINES } } );
+    my $answer = nova( $self, POST => "/servers/$server->{id}/action", { 'os-getConsoleOutput' => { length => $CONSOLE_LINES } } );
 
     return ( ref $answer eq 'HASH' ? $answer->{output} : undef ) || undef;
 }
@@ -165,8 +174,8 @@ sub vnc_access {
     my $server = $self->server($name)
       or die "There is no guest called '$name' on " . $self->describe . "\n";
 
-    my $answer = $self->_nova(
-        POST => "/servers/$server->{id}/remote-consoles",
+    my $answer = nova(
+        $self, POST => "/servers/$server->{id}/remote-consoles",
         { remote_console => { protocol => 'vnc', type => 'novnc' } },
         $CONSOLE_MICROVERSION
     );
@@ -461,15 +470,21 @@ The result is kept for the life of the object, as in the libvirt backend.
 
 =cut
 
+# A quota Nova reports as -1 is unlimited, and undef is how that is said here.
+my sub limit ($value) {
+    return undef if !defined $value || $value < 0;
+    return $value;
+}
+
 sub capacity {
     my ($self) = @_;
     return $self->{capacity} if $self->{capacity};
 
     my $nova = $self->api->limits->{absolute} // {};
 
-    my $memory_mb   = _limit( $nova->{maxTotalRAMSize} );
+    my $memory_mb   = limit( $nova->{maxTotalRAMSize} );
     my $memory_used = $nova->{totalRAMUsed} // 0;
-    my $cpus        = _limit( $nova->{maxTotalCores} );
+    my $cpus        = limit( $nova->{maxTotalCores} );
     my $cpus_used   = $nova->{totalCoresUsed} // 0;
 
     return $self->{capacity} = {
@@ -484,15 +499,8 @@ sub capacity {
         guests           => $nova->{totalInstancesUsed} // 0,
 
         # Not part of what Trog::HV reads.  max_guests uses it.
-        guests_allowed => _limit( $nova->{maxTotalInstances} ),
+        guests_allowed => limit( $nova->{maxTotalInstances} ),
     };
-}
-
-# A quota Nova reports as -1 is unlimited, and undef is how that is said here.
-sub _limit {
-    my ($value) = @_;
-    return undef if !defined $value || $value < 0;
-    return $value;
 }
 
 =head2 image_for(%needs)
@@ -628,50 +636,35 @@ sub guest_ssh_ip {
     my $server = $self->server_detail($name)
       or die "There is no guest called '$name' on " . $self->describe . "\n";
 
-    my @addresses = grep { _is_ipv4($_) } $self->_addresses($server);
+    # Nova gives a hash of network name to a list of addresses, flattened here
+    # to one list with the network name in each address.  The rest of this
+    # toolkit uses IPv4 only: the 'ips' in provision.conf is a list of IPv4
+    # addresses, so it cannot hold an IPv6 one.
+    my $by_network = ref $server->{addresses} eq 'HASH' ? $server->{addresses} : {};
+    my @addresses  = grep { ( $_->{addr} // q{} ) =~ m/\A\d+(?:[.]\d+){3}\z/ } map {
+        my $network = $_;
+        map {
+            { %$_, network => $network }    ## no critic (ValuesAndExpressions::ProhibitCommaSeparatedStatements) -- an anonymous hash, which PPI reads as a block
+        } @{ $by_network->{$network} }
+    } sort keys %$by_network;
 
     my $floating = first { ( $_->{'OS-EXT-IPS:type'} // '' ) eq 'floating' } @addresses;
     return $floating->{addr} if $floating;
 
     # Some clouds have only an external shared network.  Nova calls an address
-    # on it 'fixed', but the guest is reachable there.
-    my $reachable = first { $self->_network_is_external( $_->{network} ) } @addresses;
+    # on it 'fixed', but the guest is reachable there.  Whether the outside
+    # world can route to a network is kept, because guest_ssh_ip is asked again
+    # and again while a guest starts.
+    my $reachable = first {
+        my $on = $_->{network};
+        $self->{_external}{$on} //= do {
+            my ($network) = grep { ref $_ && ( $_->{name} // q{} ) eq $on } $self->api->networks();
+            ( $network && $network->{'router:external'} ) ? 1 : 0;
+        };
+    } @addresses;
     return $reachable->{addr} if $reachable;
 
     die "The guest '$name' has no address we can reach it at.\n" . "It is on " . ( join( ', ', map { "$_->{network} ($_->{addr})" } @addresses ) || 'no network' ) . ", none of which is external.\n" . "Set floating_network in hypervisors.conf so a routable address gets attached.\n";
-}
-
-# Nova gives a hash of network name to a list of addresses.  This flattens it to
-# one list, with the network name in each address.
-sub _addresses {
-    my ( $self, $server ) = @_;
-
-    my $addresses = $server->{addresses};
-    return () unless ref $addresses eq 'HASH';
-
-    return map {
-        my $network = $_;
-        map {
-            { %$_, network => $network }    ## no critic (ValuesAndExpressions::ProhibitCommaSeparatedStatements) -- an anonymous hash, which PPI reads as a block
-        } @{ $addresses->{$network} }
-    } sort keys %$addresses;
-}
-
-# The rest of this toolkit uses IPv4 only.  The 'ips' in provision.conf is a
-# list of IPv4 addresses, so it cannot hold an IPv6 one.
-sub _is_ipv4 ($address) { return ( $address->{addr} // '' ) =~ m/\A\d+(?:[.]\d+){3}\z/ ? 1 : 0 }
-
-# Whether the outside world can route to this network.  The answer is cached,
-# because guest_ssh_ip asks again and again while a guest starts.
-sub _network_is_external {
-    my ( $self, $name ) = @_;
-
-    return 0 unless $name;
-    return $self->{_external}{$name} if exists $self->{_external}{$name};
-
-    my ($network) = grep { ref $_ && ( $_->{name} // '' ) eq $name } $self->api->networks();
-
-    return $self->{_external}{$name} = ( $network && $network->{'router:external'} ) ? 1 : 0;
 }
 
 =head1 SNAPSHOTS
@@ -846,52 +839,29 @@ sub rebuild_guest {
     my $image = $spec{image};
     die "Rebuilding '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $image;
 
-    my %rebuild = ( imageRef => $self->_image_id($image) );
+    # The Nova rebuild takes an image id, and a provision.conf written before
+    # image_for_distro answered with one can name the image.
+    if ( $image !~ m/\A[[:xdigit:]]{8}(?:-[[:xdigit:]]{4}){3}-[[:xdigit:]]{12}\z/ ) {
+        my $found = $self->api->image_from_name($image);
+        $found = $found->[0] if ref $found eq 'ARRAY';
+
+        die "There is no image called '$image' on " . $self->describe . "\n"
+          unless ref $found eq 'HASH' && $found->{id};
+        $image = $found->{id};
+    }
+
+    my %rebuild = ( imageRef => $image );
     $rebuild{user_data} = MIME::Base64::encode_base64( $spec{user_data}, '' )
       if $spec{user_data};
 
-    $self->_nova( POST => "/servers/$server->{id}/action", { rebuild => \%rebuild }, $REBUILD_MICROVERSION );
+    nova( $self, POST => "/servers/$server->{id}/action", { rebuild => \%rebuild }, $REBUILD_MICROVERSION );
 
-    return $self->_wait_for_active( $server->{id}, $name );
-}
-
-# The Nova rebuild takes an image id, and a provision.conf written before
-# image_for_distro answered with one can name the image.
-sub _image_id {
-    my ( $self, $image ) = @_;
-
-    return $image if $image =~ m/\A[[:xdigit:]]{8}(?:-[[:xdigit:]]{4}){3}-[[:xdigit:]]{12}\z/;
-
-    my $found = $self->api->image_from_name($image);
-    $found = $found->[0] if ref $found eq 'ARRAY';
-
-    die "There is no image called '$image' on " . $self->describe . "\n"
-      unless ref $found eq 'HASH' && $found->{id};
-
-    return $found->{id};
-}
-
-# A call to Nova at a microversion.  The post in MetaAPI sends no version
-# header, so Nova treats it as 2.1, whose rebuild takes no user_data.
-sub _nova {
-    my ( $self, $method, $path, $body, $microversion ) = @_;
-
-    my $compute = $self->api->route->service('compute');
-    my %headers = defined $microversion ? ( 'OpenStack-API-Version' => "compute $microversion" ) : ();
-
-    return $compute->client->call( $method, \%headers, $compute->root_uri($path), $body );
-}
-
-# Waits until Nova finishes with the server.  ACTIVE with a task still set is a
-# rebuild that did not start yet.  ERROR does not change, so it dies at once.
-sub _wait_for_active {
-    my ( $self, $uid, $name, $timeout ) = @_;
-
-    $timeout //= $REBUILD_TIMEOUT;
-    my $deadline = time + $timeout;
-
+    # Wait until Nova finishes with the server.  ACTIVE with a task still set is
+    # a rebuild that did not start yet.  ERROR does not change, so it dies at
+    # once.
+    my $deadline = time + $REBUILD_TIMEOUT;
     while (1) {
-        my $detail = $self->api->server_from_uid($uid) // {};
+        my $detail = $self->api->server_from_uid( $server->{id} ) // {};
         my $status = uc( $detail->{status} // '' );
 
         return $detail if $status eq 'ACTIVE' && !$detail->{'OS-EXT-STS:task_state'};
@@ -903,7 +873,7 @@ sub _wait_for_active {
         sleep 2;
     }
 
-    die "The guest '$name' was not ACTIVE ${timeout}s after being rebuilt.\n" . "Check its status, and its console log for what it is doing.\n";
+    die "The guest '$name' was not ACTIVE ${REBUILD_TIMEOUT}s after being rebuilt.\n" . "Check its status, and its console log for what it is doing.\n";
 }
 
 =head2 annihilate_domain($name)
@@ -930,13 +900,23 @@ sub annihilate_domain {
     my $server = $self->server($name);
     return 0 unless $server;
 
-    my @ours = grep { index( $_->{name} // '', "$name-" ) == 0 } $self->_volumes;
+    # MetaAPI returns a single volume for a list of one, and undef for an empty
+    # list.
+    my @ours = grep { ref $_ && index( $_->{name} // '', "$name-" ) == 0 } $self->api->volumes();
 
     $self->api->delete_server( $server->{id} );
 
     # Cinder refuses to delete a volume while it is attached to a server that
-    # Nova has not finished deleting.
-    $self->_wait_for_gone($name);
+    # Nova has not finished deleting.  A server stuck in ERROR looks slow until
+    # the wait runs out, so the message says to check its status.
+    my $deadline = time + $DELETE_TIMEOUT;
+    my $gone     = 0;
+    while ( !$gone && time < $deadline ) {
+        $gone = !$self->server($name);
+        sleep 2 unless $gone;
+    }
+    die "The guest '$name' was still there ${DELETE_TIMEOUT}s after being deleted.\n" . "Check its status: a server that has gone to ERROR will not delete on asking again.\n"
+      unless $gone;
 
     foreach my $volume (@ours) {
         my $ok = eval { $self->api->delete_volume( $volume->{id} ); 1 };
@@ -944,22 +924,6 @@ sub annihilate_domain {
     }
 
     return 1;
-}
-
-# Waits until the server is gone.  A server stuck in ERROR looks slow until the
-# wait runs out, so the message says to check its status.
-sub _wait_for_gone {
-    my ( $self, $name, $timeout ) = @_;
-
-    $timeout //= $DELETE_TIMEOUT;
-    my $deadline = time + $timeout;
-
-    while ( time < $deadline ) {
-        return 1 unless $self->server($name);
-        sleep 2;
-    }
-
-    die "The guest '$name' was still there ${timeout}s after being deleted.\n" . "Check its status: a server that has gone to ERROR will not delete on asking again.\n";
 }
 
 =head2 create_volume($domain, $purpose, size_gb =E<gt> $n)
@@ -983,12 +947,6 @@ sub create_volume {
         description => "$purpose for $domain, made by trog-provisioner",
         %{ $opts{extra} // {} },
     );
-}
-
-# MetaAPI returns a single volume for a list of one, and undef for an empty list.
-sub _volumes {
-    my ($self) = @_;
-    return grep { ref $_ } $self->api->volumes();
 }
 
 =head1 WHAT THIS CANNOT DO
@@ -1042,7 +1000,7 @@ sub check_reachable {
     my ($self) = @_;
 
     my @services = eval { $self->api->auth->services };
-    return $self->_verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" ) unless @services;
+    return $self->verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" ) unless @services;
 $@
 The cloud is named '@{[ $self->cloud ]}', so this is the entry of that name in
 clouds.yaml.  Check the application credential has not been revoked or expired:
@@ -1053,12 +1011,12 @@ FIX
     my %offered = map  { $_ => 1 } @services;
     my @missing = grep { !$offered{$_} } qw{compute image network};
 
-    return $self->_verdict( 0, 'The catalog is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
+    return $self->verdict( 0, 'The catalog is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
 A guest needs Nova to run on, Glance to boot from and Neutron to be addressed
 on.  A credential scoped to a project without all three cannot build one.
 FIX
 
-    return $self->_verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
+    return $self->verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
 }
 
 =head2 $result = $hv->check_cloud_resources()
@@ -1077,7 +1035,7 @@ sub check_cloud_resources {
     $wanted{floating_network} = $self->floating_network if defined $self->floating_network;
 
     my @unset = grep { !$wanted{$_} } sort keys %wanted;
-    return $self->_verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
+    return $self->verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
 The cloud's block in hypervisors.conf has to say what to build guests as.  What
 exists is the cloud's to say, so ask it rather than guessing:
 
@@ -1092,7 +1050,7 @@ FIX
       if exists $wanted{floating_network};
 
     my @absent = grep { !$found{$_} } sort keys %found;
-    return $self->_verdict( 0, 'The cloud has no ' . join( ', ', map { "$_ '$wanted{$_}'" } @absent ), <<'FIX' ) if @absent;
+    return $self->verdict( 0, 'The cloud has no ' . join( ', ', map { "$_ '$wanted{$_}'" } @absent ), <<'FIX' ) if @absent;
 Ask the cloud what it has:
 
     openstack flavor list
@@ -1105,15 +1063,15 @@ FIX
         my $image = eval { $self->image_for_distro($distro) };
         $image ? push( @images, $image ) : push( @no_image, $@ );
     }
-    return $self->_verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
+    return $self->verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
 
     my @flavors = $self->globals_in_use( $self->size_key );
     my @missing = grep {
         !eval { scalar $self->api->look_by_id_or_name( flavors => $_ ) }
     } @flavors;
-    return $self->_verdict( 0, 'The cloud has no flavor ' . join( ', ', map { "'$_'" } @missing ), "Ask the cloud what it has:\n\n    openstack flavor list\n" ) if @missing;
+    return $self->verdict( 0, 'The cloud has no flavor ' . join( ', ', map { "'$_'" } @missing ), "Ask the cloud what it has:\n\n    openstack flavor list\n" ) if @missing;
 
-    return $self->_verdict( 1, 'Builds from ' . join( ', ', @images ) . " on $wanted{network}" . ( @flavors ? ', as ' . join( ', ', @flavors ) : ', and no guest names an openstack_flavor yet' ), q{} );
+    return $self->verdict( 1, 'Builds from ' . join( ', ', @images ) . " on $wanted{network}" . ( @flavors ? ', as ' . join( ', ', @flavors ) : ', and no guest names an openstack_flavor yet' ), q{} );
 }
 
 =head2 $result = $hv->check_cloud_quota()
@@ -1128,7 +1086,7 @@ sub check_cloud_quota {
     my ($self) = @_;
 
     my $have = eval { $self->capacity };
-    return $self->_verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
+    return $self->verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
 
     # An undefined free is a quota with no limit in it, which is never full.
     my @full;
@@ -1136,7 +1094,7 @@ sub check_cloud_quota {
     push @full, 'memory'    if defined $have->{memory_free} && $have->{memory_free} <= 0;
     push @full, 'cpus'      if defined $have->{cpus_free}   && $have->{cpus_free} <= 0;
 
-    return $self->_verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
+    return $self->verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
 The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests || 'unlimited' ]} instances,
 @{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} // 'unlimited' ]}MB of memory and
 @{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} // 'unlimited' ]} cores.
@@ -1146,7 +1104,7 @@ reserves in hypervisors.conf are held back out of the quota, so a project that
 looks like it has room may not once they are counted.
 FIX
 
-    return $self->_verdict(
+    return $self->verdict(
         1,
         sprintf(
             'Quota: %s/%s instances used, %s of memory and %s cores free',

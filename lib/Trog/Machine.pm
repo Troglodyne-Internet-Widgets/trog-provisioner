@@ -265,7 +265,67 @@ because Perl::Critic::Policy::PreferredBinaries reads those names as local
 runners.  These methods run their command on whatever machine this is.  That is
 usually another machine, where advice to use a perl module does not apply.
 
+On a remote machine, each of these, and every other command below, runs under a
+SIGALRM.  So a hung call becomes an error with a name, and the tool does not
+wait forever.  The call dies with "Gave up on" when the alarm fires.  The limit
+is what C<hang_limit> returns for the command.
+
+The library's own C<timeout> stops a call that only stalls, and it acts first.
+This alarm is for a case that the library cannot see: a call that stops making
+progress while the connection seems fine.  sftp does this when the far side
+refuses a write.  In normal use, nothing reaches this alarm.
+
+=head2 Trog::Machine::hang_limit($command)
+
+Returns how many seconds C<$command> can run on a remote machine before it
+counts as hung.  That is C<$HANG_TIMEOUT>, or the command's own C<timeout> plus
+60 seconds if that is longer.  C<$command> is the command as one string, and
+undef gives C<$HANG_TIMEOUT>.
+
+A command that blocks for a long time on purpose, such as the wait of
+L<Trog::Guest> for the Makefile of a guest, must say so with C<timeout>.  Its
+own limit then decides, and the alarm does not stop it early.
+
 =cut
+
+sub hang_limit ($what) {
+    return $HANG_TIMEOUT unless defined $what;
+
+    my %seconds = ( '' => 1, s => 1, m => 60, h => 3600, d => 86400 );
+    my $limit   = $HANG_TIMEOUT;
+
+    while ( $what =~ m/\btimeout\s+(\d+)([smhd]?)\b/g ) {
+        my $own = $1 * $seconds{ $2 // '' };
+        $limit = $own + 60 if $own + 60 > $limit;
+    }
+
+    return $limit;
+}
+
+# Runs $code, which talks to the far side, under the alarm that RUNNING THINGS
+# describes, and returns what $code returns.  $what names the command in the
+# error and sets the limit.  Locally, it runs $code with no alarm.
+my sub unhang ( $self, $what, $code ) {
+    return $code->() if $self->is_local;
+
+    my $limit = hang_limit($what);
+
+    my @result = eval {
+        local $SIG{ALRM} = sub { die "__TROG_HUNG__\n" };
+        alarm $limit;
+        my @r = $code->();
+        alarm 0;
+        @r;
+    };
+    my $error = $@;
+    alarm 0;
+
+    die 'Gave up on ' . $self->describe . " after ${limit}s: $what\n" . "Nothing came back and nothing failed, which usually means a permission\n" . "problem the far side declined to report.  Check that " . ( $self->ssh_user // 'the login user' ) . " can write where this was going.\n"
+      if $error eq "__TROG_HUNG__\n";
+
+    die $error if $error;
+    return wantarray ? @result : $result[0];
+}
 
 sub capture_cmd {
     my ( $self, $cmd ) = @_;
@@ -278,14 +338,14 @@ sub capture_cmd {
         return $out;
     }
 
-    return $self->_unhang( $cmd, sub { ( $self->ssh->cmd($cmd) )[0] } );
+    return unhang( $self, $cmd, sub { ( $self->ssh->cmd($cmd) )[0] } );
 }
 
 sub run_cmd {
     my ( $self, @argv ) = @_;
     return system(@argv) >> 8 if $self->is_local;
 
-    return $self->_unhang( join( ' ', @argv ), sub { $self->ssh->cmd_exit_code(@argv) } );
+    return unhang( $self, join( ' ', @argv ), sub { $self->ssh->cmd_exit_code(@argv) } );
 }
 
 =head1 SUDO
@@ -322,14 +382,13 @@ nobody is asked twice.
 
 my %SUDO_PASSWORD;
 
+# The key under which %SUDO_PASSWORD keeps the password of this machine.
+my sub sudo_key ($self) { return $self->ssh_target // 'localhost' }
+
 sub sudo_password {
     my ($self) = @_;
-    return $SUDO_PASSWORD{ $self->_sudo_key };
+    return $SUDO_PASSWORD{ sudo_key($self) };
 }
-
-sub _sudo_key ($self) { return $self->ssh_target // 'localhost' }
-
-sub _remember ( $self, $password ) { return $SUDO_PASSWORD{ $self->_sudo_key } = $password }
 
 =head2 forget_sudo_passwords
 
@@ -339,56 +398,19 @@ Clears every kept password.  Only the tests use this.
 
 sub forget_sudo_passwords { %SUDO_PASSWORD = (); return 1 }
 
-sub _ask_for_sudo_password {
-    my ($self) = @_;
-
-    # Given before the run, by a caller that has nobody to ask.
-    return $self->_remember( Trog::Credentials->get('sudo') ) if Trog::Credentials->have('sudo');
-
-    # Ask at the terminal, not on stdin, because cron and redirected runs
-    # point stdin where nobody types.
-    my $password;
-    eval {
-        $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo', terminal => 1 );
-        1;
-    } or do {
-        die 'sudo on '
-          . $self->describe
-          . " wants a password, and it could not be asked for:\n"
-          . $@
-          . 'Either run this where it can ask, give '
-          . ( $self->ssh_user // 'the login user' )
-          . " passwordless sudo there:\n" . '    '
-          . ( $self->ssh_user // 'youruser' )
-          . " ALL=(ALL) NOPASSWD: ALL\n"
-          . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n";
-    };
-
-    die 'No password given for ' . $self->describe . "\n" unless length $password;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a password of "0" is still a password
-
-    return $self->_remember($password);
-}
-
 # What sudo prints when it needs a password that it cannot ask for.
 our @WANTS_PASSWORD = ( 'sudo: a password is required', 'sudo: password is required', 'sudo: a terminal is required', 'sudo: no password was provided' );
-
-sub _wants_password {
-    my ($output) = @_;
-    return 0 unless defined $output;
-    return ( any { index( $output, $_ ) >= 0 } @WANTS_PASSWORD ) ? 1 : 0;
-}
-
-sub _wrong_password {
-    my ($output) = @_;
-    return 0 unless defined $output;
-    return $output =~ m/sudo:\s\d+\sincorrect\spassword\sattempt|Sorry,\stry\sagain/ ? 1 : 0;
-}
 
 =head2 run_sudo(@argv)
 
 Runs C<@argv> as root, and asks for a password if the far side needs one.
 Returns the exit code, like C<run_cmd>.  Dies if it cannot ask for a password,
 or after three wrong ones.
+
+The password is the one given to L<Trog::Credentials> before the run, under the
+name C<sudo>.  Without one, it asks at the terminal through
+C<< Trog::Credentials->prompt >>, and dies with what to configure when there is
+no terminal.  Dies if the answer is empty.
 
 =cut
 
@@ -404,7 +426,8 @@ sub run_sudo {
         my @sudo     = defined $password ? ( qw{sudo -S -p}, q{} )         : (qw{sudo -n});
         my %stdin    = defined $password ? ( stdin_data => "$password\n" ) : ();
 
-        my ( $out, $err ) = $self->_unhang(
+        my ( $out, $err ) = unhang(
+            $self,
             join( ' ', 'sudo', @argv ),
             sub {
                 $self->ssh->capture2( { timeout => $TIMEOUT, %stdin }, @sudo, @argv );
@@ -413,15 +436,48 @@ sub run_sudo {
         my $rc = $? >> 8;
         return 0 unless $rc;
 
-        my $said = ( $out // '' ) . ( $err // '' );
-        return $rc unless _wants_password($said) || _wrong_password($said);
+        my $said  = ( $out // '' ) . ( $err // '' );
+        my $wrong = $said =~ m/sudo:\s\d+\sincorrect\spassword\sattempt|Sorry,\stry\sagain/;
+        my $wants = any { index( $said, $_ ) >= 0 } @WANTS_PASSWORD;
+        return $rc unless $wrong || $wants;
         last if $attempt == 3;
 
-        # Not warn: this is part of a password prompt, and a source location in it
-        # is noise to somebody who is typing the password again.
-        print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);    ## no critic (ProhibitPrintSTDERR)
-        delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
-        $self->_ask_for_sudo_password();
+        if ($wrong) {
+
+            # Not warn: this is part of a password prompt, and a source location in it
+            # is noise to somebody who is typing the password again.
+            print {*STDERR} "Sorry, try again.\n";    ## no critic (ProhibitPrintSTDERR)
+            delete $SUDO_PASSWORD{ sudo_key($self) };
+        }
+
+        # Given before the run, by a caller that has nobody to ask.
+        if ( Trog::Credentials->have('sudo') ) {
+            $SUDO_PASSWORD{ sudo_key($self) } = Trog::Credentials->get('sudo');
+            next;
+        }
+
+        # Ask at the terminal, not on stdin, because cron and redirected runs
+        # point stdin where nobody types.
+        my $typed;
+        eval {
+            $typed = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo', terminal => 1 );
+            1;
+        } or do {
+            die 'sudo on '
+              . $self->describe
+              . " wants a password, and it could not be asked for:\n"
+              . $@
+              . 'Either run this where it can ask, give '
+              . ( $self->ssh_user // 'the login user' )
+              . " passwordless sudo there:\n" . '    '
+              . ( $self->ssh_user // 'youruser' )
+              . " ALL=(ALL) NOPASSWD: ALL\n"
+              . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n";
+        };
+
+        die 'No password given for ' . $self->describe . "\n" unless length $typed;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a password of "0" is still a password
+
+        $SUDO_PASSWORD{ sudo_key($self) } = $typed;
     }
 
     die 'Could not authenticate sudo on ' . $self->describe . "\n";
@@ -486,8 +542,14 @@ success and 0 on failure.
 
 Copies a whole directory tree from that machine to here.  It is incremental: a
 file that is already here and did not change does not travel again.  See
-L</Why a directory comes over rsync>.  Returns 1 on success.  On failure, warns
-with the rsync errors and returns 0.
+L</Why a directory comes over rsync>.  Prints the total size transferred.
+Returns 1 on success.  On failure, warns with the rsync errors and returns 0.
+
+rsync is a local process, not a command down the connection, so it does not run
+under the alarm of L</RUNNING THINGS>.  That limit is wall-clock time, and it
+would stop a long data transfer at exactly C<$HANG_TIMEOUT>, however well it
+went.  The C<--timeout> of rsync measures silence, not elapsed time.  So a
+transfer that keeps moving has as long as it needs, and one that stops ends.
 
 C<exclude> takes an arrayref of rsync patterns for paths that must not come
 down.  The patterns in use come from C<remote_skip> in L<Provisioner::Recipe>.
@@ -515,6 +577,67 @@ owner.
 =back
 
 =cut
+
+# Returns $string quoted for a POSIX shell, for a command that has to be one
+# string.
+my sub shq ($str) {
+    $str =~ s/'/'\\''/g;
+    return "'$str'";
+}
+
+# Runs @cmd on the far side with the options of Net::OpenSSH's system in
+# \%opts.  Returns 1 on success, and warns and returns 0 on failure.
+my sub remote_system ( $self, $opts, @cmd ) {
+    my $ok = unhang(
+        $self,
+        join( ' ', @cmd ),
+        sub { $self->ssh->system( { timeout => $TIMEOUT, %$opts }, @cmd ) }
+    );
+
+    warn 'Remote ' . join( ' ', @cmd ) . ' failed: ' . ( $self->ssh->error // 'unknown' ) . "\n" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+# Writes a stream to $path on the far side.  \%stdin holds stdin_data or
+# stdin_file.  Takes append, sudo and mode.  Returns 1 on success and 0 on
+# failure.
+my sub pour ( $self, $stdin, $path, %opts ) {
+    unless ( $opts{sudo} ) {
+        return remote_system( $self, { %$stdin, stdout_discard => 1 }, ( $opts{append} ? qw{tee -a} : 'tee' ), $path );
+    }
+
+    # A privileged write is always two commands, because the content and the
+    # sudo password both need standard input.  See SUDO.  mktemp makes the
+    # staging file on the far side, in a directory that exists and we can write.
+    my $staged = $self->capture_cmd('mktemp');
+    chomp $staged if defined $staged;
+    unless ( $staged && $staged =~ m{\A/} ) {
+        warn 'Could not make a staging file on ' . $self->describe . "\n";
+        return 0;
+    }
+    unless ( remote_system( $self, { %$stdin, stdout_discard => 1 }, 'tee', $staged ) ) {
+        $self->remove($staged);
+        return 0;
+    }
+
+    my $ok;
+    if ( $opts{append} ) {
+
+        # A move would replace the file, so sudo sh -c concatenates the staged
+        # content onto it.  >> has no argv form, so the command is one string.
+        $ok = !$self->run_sudo( qw{sh -c}, sprintf( 'cat %s >> %s', shq($staged), shq($path) ) );
+        $self->remove($staged);
+    }
+    else {
+        $ok =
+             !$self->run_sudo( 'mv',    $staged,               $path )
+          && !$self->run_sudo( 'chown', 'root:root',           $path )
+          && !$self->run_sudo( 'chmod', $opts{mode} // '0644', $path );
+        $self->remove($staged) unless $ok;
+    }
+
+    return $ok ? 1 : 0;
+}
 
 sub file_exists {
     my ( $self, $path ) = @_;
@@ -569,7 +692,7 @@ sub list_dir {
     }
 
     # ls, not sftp.  See "Why none of this uses sftp".
-    my $listing = $self->capture_cmd( 'ls -1 ' . _shq($path) . ' 2>/dev/null' ) // '';
+    my $listing = $self->capture_cmd( 'ls -1 ' . shq($path) . ' 2>/dev/null' ) // '';
     return grep { $_ } split( m/\n/, $listing );
 }
 
@@ -580,14 +703,15 @@ sub read_text {
     # capture(), not cmd(): cmd chomps, and the trailing newline is part of the
     # file.
     #
-    # Scalar context, explicitly.  _unhang calls its code in list context and
+    # Scalar context, explicitly.  unhang calls its code in list context and
     # gives a scalar caller the first element, and capture in list context
     # returns one element per line.
     #
     # The exit status decides, not $ssh->error.  That error is sticky: it holds
     # the last error from anything on this connection.  So an earlier failure on
     # purpose, such as the sudo -n probe, makes a good cat look like a failure.
-    my $content = $self->_unhang(
+    my $content = unhang(
+        $self,
         "cat $path",
         sub { scalar $self->ssh->capture( { timeout => $TIMEOUT }, 'cat', $path ) }
     );
@@ -597,8 +721,20 @@ sub read_text {
 
 sub write_text {
     my ( $self, $path, $content, %opts ) = @_;
-    return $self->_write_local( $path, $content, %opts ) if $self->is_local;
-    return $self->_pour( { stdin_data => $content }, $path, %opts );
+    return pour( $self, { stdin_data => $content }, $path, %opts ) unless $self->is_local;
+
+    # The write itself is the test of access.  A -w test describes a moment that
+    # is already past.  It also cannot see an immutable bit, a full disk or a
+    # read-only mount.
+    return 1 if eval { File::Slurper::Temp::write_text( $path, $content ); 1 };
+    die $@ unless $opts{sudo};
+
+    my $tmp = File::Temp->new( UNLINK => 1 );
+    print {$tmp} $content;
+    close($tmp) or die "Could not close $tmp: $!";
+    my $ok = $self->run_sudo( qw{cp}, "$tmp", $path ) == 0;
+    $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $path ) if $ok;
+    return $ok ? 1 : 0;
 }
 
 sub put_file {
@@ -613,7 +749,7 @@ sub put_file {
         return $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $remote ) == 0 ? 1 : 0;
     }
 
-    return $self->_pour( { stdin_file => $local }, $remote, %opts );
+    return pour( $self, { stdin_file => $local }, $remote, %opts );
 }
 
 sub get_dir {
@@ -624,193 +760,22 @@ sub get_dir {
     # two or three levels down in a data directory that can be new this run.
     File::Path::make_path($local);
 
-    return $self->_rsync( $self->_there($remote), _here($local), %opts );
-}
+    # The trailing slash tells rsync "the contents of this", not "this, inside
+    # that".
+    my $src  = ( $self->is_local ? q{} : $self->ssh_target . ':' ) . "$remote/";
+    my $dest = "$local/";
 
-sub append_line {
-    my ( $self, $path, $line ) = @_;
-    chomp $line;
-
-    # Append, never read-modify-write.  This is often an authorized_keys file,
-    # and a rewrite after an empty read leaves one key and locks its owner out.
-    $self->mkpath( _parent_dir($path) );
-
-    if ( $self->is_local ) {
-        my $existing = eval { File::Slurper::read_text($path) };
-        return 1 if defined $existing && any { $_ eq $line } split( m/\n/, $existing );
-        open( my $fh, '>>', $path ) or die "Could not open $path: $!";
-        print {$fh} "$line\n";
-        close($fh) or die "Could not close $path: $!";
-        return 1;
-    }
-
-    # grep on the far side decides if the line is already there, so the file
-    # never makes the trip.
-    return 1 if $self->run_cmd( qw{grep -qxF --}, $line, $path ) == 0;
-
-    return $self->_pour( { stdin_data => "$line\n" }, $path, append => 1 );
-}
-
-=head1 INTERNALS
-
-Private to this module.  They are documented here for the next person to edit
-them.
-
-=head2 _pour(\%stdin, $path, %opts)
-
-Writes a stream to C<$path> on the far side.  C<\%stdin> holds C<stdin_data> or
-C<stdin_file>.  Takes C<append>, C<sudo> and C<mode>.  Returns 1 on success and
-0 on failure.
-
-A privileged write is always two commands, because the content and the sudo
-password both need standard input.  See L</Why none of this uses sftp> and
-L</SUDO>.
-
-=cut
-
-sub _pour {
-    my ( $self, $stdin, $path, %opts ) = @_;
-
-    my @tee = $opts{append} ? (qw{tee -a}) : ('tee');
-
-    unless ( $opts{sudo} ) {
-        return $self->_run( { %$stdin, stdout_discard => 1 }, @tee, $path );
-    }
-
-    return $self->_sudo_append( $stdin, $path ) if $opts{append};
-
-    my $staged = $self->_staging_path or return 0;
-    $self->_run( { %$stdin, stdout_discard => 1 }, 'tee', $staged ) or do {
-        $self->remove($staged);
-        return 0;
-    };
-
-    my $mode = $opts{mode} // '0644';
-    my $ok =
-         !$self->run_sudo( 'mv',    $staged,     $path )
-      && !$self->run_sudo( 'chown', 'root:root', $path )
-      && !$self->run_sudo( 'chmod', $mode,       $path );
-
-    $self->remove($staged) unless $ok;
-    return $ok ? 1 : 0;
-}
-
-=head2 _sudo_append(\%stdin, $path)
-
-Appends a stream to C<$path> as root.  Returns 1 on success and 0 on failure.
-
-A move of a staged file replaces the file, and the content cannot go on stdin
-next to a sudo password.  So the content goes to a staging file, and
-C<sudo sh -c> concatenates it onto C<$path>.
-
-=cut
-
-sub _sudo_append {
-    my ( $self, $stdin, $path ) = @_;
-
-    my $staged = $self->_staging_path or return 0;
-    my $ok     = $self->_run( { %$stdin, stdout_discard => 1 }, 'tee', $staged )
-      && !$self->run_sudo( qw{sh -c}, sprintf( 'cat %s >> %s', _shq($staged), _shq($path) ) );
-
-    $self->remove($staged);
-    return $ok ? 1 : 0;
-}
-
-=head2 _shq($string)
-
-Returns C<$string> quoted for a POSIX shell, for a command that has to be one
-string.  C<_sudo_append> uses it because C<<< >> >>> has no argv form, and
-C<list_dir> uses it for the path it lists.
-
-=cut
-
-sub _shq {
-    my ($str) = @_;
-    $str =~ s/'/'\\''/g;
-    return "'$str'";
-}
-
-=head2 _staging_path
-
-Returns the path of a new private file on the far side.  C<mktemp> makes it
-there, so the directory exists and we can write to it.  Warns and returns undef
-if C<mktemp> fails.
-
-=cut
-
-sub _staging_path {
-    my ($self) = @_;
-
-    my $path = $self->capture_cmd('mktemp');
-    chomp $path  if defined $path;
-    return $path if $path && $path =~ m{\A/};
-
-    warn 'Could not make a staging file on ' . $self->describe . "\n";
-    return undef;
-}
-
-=head2 _here($path), _there($path)
-
-Return the rsync name for a directory.  The trailing slash tells rsync "the
-contents of this", not "this, inside that".  Every transfer here means the
-contents.  C<_there> adds C<user@host:> for a remote machine.
-
-=cut
-
-sub _here { return "$_[0]/" }
-
-sub _there {
-    my ( $self, $path ) = @_;
-    return _here($path) if $self->is_local;
-    return $self->ssh_target . ':' . _here($path);
-}
-
-=head2 _rsh
-
-Returns the ssh command for rsync to use.  It names the port and the key,
-because neither reaches rsync from the environment.  It accepts any host key,
-because a guest rebuilt an hour ago has a new host key, and that is normal here.
-The options are the ones that Net::OpenSSH::More puts on its own master.  So both
-ways to reach a machine accept the same things from it.
-
-rsync splits this string on spaces, so a path with a space becomes two
-arguments.  No path here has one, because this tool writes the keys into the
-domain directory that it also names.
-
-=cut
-
-sub _rsh {
-    my ($self) = @_;
-
-    my @ssh = (
+    # The port and the key, which reach rsync from nowhere else, and any host
+    # key, as Net::OpenSSH::More accepts, because a rebuilt guest has a new one.
+    # rsync splits this on spaces, which no key path that this tool writes has.
+    my @rsh = (
         'ssh', '-p', $self->ssh_port,
         '-o' => 'StrictHostKeyChecking=no',
         '-o' => 'UserKnownHostsFile=/dev/null',
         '-o' => 'GSSAPIAuthentication=no',
         '-o' => 'ConnectTimeout=180',
+        ( defined $self->ssh_key ? ( '-i', $self->ssh_key ) : () ),
     );
-    push( @ssh, '-i', $self->ssh_key ) if defined $self->ssh_key;
-
-    return join( ' ', @ssh );
-}
-
-=head2 _rsync($src, $dest, %opts)
-
-Runs one rsync from C<$src> to C<$dest>.  Takes C<exclude>, C<sudo> and
-C<update>, as C<get_dir> describes.  Prints the total size transferred.
-Returns 1 on success.  On failure, warns with the rsync errors and returns 0.
-
-This does not go through C<_run> or C<_unhang>.  rsync is a local process, not a
-command down the connection.  The limit of C<_unhang> is wall-clock time, so it
-stops a long data transfer at exactly C<$HANG_TIMEOUT>, however well it goes.
-The C<--timeout> of rsync measures silence, not elapsed time.  So a transfer
-that keeps moving has as long as it needs, and one that stops ends.
-
-=cut
-
-sub _rsync {
-    my ( $self, $src, $dest, %opts ) = @_;
-
     my @exclude = @{ $opts{exclude} // [] };
 
     my $rsync = File::Rsync->new(
@@ -822,11 +787,11 @@ sub _rsync {
         stats            => 1,
         'human-readable' => 1,
 
-        ( $self->is_local ? ()                       : ( rsh => $self->_rsh ) ),
+        ( $self->is_local ? ()                       : ( rsh => join( ' ', @rsh ) ) ),
         ( @exclude        ? ( exclude => \@exclude ) : () ),
 
-        # See get_dir for why.  sudo -n, because no terminal at the far end can
-        # answer a password prompt.  -n exits, and rsync reports the failure.
+        # sudo -n, because no terminal at the far end can answer a password
+        # prompt.  -n exits, and rsync reports the failure.
         ( $opts{sudo} ? ( 'rsync-path' => 'sudo -n rsync' ) : () ),
 
         ( $opts{update} ? ( update => 1 ) : () ),
@@ -843,112 +808,28 @@ sub _rsync {
     return 1;
 }
 
-sub _run {
-    my ( $self, $opts, @cmd ) = @_;
+sub append_line {
+    my ( $self, $path, $line ) = @_;
+    chomp $line;
 
-    my $ok = $self->_unhang(
-        join( ' ', @cmd ),
-        sub { $self->ssh->system( { timeout => $TIMEOUT, %$opts }, @cmd ) }
-    );
+    # Append, never read-modify-write.  This is often an authorized_keys file,
+    # and a rewrite after an empty read leaves one key and locks its owner out.
+    $self->mkpath( $path =~ s{/[^/]*\z}{}r || '/' );
 
-    warn 'Remote ' . join( ' ', @cmd ) . ' failed: ' . ( $self->ssh->error // 'unknown' ) . "\n" unless $ok;
-    return $ok ? 1 : 0;
-}
-
-=head2 _hang_limit($what)
-
-Returns how many seconds one command can run before it counts as hung.  That is
-C<$HANG_TIMEOUT>, or the command's own C<timeout> plus 60 seconds if that is
-longer.
-
-=cut
-
-sub _hang_limit {
-    my ($what) = @_;
-    return $HANG_TIMEOUT unless defined $what;
-
-    my %seconds = ( '' => 1, s => 1, m => 60, h => 3600, d => 86400 );
-    my $limit   = $HANG_TIMEOUT;
-
-    while ( $what =~ m/\btimeout\s+(\d+)([smhd]?)\b/g ) {
-        my $own = $1 * $seconds{ $2 // '' };
-        $limit = $own + 60 if $own + 60 > $limit;
+    if ( $self->is_local ) {
+        my $existing = eval { File::Slurper::read_text($path) };
+        return 1 if defined $existing && any { $_ eq $line } split( m/\n/, $existing );
+        open( my $fh, '>>', $path ) or die "Could not open $path: $!";
+        print {$fh} "$line\n";
+        close($fh) or die "Could not close $path: $!";
+        return 1;
     }
 
-    return $limit;
-}
+    # grep on the far side decides if the line is already there, so the file
+    # never makes the trip.
+    return 1 if $self->run_cmd( qw{grep -qxF --}, $line, $path ) == 0;
 
-=head2 _unhang($what, $code)
-
-Runs C<$code>, which talks to the far side, under a SIGALRM.  So a hung call
-becomes an error with a name, and the tool does not wait forever.  C<$what>
-names the command in the error and sets the limit, as C<_hang_limit> describes.
-Returns what C<$code> returns.  Dies with "Gave up on" when the alarm fires, and
-passes on any other error from C<$code>.  Locally, it runs C<$code> with no
-alarm.
-
-The library's own C<timeout> stops a call that only stalls, and it acts first.
-This alarm is for a case that the library cannot see: a call that stops making
-progress while the connection seems fine.  sftp does this when the far side
-refuses a write.  In normal use, nothing reaches this alarm.
-
-=cut
-
-sub _unhang {
-    my ( $self, $what, $code ) = @_;
-    return $code->() if $self->is_local;
-
-    # A command with its own timeout, such as a wait for the Makefile of a
-    # guest, blocks for that long on purpose.
-    my $limit = _hang_limit($what);
-
-    my @result = eval {
-        local $SIG{ALRM} = sub { die "__TROG_HUNG__\n" };
-        alarm $limit;
-        my @r = $code->();
-        alarm 0;
-        @r;
-    };
-    my $error = $@;
-    alarm 0;
-
-    die 'Gave up on ' . $self->describe . " after ${limit}s: $what\n" . "Nothing came back and nothing failed, which usually means a permission\n" . "problem the far side declined to report.  Check that " . ( $self->ssh_user // 'the login user' ) . " can write where this was going.\n"
-      if $error eq "__TROG_HUNG__\n";
-
-    die $error if $error;
-    return wantarray ? @result : $result[0];
-}
-
-=head2 _write_local($path, $content, %opts)
-
-Writes C<$content> to a local C<$path>.  If that fails and C<sudo> is set, it
-copies the content into place with C<sudo cp> and sets C<mode>, 0644 by default.
-Without C<sudo>, it dies on failure.  Returns 1 on success and 0 on failure.
-
-The write itself is the test of access.  A C<-w> test describes a moment that is
-already past.  It also cannot see an immutable bit, a full disk or a read-only
-mount.
-
-=cut
-
-sub _write_local {
-    my ( $self, $path, $content, %opts ) = @_;
-
-    return 1 if eval { File::Slurper::Temp::write_text( $path, $content ); 1 };
-    die $@ unless $opts{sudo};
-
-    my $tmp = File::Temp->new( UNLINK => 1 );
-    print {$tmp} $content;
-    close($tmp) or die "Could not close $tmp: $!";
-    my $ok = $self->run_sudo( qw{cp}, "$tmp", $path ) == 0;
-    $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $path ) if $ok;
-    return $ok ? 1 : 0;
-}
-
-sub _parent_dir {
-    my ($path) = @_;
-    $path =~ s{/[^/]*\z}{};
-    return $path ? $path : '/';
+    return pour( $self, { stdin_data => "$line\n" }, $path, append => 1 );
 }
 
 =head1 SEE ALSO

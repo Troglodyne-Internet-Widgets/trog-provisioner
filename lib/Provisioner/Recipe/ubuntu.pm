@@ -204,18 +204,13 @@ sub BLOCK_SCALAR_INDENT { return 6 }
 =head2 @fmts = $recipe->formatters()
 
 Returns two formatters.  C<yaml> gives a value to L<YAML::XS> and returns what
-it writes, for the places in a document that take a value.  It also quotes a
-scalar that PyYAML reads as a base-60 number and libyaml does not.  C<indent>
-indents a whole file that another file carries as a block scalar.
+it writes, for the places in a document that take a value.  It leaves out the
+document marker and the final newline that L<YAML::XS> always adds, because the
+document that the text goes into already has both.  It also quotes a scalar
+that PyYAML reads as a base-60 number and libyaml does not.  C<indent> indents
+a whole file that another file carries as a block scalar.
 
 =cut
-
-sub formatters {
-    return (
-        yaml   => Text::Xslate::html_builder( sub { return _yaml(shift) } ),
-        indent => Text::Xslate::html_builder( sub { return _indent( shift, BLOCK_SCALAR_INDENT ) } ),
-    );
-}
 
 # cloud-init reads these documents with PyYAML, which reads YAML 1.1
 # sexagesimals.  The libyaml under YAML::XS does not, so Dump leaves
@@ -225,32 +220,26 @@ sub formatters {
 # The guest then waits on systemd-networkd-wait-online forever.
 my $SEXAGESIMAL = qr/\A[-+]?\d[\d_]*(?::[0-5]?\d)+(?:[.][\d_]*)?\z/;
 
-=head2 $text = _yaml($value)
+sub formatters {
+    return (
+        yaml => Text::Xslate::html_builder(
+            sub ($value) {
+                my $text = YAML::XS::Dump($value);
+                $text =~ s/\A---[ \t]*\n?//;
+                chomp $text;
 
-Returns C<$value> as YAML, without the document marker and the final newline
-that L<YAML::XS> always adds.  The document that the text goes into already has
-both.  A scalar that matches C<$SEXAGESIMAL> comes back in single quotes.
-
-=cut
-
-sub _yaml {
-    my ($value) = @_;
-
-    my $text = YAML::XS::Dump($value);
-    $text =~ s/\A---[ \t]*\n?//;
-    chomp $text;
-
-    return "'$text'" if !ref $value && $text =~ $SEXAGESIMAL;
-    return $text;
-}
-
-sub _indent {
-    my ( $text, $indent ) = @_;
-    return $text unless $indent;
-
-    my $pad = q{ } x $indent;
-    $text =~ s/^(?=\N)/$pad/mg;
-    return $text;
+                return "'$text'" if !ref $value && $text =~ $SEXAGESIMAL;
+                return $text;
+            }
+        ),
+        indent => Text::Xslate::html_builder(
+            sub ($text) {
+                my $pad = q{ } x BLOCK_SCALAR_INDENT;
+                $text =~ s/^(?=\N)/$pad/mg;
+                return $text;
+            }
+        ),
+    );
 }
 
 =head2 $hv = $recipe->hv()
@@ -285,6 +274,28 @@ carries it by value, in C<write_files>.  So this method renders it, because the
 order of C<template_files> entries does not say which one renders first.
 C<render_raw> renders it without a second pass through C<validate>.  See
 L<Provisioner::Recipe/render_raw>.
+
+C<users> are the users that cloud-init creates.  The public half of the guest
+key is added to the C<ssh_authorized_keys> of the user named C<admin_user>.
+That key is how this machine gets back in to run the makefile again.  It goes
+on the account that can sudo, not on root.  The makefile limits the root login
+to keys.
+
+C<packages> are the packages that cloud-init installs before the makefile runs,
+plus what the makefile needs.  atd starts the makefile, make runs it, and bash
+is the shell for recipe lines.  Something must also accept mail, so it adds
+sendmail, unless the packages have postfix, which conflicts with it.
+
+C<bootcmd>, with a C<fetch_cache>, points the hosts of the cache at it before
+cloud-init installs the packages.  It writes F<scripts/fetch_via_cache> and the
+certificate of the authority under F</run>, and runs the script, so first boot
+and the makefile decide in one way which hosts go to the cache.  The
+C<fetch_via_cache off> at the end of the makefile undoes both.  C<bootcmd> is
+the one module that runs before the package install and can run a command.  It
+runs at every boot, so the command stands down once the makefile of the domain
+has made its first state file.  A reboot of a built guest then leaves its hosts
+alone.  C<refresh_cloud_init> in F<bin/provision> runs it again for a domain
+added to a guest that is up, whose state directory is not there yet.
 
 Dies if C<ips> is set without C<gateway>, or if C<contact_email> is not set.
 
@@ -327,8 +338,16 @@ sub enrich {
       unless $opts{contact_email};
 
     $opts{guest_key} = $self->guest_keypair(%opts);
-    $opts{users}     = $self->_users(%opts);
-    $opts{packages}  = _first_boot_packages( $opts{packages} );
+
+    $opts{users} = Provisioner::Utils::coerce_arrayref( $opts{users} );
+    if ( defined $opts{admin_user} ) {
+        my ($admin) = grep { ref $_ eq 'HASH' && ( $_->{name} // '' ) eq $opts{admin_user} } @{ $opts{users} };
+        push( @{ $admin->{ssh_authorized_keys} }, $opts{guest_key}{public} ) if $admin;
+    }
+
+    my @packages = @{ Provisioner::Utils::coerce_arrayref( $opts{packages} ) };
+    push( @packages, 'sendmail' ) unless any { $_ eq 'postfix' } @packages;
+    $opts{packages} = [ uniq( @packages, qw{at bash make} ) ];
 
     # What the recipes named, as its packager gives it to first boot.
     my $packager = Provisioner::Packager->named( $self->packager );
@@ -340,7 +359,26 @@ sub enrich {
         )
     ];
     $opts{answers} = [ $packager->answers( @{ Provisioner::Utils::coerce_arrayref( $opts{package_answers} ) } ) ];
-    $opts{bootcmd} = $opts{fetch_cache} ? [ _fetch_cache_bootcmd( $opts{domain}, $opts{fetch_cache} ) ] : [];
+
+    $opts{bootcmd} = [];
+    if ( my $cache = $opts{fetch_cache} ) {
+        my $script = $cache->{script}    =~ s/\n?\z/\n/r;
+        my $cert   = $cache->{authority} =~ s/\n?\z/\n/r;
+        $opts{bootcmd} = [
+            join(
+                q{},
+                "if [ ! -e /etc/provisioner/state/$opts{domain}/state ]; then\n",
+                "cat > /run/trog-fetch_via_cache <<'TROG_FETCH_VIA_CACHE'\n",
+                $script,
+                "TROG_FETCH_VIA_CACHE\n",
+                "cat > /run/trog-fetchcache-ca.crt <<'TROG_FETCHCACHE_CA'\n",
+                $cert,
+                "TROG_FETCHCACHE_CA\n",
+                "bash /run/trog-fetch_via_cache on $cache->{address} /run/trog-fetchcache-ca.crt @{ $cache->{hosts} }\n",
+                "fi\n",
+            )
+        ];
+    }
 
     # A list, not two lines of the template, because the first item has a
     # newline in it.  A YAML sequence item written by hand cannot carry one.
@@ -353,88 +391,6 @@ sub enrich {
     $opts{setup_script} = $self->render_raw( "files/$sub.setup.sh.tt", %opts );
 
     return %opts;
-}
-
-=head2 $cmd = _fetch_cache_bootcmd($domain, $fetch_cache)
-
-The C<bootcmd> that points the hosts of C<$fetch_cache> at the cache before
-cloud-init installs the packages.  It writes F<scripts/fetch_via_cache> and the
-certificate of the authority under F</run>, and runs the script, so first boot
-and the makefile decide in one way which hosts go to the cache.  The
-C<fetch_via_cache off> at the end of the makefile undoes both.
-
-C<bootcmd> is the one module that runs before the package install and can run a
-command.  It runs at every boot, so the command stands down once the makefile of
-C<$domain> has made its first state file.  A reboot of a built guest then leaves
-its hosts alone.  C<refresh_cloud_init> in F<bin/provision> runs it again for a
-domain added to a guest that is up, whose state directory is not there yet.
-
-=cut
-
-sub _fetch_cache_bootcmd {
-    my ( $domain, $cache ) = @_;
-
-    my $script = $cache->{script}    =~ s/\n?\z/\n/r;
-    my $cert   = $cache->{authority} =~ s/\n?\z/\n/r;
-    return join(
-        q{},
-        "if [ ! -e /etc/provisioner/state/$domain/state ]; then\n",
-        "cat > /run/trog-fetch_via_cache <<'TROG_FETCH_VIA_CACHE'\n",
-        $script,
-        "TROG_FETCH_VIA_CACHE\n",
-        "cat > /run/trog-fetchcache-ca.crt <<'TROG_FETCHCACHE_CA'\n",
-        $cert,
-        "TROG_FETCHCACHE_CA\n",
-        "bash /run/trog-fetch_via_cache on $cache->{address} /run/trog-fetchcache-ca.crt @{ $cache->{hosts} }\n",
-        "fi\n",
-    );
-}
-
-=head2 $pkgs = _first_boot_packages($packages)
-
-Returns the packages that cloud-init installs before the makefile runs.  That
-is C<$packages>, plus what the makefile needs.  atd starts the makefile, make
-runs it, and bash is the shell for recipe lines.
-
-Something must also accept mail.  So it adds sendmail, unless C<$packages>
-has postfix, which conflicts with it.
-
-=cut
-
-sub _first_boot_packages {
-    my ($packages) = @_;
-
-    my @pkgs = @{ Provisioner::Utils::coerce_arrayref($packages) };
-    push( @pkgs, 'sendmail' ) unless any { $_ eq 'postfix' } @pkgs;
-    push( @pkgs, qw{at bash make} );
-
-    return [ uniq @pkgs ];
-}
-
-=head2 $users = $recipe->_users(%opts)
-
-Returns the users that cloud-init creates.  The public half of the guest key is
-added to the C<ssh_authorized_keys> of the user named C<admin_user>.
-
-That key is how this machine gets back in to run the makefile again.  It goes
-on the account that can sudo, not on root.  The makefile limits the root login
-to keys.
-
-=cut
-
-sub _users {
-    my ( $self, %opts ) = @_;
-
-    my $users = Provisioner::Utils::coerce_arrayref( $opts{users} );
-    return $users unless defined $opts{admin_user};
-
-    foreach my $user (@$users) {
-        next unless ref $user eq 'HASH' && ( $user->{name} // '' ) eq $opts{admin_user};
-        push( @{ $user->{ssh_authorized_keys} }, $opts{guest_key}{public} );
-        last;
-    }
-
-    return $users;
 }
 
 =head2 $key = $recipe->guest_keypair(%opts)

@@ -121,14 +121,27 @@ sub build {
     my $explicit = defined($uri) ? 1 : 0;
     $uri = $DEFAULT_URI unless $explicit;
 
-    my $parsed = _parse_uri($uri)
-      or die "Could not parse libvirt connection URI '$uri'\n";
+    # A libvirt connection URI has the form
+    # driver[+transport]://[user@][host][:port]/path.  URI does not know the
+    # driver+transport scheme, so it returns a URI::_foreign with no authority
+    # accessors.  So the URI is split, and its authority parsed again as ssh,
+    # which gives user, bracketed IPv6 and port without a regex of our own.
+    my ( $scheme, $authority, $path ) = URI::Split::uri_split($uri);
+    my ( $driver, $transport ) = split( quotemeta('+'), $scheme // q{}, 2 );
+    die "Could not parse libvirt connection URI '$uri'\n" unless $driver;
+
+    my $server = $authority ? URI->new("ssh://$authority") : undef;
 
     my $self = bless {
         %given,
-        uri      => $uri,
-        explicit => $explicit,
-        %$parsed,
+        uri       => $uri,
+        explicit  => $explicit,
+        driver    => $driver,
+        transport => $transport,
+        user      => $server                      ? $server->user : undef,
+        host      => ( $server && $server->host ) ? $server->host : undef,
+        port      => $server                      ? $server->port : undef,
+        path      => $path,
     }, $class;
 
     # Fail now, not three minutes into a provision.
@@ -136,32 +149,6 @@ sub build {
       if !$self->is_local && !defined $self->ssh_host;
 
     return $self;
-}
-
-# A libvirt connection URI has the form driver[+transport]://[user@][host][:port]/path.
-#
-# URI does not know the driver+transport scheme, so it returns a URI::_foreign
-# with no authority accessors.  We split the URI and parse the authority again
-# as ssh.  That gives user, bracketed IPv6 and port without our own regex.
-sub _parse_uri {
-    my ($uri) = @_;
-
-    my ( $scheme, $authority, $path ) = URI::Split::uri_split($uri);
-    return undef unless $scheme;
-
-    my ( $driver, $transport ) = split( quotemeta('+'), $scheme, 2 );
-    return undef unless $driver;
-
-    my $server = $authority ? URI->new("ssh://$authority") : undef;
-
-    return {
-        driver    => $driver,
-        transport => $transport,
-        user      => $server                      ? $server->user : undef,
-        host      => ( $server && $server->host ) ? $server->host : undef,
-        port      => $server                      ? $server->port : undef,
-        path      => $path,
-    };
 }
 
 =head1 IDENTITY
@@ -302,8 +289,7 @@ sub vmm {
 # A domain lookup dies when there is no such domain, which is not an error for
 # any caller here.  The connection opens outside the eval, so a hypervisor that
 # we cannot reach does not look like "no such domain".
-sub _domain {
-    my ( $self, $name ) = @_;
+my sub domain ( $self, $name ) {
     my $vmm = $self->vmm;
     return eval { $vmm->get_domain_by_name($name) };
 }
@@ -325,7 +311,7 @@ Returns 1 if libvirt has a domain of that name, running or not, and 0 if not.
 
 =cut
 
-sub domain_exists ( $self, $name ) { return defined $self->_domain($name) ? 1 : 0 }
+sub domain_exists ( $self, $name ) { return defined domain( $self, $name ) ? 1 : 0 }
 
 =head2 stop_domain($name)
 
@@ -340,7 +326,7 @@ qemu has it open.
 
 sub stop_domain {
     my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name) or return 0;
+    my $domain = domain( $self, $name ) or return 0;
 
     return 1 unless $domain->is_active();
     eval { $domain->destroy(); 1 } or die "Could not stop $name: $@";
@@ -357,7 +343,7 @@ Dies if libvirt cannot start it.
 
 sub start_domain {
     my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name) or return 0;
+    my $domain = domain( $self, $name ) or return 0;
 
     return 1 if $domain->is_active();
     eval { $domain->create(); 1 } or die "Could not start $name: $@";
@@ -388,7 +374,7 @@ Dies if there is no such domain.
 sub domain_definition {
     my ( $self, $name ) = @_;
 
-    my $domain = $self->_domain($name)
+    my $domain = domain( $self, $name )
       or die "No domain called $name on " . $self->describe . "\n";
 
     return $domain->get_xml_description( Sys::Virt::Domain::XML_INACTIVE() );
@@ -506,11 +492,16 @@ display with C<autoport='yes'> has C<port='-1'> until the domain runs.
 sub vnc_access {
     my ( $self, $name ) = @_;
 
-    my $domain = $self->_domain($name)
+    my $domain = domain( $self, $name )
       or die "No domain called $name on " . $self->describe . "\n";
 
-    my $port = _vnc_port( $domain->get_xml_description() )
-      or die "$name has no display to connect to.\n";
+    # The port of the VNC display in the live definition.  A display with
+    # autoport has port='-1' until the domain runs, which is no port.
+    my ($port) =
+      grep { $_ > 0 }
+      map  { m{\bport='(-?\d+)'} ? $1 : () }
+      grep { index( $_, q{type='vnc'} ) >= 0 } $domain->get_xml_description() =~ m{<graphics\b[^>]*>}g;
+    die "$name has no display to connect to.\n" unless $port;
 
     my $through = $self->ssh_target // 'localhost';
     my $advice  = <<"TUNNEL";
@@ -522,20 +513,6 @@ $name has VNC on port $port, on the hypervisor's loopback.
 TUNNEL
 
     return ( $advice, $port );
-}
-
-# The port of the VNC display in the live definition of a domain, or undef when
-# there is no VNC display with a port of its own yet.
-sub _vnc_port {
-    my ($xml) = @_;
-
-    foreach my $graphics ( $xml =~ m{<graphics\b[^>]*>}g ) {
-        next if index( $graphics, q{type='vnc'} ) < 0;
-        my ($port) = $graphics =~ m{\bport='(-?\d+)'};
-        return $port if defined $port && $port > 0;
-    }
-
-    return undef;
 }
 
 =head2 domain_uuid($name)
@@ -552,7 +529,7 @@ uuid.  A first build carries none, and libvirt makes one.
 
 sub domain_uuid {
     my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name) or return undef;
+    my $domain = domain( $self, $name ) or return undef;
 
     return eval { $domain->get_uuid_string() };
 }
@@ -567,7 +544,7 @@ and 0 if not.  Dies if libvirt cannot undefine it.
 
 sub annihilate_domain {
     my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name) or return 0;
+    my $domain = domain( $self, $name ) or return 0;
 
     $self->stop_domain($name);
     eval {
@@ -684,7 +661,7 @@ sub eject_cdrom {
     my ( $self, $name, $target ) = @_;
     $target //= 'sda';
 
-    my $domain = $self->_domain($name) or return 0;
+    my $domain = domain( $self, $name ) or return 0;
     my $xml    = qq{<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><target dev='$target' bus='sata'/><readonly/></disk>};
 
     my $flags = Sys::Virt::Domain::DEVICE_MODIFY_LIVE() | Sys::Virt::Domain::DEVICE_MODIFY_CONFIG();
@@ -801,6 +778,15 @@ sub base_image {
     return $self->volume_path($name) // $path;
 }
 
+# The three characters that XML reads as markup, escaped, for a name that goes
+# into the XML libvirt is handed.
+my sub xml_escape ($str) {
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str =~ s/>/&gt;/g;
+    return $str;
+}
+
 =head2 create_disk($name, %opts)
 
 Makes a qcow2 volume over the base image, if the volume does not exist, and
@@ -828,7 +814,7 @@ sub create_disk {
 
     my $backing_xml =
       $backing
-      ? "<backingStore><path>" . _xml_escape($backing) . "</path><format type='qcow2'/></backingStore>"
+      ? "<backingStore><path>" . xml_escape($backing) . "</path><format type='qcow2'/></backingStore>"
       : '';
 
     print "Creating disk $name ($capacity bytes)" . ( $backing ? " over $backing" : '' ) . "\n";
@@ -848,7 +834,7 @@ sub create_disk {
 
     my $volume = $self->pool->create_volume(<<"XML");
 <volume>
-  <name>@{[ _xml_escape($name) ]}</name>
+  <name>@{[ xml_escape($name) ]}</name>
   <capacity unit='bytes'>$capacity</capacity>
   <target>$target</target>
   $backing_xml
@@ -1065,24 +1051,21 @@ them by creation time.  C<bin/restore --latest> and C<--oldest> need that order.
 
 sub snapshot_names {
     my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name) or return ();
+    my $domain = domain( $self, $name ) or return ();
 
     my @snaps = eval { $domain->list_all_snapshots() };
     return () unless @snaps;
 
-    my @dated = map { { name => $_->get_name(), created => _snapshot_created($_) } } @snaps;
+    # <creationTime> is seconds since the epoch.  A snapshot without one sorts
+    # first, as the oldest.
+    my @dated = map {
+        my $xml = eval { $_->get_xml_description() } // q{};
+        my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
+        +{ name => $_->get_name(), created => $created // 0 };
+    } @snaps;
     return map { $_->{name} }
       sort { $a->{created} <=> $b->{created} or $a->{name} cmp $b->{name} }
       grep { $_->{name} } @dated;
-}
-
-# <creationTime> is seconds since the epoch.  A snapshot without one sorts
-# first, as the oldest.
-sub _snapshot_created {
-    my ($snap)    = @_;
-    my $xml       = eval { $snap->get_xml_description() } // '';
-    my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
-    return $created // 0;
 }
 
 =head2 snapshot_current_name($domain)
@@ -1093,7 +1076,7 @@ The name of the current snapshot of the domain, or undef if it has none.
 
 sub snapshot_current_name {
     my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name)                or return undef;
+    my $domain = domain( $self, $name )               or return undef;
     my $snap   = eval { $domain->current_snapshot() } or return undef;
     return $snap->get_name();
 }
@@ -1123,7 +1106,7 @@ disk only.
 
 sub create_snapshot {
     my ( $self, $name, $snapname, %opts ) = @_;
-    my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
+    my $domain = domain( $self, $name ) or die "No such domain $name on " . $self->uri . "\n";
 
     # libvirt takes a full system snapshot of a running guest, or a disk-only
     # snapshot of a stopped guest, and no other kind.  Any other request is error
@@ -1136,7 +1119,7 @@ sub create_snapshot {
     $self->stop_domain($name) if $opts{disk_only};
 
     my $xml = '<domainsnapshot>';
-    $xml .= '<name>' . _xml_escape($snapname) . '</name>' if $snapname;
+    $xml .= '<name>' . xml_escape($snapname) . '</name>' if $snapname;
 
     # libvirt reads this element to tell the two kinds apart.  Without it, the
     # request is for the disk only.
@@ -1168,20 +1151,12 @@ if the revert fails.
 
 sub revert_snapshot {
     my ( $self, $name, $snapname ) = @_;
-    my $domain = $self->_domain($name)                             or return 0;
+    my $domain = domain( $self, $name )                            or return 0;
     my $snap   = eval { $domain->get_snapshot_by_name($snapname) } or return 0;
 
     my $ok = eval { $snap->revert_to( Sys::Virt::DomainSnapshot::REVERT_RUNNING() ); 1 };
     warn "Revert of $name to $snapname failed: $@" unless $ok;
     return $ok ? 1 : 0;
-}
-
-sub _xml_escape {
-    my ($str) = @_;
-    $str =~ s/&/&amp;/g;
-    $str =~ s/</&lt;/g;
-    $str =~ s/>/&gt;/g;
-    return $str;
 }
 
 =head1 HYPERVISOR FACTS
@@ -1280,33 +1255,24 @@ L</pool_takes_direct_io> answers it.
 
 =cut
 
-sub supports {
-    my ( $self, $feature ) = @_;
-    my $needs = $DISK_FEATURE{$feature} or die "No such disk feature as '$feature'\n";
-
-    return $self->{supports}{$feature} //= $self->_meets($needs);
-}
-
-# In this order on purpose.  The qemu-img probe runs a command on the
-# hypervisor, which is not necessary if libvirt is too old for the option.
-sub _meets {
-    my ( $self, $needs ) = @_;
-
-    return 0 if $self->libvirt_version < _version_number( $needs->{libvirt} );
-    return 0 if $needs->{qemu}     && $self->qemu_version < _version_number( $needs->{qemu} );
-    return 0 if $needs->{qemu_img} && !$self->qemu_img_options->{ $needs->{qemu_img} };
-    return 1;
-}
-
 # Encodes a dotted version the way libvirt does, so that it compares directly
 # with what the connection reports.
-sub _version_number {
-    my ($version) = @_;
+my sub version_number ($version) {
 
     # A character class, not an escape.  split always takes a pattern, so '.'
     # splits on every character, and perlcritic calls m/\./ a substring match.
     my ( $major, $minor, $release ) = split( m/[.]/, $version );
     return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + ( $release // 0 );
+}
+
+sub supports {
+    my ( $self, $feature ) = @_;
+    my $needs = $DISK_FEATURE{$feature} or die "No such disk feature as '$feature'\n";
+
+    # In this order on purpose.  The qemu-img probe runs a command on the
+    # hypervisor, which is not necessary if libvirt is too old for the option.
+    return $self->{supports}{$feature} //=
+      ( $self->libvirt_version >= version_number( $needs->{libvirt} ) && ( !$needs->{qemu} || $self->qemu_version >= version_number( $needs->{qemu} ) ) && ( !$needs->{qemu_img} || $self->qemu_img_options->{ $needs->{qemu_img} } ) ) ? 1 : 0;
 }
 
 =head2 qemu_img_options
@@ -1587,7 +1553,7 @@ sub clone_guest_disk {
 
     my $clone = $self->pool->clone_volume( <<"XML", $source );
 <volume>
-  <name>@{[ _xml_escape($name) ]}</name>
+  <name>@{[ xml_escape($name) ]}</name>
   <capacity unit='bytes'>$info->{capacity}</capacity>
   <target><format type='qcow2'/></target>
 </volume>
@@ -1959,15 +1925,15 @@ Passes on a local hypervisor, or when C<whoami> runs over ssh on a remote one.
 sub check_reachable {
     my ($self) = @_;
 
-    return $self->_verdict( 1, 'The hypervisor is this machine', q{} ) if $self->is_local;
+    return $self->verdict( 1, 'The hypervisor is this machine', q{} ) if $self->is_local;
 
     my $whoami = eval { $self->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
 
-    return $self->_verdict( 1, "Reached " . $self->ssh_target . " as $whoami", q{} )
+    return $self->verdict( 1, "Reached " . $self->ssh_target . " as $whoami", q{} )
       if $whoami;
 
-    return $self->_verdict( 0, 'Cannot reach ' . $self->describe, <<"FIX" );
+    return $self->verdict( 0, 'Cannot reach ' . $self->describe, <<"FIX" );
 ssh -v @{[ $self->ssh_target ]} and see what it says.  This wants an agent or a
 key already trusted there; nothing here can answer a password prompt.
 FIX
@@ -1989,16 +1955,16 @@ sub check_transfer_ip {
     my ($self) = @_;
 
     my $virbr = eval { $self->virbr_ip };
-    return $self->_verdict( 0, 'Could not ask the hypervisor for its NAT bridge', <<"FIX" ) unless $virbr;
+    return $self->verdict( 0, 'Could not ask the hypervisor for its NAT bridge', <<"FIX" ) unless $virbr;
 $@
 Guests are built on that network and fetch their payload across it, so this has
 to answer before anything can be worked out about reaching them.
 FIX
 
     my $ours = eval { Trog::Local->new()->transfer_ip($virbr) };
-    return $self->_verdict( 1, "Guests fetch their payload from $ours", q{} ) if $ours;
+    return $self->verdict( 1, "Guests fetch their payload from $ours", q{} ) if $ours;
 
-    return $self->_verdict( 0, "No address of ours is reachable from a guest on $virbr", <<"FIX" );
+    return $self->verdict( 0, "No address of ours is reachable from a guest on $virbr", <<"FIX" );
 A guest scps its payload and rsyncs its data directory out of this machine, so
 it needs an address here that it can get to.  Nothing routes to the
 hypervisor's guest network from here.
@@ -2033,12 +1999,12 @@ sub check_passwordless_sudo {
         my $allowed = eval { $self->capture_cmd('sudo -n -l 2>/dev/null') } // q{};
         my $whole   = $allowed =~ m/NOPASSWD:\s*ALL/;
 
-        return $self->_verdict( 1, 'Passwordless sudo, for everything', q{} ) if $whole;
-        return $self->_verdict( 1, 'Passwordless sudo',                 q{} );
+        return $self->verdict( 1, 'Passwordless sudo, for everything', q{} ) if $whole;
+        return $self->verdict( 1, 'Passwordless sudo',                 q{} );
     }
 
     # A narrow grant is correct for an account that builds guests unattended.
-    return $self->_verdict( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
+    return $self->verdict( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
 A rebuild that keeps the disk of a guest will not work for this account, which
 is deliberate at this level.  Widen the grant if you need it.
 FIX
@@ -2047,7 +2013,7 @@ FIX
     my $user   = $self->ssh_user // 'you';
     my $target = $self->is_local ? 'this machine' : $self->ssh_host;
 
-    return $self->_verdict( 0, "No passwordless sudo for $user on $target", <<"FIX" );
+    return $self->verdict( 0, "No passwordless sudo for $user on $target", <<"FIX" );
 Provisioning writes to the storage pool and defines domains, all through
 sudo.  A password prompt in the middle of that has nowhere to be answered
 from, and the run hangs rather than failing.
@@ -2095,7 +2061,7 @@ sub check_pool_writable {
     my ($self) = @_;
 
     my $path = eval { $self->pool_path };
-    return $self->_verdict( 0, 'Could not work out where the storage pool is', <<'FIX' ) unless $path;
+    return $self->verdict( 0, 'Could not work out where the storage pool is', <<'FIX' ) unless $path;
 libvirt looks a pool up by name, so pool_name in hypervisors.conf has to name one
 this hypervisor has, or pool_path has to say outright where it is:
 
@@ -2104,10 +2070,10 @@ FIX
 
     # The probe of pool_takes_direct_io, without O_DIRECT.
     my $probe = "$path/.writable-probe.$$";
-    return $self->_verdict( 1, "Storage pool $path takes a write", q{} )
+    return $self->verdict( 1, "Storage pool $path takes a write", q{} )
       if $self->run_cmd( 'sh', '-c', 'touch "$1" 2>/dev/null && rm -f "$1"', 'sh', $probe ) == 0;
 
-    return $self->_verdict( 0, "Storage pool $path is not writable on " . $self->describe, <<"FIX" );
+    return $self->verdict( 0, "Storage pool $path is not writable on " . $self->describe, <<"FIX" );
 The base image is downloaded into the pool with a plain curl, on purpose: a pool
 directory this run cannot write to is one no guest could ever have been built
 from, so sudo here would paper over the misconfiguration rather than fix it.
@@ -2133,14 +2099,20 @@ sub check_iso_builder {
     my ($self) = @_;
 
     my $maker = eval { $self->iso_maker };
-    return $self->_verdict( 1, "Cloud-init seed builder: $maker", q{} ) if $maker;
+    return $self->verdict( 1, "Cloud-init seed builder: $maker", q{} ) if $maker;
 
-    return $self->_verdict( 0, 'No ISO builder on the hypervisor', <<'FIX' );
+    return $self->verdict( 0, 'No ISO builder on the hypervisor', <<'FIX' );
 cloud-init reads its configuration off a small ISO, and something has to make
 it:
 
     sudo apt install xorriso
 FIX
+}
+
+# Turns a packed libvirt version, major * 1000000 + minor * 1000 + release, into
+# dotted form.  libvirt_version is a different method, which asks the connection.
+my sub version_string ($packed) {
+    return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
 }
 
 =head2 $result = $hv->check_libvirt()
@@ -2153,9 +2125,9 @@ sub check_libvirt {
     my ($self) = @_;
 
     my $version = eval { $self->vmm->get_library_version() };
-    return $self->_verdict( 1, 'libvirt answers, running ' . _version_string($version), q{} ) if $version;
+    return $self->verdict( 1, 'libvirt answers, running ' . version_string($version), q{} ) if $version;
 
-    return $self->_verdict( 0, 'libvirt did not answer', <<"FIX" );
+    return $self->verdict( 0, 'libvirt did not answer', <<"FIX" );
 $@
 The URI is @{[ $self->uri ]}.  Check libvirtd is running there and that the user
 is in the libvirt group.
@@ -2178,21 +2150,21 @@ sub check_sys_virt_in_step {
     my ($self) = @_;
 
     my $remote = eval { $self->vmm->get_library_version() };
-    return $self->_verdict( 0, 'Could not ask the hypervisor its libvirt version', <<'FIX' ) unless $remote;
+    return $self->verdict( 0, 'Could not ask the hypervisor its libvirt version', <<'FIX' ) unless $remote;
 libvirt did not answer, so this could not be checked.  Fix that first; the
 answer is above.
 FIX
 
-    my $there = _version_string($remote);
+    my $there = version_string($remote);
     my $here  = Sys::Virt->VERSION;
 
     my ($here_mm)  = $here  =~ m/\A(\d+\.\d+)/;
     my ($there_mm) = $there =~ m/\A(\d+\.\d+)/;
 
-    return $self->_verdict( 1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{} )
+    return $self->verdict( 1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{} )
       if defined $here_mm && defined $there_mm && $here_mm eq $there_mm;
 
-    return $self->_verdict( 0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX" );
+    return $self->verdict( 0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX" );
 These want to be the same release.  Sys::Virt is versioned to track libvirt and
 binds the API of the one it was built against, so a mismatch does not announce
 itself -- it shows up as a missing constant or an unimplemented call, blamed on
@@ -2525,13 +2497,6 @@ the guest does.  Point the fleet at the collector:
 
 Nothing depends on that recipe, and a guest that does not run it ships nowhere.
 FIX
-}
-
-# Turns a packed libvirt version, major * 1000000 + minor * 1000 + release, into
-# dotted form.  libvirt_version is a different method, which asks the connection.
-sub _version_string {
-    my ($packed) = @_;
-    return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
 }
 
 =head2 clear_guest($domain)

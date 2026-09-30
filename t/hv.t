@@ -389,35 +389,6 @@ subtest 'remote work goes through commands with an exit status' => sub {
 
     my ( @connected, @commands, %files );
 
-    # Stand in for the far side: `tee PATH` writes its stdin there, `cat PATH`
-    # reads it back, `test -f` answers for it.
-    my $run = sub {
-        my ( $opts, @cmd ) = @_;
-        push @commands, { opts => $opts, cmd => [@cmd] };
-
-        my @argv = @cmd;
-        shift @argv if $argv[0] eq 'sudo';
-
-        if ( $argv[0] eq 'tee' ) {
-            my $append = $argv[1] eq '-a';
-            shift @argv if $append;
-
-            my $content = $opts->{stdin_data};
-            $content = do {
-                open( my $fh, '<', $opts->{stdin_file} ) or return 0;
-                local $/;
-                my $slurped = <$fh>;
-                close($fh) or die "Could not close $opts->{stdin_file}: $!";
-                $slurped;
-            } if defined $opts->{stdin_file};
-
-            $append ? ( $files{ $argv[1] } .= $content ) : ( $files{ $argv[1] } = $content );
-            return 1;
-        }
-        return exists $files{ $argv[2] } ? 1 : 0 if $argv[0] eq 'test';
-        return 1;
-    };
-
     my $mock = Test::MockModule->new('Net::OpenSSH::More');
     $mock->redefine(
         new => sub {
@@ -426,7 +397,37 @@ subtest 'remote work goes through commands with an exit status' => sub {
             return bless {}, $class;
         }
     );
-    $mock->redefine( system => sub { my ( $self, $opts, @cmd ) = @_; return $run->( $opts, @cmd ) } );
+
+    # Stand in for the far side: `tee PATH` writes its stdin there, `cat PATH`
+    # reads it back, `test -f` answers for it.
+    $mock->redefine(
+        system => sub {
+            my ( $self, $opts, @cmd ) = @_;
+            push @commands, { opts => $opts, cmd => [@cmd] };
+
+            my @argv = @cmd;
+            shift @argv if $argv[0] eq 'sudo';
+
+            if ( $argv[0] eq 'tee' ) {
+                my $append = $argv[1] eq '-a';
+                shift @argv if $append;
+
+                my $content = $opts->{stdin_data};
+                $content = do {
+                    open( my $fh, '<', $opts->{stdin_file} ) or return 0;
+                    local $/;
+                    my $slurped = <$fh>;
+                    close($fh) or die "Could not close $opts->{stdin_file}: $!";
+                    $slurped;
+                } if defined $opts->{stdin_file};
+
+                $append ? ( $files{ $argv[1] } .= $content ) : ( $files{ $argv[1] } = $content );
+                return 1;
+            }
+            return exists $files{ $argv[2] } ? 1 : 0 if $argv[0] eq 'test';
+            return 1;
+        }
+    );
 
     # run_sudo goes through capture2, and this far side has passwordless sudo.
     $mock->redefine(
@@ -582,8 +583,9 @@ subtest 'a sudo password is asked for once and then remembered' => sub {
         }
     );
 
-    my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( _ask_for_sudo_password => sub { $asked++; return $_[0]->_remember('hunter2') } );
+    Trog::Credentials->forget();
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { $asked++; return 'hunter2' } );
 
     is( $hv->run_sudo(qw{systemctl restart rsyslog}), 0, 'the command succeeds in the end' );
     is( $asked,                                       1, 'we asked for a password' );
@@ -661,9 +663,10 @@ subtest 'a sudo password that is wrong three times stops the command' => sub {
             return ( '', defined $opts->{stdin_data} ? "Sorry, try again.\n" : "sudo: a password is required\n" );
         }
     );
-    my $asked   = 0;
-    my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( _ask_for_sudo_password => sub { $asked++; return $_[0]->_remember("guess$asked") } );
+    my $asked = 0;
+    Trog::Credentials->forget();
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { $asked++; return "guess$asked" } );
 
     my ( $said, $err ) = Capture::Tiny::capture_stderr(
         sub {
@@ -901,6 +904,19 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
 
 {
 
+    # A connection with one domain, whatever it is asked for, or none when it
+    # is given undef: libvirt dies on a name it does not have.
+    package FakeDomainVMM;
+
+    sub new ( $class, $domain ) { return bless { domain => $domain }, $class }
+
+    sub get_domain_by_name ( $self, $ ) {
+        return $self->{domain} // die "Domain not found\n";
+    }
+}
+
+{
+
     package FakeStoppableDomain;
 
     sub new             { my ( $class, $active, $stopped ) = @_; return bless { active => $active, stopped => $stopped }, $class }
@@ -1024,16 +1040,16 @@ subtest 'stopping a domain leaves it defined' => sub {
 
     my $stopped = 0;
     my $mock    = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( _domain => sub { FakeStoppableDomain->new( 1, \$stopped ) } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new( FakeStoppableDomain->new( 1, \$stopped ) ) } );
 
     ok $hv->stop_domain('vm.test'), 'a running domain stops';
     is( $stopped, 1, 'by being destroyed, which is libvirt for switched off' );
 
-    $mock->redefine( _domain => sub { FakeStoppableDomain->new( 0, \$stopped ) } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new( FakeStoppableDomain->new( 0, \$stopped ) ) } );
     ok $hv->stop_domain('vm.test'), 'one that is already off is nothing to do';
     is( $stopped, 1, 'and is not asked twice' );
 
-    $mock->redefine( _domain => sub { undef } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new(undef) } );
     ok !$hv->stop_domain('vm.test'), 'and a domain that is not there says so';
 };
 
@@ -1093,7 +1109,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     my @seen;
     my $running = FakeSnapshotDomain->new( 1, \@seen );
     my $mock    = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( _domain => sub { $running } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($running) } );
 
     ok( $hv->create_snapshot( 'vm.test', 'whole' ), 'a running guest is snapshotted' );
     like( $seen[0]{xml}, qr{<memory[ ]snapshot='internal'/>}, 'with its memory in the XML, which is what makes it a full system snapshot' );
@@ -1102,7 +1118,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
 
     @seen = ();
     my $stoppable = FakeSnapshotDomain->new( 1, \@seen );
-    $mock->redefine( _domain => sub { $stoppable } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($stoppable) } );
 
     ok( $hv->create_snapshot( 'vm.test', 'disk', disk_only => 1 ), 'and disk_only is snapshotted too' );
     is( $seen[0], 'destroy', 'having taken the guest down first, which is the only state libvirt snapshots a disk in' );
@@ -1114,7 +1130,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     # would only be to stop it again a moment later.
     @seen = ();
     my $doomed = FakeSnapshotDomain->new( 1, \@seen );
-    $mock->redefine( _domain => sub { $doomed } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($doomed) } );
 
     ok( $hv->create_snapshot( 'vm.test', 'doomed', disk_only => 1, leave_down => 1 ), 'leave_down snapshots as well' );
     is( $seen[0], 'destroy', 'stopping the guest' );
@@ -1125,7 +1141,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     # failed is the surprise this whole option exists to avoid.
     @seen = ();
     my $refused = FakeSnapshotDomain->new( 1, \@seen, 'refuse' );
-    $mock->redefine( _domain => sub { $refused } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($refused) } );
 
     my @warned;
     {
@@ -1140,7 +1156,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     # take of it.
     @seen = ();
     my $off = FakeSnapshotDomain->new( 0, \@seen );
-    $mock->redefine( _domain => sub { $off } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($off) } );
 
     ok( $hv->create_snapshot( 'vm.test', 'cold' ), 'a guest that is already off is snapshotted without disk_only being asked for' );
     unlike( $seen[0]{xml}, qr/<memory/, 'with no memory element, there being no memory' );
@@ -1220,19 +1236,19 @@ subtest 'starting a domain leaves it running' => sub {
     my @seen;
     my $off  = FakeSnapshotDomain->new( 0, \@seen );
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( _domain => sub { $off } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($off) } );
 
     ok( $hv->start_domain('vm.test'), 'a domain that is off starts' );
     is_deeply( \@seen, ['create'], 'by being created, which is libvirt for switched on' );
 
     @seen = ();
     my $on = FakeSnapshotDomain->new( 1, \@seen );
-    $mock->redefine( _domain => sub { $on } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new($on) } );
 
     ok( $hv->start_domain('vm.test'), 'one that is already running is nothing to do' );
     is_deeply( \@seen, [], 'and is not asked twice' );
 
-    $mock->redefine( _domain => sub { undef } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new(undef) } );
     ok( !$hv->start_domain('vm.test'), 'and a domain that is not there says so' );
 };
 
@@ -1241,14 +1257,14 @@ subtest 'a domain that already exists hands back the uuid libvirt gave it' => su
 
     my $ignored = 0;
     my $mock    = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( _domain => sub { FakeStoppableDomain->new( 0, \$ignored ) } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new( FakeStoppableDomain->new( 0, \$ignored ) ) } );
 
     is( $hv->domain_uuid('vm.test'), '35341952-6f2b-457a-a882-80f6c47e2d2c', 'the uuid it is already bound to' );
 
     # Undef rather than an error: a first build has no domain to ask, and the
     # template leaves the element out so libvirt mints one.  The rebuild that
     # keeps a disk is the only caller that finds anything here.
-    $mock->redefine( _domain => sub { undef } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new(undef) } );
     is( $hv->domain_uuid('vm.test'), undef, 'and nothing at all for a domain that does not exist yet' );
 };
 
@@ -1601,29 +1617,29 @@ subtest 'a rebuilt guest can hold two leases, and the newest is the address it h
 
 subtest 'a command that names its own timeout is not called hung before it' => sub {
 
-    # _unhang exists to notice a command that should return promptly and does
+    # The hang guard of Trog::Machine exists to notice a command that should return promptly and does
     # not.  wait_for_makefile's is `sudo timeout 180m bash -c 'until atq is
     # empty ...'`, which is meant to block for as long as the guest takes to
     # build -- and the ten minute alarm killed it regardless, so every setup
     # timeout above ten minutes was decorative and a guest still compiling came
-    # back as a failure.  Only the remote path reaches _unhang, which is why
+    # back as a failure.  Only the remote path reaches that guard, which is why
     # this never appeared against a local hypervisor.
     is(
-        Trog::Machine::_hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,
         'an ordinary command gets the default'
     );
 
     is(
-        Trog::Machine::_hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),
         180 * 60 + 60, 'one that says 180m gets 180m and a minute'
     );
 
     is(
-        Trog::Machine::_hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,
         'and one shorter than the default does not lower it'
     );
 
-    is( Trog::Machine::_hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( Trog::Machine::hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );
 };
 
 # --- What libvirt refuses stops the run ---------------------------------------
@@ -1631,7 +1647,6 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
     my %refuse;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm       => sub { FakeRefusingVMM->new( \%refuse ) } );
-    $mock->redefine( _domain   => sub { FakeRefusing->new( \%refuse ) } );
     $mock->redefine( pool_path => sub { '/bogus/pool' } );
 
     my $hv = fresh( uri => 'qemu+ssh://hv/system' );
@@ -1688,6 +1703,7 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
     sub get_storage_pool_by_name ( $, $ )            { die "no such pool\n" }
     sub define_storage_pool      ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
     sub define_domain            ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
+    sub get_domain_by_name       ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
 }
 
 {
@@ -1699,14 +1715,14 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
     sub new ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
     sub get_name ($)            { return 'vm.test' }
     sub is_active     ($self)      { return $self->{refuse}{running} ? 1 : 0 }
-    sub set_autostart ( $self, $ ) { return $self->_or_refuse('set_autostart') }
-    sub create        ($self)      { return $self->_or_refuse('create') }
-    sub build         ( $self, $ ) { return $self->_or_refuse('build') }
-    sub refresh       ($self)      { return $self->_or_refuse('refresh') }
-    sub destroy       ($self)      { return $self->_or_refuse('destroy') }
-    sub undefine      ( $self, @ ) { return $self->_or_refuse('undefine') }
+    sub set_autostart ( $self, $ ) { return $self->or_refuse('set_autostart') }
+    sub create        ($self)      { return $self->or_refuse('create') }
+    sub build         ( $self, $ ) { return $self->or_refuse('build') }
+    sub refresh       ($self)      { return $self->or_refuse('refresh') }
+    sub destroy       ($self)      { return $self->or_refuse('destroy') }
+    sub undefine      ( $self, @ ) { return $self->or_refuse('undefine') }
 
-    sub _or_refuse ( $self, $what ) {
+    sub or_refuse ( $self, $what ) {
         die "$what refused\n" if $self->{refuse}{$what};
         return 1;
     }
@@ -1784,7 +1800,7 @@ subtest 'the console of a libvirt guest is read off the hypervisor as root' => s
 
 subtest 'the vnc access of a libvirt guest is a port and the tunnel to it' => sub {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( _domain    => sub { FakeConsoleDomain->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) } );
+    $mock->redefine( vmm        => sub { FakeDomainVMM->new( FakeConsoleDomain->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) ) } );
     $mock->redefine( ssh_target => sub { 'someadmin@hv.test' } );
     $mock->redefine( describe   => sub { 'hv.test' } );
 
@@ -1794,13 +1810,13 @@ subtest 'the vnc access of a libvirt guest is a port and the tunnel to it' => su
 
     # Measured on libvirt 10.0.0: an autoport display reads port='-1' until the
     # domain runs.  That is the absence of a port, not port -1.
-    $mock->redefine( _domain => sub { FakeConsoleDomain->new( xml => q{<graphics type='vnc' port='-1' autoport='yes'>} ) } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new( FakeConsoleDomain->new( xml => q{<graphics type='vnc' port='-1' autoport='yes'>} ) ) } );
     like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('vm.test') }, qr/no[ ]display[ ]to[ ]connect[ ]to/, 'port -1 is no port' );
 
-    $mock->redefine( _domain => sub { FakeConsoleDomain->new( xml => q{<graphics type='spice' port='5901'>} ) } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new( FakeConsoleDomain->new( xml => q{<graphics type='spice' port='5901'>} ) ) } );
     like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('vm.test') }, qr/no[ ]display[ ]to[ ]connect[ ]to/, 'and a display that is not vnc is not this one' );
 
-    $mock->redefine( _domain => sub { undef } );
+    $mock->redefine( vmm => sub { FakeDomainVMM->new(undef) } );
     like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('gone.test') }, qr/No[ ]domain[ ]called[ ]gone[.]test/, 'a guest that is not there is named' );
 };
 

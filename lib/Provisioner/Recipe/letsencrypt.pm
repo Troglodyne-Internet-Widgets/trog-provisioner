@@ -161,112 +161,20 @@ sub datadirs {
 # names no CA gets this one.
 our $DEFAULT_CA = 'letsencrypt';
 
-=head2 $tld = _reserved_tld($domain)
-
-Returns the TLD of C<$domain> if only our own CA can issue for it.  Otherwise
-returns nothing.
-
-The list of TLDs comes from L<Provisioner::DNSRecipe>.  No public registrar
-holds a zone under one of them, for the same reason that no public CA issues for
-a name under one.  So a guest under one gets its certificate from the CA of the
-fleet, or it gets none.
-
-=cut
-
-sub _reserved_tld {
-    my ($domain) = @_;
-
+# The TLD of $domain if only our own CA can issue for it, and nothing if not.
+# No public registrar holds a zone under a reserved TLD of Provisioner::DNSRecipe,
+# for the same reason that no public CA issues for a name under one.
+my sub reserved_tld ($domain) {
     my $tld = Provisioner::Utils::tld_of($domain) or return;
 
     return ( any { $_ eq $tld } Provisioner::DNSRecipe->reserved_tlds ) ? $tld : ();
 }
 
-=head2 $bool = _auto_ca(%opts)
-
-Returns 1 if the CA of this domain is ours by default and not by name.  That is
-the case when C<ca> is not set and the domain is under a reserved TLD.
-Otherwise returns 0.
-
-It reads the raw options.  C<required_recipes> runs before validation, so an
-absent C<ca> is still absent and not defaulted.  That is how it tells a domain
-that chose the public CA from a domain that named none.
-
-=cut
-
-sub _auto_ca {
-    my (%opts) = @_;
-
-    return ( !defined $opts{ca} && _reserved_tld( $opts{domain} ) ) ? 1 : 0;
-}
-
-=head2 $bool = _our_ca(%opts)
-
-Returns 1 if this domain needs a CA of ours built for it.  That is the case when
-it names a C<ca> other than C<$DEFAULT_CA>, or when C<_auto_ca> returns 1.
-Otherwise returns 0.
-
-=cut
-
-sub _our_ca {
-    my (%opts) = @_;
-
-    return 1 if defined $opts{ca} && $opts{ca} ne $DEFAULT_CA;
-    return _auto_ca(%opts);
-}
-
-=head2 $bool = _ca_rebuilt_with_guest(%opts)
-
-Returns 1 if a rebuild of the guest also rebuilds the CA that issues for this
-domain.  Otherwise returns 0.  C<restores> asks this to decide whether the ACME
-account goes back.  This is a narrower question than C<_our_ca>.
-
-The answer is 1 when C<ca> is not set and the domain is under a reserved TLD.
-It is also 1 when C<ca> is a URL whose host is C<localhost> or C<127.0.0.1>.
-
-acmeca runs on the guest, on loopback.  Each provision starts it with an empty
-database and a new intermediate.  So it does not know an account that it issued
-before, and every order on that account returns C<accountDoesNotExist>.
-
-Every other CA outlives the guest.  That includes a CA that is neither Let's
-Encrypt nor ours, such as C<buypass>, C<zerossl>, or an internal CA on another
-machine.  An account with one of them is the identity of this installation with
-a third party, and the recipe keeps it on purpose.  If the recipe drops it, the
-rebuild registers again for nothing.  With Let's Encrypt, that also breaks their
-terms.
-
-=cut
-
-sub _ca_rebuilt_with_guest {
-    my (%opts) = @_;
-
-    return 1 if !defined $opts{ca} && _reserved_tld( $opts{domain} );
-    return 0 unless defined $opts{ca};
-
-    my $host = Provisioner::Utils::host_of( $opts{ca} ) // q{};
-
-    return ( $host eq 'localhost' || $host eq '127.0.0.1' ) ? 1 : 0;
-}
-
-=head2 $url = _directory_url($domain)
-
-Returns the URL of the ACME directory where acmeca answers for C<$domain>.  The
-port is the acmeca C<port> that the domain configured.  If the domain configured
-none, the port is the default from the acmeca schema.
-
-This reads the port and does not set it.  The operator can also configure the
-acmeca port, and C<Provisioner::Recipe::resolve_conflict> dies on a second value
-for a field that the operator set.
-
-=cut
-
-sub _directory_url {
-    my ($domain) = @_;
-
-    my $configured = Provisioner::Cookbook->domain_config($domain)->{acmeca}{port};
-    my %args       = Provisioner::Cookbook->load('acmeca')->args();
-    my $port       = $configured // $args{properties}{port}{default};
-
-    return "https://localhost:$port/acme/trog/directory";
+# 1 if the CA of this domain is ours by default and not by name, and 0 if not.
+# It reads the raw options, where an absent ca is still absent, because
+# required_recipes runs before validation.
+my sub auto_ca (%opts) {
+    return ( !defined $opts{ca} && reserved_tld( $opts{domain} ) ) ? 1 : 0;
 }
 
 sub args {
@@ -303,7 +211,17 @@ sub enrich {
 
     # The default CA depends on the domain: see L</Which CA issues, and how a
     # reserved TLD gets one at all>.
-    $params{ca} = _directory_url( $params{domain} ) if _auto_ca(%params);
+    if ( auto_ca(%params) ) {
+
+        # Where acmeca answers, on the port the domain configured for it or
+        # else the default of its schema.  It reads the port and does not set
+        # it, because resolve_conflict dies on a second value for a field that
+        # the operator set.
+        my $configured = Provisioner::Cookbook->domain_config( $params{domain} )->{acmeca}{port};
+        my %args       = Provisioner::Cookbook->load('acmeca')->args();
+        my $port       = $configured // $args{properties}{port}{default};
+        $params{ca} = "https://localhost:$port/acme/trog/directory";
+    }
     $params{ca} //= $DEFAULT_CA;
 
     # The rest of the render uses the resolved provider, because a domain that
@@ -322,17 +240,37 @@ sub enrich {
     return %params;
 }
 
+=head2 %restores = $recipe->restores(%opts)
+
+The certificates, so that a rebuild does not request them again against the
+rate limit, and the ACME account, but only for a CA that outlives the guest.
+
+A rebuild of the guest also rebuilds the CA when C<ca> is not set and the
+domain is under a reserved TLD, or when C<ca> is a URL whose host is
+C<localhost> or C<127.0.0.1>.  acmeca runs on the guest, on loopback.  Each
+provision starts it with an empty database and a new intermediate.  So it does
+not know an account that it issued before, and every order on that account
+returns C<accountDoesNotExist>.
+
+Every other CA outlives the guest.  That includes a CA that is neither Let's
+Encrypt nor ours, such as C<buypass>, C<zerossl>, or an internal CA on another
+machine.  An account with one of them is the identity of this installation with
+a third party, and the recipe keeps it on purpose.  If the recipe drops it, the
+rebuild registers again for nothing.  With Let's Encrypt, that also breaks their
+terms.
+
+=cut
+
 sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # The certificates, so that a rebuild does not request them again against
-    # the rate limit.
     my %restores = ( "/var/lib/dehydrated/certs/$domain" => { from => "$install_dir/$domain/.letsencrypt/var-certs/$domain", owner => 'root:root' } );
 
-    # The ACME account goes back only for a CA that outlives the guest.  See
-    # _ca_rebuilt_with_guest.
-    return %restores if _ca_rebuilt_with_guest(%opts);
+    return %restores if !defined $opts{ca} && reserved_tld($domain);
+
+    my $host = defined $opts{ca} ? ( Provisioner::Utils::host_of( $opts{ca} ) // q{} ) : q{};
+    return %restores if $host eq 'localhost' || $host eq '127.0.0.1';
 
     return ( %restores, '/etc/dehydrated/accounts' => { from => "$install_dir/$domain/.letsencrypt/accounts", owner => 'root:root' } );
 }
@@ -382,12 +320,13 @@ depend on where two recipes happen to sit in a list.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    my @required = _our_ca(%opts) ? ( acmeca => sub { return () } ) : ();
+    my $auto     = auto_ca(%opts);
+    my @required = ( $auto || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
 
     # acmeca requires pdns and gives it no api_key.  Supply one only when this
     # recipe is why pdns is there and the operator set none.  See L</Which CA
     # issues, and how a reserved TLD gets one at all>.
-    if ( _auto_ca(%opts) ) {
+    if ($auto) {
 
         # The domain of the machine, not this one, because one pdns serves the
         # whole guest and already runs with its key.  Provisioner::Cookbook/host_of

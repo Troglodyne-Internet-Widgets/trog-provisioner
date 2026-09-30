@@ -175,6 +175,11 @@ The signing key of the homeserver and the registration shared secret, each
 generated once and kept in the secret store.  The signing key is the identity
 that the rest of the federation knows this server by.
 
+The signing key is in the format that C<signedjson> writes.  That is the
+algorithm, a short version tag that names this key among any others the server
+had, and 32 seed bytes in base64 without padding.  It is made here, not on the
+guest, because a guest that makes its own makes a new one on every rebuild.
+
 =cut
 
 sub guest_secrets {
@@ -187,9 +192,15 @@ sub guest_secrets {
     return (
         "/etc/matrix-synapse/homeserver.signing.key" => {
             ref      => "secret:matrix/$domain-signing-key/password",
-            generate => \&_signing_key,
-            owner    => 'matrix-synapse:matrix-synapse',
-            mode     => '0600',
+            generate => sub {
+                my $version = 'a_' . join( '', map { ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
+                my $seed    = MIME::Base64::encode_base64( Crypt::PRNG::random_bytes(32), '' );
+                $seed =~ s/=+\z//;
+
+                return "ed25519 $version $seed";
+            },
+            owner => 'matrix-synapse:matrix-synapse',
+            mode  => '0600',
         },
         "/etc/matrix-synapse/registration.shared.secret" => {
             ref      => "secret:matrix/$domain-registration-secret/password",
@@ -198,25 +209,6 @@ sub guest_secrets {
             mode     => '0600',
         },
     );
-}
-
-=head2 $key = _signing_key()
-
-Returns a new signing key in the format that C<signedjson> writes.  That is the
-algorithm, a short version tag that names this key among any others the server
-had, and 32 seed bytes in base64 without padding.
-
-The key is made here, not on the guest, because a guest that makes its own
-makes a new one on every rebuild.
-
-=cut
-
-sub _signing_key {
-    my $version = 'a_' . join( '', map { ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
-    my $seed    = MIME::Base64::encode_base64( Crypt::PRNG::random_bytes(32), '' );
-    $seed =~ s/=+\z//;
-
-    return "ed25519 $version $seed";
 }
 
 =head2 @patterns = $recipe->remote_skip()

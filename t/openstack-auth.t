@@ -224,14 +224,21 @@ subtest 'the cached token is not left readable' => sub {
 subtest 'the cached token is never readable, even where chmod fails' => sub {
     my $dir = fresh();
 
-    # A cache file somebody left readable, rewritten where chmod does nothing.
-    my $auth = Trog::OpenStack::Auth->new( 'https://keystone.example.net:5000/v3', @CREDS, cache_dir => $dir );
-    my $path = $auth->cache_path;
+    # A cache file somebody left readable, with a token too old to use, so the
+    # next command asks Keystone and writes it again where chmod does nothing.
+    my $auth   = Trog::OpenStack::Auth->new( 'https://keystone.example.net:5000/v3', @CREDS, cache_dir => $dir );
+    my $path   = $auth->cache_path;
+    my $cached = Cpanel::JSON::XS::decode_json( File::Slurper::read_binary($path) );
+    $cached->{expires_at} = keystone_time(-60);
+    File::Slurper::Temp::write_binary( $path, Cpanel::JSON::XS::encode_json($cached) );
     CORE::chmod( 0o644, $path ) or die "Cannot chmod $path: $!";
 
+    @REQUESTS    = ();
     $chmod_fails = 1;
-    $auth->_store();
+    Trog::OpenStack::Auth->new( 'https://keystone.example.net:5000/v3', @CREDS, cache_dir => $dir );
     $chmod_fails = 0;
+
+    is scalar @REQUESTS, 1, 'the stale token sent it to Keystone, so it wrote the cache again';
 
     is sprintf( '%04o', ( stat $path )[2] & 0o7777 ), '0600', 'the token is written 0600, not given that mode afterwards';
 };

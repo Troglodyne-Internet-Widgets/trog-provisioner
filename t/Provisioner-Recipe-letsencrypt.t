@@ -148,10 +148,10 @@ subtest 'a reserved TLD is served locally whatever reached the module list' => s
     # what serves it, which is true before the depsolver has run.
     like( $slurp->('dehydrated.conf'), qr{^CA="https://localhost:\d+/acme/trog/directory"$}m, 'the fleet CA, with pdns absent from the list' );
 
-    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
+    my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
     ok( exists $required{pdns}, 'because the recipe is what puts that server there' );
 
-    my %opts = _fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
+    my %opts = fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
     is( $opts{dns_preference}, 'pdns', 'and both callers resolve the one provider' );
 };
 
@@ -301,9 +301,9 @@ YAML
     # domain layered onto another never rewrites api.conf and the key in it stays
     # the first domain's.  A token of its own is one the server does not know:
     # measured on a shared host, where every challenge came back 401.
-    my %host   = _fresh()->validate( %common, domain => 'first.test' );
-    my %tenant = _fresh()->validate( %common, domain => 'second.test' );
-    my %alone  = _fresh()->validate( %common, domain => 'third.test' );
+    my %host   = fresh()->validate( %common, domain => 'first.test' );
+    my %tenant = fresh()->validate( %common, domain => 'second.test' );
+    my %alone  = fresh()->validate( %common, domain => 'third.test' );
 
     # Length first, and not merely equality: two empty strings are equal, so an
     # absent credential would satisfy the comparison below while rendering a
@@ -315,8 +315,8 @@ YAML
     # The hook is only half of it.  required_recipes hands pdns its api_key on a
     # separate path, and fixing the hook alone left the server configured with
     # one key and told to expect another.
-    my %host_req    = _fresh()->required_recipes( %common, domain => 'first.test' );
-    my %tenant_req  = _fresh()->required_recipes( %common, domain => 'second.test' );
+    my %host_req    = fresh()->required_recipes( %common, domain => 'first.test' );
+    my %tenant_req  = fresh()->required_recipes( %common, domain => 'second.test' );
     my %host_pdns   = $host_req{pdns}   ? $host_req{pdns}->()   : ();
     my %tenant_pdns = $tenant_req{pdns} ? $tenant_req{pdns}->() : ();
 
@@ -326,7 +326,7 @@ YAML
     Provisioner::Cookbook->forget();
 };
 
-sub _fresh {
+sub fresh {
     return Provisioner::Cookbook->load( 'letsencrypt', distro => 'ubuntu' )->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => tempdir( CLEANUP => 1 ),
@@ -335,7 +335,7 @@ sub _fresh {
 }
 
 subtest 'a guest that answers its own challenge can resolve its own zone' => sub {
-    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     # lexicon walks the zone through the system resolver for --resolve-zone-name,
     # and step-ca validates dns-01 through it too.  Measured on a scratch guest
@@ -346,7 +346,7 @@ subtest 'a guest that answers its own challenge can resolve its own zone' => sub
 
     # Somebody else holds the zone, so the guest has no need to resolve it here.
     my $registrar = with_registrar();
-    my %elsewhere = _fresh()->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    my %elsewhere = fresh()->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
     ok( !exists $elsewhere{nostubresolver}, 'while a registrar-served name is handed no resolver of ours' );
 };
 
@@ -358,13 +358,13 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
     # resolved to the registrar without saying anything -- on the one domain
     # whose zone this fleet is itself serving.
     like(
-        exception { _fresh()->enrich( $public->( prefer_local_dns => 1 ) ) },
+        exception { fresh()->enrich( $public->( prefer_local_dns => 1 ) ) },
         qr/dns_preference/,
         'the flag this replaced names its replacement rather than being ignored'
     );
 
     like(
-        exception { _fresh()->enrich( $public->( dns_preference => 'pdns' ) ) },
+        exception { fresh()->enrich( $public->( dns_preference => 'pdns' ) ) },
         qr/no[ ]pdns[ ]recipe/,
         'asking for a local server where none is configured is refused'
     );
@@ -377,7 +377,7 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
         my $registrar = with_registrar();
         like(
             exception {
-                _fresh()->enrich( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', dns_preference => 'registrar' );
+                fresh()->enrich( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', dns_preference => 'registrar' );
             },
             qr/reserve/,
             'and so is naming a registrar for a name no registrar can hold'
@@ -393,7 +393,7 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
         $nothing->redefine( domain_config => sub { return {} } );
 
         like(
-            exception { _fresh()->enrich( $public->() ) },
+            exception { fresh()->enrich( $public->() ) },
             qr/no[ ]DNS[ ]provider/,
             'a domain with neither is told so, rather than rendering a hook that cannot run'
         );
@@ -410,19 +410,19 @@ subtest 'a guest that could answer either way is asked which' => sub {
     my %both = ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     like(
-        exception { _fresh()->enrich(%both) },
+        exception { fresh()->enrich(%both) },
         qr/dns_preference/,
         'a tie with no tiebreaker is refused rather than resolved'
     );
 
     foreach my $named (qw{pdns registrar}) {
-        my %opts = _fresh()->enrich( %both, dns_preference => $named );
+        my %opts = fresh()->enrich( %both, dns_preference => $named );
         is( $opts{dns_preference}, $named, "naming $named settles it" );
     }
 
     # The tiebreaker decides the hook as well as the answer: the local server is
     # reached over a unix socket lexicon has to be pointed at.
-    my %local = _fresh()->enrich( %both, dns_preference => 'pdns' );
+    my %local = fresh()->enrich( %both, dns_preference => 'pdns' );
     is( $local{lexicon}{type}, 'powerdns', 'and the local server is what lexicon is given' );
 };
 

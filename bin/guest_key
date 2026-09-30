@@ -64,6 +64,8 @@ gets mode 0600.  If FILE already exists, guest_key refuses.
 
 =cut
 
+my sub print_line ($line) { print "$line\n"; return 0 }
+
 sub main {
     my @args = @_;
 
@@ -84,7 +86,7 @@ sub main {
     die "No key for $domain, in the store or at $on_disk.\n" . "A domain that has never been provisioned has none yet.\n"
       unless defined $path;
 
-    return _print($path) unless defined $out;
+    return print_line($path) unless defined $out;
 
     # Refuse, do not overwrite: a file here is usually an old copy that nobody
     # removed.
@@ -94,10 +96,8 @@ sub main {
     chmod 0600, $out or die "Could not make $out private: $!\n";
 
     warn "$out is the way in to $domain, and it will stay there until you remove it.\n";
-    return _print($out);
+    return print_line($out);
 }
-
-sub _print { print "$_[0]\n"; return 0 }
 
 exit main(@ARGV) unless caller;
 

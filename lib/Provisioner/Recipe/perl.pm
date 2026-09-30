@@ -162,18 +162,19 @@ C<--notest>.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{cpan_steps} = [ map { [ _words($_) ] } @{ $opts{cpan_deps} } ];
+    my @steps;
+    foreach my $step ( @{ $opts{cpan_deps} } ) {
+        my ($verb) = grep { exists $step->{$_} } qw{installdeps dzil};
+        push(
+            @steps,
+            $step->{install} ? [ 'install', @{ $step->{install} } ]
+            : $step->{pin}   ? [ 'pin',     @{ $step->{pin} }{qw{pkgconfig module}} ]
+            :                  [ $verb, $step->{$verb} ]
+        );
+    }
+    $opts{cpan_steps} = \@steps;
+
     return %opts;
-}
-
-sub _words {
-    my ($step) = @_;
-
-    return ( 'install', @{ $step->{install} } )                   if $step->{install};
-    return ( 'pin',     @{ $step->{pin} }{qw{pkgconfig module}} ) if $step->{pin};
-
-    my ($verb) = grep { exists $step->{$_} } qw{installdeps dzil};
-    return ( $verb, $step->{$verb} );
 }
 
 sub template_files {

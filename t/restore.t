@@ -57,7 +57,18 @@ my $NO_FLEET = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
 sub main_restore (@args) { return Trog::Bin::Restore::main( '--hvconf', $NO_FLEET, @args ) }
 
 # The interface is documented in POD now, and pod2usage prints that.
-my $synopsis = _pod_section( "$FindBin::Bin/../bin/restore", 'SYNOPSIS|OPTIONS' );
+my $synopsis = do {
+    open( my $fh, '>', \my $text ) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => "$FindBin::Bin/../bin/restore",
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => 'SYNOPSIS|OPTIONS',
+    );
+    close($fh) or die "Could not close the POD read out of bin/restore: $!";
+    $text // '';
+};
 like( $synopsis, qr/--latest/,     'POD documents --latest' );
 like( $synopsis, qr/--oldest/,     'POD documents --oldest' );
 like( $synopsis, qr/--name/,       'POD documents --name' );
@@ -66,28 +77,50 @@ like( $synopsis, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
 
 # No domain, and no mode, both exit non-zero with the usage.  These have to be
 # real runs, since pod2usage exits rather than dying.
+my sub run (@cmd) {
+    my $out = q{};
+    IPC::Run3::run3( [ $^X, @cmd ], \undef, \$out, \$out );
+    return ( $out, $? );
+}
+
 {
-    my ( $out, $rc ) = _run("$FindBin::Bin/../bin/restore");
+    my ( $out, $rc ) = run("$FindBin::Bin/../bin/restore");
     isnt( $rc, 0, 'no arguments exits non-zero' );
     like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
     like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 }
 
 {
-    my ( $out, $rc ) = _run( "$FindBin::Bin/../bin/restore", 'myvm.lan' );
+    my ( $out, $rc ) = run( "$FindBin::Bin/../bin/restore", 'myvm.lan' );
     isnt( $rc, 0, 'a domain with no mode exits non-zero' );
     like( $out, qr/exactly[ ]one[ ]of[ ]--latest/, 'saying which flags to pick between' );
 }
 
 {
-    my ( undef, $rc ) = _run( "$FindBin::Bin/../bin/restore", qw{--latest --oldest myvm.lan} );
+    my ( undef, $rc ) = run( "$FindBin::Bin/../bin/restore", qw{--latest --oldest myvm.lan} );
     isnt( $rc, 0, 'two modes at once exits non-zero' );
+}
+
+# A minimal provision.conf for $domain in $dir, and an empty key beside it so
+# that wait_for_ssh does not die early.  Returns the domain directory.
+my sub make_conf ( $dir, $domain, %params ) {
+    my $ddir = "$dir/$domain";
+    mkdir $ddir or die $!;
+    open my $fh, '>', "$ddir/provision.conf" or die $!;
+    for my $k ( keys %params ) {
+        print {$fh} "$k=$params{$k}\n";
+    }
+    close($fh) or die "Could not close $ddir/provision.conf: $!";
+
+    open my $kf, '>', "$ddir/key.rsa" or die $!;
+    close($kf) or die "Could not close $ddir/key.rsa: $!";
+    return $ddir;
 }
 
 # A domain directory with a provision.conf in it, for the cases that fail after
 # the file is read: a missing one is refused before anything else.
 my $CONFIGURED = tempdir( CLEANUP => 1 );
-_make_conf( $CONFIGURED, 'myvm.lan', admin_user => 'someadmin', ips => '10.9.9.5' );
+make_conf( $CONFIGURED, 'myvm.lan', admin_user => 'someadmin', ips => '10.9.9.5' );
 
 # No snapshots -> dies
 {
@@ -125,27 +158,10 @@ _make_conf( $CONFIGURED, 'myvm.lan', admin_user => 'someadmin', ips => '10.9.9.5
     is_deeply( \@reverted, [], 'and reverts nothing, leaving the guest as it was' );
 }
 
-# Helper: build a minimal provision.conf in a temp dir
-sub _make_conf {
-    my ( $dir, $domain, %params ) = @_;
-    my $ddir = "$dir/$domain";
-    mkdir $ddir or die $!;
-    open my $fh, '>', "$ddir/provision.conf" or die $!;
-    for my $k ( keys %params ) {
-        print {$fh} "$k=$params{$k}\n";
-    }
-    close($fh) or die "Could not close $ddir/provision.conf: $!";
-
-    # Create dummy key so wait_for_ssh doesn't die early
-    open my $kf, '>', "$ddir/key.rsa" or die $!;
-    close($kf) or die "Could not close $ddir/key.rsa: $!";
-    return $ddir;
-}
-
 # --latest picks last snapshot and reverts to it
 {
     my $tmpdir = tempdir( CLEANUP => 1 );
-    _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
+    make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
@@ -161,7 +177,7 @@ sub _make_conf {
 # --oldest picks first snapshot
 {
     my $tmpdir = tempdir( CLEANUP => 1 );
-    _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
+    make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
@@ -177,7 +193,7 @@ sub _make_conf {
 # --name picks the specified snapshot
 {
     my $tmpdir = tempdir( CLEANUP => 1 );
-    _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
+    make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
@@ -194,7 +210,7 @@ sub _make_conf {
 # wait_for_ssh called with correct user, key, ip
 {
     my $tmpdir = tempdir( CLEANUP => 1 );
-    _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.42' );
+    make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.42' );
 
     my $connected;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
@@ -213,7 +229,7 @@ sub _make_conf {
 # --hypervisor reaches the hypervisor object
 {
     my $tmpdir = tempdir( CLEANUP => 1 );
-    _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
+    make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my $seen;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
@@ -228,27 +244,6 @@ sub _make_conf {
         '--domaindir', $tmpdir, 'myvm.lan'
     );
     is( $seen, 'qemu+ssh://hv1/system', 'snapshots are looked up on the hypervisor we named' );
-}
-
-sub _run {
-    my (@cmd) = @_;
-    my $out = q{};
-    IPC::Run3::run3( [ $^X, @cmd ], \undef, \$out, \$out );
-    return ( $out, $? );
-}
-
-sub _pod_section {
-    my ( $file, $sections ) = @_;
-    open( my $fh, '>', \my $text ) or die $!;
-    Pod::Usage::pod2usage(
-        -input    => $file,
-        -output   => $fh,
-        -exitval  => 'NOEXIT',
-        -verbose  => 99,
-        -sections => $sections,
-    );
-    close($fh) or die "Could not close the POD read out of $file: $!";
-    return $text // '';
 }
 
 done_testing;

@@ -249,7 +249,7 @@ our %MACHINE_LISTENERS;
 Returns the salvages of the last C<main> that got nothing from a guest that
 still has state.  To salvage is to copy the state of a service off a guest
 before it is rebuilt.  The hash is keyed by domain, and each value is an array
-reference of the alarming gaps that C<_salvage_gap> returned.  The hash is empty when there is nothing
+reference of the alarming gaps that C<salvage_path> returned.  The hash is empty when there is nothing
 to report.
 
 C<main> gives a warning and exits 0 in this case.  F<bin/provision> calls this
@@ -549,6 +549,30 @@ sub transfer_to {
     return ( \@ips, $port, $user );
 }
 
+# A Trog::Guest for the guest that is about to be rebuilt, as $admin_user: the
+# same object for the same three arguments, for the life of the process.
+my sub salvage_guest ( $static_ip, $admin_user, $cfg_dir ) {
+
+    # Without a CIDR suffix.
+    ( my $host = $static_ip ) =~ s{/\N*\z}{};
+
+    # One connection for each guest, not one for each call, because both
+    # callers ask inside the loop over the modules.
+    state %guest;
+    my $id = join( "\0", $host, $admin_user // q{}, $cfg_dir // q{} );
+    return $guest{$id} if $guest{$id};
+
+    # When there is no key yet, ssh uses its agent and its own configuration.
+    my $key = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
+
+    return $guest{$id} = Trog::Guest->new(
+        name => $host,
+        host => $host,
+        user => $admin_user,
+        ( $key ? ( key_path => $key ) : () ),
+    );
+}
+
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
 sub handle_domain {
     my ( $domain, $hv ) = @_;
@@ -817,13 +841,26 @@ sub handle_domain {
     $global_config->{packager_remove_invocation} = $distro->packager_remove_invocation;
 
     # Whether the guest is up.  The connection is only the probe: the fetch
-    # goes through _salvage_guest.
-    my ( $ssh, $target_is_up );
+    # goes through salvage_guest.  A guest without an address yet is not
+    # built, so it has nothing to salvage.
+    my $target_is_up = 0;
+    if ( !$skip_ssh && $static_ip ) {
 
-    # A guest without an address yet is not built, so it has nothing to
-    # salvage.
-    ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir )
-      if !$skip_ssh && $static_ip;
+        # Without a CIDR suffix.
+        ( my $host = $static_ip ) =~ s{/\N*\z}{};
+
+        # From the store, or from the disk for a domain that was never sealed.
+        # The domain is the last part of $cfg_dir.
+        my $key2use = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
+
+        my $ssh = Net::SFTP::Foreign->new(
+            host     => $host,
+            user     => $admin_user,
+            more     => [ -o => "StrictHostKeyChecking=no", -o => 'UserKnownHostsFile=/dev/null' ],
+            key_path => $key2use
+        );
+        $target_is_up = !$ssh->error;
+    }
 
     # The distro recipe goes in, so that the depsolver configures it and pulls
     # in the vm recipe.  Both come out again below.
@@ -971,31 +1008,14 @@ sub handle_domain {
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Fetching $to_fetch into $data_dir/$tg{$to_fetch}\n";
 
-                # The result is ignored, because _salvage_gap below tells more,
-                # and part of the state is better than none.
-                _salvage_guest( $static_ip, $admin_user, $cfg_dir )->get_dir(
-                    $to_fetch,
-                    "$data_dir/$tg{$to_fetch}",
-
-                    # Left on the live guest, not fetched and then deleted: see
-                    # remote_skip in Provisioner::Recipe.
-                    exclude => \@skip,
-
-                    # A copy on the guest that is older than ours is not fetched.
-                    update => 1,
-
-                    # As root, because every other practical option is more
-                    # complex and has no benefit to security.
-                    sudo => 1,
-                );
-
-                my $gap = _salvage_gap(
-                    guest       => _salvage_guest( $static_ip, $admin_user, $cfg_dir ),
+                my $gap = salvage_path(
+                    guest       => salvage_guest( $static_ip, $admin_user, $cfg_dir ),
                     recipe      => $module,
                     host        => $fqdn,
                     user        => $admin_user,
                     remote      => $to_fetch,
                     destination => "$data_dir/$tg{$to_fetch}",
+                    exclude     => \@skip,
                 );
                 next unless $gap;
 
@@ -1244,35 +1264,28 @@ sub handle_domain {
     return 0;
 }
 
-=head2 $guest = _salvage_guest($static_ip, $admin_user, $cfg_dir)
+# The newest mtime anywhere under each path in @$watched, keyed by path, and an
+# empty value for a path that is absent or unreadable.  Under the path, because
+# the mtime of a directory misses a dump that is written again in place.
+my sub salvage_mtimes ( $guest, $watched ) {
+    return () unless @$watched;
 
-Returns a L<Trog::Guest> for the guest that is about to be rebuilt, as
-C<$admin_user>.  It returns the same object for the same three arguments, for
-the life of the process.
+    my $script = join "\n", map {
+        ( my $q = $_ ) =~ s/'/'\\''/g;
+        "printf '%s\\t%s\\n' '$q' \"\$(find '$q' -printf '%T@\\n' 2>/dev/null | sort -rn | head -1)\""
+    } @$watched;
 
-=cut
+    ( my $quoted = $script ) =~ s/'/'\\''/g;
+    my $said = $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
 
-sub _salvage_guest {
-    my ( $static_ip, $admin_user, $cfg_dir ) = @_;
+    my %mtime;
+    foreach my $line ( split m/\n/, $said ) {
+        my ( $path, $stamp ) = split m/\t/, $line, 2;
+        next unless $path;
+        $mtime{$path} = defined $stamp ? $stamp : q{};
+    }
 
-    # Without a CIDR suffix.
-    ( my $host = $static_ip ) =~ s{/\N*\z}{};
-
-    # One connection for each guest, not one for each call, because both
-    # callers ask inside the loop over the modules.
-    state %guest;
-    my $id = join( "\0", $host, $admin_user // q{}, $cfg_dir // q{} );
-    return $guest{$id} if $guest{$id};
-
-    # When there is no key yet, ssh uses its agent and its own configuration.
-    my $key = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
-
-    return $guest{$id} = Trog::Guest->new(
-        name => $host,
-        host => $host,
-        user => $admin_user,
-        ( $key ? ( key_path => $key ) : () ),
-    );
+    return %mtime;
 }
 
 =head2 refresh_salvage(%args)
@@ -1298,10 +1311,10 @@ sub refresh_salvage (%args) {
     return unless @$commands;
     $watched //= [];
 
-    my $guest = _salvage_guest( $static_ip, $admin_user, $cfg_dir );
+    my $guest = salvage_guest( $static_ip, $admin_user, $cfg_dir );
     my $host  = $guest->name;
 
-    my %seen = _salvage_mtimes( $guest, $watched );
+    my %seen = salvage_mtimes( $guest, $watched );
 
     foreach my $command (@$commands) {
         print "Asking $host to run '$command' before salvaging $module\n";
@@ -1311,7 +1324,7 @@ sub refresh_salvage (%args) {
 
         # Again after every command, so that the next one is not blamed for
         # the changes of this one.
-        my %now     = _salvage_mtimes( $guest, $watched );
+        my %now     = salvage_mtimes( $guest, $watched );
         my @touched = grep { ( $seen{$_} // q{} ) ne ( $now{$_} // q{} ) } sort keys %now;
         %seen = %now;
 
@@ -1324,37 +1337,6 @@ sub refresh_salvage (%args) {
     }
 
     return 1;
-}
-
-=head2 %mtime = _salvage_mtimes($guest, $watched)
-
-Returns the newest mtime anywhere under each path in C<$watched>, keyed by
-path.  It looks under the path, because the mtime of a directory misses a dump
-that is written again in place.  A path that is absent or unreadable gives an
-empty value.
-
-=cut
-
-sub _salvage_mtimes {
-    my ( $guest, $watched ) = @_;
-    return () unless @$watched;
-
-    my $script = join "\n", map {
-        ( my $q = $_ ) =~ s/'/'\\''/g;
-        "printf '%s\\t%s\\n' '$q' \"\$(find '$q' -printf '%T@\\n' 2>/dev/null | sort -rn | head -1)\""
-    } @$watched;
-
-    ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
-
-    my %mtime;
-    foreach my $line ( split m/\n/, $said ) {
-        my ( $path, $stamp ) = split m/\t/, $line, 2;
-        next unless $path;
-        $mtime{$path} = defined $stamp ? $stamp : q{};
-    }
-
-    return %mtime;
 }
 
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)
@@ -1468,25 +1450,72 @@ sub pack_scripts {
     return @packed;
 }
 
-=head2 $gap = _salvage_gap(%args)
+=head2 $gap = salvage_path(%args)
 
-Returns nothing if C<destination> holds a file.  Otherwise returns a hash
-reference with C<recipe>, C<remote>, C<message>, and C<alarming>, which is true
-when the salvage lost state.  The other arguments are C<guest>, C<recipe>,
-C<host>, C<user> and C<remote>.
+Fetches C<remote> from C<guest>, a L<Trog::Guest>, into C<destination>, as
+root, and says whether the salvage lost state.  C<exclude> lists what stays on
+the guest: see C<remote_skip> in L<Provisioner::Recipe>.  C<recipe>, C<host>
+and C<user> name the recipe, the guest and the user for the message.
+
+Returns nothing if C<destination> holds a file after the fetch.  Otherwise
+returns a hash reference with C<recipe>, C<remote>, C<message>, and
+C<alarming>, which is true when the salvage lost state.
 
 It examines the destination, not the transfer, because a second run moves
-nothing from a guest that did not change.  An empty destination has three
-causes.  The path is not on the guest, or it is empty, or it holds files that
-did not come down.  Only the last one is alarming.  The guest is asked as root,
-because only the service can open the path.
+nothing from a guest that did not change.  It counts files, not directories,
+because a fetch that cannot read makes the directories anyway.  A symlink
+counts, and is not followed, because it can point anywhere.
+
+An empty destination has three causes.  The path is not on the guest, or it is
+empty, or it holds files that did not come down.  Only the last one is
+alarming.  The guest is asked as root, because only the service can open the
+path.
 
 =cut
 
-sub _salvage_gap {
-    my (%args) = @_;
+sub salvage_path (%args) {
 
-    return () if _dir_has_files( $args{destination} );
+    # The result is ignored, because the destination tells more, and part of
+    # the state is better than none.
+    $args{guest}->get_dir(
+        $args{remote},
+        $args{destination},
+
+        # Left on the live guest, not fetched and then deleted.
+        exclude => $args{exclude} // [],
+
+        # A copy on the guest that is older than ours is not fetched.
+        update => 1,
+
+        # As root, because every other practical option is more complex and
+        # has no benefit to security.
+        sudo => 1,
+    );
+
+    if ( -d $args{destination} ) {
+
+        # die is how you leave File::Find early.  A reference, not a string,
+        # because File::Find appends its own context to a message.
+        my $found = \'found';
+
+        my $walked = eval {
+            File::Find::find(
+                {
+                    no_chdir => 1,
+                    wanted   => sub {
+                        die $found if -l $File::Find::name || !-d $File::Find::name;
+                    },
+                },
+                $args{destination}
+            );
+            1;
+        };
+        if ( !$walked ) {
+            my $err = $@;
+            return () if ref $err && ref $err eq 'SCALAR' && $err == $found;
+            die $err;
+        }
+    }
 
     # The path as an argument, because run_sudo escapes each one.  find prints
     # nothing for an absent path, so one question covers both quiet causes.
@@ -1516,63 +1545,6 @@ sub _salvage_gap {
         alarming => 1,
         message  => "$args{recipe}: salvaged nothing out of $args{remote} on $args{host}, and $args{destination} is empty." . "  The guest still has files there, so this is a fetch that failed rather than a service with no state." . "  Rebuilding $args{host} now loses them.",
     };
-}
-
-=head2 $bool = _dir_has_files($dir)
-
-Returns 1 if any file is under C<$dir>, and 0 if there is none or C<$dir> is not
-a directory.  It counts files, not entries, because a fetch that cannot read
-makes the directories anyway.  It stops at the first file.  A symlink counts,
-and is not followed, because it can point anywhere.
-
-=cut
-
-sub _dir_has_files {
-    my ($dir) = @_;
-    return 0 unless -d $dir;
-
-    # die is how you leave File::Find early.  A reference, not a string,
-    # because File::Find appends its own context to a message.
-    my $found = \'found';
-
-    my $ok = eval {
-        File::Find::find(
-            {
-                no_chdir => 1,
-                wanted   => sub {
-                    die $found if -l $File::Find::name || !-d $File::Find::name;
-                },
-            },
-            $dir
-        );
-        1;
-    };
-    return 0 if $ok;
-
-    my $err = $@;
-    return 1 if ref $err && ref $err eq 'SCALAR' && $err == $found;
-    die $err;
-}
-
-sub _get_sftp {
-    my ( $static_ip, $admin_user, $cfg_dir ) = @_;
-
-    # Without a CIDR suffix.
-    $static_ip =~ s|/\N*$||;
-    my $target_is_up = 0;
-
-    # From the store, or from the disk for a domain that was never sealed.  The
-    # domain is the last part of $cfg_dir.
-    my $key2use = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
-
-    my $ssh = Net::SFTP::Foreign->new(
-        host     => $static_ip,
-        user     => $admin_user,
-        more     => [ -o => "StrictHostKeyChecking=no", -o => 'UserKnownHostsFile=/dev/null' ],
-        key_path => $key2use
-    );
-    $ssh->error or $target_is_up = 1;
-    return ( $ssh, $target_is_up );
 }
 
 exit main(@ARGV) unless caller;

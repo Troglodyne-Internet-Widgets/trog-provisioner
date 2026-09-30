@@ -12,11 +12,10 @@ t/setup-masquerade.t - scripts/setup-masquerade: the two rules a VPN needs, and 
 =cut
 
 use Test::More;
-use Capture::Tiny    qw{capture_stdout};
-use Test::MockModule qw{strict};
-use Test::Fatal      qw{exception};
-use File::Temp       qw{tempdir};
-use File::Slurper    qw{read_text};
+use Capture::Tiny qw{capture_stdout};
+use Test::Fatal   qw{exception};
+use File::Temp    qw{tempdir};
+use File::Slurper qw{read_text};
 use File::Slurper::Temp();
 
 use FindBin;
@@ -54,10 +53,27 @@ RULES
 
 # Every run in here is against a file in a temporary directory, and neither the
 # firewall nor the routing table of whatever is running this is asked anything.
-my $reloads = 0;
-my $mock    = Test::MockModule->new( 'Trog::Script::SetupMasquerade', no_auto => 1 );
-$mock->redefine( _reload         => sub { $reloads++; return } );
-$mock->redefine( _default_routes => sub { return "default via 192.0.2.254 dev ens4 proto static\n" } );
+# The script asks ufw and ip by name, so these stand in for them, first on the
+# PATH.  The ufw here is always active, and writes down each reload it is asked
+# for.  The ip here answers with whatever $ENV{FAKE_DEFAULT_ROUTES} holds.
+my $fakes   = tempdir( CLEANUP => 1 );
+my $reloads = "$fakes/reloads";
+File::Slurper::Temp::write_text( "$fakes/ufw", <<"UFW" );
+#!/bin/sh
+case "\$1" in
+    status) echo 'Status: active' ;;
+    reload) echo reload >> '$reloads' ;;
+esac
+UFW
+File::Slurper::Temp::write_text( "$fakes/ip", qq{#!/bin/sh\nprintf '%s' "\$FAKE_DEFAULT_ROUTES"\n} );
+chmod 0755, "$fakes/ufw", "$fakes/ip" or die "Could not make the stand-ins in $fakes executable: $!";
+local $ENV{PATH}                = "$fakes:$ENV{PATH}";
+local $ENV{FAKE_DEFAULT_ROUTES} = "default via 192.0.2.254 dev ens4 proto static\n";
+
+my sub reloads () {
+    return 0 unless -e $reloads;
+    return scalar( () = read_text($reloads) =~ m/^reload$/mg );
+}
 
 sub rules_file {
     my ($content) = @_;
@@ -125,16 +141,17 @@ subtest 'a VPN subnet gets forwarded and masqueraded, in one nat table' => sub {
 };
 
 subtest 'running it again changes nothing, and reloads nothing' => sub {
-    my $path = rules_file();
+    my $path   = rules_file();
+    my $before = reloads();
     my ( undef, $first, $said ) = run_on( $path, '10.8.0.0/24=eth0' );
     like( $said, qr/^Wrote[ ]1[ ]masquerade[ ]and[ ]2[ ]forwarding[ ]rule/, 'the first run says what it wrote' );
+    is( reloads(), $before + 1, 'and reloads the firewall it changed' );
 
-    $reloads = 0;
     my ( $rc, $second, $quiet ) = run_on( $path, '10.8.0.0/24=eth0' );
-    is( $rc,      0,      'the second run succeeds' );
-    is( $second,  $first, 'and leaves the file byte for byte as it was' );
-    is( $quiet,   q{},    'saying nothing, because it did nothing' );
-    is( $reloads, 0,      'and not reloading a firewall that has not changed' );
+    is( $rc,       0,           'the second run succeeds' );
+    is( $second,   $first,      'and leaves the file byte for byte as it was' );
+    is( $quiet,    q{},         'saying nothing, because it did nothing' );
+    is( reloads(), $before + 1, 'and not reloading a firewall that has not changed' );
 };
 
 subtest 'a subnet that changed does not leave the old one behind' => sub {
@@ -192,8 +209,7 @@ subtest 'the interface is asked of the guest when the domain does not name one' 
 };
 
 subtest 'and a guest with no default route is told to name one rather than left silent' => sub {
-    my $quiet = Test::MockModule->new( 'Trog::Script::SetupMasquerade', no_auto => 1 );
-    $quiet->redefine( _default_routes => sub { return q{} } );
+    local $ENV{FAKE_DEFAULT_ROUTES} = q{};
 
     my $path = rules_file();
     like(

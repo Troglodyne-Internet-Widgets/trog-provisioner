@@ -497,14 +497,9 @@ sub purge_data_dir {
     return;
 }
 
-=head2 @hvs = _sweep_hypervisors($hv_name, $hvconf)
-
-The hypervisors a sweep looks at: the one that C<$hv_name> names, or every one
-in the fleet.  Dies if the fleet does not name it.
-
-=cut
-
-sub _sweep_hypervisors {
+# The hypervisors a sweep looks at: the one that $hv_name names, or every one in
+# the fleet.  Dies if the fleet does not name it.
+my sub sweep_hypervisors {
     my ( $hv_name, $hvconf ) = @_;
 
     my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path );
@@ -549,7 +544,7 @@ backend dies, and nothing here catches it.
 sub sweep_backups {
     my ( $hv_name, $hvconf, $dryrun ) = @_;
 
-    my @hvs = _sweep_hypervisors( $hv_name, $hvconf );
+    my @hvs = sweep_hypervisors( $hv_name, $hvconf );
 
     my %found;
     foreach my $hv (@hvs) {
@@ -597,7 +592,7 @@ holds.
 sub sweep_orphans {
     my ( $hv_name, $hvconf, $dryrun ) = @_;
 
-    my @hvs = _sweep_hypervisors( $hv_name, $hvconf );
+    my @hvs = sweep_hypervisors( $hv_name, $hvconf );
 
     # Ask the hypervisor, not libvirt, because a cloud has no libvirt.  It
     # answers from Nova.

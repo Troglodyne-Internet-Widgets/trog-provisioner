@@ -12,6 +12,7 @@ use Cwd();
 use File::Basename();
 use List::Util qw{first};
 use Net::IP;
+use Socket();
 
 use Provisioner::Utils();
 
@@ -349,6 +350,14 @@ with.
 It records an address only when it is in the pool.  C<assign> cannot give out
 an address outside the pool, so a row for one is noise.
 
+Another machine that answers is an address in the pool that answers a ping from
+the hypervisor, or that the neighbor table of its bridge holds as C<REACHABLE>,
+and that no guest holds.  Its name is C<insitu:> and its hardware address, or
+C<unknown> if the table has none.  An entry that is out of date reserves an
+address that is free.  That is the safe error, because the other error gives
+out an address that is in use.  A hypervisor that names no bridge device is not
+swept.
+
 =cut
 
 sub seed {
@@ -378,170 +387,86 @@ sub seed {
         next if $hv->manages_addresses;
 
         # The sweep goes first, because it fills the neighbor table.  libvirt
-        # knows the bridged address of a guest only if the host spoke to it lately.
-        my @live = _live_addresses( $hv, [ sort keys %in_pool ] );
+        # knows the bridged address of a guest only if the host spoke to it
+        # lately.  It runs on the hypervisor, because this machine can be on a
+        # different network.  A hypervisor with no bridge device is not swept.
+        my $bridge = %in_pool && eval { $hv->bridge_device };
+        my $swept  = q{};
+        if ($bridge) {
 
-        foreach my $found ( _guest_addresses($hv) ) {
+            # An answer to the ping is the main signal.  A REACHABLE entry in
+            # the table is a second one, and the table also gives the hardware
+            # address.  REACHABLE alone is not reliable: an entry can decay to
+            # STALE before the read.
+            #
+            # Do not quote each address.  They are numbers, and a quote inside
+            # the script closes the quoting of the sh -c around it.
+            my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } sort keys %in_pool;
+            $script .= " wait; ip -4 neigh show dev $bridge";
+            ( my $quoted = $script ) =~ s/'/'\\''/g;
+            $swept = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
+        }
+
+        # STALE is not a signal.  It outlives the machine, so reserving it
+        # leaks the pool.
+        my %mac  = $swept =~ m/^(\d+(?:[.]\d+){3})\h+lladdr\h+(\S+)/mg;
+        my %live = map { $_ => 1 } ( $swept =~ m/^LIVE\h+(\d+(?:[.]\d+){3})$/mg ), ( $swept =~ m/^(\d+(?:[.]\d+){3})\h+lladdr\h+\S+\N*\bREACHABLE\b/mg );
+
+        # The address of each guest comes from its provision.conf.  libvirt
+        # knows that a guest exists, but not the address it was built with,
+        # and the neighbor table misses a quiet guest and keeps the address of
+        # a destroyed one.  No eval, on purpose: see ensure_seeded.
+        my @names = map { $_->get_name() } $hv->vmm->list_all_domains();
+        if (@names) {
+            my $dir    = $hv->domain_dir;
+            my $script = join "\n", map {
+                ( my $q = $_ ) =~ s/'/'\\''/g;
+                "printf '%s\\t%s\\n' '$q' \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' '$dir/$q/provision.conf' 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
+            } @names;
+
+            # Also ask libvirt for the address of each guest.  This finds a
+            # guest whose provision.conf is missing or cannot be read.
+            #
+            # This runs virsh on the hypervisor, not Sys::Virt from here.  The
+            # ARP source reads the neighbor table of the client.  This machine
+            # is not on the bridge of the guests, so from here it reports only
+            # the NAT address.
+            $script .= "\n" . join "\n", map {
+                ( my $q = $_ ) =~ s/'/'\\''/g;
+                "virsh domifaddr '$q' --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$q\t|\"";
+            } @names;
+
+            ( my $quoted = $script ) =~ s/'/'\\''/g;
+            my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
 
             # A guest also answers on the NAT bridge, and libvirt gives out
             # those addresses, not this pool.
-            next unless $in_pool{ $found->{ip} };
-            $recorded += record( $found->{ip}, $found->{domain} );
+            my @found = $said =~ m/^([^\t\n]+)\t(\d+(?:[.]\d+){3})$/mg;
+            while ( my ( $domain, $ip ) = splice( @found, 0, 2 ) ) {
+                $recorded += record( $ip, $domain ) if $in_pool{$ip};
+            }
         }
 
-        # The hypervisor goes before the sweep results, so that its row names it.
-        # Its address comes from the host part of its libvirt URI.  If that name
-        # does not resolve, nothing is reserved for it.
-        my $host = eval { $hv->ssh_host };
-        my $ip   = $host ? _resolve($host) : undef;
+        # The hypervisor goes before the machines that answered, so that its row
+        # names it.  Its address comes from the host part of its libvirt URI.
+        # If that name does not resolve, nothing is reserved for it.
+        my $host   = eval { $hv->ssh_host };
+        my $packed = $host   && Socket::inet_aton($host);
+        my $ip     = $packed && Socket::inet_ntoa($packed);
         $recorded += reserve( $ip, "hv:$name" ) if $ip && $in_pool{$ip};
 
-        # Other machines that answer, for example a printer or a router.  The
-        # guests above tell us nothing about the rest of the network.
+        # Other machines that answer, for example a printer or a router.  An
+        # address in the pool that answers and that no guest holds belongs to
+        # some other machine, so it is reserved.
         my $already = taken();
-        foreach my $found (@live) {
-
-            # The neighbor table holds each address the hypervisor spoke to
-            # lately.  Only an address in the pool needs a row.
-            next unless $in_pool{ $found->{ip} };
-
-            # An address that answers and that no guest holds belongs to some
-            # other machine, so it is reserved.
-            next if $already->{ $found->{ip} };
-            $recorded += reserve( $found->{ip}, "insitu:$found->{mac}" );
+        foreach my $found ( grep { $in_pool{$_} && !$already->{$_} } sort keys %live ) {
+            $recorded += reserve( $found, 'insitu:' . ( $mac{$found} // 'unknown' ) );
         }
 
         $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, "hv:$name" );
     }
 
     return $recorded;
-}
-
-=head2 _guest_addresses($hv)
-
-Returns a list of hash references with the keys C<domain> and C<ip>, one for
-each address of each guest on C<$hv>.  A guest can appear more than once.
-
-It reads the address from the F<provision.conf> of each guest.  libvirt knows
-that a guest exists, but not the address it was built with.  The neighbor table
-misses a quiet guest and keeps the address of a destroyed one.  The command
-runs on the hypervisor once, not once for each domain.
-
-Dies if it cannot connect to libvirt on C<$hv>.  C<ensure_seeded> says why.
-
-=cut
-
-sub _guest_addresses {
-    my ($hv) = @_;
-
-    # No eval, on purpose.  See ensure_seeded.
-    my @names = map { $_->get_name() } $hv->vmm->list_all_domains();
-    return () unless @names;
-
-    my $dir    = $hv->domain_dir;
-    my $script = join "\n", map {
-        ( my $q = $_ ) =~ s/'/'\\''/g;
-        "printf '%s\\t%s\\n' '$q' \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' '$dir/$q/provision.conf' 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
-    } @names;
-
-    # Also ask libvirt for the address of each guest.  This finds a guest whose
-    # provision.conf is missing or cannot be read.
-    #
-    # This runs virsh on the hypervisor, not Sys::Virt from here.  The ARP
-    # source reads the neighbor table of the client.  This machine is not on
-    # the bridge of the guests, so from here it reports only the NAT address.
-    $script .= "\n" . join "\n", map {
-        ( my $q = $_ ) =~ s/'/'\\''/g;
-        "virsh domifaddr '$q' --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$q\t|\"";
-    } @names;
-
-    ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
-
-    my ( @found, %seen );
-    foreach my $line ( split m/\n/, $said ) {
-        my ( $domain, $ip ) = split m/\t/, $line, 2;
-        next unless $domain;
-        next unless defined $ip && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
-
-        # A domain also answers on the NAT bridge, so it can appear twice.  The
-        # caller knows the pool, so the caller picks the address in it.
-        next if $seen{"$domain\t$ip"}++;
-        push( @found, { domain => $domain, ip => $ip } );
-    }
-
-    return @found;
-}
-
-=head2 _live_addresses($hv, $pool)
-
-C<$pool> is an array reference of addresses.  Returns a list of hash references
-with the keys C<ip> and C<mac>, one for each address that answers now.  The
-C<mac> is C<unknown> if the neighbor table has none.  Returns an empty list if
-C<$pool> is empty or C<$hv> has no bridge device.
-
-It pings each address in the pool from the hypervisor, and then reads the
-neighbor table of the bridge there.  The table holds only the addresses that
-the host spoke to lately, so the ping comes first.  libvirt reads the same table
-for C<virsh domifaddr --source arp>.  This machine can be on a different
-network, so the sweep runs on the hypervisor.
-
-An entry that is out of date reserves an address that is free.  That is the safe
-error, because the other error gives out an address that is in use.
-
-=cut
-
-sub _live_addresses {
-    my ( $hv, $pool ) = @_;
-    return () unless @$pool;
-
-    my $bridge = eval { $hv->bridge_device } or return ();
-
-    # An answer to the ping is the main signal.  A REACHABLE entry in the table
-    # is a second signal, and the table also gives the hardware address.
-    # REACHABLE alone is not reliable: an entry can decay to STALE before the read.
-    #
-    # STALE is not a signal.  It outlives the machine, so reserving it leaks the pool.
-    #
-    # Do not quote each address.  They are numbers, and a quote inside the
-    # script closes the quoting of the sh -c around it.
-    my @addresses = grep { m/\A\d+(?:[.]\d+){3}\z/ } @$pool;
-    my $script    = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } @addresses;
-    $script .= " wait; ip -4 neigh show dev $bridge";
-
-    ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
-
-    my ( %live, %mac );
-    foreach my $line ( split m/\n/, $said ) {
-        if ( my ($answered) = $line =~ m/\ALIVE\s+(\d+(?:[.]\d+){3})\z/ ) {
-            $live{$answered} = 1;
-            next;
-        }
-
-        my ( $ip, $hw ) = $line =~ m/\A(\d+(?:[.]\d+){3})\s+lladdr\s+(\S+)/ or next;
-        $mac{$ip}  = $hw;
-        $live{$ip} = 1 if $line =~ m/\bREACHABLE\b/;
-    }
-
-    return map { { ip => $_, mac => $mac{$_} // 'unknown' } } sort keys %live;
-}
-
-=head2 _resolve($host)
-
-Returns C<$host> if it is already an IPv4 address.  If not, returns the address
-that the resolver gives, or undef.  It does not die, because the seed skips a
-hypervisor that does not resolve and records the rest.
-
-=cut
-
-sub _resolve {
-    my ($host) = @_;
-    return $host if $host =~ m/\A\d+(?:[.]\d+){3}\z/;
-
-    require Socket;
-    my $packed = Socket::inet_aton($host) or return undef;
-    return Socket::inet_ntoa($packed);
 }
 
 1;

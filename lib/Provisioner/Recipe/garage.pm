@@ -93,33 +93,18 @@ one run of C<bin/new_config> builds gets the same version from one request.
 =cut
 
 sub latest_version {
-    return $LATEST //= _newest_stable_tag($TAGS) // do {
-        warn "garage: could not read the release tags from $TAGS, falling back to $FALLBACK_VERSION
-";
-        $FALLBACK_VERSION;
-    };
-}
+    return $LATEST if defined $LATEST;
 
-=head2 $tag = _newest_stable_tag($url)
+    my $res  = HTTP::Tiny->new( timeout => 10 )->get( $TAGS, { headers => { 'Accept' => 'application/vnd.github+json' } } );
+    my $tags = $res->{success} ? eval { Cpanel::JSON::XS::decode_json( $res->{content} ) } : undef;
 
-Returns the first stable tag in the GitHub tag list at C<$url>.  The list is
-newest first.  The list also holds C<-rc>, C<-beta> and C<-internal> tags, which
-are skipped.  Returns undef if the list cannot be read.
+    # The list is newest first, and it also holds -rc, -beta and -internal
+    # tags, which are not stable.
+    my ($newest) = grep { m{\Av\d+[.]\d+[.]\d+\z} } map { ref $_ eq 'HASH' && defined $_->{name} ? $_->{name} : () } @{ ref $tags eq 'ARRAY' ? $tags : [] };
+    return $LATEST = $newest if defined $newest;
 
-=cut
-
-sub _newest_stable_tag {
-    my ($url) = @_;
-
-    my $res = HTTP::Tiny->new( timeout => 10 )->get( $url, { headers => { 'Accept' => 'application/vnd.github+json' } } );
-    return undef unless $res->{success};
-
-    my $tags = eval { Cpanel::JSON::XS::decode_json( $res->{content} ) };
-    foreach my $tag ( @{ ref $tags eq 'ARRAY' ? $tags : [] } ) {
-        next unless ref $tag eq 'HASH' && defined $tag->{name};
-        return $tag->{name} if $tag->{name} =~ m{\Av\d+[.]\d+[.]\d+\z};
-    }
-    return undef;
+    warn "garage: could not read the release tags from $TAGS, falling back to $FALLBACK_VERSION\n";
+    return $LATEST = $FALLBACK_VERSION;
 }
 
 =head2 %files = $recipe->guest_secrets($install_dir, $domain)

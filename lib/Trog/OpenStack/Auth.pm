@@ -136,7 +136,11 @@ sub from_cloud {
 
 =head2 new($endpoint, %args)
 
-Returns an object that holds a token, from the cache or from Keystone.
+Returns an object that holds a token, from the cache or from Keystone.  A
+token from Keystone goes into the cache for the next command.  A cache that
+cannot be written is not an error, because it only makes the next run slower.
+
+C<$endpoint> is the Keystone endpoint, with or without C</v3> at the end.
 
 C<application_credential_id> and C<application_credential_secret> are
 required.  The secret can be a code reference.  The module calls it only when
@@ -185,13 +189,19 @@ sub new {
     die "No application credential secret provided in \"application_credential_secret\"\n"
       unless ref $secret eq 'CODE' || length $secret;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
 
+    # The auth_url in a clouds.yaml can end in /v3 or not: Horizon adds it, and
+    # openstacksdk documents both forms.  OpenStack::Client adds its paths to
+    # the end of the endpoint, and each form must get to /v3/auth/tokens.
+    $endpoint =~ s{/+$}{};
+    $endpoint .= '/v3' unless $endpoint =~ m{/v3$};
+
     my $self = bless {
         package_ua       => $args{package_ua} // 'Trog::OpenStack::UserAgent',
         package_request  => $args{package_request},
         package_response => $args{package_response},
         clients          => {},
         services         => [],
-        endpoint         => _identity_endpoint($endpoint),
+        endpoint         => $endpoint,
         region           => $args{region},
         interface        => $args{interface},
         credential_id    => $id,
@@ -199,10 +209,104 @@ sub new {
         no_cache         => $args{no_cache},
     }, $class;
 
-    return $self if $self->_restore;
+    my $path = $self->{no_cache} ? undef : $self->cache_path;
 
-    $self->_authenticate( ref $secret eq 'CODE' ? $secret->() : $secret );
-    $self->_store;
+    # A bad or missing cache file is a cache miss, and costs only a round trip.
+    my $cached;
+    $cached = eval { Cpanel::JSON::XS::decode_json( File::Slurper::read_binary($path) ) } if defined $path;
+    $cached = {} unless ref $cached eq 'HASH';
+
+    # Keystone reports UTC, which is what strptime assumes.  An expiry that
+    # cannot be read is taken as expired.
+    my ($stamp) = ( $cached->{expires_at} // q{} ) =~ m/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/;
+    my $expires = 0;
+    $expires = eval { Time::Piece->strptime( $stamp, '%Y-%m-%dT%H:%M:%S' )->epoch } // 0 if defined $stamp;
+
+    # The cache key holds the endpoint too, but a file with a colliding name
+    # must not send a token to the wrong cloud.
+    if (   $cached->{token}
+        && ref $cached->{catalog} eq 'ARRAY'
+        && @{ $cached->{catalog} }
+        && ( $cached->{endpoint} // q{} ) eq $endpoint
+        && $expires - $EXPIRY_MARGIN > time() ) {
+        $self->{token}      = $cached->{token};
+        $self->{expires_at} = $cached->{expires_at};
+        $self->{services}   = $cached->{catalog};
+        return $self;
+    }
+
+    my ( $response, $body );
+    my $ok = eval {
+        my $client = OpenStack::Client->new(
+            $endpoint,
+            package_ua       => $self->{package_ua},
+            package_request  => $self->{package_request},
+            package_response => $self->{package_response},
+        );
+
+        $response = $client->request(
+            method => 'POST',
+            path   => '/auth/tokens',
+            body   => {
+                auth => {
+                    identity => {
+                        methods                => ['application_credential'],
+                        application_credential => {
+                            id     => $id,
+                            secret => ref $secret eq 'CODE' ? $secret->() : $secret,
+                        },
+                    },
+                },
+            },
+        );
+
+        $body = $response->decode_json;
+        1;
+    };
+
+    # Each step of the exchange can fail, and each failure must name the
+    # endpoint.  Usually decode_json fails, with the body of a 4xx as its
+    # message.  "401 Unauthorized" alone does not tell a revoked credential
+    # from the wrong cloud, and each has a different fix.
+    die "Authenticating against $endpoint failed: $@" unless $ok;
+
+    my $token = $response->header('X-Subject-Token');
+    die "Authenticating against $endpoint returned no token\n"
+      unless $token;
+
+    my $catalog = $body->{token}{catalog};
+    die "Authenticating against $endpoint returned no service catalog\n"
+      unless ref $catalog eq 'ARRAY' && @$catalog;
+
+    $self->{response}   = $response;
+    $self->{body}       = $body;
+    $self->{token}      = $token;
+    $self->{expires_at} = $body->{token}{expires_at};
+    $self->{services}   = $catalog;
+
+    return $self unless defined $path;
+
+    my $encoded = Cpanel::JSON::XS::encode_json(
+        {
+            token      => $token,
+            expires_at => $self->{expires_at},
+            catalog    => $catalog,
+            endpoint   => $endpoint,
+        }
+    );
+
+    eval {
+        my ($dir) = $path =~ m{^(\N*)/[^/]+$};
+        File::Path::make_path( $dir, { mode => 0o700 } );
+
+        # write_binary renames a temporary file over $path, so that two
+        # provisions at once cannot leave a half-written file.  It takes the
+        # mode of that temporary file from this package variable, so no other
+        # user can read the token, even before the rename.
+        local $File::Slurper::Temp::FILE_TEMP_PERMS = 0o600;
+        File::Slurper::Temp::write_binary( $path, $encoded );
+        1;
+    } or return $self;
 
     return $self;
 }
@@ -225,44 +329,15 @@ sub secret_for {
 
     my $secret = $cloud->{application_credential_secret};
     return $secret unless defined $secret && index( $secret, 'secret:' ) == 0;
-    return _from_keepass($secret);
-}
 
-=head2 _from_keepass($reference)
-
-Returns a code reference that looks up the C<secret:> reference C<$reference>
-in F<secrets.kdbx>.  Dies at once when the reference is malformed, so the error
-comes on every run, not only when the token expires.
-
-=cut
-
-sub _from_keepass {
-    my ($reference) = @_;
-
-    Trog::Secrets->parse($reference);
+    # Parsed now, so that a malformed reference fails every run, not only the
+    # runs whose token has expired.
+    Trog::Secrets->parse($secret);
 
     return sub {
-        my %found = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
+        my %found = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $secret );
         return $found{secret};
     };
-}
-
-=head2 _identity_endpoint($endpoint)
-
-Returns C<$endpoint> with no trailing slash, and with C</v3> at the end.
-
-The C<auth_url> in a F<clouds.yaml> can end in C</v3> or not.  Horizon adds it,
-and C<openstacksdk> documents both forms.  L<OpenStack::Client> adds its paths to
-the end of the endpoint, and each form must get to C</v3/auth/tokens>.
-
-=cut
-
-sub _identity_endpoint {
-    my ($endpoint) = @_;
-
-    $endpoint =~ s{/+$}{};
-    return $endpoint if $endpoint =~ m{/v3$};
-    return "$endpoint/v3";
 }
 
 =head1 OBJECT METHODS
@@ -285,82 +360,22 @@ sub token     ($self) { return $self->{token} }
 sub region    ($self) { return $self->{region} }
 sub interface ($self) { return $self->{interface} }
 
-=head2 _authenticate($secret)
-
-Asks Keystone for a token with the application credential, and puts the token,
-its expiry and the catalog on the object.  Returns 1.  Dies when the request
-fails, or when the answer has no token or no catalog.
-
-=cut
-
-sub _authenticate {
-    my ( $self, $secret ) = @_;
-
-    my ( $response, $body );
-    my $ok = eval {
-        my $client = OpenStack::Client->new(
-            $self->{endpoint},
-            package_ua       => $self->{package_ua},
-            package_request  => $self->{package_request},
-            package_response => $self->{package_response},
-        );
-
-        $response = $client->request(
-            method => 'POST',
-            path   => '/auth/tokens',
-            body   => {
-                auth => {
-                    identity => {
-                        methods                => ['application_credential'],
-                        application_credential => {
-                            id     => $self->{credential_id},
-                            secret => $secret,
-                        },
-                    },
-                },
-            },
-        );
-
-        $body = $response->decode_json;
-        1;
-    };
-
-    # Each step of the exchange can fail, and each failure must name the
-    # endpoint.  Usually decode_json fails, with the body of a 4xx as its
-    # message.  "401 Unauthorized" alone does not tell a revoked credential
-    # from the wrong cloud, and each has a different fix.
-    die "Authenticating against $self->{endpoint} failed: $@" unless $ok;
-
-    my $token = $response->header('X-Subject-Token');
-    die "Authenticating against $self->{endpoint} returned no token\n"
-      unless $token;
-
-    my $catalog = $body->{token}{catalog};
-    die "Authenticating against $self->{endpoint} returned no service catalog\n"
-      unless ref $catalog eq 'ARRAY' && @$catalog;
-
-    $self->{response}   = $response;
-    $self->{body}       = $body;
-    $self->{token}      = $token;
-    $self->{expires_at} = $body->{token}{expires_at};
-    $self->{services}   = $catalog;
-
-    return 1;
-}
-
 =head1 THE CACHE
 
 =head2 cache_path
 
-Returns the path of the cache file for the token of this object.  Returns
-nothing when there is no directory for the cache.
+Returns the path of the cache file for the token of this object.  It is in
+C<cache_dir>, or else in F<trog-provisioner> under C<$XDG_CACHE_HOME> or under
+F<$HOME/.cache>.  Returns nothing when there is no directory for the cache,
+which is when none of those is set.
 
 =cut
 
 sub cache_path {
     my ($self) = @_;
 
-    my $dir = $self->{cache_dir} // _default_cache_dir();
+    my $base = $ENV{XDG_CACHE_HOME} || ( $ENV{HOME} ? "$ENV{HOME}/.cache" : undef );
+    my $dir  = $self->{cache_dir} // ( $base ? "$base/trog-provisioner" : undef );
     return unless $dir;
 
     # A hash, because the endpoint has slashes and the id is a credential.
@@ -368,130 +383,6 @@ sub cache_path {
     my $key = Digest::SHA::sha256_hex("$self->{endpoint}\0$self->{credential_id}");
 
     return "$dir/openstack-token-$key.json";
-}
-
-=head2 _default_cache_dir
-
-Returns F<trog-provisioner> under C<$XDG_CACHE_HOME>, or under F<$HOME/.cache>.
-Returns nothing when neither C<$XDG_CACHE_HOME> nor C<$HOME> is set.
-
-=cut
-
-sub _default_cache_dir {
-    my $base = $ENV{XDG_CACHE_HOME};
-    $base = "$ENV{HOME}/.cache" if !$base && $ENV{HOME};
-
-    return unless $base;
-    return "$base/trog-provisioner";
-}
-
-=head2 _restore
-
-Puts a usable token from the cache on the object.  Returns 1 if there was
-one, and 0 if not.
-
-=cut
-
-sub _restore {
-    my ($self) = @_;
-
-    return 0 if $self->{no_cache};
-
-    my $path = $self->cache_path;
-    return 0 unless defined $path;
-
-    # A bad or missing cache file is a cache miss, and costs only a round trip.
-    my $cached = eval { Cpanel::JSON::XS::decode_json( File::Slurper::read_binary($path) ) };
-    return 0 unless ref $cached eq 'HASH';
-
-    return 0 unless _looks_current( $cached, $self->{endpoint} );
-
-    $self->{token}      = $cached->{token};
-    $self->{expires_at} = $cached->{expires_at};
-    $self->{services}   = $cached->{catalog};
-
-    return 1;
-}
-
-=head2 _looks_current($cached, $endpoint)
-
-Returns true if the cache entry C<$cached> has a token and a catalog, is for
-C<$endpoint>, and is good for more than C<$EXPIRY_MARGIN> seconds.
-
-=cut
-
-sub _looks_current {
-    my ( $cached, $endpoint ) = @_;
-
-    return 0 unless $cached->{token};
-    return 0 unless ref $cached->{catalog} eq 'ARRAY' && @{ $cached->{catalog} };
-
-    # The cache key holds the endpoint too, but a file with a colliding name
-    # must not send a token to the wrong cloud.
-    return 0 unless ( $cached->{endpoint} // '' ) eq $endpoint;
-
-    return _epoch_of( $cached->{expires_at} ) - $EXPIRY_MARGIN > time();
-}
-
-=head2 _epoch_of($iso)
-
-Returns the C<expires_at> of Keystone, C<$iso>, as an epoch.  Returns 0 when it
-cannot read it, and each caller takes 0 as expired.
-
-=cut
-
-sub _epoch_of {
-    my ($iso) = @_;
-
-    return 0 unless defined $iso;
-
-    my ($stamp) = $iso =~ m/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/;
-    return 0 unless defined $stamp;
-
-    # Keystone reports UTC, which is what strptime assumes.
-    my $parsed = eval { Time::Piece->strptime( $stamp, '%Y-%m-%dT%H:%M:%S' ) };
-    return $parsed ? $parsed->epoch : 0;
-}
-
-=head2 _store
-
-Writes the token to the cache for the next command.  Returns 1 if it wrote the
-file, and 0 if not.  It does not die, because a failure only makes the next run
-slower.
-
-=cut
-
-sub _store {
-    my ($self) = @_;
-
-    return 0 if $self->{no_cache};
-
-    my $path = $self->cache_path;
-    return 0 unless defined $path;
-
-    my $encoded = Cpanel::JSON::XS::encode_json(
-        {
-            token      => $self->{token},
-            expires_at => $self->{expires_at},
-            catalog    => $self->{services},
-            endpoint   => $self->{endpoint},
-        }
-    );
-
-    my $ok = eval {
-        my ($dir) = $path =~ m{^(\N*)/[^/]+$};
-        File::Path::make_path( $dir, { mode => 0o700 } );
-
-        # write_binary renames a temporary file over $path, so that two
-        # provisions at once cannot leave a half-written file.  It takes the
-        # mode of that temporary file from this package variable, so no other
-        # user can read the token, even before the rename.
-        local $File::Slurper::Temp::FILE_TEMP_PERMS = 0o600;
-        File::Slurper::Temp::write_binary( $path, $encoded );
-        1;
-    };
-
-    return $ok ? 1 : 0;
 }
 
 =head1 REQUIREMENTS

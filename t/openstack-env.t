@@ -18,6 +18,8 @@ use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use Capture::Tiny    qw{capture_stdout};
+use IO::Pty();
+use IO::Select();
 
 use FindBin;
 use FindBin::libs;
@@ -44,7 +46,7 @@ my %CLOUD = (
 );
 
 # A run of main with the cloud and the secret it would have read, and stdout
-# not a terminal, which is how it is used: eval "$(bin/openstack-env)".
+# captured, so not a terminal, which is how it is used: eval "$(bin/openstack-env)".
 sub run_with {
     my ( $cloud, $secret, @args ) = @_;
 
@@ -52,9 +54,6 @@ sub run_with {
     $config->redefine( load => sub { return {%$cloud} } );
     my $auth = Test::MockModule->new('Trog::OpenStack::Auth');
     $auth->redefine( secret_for => sub { return $secret } );
-    my $bin = Test::MockModule->new( 'Trog::Bin::OpenStackEnv', no_auto => 1 );
-    $bin->redefine( _is_terminal => sub { 0 } );
-
     my ( $out, $rc );
     $out = capture_stdout( sub { $rc = Trog::Bin::OpenStackEnv::main(@args) } );
     return ( $out, $rc );
@@ -107,17 +106,28 @@ subtest 'it refuses to print a secret to a terminal' => sub {
     $config->redefine( load => sub { return {%CLOUD} } );
     my $auth = Test::MockModule->new('Trog::OpenStack::Auth');
     $auth->redefine( secret_for => sub { return 'the-secret' } );
-    my $bin = Test::MockModule->new( 'Trog::Bin::OpenStackEnv', no_auto => 1 );
-    $bin->redefine( _is_terminal => sub { 1 } );
 
-    my $err = exception {
-        capture_stdout( sub { Trog::Bin::OpenStackEnv::main() } )
+    # A terminal for stdout, which a test run does not otherwise have, and
+    # what main printed on it, read back from the other end.
+    my $pty         = IO::Pty->new();
+    my $terminal    = $pty->slave;
+    my $on_terminal = sub (@args) {
+        local *STDOUT = $terminal;
+        Trog::Bin::OpenStackEnv::main(@args);
+
+        my $out = q{};
+        while ( IO::Select->new($pty)->can_read(0.2) ) {
+            sysread( $pty, my $chunk, 65_536 ) or last;
+            $out .= $chunk;
+        }
+        return $out;
     };
+
+    my $err = exception { $on_terminal->() };
     like( $err, qr/refuses[ ]a[ ]terminal/, 'a terminal is refused, where it would sit in the scrollback' );
     like( $err, qr/eval/,                   'saying how it is meant to be run' );
 
-    my ($out) = capture_stdout( sub { Trog::Bin::OpenStackEnv::main('--show') } );
-    like( $out, qr/OS_APPLICATION_CREDENTIAL_SECRET='the-secret'/, 'and --show prints it anyway' );
+    like( $on_terminal->('--show'), qr/OS_APPLICATION_CREDENTIAL_SECRET='the-secret'/, 'and --show prints it anyway' );
 };
 
 subtest 'a cloud with no credential at all' => sub {

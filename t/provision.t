@@ -55,7 +55,15 @@ require_ok($script) or BAIL_OUT("$script does not load; the install is incomplet
 
 # --- The interface lives in POD, and pod2usage prints it ----------------------
 subtest 'the POD documents the interface' => sub {
-    my $synopsis = _pod_section( $script, 'SYNOPSIS|OPTIONS' );
+    open( my $fh, '>', \my $synopsis ) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => $script,
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => 'SYNOPSIS|OPTIONS',
+    );
+    close($fh) or die "Could not close the POD read out of $script: $!";
     like( $synopsis, qr/--hypervisor/,             'POD documents --hypervisor' );
     like( $synopsis, qr/--domaindir/,              'POD documents --domaindir' );
     like( $synopsis, qr/--existing/,               'POD documents --existing' );
@@ -311,6 +319,13 @@ subtest 'a dry run applies nothing' => sub {
     is( File::Slurper::read_text("$dir/vm.test/key.rsa"), "PRIVATE\n", 'the existing key is still the existing key' );
 };
 
+# A provision.conf in a directory of its own, holding %params, and its path.
+my sub conf (%params) {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/provision.conf", join( '', map { "$_=$params{$_}\n" } sort keys %params ) );
+    return "$dir/provision.conf";
+}
+
 # The unit half of this -- every disk knob against every libvirt version -- is
 # t/Provisioner-Recipe-vm.t.  What is left here is the integration claim: that a
 # real provision still reaches the recipe, and that what bin/new_config wrote
@@ -367,7 +382,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     File::Slurper::Temp::write_text( "$dir/vm.test/$_", $wrote{$_} ) for keys %wrote;
 
     my $config = Config::Simple->new(
-        _conf(
+        conf(
             domain     => 'vm.test',   memory => 2048, cpus => 2,
             size       => 42949672960, image  => 'https://example.test/img',
             admin_user => 'someadmin', distro => 'ubuntu',
@@ -449,7 +464,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
       for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ];
 
     my $config = Config::Simple->new(
-        _conf(
+        conf(
             domain     => 'vm.test',   memory => 2048, cpus => 2,
             size       => 42949672960, image  => 'https://example.test/img',
             admin_user => 'someadmin', distro => 'ubuntu',
@@ -536,7 +551,7 @@ sub rebuild_answering {
       for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ];
 
     my $config = Config::Simple->new(
-        _conf(
+        conf(
             domain     => 'vm.test',   memory => 2048, cpus => 2,
             size       => 42949672960, image  => 'https://example.test/img',
             admin_user => 'someadmin', distro => 'ubuntu',
@@ -689,6 +704,60 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
     like( exception { Trog::Bin::Provisioner::primary_adapter( {}, $mac ) }, qr/No[ ]ethernets[ ]at[ ]all/, 'and a netplan with no ethernets is its own error' );
 };
 
+# What a reprovision did, without doing any of it: which machine it connected
+# to, with whose key, and what it asked the hypervisor to destroy on the way.
+my sub layered (%params) {
+    my ( $domain, $reuse, $depends ) = @params{qw{domain reuse depends}};
+
+    my $dir  = tempdir( CLEANUP => 1 );
+    my %seen = ( cleared => [] );
+
+    # The key each guest is opened with, on disk -- which is what a domain built
+    # before there was a store still has.  Trog::Guest->key_path hands back the
+    # file when there is one, and that is the case this subtest is about.
+    foreach my $d ( grep { defined } $domain, $depends ) {
+        mkdir "$dir/$d";
+        File::Slurper::Temp::write_text( "$dir/$d/key.rsa", "PRIVATE\n" );
+    }
+
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
+    my $bin   = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my $guest = Test::MockModule->new('Trog::Guest');
+
+    $hv->redefine( domain_dir  => sub { $dir } );
+    $hv->redefine( guest_mac   => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( clear_guest => sub { push( @{ $seen{cleared} }, $_[1] ); 1 } );
+
+    # Left fatal rather than mocked to an answer.  A domain being layered onto
+    # another's guest has no lease and no server of its own, so either question
+    # is one with no answer, and the address is already in hand.
+    $hv->redefine( lease_ip     => sub { die "went looking for a lease\n" } );
+    $hv->redefine( guest_ssh_ip => sub { die "asked the hypervisor where to connect\n" } );
+
+    $guest->redefine(
+        new => sub {
+            my ( $class, %guest_args ) = @_;
+            @seen{qw{host key}} = @guest_args{qw{host key_path}};
+            return bless {}, $class;
+        }
+    );
+    $guest->redefine( put_file    => sub { 1 } );
+    $guest->redefine( capture_cmd => sub { q{} } );
+
+    # The guest-side work has subtests of its own; this is about which machine
+    # that work is aimed at.
+    $bin->redefine( read_seed             => sub { () } );
+    $bin->redefine( authorize_guest_key   => sub { 1 } );
+    $bin->redefine( refresh_cloud_init    => sub { 1 } );
+    $bin->redefine( merge_guest_addresses => sub { 1 } );
+    $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
+
+    my $config = Config::Simple->new( conf( domain => $domain, admin_user => 'someadmin' ) );
+    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'someadmin', depends => $depends ) } );
+
+    return %seen;
+}
+
 # Reusing a guest means provisioning onto one that is already up, which is how a
 # shared host gets built: bar.test is layered onto the guest depends_on named
 # rather than being given one of its own.  So $domain is not always the machine,
@@ -696,7 +765,7 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 # is connected to, and whether clearing $domain takes the target away with it.
 
 subtest 'a domain layered onto the guest built for another' => sub {
-    my %seen = _layered( domain => 'bar.test', reuse => '192.168.122.50', depends => 'foo.test' );
+    my %seen = layered( domain => 'bar.test', reuse => '192.168.122.50', depends => 'foo.test' );
 
     # foo.test's guest is the machine; bar.test has none, which is the whole
     # point of depending on one.  Deriving the address from bar.test's own MAC
@@ -711,7 +780,7 @@ subtest 'a domain layered onto the guest built for another' => sub {
 };
 
 subtest 'a domain reprovisioned onto a guest of its own' => sub {
-    my %seen = _layered( domain => 'vm.test', reuse => '192.168.122.50' );
+    my %seen = layered( domain => 'vm.test', reuse => '192.168.122.50' );
 
     is( $seen{host}, '192.168.122.50', 'is reached at the address --existing named' );
     is_deeply( $seen{cleared}, [], 'and nothing is annihilated, that name being the machine itself' );
@@ -893,86 +962,10 @@ subtest 'two guests consolidated with _shared: salvaged, then the old one goes, 
     ) or diag explain \@did;
 };
 
-# What a reprovision did, without doing any of it: which machine it connected
-# to, with whose key, and what it asked the hypervisor to destroy on the way.
-sub _layered {
-    my (%params) = @_;
-    my ( $domain, $reuse, $depends ) = @params{qw{domain reuse depends}};
-
-    my $dir  = tempdir( CLEANUP => 1 );
-    my %seen = ( cleared => [] );
-
-    # The key each guest is opened with, on disk -- which is what a domain built
-    # before there was a store still has.  Trog::Guest->key_path hands back the
-    # file when there is one, and that is the case this subtest is about.
-    foreach my $d ( grep { defined } $domain, $depends ) {
-        mkdir "$dir/$d";
-        File::Slurper::Temp::write_text( "$dir/$d/key.rsa", "PRIVATE\n" );
-    }
-
-    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
-    my $bin   = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
-    my $guest = Test::MockModule->new('Trog::Guest');
-
-    $hv->redefine( domain_dir  => sub { $dir } );
-    $hv->redefine( guest_mac   => sub { '52:54:00:aa:bb:cc' } );
-    $hv->redefine( clear_guest => sub { push( @{ $seen{cleared} }, $_[1] ); 1 } );
-
-    # Left fatal rather than mocked to an answer.  A domain being layered onto
-    # another's guest has no lease and no server of its own, so either question
-    # is one with no answer, and the address is already in hand.
-    $hv->redefine( lease_ip     => sub { die "went looking for a lease\n" } );
-    $hv->redefine( guest_ssh_ip => sub { die "asked the hypervisor where to connect\n" } );
-
-    $guest->redefine(
-        new => sub {
-            my ( $class, %guest_args ) = @_;
-            @seen{qw{host key}} = @guest_args{qw{host key_path}};
-            return bless {}, $class;
-        }
-    );
-    $guest->redefine( put_file    => sub { 1 } );
-    $guest->redefine( capture_cmd => sub { q{} } );
-
-    # The guest-side work has subtests of its own; this is about which machine
-    # that work is aimed at.
-    $bin->redefine( read_seed             => sub { () } );
-    $bin->redefine( authorize_guest_key   => sub { 1 } );
-    $bin->redefine( refresh_cloud_init    => sub { 1 } );
-    $bin->redefine( merge_guest_addresses => sub { 1 } );
-    $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
-
-    my $config = Config::Simple->new( _conf( domain => $domain, admin_user => 'someadmin' ) );
-    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'someadmin', depends => $depends ) } );
-
-    return %seen;
-}
-
-sub _conf {
-    my (%params) = @_;
-    my $dir = tempdir( CLEANUP => 1 );
-    File::Slurper::Temp::write_text( "$dir/provision.conf", join( '', map { "$_=$params{$_}\n" } sort keys %params ) );
-    return "$dir/provision.conf";
-}
-
 sub quietly {
     my ($code) = @_;
     my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
-}
-
-sub _pod_section {
-    my ( $file, $sections ) = @_;
-    open( my $fh, '>', \my $text ) or die $!;
-    Pod::Usage::pod2usage(
-        -input    => $file,
-        -output   => $fh,
-        -exitval  => 'NOEXIT',
-        -verbose  => 99,
-        -sections => $sections,
-    );
-    close($fh) or die "Could not close the POD read out of $file: $!";
-    return $text // '';
 }
 
 subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
@@ -1078,7 +1071,7 @@ subtest 'the marker that setup.sh waits for is written after every secret' => su
     use warnings;
     my $guest = bless {}, 'SecretsProbe';
 
-    is( _quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, $domain ) } ), 1, 'the secrets are placed' );
+    is( quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, $domain ) } ), 1, 'the secrets are placed' );
     is_deeply( \@did, [ '/bogus/signing.key', 'runner key', Trog::Guest->secrets_marker($domain) ], 'the files, then the runner key, and the marker last' );
 
     is( exception { Trog::Bin::Provisioner::place_guest_secrets( undef, 'none.test.test' ) }, undef, 'a domain with no manifest writes no marker, and touches no guest' );
@@ -1088,7 +1081,7 @@ subtest 'the marker that setup.sh waits for is written after every secret' => su
     $written = 0;
     like(
         exception {
-            _quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, 'third.test.test' ) } )
+            quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, 'third.test.test' ) } )
         },
         qr/which[ ]its[ ]build[ ]waits[ ]for/,
         'and a marker that cannot be written stops the run, rather than a build that waits half an hour'
@@ -1130,10 +1123,16 @@ subtest 'a runner is authorized on each hypervisor it was configured for' => sub
     $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
     $hv->redefine( append_line     => sub { push @{ $appended{ $_[1] } }, $_[2]; return 1 } );
 
-    my $private = _throwaway_key();
-    my %values  = ( "/opt/domains/$domain/.ssh/id_ed25519" => $private );
+    # The recipe's own generator, rather than a key made some other way here.  A
+    # made-up string would only prove that CryptX rejects made-up strings, and a
+    # key from ssh-keygen would not exercise the thing that actually goes in the
+    # store -- which has a rewrap in it precisely because the two do not agree by
+    # default.
+    my %secrets = Provisioner::Cookbook->load('trogrunner')->guest_secrets( '/bogus/domains', 'runner.test.test' );
+    my ($entry) = values %secrets;
+    my %values  = ( "/opt/domains/$domain/.ssh/id_ed25519" => $entry->{generate}->() );
 
-    _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
+    quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
 
     is_deeply( [ sort keys %appended ], [qw{one.test.test two.test.test}], 'one line per hypervisor, and no others' );
     like( $appended{'one.test.test'}[0], qr/\Assh-ed25519[ ]/, 'the public half, derived rather than stored' );
@@ -1166,22 +1165,6 @@ subtest 'a guest that is not a runner, or one that asked for nothing' => sub {
 
     is( $touched, 0, 'neither of them reached a hypervisor' );
 };
-
-# The recipe's own generator, rather than a key made some other way here.  A
-# made-up string would only prove that CryptX rejects made-up strings, and a key
-# from ssh-keygen would not exercise the thing that actually goes in the store --
-# which has a rewrap in it precisely because the two do not agree by default.
-sub _throwaway_key {
-    my %secrets = Provisioner::Cookbook->load('trogrunner')->guest_secrets( '/bogus/domains', 'runner.test.test' );
-    my ($entry) = values %secrets;
-    return $entry->{generate}->();
-}
-
-sub _quietly {
-    my ($code) = @_;
-    my ( undef, @result ) = capture_stdout { $code->() };
-    return wantarray ? @result : $result[0];
-}
 
 # The generator places the guest, so it has to place it in the fleet that
 # --hvconf names, which is the one choose_hypervisor reads afterwards.

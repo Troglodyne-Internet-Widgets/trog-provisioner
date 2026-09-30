@@ -83,6 +83,14 @@ error is better than a guest built from the answer of a different distribution.
 
 =cut
 
+# Dies, naming the distribution of $self and the $what that it does not answer.
+my sub unanswered ( $self, $what ) {
+    my $distro = Scalar::Util::blessed($self) || $self;
+    $distro =~ s/\AProvisioner::Recipe:://;
+
+    die "The $distro distro recipe does not say what its $what is.\n" . "Every distribution has to answer that before a guest can be built on it;\n" . "see perldoc Provisioner::DistroRecipe.\n";
+}
+
 =head1 METHODS A DISTRIBUTION MUST ANSWER
 
 =head2 $packager = $distro->packager()
@@ -106,7 +114,7 @@ parent class.  See L<Provisioner::Recipe/Where the packages are named>.
 
 =cut
 
-sub packager { return shift->_unanswered('packager') }
+sub packager { return unanswered( shift, 'packager' ) }
 
 =head2 @modules = $distro->rerun_modules()
 
@@ -140,7 +148,7 @@ C<release_version> instead.
 
 =cut
 
-sub base_image { return shift->_unanswered('base_image') }
+sub base_image { return unanswered( shift, 'base_image' ) }
 
 =head2 $version = $distro->release_version()
 
@@ -151,7 +159,7 @@ C<os_distro> and C<os_version> properties.
 
 =cut
 
-sub release_version { return shift->_unanswered('release_version') }
+sub release_version { return unanswered( shift, 'release_version' ) }
 
 =head2 $name = $distro->distribution()
 
@@ -182,18 +190,9 @@ names.  So F<templates/makefile.tt> does not depend on a distribution.
 
 =cut
 
-sub packager_invocation        { return shift->_unanswered('packager_invocation') }
-sub packager_up_invocation     { return shift->_unanswered('packager_up_invocation') }
-sub packager_remove_invocation { return shift->_unanswered('packager_remove_invocation') }
-
-sub _unanswered {
-    my ( $self, $what ) = @_;
-
-    my $distro = Scalar::Util::blessed($self) || $self;
-    $distro =~ s/\AProvisioner::Recipe:://;
-
-    die "The $distro distro recipe does not say what its $what is.\n" . "Every distribution has to answer that before a guest can be built on it;\n" . "see perldoc Provisioner::DistroRecipe.\n";
-}
+sub packager_invocation        { return unanswered( shift, 'packager_invocation' ) }
+sub packager_up_invocation     { return unanswered( shift, 'packager_up_invocation' ) }
+sub packager_remove_invocation { return unanswered( shift, 'packager_remove_invocation' ) }
 
 =head1 METHODS
 

@@ -1006,7 +1006,15 @@ sub claims {
     foreach my $claim ( $self->listens(%opts) ) {
         my ( $address, $port, $udp ) = $claim =~ m{\A (?: ( [\d.]+ | \[ [^\]]+ \] ) : )? (\d+) (?: /tcp | (/udp) )? \z}
           or die "The $name recipe claims '$claim' in listens, which is not a port, an address and a port, or either of them with /tcp or /udp.\n";
-        $on{ $port . ( $udp // q{} ) }{ _address( $name, $address ) } = 1;
+
+        # The address in the form that inet_ntop writes, so that one address
+        # is one key however a recipe spelled it.
+        if ( defined $address ) {
+            my $family = ( $address =~ s{\A\[(.*)\]\z}{$1} ) ? Socket::AF_INET6() : Socket::AF_INET();
+            my $packed = Socket::inet_pton( $family, $address ) // die "The $name recipe claims a port on '$address', which is not an IP address.\n";
+            $address = Socket::inet_ntop( $family, $packed );
+        }
+        $on{ $port . ( $udp // q{} ) }{ $address // q{::} } = 1;
     }
     $on{s{/tcp\z}{}r} //= { q{::} => 1 } foreach keys %limits;
 
@@ -1018,19 +1026,6 @@ sub claims {
     }
 
     return %listeners;
-}
-
-# The address of a claim in the form that inet_ntop writes, so that one address
-# is one key however a recipe spelled it.  An absent address is every address.
-sub _address {
-    my ( $name, $address ) = @_;
-
-    return q{::} unless defined $address;
-
-    my $family = ( $address =~ s{\A\[(.*)\]\z}{$1} ) ? Socket::AF_INET6() : Socket::AF_INET();
-    my $packed = Socket::inet_pton( $family, $address ) // die "The $name recipe claims a port on '$address', which is not an IP address.\n";
-
-    return Socket::inet_ntop( $family, $packed );
 }
 
 =head3 %jails = $recipe->jails(%opts)
@@ -1196,7 +1191,7 @@ Returns a map from the path on the guest to how the file gets there:
 
     "/etc/matrix-synapse/homeserver.signing.key" => {
         ref      => "secret:matrix/$domain-signing-key/password",
-        generate => \&_signing_key,
+        generate => sub { ... },    # returns a new key
         owner    => 'matrix-synapse:matrix-synapse',
         mode     => '0600',
     }
@@ -1687,6 +1682,14 @@ sub template_path {
 Validates the configuration of the recipe, and returns it as C<enrich> returns
 it.  Dies with every schema error, and names the recipe and the domain.
 
+An error that counts the properties of an object, such as C<Too many
+properties: 2/1>, names none of them, so the keys of that object follow it.
+Only the keys: a value can be a password.  A key whose value is an object has
+the keys of that object after it, in braces.  So ufw's refusal of two recipes
+on one port names each address and the recipe on it:
+
+    /listeners/3000: /anyOf/0 Too many properties: 2/1. (127.0.0.1 {gogs}, :: {grafana})
+
 This method is universal, and a recipe must not override it.  It uses
 C<schema>, which combines the own C<args> of the recipe with C<global_args>.  It
 runs the schema over the options, and then calls C<enrich>.  A subclass that
@@ -1718,37 +1721,25 @@ sub validate {
         my $name  = $self->recipe_name() // ( Scalar::Util::blessed($self) // $self );
         my $where = $opts{domain} ? " for $opts{domain}" : q{};
 
-        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { '  ' . _explain( $_, \%opts ) } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
+        my @said;
+        foreach my $error (@errors) {
+            my ( undef, $keyword ) = @{ $error->details };
+            my $at = ( $keyword // '' ) =~ m/\A(?:max|min)Properties\z/ ? Mojo::JSON::Pointer->new( \%opts )->get( $error->path ) : undef;
+            if ( ref $at ne 'HASH' ) {
+                push( @said, "$error" );
+                next;
+            }
+
+            my @keys = map { ref $at->{$_} eq 'HASH' ? "$_ {" . join( ', ', sort keys %{ $at->{$_} } ) . '}' : $_ } sort keys %$at;
+            push( @said, "$error (" . join( ', ', @keys ) . ')' );
+        }
+
+        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { "  $_" } @said ) . "\nSee `bin/recipes $name` for what it takes.\n";
     }
 
     $opts{user} //= $opts{admin_user};
 
     return $self->enrich(%opts);
-}
-
-=head3 $text = _explain($error, $opts)
-
-The text of a schema error.  An error that counts the properties of an object,
-such as C<Too many properties: 2/1>, names none of them, so the keys of that
-object follow it.  Only the keys: a value can be a password.  A key whose value
-is an object has the keys of that object after it, in braces.  So ufw's
-refusal of two recipes on one port names each address and the recipe on it:
-
-    /listeners/3000: /anyOf/0 Too many properties: 2/1. (127.0.0.1 {gogs}, :: {grafana})
-
-=cut
-
-sub _explain {
-    my ( $error, $opts ) = @_;
-
-    my ( undef, $keyword ) = @{ $error->details };
-    return "$error" unless ( $keyword // '' ) =~ m/\A(?:max|min)Properties\z/;
-
-    my $at = Mojo::JSON::Pointer->new($opts)->get( $error->path );
-    return "$error" unless ref $at eq 'HASH';
-
-    my @keys = map { ref $at->{$_} eq 'HASH' ? "$_ {" . join( ', ', sort keys %{ $at->{$_} } ) . '}' : $_ } sort keys %$at;
-    return "$error (" . join( ', ', @keys ) . ')';
 }
 
 =head3 %vars = $recipe->validated(%opts)

@@ -23,6 +23,11 @@ Provisioner::Recipe::Ubuntu::postgres - Ubuntu's C<deps> and archive for L<Provi
 
 =cut
 
+# The suite of PGDG for the release of Ubuntu that guests run.
+my sub suite () {
+    return 'Provisioner::Recipe::ubuntu'->release() . '-pgdg';
+}
+
 sub deps {
     my ( $self, %opts ) = @_;
 
@@ -41,7 +46,7 @@ sub package_sources {
     return {
         name       => 'pgdg',
         uri        => 'https://apt.postgresql.org/pub/repos/apt',
-        suites     => [ _suite() ],
+        suites     => [ suite() ],
         components => ['main'],
         key        => 'https://www.postgresql.org/media/keys/ACCC4CF8.asc',
     };
@@ -61,7 +66,7 @@ no server.
 sub newest_version {
     state $major;
     $major //= do {
-        my $url = "https://apt.postgresql.org/pub/repos/apt/dists/@{[ _suite() ]}/main/binary-amd64/Packages.gz";
+        my $url = 'https://apt.postgresql.org/pub/repos/apt/dists/' . suite() . '/main/binary-amd64/Packages.gz';
         my $res = Provisioner::Packager::Deb::fetch($url);
         die "Could not read the package index of PGDG at $url to find its newest postgres: $res->{status} $res->{reason}\n"
           unless $res->{success};
@@ -74,10 +79,6 @@ sub newest_version {
         $newest;
     };
     return $major;
-}
-
-sub _suite {
-    return 'Provisioner::Recipe::ubuntu'->release() . '-pgdg';
 }
 
 1;

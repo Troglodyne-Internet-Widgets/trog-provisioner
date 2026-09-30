@@ -17,7 +17,7 @@ t/Trog-Machine.t - Trog::Machine: fetching a directory, and not fetching it twic
 ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
 
 use Test::More;
-use Capture::Tiny qw{capture_stdout};
+use Capture::Tiny qw{capture_stdout capture_stderr};
 use Test::NoWarnings;
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -50,8 +50,22 @@ sub here (@args) {
     return ( $machine, $mock );
 }
 
+# Runs get_dir on $machine against a File::Rsync that moves nothing and
+# succeeds, and returns what rsync was built with, what it was asked to move,
+# and what get_dir returned.
+sub rsync_for ( $machine, @get_dir ) {
+    my %got;
+    my $mock = Test::MockModule->new('File::Rsync');
+    $mock->redefine( new  => sub { my ( $class, %args ) = @_; $got{built} = \%args; return bless {}, $class } );
+    $mock->redefine( exec => sub { my ( $self,  %args ) = @_; $got{moved} = \%args; return 1 } );
+    $mock->redefine( out  => sub { return [] } );
+    $got{returned} = $machine->get_dir(@get_dir);
+    return \%got;
+}
+
 subtest 'the ssh rsync is told to use' => sub {
-    my $rsh = remote()->_rsh;
+    my $dir = tempdir( CLEANUP => 1 );
+    my $rsh = rsync_for( remote(), '/bogus/lib/deluged', "$dir/deluged" )->{built}{rsh};
 
     like( $rsh, qr{\A ssh \s -p \s 2222 \b},                  'the port, which rsync cannot get from anywhere else' );
     like( $rsh, qr{-i \s /bogus/domains/vm[.]test/key[.]rsa}, 'and the key, for the same reason' );
@@ -62,7 +76,8 @@ subtest 'the ssh rsync is told to use' => sub {
     like( $rsh, qr{StrictHostKeyChecking=no},     'a host key nobody has seen is expected here' );
     like( $rsh, qr{UserKnownHostsFile=/dev/null}, 'and is not written down afterwards' );
 
-    unlike( Trog::Machine->new( host => 'hv.test' )->_rsh, qr{-i}, 'no key, no -i naming a file that is not there' );
+    my $keyless = rsync_for( Trog::Machine->new( host => 'hv.test' ), '/bogus/lib/deluged', "$dir/deluged" );
+    unlike( $keyless->{built}{rsh}, qr{-i}, 'no key, no -i naming a file that is not there' );
 };
 
 subtest 'every machine gets a connection of its own' => sub {
@@ -104,18 +119,15 @@ subtest 'the port the far side listens on' => sub {
 };
 
 subtest 'what get_dir asks rsync for' => sub {
-    my $dir  = tempdir( CLEANUP => 1 );
-    my $mock = Test::MockModule->new('Trog::Machine');
-    my @asked;
-    $mock->redefine( _rsync => sub { shift; push( @asked, [@_] ); 1 } );
+    my $dir = tempdir( CLEANUP => 1 );
+    my $got = rsync_for( remote(), '/bogus/lib/deluged', "$dir/deep/deluged", exclude => ['secrets.key'], update => 1, sudo => 1 );
+    ok( $got->{returned}, 'it comes' );
 
-    ok( remote()->get_dir( '/bogus/lib/deluged', "$dir/deep/deluged", exclude => ['secrets.key'], update => 1, sudo => 1 ), 'it comes' );
-
-    is( $asked[0][0], 'someadmin@hv.test:/bogus/lib/deluged/', 'the guest is the source' );
-    is( $asked[0][1], "$dir/deep/deluged/",                    'and we are the destination' );
+    is( $got->{moved}{src},  'someadmin@hv.test:/bogus/lib/deluged/', 'the guest is the source' );
+    is( $got->{moved}{dest}, "$dir/deep/deluged/",                    'and we are the destination' );
     is_deeply(
-        { @{ $asked[0] }[ 2 .. $#{ $asked[0] } ] },
-        { exclude => ['secrets.key'], update => 1, sudo => 1 },
+        [ @{ $got->{built} }{qw{exclude update rsync-path}} ],
+        [ ['secrets.key'], 1, 'sudo -n rsync' ],
         'with what must not come down, what must not come back, and who to read it as'
     );
 
@@ -152,14 +164,8 @@ subtest 'a privileged fetch asks the far end to be root, and not to wait for a p
 
     # A real destination, because get_dir makes the path above it before rsync
     # is reached -- see the subtest above.
-    my $dir  = tempdir( CLEANUP => 1 );
-    my $mock = Test::MockModule->new('File::Rsync');
-    my %built;
-    $mock->redefine( new  => sub { my ( $class, %args ) = @_; %built = %args; return bless {}, $class } );
-    $mock->redefine( exec => sub { return 1 } );
-    $mock->redefine( out  => sub { return [] } );
-
-    remote()->get_dir( '/bogus/lib/redis', "$dir/redis", sudo => 1 );
+    my $dir   = tempdir( CLEANUP => 1 );
+    my %built = %{ rsync_for( remote(), '/bogus/lib/redis', "$dir/redis", sudo => 1 )->{built} };
 
     # A service keeps its state in a directory it owns and nobody else can open,
     # so an unprivileged rsync walks the tree, makes the local directories,
@@ -172,8 +178,8 @@ subtest 'a privileged fetch asks the far end to be root, and not to wait for a p
     # failing where somebody can see it.
     like( $built{'rsync-path'}, qr/\s-n\b/, 'and it fails rather than waiting when sudo would ask' );
 
-    remote()->get_dir( '/bogus/lib/deluged', "$dir/deluged" );
-    ok( !exists $built{'rsync-path'}, 'an ordinary fetch stays unprivileged' );
+    my $ordinary = rsync_for( remote(), '/bogus/lib/deluged', "$dir/deluged" );
+    ok( !exists $ordinary->{built}{'rsync-path'}, 'an ordinary fetch stays unprivileged' );
 };
 
 subtest 'rsync moves what changed and nothing else' => sub {
@@ -218,7 +224,7 @@ subtest 'a transfer that fails says which one, and does not pretend' => sub {
 subtest 'a file read off a remote machine comes back whole' => sub {
 
     # Net::OpenSSH::capture returns one element per line in list context, and
-    # _unhang calls what it is given in list context and hands a scalar caller
+    # unhang calls what it is given in list context and hands a scalar caller
     # the first element -- so read_text came back as line one of the file.
     # Measured against a 233-line authorized_keys: 608 bytes of 128667.
     #
@@ -234,7 +240,7 @@ subtest 'a file read off a remote machine comes back whole' => sub {
     my $got = remote()->read_text('/bogus/authorized_keys');
     is( $got, $file, 'every line of it, with the trailing newline the file has' );
 
-    # The call has to say so itself; _unhang cannot know what its caller wanted.
+    # The call has to say so itself; unhang cannot know what its caller wanted.
     ok( $ssh->{scalar_context}, 'because capture was asked in scalar context' );
 };
 
@@ -287,31 +293,65 @@ subtest 'a file copied here with sudo gets the mode it was asked for' => sub {
     is_deeply( $sudo[-1], [qw{chmod 0644 /bogus/root/devices.map}], 'or 0644, whatever the umask of root' );
 };
 
+{
+    # Net::OpenSSH's capture2 on a machine whose sudo refuses the first command
+    # with $said on stderr, and runs every later one.
+    package FakeSudo;
+
+    sub new { my ( $class, $said ) = @_; return bless { said => $said, sent => 0 }, $class }
+
+    sub capture2 {
+        my ($self) = @_;
+        ## no critic (Variables::RequireLocalizedPunctuationVars) -- run_sudo reads it afterwards, as it would from the real call
+        if ( !$self->{sent}++ ) {
+            $? = 1 << 8;
+            return ( undef, $self->{said} );
+        }
+        $? = 0;
+        return ( q{}, q{} );
+    }
+}
+
+# What run_sudo made of $said, the first thing sudo said: whether it gave the
+# exit code back, asked for a password, or said the last one was wrong and
+# asked again.  A password was given before the run, so asking never prompts.
+sub sudo_reads ($said) {
+    Trog::Machine::forget_sudo_passwords();
+    Trog::Credentials->forget();
+    Trog::Credentials->remember( 'sudo', 'hunter2' );
+
+    my $ssh  = FakeSudo->new($said);
+    my $mock = Test::MockModule->new('Trog::Machine');
+    $mock->redefine( ssh => sub { $ssh } );
+
+    my ( $stderr, $rc ) = capture_stderr { remote()->run_sudo(qw{true}) };
+    Trog::Credentials->forget();
+
+    my $sorry = $stderr =~ m/Sorry,[ ]try[ ]again/;
+    return 'given back'  if $rc == 1 && $ssh->{sent} == 1 && !$sorry;
+    return 'asked'       if $rc == 0 && $ssh->{sent} == 2 && !$sorry;
+    return 'asked again' if $rc == 0 && $ssh->{sent} == 2 && $sorry;
+    return "something else: exit $rc after $ssh->{sent} commands, saying '$stderr'";
+}
+
 subtest 'what sudo says when it wants a password it cannot ask for' => sub {
-    my $wants = sub { Trog::Machine::_wants_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( sudo_reads("sudo: a password is required\n"),                                                'asked', 'sudo -n with no passwordless sudo' );
+    is( sudo_reads("sudo: password is required\n"),                                                  'asked', 'and without the article' );
+    is( sudo_reads("sudo: a terminal is required to read the password; either use the -S option\n"), 'asked', 'no terminal to read one at' );
+    is( sudo_reads("sudo: no password was provided\n"),                                              'asked', 'and -S given nothing' );
 
-    is( $wants->("sudo: a password is required\n"),                                                1, 'sudo -n with no passwordless sudo' );
-    is( $wants->("sudo: password is required\n"),                                                  1, 'and without the article' );
-    is( $wants->("sudo: a terminal is required to read the password; either use the -S option\n"), 1, 'no terminal to read one at' );
-    is( $wants->("sudo: no password was provided\n"),                                              1, 'and -S given nothing' );
-
-    is( $wants->("sudo: 1 incorrect password attempt\n"), 0, 'a wrong password is not a missing one' );
-    is( $wants->("a password is required\n"),             0, 'and nothing sudo did not say' );
-    is( $wants->(q{}),                                    0, 'nothing said is nothing wanted' );
-    is( $wants->(undef),                                  0, 'and neither is nothing captured' );
+    is( sudo_reads("a password is required\n"), 'given back', 'and nothing sudo did not say' );
+    is( sudo_reads(q{}),                        'given back', 'nothing said is nothing wanted' );
+    is( sudo_reads(undef),                      'given back', 'and neither is nothing captured' );
 };
 
 subtest 'what sudo says when the password it was given is wrong' => sub {
-    my $wrong = sub { Trog::Machine::_wrong_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( sudo_reads("sudo: 1 incorrect password attempt\n"),  'asked again', 'one bad attempt, as sudo counts them' );
+    is( sudo_reads("sudo: 3 incorrect password attempts\n"), 'asked again', 'and several' );
+    is( sudo_reads("Sorry, try again.\n"),                   'asked again', 'the line it prints between attempts' );
 
-    is( $wrong->("sudo: 1 incorrect password attempt\n"),  1, 'one bad attempt, as sudo counts them' );
-    is( $wrong->("sudo: 3 incorrect password attempts\n"), 1, 'and several' );
-    is( $wrong->("Sorry, try again.\n"),                   1, 'the line it prints between attempts' );
-
-    is( $wrong->("sudo: a password is required\n"),     0, 'wanting a password is not having been given a wrong one' );
-    is( $wrong->("sudo: incorrect password attempt\n"), 0, 'nor is a count that is not there' );
-    is( $wrong->(q{}),                                  0, 'nothing said is nothing wrong' );
-    is( $wrong->(undef),                                0, 'and neither is nothing captured' );
+    is( sudo_reads("sudo: a password is required\n"),     'asked',      'wanting a password is not having been given a wrong one' );
+    is( sudo_reads("sudo: incorrect password attempt\n"), 'given back', 'nor is a count that is not there' );
 };
 
 Test::NoWarnings::had_no_warnings();

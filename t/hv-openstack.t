@@ -56,7 +56,7 @@ use Trog::HV::OpenStack();
         return bless { calls => [], servers => [], images => [], volumes => [], %state }, $class;
     }
 
-    sub _record {
+    sub record {
         my ( $self, $what, @args ) = @_;
         push @{ $self->{calls} }, [ $what, @args ];
         return;
@@ -72,7 +72,7 @@ use Trog::HV::OpenStack();
 
     sub list_images {
         my ( $self, %query ) = @_;
-        $self->_record( list_images => \%query );
+        $self->record( list_images => \%query );
 
         # Glance filters on the os_ properties image_for_distro asks by.
         my @os = grep { m/\Aos_/ } keys %query;
@@ -108,7 +108,7 @@ use Trog::HV::OpenStack();
 
     sub server_from_uid {
         my ( $self, $uid ) = @_;
-        $self->_record( server_from_uid => $uid );
+        $self->record( server_from_uid => $uid );
         my ($full) = grep { $_->{id} eq $uid } @{ $self->{servers} };
         return $full;
     }
@@ -118,21 +118,35 @@ use Trog::HV::OpenStack();
 
     sub create_vm {
         my ( $self, %opts ) = @_;
-        $self->_record( create_vm => \%opts );
+        $self->record( create_vm => \%opts );
         return { id => 'new-uuid', name => $opts{name}, status => 'ACTIVE', floating_ip_address => '203.0.113.9' };
     }
 
     sub delete_server {
         my ( $self, $uid ) = @_;
-        $self->_record( delete_server => $uid );
+        $self->record( delete_server => $uid );
         @{ $self->{servers} } = grep { $_->{id} ne $uid } @{ $self->{servers} };
         return 1;
     }
 
-    sub delete_volume { my ( $s, $id ) = @_; $s->_record( delete_volume => $id ); return 1 }
-    sub create_volume { my ( $s, %o )  = @_; $s->_record( create_volume => \%o ); return { id => 'vol-new', %o } }
-    sub create_image  { my ( $s, @a )  = @_; $s->_record( create_image  => @a );  return 1 }
-    sub server_action { my ( $s, @a )  = @_; $s->_record( server_action => @a );  return 1 }
+    # A call to Nova at a microversion goes around MetaAPI's own calls, to the
+    # client of the compute service in its route.  The fake is all of those,
+    # records the call, and answers with nova_answer.
+    sub route    ($self)      { return $self }
+    sub service  ( $self, $ ) { return $self }
+    sub client   ($self)      { return $self }
+    sub root_uri ( $, $path ) { return $path }
+
+    sub call {
+        my ( $self, @args ) = @_;
+        $self->record( call => @args );
+        return $self->{nova_answer} // {};
+    }
+
+    sub delete_volume { my ( $s, $id ) = @_; $s->record( delete_volume => $id ); return 1 }
+    sub create_volume { my ( $s, %o )  = @_; $s->record( create_volume => \%o ); return { id => 'vol-new', %o } }
+    sub create_image  { my ( $s, @a )  = @_; $s->record( create_image  => @a );  return 1 }
+    sub server_action { my ( $s, @a )  = @_; $s->record( server_action => @a );  return 1 }
 }
 
 my $FAKE;
@@ -643,9 +657,6 @@ subtest 'volumes' => sub {
 };
 
 subtest 'a guest that is there already is rebuilt, not replaced' => sub {
-    my @asked;
-    $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return {} } );
-
     my $hv = cloud();
     $FAKE = Test::FakeCloud->new(
         servers => [ { id => 's1',    name => 'vm.example.com', status => 'ACTIVE' } ],
@@ -654,15 +665,16 @@ subtest 'a guest that is there already is rebuilt, not replaced' => sub {
 
     my $server = $hv->rebuild_guest( 'vm.example.com', image => 'noble', user_data => "#cloud-config\n" );
 
-    is_deeply $asked[0],
-      [ POST => '/servers/s1/action', { rebuild => { imageRef => 'img-1', user_data => MIME::Base64::encode_base64( "#cloud-config\n", '' ) } }, '2.57' ],
+    is_deeply [ $FAKE->calls_to('call') ],
+      [ [ call => POST => { 'OpenStack-API-Version' => 'compute 2.57' }, '/servers/s1/action', { rebuild => { imageRef => 'img-1', user_data => MIME::Base64::encode_base64( "#cloud-config\n", '' ) } } ] ],
       'a rebuild onto the image, with the new payload, at the microversion that takes it';
     is $server->{id},                           's1', 'the same server comes back';
     is scalar $FAKE->calls_to('delete_server'), 0,    'and nothing was deleted to get there';
 
-    @asked = ();
+    $FAKE->{calls} = [];
     $hv->rebuild_guest( 'vm.example.com', image => '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b' );
-    is $asked[0][2]{rebuild}{imageRef}, '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b', 'an image named by id is used as it is';
+    my ($by_id) = $FAKE->calls_to('call');
+    is $by_id->[4]{rebuild}{imageRef}, '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b', 'an image named by id is used as it is';
 
     like exception { $hv->rebuild_guest( 'vm.example.com', image => 'nosuch' ) }, qr/no[ ]image[ ]called[ ]'nosuch'/,
       'an image that is not there is said, not sent';
@@ -674,8 +686,6 @@ subtest 'a guest that is there already is rebuilt, not replaced' => sub {
     $FAKE->{servers}[0]{fault}  = { message => 'No valid host was found' };
     like exception { $hv->rebuild_guest( 'vm.example.com', image => 'noble' ) }, qr/left[ ]it[ ]in[ ]ERROR:[ ]No[ ]valid[ ]host[ ]was[ ]found/,
       'a rebuild that failed says so at once, with what Nova said';
-
-    $mock->unmock('_nova');
 };
 
 subtest 'nothing to prepare, release or clear up after' => sub {
@@ -728,32 +738,28 @@ subtest 'what bin/debug_boot can ask a cloud for' => sub {
     is_deeply [ sort $hv->debug_actions ], [qw{console fetch vnc}], 'the three Nova answers, and not the ones that need a disk or a domain';
     is $hv->console_capture( 'vm.example.com', wait => 45 ), 0, 'nothing is restarted to read a console the cloud already keeps';
 
-    my @asked;
-    $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return { output => "[    0.000000] Linux version 6.8.0\n" } } );
-
+    $FAKE->{nova_answer} = { output => "[    0.000000] Linux version 6.8.0\n" };
     is $hv->console_output('vm.example.com'), "[    0.000000] Linux version 6.8.0\n", 'the console log comes back as text';
-    is_deeply $asked[0], [ POST => '/servers/s1/action', { 'os-getConsoleOutput' => { length => 5000 } } ],
+    is_deeply [ $FAKE->calls_to('call') ], [ [ call => POST => {}, '/servers/s1/action', { 'os-getConsoleOutput' => { length => 5000 } } ] ],
       'asked of the server, for enough lines to hold a boot';
 
-    $mock->redefine( _nova => sub { return {} } );
+    $FAKE->{nova_answer} = {};
     is $hv->console_output('vm.example.com'), undef, 'a server with no console output says none rather than an empty file';
 
-    @asked = ();
-    $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return { remote_console => { type => 'novnc', url => 'https://cloud.test/vnc_auto.html?token=abc' } } } );
+    $FAKE->{calls}       = [];
+    $FAKE->{nova_answer} = { remote_console => { type => 'novnc', url => 'https://cloud.test/vnc_auto.html?token=abc' } };
 
     my ( $advice, $url ) = $hv->vnc_access('vm.example.com');
     is $url, 'https://cloud.test/vnc_auto.html?token=abc', 'the console URL is the thing to act on';
     like $advice, qr/Open[ ]this[ ]in[ ]a[ ]browser/, 'and the advice says what to do with it';
     like $advice, qr/expires[ ]the[ ]token/,          'and that it does not keep';
-    is_deeply $asked[0], [ POST => '/servers/s1/remote-consoles', { remote_console => { protocol => 'vnc', type => 'novnc' } }, '2.6' ],
+    is_deeply [ $FAKE->calls_to('call') ], [ [ call => POST => { 'OpenStack-API-Version' => 'compute 2.6' }, '/servers/s1/remote-consoles', { remote_console => { protocol => 'vnc', type => 'novnc' } } ] ],
       'asked through remote-consoles, at the microversion that has it';
 
-    $mock->redefine( _nova => sub { return {} } );
+    $FAKE->{nova_answer} = {};
     like exception { $hv->vnc_access('vm.example.com') }, qr/no[ ]display[ ]to[ ]connect[ ]to/, 'a server the cloud gives no URL for says so';
 
     like exception { $hv->console_output('gone.example.com') }, qr/no[ ]guest[ ]called[ ]'gone\Nexample\Ncom'/, 'and a server that is not there is named';
-
-    $mock->unmock('_nova');
 };
 
 done_testing();
