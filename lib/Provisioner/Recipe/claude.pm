@@ -36,6 +36,38 @@ The recipe salvages F<.claude.json> from that directory on the old guest.
 
 SLOP in the ice machine.
 
+The directory of the domain is the C<HOME> of the agent, so these are the
+settings of the user, which apply wherever a session starts.  The settings of a
+project are the wrong place for the two sections below: a repository must not
+be able to declare itself trusted, and Claude Code did not read C<autoMode>
+from them when this was tested.
+
+=head2 AUTO MODE
+
+Auto mode lets a classifier approve or refuse each action of the agent.  Its
+configuration says where the trust boundary is: which organizations,
+repositories and hosts belong to the operator.  That is data about the
+operator, not about the recipe, so the recipe ships none.
+
+To give a domain one, put the value of C<autoMode> in
+F<claude.auto-mode.json> in the data directory of the domain.  From a settings
+file that already has one:
+
+    jq .autoMode ~/.claude/settings.json > $data_dir/claude.auto-mode.json
+
+C<claude_settings auto-mode> puts it in place of C<autoMode> in the settings on
+the guest, and every other key stays.  A domain with no such file gets the
+defaults of Claude Code.
+
+=head2 THE CHECKOUTS OF ADMINCODE
+
+On a guest that also runs L<Provisioner::Recipe::admincode>, each repository
+that it clones becomes an entry of C<permissions.additionalDirectories>, which
+is what C</add-dir> saves.  So the agent can work in any of them, and loads the
+skills in their F<.claude/skills>, wherever its session starts.  The admincode
+fragment queues C<claude_settings add-repos> as a postrun task, because it
+knows the C<basedir>, and this target can run after its own.
+
 =head2 RTK
 
 L<rtk|https://github.com/rtk-ai/rtk> filters the output of a shell command

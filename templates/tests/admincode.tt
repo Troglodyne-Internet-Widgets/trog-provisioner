@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Test::More;
 use JSON::PP ();
+use File::Basename qw{basename dirname};
 
 my $code = '[% install_dir %]/[% domain %]/[% basedir %]';
 ok(-d $code, 'code directory exists');
@@ -49,6 +50,21 @@ if (-f $repos_cache) {
         or diag "not under $code: @absent";
 }
 [% END -%]
+[% END -%]
+
+[% IF modules.grep('^claude$').size() %]
+# Each clone is a directory the agent may work in, from wherever its session
+# starts, which is what loads the skills of the repository.
+{
+    my $settings_path = '[% install_dir %]/[% domain %]/.claude/settings.json';
+    my $settings = eval { JSON::PP->new->decode(do { local (@ARGV, $/) = $settings_path; <> }) } // {};
+    my %added = map { $_ => 1 } @{ $settings->{permissions}{additionalDirectories} // [] };
+    # .* matches . and .., which are the basedir and its parent.
+    my @clones  = grep { basename($_) ne '.' && basename($_) ne '..' } map { dirname($_) } glob "$code/*/.git $code/.*/.git";
+    my @missing = grep { !$added{$_} } @clones;
+    is(scalar @missing, 0, 'every clone is an additional directory of the agent')
+        or diag "not in $settings_path: @missing";
+}
 [% END -%]
 
 [% FOR pkg IN extra_pkgs %]
