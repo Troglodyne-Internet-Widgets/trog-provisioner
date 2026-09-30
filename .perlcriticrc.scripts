@@ -111,6 +111,7 @@ formats = #!/usr/bin/perl
 [ProhibitRegexForSimpleSubstring]
 [RegularExpressions::ProhibitRegexToStripAffix]
 [RegularExpressions::ProhibitRegexToChomp]
+[RegularExpressions::ProhibitRegexForStringEquality]
 [BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [RequireQwForLiteralLists]

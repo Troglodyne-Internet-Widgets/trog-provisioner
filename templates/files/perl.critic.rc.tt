@@ -56,6 +56,7 @@ formats = #!/usr/bin/env perl
 [ProhibitRegexForSimpleSubstring]
 [RegularExpressions::ProhibitRegexToStripAffix]
 [RegularExpressions::ProhibitRegexToChomp]
+[RegularExpressions::ProhibitRegexForStringEquality]
 [BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [ProhibitUsageSubs]
