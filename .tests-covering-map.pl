@@ -56,9 +56,13 @@ profiles and the files that they read reach no test.  The pre-commit hook runs
 C<perltidy> and C<perlcritic> itself, and no test reads these files from this
 checkout.
 
-F<git-hooks/> is in the same position.  The hooks are shell, nothing loads them,
-and a change to one cannot break a test -- so running every test to find out
+F<git-hooks/pre-commit> is in the same position.  It is shell, nothing loads
+it, and a change to it cannot break a test -- so running every test to find out
 says nothing that reading the hook does not.
+
+=item F<git-hooks/post-commit>
+
+It stands for each test that names it.  F<t/post-commit.t> runs it as git does.
 
 =back
 
@@ -75,7 +79,7 @@ my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
   dist.ini weaver.ini .mailmap .perltidyrc .perlcriticrc .perlcriticrc.scripts
   scripts/.perlcriticrc .preferred_modules.ini .preferred_modules.scripts.ini
   .preferred_binaries.ini .pod_stopwords
-  git-hooks/pre-commit git-hooks/post-commit
+  git-hooks/pre-commit
 };
 
 # The path of each template, relative to the root, and the files that stand for
@@ -149,7 +153,7 @@ return sub {
         return @unique;
     }
 
-    return _tests_that_name($path) if $path =~ m{\Ascripts/[^/]+\z};
+    return _tests_that_name($path) if $path =~ m{\Ascripts/[^/]+\z} || $path eq 'git-hooks/post-commit';
 
     # bin/new_config copies it into the configuration of every domain.
     return 'bin/new_config' if $path eq 'openssl.conf';

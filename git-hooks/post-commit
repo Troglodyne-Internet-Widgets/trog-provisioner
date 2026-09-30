@@ -22,4 +22,13 @@ export AUTHOR_TESTING=1 RELEASE_TESTING=1
 
 command -v tests-covering >/dev/null 2>&1 || exit 0
 
+# Not while a rebase, or a cherry-pick or revert of several commits, applies
+# them.  git runs this hook for each commit that it applies, and each refresh
+# runs every stale test under Devel::Cover.  A refresh brings the records up to
+# the working tree, however many commits it missed, so the next commit after
+# the rebase catches them up.
+for state in rebase-merge rebase-apply sequencer; do
+    [ -d "$(git rev-parse --git-path "$state")" ] && exit 0
+done
+
 tests-covering --refresh --jobs "$(nproc 2>/dev/null || echo 1)" >/dev/null 2>&1 &
