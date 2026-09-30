@@ -1109,6 +1109,19 @@ subtest 'upstream_domains: the guests a domain needs up first, in the order to b
     like( $cycle, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/,   'both of them' );
     unlike( $cycle, qr/web[.]test[ ]names/, 'and not the guest that only leads into it' );
     like( $cycle, qr/set[ ]cache[ ]to[ ]empty/, 'saying how to break it' );
+
+    is_deeply(
+        [ map { "$_->{by} $_->{setting}" } Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf ) ],
+        [ 'cache.test logshipper.host', 'logs.test _global.cache' ],
+        'upstream_cycle returns the same cycle, and does not die'
+    );
+    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf, 'cache.test' ) ], [], 'with one of its guests up, there is none' );
+    is_deeply(
+        [ Provisioner::Cookbook->upstream_domains( 'web.test', \%conf, 'cache.test' ) ],
+        [qw{cache.test logs.test}],
+        'and upstream_domains returns both, the one that is up first'
+    );
+    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'plain.test', \%conf ) ], [], 'a domain that needs no guest of the cycle has none' );
 };
 
 subtest 'named_guests: each setting that names a guest here, and which' => sub {

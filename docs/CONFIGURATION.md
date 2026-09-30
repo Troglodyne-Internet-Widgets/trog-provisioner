@@ -613,6 +613,12 @@ logs.example.test:
         cache: ''
 ```
 
+A loop of guests that are all up stops nothing, because `bin/provision` leaves
+them as they are. So for the build of another guest, `bin/provision` names the
+loop and asks whether to go on. The loop still stops the next rebuild of one of
+its guests, and `--rebuild-upstream-guests` on another guest. With no terminal
+to ask on, `bin/provision` refuses, as it does for any loop.
+
 A guest is placed only on the network of the guests it needs; see
 [Networks](#networks). A guest that should run somewhere else, such as a cloud
 with caches of its own, needs a configuration of its own without those
