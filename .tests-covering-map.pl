@@ -37,8 +37,17 @@ every domain, for the ssl target of the makefile.
 
 =item A script under F<scripts/>
 
-A script that starts with C<#!/usr/bin/perl> runs on the system perl, which
-cannot record what it loads.  It stands for each test that names it.
+A script runs on the system perl of a guest, or in a shell, and neither records
+what it loads.  It stands for each test that names it, by its path or by its
+file name, and for F<t/new_config-packaging.t>, which packs every script into
+the payload of a guest.
+
+=item Files that the code reads at run time
+
+F<schema/ips.sql> stands for L<Provisioner::IPPool>, which builds F<ips.db>
+from it.  F<virtiofs-better> stands for L<Trog::HV::Libvirt>, which runs it on
+the hypervisor, and for each test that names it.
+F<hypervisors.conf.example> stands for each test that names it.
 
 =item A new recipe
 
@@ -47,12 +56,14 @@ new one.  A recipe that no test loads yet stands for the Cookbook.
 
 =item Documentation
 
-Markdown, F<docs/>, F<LICENSE> and F<CHANGES> reach no test.
+Markdown, F<docs/>, F<LICENSE>, F<CHANGES> and F<example.test/>, the example of
+the configuration of a domain, reach no test.
 
 =item Configuration of the tools, and the hooks that run them
 
-F<dist.ini>, F<weaver.ini>, F<.mailmap>, F<.perltidyrc>, the C<perlcritic>
-profiles and the files that they read reach no test.  The pre-commit hook runs
+F<dist.ini>, F<weaver.ini>, F<.mailmap>, F<.gitignore>, F<.perltidyrc>, the
+C<perlcritic> profiles and the files that they read, and F<.perl-slop.json>,
+which configures the gates of the perl-slop plugin, reach no test.  The pre-commit hook runs
 C<perltidy> and C<perlcritic> itself, and no test reads these files from this
 checkout.
 
@@ -70,13 +81,14 @@ Anything else is left unexplained, and the hook then runs every test.
 
 =cut
 
+use File::Basename();
 use File::Spec();
 use File::Temp();
 use Provisioner::Cookbook();
 
 # Read by the tools that the hook runs, and by dzil, and by no test.
 my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
-  dist.ini weaver.ini .mailmap .perltidyrc .perlcriticrc .perlcriticrc.scripts
+  dist.ini weaver.ini .mailmap .gitignore .perl-slop.json .perltidyrc .perlcriticrc .perlcriticrc.scripts
   scripts/.perlcriticrc .preferred_modules.ini .preferred_modules.scripts.ini
   .preferred_binaries.ini .pod_stopwords
   git-hooks/pre-commit
@@ -86,12 +98,28 @@ my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
 # it.  Built on the first call, because loading every recipe takes a second.
 my %stands_for;
 
+# The tests that name $name, as a whole word: a path, or a file name, which is
+# how most tests name a script.
+my sub tests_naming ($name) {
+    my @tests;
+    foreach my $test ( glob 't/*.t' ) {
+
+        # The test of this map names paths to ask the map about, not to read.
+        next if $test eq 't/tests-covering-map.t';
+        open( my $fh, '<', $test ) or die "Cannot read $test: $!";
+        my $source = do { local $/; <$fh> };
+        close($fh) or die "Cannot close $test: $!";
+        push @tests, $test if $source =~ m{(?<![\w.-])\Q$name\E(?![\w.-])};
+    }
+    return @tests;
+}
+
 return sub {
     my ($path) = @_;
 
     # NO_TESTS in Perl::Tests::Covering, spelled out so that the test of this
     # map does not need the module.
-    return q{} if $path =~ m{(?:[.]md|\ALICENSE|\ACHANGES)\z} || $path =~ m{\Adocs/};
+    return q{} if $path =~ m{(?:[.]md|\ALICENSE|\ACHANGES)\z} || $path =~ m{\A(?:docs|example[.]test)/};
 
     # Before the scripts, because scripts/.perlcriticrc is a link to the profile.
     return q{} if $TOOL_CONFIGURATION{$path};
@@ -135,18 +163,15 @@ return sub {
         return @unique;
     }
 
-    # The tests that name a script or the post-commit hook, because none of them
-    # loads it.
-    if ( $path =~ m{\Ascripts/[^/]+\z} || $path eq 'git-hooks/post-commit' ) {
-        my @tests;
-        foreach my $test ( glob 't/*.t' ) {
-            open( my $fh, '<', $test ) or die "Cannot read $test: $!";
-            my $source = do { local $/; <$fh> };
-            close($fh) or die "Cannot close $test: $!";
-            push @tests, $test if index( $source, $path ) >= 0;
-        }
+    if ( $path =~ m{\Ascripts/[^/]+\z} ) {
+        my %tests = map { $_ => 1 } tests_naming( File::Basename::basename($path) ), 't/new_config-packaging.t';
+        my @tests = sort keys %tests;
         return @tests;
     }
+
+    return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example';
+    return ( 'lib/Trog/HV/Libvirt.pm', tests_naming($path) ) if $path eq 'virtiofs-better';
+    return 'lib/Provisioner/IPPool.pm'                       if $path eq 'schema/ips.sql';
 
     # bin/new_config copies it into the configuration of every domain.
     return 'bin/new_config' if $path eq 'openssl.conf';
