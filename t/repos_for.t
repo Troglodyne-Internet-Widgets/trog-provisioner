@@ -153,14 +153,28 @@ subtest 'the cache is data rather than perl' => sub {
 };
 
 subtest 'a name that is not a plain directory component is refused' => sub {
-    my $nasty = repos_for(
-        args  => [ 'https://api.test/', 'mallory' ],
+    foreach my $name (qw{../escape . .. -oops a/b}) {
+        my $nasty = repos_for(
+            args  => [ 'https://api.test/', 'mallory' ],
+            home  => tempdir( CLEANUP => 1 ),
+            repos => { mallory => [ row( 'mallory', $name ) ] },
+        );
+        is( $nasty->{rc}, 1, "$name: the run reports something wrong" );
+        ok( !cloned( $nasty, $name ), "$name: and nothing is cloned to it" );
+        like( $nasty->{err}, qr/'\Q$name\E': [ ] not [ ] a [ ] plain [ ] directory [ ] name/x, "$name: saying which name" );
+    }
+};
+
+# GitHub keeps the profile of an organization in a repository named .github.
+subtest 'a name that starts with a dot is still a directory name' => sub {
+    my $dotted = repos_for(
+        args  => [ 'https://api.test/', 'org' ],
         home  => tempdir( CLEANUP => 1 ),
-        repos => { mallory => [ row( 'mallory', '../escape' ) ] },
+        repos => { org => [ row( 'org', '.github' ), row( 'org', '..hidden' ) ] },
     );
-    is( $nasty->{rc}, 1, 'the run reports something wrong' );
-    ok( !cloned( $nasty, '../escape' ), 'and nothing is cloned to it' );
-    like( $nasty->{err}, qr/not [ ] a [ ] plain [ ] directory [ ] name/x, 'saying which name' );
+    is( $dotted->{rc}, 0, 'the run succeeds' ) or diag $dotted->{err};
+    ok( cloned( $dotted, '.github' ),  '.github is cloned' );
+    ok( cloned( $dotted, '..hidden' ), 'and so is a name that only starts like ..' );
 };
 
 subtest 'an https clone that fails is retried over ssh' => sub {
