@@ -1,0 +1,180 @@
+#!/usr/bin/perl
+
+package Trog::ClaudeSettings;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use Fcntl          ();
+use File::Basename qw{dirname};
+use File::Glob     ();
+use File::Temp     ();
+use JSON::PP       ();
+use List::Util     ();
+
+my $USAGE = <<'EOF';
+usage: claude_settings auto-mode FRAGMENT SETTINGS
+       claude_settings add-repos BASEDIR SETTINGS
+EOF
+
+=head1 NAME
+
+claude_settings - put what the operator supplies into the settings of Claude
+Code
+
+=head1 SYNOPSIS
+
+    claude_settings auto-mode FRAGMENT SETTINGS
+    claude_settings add-repos BASEDIR SETTINGS
+
+C<SETTINGS> is the settings file to change.  Every key that the command does
+not name stays as it was.  The file keeps its owner and its mode.
+
+C<auto-mode> puts the JSON object in C<FRAGMENT>, the value of C<autoMode> in a
+settings file, in place of the C<autoMode> of C<SETTINGS>.  If C<FRAGMENT> does
+not exist, it changes nothing and exits 0.  Most domains have no fragment.
+
+C<add-repos> adds each git repository directly under C<BASEDIR> to
+C<permissions.additionalDirectories>, which is what C</add-dir> saves.  So the
+agent can work in each of them, and loads the skills in their
+F<.claude/skills>, from wherever its session starts.  The directories that are
+there already stay.
+
+=head1 FUNCTIONS
+
+=head2 $exit = main(@args)
+
+Runs the command in C<@args>, and returns the exit status.
+
+=cut
+
+# JSON::PP and not JSON, because this runs on the system perl of a guest, and
+# the claude recipe installs no JSON module.  JSON::PP is core since 5.014.
+my %COMMANDS = (
+    'auto-mode' => \&auto_mode,
+    'add-repos' => \&add_repos,
+);
+
+sub main {
+    my ( $command, @args ) = @_;
+
+    my $run = $COMMANDS{ $command // q{} };
+    die $USAGE if !$run || @args != 2 || List::Util::any { $_ eq q{} } @args;
+
+    return $run->(@args);
+}
+
+=head2 $exit = auto_mode($fragment_file, $settings_file)
+
+The C<auto-mode> command.
+
+=cut
+
+sub auto_mode {
+    my ( $fragment_file, $settings_file ) = @_;
+
+    return 0 unless -e $fragment_file;
+
+    my $fragment = read_json($fragment_file);
+    die "$fragment_file must hold a JSON object, the value of autoMode.\n"
+      unless ref $fragment eq 'HASH';
+
+    my $settings = read_settings($settings_file);
+    $settings->{autoMode} = $fragment;
+    write_json( $settings_file, $settings );
+
+    return 0;
+}
+
+=head2 $exit = add_repos($basedir, $settings_file)
+
+The C<add-repos> command.  A repository is a directory with a F<.git> in it.
+
+=cut
+
+sub add_repos {
+    my ( $basedir, $settings_file ) = @_;
+
+    die "$basedir is not a directory.\n" unless -d $basedir;
+    my @repos = map { dirname($_) } File::Glob::bsd_glob("$basedir/*/.git");
+
+    my $settings = read_settings($settings_file);
+    my $dirs     = $settings->{permissions}{additionalDirectories} //= [];
+    die "permissions.additionalDirectories in $settings_file must be a list.\n"
+      unless ref $dirs eq 'ARRAY';
+
+    my %seen;
+    @$dirs = grep { !$seen{$_}++ } @$dirs, sort @repos;
+    write_json( $settings_file, $settings );
+
+    return 0;
+}
+
+=head2 $data = read_settings($path)
+
+Decodes the settings file at C<$path>, and dies unless it holds a JSON object.
+
+=cut
+
+sub read_settings {
+    my ($path) = @_;
+
+    my $settings = read_json($path);
+    die "$path must hold a JSON object.\n" unless ref $settings eq 'HASH';
+
+    return $settings;
+}
+
+=head2 $data = read_json($path)
+
+Decodes the file at C<$path>, and dies with the path if it cannot.
+
+=cut
+
+sub read_json {
+    my ($path) = @_;
+
+    open my $fh, '<', $path or die "Cannot read $path: $!\n";
+    my $text = do { local $/; <$fh> };
+    close $fh or die "Cannot close $path: $!\n";
+
+    my $data;
+    eval { $data = JSON::PP->new->decode($text); 1 } or die "$path is not valid JSON: $@";
+
+    return $data;
+}
+
+=head2 write_json($path, $data)
+
+Replaces the file at C<$path> with C<$data> in one rename, so that a failure
+leaves the old file in place and not half of the new one.  The new file gets
+the owner and the mode of the old one.
+
+=cut
+
+sub write_json {
+    my ( $path, $data ) = @_;
+
+    my ( $mode, $uid, $gid ) = ( stat $path )[ 2, 4, 5 ];
+    die "Cannot stat $path: $!\n" unless defined $mode;
+
+    my $json = JSON::PP->new->canonical->pretty;
+    my $tmp  = File::Temp->new( DIR => dirname($path) );
+    print {$tmp} $json->encode($data) or die "Cannot write $tmp: $!\n";
+    close $tmp                        or die "Cannot close $tmp: $!\n";
+
+    # A postrun task runs as root, after the claude recipe gave the file to
+    # the admin, who must still be able to change it.
+    chown $uid, $gid, "$tmp" or die "Cannot chown $tmp: $!\n";
+    chmod Fcntl::S_IMODE($mode), "$tmp" or die "Cannot chmod $tmp: $!\n";
+    rename "$tmp", $path or die "Cannot rename $tmp to $path: $!\n";
+
+    # The name is the settings file now, so the object must not unlink it.
+    $tmp->unlink_on_destroy(0);
+
+    return;
+}
+
+exit main(@ARGV) unless caller;

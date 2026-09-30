@@ -21,6 +21,12 @@ cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /hom
 [% END -%]
 rm -f [% install_dir %]/[% domain %]/.repos_for.token
 [% END -%]
+[% IF modules.grep('^claude$').size() %]
+[%# Deferred, because the claude recipe installs the settings file, and its
+    target can run after this one.  Each clone becomes a directory the agent
+    may work in, whose skills it loads. -%]
+[% script_dir %]/queue_postrun_task [% script_dir %]/claude_settings add-repos [% install_dir %]/[% domain %]/[% basedir %] [% install_dir %]/[% domain %]/.claude/settings.json
+[% END -%]
 [% IF modules.grep('^perl$').size() %]
 [%# --notest always, because this smokes the suites of the repositories and not
     the suites of their dependencies.  smoke_perl_modules.pl runs those suites

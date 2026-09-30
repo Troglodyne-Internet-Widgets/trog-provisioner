@@ -51,6 +51,19 @@ if (-f $repos_cache) {
 [% END -%]
 [% END -%]
 
+[% IF modules.grep('^claude$').size() %]
+# Each clone is a directory the agent may work in, from wherever its session
+# starts, which is what loads the skills of the repository.
+{
+    my $settings_path = '[% install_dir %]/[% domain %]/.claude/settings.json';
+    my $settings = eval { JSON::PP->new->decode(do { local (@ARGV, $/) = $settings_path; <> }) } // {};
+    my %added = map { $_ => 1 } @{ $settings->{permissions}{additionalDirectories} // [] };
+    my @missing = grep { !$added{$_} } map { s{/[.]git\z}{}r } glob "$code/*/.git";
+    is(scalar @missing, 0, 'every clone is an additional directory of the agent')
+        or diag "not in $settings_path: @missing";
+}
+[% END -%]
+
 [% FOR pkg IN extra_pkgs %]
 {
     my $installed = `dpkg -s [% pkg %] 2>/dev/null`;

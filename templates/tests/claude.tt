@@ -61,4 +61,15 @@ SKIP: {
     }
 }
 
+# The auto mode configuration of the operator, where the domain has one.  A
+# domain without one keeps the defaults, which is the ordinary case.
+my $fragment_path = '[% install_dir %]/[% domain %]/claude.auto-mode.json';
+SKIP: {
+    skip 'this domain has no auto mode configuration', 1 unless -e $fragment_path;
+    skip 'settings did not parse', 1 unless $conf;
+
+    my $fragment = eval { decode_json(do { local (@ARGV, $/) = $fragment_path; <> }) };
+    is_deeply($conf->{autoMode}, $fragment, 'the settings carry the auto mode configuration of the domain');
+}
+
 done_testing();

@@ -1,6 +1,10 @@
 command -v claude >/dev/null 2>&1 || HOME='[% install_dir %]/[% domain %]' npm install -g --silent @anthropic-ai/claude-code
 install -m 0755 -o [% admin_user %] -g [% admin_user %] -d [% install_dir %]/[% domain %]/.claude
 mv claude.settings.json [% install_dir %]/[% domain %]/.claude/settings.json
+[%# The auto mode configuration of the operator, from the data directory of the
+    domain, if it has one.  After the mv, because every provision replaces the
+    settings file with one that knows nothing of it. -%]
+[% script_dir %]/claude_settings auto-mode '[% install_dir %]/[% domain %]/claude.auto-mode.json' '[% install_dir %]/[% domain %]/.claude/settings.json'
 [%# rtk, from the .deb its release publishes: one binary in /usr/bin that every
     account can run, and a version dpkg can be asked about.
 

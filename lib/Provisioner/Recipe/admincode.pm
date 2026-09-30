@@ -46,7 +46,9 @@ API also works.  F<scripts/repos_for> clones each repository as the admin user
 over https.  Then it sets the origin to the ssh URL, so the admin can push.
 
 The purpose is to set up a developer or an agent with all of their repositories
-in one step.  Supply the global git configuration of the admin through the
+in one step.  On a guest that also runs L<Provisioner::Recipe::claude>, each
+clone becomes a directory that the agent can work in, and whose skills it
+loads.  That recipe says how.  Supply the global git configuration of the admin through the
 C<skel> of L<Provisioner::Recipe::adminconfig>.
 
 If the C<perl> recipe is enabled, the CPAN dependencies of each repository are

@@ -73,6 +73,17 @@ subtest 'the host keys it asks git for are those of the host that serves ssh' =>
     is_deeply( $hosts_for->( 'https://api.github.com/', 'https://git.test.test/api/v1' ), [ 'github.com', 'git.test.test' ], 'each api_url for itself' );
 };
 
+# The settings file is the claude recipe's, and its target can run after this
+# one, so the clones are added once every target is done.
+subtest 'the checkouts are working directories of the agent only on a guest that runs claude' => sub {
+    my $alone = fresh()->render( %COMMON, modules => [qw{admincode}] );
+    unlike( $alone, qr/claude_settings/, 'a guest without claude leaves its settings alone' );
+
+    my $with   = fresh()->render( %COMMON, modules => [qw{admincode claude}] );
+    my $queued = 'queue_postrun_task /root/bin/claude_settings add-repos /opt/domains/code.test.test/src /opt/domains/code.test.test/.claude/settings.json';
+    ok( index( $with, $queued ) >= 0, 'a guest with it adds the basedir clones to the settings of the agent, after every target' ) or diag $with;
+};
+
 subtest 'the extra packages install at first boot, with the rest' => sub {
     my @deps = fresh()->deps( extra_pkgs => [qw{tig tmux}] );
     ok( ( grep { $_ eq 'tig' } @deps ) && ( grep { $_ eq 'tmux' } @deps ), 'the extra_pkgs of the operator are deps' );

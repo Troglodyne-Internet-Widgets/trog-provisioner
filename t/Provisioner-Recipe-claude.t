@@ -68,6 +68,16 @@ subtest 'rtk is registered after the settings are installed' => sub {
     like( $said, qr/HOME='[^']*\/agent\.test\.test'[^\n]*rtk[ ]init/, 'into the home the agent runs out of' );
 };
 
+# Every provision replaces the settings file.  Run before the mv, the auto mode
+# configuration goes into the file the mv then overwrites, and nothing says so.
+subtest 'the auto mode configuration goes into the installed settings' => sub {
+    my $said = recipe()->render(%G);
+
+    my $run = q{/root/bin/claude_settings auto-mode '/opt/domains/agent.test.test/claude.auto-mode.json' '/opt/domains/agent.test.test/.claude/settings.json'};
+    ok( index( $said, $run ) >= 0,                                                               'from the data directory of the domain, into its settings' ) or diag $said;
+    ok( index( $said, 'claude_settings auto-mode' ) > index( $said, 'mv claude.settings.json' ), 'after the settings file is in place' );
+};
+
 subtest 'where it fetches from, and what the cache keeps' => sub {
     my @hosts = recipe()->fetch_hosts();
     ok( ( grep { $_ eq 'github.com' } @hosts ), 'the release comes from GitHub' );
