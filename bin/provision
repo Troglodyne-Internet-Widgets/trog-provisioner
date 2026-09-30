@@ -212,59 +212,18 @@ breaks it, for example an empty C<cache> in the C<_global> of the log collector.
 
 =cut
 
-sub _coerce_array (@values) {
-    return \@values;
-}
-
 # The settings that are lists.  Config::Simple returns a string when the file
 # names one value, and an array reference when it names two.  Every recipe
 # expects an array, so without this a guest with one resolver is refused.
 my %LIST_SETTING = map { $_ => 1 } qw{resolvers ips packages transfer_ips};
 
-=head2 %settings = _settings($config)
-
-Returns all that F<provision.conf> says, as a plain hash, to give to a recipe.
-$config is the Config::Simple object of the file.  Each setting in
-C<%LIST_SETTING> is an array reference.
-
-Config::Simple puts the name of its block in front of each key.
-F<provision.conf> has no blocks, so a key comes back as C<default.image>, and a
-recipe that asks for C<image> does not find it.  This sub removes the prefix.
-It does not ask for the block by name.  C<< param(-block => 'default') >> works
-only on a file that Config::Simple reads as INI syntax.  It decides that from a
-[header] line, and F<provision.conf> has none.
-
-=cut
-
-sub _settings {
-    my ($config) = @_;
-
-    my %vars     = $config->vars();
-    my %settings = map { (s/\Adefault[.]//r) => $vars{$_} } keys %vars;
-
-    $settings{$_} = Provisioner::Utils::coerce_arrayref( $settings{$_} )
-      for grep { exists $settings{$_} } keys %LIST_SETTING;
-
-    return %settings;
-}
-
 #TODO: CPU and GPU passthrough acceleration, with techniques such as this one:
 # https://github.com/HarbourHeading/KVM-GPU-Passthrough
 
-=head2 $fh = _must_read($path, $what)
-
-Opens $path for reading and returns the handle.  If the open fails, it dies
-with C<$what: $path> and the reason.
-
-The open is the test.  A C<-f> test is true or false at a moment that is over
-when the code acts on it.  It also cannot tell a missing file from a file that
-this user cannot read.  This tool meets the second case, because it can run as
-a user that does not own the domain directory.  An open answers both
-questions, and the answer stays true while the handle is in use.
-
-=cut
-
-sub _must_read {
+# Opens $path for reading, or dies with "$what: $path" and the reason.  The open
+# is the test, not -f: this tool can run as a user that does not own the domain
+# directory, and only an open tells a missing file from one it cannot read.
+my sub must_read {
     my ( $path, $what ) = @_;
     open( my $fh, '<', $path ) or die "$what: $path ($!)\n";
     return $fh;
@@ -401,7 +360,22 @@ sub authorize_runner_key {
     die "$domain wants hypervisor access and the store had no key for it\n"
       unless $private && length( $values->{$private} // q{} );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a key of "0" is still a key
 
-    my $pubkey = _public_half( $domain, $values->{$private} );
+    # ssh_pubkey_from_private reads a key from a file, so the key goes to a
+    # temporary one that only this user can read, for as long as that takes.
+    my $pubkey = do {
+        my $tmp = File::Temp->new( UNLINK => 1 );
+        chmod 0600, $tmp->filename;
+        print {$tmp} "$values->{$private}\n";
+        $tmp->flush();
+
+        my $half = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
+        die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
+          unless $half;
+
+        # The comment names the line, so that a reader of authorized_keys can
+        # tell whose it is and remove it by hand.
+        "$half trog-provisioner runner $domain";
+    };
     File::Slurper::Temp::write_binary( "$domain_dir/$domain/hypervisor-key.pub", "$pubkey\n" );
 
     # from="<address>" when the domain holds one.  The address is stable,
@@ -426,34 +400,6 @@ sub authorize_runner_key {
 
     print "$domain now has $grant{access} on: " . join( ', ', sort keys %$hypervisors ) . "\n";
     return 1;
-}
-
-=head2 $pubkey = _public_half($domain, $private)
-
-Returns the public half of the private key $private, followed by the comment
-C<trog-provisioner runner $domain>.  It dies if
-C<Provisioner::Utils::ssh_pubkey_from_private> cannot read $private as a key.
-
-That function reads a key from a file, so this sub first writes $private to a
-temporary file with mode 0600.
-
-=cut
-
-sub _public_half {
-    my ( $domain, $private ) = @_;
-
-    my $tmp = File::Temp->new( UNLINK => 1 );
-    chmod 0600, $tmp->filename;
-    print {$tmp} "$private\n";
-    $tmp->flush();
-
-    my $pubkey = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
-    die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
-      unless $pubkey;
-
-    # The comment names the line, so that a reader of authorized_keys can tell
-    # whose it is and remove it by hand.
-    return "$pubkey trog-provisioner runner $domain";
 }
 
 # What to do about a rebuild that destroys the guest, as the
@@ -639,10 +585,10 @@ sub build_guest {
       unless defined $domain_dir_from_cli;
 
     my $cfile = "$domain_dir/$domain/provision.conf";
-    close( _must_read( $cfile, "No provision.conf for $domain" ) ) or die "Could not close $cfile: $!\n";
+    close( must_read( $cfile, "No provision.conf for $domain" ) ) or die "Could not close $cfile: $!\n";
 
     my $udf = "$domain_dir/$domain/users.yaml";
-    close( _must_read( $udf, "No users.yaml for $domain" ) ) or die "Could not close $udf: $!\n";
+    close( must_read( $udf, "No users.yaml for $domain" ) ) or die "Could not close $udf: $!\n";
 
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
@@ -652,7 +598,7 @@ sub build_guest {
     my $dconfig;
     if ($depends) {
         my $dcfile = "$domain_dir/$depends/provision.conf";
-        close( _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
+        close( must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
         $dconfig = Config::Simple->new($dcfile);
     }
 
@@ -681,7 +627,7 @@ sub build_guest {
 
     $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
-    close( _must_read( $data, "No data to host for $domain" ) ) or die "Could not close $data: $!\n";
+    close( must_read( $data, "No data to host for $domain" ) ) or die "Could not close $data: $!\n";
 
     # The storage pool, and the virtiofs shim that lets a guest mount a
     # directory of the hypervisor.  A hypervisor that has neither does nothing.
@@ -994,7 +940,14 @@ sub provision_domain (%args) {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
-    my %settings = _settings($config);
+    # All that provision.conf says, as a plain hash for a recipe, without the
+    # "default." that Config::Simple puts in front of each key.  Not
+    # param(-block => 'default'), which works only on a file with a [header]
+    # line, and provision.conf has none.
+    my %vars     = $config->vars();
+    my %settings = map { (s/\Adefault[.]//r) => $vars{$_} } keys %vars;
+    $settings{$_} = Provisioner::Utils::coerce_arrayref( $settings{$_} )
+      for grep { exists $settings{$_} } keys %LIST_SETTING;
 
     if ( $hv->rebuild_destroys_guest( $domain, capacity => $settings{size} ) ) {
         my $behavior = $nonreusable // $NONREUSABLE{ask};
@@ -1142,7 +1095,7 @@ C<primary_adapter>.
 sub merge_guest_addresses (%args) {
     my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @args{qw{guest hv config domain_dir domain built_for}};
 
-    my $ips         = _coerce_array( $config->param('ips') );
+    my $ips         = [ $config->param('ips') ];
     my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
     my $parsed      = YAML::XS::Load($existing_nc);
 
