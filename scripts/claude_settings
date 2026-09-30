@@ -90,7 +90,8 @@ sub auto_mode {
 
 =head2 $exit = add_repos($basedir, $settings_file)
 
-The C<add-repos> command.  A repository is a directory with a F<.git> in it.
+The C<add-repos> command.  A repository is a directory with a F<.git> in it,
+such as F<.github>, whose name starts with a dot.  C<.> and C<..> are not.
 
 =cut
 
@@ -98,7 +99,7 @@ sub add_repos {
     my ( $basedir, $settings_file ) = @_;
 
     die "$basedir is not a directory.\n" unless -d $basedir;
-    my @repos = map { dirname($_) } File::Glob::bsd_glob("$basedir/*/.git");
+    my @repos = grep { !m{/[.][.]?\z} } map { dirname($_) } File::Glob::bsd_glob("$basedir/*/.git"), File::Glob::bsd_glob("$basedir/.*/.git");
 
     my $settings = read_settings($settings_file);
     my $dirs     = $settings->{permissions}{additionalDirectories} //= [];

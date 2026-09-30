@@ -112,18 +112,21 @@ sub basedir_with {
     my $base = tempdir( CLEANUP => 1 );
     make_path("$base/$_/.git") for @repos;
     make_path("$base/not-a-repo");
+
+    # The basedir a repository itself, which .*/.git matches as ./.git.
+    make_path("$base/.git");
     write_file( "$base/a-file", "\n" );
     return $base;
 }
 
 subtest 'add-repos: each clone becomes an additional directory' => sub {
-    my $base = basedir_with(qw{beta alpha});
+    my $base = basedir_with(qw{beta alpha .github});
     my $dir  = home();
 
     is( run( 'add-repos', $base, "$dir/settings.json" ), 0, 'exits 0' );
     my $got = settings_in($dir);
-    is_deeply( $got->{permissions}{additionalDirectories}, [ "$base/alpha", "$base/beta" ], 'the repositories and nothing else under the basedir' );
-    is_deeply( $got->{enabledPlugins},                     $SETTINGS{enabledPlugins},       'and the rest of the settings stay' );
+    is_deeply( $got->{permissions}{additionalDirectories}, [ "$base/.github", "$base/alpha", "$base/beta" ], 'the repositories and nothing else under the basedir, a name with a leading dot too' );
+    is_deeply( $got->{enabledPlugins},                     $SETTINGS{enabledPlugins},                        'and the rest of the settings stay' );
 };
 
 subtest 'add-repos: what is there already stays, once' => sub {

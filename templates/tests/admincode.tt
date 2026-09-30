@@ -58,7 +58,7 @@ if (-f $repos_cache) {
     my $settings_path = '[% install_dir %]/[% domain %]/.claude/settings.json';
     my $settings = eval { JSON::PP->new->decode(do { local (@ARGV, $/) = $settings_path; <> }) } // {};
     my %added = map { $_ => 1 } @{ $settings->{permissions}{additionalDirectories} // [] };
-    my @missing = grep { !$added{$_} } map { s{/[.]git\z}{}r } glob "$code/*/.git";
+    my @missing = grep { !$added{$_} && !m{/[.][.]?\z} } map { s{/[.]git\z}{}r } glob "$code/*/.git $code/.*/.git";
     is(scalar @missing, 0, 'every clone is an additional directory of the agent')
         or diag "not in $settings_path: @missing";
 }
