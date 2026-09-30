@@ -27,6 +27,7 @@ use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
 use IPC::Run3();
+use Time::HiRes qw{sleep time};
 use FindBin;
 
 use FindBin::libs;

@@ -13,6 +13,7 @@ use parent 'Trog::HV::Cloud';
 use List::Util qw{first};
 use MIME::Base64();
 
+use Time::HiRes qw{sleep time};
 use Provisioner::Cookbook();
 
 use Trog::OpenStack::Auth();

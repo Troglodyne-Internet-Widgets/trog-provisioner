@@ -13,6 +13,7 @@ use parent qw{Provisioner::Recipe};
 use File::Copy();
 use IO::Socket::SSL::Utils();
 
+use Time::HiRes qw{time};
 use Provisioner::Cookbook();
 use Provisioner::DNSRecipe();
 use Provisioner::Utils();
@@ -296,7 +297,7 @@ sub intermediate {
         CA        => 1,
         subject   => { commonName => "trog-provisioner acme intermediate for .$tld" },
         issuer    => [ $ca_cert, $ca_key ],
-        not_after => time + $INTERMEDIATE_DAYS * $DAY,
+        not_after => int(time) + $INTERMEDIATE_DAYS * $DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
         ext       => [ { sn => 'nameConstraints', data => "critical,permitted;DNS:.$tld,permitted;DNS:localhost" } ],
     );

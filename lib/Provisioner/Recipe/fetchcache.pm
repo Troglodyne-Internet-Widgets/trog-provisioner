@@ -15,6 +15,7 @@ use List::Util();
 use File::Slurper();
 use IO::Socket::SSL::Utils();
 
+use Time::HiRes qw{time};
 use Provisioner::Cookbook();
 use Provisioner::Utils();
 use Trog::Config();
@@ -536,7 +537,7 @@ sub authority {
     my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
         CA        => 1,
         subject   => { commonName => 'trog-provisioner fetch cache authority' },
-        not_after => time + AUTHORITY_DAYS * DAY,
+        not_after => int(time) + AUTHORITY_DAYS * DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
     );
 
@@ -573,7 +574,7 @@ sub certify {
         subject   => { commonName => $hosts[0] },
         purpose   => 'server',
         issuer    => [ $ca_cert, $ca_key ],
-        not_after => time + CERTIFICATE_DAYS * DAY,
+        not_after => int(time) + CERTIFICATE_DAYS * DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
         ext       => [ { sn => 'subjectAltName', data => join( ',', map { "DNS:$_" } @hosts ) } ],
     );

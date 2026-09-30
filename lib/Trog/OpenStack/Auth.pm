@@ -18,6 +18,7 @@ use File::Slurper::Temp();
 use OpenStack::Client();
 use Time::Piece();
 
+use Time::HiRes qw{time};
 use Trog::Config();
 use Trog::Credentials();
 use Trog::OpenStack::Config();

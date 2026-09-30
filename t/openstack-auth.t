@@ -22,6 +22,7 @@ use File::Slurper::Temp();
 use Cpanel::JSON::XS();
 use POSIX qw{strftime};
 
+use Time::HiRes qw{time};
 use FindBin::libs;
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.

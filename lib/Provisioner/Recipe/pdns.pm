@@ -42,6 +42,7 @@ use Net::IP;
 use File::Slurper;
 use Crypt::PRNG();
 
+use Time::HiRes qw{time};
 use Provisioner::Cookbook();
 
 # The API socket as the host sees it.  pdns binds /api.sock inside its chroot,
@@ -206,7 +207,7 @@ sub enrich {
         $opts{extra_records} = File::Slurper::read_text($extras);
     }
 
-    $opts{serial} = time;
+    $opts{serial} = int time;
 
     $opts{api_socket} = $API_SOCKET;
 

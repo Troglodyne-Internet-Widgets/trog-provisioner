@@ -9,6 +9,7 @@ use re '/aasx';
 use parent 'Trog::Machine';
 
 use Socket();
+use Time::HiRes qw{alarm};
 
 =head1 NAME
 
