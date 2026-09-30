@@ -20,6 +20,7 @@ use File::Temp  qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use IO::Socket::SSL::Utils();
+use List::Util();
 use Net::SSLeay();
 
 use FindBin::libs;
@@ -342,14 +343,6 @@ subtest 'the authority is made once, kept in the configuration directory, and it
 # each URL is taken for can be asked here rather than on a guest.
 subtest 'which kind each URL recipes fetch is taken for' => sub {
     my @CLASSES = $FETCHCACHE->classes();
-    my $kind    = sub {
-        my ($url) = @_;
-        return 'pass' if $url =~ m{^(?:$Provisioner::Recipe::fetchcache::PASSTHROUGH)};
-        foreach my $class (@CLASSES) {
-            return $class->{name} if !defined $class->{pattern} || $url =~ m{^(?:$class->{pattern})};
-        }
-        return 'none';
-    };
 
     my $sha = '2082d13bb195f3203d41a308b89417426a7deca1';
     foreach my $case (
@@ -377,7 +370,11 @@ subtest 'which kind each URL recipes fetch is taken for' => sub {
         [ 'github.com/o/r/info/refs?service=git-receive-pack'                                 => 'pass' ],
     ) {
         my ( $url, $want ) = @$case;
-        is( $kind->($url), $want, "$url is $want" );
+
+        # The passthrough, else the first class that takes it, as nginx does.
+        my $class = List::Util::first { !defined $_->{pattern} || $url =~ m{^(?:$_->{pattern})} } @CLASSES;
+        my $kind  = $url =~ m{^(?:$Provisioner::Recipe::fetchcache::PASSTHROUGH)} ? 'pass' : $class ? $class->{name} : 'none';
+        is( $kind, $want, "$url is $want" );
     }
 };
 

@@ -113,33 +113,10 @@ sub run {
     Trog::Secrets->create( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
     Trog::Credentials->remember( keepass => 'throwaway' );
 
-    my $tmpdir      = File::Temp::tempdir( CLEANUP => 1 );
-    my $recipe_file = _configuration( $tmpdir, $recipe );
+    my $tmpdir = File::Temp::tempdir( CLEANUP => 1 );
 
-    # By module name, never by path.  A file required once by path and once by
-    # name is compiled twice, and FATAL warnings make the second a death.
-    require_ok("Provisioner::Recipe::$recipe");
-    my $r = "Provisioner::Recipe::$recipe"->new( output_dir => $tmpdir );
-
-    # t/recipes-remotetests.t checks that there are some, without AUTHOR_TESTING.
-    my @tests = $r->tests();
-
-    _generates(
-        recipe => $recipe,
-        tmpdir => $tmpdir,
-        config => $recipe_file,
-        tests  => \@tests,
-        files  => { $r->template_files() },
-    );
-    done_testing();
-    return;
-}
-
-# Writes the recipes.yaml of a run, with a domain for every recipe, and returns
-# its path.  Also makes what a recipe reads from the directory of the run.
-sub _configuration {
-    my ( $tmpdir, $recipe ) = @_;
-
+    # The recipes.yaml of the run, with a domain for every recipe, and what a
+    # recipe reads from the directory of the run.
     mkdir "$tmpdir/$_"           for qw{dotfiles dotfiles/someadmin data domains};
     mkdir "$tmpdir/data/$_.$TLD" for qw{data backup backupdestination};
     File::Touch::touch("$tmpdir/dotfiles/test");
@@ -195,17 +172,20 @@ sub _configuration {
     print {$rh} YAML::XS::Dump( \%config );
     close($rh) or die "Could not close $recipe_file: $!";
 
-    return $recipe_file;
-}
+    # By module name, never by path.  A file required once by path and once by
+    # name is compiled twice, and FATAL warnings make the second a death.
+    require_ok("Provisioner::Recipe::$recipe");
+    my $r = "Provisioner::Recipe::$recipe"->new( output_dir => $tmpdir );
 
-# Runs new_config for the domain of the recipe, and checks what it wrote.
-sub _generates {
-    my (%args) = @_;
-    my ( $recipe, $tmpdir, $tests, $files ) = @args{qw{recipe tmpdir tests files}};
+    # t/recipes-remotetests.t checks that there are some, without AUTHOR_TESTING.
+    my @tests = $r->tests();
 
+    my %files = $r->template_files();
+
+    # Run new_config for the domain of the recipe, and check what it wrote.
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--recipes', $args{config},
+            '--recipes', $recipe_file,
             '--skip_ssh',
             "$recipe.$TLD",
         )
@@ -215,13 +195,14 @@ sub _generates {
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- each is a file that this run just made, in a directory that nothing else can see
     my $ddir = "$tmpdir/domains/$recipe.$TLD";
     ok( -f "$ddir/$_", "$_ generated" )            for qw{Makefile data.tar.gz provision.conf users.yaml};
-    ok( -f "$ddir/$_", "$_ generated in datadir" ) for values %$files;
+    ok( -f "$ddir/$_", "$_ generated in datadir" ) for values %files;
 
-    foreach my $test (@$tests) {
+    foreach my $test (@tests) {
         my $tname = $test =~ s/tt\z/t/r;
         ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname" );
     }
     ## use critic
+    done_testing();
     return;
 }
 
