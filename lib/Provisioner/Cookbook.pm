@@ -1226,26 +1226,10 @@ sub host_of {
     return;
 }
 
-=head2 @domains = $class->upstream_domains($domain, $conf)
-
-The domains whose guests must be up before the guest of C<$domain> builds, in
-the order to build them: each after the ones it needs itself.  C<$domain> is
-not among them.  C<$conf> is as in C<domain_config>.
-
-A domain needs every other domain of the configuration that one of its settings
-names, as C<named_guests> finds them, and each domain that those need in turn.
-A domain built onto the guest of another, see C<host_of>, also needs what that
-guest needs, but not the guest itself, which F<bin/provision> builds as the
-host.
-
-Dies on a cycle, because no order builds each guest after the ones it needs.
-The message names each guest in the cycle and the setting that names the next
-one, so that a person can change one of those settings.
-
-=cut
-
-sub upstream_domains {
-    my ( $class, $domain, $conf ) = @_;
+# The order to build the guests that $domain needs, $domain among them, and
+# the steps of the cycle that stops the rest, as array references.  A guest of
+# @up waits for nothing, because this run does not build it.
+my sub upstream_order ( $class, $domain, $conf, @up ) {
     $conf //= $class->configuration();
 
     # Every guest that the domain needs, however far down, in the order found.
@@ -1261,35 +1245,82 @@ sub upstream_domains {
 
     # Each guest once all it needs is out, in the order found, until none is left
     # or none can go: then what is left needs itself, round a cycle.
+    my %up = map { $_ => 1 } @up;
     my ( @order, %out );
     while (
         my @ready = grep {
-                 !$out{$_}
-              && !( any { !$out{ $_->{domain} } } @{ $named{$_} } )
+            !$out{$_}
+              && ( $up{$_} || !( any { !$out{ $_->{domain} } } @{ $named{$_} } ) )
         } @found
     ) {
         $out{$_} = 1 for @ready;
         push( @order, @ready );
     }
-    if ( my @left = grep { !$out{$_} } @found ) {
+    my @left = grep { !$out{$_} } @found;
+    return ( \@order, [] ) unless @left;
 
-        # The cycle that the first guest left reaches, as the names that lead
-        # round it.  Every guest left needs one that is left, so the path
-        # meets itself.
-        my @path = ( $left[0] );
-        my @steps;
-        my $at;
-        while ( !defined $at ) {
-            my ($next) = grep { !$out{ $_->{domain} } } @{ $named{ $path[-1] } };
-            push( @steps, $next );
-            $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
-            push( @path, $next->{domain} );
-        }
-
-        die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @steps[ $at .. $#steps ] ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n";
+    # The cycle that the first guest left reaches, as the names that lead round
+    # it.  Every guest left needs one that is left, so the path meets itself.
+    my @path = ( $left[0] );
+    my @steps;
+    my $at;
+    while ( !defined $at ) {
+        my ($next) = grep { !$out{ $_->{domain} } } @{ $named{ $path[-1] } };
+        push( @steps, $next );
+        $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
+        push( @path, $next->{domain} );
     }
 
-    return grep { $_ ne $domain } @order;
+    return ( \@order, [ @steps[ $at .. $#steps ] ] );
+}
+
+=head2 @domains = $class->upstream_domains($domain, $conf, @up)
+
+The domains whose guests must be up before the guest of C<$domain> builds, in
+the order to build them: each after the ones it needs itself.  C<$domain> is
+not among them.  C<$conf> is as in C<domain_config>.
+
+A domain needs every other domain of the configuration that one of its settings
+names, as C<named_guests> finds them, and each domain that those need in turn.
+A domain built onto the guest of another, see C<host_of>, also needs what that
+guest needs, but not the guest itself, which F<bin/provision> builds as the
+host.
+
+C<@up> names guests that are up and that the caller does not build.  Each of
+them waits for nothing, so a cycle through them stops nothing.  They are still
+in the list, and so are the guests that they need.
+
+Dies on a cycle, because no order builds each guest after the ones it needs.
+The message names each guest in the cycle and the setting that names the next
+one, so that a person can change one of those settings.
+
+=cut
+
+sub upstream_domains {
+    my ( $class, $domain, $conf, @up ) = @_;
+
+    my ( $order, $cycle ) = upstream_order( $class, $domain, $conf, @up );
+    die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @{$cycle} ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n"
+      if @{$cycle};
+
+    return grep { $_ ne $domain } @{$order};
+}
+
+=head2 @steps = $class->upstream_cycle($domain, $conf, @up)
+
+The cycle that C<upstream_domains> dies on, and an empty list when there is
+none.  Each step is a hash reference as C<named_guests> returns it, and the
+C<by> of each step is the C<domain> of the step before it.  The arguments are
+as for C<upstream_domains>.  With the guests of this cycle added to C<@up>,
+it returns the next cycle, if there is one.
+
+=cut
+
+sub upstream_cycle {
+    my ( $class, $domain, $conf, @up ) = @_;
+
+    my ( undef, $cycle ) = upstream_order( $class, $domain, $conf, @up );
+    return @{$cycle};
 }
 
 =head2 @domains = $class->direct_upstream_domains($domain, $conf)

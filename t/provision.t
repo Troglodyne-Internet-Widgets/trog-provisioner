@@ -1302,6 +1302,39 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     $recipes = upstream_fixture( 'cache.test' => { fetchcache => {}, logshipper => { host => 'logs.test' } } );
     like( $run->('web.test'), qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming the setting' );
     is_deeply( \@built, [], 'before anything is built' );
+
+    %up = ( 'cache.test' => 'hv9' );
+    like( $run->('web.test'), qr/cannot[ ]be[ ]built/, 'and so is a cycle with a guest that is not up' );
+    is_deeply( \@built, [], 'still before anything is built' );
+
+    %up = ( 'cache.test' => 'hv9', 'logs.test' => 'hv9' );
+    like( $run->('web.test'), qr/no[ ]terminal/, 'a cycle of guests that are up stops the run with nobody to ask' );
+    is_deeply( \@built, [], 'before anything is built' );
+
+    my $local = Test::MockModule->new('Trog::Local');
+    my $utils = Test::MockModule->new('Trog::Utils');
+    my $answer;
+    $local->redefine( interactive => sub { 1 } );
+    $utils->redefine( prompt      => sub { $answer } );
+
+    $answer = 'n';
+    like( $run->('web.test'), qr/web[.]test[ ]was[ ]not[ ]built/, 'with a terminal, it asks, and no stops it' );
+    is_deeply( \@built, [], 'before anything is built' );
+
+    $answer = 'y';
+    is(
+        exception {
+            $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) }
+        },
+        undef,
+        'and yes goes on'
+    );
+    like( $said, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'after it names the cycle' );
+    like( $said, qr/none[ ]of[ ]them[ ]can[ ]be[ ]rebuilt/,                       'and what it stops' );
+    is_deeply( [ map { $_->{domain} } @built ], ['web.test'], 'building only the domain, and leaving both guests of the cycle alone' );
+
+    like( $run->(qw{--rebuild-upstream-guests web.test}), qr/cannot[ ]be[ ]built/, 'but --rebuild-upstream-guests, which would rebuild them, is refused' );
+    like( $run->('logs.test'),                            qr/cannot[ ]be[ ]built/, 'and so is a guest of the cycle itself' );
 };
 
 subtest 'guest_is_up asks the whole fleet, whatever --hypervisor names' => sub {

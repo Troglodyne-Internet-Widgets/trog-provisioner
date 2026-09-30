@@ -209,6 +209,9 @@ only.  When one fails, the run stops, and DOMAIN is not built.
 Two guests that each need the other are refused before anything is built,
 because no order builds both.  One line in the configuration of one of them
 breaks it, for example an empty C<cache> in the C<_global> of the log collector.
+If both are up, and this run does not rebuild them, the pair stops nothing that
+this run does.  Then provision names the pair and asks whether to go on.  With
+no terminal to ask on, it refuses, as before.
 
 =cut
 
@@ -492,12 +495,13 @@ sub main {
     # Said up front, because a setting that names a guest is enough to make it
     # needed, and nobody writes that down as a dependency.
     my $conf     = Provisioner::Cookbook->configuration($recipes);
-    my @upstream = Provisioner::Cookbook->upstream_domains( $domain, $conf );
+    my %there    = $rebuild_upstream ? () : cycles_left_up( $domain, $conf, %build );
+    my @upstream = Provisioner::Cookbook->upstream_domains( $domain, $conf, keys %there );
     foreach my $named ( map { Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
         print "$named->{by} names $named->{domain} in $named->{setting}, so it needs that guest up first.\n";
     }
     foreach my $upstream (@upstream) {
-        if ( !$rebuild_upstream && ( my $there = guest_is_up( $upstream, %build ) ) ) {
+        if ( !$rebuild_upstream && ( my $there = $there{$upstream} // guest_is_up( $upstream, %build ) ) ) {
             print "$upstream is up on $there, so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
             next;
         }
@@ -508,6 +512,51 @@ sub main {
 
     # Only the guest asked for takes --existing and --salvage-gaps-ok.
     return build_guest( %build, domain => $domain, reuse => $reuse, salvage_gaps_ok => $salvage_gaps_ok );
+}
+
+=head2 %there = cycles_left_up($domain, $conf, %args)
+
+The guests of each cycle among the guests that C<$domain> needs, see
+L<Provisioner::Cookbook/upstream_cycle>, when this run can leave every one of
+them as it is.  Each key is a guest, and its value is the hypervisor that has
+it, as C<guest_is_up> says.  C<%args> is as for C<guest_is_up>.  Returns an
+empty list when there is no cycle.
+
+A cycle stops a build only when the build has to make one of its guests.  When
+all of them are up, it stops only the next rebuild of one of them.  So this
+names the cycle and asks whether to go on, and dies on no.  With no terminal to
+ask on, it dies, as a cycle always did.
+
+It stops at the first cycle that this run cannot leave alone: one that holds
+C<$domain>, or a guest that is not up.  It returns what it found up to there,
+and C<upstream_domains> dies on that cycle with its own message.
+
+=cut
+
+sub cycles_left_up {
+    my ( $domain, $conf, %args ) = @_;
+
+    my %there;
+    while ( my @cycle = Provisioner::Cookbook->upstream_cycle( $domain, $conf, keys %there ) ) {
+        my @guests = map { $_->{by} } @cycle;
+        last if List::Util::any { $_ eq $domain } @guests;
+
+        my %found;
+        foreach my $guest (@guests) {
+            my $name = guest_is_up( $guest, %args ) or last;
+            $found{$guest} = $name;
+        }
+        last if scalar( keys %found ) < scalar(@guests);
+
+        print "These guests are up, and each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @cycle ) . "This run leaves them as they are, but none of them can be rebuilt until one of these settings changes.\n";
+        die "There is no terminal to ask whether to go on, so $domain was not built.\n" unless Trog::Local->interactive;
+        my $answer = Trog::Utils::prompt("Build $domain anyway? [y/N]:") // q{};
+        die "$domain was not built.\n" unless "$answer" =~ m/\A\s*y/i;
+
+        %there = ( %there, %found );
+    }
+
+    return %there;
 }
 
 =head2 $name = guest_is_up($domain, %args)
