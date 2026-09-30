@@ -20,6 +20,13 @@ export AUTHOR_TESTING=1 RELEASE_TESTING=1
 #
 # Install it: cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 
+# The perl this tree needs, which only a login shell finds: see pre-commit.
+if [ -x /opt/perl5/current/bin/perl ]
+then
+    PATH="/opt/perl5/current/bin:$PATH"
+    export PATH
+fi
+
 command -v tests-covering >/dev/null 2>&1 || exit 0
 
 tests-covering --refresh --jobs "$(nproc 2>/dev/null || echo 1)" >/dev/null 2>&1 &
