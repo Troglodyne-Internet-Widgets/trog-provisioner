@@ -63,27 +63,40 @@ sub refresh {
 # fetch once for each thing that module salvages -- and each of those used to be
 # its own ssh handshake against a machine that is about to be thrown away.
 subtest 'one connection per guest, however many times a run asks for one' => sub {
-    my $built = 0;
-    my $mock  = Test::MockModule->new('Trog::Guest');
+    my ( @built, @asked );
+    my $mock = Test::MockModule->new('Trog::Guest');
     $mock->redefine(
         new => sub {
             my ( $class, %opts ) = @_;
-            $built++;
-            return bless {%opts}, $class;
+            my $guest = bless {%opts}, $class;
+            push @built, $guest;
+            return $guest;
         }
     );
+    $mock->redefine( run_sudo => sub { my ($guest) = @_; push @asked, $guest; return 0 } );
 
-    my $first = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    my $again = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my sub refresh_on ($static_ip) {
+        return Trog::Provisioner::Config::Generator::refresh_salvage(
+            static_ip  => $static_ip,
+            admin_user => 'admin',
+            cfg_dir    => '/nonexistent',
+            module     => 'mariadb',
+            commands   => ['dump-it'],
+            watched    => [],
+        );
+    }
 
-    is( $built,       1,          'asking twice opens one connection' );
-    is( $again,       $first,     'and the second ask gets the one already open' );
-    is( $first->name, '10.0.0.1', 'the address it connects to is not the cidr it was given' );
+    refresh_on('10.0.0.1/24');
+    refresh_on('10.0.0.1/24');
+
+    is( scalar @built,     1,          'asking twice opens one connection' );
+    is( $asked[1],         $asked[0],  'and the second ask goes to the one already open' );
+    is( $built[0]->{host}, '10.0.0.1', 'the address it connects to is not the cidr it was given' );
 
     # A run configures several domains, and each of them is a different guest.
-    my $other = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.2/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    is( $built, 2, 'a different guest is a different connection' );
-    isnt( $other, $first, 'rather than the last one answered for it' );
+    refresh_on('10.0.0.2/24');
+    is( scalar @built, 2, 'a different guest is a different connection' );
+    isnt( $asked[2], $asked[0], 'rather than the last one answered for it' );
 };
 
 subtest 'a refresh that worked says nothing' => sub {

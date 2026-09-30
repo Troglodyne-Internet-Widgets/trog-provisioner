@@ -27,6 +27,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
+use File::Slurper();
 use File::Temp();
 use Provisioner::Utils();
 use Text::Xslate();
@@ -82,20 +83,11 @@ subtest "the Makefile moves the scripts into place" => sub {
         function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
     );
     my $out = $xslate->render_string(
-        _slurp("$FindBin::Bin/../templates/makefile.tt"),
+        File::Slurper::read_text("$FindBin::Bin/../templates/makefile.tt"),
         { state_dir => '/etc/provisioner/state/vm', script_dir => '/root/bin' }
     );
 
     like( $out, qr{^\tmv[ ]scripts/\*[ ]/root/bin/$}m, 'moves them out of the extracted tarball' );
 };
-
-sub _slurp {
-    my ($path) = @_;
-    open( my $fh, '<', $path ) or die "Could not read $path: $!";
-    local $/;
-    my $content = <$fh>;
-    close($fh) or die "Could not close $path: $!";
-    return $content;
-}
 
 done_testing();

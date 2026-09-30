@@ -168,6 +168,17 @@ RECIPES
     like( $result, qr/nostubresolver/,                  'and which recipe puts it in front for such a guest' );
 };
 
+# Plain open, not File::Slurper: loading that here would put it in memory ahead
+# of Test::MockFile, and anything compiled before the mock is installed opens
+# files for real.
+my sub slurp ($path) {
+    open( my $fh, '<', $path ) or die "Could not read $path: $!";
+    local $/;
+    my $content = <$fh>;
+    close($fh) or die "Could not close $path: $!";
+    return $content;
+}
+
 subtest "a domain with no recipe costs nothing" => sub {
 
     # auto_assign takes an address out of the pool for good, and get_secrets
@@ -201,7 +212,7 @@ RECIPES
     # this file sets in BEGIN rather than the basedir the rest of these mock.
     my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
 
-    my $before = _slurp("$basedir/recipes.yaml");
+    my $before = slurp("$basedir/recipes.yaml");
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
@@ -213,22 +224,10 @@ RECIPES
 
     like( $result, qr/No[ ]recipe[ ]configuration/i, 'it says the recipe is missing' );
     is(
-        _slurp("$basedir/recipes.yaml"), $before,
+        slurp("$basedir/recipes.yaml"), $before,
         'and recipes.yaml is untouched, so the typo cost no address'
     );
 };
-
-# Plain open, not File::Slurper: loading that here would put it in memory ahead
-# of Test::MockFile, and anything compiled before the mock is installed opens
-# files for real.
-sub _slurp {
-    my ($path) = @_;
-    open( my $fh, '<', $path ) or die "Could not read $path: $!";
-    local $/;
-    my $content = <$fh>;
-    close($fh) or die "Could not close $path: $!";
-    return $content;
-}
 
 subtest 'a recipe that names rate limits depends on ufw for them' => sub {
     require Provisioner::Recipe::redis;
@@ -306,9 +305,10 @@ subtest 'hv_lines passes a setting of 0 through, and leaves out an empty one' =>
     unlike( $lines, qr/cpu_mode/,               'and neither is one already written above' );
 };
 
-# A stand-in for the sftp session, which is the only part of the salvage check
-# that has to be a guest.  Two answers are all _salvage_gap asks it for: whether
-# what the guest said when asked whether the path still holds anything.
+# A stand-in for the guest, which is the only part of a salvage that has to be
+# one.  The fetch lands nothing, so what is in the destination is what the test
+# put there, and the fetch keeps its options for a test to read.  The other
+# thing salvage_path asks the guest is whether the path still holds anything.
 #
 # run_sudo's convention, which is the opposite of the usual one: zero means the
 # command succeeded.  Here that is `test -n`, so zero means files are there.
@@ -316,8 +316,9 @@ subtest 'hv_lines passes a setting of 0 through, and leaves out an empty one' =>
 
     package MockGuest;
 
-    sub new { my ( $class, %args ) = @_; return bless {%args}, $class }
+    sub new      { my ( $class, %args ) = @_; return bless {%args}, $class }
     sub run_sudo { my ($self) = @_; return $self->{rc} }
+    sub get_dir  { my ( $self, $remote, $local, %opts ) = @_; $self->{fetched} = { remote => $remote, local => $local, %opts }; return 1 }
 }
 
 # Real directories under here, not mocks.  What the check asks is whether
@@ -347,17 +348,27 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # A destination with state in it is a salvage that worked, on this run or on
     # an earlier one.  newer_only means the second run against an unchanged guest
     # copies nothing at all, and that must not read as a failure.
-    my $quiet = Trog::Provisioner::Config::Generator::_salvage_gap(    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $guest = MockGuest->new( rc => 0 );
+    my $quiet = Trog::Provisioner::Config::Generator::salvage_path(
         %args,
-        guest       => MockGuest->new( rc => 0 ),
+        guest       => $guest,
         destination => $landed,
+        exclude     => ['*.sock'],
     );
     ok( !$quiet, 'a destination with state in it is not complained about' );
+
+    # As root, or a service's own state directory comes down empty; and only
+    # what is newer on the guest, or the second run fetches everything again.
+    is_deeply(
+        $guest->{fetched},
+        { remote => '/var/lib/redis', local => $landed, exclude => ['*.sock'], update => 1, sudo => 1 },
+        'it fetched the path into the destination, as root, and only what is newer'
+    );
 
     # Nothing under the path on the guest: either it was never created, or the
     # service has not written into it.  Both are what a first build looks like,
     # and the fetch reads what the service owns now, so neither is unreadable.
-    my $absent = Trog::Provisioner::Config::Generator::_salvage_gap(    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $absent = Trog::Provisioner::Config::Generator::salvage_path(
         %args,
         guest       => MockGuest->new( rc => 1 ),
         destination => $empty,
@@ -367,7 +378,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     like( $absent->{message}, qr/nothing[ ]to[ ]salvage/, 'and it says why there was nothing' );
 
     # The one that matters: the guest has files there and we came away with none.
-    my $lost = Trog::Provisioner::Config::Generator::_salvage_gap(      ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $lost = Trog::Provisioner::Config::Generator::salvage_path(
         %args,
         guest       => MockGuest->new( rc => 0 ),
         destination => $empty,
@@ -387,7 +398,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # having been asked -- a guest that went away mid-run, or a sudo refused.
     # Filing that as a service which has never run would put the alarm out on
     # state that is still there.
-    my $dropped = Trog::Provisioner::Config::Generator::_salvage_gap(    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $dropped = Trog::Provisioner::Config::Generator::salvage_path(
         %args,
         guest       => MockGuest->new( rc => 255 ),
         destination => $empty,
@@ -398,29 +409,32 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
 
 subtest 'an empty tree of directories is not a salvage' => sub {
 
+    # The guest still has files at the path, so each destination below that
+    # counts as empty is a salvage that lost them.
+    my %args = (
+        recipe => 'slapd',
+        host   => 'd.test.local',
+        user   => 'tester',
+        remote => '/etc/ldap/slapd.d',
+    );
+    my sub gap_at ($destination) {
+        return Trog::Provisioner::Config::Generator::salvage_path( %args, guest => MockGuest->new( rc => 0 ), destination => $destination );
+    }
+
     # rget makes the local directories on the way down whether or not it can read
     # what is inside them, so this is exactly what an unreadable fetch leaves.
     my $dir = "$salvage_root/slapd";
     mkdir $dir           or die "Could not create $dir: $!";
     mkdir "$dir/slapd.d" or die "Could not create $dir/slapd.d: $!";
 
-    ok(
-        !Trog::Provisioner::Config::Generator::_dir_has_files($dir),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-        'directories alone do not count as anything having landed'
-    );
+    ok( gap_at($dir)->{alarming}, 'directories alone do not count as anything having landed' );
 
     open( my $fh, '>', "$dir/slapd.d/olcDatabase.ldif" ) or die "Could not write into $dir/slapd.d: $!";
     close($fh)                                           or die "Could not close $dir/slapd.d/olcDatabase.ldif: $!";
 
-    ok(
-        Trog::Provisioner::Config::Generator::_dir_has_files($dir),     ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-        'a file anywhere underneath does'
-    );
+    ok( !gap_at($dir), 'a file anywhere underneath does' );
 
-    ok(
-        !Trog::Provisioner::Config::Generator::_dir_has_files("$salvage_root/never-made"),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-        'and a destination nothing ever created has nothing in it'
-    );
+    ok( gap_at("$salvage_root/never-made")->{alarming}, 'and a destination nothing ever created has nothing in it' );
 
     # A symlink counts as having landed, and is not walked into: one salvaged off
     # a guest can point anywhere, including back at the tree it sits in.
@@ -428,10 +442,7 @@ subtest 'an empty tree of directories is not a salvage' => sub {
     mkdir $links                     or die "Could not create $links: $!";
     symlink( $links, "$links/loop" ) or die "Could not symlink into $links: $!";
 
-    ok(
-        Trog::Provisioner::Config::Generator::_dir_has_files($links),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-        'a symlink is something, and looking at it does not walk into itself'
-    );
+    ok( !gap_at($links), 'a symlink is something, and looking at it does not walk into itself' );
 };
 
 done_testing();
