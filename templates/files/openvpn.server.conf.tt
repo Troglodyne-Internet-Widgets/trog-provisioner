@@ -20,6 +20,12 @@ ifconfig-pool-persist /var/log/openvpn/ipp.txt
     for each client, and upstream deprecates it. -%]
 topology subnet
 
+[%# The networks that a client sends through the tunnel.  Provisioner::Recipe::openvpn
+    says why the default is each pool network as two halves. -%]
+[% FOR r IN pushes -%]
+push "route [% r.network %] [% r.netmask %]"
+[% END -%]
+
 [% IF dns.size() -%]
 [% FOR d IN dns -%]
 push "dhcp-option DNS [% d %]"

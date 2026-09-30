@@ -16,6 +16,8 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         dnsrecords:
+            # Optional.  The default is the address the guest was built with.
+            address: 203.0.113.10
 
 =head2 DESCRIPTION
 
@@ -59,6 +61,14 @@ RFC 1918 address.  It goes up as it stands: a zone holding internal addresses fo
 internal names is ordinary practice, and it is the address the thing asking is
 going to need.
 
+=head2 Publishing a different address
+
+C<address> replaces C<main_ip> in the C<A> record, and in nothing else.  Use it
+for a guest that the outside world reaches through a port forward on a
+gateway: the record then names the public address of the gateway, and the guest
+keeps its own address everywhere else.  The C<CNAME> of each alias names the
+domain, so it follows.
+
 =head2 Where it does not run
 
 Where there is no address to publish.  A hypervisor that allocates addresses
@@ -72,14 +82,26 @@ of every one after it, for the reason above.
 
 =cut
 
+sub args {
+    return (
+        properties => {
+            address => { type => 'string', format => 'ipv4', description => 'The address the A record names.  The default is main_ip, the address the guest was built with.' },
+        },
+    );
+}
+
 =head2 %opts = $recipe->enrich(%opts)
+
+C<address> defaults to C<main_ip> here, because the schema cannot name another
+value as a default.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{publish_records} = $opts{main_ip} ? 1 : 0;
+    $opts{address} //= $opts{main_ip};
+    $opts{publish_records} = $opts{address} ? 1 : 0;
 
     return %opts;
 }

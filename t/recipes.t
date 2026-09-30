@@ -158,6 +158,7 @@ my %G = (
     full_aliases               => ['www.test.test.test'],
     modules                    => [],
     ipmap                      => { test => '192.0.2.100' },
+    ip_pool                    => { cidr => '192.0.2.0/24' },
     nameservers                => {},
     packager_invocation        => 'apt-get install -y',
     packager_up_invocation     => 'apt-get upgrade -y',
@@ -605,6 +606,32 @@ subtest 'openvpn pushes redirect-gateway only when the domain asks' => sub {
     # has deprecated.  Both configurations say so, since it is not the client's
     # to choose.
     like( $_, qr/^topology[ ]subnet$/m, 'and either way the server names its topology' ) for ( $on, $off );
+};
+
+subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' => sub {
+    my $vpn    = sub { 'Provisioner::Recipe::openvpn'->new(%PROV) };
+    my $routes = sub { [ $_[0] =~ m/^push[ ]"route[ ](\S+[ ]\S+)"$/mg ] };
+
+    my $pool = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => { cidr => '192.0.2.0/24' } );
+    is_deeply(
+        $routes->($pool), [ '192.0.2.0 255.255.255.128', '192.0.2.128 255.255.255.128' ],
+        'a pool network goes as its two halves, which win over a home network with the same numbers'
+    );
+
+    my $both = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => { cidr => [ '10.0.0.0/31', '198.51.100.7/32' ], addresses => '198.51.100.9 198.51.100.9' } );
+    is_deeply(
+        $routes->($both), [ '10.0.0.0 255.255.255.255', '10.0.0.1 255.255.255.255', '198.51.100.7 255.255.255.255', '198.51.100.9 255.255.255.255' ],
+        'a /32 has no halves, and each address of the pool goes once, as a /32'
+    );
+
+    my $told = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => { cidr => '192.0.2.0/24' }, routes => [ '192.0.2.5/32', '172.16.9.9/12' ] );
+    is_deeply( $routes->($told), [ '192.0.2.5 255.255.255.255', '172.16.0.0 255.240.0.0' ], 'routes that the domain names replace the pool, with the host bits cleared' );
+
+    my $none = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => {} );
+    is_deeply( $routes->($none), [], 'and with no pool and no routes, the server pushes none' );
+
+    like( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0/33'] ) }, qr/not[ ]an[ ]IPv4[ ]CIDR[ ]block/, 'a prefix longer than 32 is refused' );
+    ok( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0'] ) }, 'and so is an address without a prefix' );
 };
 
 # ----------------------------------------------------------------

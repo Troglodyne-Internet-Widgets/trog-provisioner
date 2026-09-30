@@ -8,7 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use Socket qw{inet_aton};
+use Socket qw{inet_aton inet_ntoa};
+
+use Provisioner::IPPool();
 
 use parent qw{Provisioner::Recipe};
 
@@ -28,6 +30,10 @@ In recipes.yaml:
             # dns is optional. Without it, the server pushes no DNS servers to clients.
             interface: eth0
             redirect_gateway: false
+            # Optional.  Without it, the halves of each cidr of the ip_pool.
+            routes:
+                - 192.0.2.0/25
+                - 192.0.2.128/25
 
 =head2 DESCRIPTION
 
@@ -68,6 +74,31 @@ C<redirect_gateway> tells clients to send all of their traffic through the
 tunnel, not only the traffic for hosts on the VPN.  The default is off.  The
 server pushes this at connect time.  So a change takes effect on every deployed
 client when it next reconnects.
+
+=head3 The networks that a client reaches
+
+C<routes> lists the networks that the server tells a client to send through the
+tunnel, as CIDR blocks.  The guest forwards that traffic onto its own network,
+and the MASQUERADE rule above gives it the address of the guest.  So a guest
+of the installation answers a client with no route back to the VPN subnet.  The
+C<A> records of the installation already hold the addresses of the guests, so
+a name that resolves anywhere is reachable through the tunnel.
+
+Without C<routes>, the recipe routes the C<ip_pool> in the C<_global> of the
+installation, the pool that F<ips.db> hands addresses out of.  Each C<cidr>
+block goes as its two halves, and each item of C<addresses> goes as a C</32>.
+Without either, the server pushes no route.
+
+The halves are for a client on a home network with the same numbers, such as
+C<192.168.1.0/24>, the default of many home routers.  The client then has two
+routes to the addresses of the guests, and the longer prefix wins.  A half is
+longer than the home network, so traffic to a guest goes through the tunnel.
+
+The cost is that the client cannot reach its own home network while it is
+connected, for example its printer or its router, if that network has the same
+numbers.  Its traffic for those addresses goes into the tunnel too.  If that
+matters for a client, give C<routes> a C</32> for each guest, which takes only
+those addresses away from the home network.
 
 =head3 The PKI is the part that cannot be made again
 
@@ -177,35 +208,81 @@ sub args {
 
             # Off, because a change reaches every deployed client.  See DESCRIPTION.
             redirect_gateway => { type => 'boolean', default => 0 },
+
+            # No default here, because the default comes from ip_pool.  See enrich.
+            routes => {
+                type        => 'array',
+                description => 'The networks a client sends through the tunnel, as CIDR blocks.  The default is each cidr of ip_pool as its two halves, and each of its addresses as a /32.',
+                items       => { type => 'string', pattern => '^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$' },
+            },
         },
     );
 }
 
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{cidr} = _netmask_to_cidr( $opts{netmask} );
-    return %opts;
+# The netmask of a prefix length, as an integer.
+my sub mask ($prefix) {
+    return $prefix ? ( 0xFFFFFFFF << ( 32 - $prefix ) ) & 0xFFFFFFFF : 0;
 }
 
-=head2 $prefix = _netmask_to_cidr($netmask)
+# The address of a CIDR block with the host bits cleared, and its prefix
+# length, so that 192.0.2.5/24 gives 192.0.2.0 and 24.
+my sub network ($block) {
+    my ( $address, $prefix ) = $block =~ m{\A(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})\z};
+    my $packed = defined $prefix && $prefix <= 32 && inet_aton($address);
+    die "'$block' is not an IPv4 CIDR block\n" unless $packed;
 
-Takes a dotted-quad C<netmask>, such as C<255.255.255.0>.  Returns the number of
-bits that are set in it, such as C<24>.  The firewall rules use it as the prefix
-length of the VPN subnet.
+    return ( inet_ntoa( pack( 'N', unpack( 'N', $packed ) & mask($prefix) ) ), $prefix );
+}
 
-Returns 0 for a C<netmask> that is empty, undefined or not a dotted quad.  It does
-not die.
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
+VPN subnet.
+
+Fills in C<routes> from C<ip_pool>: the two halves of each C<cidr> block, then a
+C</32> for each of its C<addresses>, each route once.  A C</32> block has no
+halves, so it goes as it is.  See L</The networks that a client reaches>.
+
+Adds C<pushes>, each route as the C<network> and the C<netmask> that the
+C<route> directive of OpenVPN takes, with the host bits of the network cleared.
+Dies if a route is not an IPv4 CIDR block.
 
 =cut
 
-sub _netmask_to_cidr {
-    my ($mask) = @_;
+sub enrich {
+    my ( $self, %opts ) = @_;
 
-    # Test the format first, because inet_aton() resolves anything else as a
-    # hostname.
-    return 0 unless $mask && $mask =~ m{^\d{1,3}(?:\.\d{1,3}){3}$};
-    my $packed = inet_aton($mask) or return 0;
-    return unpack( '%32b*', $packed );
+    # The schema makes netmask an IPv4 address, so inet_aton resolves no name.
+    $opts{cidr} = unpack( '%32b*', inet_aton( $opts{netmask} ) );
+
+    unless ( $opts{routes} ) {
+        my $pool = $opts{ip_pool} // {};
+        my @routes;
+        foreach my $block ( Provisioner::IPPool::pool_items( $pool->{cidr} ) ) {
+            my ( $address, $prefix ) = network($block);
+            if ( $prefix == 32 ) {
+                push @routes, "$address/32";
+                next;
+            }
+
+            my $half = 2**( 31 - $prefix );
+            my $base = unpack( 'N', inet_aton($address) );
+            push @routes, map { inet_ntoa( pack( 'N', $base + $_ * $half ) ) . '/' . ( $prefix + 1 ) } 0, 1;
+        }
+        push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $pool->{addresses} );
+
+        my %seen;
+        $opts{routes} = [ grep { !$seen{$_}++ } @routes ];
+    }
+
+    $opts{pushes} = [
+        map {
+            my ( $address, $prefix ) = network($_);
+            +{ network => $address, netmask => inet_ntoa( pack( 'N', mask($prefix) ) ) }
+        } @{ $opts{routes} }
+    ];
+
+    return %opts;
 }
 
 sub template_files {

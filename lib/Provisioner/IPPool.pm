@@ -66,11 +66,11 @@ sub pool_ips {
     my ($pool) = @_;
     my ( %seen, @ips );
 
-    foreach my $ip ( _items( $pool->{addresses} ) ) {
+    foreach my $ip ( pool_items( $pool->{addresses} ) ) {
         push @ips, $ip unless $seen{$ip}++;
     }
 
-    foreach my $cidr ( _items( $pool->{cidr} ) ) {
+    foreach my $cidr ( pool_items( $pool->{cidr} ) ) {
         my $net = Net::IP->new($cidr)
           or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
 
@@ -215,8 +215,14 @@ sub release {
     return $ip;
 }
 
-# The items of a pool key, which is a list or one string with whitespace in it.
-sub _items {
+=head2 @items = pool_items($said)
+
+Returns the items of one key of an C<ip_pool>, such as C<addresses> or C<cidr>.
+C<$said> is a list, or one string with whitespace between the items, or undef.
+
+=cut
+
+sub pool_items {
     my ($said) = @_;
     return grep { m/\S/ } map { split /\s+/ } @{ Provisioner::Utils::coerce_arrayref( $said // [] ) };
 }

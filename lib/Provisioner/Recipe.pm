@@ -444,7 +444,15 @@ sub global_args {
             full_aliases => { type => 'array', items => { type => 'string' }, description => "This domain's aliases, built from the ip map." },
             modules      => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
 
-            ipmap       => { type => 'object', additionalProperties => { type => 'string' },                               description => 'Every domain this installation assigns an address to, and its address.' },
+            ipmap   => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
+            ip_pool => {
+                type        => 'object',
+                description => 'The addresses this installation hands out, and the networks they are on.',
+                properties  => {
+                    addresses => { type => [qw{array string}], items => { type => 'string' } },
+                    cidr      => { type => [qw{array string}], items => { type => 'string' } },
+                },
+            },
             nameservers => { type => 'object', additionalProperties => { type => 'string' },                               description => 'The public nameservers for the zones this fleet serves.' },
             aliases     => { type => 'object', additionalProperties => { type => 'array', items => { type => 'string' } }, description => 'Every domain in the map, and the names that also answer for it.' },
 

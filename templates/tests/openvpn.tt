@@ -138,6 +138,10 @@ like($before, qr{^-A ufw-before-forward -s \Q[% subnet %]/[% cidr %]\E -j ACCEPT
 my $server_conf = slurp('/etc/openvpn/server/server.conf');
 like($server_conf, qr{^topology subnet$}m,
     'the server names its topology rather than taking the deprecated net30 default');
+[% FOR r IN pushes -%]
+like($server_conf, qr{^push "route \Q[% r.network %] [% r.netmask %]\E"$}m,
+    'and routes clients to [% r.network %] [% r.netmask %] through the tunnel');
+[% END -%]
 [% IF redirect_gateway -%]
 like($server_conf, qr{^push "redirect-gateway def1 bypass-dhcp"$}m,
     'and pushes the default route, which is what this domain asked for');

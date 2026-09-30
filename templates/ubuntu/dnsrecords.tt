@@ -8,5 +8,5 @@
     publish yet.  A guest serving its own zone gets this too -- see the recipe on
     what a rebuild does to a zone pdns declines to reload. -%]
 [% IF publish_records %]
-[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% domain %] [% main_ip %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% domain %] [% address %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
 [% END -%]
