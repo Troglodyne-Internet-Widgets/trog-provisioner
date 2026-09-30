@@ -71,7 +71,7 @@ sub domain_xml {
     return File::Slurper::read_text("$dir/domain.xml");
 }
 
-sub _conf {
+sub conf {
     my (%params) = @_;
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/provision.conf", join( '', map { "$_=$params{$_}\n" } sort keys %params ) );
@@ -91,7 +91,7 @@ sub quietly {
 # assignment, which is a warning and then a seed with no files in it.
 subtest 'the seed is built from all three NoCloud files' => sub {
     my $config = Config::Simple->new(
-        _conf(
+        conf(
             domain => 'vm.example.test', memory => 2048,
             cpus   => 2, size => 42949672960, image => 'https://example.test/img'
         )
@@ -170,7 +170,7 @@ subtest 'the seed is built from all three NoCloud files' => sub {
 # version.  These build the same guest against an old hypervisor and a new one
 # and assert on the difference, which is the only part of this worth testing:
 # whether the XML is any faster is not a thing a unit test can know.
-sub _tuned_xml {
+sub tuned_xml {
     my (%opts) = @_;
 
     my $dir = tempdir( CLEANUP => 1 );
@@ -179,7 +179,7 @@ sub _tuned_xml {
       if $opts{extra_disk};
 
     my $config = Config::Simple->new(
-        _conf(
+        conf(
             domain => 'vm.example.test',          memory => 2048, cpus => 4,
             size   => $opts{size} // 42949672960, image  => 'https://example.test/img',
             %{ $opts{config} // {} },
@@ -221,20 +221,20 @@ sub _tuned_xml {
 
 # What the build said while making that domain, for the decisions whose whole
 # point is telling somebody what to do about them.
-sub _tuned_output {
+sub tuned_output {
     my (%opts) = @_;
-    my ( undef, $said ) = _tuned_xml(%opts);
+    my ( undef, $said ) = tuned_xml(%opts);
     return $said;
 }
 
 # libvirt encodes a version as major * 1_000_000 + minor * 1_000 + release, and
 # so does everything that compares one here.  Spelled out because 0.9.8 and
 # 9.8.0 are two very different numbers and only one of them is a real libvirt.
-sub _libvirt { my ( $major, $minor, $release ) = @_; return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + $release }
+sub libvirt { my ( $major, $minor, $release ) = @_; return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + $release }
 
 subtest 'a rebuild that keeps its disk writes the uuid libvirt already gave it' => sub {
     my $config = Config::Simple->new(
-        _conf(
+        conf(
             domain => 'vm.example.test', memory => 2048,
             cpus   => 2, size => 42949672960, image => 'https://example.test/img'
         )
@@ -280,7 +280,7 @@ subtest 'a rebuild that keeps its disk writes the uuid libvirt already gave it' 
 };
 
 subtest 'a hypervisor from before any of this gets a domain it can still define' => sub {
-    my $xml = _tuned_xml( libvirt => _libvirt( 0, 9, 0 ), qemu => _libvirt( 1, 0, 0 ) );
+    my $xml = tuned_xml( libvirt => libvirt( 0, 9, 0 ), qemu => libvirt( 1, 0, 0 ) );
 
     unlike( $xml, qr/discard=/,          'no discard, which libvirt 1.0.6 was the first to parse' );
     unlike( $xml, qr/discard_no_unref=/, 'no discard_no_unref, which needs qemu 8.1 behind it' );
@@ -299,7 +299,7 @@ subtest 'a middling hypervisor gets exactly the half of it that it can take' => 
     # libvirt 5.0 / qemu 4.0.  Not a hypothetical: that is a machine that has
     # not been rebuilt since Ubuntu 20.04, and the point of the version table is
     # that such a machine gets the knobs it has rather than all or none of them.
-    my $xml = _tuned_xml( libvirt => _libvirt( 5, 0, 0 ), qemu => _libvirt( 4, 0, 0 ) );
+    my $xml = tuned_xml( libvirt => libvirt( 5, 0, 0 ), qemu => libvirt( 4, 0, 0 ) );
 
     like( $xml, qr/discard='unmap'/, 'discard, which it has had since 1.0.6' );
     like( $xml, qr/iothread='1'/,    'an iothread, which it has had since 1.2.8' );
@@ -311,7 +311,7 @@ subtest 'a middling hypervisor gets exactly the half of it that it can take' => 
 };
 
 subtest 'a current hypervisor gets the lot' => sub {
-    my $xml = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000 );
+    my $xml = tuned_xml( libvirt => 10_000_000, qemu => 9_000_000 );
 
     like( $xml, qr/<iothreads>1<\/iothreads>/, 'an iothread, so submission is off qemu main loop' );
     like( $xml, qr/iothread='1'/,              'and the disk is on it' );
@@ -329,31 +329,31 @@ subtest 'a current hypervisor gets the lot' => sub {
     # The AIO backend is not turned on behind anybody's back.
     unlike( $xml, qr/io='io_uring'/, "and the AIO backend is left alone unless disk_io says otherwise" );
 
-    my $asked = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => { disk_io => 'io_uring' } );
+    my $asked = tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => { disk_io => 'io_uring' } );
     like( $asked, qr/io='io_uring'/, 'which it does when it is asked' );
 
-    my $old = _tuned_xml( libvirt => 5_000_000, qemu => 4_000_000, config => { disk_io => 'io_uring' } );
+    my $old = tuned_xml( libvirt => 5_000_000, qemu => 4_000_000, config => { disk_io => 'io_uring' } );
     unlike( $old, qr/io=/, 'and not on a qemu that never had it, however loudly it is asked for' );
 };
 
 subtest 'more than one iothread is only spread where qemu can spread it' => sub {
     my %new = ( libvirt => 10_000_000, qemu => 9_000_000, config => { disk_iothreads => 4 } );
 
-    my $xml = _tuned_xml(%new);
+    my $xml = tuned_xml(%new);
     like( $xml, qr/<iothreads>4<\/iothreads>/, 'the domain gets the pool it asked for' );
     like( $xml, qr/<iothread[ ]id='4'\/>/,     'and the disk maps its queues across all of it' );
     unlike( $xml, qr/<driver[^>]*iothread='/, 'so it does not also name a single one, which is mutually exclusive' );
 
     # qemu 8.2 has iothreads but not iothread-vq-mapping, so the pool is still
     # worth having for several disks -- one disk just cannot spread across it.
-    my $unmapped = _tuned_xml( %new, qemu => 8_002_000 );
+    my $unmapped = tuned_xml( %new, qemu => 8_002_000 );
     like( $unmapped, qr/<iothreads>4<\/iothreads>/, 'a qemu without vq mapping still gets the pool' );
     like( $unmapped, qr/iothread='1'/,              'with the disk pinned to one of them' );
     unlike( $unmapped, qr/<iothread[ ]id=/, 'rather than a mapping it would refuse to start with' );
 };
 
 subtest 'zero iothreads is an answer, not an absent one' => sub {
-    my $xml = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => { disk_iothreads => 0 } );
+    my $xml = tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => { disk_iothreads => 0 } );
     unlike( $xml, qr/<iothreads>/, 'disk_iothreads=0 gives no iothread pool' ) or diag $xml;
     unlike( $xml, qr/iothread='/,  'and puts the disk on none' );
 };
@@ -361,7 +361,7 @@ subtest 'zero iothreads is an answer, not an absent one' => sub {
 subtest 'the throttle is per disk, and says so when it cannot be honoured' => sub {
     my %limits = ( disk_total_iops_sec => 2000, disk_total_bytes_sec => 100_000_000 );
 
-    my $xml = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => \%limits, extra_disk => 1 );
+    my $xml = tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => \%limits, extra_disk => 1 );
     like( $xml, qr/<total_iops_sec>2000<\/total_iops_sec>/, 'the limit reaches the domain' );
 
     # Per disk rather than per domain, libvirt having no domain-wide version of
@@ -372,13 +372,13 @@ subtest 'the throttle is per disk, and says so when it cannot be honoured' => su
     # A limit that is not applied is worse than no limit: somebody believes in
     # it.  So this is the one knob here that is fatal rather than skipped.
     like(
-        exception { _tuned_xml( libvirt => _libvirt( 0, 9, 0 ), qemu => 9_000_000, config => \%limits ) },
+        exception { tuned_xml( libvirt => libvirt( 0, 9, 0 ), qemu => 9_000_000, config => \%limits ) },
         qr/need[ ]libvirt[ ]0\.9\.8/, 'and a hypervisor too old to honor it fails the build'
     );
 
     like(
         exception {
-            _tuned_xml(
+            tuned_xml(
                 libvirt => 10_000_000, qemu => 9_000_000,
                 config  => { disk_total_iops_sec => 2000, disk_read_iops_sec => 1000 }
             );
@@ -393,14 +393,14 @@ subtest 'cache=none is offered to whatever will actually take an O_DIRECT write'
     # Asked of the filesystem, not worked out from its name: tmpfs takes one on
     # a current kernel and ZFS has since 2.3, so a list of names that cannot
     # would today have both of them wrong.
-    my $tmpfs = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'tmpfs', direct_io => 1 );
+    my $tmpfs = tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'tmpfs', direct_io => 1 );
     like( $tmpfs, qr/cache='none'/, 'a filesystem that takes the write gets it, whatever it is called' );
 
-    my $refused = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'ext2/ext3', direct_io => 0 );
+    my $refused = tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'ext2/ext3', direct_io => 0 );
     like( $refused, qr/cache='writeback'/, 'and one that refuses gets writeback, whatever it is called' );
 
     # Somebody who names a mode has a reason.
-    my $asked = _tuned_xml(
+    my $asked = tuned_xml(
         libvirt => 10_000_000, qemu => 9_000_000, direct_io => 0,
         config  => { disk_cache => 'none' }
     );
@@ -411,18 +411,18 @@ subtest 'a ZFS pool that refuses is told which of the two things it is' => sub {
     my %zfs = ( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'zfs', direct_io => 0 );
 
     like(
-        _tuned_output( %zfs, zfs_version => '2.2.7' ), qr/Direct[ ]I\/O[ ]arrived[ ]in[ ]2\.3,[ ]so[ ]this[ ]wants[ ]an[ ]upgrade/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        tuned_output( %zfs, zfs_version => '2.2.7' ), qr/Direct[ ]I\/O[ ]arrived[ ]in[ ]2\.3,[ ]so[ ]this[ ]wants[ ]an[ ]upgrade/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a release without Direct I/O at all is told to upgrade'
     );
     like(
-        _tuned_output( %zfs, zfs_version => '2.3.1' ), qr/zfs[ ]get[ ]direct/,
+        tuned_output( %zfs, zfs_version => '2.3.1' ), qr/zfs[ ]get[ ]direct/,
         'and one that has it is pointed at the pool and the dataset instead'
     );
 
     # 2.10 is a later release than 2.3, which a string comparison gets backwards
     # and would send somebody off to upgrade a version they already have.
     like(
-        _tuned_output( %zfs, zfs_version => '2.10.0' ), qr/zfs[ ]get[ ]direct/,
+        tuned_output( %zfs, zfs_version => '2.10.0' ), qr/zfs[ ]get[ ]direct/,
         'and 2.10 is read as later than 2.3, not earlier'
     );
 };
@@ -434,7 +434,7 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
     # every domain when nobody says otherwise, so saying nothing has to keep
     # meaning that -- a guest that quietly escapes the slice its hypervisor
     # was given is the failure this asserts against.
-    my $default = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ) );
+    my $default = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ) );
     unlike( $default, qr/<partition>/, 'nothing written when the hypervisor names no partition' );
     like( $default, qr/<source[ ]pool='tf_disks'/, 'and the pool everything has always used' );
 
@@ -442,9 +442,9 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
     # they are the only two limits a guest can be held to: the pool is where a
     # filesystem quota bites, the partition is where a CPU cap does.  See
     # QUOTAS in Provisioner::Recipe::trogrunner.
-    my $confined = _tuned_xml(
-        libvirt => _libvirt( 10, 0, 0 ),
-        qemu    => _libvirt( 9,  0, 0 ),
+    my $confined = tuned_xml(
+        libvirt => libvirt( 10, 0, 0 ),
+        qemu    => libvirt( 9,  0, 0 ),
         hv      => { partition => '/machine/runner', pool_name => 'runner_disks' },
     );
     like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );                                                       ## no critic (RegularExpressions::ProhibitComplexRegexes)
@@ -453,7 +453,7 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
 
 # --- The machine type, and the topology that follows from it -----------------
 subtest 'a guest is a q35 unless it is configured otherwise' => sub {
-    my $default = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ) );
+    my $default = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ) );
     like( $default, qr/<type[ ]arch='x86_64'[ ]machine='q35'>hvm<\/type>/, 'q35 by default, for the PCIe topology' );
 
     # A q35 guest has its interfaces behind root ports that libvirt allocates.
@@ -461,14 +461,14 @@ subtest 'a guest is a q35 unless it is configured otherwise' => sub {
     # with no hotplug slot, and the name no longer follows from it either way.
     unlike( $default, qr/<address[ ]type='pci'[^>]*slot='0x0[34]'/, 'and its interfaces are left for libvirt to place' );
 
-    my $i440fx = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ), config => { machine => 'pc' } );
+    my $i440fx = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { machine => 'pc' } );
     like( $i440fx, qr/<type[ ]arch='x86_64'[ ]machine='pc'>hvm<\/type>/, 'a guest can ask for the older machine' );
     like( $i440fx, qr/<address[ ]type='pci'[^>]*slot='0x03'[^>]*\/>/,    'where the slot of the NAT interface is pinned' );
     like( $i440fx, qr/<address[ ]type='pci'[^>]*slot='0x04'[^>]*\/>/,    'and of the bridge one, because the names come from them there' );
 
     # Pinning a version is how a guest keeps the same device model across a
     # host qemu upgrade, and q35 is a substring of every q35 version.
-    my $pinned = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ), config => { machine => 'pc-q35-8.2' } );
+    my $pinned = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { machine => 'pc-q35-8.2' } );
     like( $pinned, qr/machine='pc-q35-8[.]2'/, 'a version can be named' );
     unlike( $pinned, qr/<address[ ]type='pci'[^>]*slot='0x0[34]'/, 'and it is still a PCIe machine' );
 };

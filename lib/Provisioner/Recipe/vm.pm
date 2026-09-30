@@ -326,407 +326,17 @@ sub hv {
     return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
 }
 
-=head2 %opts = $recipe->enrich(%opts)
-
-Works out what this hypervisor accepts, and from that, what each disk of the
-guest looks like.
-
-Takes the options of the recipe.  Returns them with C<tuning>, C<tpm>,
-C<partition>, C<nat_slot>, C<bridge_slot>, C<disks>, C<filesystems> and
-C<devices_map> added.  Dies if it gets a throttle that the hypervisor does not
-support, or a total throttle together with one of its halves.  Also dies if
-F<mounts.txt> asks for more devices than C<vdb> to C<vdz>.
-
-Each value it adds is a decision, not a string: which cache mode, how many
-iothreads, which disk gets which of the iothreads, and what F<mounts.txt> asks
-for.  The template writes the XML.
-
-=cut
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    my $hv        = $self->hv;
-    my $iothreads = $self->_iothreads( \%opts );
-
-    my %tuning = (
-        cache            => $self->_cache( \%opts ),
-        io               => $self->_io( \%opts ),
-        discard          => $hv->supports('discard') ? 1 : 0,
-        detect_zeroes    => $self->_detect_zeroes( \%opts ),
-        discard_no_unref => $hv->supports('discard_no_unref') ? 1 : 0,
-        iothreads        => $iothreads,
-        mapping          => ( $iothreads > 1 && $hv->supports('iothread_mapping') ) ? 1 : 0,
-        queues           => $self->_queues( \%opts ),
-        blockio          => $self->_blockio( \%opts ),
-        iotune           => $self->_iotune( \%opts ),
-
-        # create_storage asks the hypervisor for this, because the size of the
-        # image decides it.
-        metadata_cache => $opts{metadata_cache},
-    );
-
-    $opts{tuning} = \%tuning;
-    $opts{tpm}    = $self->_tpm;
-
-    # The cgroup partition for every guest on this hypervisor.  libvirt uses
-    # /machine when none is named, so unset means the same thing.  An operator
-    # names one to put every guest built here into one systemd slice to cap.
-    $opts{partition} = $hv->partition;
-
-    # Whether the machine gives the guest a PCIe topology.  A q35 of any
-    # version does; i440fx does not.  The template puts the interfaces on the
-    # bus that the machine has.
-    $opts{pcie} = ( $opts{machine} // q{} ) =~ m/q35/ ? 1 : 0;
-
-    # The PCI slots of the two interfaces, as libvirt writes them.  On i440fx
-    # the hypervisor decides them, because the interface names on the guest
-    # come from the slot.  See Trog::HV::nic_names.
-    ( $opts{nat_slot}, $opts{bridge_slot} ) = map { sprintf '0x%02x', $_ } $hv->nic_slots;
-
-    my ( $disks, $filesystems, $devices ) = $self->_devices( \%opts, \%tuning );
-    $opts{disks}       = $disks;
-    $opts{filesystems} = $filesystems;
-    $opts{devices_map} = $devices;
-
-    return %opts;
-}
-
-=head1 INTERNALS
-
-Private to this module.  They are documented here for the next person to edit
-them.
-
-=head2 $bool = $recipe->_tpm()
-
-Returns 1 if the hypervisor has a hardware TPM, and the guest then gets an
-emulated one.  Otherwise prints a message and returns 0.
-
-C<swtpm> keeps the TPM state of a guest in a file on the hypervisor, next to the
-disk image of the guest.  A key sealed to that TPM is sealed to that file, so
-whoever takes the disk also takes the TPM.  That has value when hardware
-protects the disk of the hypervisor.  When it does not, it is worse than
-nothing, because software on the guest uses the TPM and trusts it.
-
-=cut
-
-sub _tpm {
-    my ($self) = @_;
-    return 1 if $self->hv->has_tpm;
-
-    print "No hardware TPM on the hypervisor, so this guest gets none either\n";
-    return 0;
-}
-
-=head2 $value = _asked(\%opts, $key)
-
-Returns the value of C<$key>, or undef if that value is false.  An absent key,
-a key with nothing after the C<=>, and C<0> are all false.  L<Config::Simple>
-tells the first two apart, and nothing here needs to.
-
-=cut
-
-sub _asked {
-    my ( $opts, $key ) = @_;
+# The value of the option named by the key, or undef when the option is absent
+# or empty.  Config::Simple tells those two apart, and nothing here needs to.
+my sub asked ( $opts, $key ) {
     return undef unless length $opts->{$key};    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- "0" is an answer: disk_iothreads=0 turns iothreads off
     return $opts->{$key};
 }
 
-=head2 $mode = $recipe->_cache(\%opts)
-
-Returns the cache mode for the disks.  That is C<disk_cache> if it is set, else
-C<none> if the storage pool takes an O_DIRECT write.  Otherwise it prints a
-message and returns C<writeback>.
-
-The description of C<disk_cache> in the schema gives the trade between the two.
-One more cost of the host page cache is that L<Trog::Hypervisors> does not count
-that memory when it decides what else fits.
-
-No version check can decide this setting.  A pool that does not take O_DIRECT
-makes qemu fail to open the disk, so the domain is defined but does not start.
-So the question goes to the filesystem.  See
-L<Trog::HV::Libvirt/pool_takes_direct_io> for why file system names do not
-answer it.
-
-=cut
-
-sub _cache {
-    my ( $self, $opts ) = @_;
-    my $hv = $self->hv;
-
-    my $asked = _asked( $opts, 'disk_cache' );
-    return $asked if $asked;
-    return 'none' if $hv->pool_takes_direct_io;
-
-    print "The storage pool, on " . $hv->pool_fstype . ", would not take an O_DIRECT write, so this\n" . "guest gets cache='writeback' rather than a domain that defines and then won't start.\n" . $self->_direct_io_advice . "Set disk_cache in provision.conf to say otherwise.\n";
-    return 'writeback';
-}
-
-=head2 $text = $recipe->_direct_io_advice()
-
-Returns advice for the operator when the pool is on ZFS, and an empty string
-otherwise.
-
-On ZFS, O_DIRECT fails for one of two causes.  The release has no Direct I/O,
-or a pool or a dataset is configured not to use it.  An operator can fix
-either, but only when the message says which one it is.
-
-=cut
-
-sub _direct_io_advice {
-    my ($self) = @_;
-    my $hv = $self->hv;
-    return '' unless $hv->pool_fstype eq 'zfs';
-
-    my $version = $hv->zfs_version;
-    return "The pool is on ZFS and the hypervisor would not say which version; ask it with\n" . "`cat /sys/module/zfs/version`.\n"
-      unless defined $version;
-
-    return "OpenZFS is $version here and Direct I/O arrived in 2.3, so this wants an upgrade.\n"
-      if _zfs_predates_direct_io($version);
-
-    return "OpenZFS $version has Direct I/O, so it is the pool or the dataset refusing it:\n" . "`zpool get all` for the feature flags, `zfs get direct` for the property.\n";
-}
-
-=head2 $bool = _zfs_predates_direct_io($version)
-
-Returns 1 if OpenZFS C<$version> is older than 2.3, which added Direct I/O.
-Returns 0 for a later version, or for one it cannot parse.  It compares numbers,
-because a string comparison puts 2.10 before 2.3.
-
-=cut
-
-sub _zfs_predates_direct_io {
-    my ($version) = @_;
-    my ( $major, $minor ) = $version =~ m/^(\d+)[.](\d+)/ or return 0;
-    return ( ( $major * 1_000 ) + $minor ) < 2_003 ? 1 : 0;
-}
-
-=head2 $backend = $recipe->_io(\%opts)
-
-Returns the AIO backend that C<disk_io> names, or undef to leave the choice to
-qemu.  For C<io_uring> on a hypervisor that does not support it, prints a
-message and returns undef.  It never sets a backend that nobody asked for.
-
-=cut
-
-sub _io {
-    my ( $self, $opts ) = @_;
-    my $hv = $self->hv;
-
-    my $asked = _asked( $opts, 'disk_io' ) or return undef;
-    return $asked unless $asked eq 'io_uring';
-    return 'io_uring' if $hv->supports('io_uring');
-
-    print "disk_io=io_uring needs libvirt 6.3 and qemu 5.0; " . $hv->describe . " has older,\n" . "so the disk is left on qemu's own choice of AIO backend.\n";
-    return undef;
-}
-
-=head2 $mode = $recipe->_detect_zeroes(\%opts)
-
-Returns C<disk_detect_zeroes> if it is set and the hypervisor supports it.
-Otherwise returns undef, and prints a message if it was set.
-
-It is off by default, unlike the discard path.  With C<detect_zeroes='unmap'>,
-qemu inspects every write for zeros, to reclaim space that the guest did not
-free.  The weekly C<fstrim> on the guest goes through C<discard='unmap'> and
-reclaims what the guest freed, at no cost for each write.  So it has value only
-on a guest that writes zeros in bulk.
-
-=cut
-
-sub _detect_zeroes {
-    my ( $self, $opts ) = @_;
-    my $hv = $self->hv;
-
-    my $asked = _asked( $opts, 'disk_detect_zeroes' ) or return undef;
-    return $asked if $hv->supports('detect_zeroes');
-
-    print "disk_detect_zeroes needs libvirt 2.0; " . $hv->describe . " has older, so it is left off.\n";
-    return undef;
-}
-
-=head2 $count = $recipe->_iothreads(\%opts)
-
-Returns the number of iothreads, from C<disk_iothreads> or 1 by default.
-Returns 0 if that number is negative.  Also returns 0, with a message, if the
-hypervisor does not support iothreads.
-
-Without iothreads, virtio-blk submission runs on the main loop of qemu, in
-series with all other work on that loop.  More than one has value only on a
-guest with several busy disks, or on a hypervisor that can spread the queues
-of one disk across them.  See C<_disk>.
-
-=cut
-
-sub _iothreads {
-    my ( $self, $opts ) = @_;
-    my $hv = $self->hv;
-
-    my $asked = _asked( $opts, 'disk_iothreads' ) // 1;
-    return 0      if $asked <= 0;
-    return $asked if $hv->supports('iothread');
-
-    print "disk_iothreads needs libvirt 1.2.8 and qemu 2.1; " . $hv->describe . " has older,\n" . "so this guest's disks stay on qemu's main loop.\n";
-    return 0;
-}
-
-=head2 $count = $recipe->_queues(\%opts)
-
-Returns the number of virtqueues on each disk, from C<disk_queues> or the vcpu
-count by default.  Returns undef if that number is not positive, or if the
-hypervisor does not support the attribute.
-
-Recent qemu already gives virtio-blk one virtqueue for each vcpu.  So on most of
-the fleet, this only states what qemu does anyway.  The XML must state it, so
-that the queues can go across iothreads.
-
-=cut
-
-sub _queues {
-    my ( $self, $opts ) = @_;
-    return undef unless $self->hv->supports('queues');
-
-    my $asked = _asked( $opts, 'disk_queues' ) // $opts->{cpus};
-    return $asked > 0 ? $asked : undef;
-}
-
-=head2 \%sizes = $recipe->_blockio(\%opts)
-
-Returns the C<logical> and C<physical> sector sizes to announce to the guest,
-512 and 4096 by default.  Returns undef if the hypervisor does not support the
-element.
-
-virtio-blk announces 512/512 by default.  The guest then lays out its
-filesystem for 512 byte sectors, and does read-modify-write against 4K hardware
-for the life of the disk.  4096 is safe to announce on a 512n device too.  The
-guest only aligns to a boundary that the device ignores.  That is why 4096 is a
-default and not a probe.
-
-=cut
-
-sub _blockio {
-    my ( $self, $opts ) = @_;
-    return undef unless $self->hv->supports('blockio');
-
-    return {
-        logical  => _asked( $opts, 'disk_logical_block_size' )  // 512,
-        physical => _asked( $opts, 'disk_physical_block_size' ) // 4096,
-    };
-}
-
-=head2 \@limits = $recipe->_iotune(\%opts)
-
-Returns the throttles set in C<disk_*_bytes_sec> and C<disk_*_iops_sec>, or
-undef if none is set.  Each is a hashref of C<name> and C<value>.  The list is
-in the order that libvirt wants, so the template does not need to know it.
-
-Dies if the hypervisor does not support C<iotune>.  See
-L</Nothing is emitted blind>.  Also dies if a total is set together with one of
-its halves, because libvirt takes a total or the two halves, never both.
-
-F<hypervisors.conf> reserves memory, CPUs and disk space.  It reserves nothing
-of the disk I/O queue that all guests on a machine share.  So one guest that
-runs a backup can slow every other guest, and no capacity check predicts it.
-These limits are the answer.  They are off unless a guest sets them, because a
-throttle has a cost.  Only the owner of the workload knows the correct value.
-
-=cut
-
-sub _iotune {
-    my ( $self, $opts ) = @_;
-    my $hv = $self->hv;
-
-    my %limit = map { $_ => _asked( $opts, "disk_$_" ) } @IOTUNE_KEY;
-    delete @limit{ grep { !defined $limit{$_} } keys %limit };
-    return undef unless %limit;
-
-    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honor them.\n"
-      unless $hv->supports('iotune');
-
-    foreach my $unit (qw{bytes_sec iops_sec}) {
-        next unless $limit{"total_$unit"};
-        die "disk_total_$unit cannot be set alongside disk_read_$unit or disk_write_$unit:\n" . "libvirt takes a total or the two halves, never both.\n"
-          if $limit{"read_$unit"} || $limit{"write_$unit"};
-    }
-
-    return [ map { { name => $_, value => $limit{$_} } } grep { defined $limit{$_} } @IOTUNE_KEY ];
-}
-
-=head2 (\@disks, \@filesystems, $map) = $recipe->_devices(\%opts, \%tuning)
-
-Returns every device of the domain.  C<\@disks> starts with the disk of the
-guest, then the disks that F<mounts.txt> asks for.  C<\@filesystems> holds the
-C<virtiofs> shares.  C<$map> is the text that the guest gets, so it can find
-them.  Dies if F<mounts.txt> asks for more devices than C<vdb> to C<vdz>.
-
-Each line of F<mounts.txt> is C<pool=name>.  A C<raw> pool is a block device on
-the host.  C<dir> is a directory shared in through C<virtiofs>, and C<file> is
-an image file.  Any other pool is the name of another libvirt pool.  A C<fuse>
-line is skipped, because the guest mounts those itself.
-
-Each line of C<$map> is C<name=vdX> for a directory, or C<name=/dev/vdX> for a
-disk.
-
-=cut
-
-sub _devices {
-    my ( $self, $opts, $tuning ) = @_;
-
-    my @disks = ( $self->_disk( $tuning, format => 'qcow2', dev => 'vda', boot => 1, index => 0, primary => 1 ) );
-    my ( @filesystems, $map );
-    $map = '';
-
-    my $spec_file = "$self->{output_dir}/mounts.txt";
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_r)
-    if ( -r $spec_file ) {
-        my @devnames = ( 'vdb' .. 'vdz' );
-        my $order    = 2;
-        my $index    = 0;
-
-        foreach my $diskspec ( grep { $_ } split( m/\n/, File::Slurper::read_text($spec_file) ) ) {
-            my ( $pool, $disk ) = split( m/=/, $diskspec );
-            next if $pool eq 'fuse';
-
-            $order++;
-            my $dev = shift @devnames or die "Ran out of vdnames!\n";
-
-            $map .= $pool eq 'dir' ? "$disk=$dev\n" : "$disk=/dev/$dev\n";
-
-            if ( $pool eq 'dir' ) {
-                push( @filesystems, { source => $disk, target => $dev } );
-                next;
-            }
-
-            $index++;
-
-            if ( $pool eq 'raw' ) {
-                push( @disks, $self->_disk( $tuning, format => 'raw', dev => $dev, boot => $order, index => $index, type => 'block', source => $disk ) );
-                next;
-            }
-
-            # A file or a volume in another pool.  Both resolve to a path, and
-            # libvirt wants the path.
-            my $path = $pool eq 'file' ? $disk : ( $self->hv->volume_path( $disk, $pool ) // $disk );
-            push( @disks, $self->_disk( $tuning, format => 'qcow2', dev => $dev, boot => $order, index => $index, type => 'file', source => $path ) );
-        }
-    }
-
-    return ( \@disks, \@filesystems, $map );
-}
-
-=head2 \%disk = $recipe->_disk(\%tuning, %disk)
-
-Returns one disk, with every attribute decided, for the template to write.
-C<%disk> holds C<format>, C<dev>, C<boot> and C<index>.  An extra disk also
-has C<type> and C<source>, and the disk of the guest has C<primary>.  C<type>
-defaults to C<volume>.
-
-=cut
-
-sub _disk {
-    my ( $self, $tuning, %disk ) = @_;
-
+# One disk, with every attribute decided, for the template to write.  %disk
+# holds format, dev, boot and index; an extra disk also has type and source,
+# and the disk of the guest has primary.
+my sub disk ( $tuning, %disk ) {
     $disk{type} //= 'volume';
 
     # Only for qcow2, because a raw block device has no cluster to keep the
@@ -753,6 +363,265 @@ sub _disk {
     $disk{metadata_cache} = $tuning->{metadata_cache} if $disk{primary};
 
     return \%disk;
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Works out what this hypervisor accepts, and from that, what each disk of the
+guest looks like.
+
+Takes the options of the recipe.  Returns them with C<tuning>, C<tpm>,
+C<partition>, C<nat_slot>, C<bridge_slot>, C<disks>, C<filesystems> and
+C<devices_map> added.  Dies if it gets a throttle that the hypervisor does not
+support, or a total throttle together with one of its halves.  Also dies if
+F<mounts.txt> asks for more devices than C<vdb> to C<vdz>.
+
+Each value it adds is a decision, not a string: which cache mode, how many
+iothreads, which disk gets which of the iothreads, and what F<mounts.txt> asks
+for.  The template writes the XML.  An option that is absent, or empty after
+the C<=>, counts as not set.  C<0> is an answer: C<disk_iothreads=0> turns
+iothreads off.  It never sets something that the hypervisor does not support,
+and it prints why when that overrides what was asked.
+
+=over 4
+
+=item C<tuning>
+
+=over 4
+
+=item C<cache>
+
+C<disk_cache> if it is set, else C<none> if the storage pool takes an O_DIRECT
+write, else C<writeback>, with a message.  The description of C<disk_cache> in
+the schema gives the trade between the two.  One more cost of the host page
+cache is that L<Trog::Hypervisors> does not count that memory when it decides
+what else fits.
+
+No version check can decide this setting.  A pool that does not take O_DIRECT
+makes qemu fail to open the disk, so the domain is defined but does not start.
+So the question goes to the filesystem.  See
+L<Trog::HV::Libvirt/pool_takes_direct_io> for why file system names do not
+answer it.  On ZFS, O_DIRECT fails for one of two causes: the release is older
+than OpenZFS 2.3, which added Direct I/O, or a pool or a dataset is configured
+not to use it.  The message says which, so that an operator can fix it.
+
+=item C<io>
+
+The AIO backend that C<disk_io> names, or undef to leave the choice to qemu.
+C<io_uring> on a hypervisor that does not support it is undef, with a message.
+
+=item C<detect_zeroes>
+
+C<disk_detect_zeroes>, if the hypervisor supports it.  It is off by default,
+unlike the discard path.  With C<detect_zeroes='unmap'>, qemu inspects every
+write for zeros, to reclaim space that the guest did not free.  The weekly
+C<fstrim> on the guest goes through C<discard='unmap'> and reclaims what the
+guest freed, at no cost for each write.  So it has value only on a guest that
+writes zeros in bulk.
+
+=item C<iothreads>
+
+C<disk_iothreads>, or 1 by default, and 0 if that is negative or the hypervisor
+does not support iothreads.  Without iothreads, virtio-blk submission runs on
+the main loop of qemu, in series with all other work on that loop.  More than
+one has value only on a guest with several busy disks, or on a hypervisor that
+can spread the queues of one disk across them, which is C<mapping>.
+
+=item C<queues>
+
+The virtqueues on each disk, C<disk_queues> or the vcpu count by default, or
+undef if that is not positive or the hypervisor does not support the attribute.
+Recent qemu already gives virtio-blk one virtqueue for each vcpu, so on most of
+the fleet this only states what qemu does anyway.  The XML must state it, so
+that the queues can go across iothreads.
+
+=item C<blockio>
+
+The C<logical> and C<physical> sector sizes to announce to the guest, 512 and
+4096 by default, or undef if the hypervisor does not support the element.
+virtio-blk announces 512/512 by default.  The guest then lays out its
+filesystem for 512 byte sectors, and does read-modify-write against 4K hardware
+for the life of the disk.  4096 is safe to announce on a 512n device too.  The
+guest only aligns to a boundary that the device ignores.  That is why 4096 is a
+default and not a probe.
+
+=item C<iotune>
+
+The throttles set in C<disk_*_bytes_sec> and C<disk_*_iops_sec>, each as a
+C<name> and a C<value>, in the order that libvirt wants, or undef if none is
+set.  See L</Nothing is emitted blind>.  libvirt takes a total or the two
+halves, never both.
+
+F<hypervisors.conf> reserves memory, CPUs and disk space.  It reserves nothing
+of the disk I/O queue that all guests on a machine share.  So one guest that
+runs a backup can slow every other guest, and no capacity check predicts it.
+These limits are the answer.  They are off unless a guest sets them, because a
+throttle has a cost.  Only the owner of the workload knows the correct value.
+
+=back
+
+=item C<tpm>
+
+1 if the hypervisor has a hardware TPM, and the guest then gets an emulated
+one.  Otherwise 0, with a message.  C<swtpm> keeps the TPM state of a guest in
+a file on the hypervisor, next to the disk image of the guest.  A key sealed to
+that TPM is sealed to that file, so whoever takes the disk also takes the TPM.
+That has value when hardware protects the disk of the hypervisor.  When it does
+not, it is worse than nothing, because software on the guest uses the TPM and
+trusts it.
+
+=item C<disks>, C<filesystems> and C<devices_map>
+
+C<disks> starts with the disk of the guest, then the disks that F<mounts.txt>
+asks for.  C<filesystems> holds the C<virtiofs> shares.  C<devices_map> is the
+text that the guest gets, so it can find them.
+
+Each line of F<mounts.txt> is C<pool=name>.  A C<raw> pool is a block device on
+the host.  C<dir> is a directory shared in through C<virtiofs>, and C<file> is
+an image file.  Any other pool is the name of another libvirt pool.  A C<fuse>
+line is skipped, because the guest mounts those itself.  Each line of
+C<devices_map> is C<name=vdX> for a directory, or C<name=/dev/vdX> for a disk.
+
+=back
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    my $hv = $self->hv;
+
+    my $iothreads = asked( \%opts, 'disk_iothreads' ) // 1;
+    $iothreads = 0 if $iothreads < 0;
+    if ( $iothreads && !$hv->supports('iothread') ) {
+        print "disk_iothreads needs libvirt 1.2.8 and qemu 2.1; " . $hv->describe . " has older,\n" . "so this guest's disks stay on qemu's main loop.\n";
+        $iothreads = 0;
+    }
+
+    my $cache = asked( \%opts, 'disk_cache' ) || ( $hv->pool_takes_direct_io ? 'none' : undef );
+    if ( !$cache ) {
+        my $fstype  = $hv->pool_fstype;
+        my $version = $fstype eq 'zfs' ? $hv->zfs_version : undef;
+
+        # Compared as numbers, because a string comparison puts 2.10 before 2.3.
+        my ( $major, $minor ) = ( $version // q{} ) =~ m/^(\d+)[.](\d+)/;
+        my $advice =
+            $fstype ne 'zfs'                                          ? q{}
+          : !defined $version                                         ? "The pool is on ZFS and the hypervisor would not say which version; ask it with\n" . "`cat /sys/module/zfs/version`.\n"
+          : ( defined $major && ( $major * 1_000 ) + $minor < 2_003 ) ? "OpenZFS is $version here and Direct I/O arrived in 2.3, so this wants an upgrade.\n"
+          :                                                             "OpenZFS $version has Direct I/O, so it is the pool or the dataset refusing it:\n" . "`zpool get all` for the feature flags, `zfs get direct` for the property.\n";
+
+        print "The storage pool, on $fstype, would not take an O_DIRECT write, so this\n" . "guest gets cache='writeback' rather than a domain that defines and then won't start.\n" . $advice . "Set disk_cache in provision.conf to say otherwise.\n";
+        $cache = 'writeback';
+    }
+
+    my $io = asked( \%opts, 'disk_io' ) || undef;
+    if ( ( $io // q{} ) eq 'io_uring' && !$hv->supports('io_uring') ) {
+        print "disk_io=io_uring needs libvirt 6.3 and qemu 5.0; " . $hv->describe . " has older,\n" . "so the disk is left on qemu's own choice of AIO backend.\n";
+        $io = undef;
+    }
+
+    my $detect_zeroes = asked( \%opts, 'disk_detect_zeroes' ) || undef;
+    if ( $detect_zeroes && !$hv->supports('detect_zeroes') ) {
+        print "disk_detect_zeroes needs libvirt 2.0; " . $hv->describe . " has older, so it is left off.\n";
+        $detect_zeroes = undef;
+    }
+
+    my $queues = asked( \%opts, 'disk_queues' ) // $opts{cpus};
+
+    my %limit = map { $_ => asked( \%opts, "disk_$_" ) } @IOTUNE_KEY;
+    delete @limit{ grep { !defined $limit{$_} } keys %limit };
+    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honor them.\n"
+      if %limit && !$hv->supports('iotune');
+    foreach my $unit ( grep { $limit{"total_$_"} } qw{bytes_sec iops_sec} ) {
+        die "disk_total_$unit cannot be set alongside disk_read_$unit or disk_write_$unit:\n" . "libvirt takes a total or the two halves, never both.\n"
+          if $limit{"read_$unit"} || $limit{"write_$unit"};
+    }
+
+    my %tuning = (
+        cache            => $cache,
+        io               => $io,
+        discard          => $hv->supports('discard') ? 1 : 0,
+        detect_zeroes    => $detect_zeroes,
+        discard_no_unref => $hv->supports('discard_no_unref') ? 1 : 0,
+        iothreads        => $iothreads,
+        mapping          => ( $iothreads > 1          && $hv->supports('iothread_mapping') ) ? 1       : 0,
+        queues           => ( $hv->supports('queues') && $queues > 0 )                       ? $queues : undef,
+        blockio          => $hv->supports('blockio')
+        ? {
+            logical  => asked( \%opts, 'disk_logical_block_size' )  // 512,
+            physical => asked( \%opts, 'disk_physical_block_size' ) // 4096,
+          }
+        : undef,
+        iotune => %limit ? [ map { { name => $_, value => $limit{$_} } } grep { defined $limit{$_} } @IOTUNE_KEY ] : undef,
+
+        # create_storage asks the hypervisor for this, because the size of the
+        # image decides it.
+        metadata_cache => $opts{metadata_cache},
+    );
+
+    $opts{tuning} = \%tuning;
+
+    $opts{tpm} = $hv->has_tpm ? 1 : 0;
+    print "No hardware TPM on the hypervisor, so this guest gets none either\n" unless $opts{tpm};
+
+    # The cgroup partition for every guest on this hypervisor.  libvirt uses
+    # /machine when none is named, so unset means the same thing.  An operator
+    # names one to put every guest built here into one systemd slice to cap.
+    $opts{partition} = $hv->partition;
+
+    # Whether the machine gives the guest a PCIe topology.  A q35 of any
+    # version does; i440fx does not.  The template puts the interfaces on the
+    # bus that the machine has.
+    $opts{pcie} = ( $opts{machine} // q{} ) =~ m/q35/ ? 1 : 0;
+
+    # The PCI slots of the two interfaces, as libvirt writes them.  On i440fx
+    # the hypervisor decides them, because the interface names on the guest
+    # come from the slot.  See Trog::HV::nic_names.
+    ( $opts{nat_slot}, $opts{bridge_slot} ) = map { sprintf '0x%02x', $_ } $hv->nic_slots;
+
+    my @disks = ( disk( \%tuning, format => 'qcow2', dev => 'vda', boot => 1, index => 0, primary => 1 ) );
+    my @filesystems;
+    my $map = q{};
+
+    my $spec_file = "$self->{output_dir}/mounts.txt";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_r)
+    my @specs    = -r $spec_file ? grep { $_ } split( m/\n/, File::Slurper::read_text($spec_file) ) : ();
+    my @devnames = ( 'vdb' .. 'vdz' );
+    my $order    = 2;
+    my $index    = 0;
+    foreach my $diskspec (@specs) {
+        my ( $pool, $disk ) = split( m/=/, $diskspec );
+        next if $pool eq 'fuse';
+
+        $order++;
+        my $dev = shift @devnames or die "Ran out of vdnames!\n";
+
+        $map .= $pool eq 'dir' ? "$disk=$dev\n" : "$disk=/dev/$dev\n";
+
+        if ( $pool eq 'dir' ) {
+            push( @filesystems, { source => $disk, target => $dev } );
+            next;
+        }
+
+        $index++;
+
+        if ( $pool eq 'raw' ) {
+            push( @disks, disk( \%tuning, format => 'raw', dev => $dev, boot => $order, index => $index, type => 'block', source => $disk ) );
+            next;
+        }
+
+        # A file or a volume in another pool.  Both resolve to a path, and
+        # libvirt wants the path.
+        my $path = $pool eq 'file' ? $disk : ( $hv->volume_path( $disk, $pool ) // $disk );
+        push( @disks, disk( \%tuning, format => 'qcow2', dev => $dev, boot => $order, index => $index, type => 'file', source => $path ) );
+    }
+
+    $opts{disks}       = \@disks;
+    $opts{filesystems} = \@filesystems;
+    $opts{devices_map} = $map;
+
+    return %opts;
 }
 
 1;
