@@ -176,7 +176,8 @@ sub args {
                     required   => [qw{password gecos}],
                     properties => {
                         password => {
-                            type => 'string',
+                            type       => 'string',
+                            'x-secret' => 1,
 
                             # The template renders a salted_sha_512 hash, so
                             # the payload never holds the plaintext.  A literal

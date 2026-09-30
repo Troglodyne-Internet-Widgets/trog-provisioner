@@ -175,6 +175,7 @@ sub args {
         properties => {
             admin_password => {
                 type        => 'string',
+                'x-secret'  => 1,
                 description => 'Password for the grafana administrator.  No default on purpose: see the POD.',
             },
             grafana_admin => {

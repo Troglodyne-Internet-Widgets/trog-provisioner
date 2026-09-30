@@ -346,6 +346,9 @@ my %WITH_SECRETS = (
 # the guest.  So a command that carries a secret must start with @, and
 # quiet_secrets puts it there.  The references resolve the way bin/new_config
 # resolves them, through Trog::Secrets, with %STORE in place of the database.
+#
+# Quieted with what the schema marks, and not with what the store held: that
+# is all a secret written literally gets, so it has to be enough on its own.
 subtest 'no command that make prints carries a secret' => sub {
     my %resolved;
     foreach my $recipe ( sort keys %WITH_SECRETS ) {
@@ -359,7 +362,7 @@ subtest 'no command that make prints carries a secret' => sub {
         my @printed;
         my $err = exception {
             foreach my $fragment ( ( fragment_for($recipe) ? $r->render( %G, %input ) : () ), ( fragment_for( $recipe, 'global.tt' ) ? $r->render_global( %G, %input ) : () ) ) {
-                push( @printed, Provisioner::Recipe->fragment_commands( Provisioner::Recipe->quiet_secrets( $fragment, values %values ) ) );
+                push( @printed, Provisioner::Recipe->fragment_commands( Provisioner::Recipe->quiet_secrets( $fragment, map { $_->[1] } $r->secrets_in( \%input ) ) ) );
             }
         };
         is( $err, undef, "$recipe renders with its secrets" ) or next;
@@ -372,6 +375,32 @@ subtest 'no command that make prints carries a secret' => sub {
         }
     }
     is_deeply( [ sort keys %resolved ], [ sort keys %STORE ], 'and every secret in the store was looked for' );
+};
+
+# A secret that no schema marks is quieted only when it came from the store,
+# and preflight does not report it written literally.  The name is the only
+# thing a new field has to go on, so a field named like a secret must say.
+subtest 'a field named like a secret is marked x-secret' => sub {
+    my $walk;
+    $walk = sub {
+        my ( $schema, $path ) = @_;
+        return () if ref $schema ne 'HASH';
+
+        my ($field) = $path =~ m/([^.\[\]*]+)\z/;
+        my @unmarked;
+        push( @unmarked, $path ) if defined $field && $field !~ m/_(?:file|path)\z/ && $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/ && !$schema->{'x-secret'};
+
+        push( @unmarked, $walk->( $schema->{properties}{$_},       $path eq q{} ? $_ : "$path.$_" ) ) for sort keys %{ $schema->{properties} // {} };
+        push( @unmarked, $walk->( $schema->{additionalProperties}, "$path.*" ) )  if ref $schema->{additionalProperties} eq 'HASH';
+        push( @unmarked, $walk->( $schema->{items},                "$path\[]" ) ) if ref $schema->{items} eq 'HASH';
+        return @unmarked;
+    };
+
+    foreach my $recipe (@available) {
+        my %schema   = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->schema();
+        my @unmarked = $walk->( \%schema, q{} );
+        ok( !@unmarked, "$recipe marks every field named like a secret" ) or diag join( "\n", @unmarked );
+    }
 };
 
 # An @ quiets a command only at its start.  On a continued line, the shell gets

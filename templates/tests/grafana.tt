@@ -3,12 +3,24 @@ use warnings;
 
 use Test::More;
 use JSON::PP;
+use File::Temp ();
 
 my $port      = '[% port %]';
 my $database  = '[% influx_database %]';
 my $ds_name   = '[% datasource_name %]';
 my $retention = '[% retention %]';
 my $influx    = 'http://127.0.0.1:8086';
+
+# The login goes to curl in a file of its own, because ps shows argv to every
+# user on the guest.  File::Temp makes the file 0600.
+sub grafana_api {
+    my ($url) = @_;
+    my $login = q{[% grafana_admin %]:[% admin_password %]} =~ s/(["\\])/\\$1/gr;
+    my $config = File::Temp->new;
+    print {$config} qq{user = "$login"\n};
+    close $config;
+    return `curl -fsS -K '$config' '$url' 2>&1`;
+}
 
 subtest 'all three services are running' => sub {
 
@@ -85,7 +97,7 @@ subtest 'grafana loaded the datasource it was provisioned with' => sub {
     # Ask grafana, not the file.  Grafana skips a provisioning file with a
     # syntax error at startup, logs it once, and stays healthy with no
     # datasource.
-    my $out = `curl -fsS -u '[% grafana_admin %]:[% admin_password %]' http://127.0.0.1:$port/api/datasources 2>&1`;
+    my $out = grafana_api("http://127.0.0.1:$port/api/datasources");
     like( $out, qr/"name":"\Q$ds_name\E"/,     "the $ds_name datasource is there" ) or diag $out;
     like( $out, qr/"database":"\Q$database\E"/, "pointed at $database" )            or diag $out;
 };
@@ -103,15 +115,14 @@ subtest 'a login lands on the home dashboard' => sub {
     ok( $want->{title}, 'with a title to tell it from the stock home page' ) or return;
 
     my $api  = "http://127.0.0.1:$port/api/dashboards";
-    my $auth = q{[% grafana_admin %]:[% admin_password %]};
-    my $out  = `curl -fsS -u '$auth' $api/home 2>&1`;
+    my $out  = grafana_api("$api/home");
     my $home = eval { JSON::PP->new->decode($out) };
     ok( $home, 'grafana answers for its home page' ) or do { diag $out; return };
 
     # Grafana 13 answers with a redirect to a copy of the file under a uid of
     # its own, so the title is what the two have in common.
     if ( my ($uid) = ( $home->{redirectUri} // q{} ) =~ m{^/d/([^/]+)} ) {
-        $out  = `curl -fsS -u '$auth' $api/uid/$uid 2>&1`;
+        $out  = grafana_api("$api/uid/$uid");
         $home = eval { JSON::PP->new->decode($out) };
     }
     is( $home && $home->{dashboard}{title}, $want->{title}, "and the home page is $want->{title}" ) or diag $out;

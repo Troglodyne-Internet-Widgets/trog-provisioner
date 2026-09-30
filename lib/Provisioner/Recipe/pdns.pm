@@ -99,6 +99,7 @@ sub args {
         properties => {
             api_key => {
                 type        => 'string',
+                'x-secret'  => 1,
                 description =>
                   'The credential everything on this guest presents to talk to the API on its loopback socket -- lexicon writing an _acme-challenge record, synczones reading the zone back.  Made here when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  It belongs to the server, so a domain layered onto another guest presents that machine key rather than one of its own.',
             },
@@ -113,7 +114,7 @@ sub args {
                 properties => {
                     type => { type => 'string', description => 'The lexicon provider holding the zone, spelled as the registrar recipe spells it.' },
                     user => { type => 'string', description => 'The username that provider authenticates with.' },
-                    key  => { type => 'string', description => 'The token or password for it.' },
+                    key  => { type => 'string', 'x-secret'  => 1, description => 'The token or password for it.' },
                 },
             },
 

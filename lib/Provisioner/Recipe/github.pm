@@ -81,7 +81,7 @@ sub args {
         properties => {
             account      => { type => 'string', description => 'The account on the guest that gets the login.  Defaults to the service user of the domain.' },
             github_user  => { type => 'string', description => 'The GitHub account to log in as.' },
-            github_token => { type => 'string', description => 'A personal access token for that account.  It is written into the login state of the account on the guest, so it is as secret as the guest is.' },
+            github_token => { type => 'string', 'x-secret'  => 1, description => 'A personal access token for that account.  It is written into the login state of the account on the guest, so it is as secret as the guest is.' },
 
             git_protocol => { type => 'string', enum => [qw{https ssh}], default => 'https', description => 'What gh clones with.  ssh where the account has a key, which Provisioner::Recipe::git gives it; https otherwise, which authenticates with the token.' },
         },

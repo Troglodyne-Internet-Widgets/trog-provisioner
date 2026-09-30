@@ -135,7 +135,7 @@ sub args {
                     required   => [qw{api_url token repos_for}],
                     properties => {
                         api_url   => { type => "string" },
-                        token     => { type => "string" },
+                        token     => { type => "string", 'x-secret' => 1 },
                         repos_for => {
                             type  => "array",
                             items => { type => "string" },

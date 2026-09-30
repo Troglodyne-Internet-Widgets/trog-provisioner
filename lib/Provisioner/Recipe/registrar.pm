@@ -67,6 +67,7 @@ sub args {
             },
             key => {
                 type        => 'string',
+                'x-secret'  => 1,
                 default     => q{},
                 description => 'The token lexicon authenticates with.  A secret: reference rather than the value, so it lives in the store and not in the configuration.',
             },

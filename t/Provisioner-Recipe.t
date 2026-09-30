@@ -576,4 +576,41 @@ subtest 'quiet_secrets puts an @ on each command that holds a secret' => sub {
     is( $quiet->($plain),             $plain, 'and so is any fragment, when there are no secrets' );
 };
 
+{
+    # A secret at each depth that a schema can put one.
+    package Test::Recipe::Secrets;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
+
+    sub args {
+        return (
+            type       => 'object',
+            properties => {
+                token => { type => 'string', 'x-secret' => 1 },
+                name  => { type => 'string' },
+                from  => { type => 'array',  items                => { type => 'object', properties => { key      => { type => 'string', 'x-secret' => 1 }, url => { type => 'string' } } } },
+                users => { type => 'object', additionalProperties => { type => 'object', properties => { password => { type => 'string', 'x-secret' => 1 } } } },
+            },
+        );
+    }
+}
+
+subtest 'secrets_in finds each value that the schema marks, wherever it is' => sub {
+    my %config = (
+        token => 'SeCrEt-top',
+        name  => 'not-a-secret',
+        from  => [ { key => 'SeCrEt-first', url => 'https://bogus.test.test' }, { key => 'secret:group/title/password' } ],
+        users => { someone => { password => 'SeCrEt-user' } },
+    );
+    is_deeply(
+        [ Test::Recipe::Secrets->secrets_in( \%config ) ],
+        [ [ 'from[0].key', 'SeCrEt-first' ], [ 'from[1].key', 'secret:group/title/password' ], [ 'token', 'SeCrEt-top' ], [ 'users.someone.password', 'SeCrEt-user' ] ],
+        'in a list, in a map, and at the top, by path, and nothing unmarked'
+    );
+
+    # Nothing there is nothing to quiet, and a list or a map where the schema
+    # wants a string is what validate refuses, not a secret.
+    is_deeply( [ Test::Recipe::Secrets->secrets_in( { token => q{}, from => [ { key => undef } ], users => { someone => { password => ['x'] } } } ) ], [], 'an empty, undefined or structured value is not a secret' );
+    is_deeply( [ Test::Recipe::Secrets->secrets_in( { bogus => { token => 'SeCrEt' } } ) ], [], 'nor is a value where the schema declares nothing' );
+};
+
 done_testing();

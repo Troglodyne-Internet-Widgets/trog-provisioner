@@ -135,10 +135,10 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            bind             => { type => 'string',  default => '127.0.0.1' },
-            port             => { type => 'integer', minimum => 1024, default => 6379 },
-            save             => { type => 'boolean', default => 1 },
-            requirepass      => { type => 'string' },
+            bind             => { type => 'string',  default    => '127.0.0.1' },
+            port             => { type => 'integer', minimum    => 1024, default => 6379 },
+            save             => { type => 'boolean', default    => 1 },
+            requirepass      => { type => 'string',  'x-secret' => 1 },
             maxmemory        => { type => 'string' },
             maxmemory_policy => {
                 type => 'string',

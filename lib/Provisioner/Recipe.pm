@@ -101,8 +101,10 @@ streams.
 
 =item * Make prints each command before it runs it, and F<ubuntu.setup.sh.tt>
 keeps what make prints in F</var/log/E<lt>domainE<gt>.setup.log> on the guest.
-C<bin/new_config> starts each command that holds a resolved secret with C<@>,
-through C<quiet_secrets>, so a fragment does not do that itself.  Start a
+C<bin/new_config> starts each command that holds a secret with C<@>, through
+C<quiet_secrets>, so a fragment does not do that itself.  A secret is a value
+from the store, or a value in a field that the schema marks
+C<'x-secret' =E<gt> 1>, so mark every such field; see L</secrets_in>.  Start a
 command with C<@> yourself when its text names a failure, such as C<|| echo
 "could not ...">.  In the log, that text reads as a failure even on a run that
 worked.  Put the C<@> on the first line of the command.  Keep a secret out of
@@ -1547,6 +1549,49 @@ sub quiet_secrets ( $class, $fragment, @secrets ) {
         $command =~ s/\A(\s*)/$1@/;
     }
     return join( q{}, @commands );
+}
+
+=head3 @found = $recipe->secrets_in(\%config)
+
+Returns a pair C<[ $path, $value ]> for each value in C<%config> that the
+C<schema> of this recipe marks C<'x-secret' =E<gt> 1>, and that is a string
+with something in it.  C<$path> is spelled as L<Trog::Utils/slots_in> spells
+it, such as C<repos_from[0].token>.  The config is raw: nothing is validated or
+defaulted, so this works on a configuration as it is written.
+
+Mark every field whose value is a password, a token or a key that an operator
+supplies.  C<bin/new_config> quiets each value found here, written literally or
+resolved from the store, and C<bin/preflight> reports each one that is written
+literally.  An unmarked secret gets neither.
+
+=cut
+
+sub secrets_in ( $self, $config ) {
+    my %schema = $self->schema();
+
+    # A stack, popped, with each level pushed in reverse, so the pairs come out
+    # in the order of the configuration, as slots_in gives its paths.
+    my @stack = ( [ \%schema, $config, q{} ] );
+    my @found;
+    while ( my $at = pop @stack ) {
+        my ( $schema, $data, $path ) = @$at;
+        next if ref $schema ne 'HASH';
+        if ( $schema->{'x-secret'} ) {
+            push( @found, [ $path, $data ] ) if defined $data && !ref $data && $data ne q{};
+            next;
+        }
+
+        my @below;
+        if ( ref $data eq 'HASH' ) {
+            my $rest = ref $schema->{additionalProperties} eq 'HASH' ? $schema->{additionalProperties} : undef;
+            @below = map { [ $schema->{properties}{$_} // $rest, $data->{$_}, $path eq q{} ? $_ : "$path.$_" ] } sort keys %$data;
+        }
+        elsif ( ref $data eq 'ARRAY' ) {
+            @below = map { [ $schema->{items}, $data->[$_], "$path\[$_]" ] } 0 .. $#$data;
+        }
+        push( @stack, reverse @below );
+    }
+    return @found;
 }
 
 =head3 $output = $recipe->render_raw($file, %template_vars)
