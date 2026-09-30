@@ -83,8 +83,10 @@ does.
 =head2 %required = $recipe->required_recipes(%opts)
 
 C<github> for the CLI, which somebody working at a shell on the guest expects
-and which used to be installed here, and C<git> for the host keys of each
-C<api_url> it clones from.
+and which used to be installed here, and C<git> for the host keys of the host
+that serves ssh for each C<api_url> it clones from.  That is the host of the
+C<api_url>, except for C<api.github.com>: GitHub serves ssh from
+C<github.com>, and C<api.github.com> answers no ssh at all.
 
 Neither is given a login or a key.  An administrator logs in as themselves and
 forwards their own key; the host keys are the half of that which the guest has
@@ -102,7 +104,15 @@ sub required_recipes {
             return (
                 accounts => {
                     $given{admin_user} => {
-                        hosts => [ grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $given{repos_from} // [] } ],
+                        hosts => [
+                            grep { $_ }
+                            map {
+
+                                # GitHub Enterprise and gogs serve the API and ssh from one host.
+                                my $host = Provisioner::Utils::host_of( $_->{api_url} ) // q{};
+                                $host eq 'api.github.com' ? 'github.com' : $host
+                            } @{ $given{repos_from} // [] }
+                        ],
                     },
                 },
             );
