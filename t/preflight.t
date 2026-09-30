@@ -155,10 +155,18 @@ subtest 'a cloud runs out of quota, not of hardware' => sub {
     Trog::HV->forget();
 };
 
-subtest 'libvirt packs its version into one integer' => sub {
-    is( Trog::HV::Libvirt::_version_string(10000000), '10.0.0', 'major only' );     ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    is( Trog::HV::Libvirt::_version_string(9004000),  '9.4.0',  'and minor' );      ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    is( Trog::HV::Libvirt::_version_string(8000012),  '8.0.12', 'and release' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+subtest 'libvirt packs its version into one integer, and the check says it dotted' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    my $sv = Test::MockModule->new('Sys::Virt');
+    $hv->redefine( vmm => sub { bless {}, 'Sys::Virt' } );
+
+    foreach my $case ( [ 10000000, '10.0.0', 'major only' ], [ 9004000, '9.4.0', 'and minor' ], [ 8000012, '8.0.12', 'and release' ] ) {
+        my ( $packed, $dotted, $why ) = @$case;
+        $sv->redefine( get_library_version => sub { $packed } );
+
+        my ($result) = quietly( sub { Trog::HV->new()->check_libvirt } );
+        is( $result->{what}, "libvirt answers, running $dotted", $why );
+    }
 };
 
 subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
