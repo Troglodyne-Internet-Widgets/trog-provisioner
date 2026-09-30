@@ -313,17 +313,6 @@ sub write_pem {
     return;
 }
 
-# Wraps the body of a PEM at 64 columns, as RFC 7468 requires.
-sub _rewrap_pem {
-    my ($pem) = @_;
-
-    my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})}
-      or return $pem;
-
-    $body =~ s/\s//g;
-    return join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n";
-}
-
 =head3 write_ssh_keypair($path, $type, $bits, $comment)
 
 Makes an ssh keypair and writes both halves.  The private key goes to C<$path>
@@ -358,7 +347,11 @@ sub write_ssh_keypair {
     $key->{comment} = $comment if defined $comment;
 
     $key->write_private($path);
-    File::Slurper::Temp::write_text( $path, _rewrap_pem( File::Slurper::read_text($path) ) );
+    my $pem = File::Slurper::read_text($path);
+    if ( my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})} ) {
+        $body =~ s/\s//g;
+        File::Slurper::Temp::write_text( $path, join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n" );
+    }
 
     my $public = $key->dump_public;
     File::Slurper::Temp::write_text( "$path.pub", "$public\n" );
@@ -377,43 +370,43 @@ my %ECC_CURVES = (
 # 'string' is a 32-bit big-endian length, then that many bytes.  An 'mpint' is
 # the same, but holds a big-endian integer of minimal length.  That integer gets
 # a leading zero byte when its high bit is set, so it does not read as negative.
-sub _sshstr ($string) { return pack( 'N/a*', $string ) }
+my sub sshstr ($string) { return pack( 'N/a*', $string ) }
 
-sub _mpint {
-    my ($hex) = @_;
+my sub mpint ($hex) {
     $hex = "0$hex" if length($hex) % 2;
     my $bin = pack( 'H*', $hex );
     $bin =~ s{^\x00+}{};
     $bin = chr(0) . $bin if !$bin || ord( substr( $bin, 0, 1 ) ) & 0x80;
-    return _sshstr($bin);
+    return sshstr($bin);
 }
 
-sub _blob_rsa {
-    my ($pk) = @_;
-    my $hash = $pk->key2hash();
-    return ( 'ssh-rsa', _sshstr('ssh-rsa') . _mpint( $hash->{e} ) . _mpint( $hash->{N} ) );
-}
-
-sub _blob_ed25519 {
-    my ($pk) = @_;
-    return ( 'ssh-ed25519', _sshstr('ssh-ed25519') . _sshstr( $pk->export_key_raw('public') ) );
-}
-
-sub _blob_ecc {
-    my ($pk)  = @_;
-    my $curve = $pk->key2hash()->{curve_name} // '';
-    my $nist  = $ECC_CURVES{ lc($curve) } or die "Unsupported ECDSA curve '$curve'";
-    my $type  = "ecdsa-sha2-$nist";
-
-    # export_key_raw() returns the uncompressed point, which is the form OpenSSH needs.
-    return ( $type, _sshstr($type) . _sshstr($nist) . _sshstr( $pk->export_key_raw('public') ) );
-}
-
-# CryptX cannot detect the key type, so each importer is tried in turn.
+# CryptX cannot detect the key type, so each importer is tried in turn.  Each
+# encoder returns the type of the key and its blob.
 my @IMPORTERS = (
-    [ 'Crypt::PK::Ed25519', \&_blob_ed25519 ],
-    [ 'Crypt::PK::ECC',     \&_blob_ecc ],
-    [ 'Crypt::PK::RSA',     \&_blob_rsa ],
+    [
+        'Crypt::PK::Ed25519',
+        sub ($pk) {
+            return ( 'ssh-ed25519', sshstr('ssh-ed25519') . sshstr( $pk->export_key_raw('public') ) );
+        },
+    ],
+    [
+        'Crypt::PK::ECC',
+        sub ($pk) {
+            my $curve = $pk->key2hash()->{curve_name} // '';
+            my $nist  = $ECC_CURVES{ lc($curve) } or die "Unsupported ECDSA curve '$curve'";
+            my $type  = "ecdsa-sha2-$nist";
+
+            # export_key_raw() returns the uncompressed point, which is the form OpenSSH needs.
+            return ( $type, sshstr($type) . sshstr($nist) . sshstr( $pk->export_key_raw('public') ) );
+        },
+    ],
+    [
+        'Crypt::PK::RSA',
+        sub ($pk) {
+            my $hash = $pk->key2hash();
+            return ( 'ssh-rsa', sshstr('ssh-rsa') . mpint( $hash->{e} ) . mpint( $hash->{N} ) );
+        },
+    ],
 );
 
 =head3 ssh_pubkey_from_private($path)
