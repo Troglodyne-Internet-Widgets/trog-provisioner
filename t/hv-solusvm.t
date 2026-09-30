@@ -322,6 +322,26 @@ subtest 'the address a guest is reached at' => sub {
       'a guest with no address yet says what it is doing instead of handing back nothing';
 };
 
+subtest 'which network of the guests an address is on' => sub {
+    my $hv = node();
+    $STATE{servers} = [
+        { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.4.32.98', netmask => '255.255.224.0' } ] } },
+        { id => 2, name => 'bare.test' },
+    ];
+
+    is $hv->guest_network_of('10.4.32.49'),    '10.4.32.0/19', 'an address on a guest\'s own network is on it, named as the network rather than the guest';
+    is $hv->guest_network_of('10.4.63.255'),   '10.4.32.0/19', 'up to the last address the netmask holds';
+    is $hv->guest_network_of('10.4.64.1'),     undef,          'and not one past it';
+    is $hv->guest_network_of('172.29.48.208'), undef,          'an address behind a NAT of its own is on none of them';
+    is $hv->guest_network_of('localhost'),     undef,          'and a name is not resolved into an address to compare';
+
+    $STATE{servers} = [ { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.4.32.98', netmask => '0.0.0.0' } ] } } ];
+    is $hv->guest_network_of('10.4.32.49'), undef, 'a netmask of nothing puts every address on it, so it is no evidence of a shared network';
+
+    $STATE{servers} = [];
+    is $hv->guest_network_of('10.4.32.49'), undef, 'with no guests, there is no network to be on';
+};
+
 subtest 'building a guest' => sub {
     my $hv = node();
 

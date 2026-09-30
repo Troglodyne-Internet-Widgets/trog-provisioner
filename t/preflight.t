@@ -541,6 +541,26 @@ subtest 'which hypervisors need a port forwarded to us, and which do not' => sub
     ok !$result->{ok}, 'nor one told to use an address nothing on the internet routes to';
     like $result->{what}, qr/private[ ]address/, 'which it says';
 
+    # Unless it is ours, on a network the backend says its guests are on.
+    my $shared = Test::MockModule->new('Trog::HV');
+    $shared->redefine( guest_network_of => sub { my ( undef, $address ) = @_; return $address =~ m/\A 10[.]0[.]0[.]/x ? '10.0.0.0/24' : undef } );
+
+    $result = $cloud->check_transfer_route;
+    ok !$result->{ok}, 'a private address on a guest network is still refused when it is not ours';
+    like $result->{fix}, qr/no[ ]guest[ ]there[ ]is[ ]on[ ]a[ ]network\s+with[ ]it/, 'saying the other way a private address can work';
+
+    $local->redefine( holds_address => sub { my ( undef, $address ) = @_; return $address =~ m/\A (?:192[.]0[.]2[.]10|10[.]0[.]0[.]5) \z/x ? 1 : 0 } );
+    $result = $cloud->check_transfer_route;
+    ok $result->{ok}, 'and passes once it is an address of this machine on the network of a guest';
+    like $result->{what}, qr/10[.]0[.]0[.]5:22 .* on[ ]10[.]0[.]0[.]0\/24/x, 'naming the network they share';
+
+    $cloud->{transfer_ip} = '10.9.9.9';
+    $local->redefine( holds_address => sub { return 1 } );
+    $result = $cloud->check_transfer_route;
+    ok !$result->{ok}, 'while an address of ours on no guest network is refused as before';
+    $shared->unmock('guest_network_of');
+    $local->redefine( holds_address => sub { my ( undef, $address ) = @_; return $address eq '192.0.2.10' ? 1 : 0 } );
+
     $cloud->{transfer_ip} = '192.0.2.10';
     $result = $cloud->check_transfer_route;
     ok $result->{ok}, 'an address of this machine is reachable as it is';
