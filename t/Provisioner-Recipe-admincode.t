@@ -56,6 +56,23 @@ subtest 'the checkouts are smoked only on a guest that builds a perl' => sub {
     like( $built, qr/smoke_perl_modules/, 'a guest with the perl recipe does' );
 };
 
+# The git recipe scans these for their ssh host keys, and a host that serves
+# no ssh gives it nothing, so its guest test fails.
+subtest 'the host keys it asks git for are those of the host that serves ssh' => sub {
+    my %git       = fresh()->required_recipes();
+    my $hosts_for = sub {
+        my (@urls) = @_;
+        my %given  = ( admin_user => 'someadmin', repos_from => [ map { { api_url => $_ } } @urls ] );
+        my %asked  = $git{git}->(%given);
+        return $asked{accounts}{someadmin}{hosts};
+    };
+
+    is_deeply( $hosts_for->('https://api.github.com/'),                                   ['github.com'],                    'GitHub serves ssh from github.com, not from its API host' );
+    is_deeply( $hosts_for->('https://git.test.test/api/v1'),                              ['git.test.test'],                 'a forge that serves both from one host is asked about that host' );
+    is_deeply( $hosts_for->('https://ghe.test.test/api/v3'),                              ['ghe.test.test'],                 'and so is GitHub Enterprise' );
+    is_deeply( $hosts_for->( 'https://api.github.com/', 'https://git.test.test/api/v1' ), [ 'github.com', 'git.test.test' ], 'each api_url for itself' );
+};
+
 subtest 'the extra packages install at first boot, with the rest' => sub {
     my @deps = fresh()->deps( extra_pkgs => [qw{tig tmux}] );
     ok( ( grep { $_ eq 'tig' } @deps ) && ( grep { $_ eq 'tmux' } @deps ), 'the extra_pkgs of the operator are deps' );
