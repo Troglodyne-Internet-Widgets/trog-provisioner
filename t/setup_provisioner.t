@@ -75,22 +75,16 @@ subtest 'what moved out has not quietly moved back' => sub {
 };
 
 subtest 'the POD says which machine this is about' => sub {
-    my $description = _pod_section( $script, 'DESCRIPTION' );
+    my $description = q{};
+    open( my $fh, '>', \$description ) or die $!;
+    Pod::Usage::pod2usage(
+        -input   => $script, -output   => $fh, -exitval => 'NOEXIT',
+        -verbose => 99,      -sections => 'DESCRIPTION',
+    );
+    close($fh) or die "Could not close the POD read out of $script: $!";
 
     like( $description, qr/hypervisor/, 'the machine that hosts guests' );
     like( $description, qr/trogrunner/, 'and where the machine that runs the provisioner comes from instead' );
 };
-
-sub _pod_section {
-    my ( $file, $section ) = @_;
-    my $out = q{};
-    open( my $fh, '>', \$out ) or die $!;
-    Pod::Usage::pod2usage(
-        -input   => $file, -output   => $fh, -exitval => 'NOEXIT',
-        -verbose => 99,    -sections => $section,
-    );
-    close($fh) or die "Could not close the POD read out of $file: $!";
-    return $out;
-}
 
 done_testing;
