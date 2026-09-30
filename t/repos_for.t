@@ -153,7 +153,7 @@ subtest 'the cache is data rather than perl' => sub {
 };
 
 subtest 'a name that is not a plain directory component is refused' => sub {
-    foreach my $name (qw{../escape . .. -oops a/b}) {
+    foreach my $name (qw{../escape . .. a/b}) {
         my $nasty = repos_for(
             args  => [ 'https://api.test/', 'mallory' ],
             home  => tempdir( CLEANUP => 1 ),
@@ -166,15 +166,18 @@ subtest 'a name that is not a plain directory component is refused' => sub {
 };
 
 # GitHub keeps the profile of an organization in a repository named .github.
-subtest 'a name that starts with a dot is still a directory name' => sub {
-    my $dotted = repos_for(
+subtest 'any other name is a directory name' => sub {
+    my $named = repos_for(
         args  => [ 'https://api.test/', 'org' ],
         home  => tempdir( CLEANUP => 1 ),
-        repos => { org => [ row( 'org', '.github' ), row( 'org', '..hidden' ) ] },
+        repos => { org => [ row( 'org', '.github' ), row( 'org', '..hidden' ), row( 'org', '-oops' ) ] },
     );
-    is( $dotted->{rc}, 0, 'the run succeeds' ) or diag $dotted->{err};
-    ok( cloned( $dotted, '.github' ),  '.github is cloned' );
-    ok( cloned( $dotted, '..hidden' ), 'and so is a name that only starts like ..' );
+    is( $named->{rc}, 0, 'the run succeeds' ) or diag $named->{err};
+    ok( cloned( $named, $_ ), "$_ is cloned" ) for qw{.github ..hidden -oops};
+
+    # A leading dash is safe only because git reads nothing after -- as an option.
+    my @clones = grep { $_->[1] eq 'clone' } @{ $named->{ran} };
+    ok( !grep( { $_->[2] ne '--' } @clones ), 'git gets -- before the url of every clone' ) or diag explain \@clones;
 };
 
 subtest 'an https clone that fails is retried over ssh' => sub {
@@ -185,7 +188,7 @@ subtest 'an https clone that fails is retried over ssh' => sub {
         fails => qr{https},
     );
     is( $fallback->{rc}, 0, 'the ssh clone carries the run' );
-    ok( scalar( grep { $_->[1] eq 'clone' && $_->[2] =~ m{\Agit\@} } @{ $fallback->{ran} } ), 'the ssh url is tried' );
+    ok( scalar( grep { $_->[1] eq 'clone' && index( $_->[3], 'git@' ) == 0 } @{ $fallback->{ran} } ), 'the ssh url is tried' );
 };
 
 subtest 'a token is required, and comes from stdin' => sub {

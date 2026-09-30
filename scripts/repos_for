@@ -10,6 +10,7 @@ use warnings FATAL => 'all';
 use File::pushd  qw{pushd};
 use Getopt::Long qw{GetOptionsFromArray};
 use JSON::PP     ();
+use List::Util   ();
 use Pithub;
 
 my $USAGE = "usage: repos_for [--reset] API_URL ENTITY [ENTITY ...] < token_file\n";
@@ -135,8 +136,9 @@ ssh.
 
 Returns the number of failures, 0 or 1, and does not die.  So one repository
 that nobody can reach does not stop the others.  A C<$repo> that is not a plain
-directory name is a failure: C<.>, C<..>, a name with a slash, or one that
-starts with C<->.  A C<$repo> directory that exists already is left
+directory name is a failure: C<.>, C<..>, or a name with a slash.  git gets
+C<--> before the url, so a name that starts with C<-> is a name and not an
+option.  A C<$repo> directory that exists already is left
 alone and returns 0, because somebody can have work in it.
 
 =cut
@@ -144,10 +146,9 @@ alone and returns 0, because somebody can have work in it.
 sub clone {
     my ( $repo, $robj ) = @_;
 
-    # The name comes from the API and becomes a path, so it must be one plain
-    # directory name.  A leading dot is allowed, for a repository such as
-    # .github, but not . or .., which name directories that are there already.
-    unless ( $repo =~ m{\A(?!\.\.?\z)[\w.][\w.-]*\z}a ) {
+    # The name comes from the API and becomes a path, so it must be one
+    # directory name, and not one that is there already.
+    if ( index( $repo, '/' ) >= 0 || List::Util::any { $repo eq $_ } qw{. ..} ) {
         warn "Skipping '$repo': not a plain directory name\n";
         return 1;
     }
@@ -155,7 +156,7 @@ sub clone {
     return 0 if -d $repo;
 
     print "Cloning $repo...\n";
-    if ( run( qw{git clone}, $robj->{clone_url}, $repo ) ) {
+    if ( run( qw{git clone --}, $robj->{clone_url}, $repo ) ) {
         my $dir = pushd($repo);
         print "Rewriting origin in $repo...\n";
         return run( qw{git remote set-url origin}, $robj->{ssh_url} ) ? 0 : 1;
@@ -164,7 +165,7 @@ sub clone {
     # The admin can have a key in their skel for a host that refuses https.  A
     # clone over ssh already has the ssh origin.
     print "Retrying $repo over ssh...\n";
-    return run( qw{git clone}, $robj->{ssh_url}, $repo ) ? 0 : 1;
+    return run( qw{git clone --}, $robj->{ssh_url}, $repo ) ? 0 : 1;
 }
 
 =head2 $ok = run(@cmd)
