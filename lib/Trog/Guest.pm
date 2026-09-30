@@ -69,7 +69,7 @@ our $SSH_RETRY_INTERVAL = 6;
 # longest build installs perl from source and ninety-odd distributions after it.
 # It takes about twenty minutes.
 #
-# Trog::Machine::_unhang must allow at least this long, or it treats a guest
+# Trog::Machine::hang_limit must allow at least this long, or it treats a guest
 # that is still building as hung.  It reads its limit from each command.
 our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 

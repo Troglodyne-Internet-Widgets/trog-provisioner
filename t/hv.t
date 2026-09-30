@@ -583,8 +583,9 @@ subtest 'a sudo password is asked for once and then remembered' => sub {
         }
     );
 
-    my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( _ask_for_sudo_password => sub { $asked++; return $_[0]->_remember('hunter2') } );
+    Trog::Credentials->forget();
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { $asked++; return 'hunter2' } );
 
     is( $hv->run_sudo(qw{systemctl restart rsyslog}), 0, 'the command succeeds in the end' );
     is( $asked,                                       1, 'we asked for a password' );
@@ -662,9 +663,10 @@ subtest 'a sudo password that is wrong three times stops the command' => sub {
             return ( '', defined $opts->{stdin_data} ? "Sorry, try again.\n" : "sudo: a password is required\n" );
         }
     );
-    my $asked   = 0;
-    my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( _ask_for_sudo_password => sub { $asked++; return $_[0]->_remember("guess$asked") } );
+    my $asked = 0;
+    Trog::Credentials->forget();
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { $asked++; return "guess$asked" } );
 
     my ( $said, $err ) = Capture::Tiny::capture_stderr(
         sub {
@@ -1615,29 +1617,29 @@ subtest 'a rebuilt guest can hold two leases, and the newest is the address it h
 
 subtest 'a command that names its own timeout is not called hung before it' => sub {
 
-    # _unhang exists to notice a command that should return promptly and does
+    # The hang guard of Trog::Machine exists to notice a command that should return promptly and does
     # not.  wait_for_makefile's is `sudo timeout 180m bash -c 'until atq is
     # empty ...'`, which is meant to block for as long as the guest takes to
     # build -- and the ten minute alarm killed it regardless, so every setup
     # timeout above ten minutes was decorative and a guest still compiling came
-    # back as a failure.  Only the remote path reaches _unhang, which is why
+    # back as a failure.  Only the remote path reaches that guard, which is why
     # this never appeared against a local hypervisor.
     is(
-        Trog::Machine::_hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,
         'an ordinary command gets the default'
     );
 
     is(
-        Trog::Machine::_hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),
         180 * 60 + 60, 'one that says 180m gets 180m and a minute'
     );
 
     is(
-        Trog::Machine::_hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,
         'and one shorter than the default does not lower it'
     );
 
-    is( Trog::Machine::_hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( Trog::Machine::hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );
 };
 
 # --- What libvirt refuses stops the run ---------------------------------------

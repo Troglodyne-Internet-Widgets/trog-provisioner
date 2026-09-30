@@ -164,6 +164,20 @@ subtest 'sudo on a machine nobody is watching' => sub {
     $machine->redefine( ssh_target => sub { 'ubuntu@hv.example.test' } );
     local $Trog::Credentials::TERMINAL = '/bogus/tty';
 
+    # sudo on the far side, which wants a password and takes only hunter2.
+    my @stdin;
+    my $ssh = Test::MockModule->new('Net::OpenSSH::More');
+    $ssh->redefine( new => sub { bless {}, shift } );
+    $ssh->redefine(
+        capture2 => sub {
+            my ( $self, $opts ) = @_;
+            push( @stdin, $opts->{stdin_data} );
+            ## no critic (Variables::RequireLocalizedPunctuationVars) -- run_sudo reads it afterwards, as it would from the real call
+            $? = ( $opts->{stdin_data} // q{} ) eq "hunter2\n" ? 0 : 1 << 8;
+            return ( q{}, $? ? "sudo: a password is required\n" : q{} );
+        }
+    );
+
     Trog::HV->forget();
     my $hv = Trog::HV->new( uri => 'qemu+ssh://ubuntu@hv.example.test/system' );
     Trog::Machine::forget_sudo_passwords();
@@ -171,15 +185,16 @@ subtest 'sudo on a machine nobody is watching' => sub {
     # This is the case the whole thing is for: a detached run, sudo on the far
     # side wanting a password, and no terminal in sight.
     load_block("sudo: hunter2\n");
-    Trog::Machine::_ask_for_sudo_password($hv);    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    is( $hv->sudo_password, 'hunter2', 'the password handed in is the one sudo gets' );
+    is( $hv->run_sudo(qw{systemctl restart rsyslog}), 0,           'sudo works' );
+    is( $stdin[-1],                                   "hunter2\n", 'with the password handed in' );
+    is( $hv->sudo_password,                           'hunter2',   'which is kept for the rest of the run' );
 
     # And without it, the same run says what to do rather than hanging.
     Trog::Credentials->forget();
     Trog::Credentials->load( IO::String->new('') );
     Trog::Machine::forget_sudo_passwords();
 
-    my $why = exception { Trog::Machine::_ask_for_sudo_password($hv) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $why = exception { $hv->run_sudo(qw{systemctl restart rsyslog}) };
     like( $why, qr/Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal/, 'with nothing handed in and no terminal it refuses' );
     like( $why, qr/NOPASSWD/,                                      'saying how to not need one' );
     like( $why, qr/Trog::Credentials/,                             'and how to hand one in' );

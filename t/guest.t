@@ -239,7 +239,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     # These are two separate limits on the same wait, and only their
     # relationship matters.  wait_for_makefile blocks on the at queue for
     # $SETUP_TIMEOUT; every remote command it uses to do that goes through
-    # Trog::Machine::_unhang, which used to allow ten minutes flat.  The inner
+    # the hang detector of Trog::Machine, which used to allow ten minutes flat.  The inner
     # limit won, so SETUP_TIMEOUT did nothing whatever it was set to, and a
     # guest that was still building was reported as a failed provision.
     #
@@ -256,7 +256,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     my $atq = qq{sudo timeout $Trog::Guest::SETUP_TIMEOUT bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
 
     cmp_ok(
-        Trog::Machine::_hang_limit($atq), '>=', $setup,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+        Trog::Machine::hang_limit($atq), '>=', $setup,
         'the hang detector gives the wait at least as long as the wait asks for'
     );
 };
