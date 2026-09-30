@@ -85,7 +85,7 @@ sub answer {
 
     if ( my ($id) = $path =~ m{\A /servers/(\d+)/snapshots \z}x ) {
         return _page( $STATE{snapshots}{$id} // [] ) if $method eq 'GET';
-        return { data => {} }                        if $method eq 'POST';
+        return _snapshot($id)                        if $method eq 'POST';
     }
 
     return { data => {} } if $method eq 'POST' && $path =~ m{\A /snapshots/\d+/revert \z}x;
@@ -138,6 +138,16 @@ sub _reinstall {
     return { data => {} };
 }
 
+# The node refuses a snapshot of a server whose plan does not allow them, with
+# the 400 and the message a live one gave.
+sub _snapshot {
+    my ($id) = @_;
+
+    my ($server) = grep { $_->{id} == $id } @{ $STATE{servers} };
+    return { data        => {} } if $server->{plan}{is_snapshots_enabled};
+    return { http_status => 400, message => 'Snapshots must be enabled in the plan and the server must be available.' };
+}
+
 sub _delete {
     my ($id) = @_;
     @{ $STATE{servers} } = grep { $_->{id} != $id } @{ $STATE{servers} } unless $STATE{keep_deleted};
@@ -154,11 +164,12 @@ $transport->redefine(
         push @ASKED, { method => $method, path => $path, url => $url, body => $body, headers => $args->{headers} // {} };
 
         my $answered = answer( $method, $path, $body );
+        my $status   = delete $answered->{http_status} // 200;
         my $json     = Cpanel::JSON::XS->new->utf8->canonical;
         return {
-            status  => 200,
-            reason  => 'OK',
-            success => 1,
+            status  => $status,
+            reason  => $status == 200 ? 'OK' : 'Bad Request',
+            success => $status == 200,
             headers => { 'content-type' => 'application/json' },
             content => $json->encode($answered),
         };
@@ -350,6 +361,33 @@ subtest 'reinstalling one that is already there' => sub {
 
     like exception { $hv->rebuild_guest( 'gone.test', image => 28 ) }, qr/no[ ]guest[ ]called[ ]'gone.test'/, 'and there has to be one to reinstall';
     like exception { $hv->rebuild_guest('one.test') },                 qr/needs[ ]an[ ]image/,                'and an image to put back on it';
+};
+
+subtest 'a snapshot before a reinstall, where the plan allows one' => sub {
+    my $hv = node();
+    $STATE{servers} = [
+        { id => 1, name => 'snaps.test',   status => 'started', plan => { is_snapshots_enabled => 1 } },
+        { id => 2, name => 'nosnaps.test', status => 'started', plan => { is_snapshots_enabled => 0 } },
+    ];
+
+    is $hv->rollback_possible('snaps.test'),   1, 'a guest on a plan that allows snapshots has a rollback point to offer';
+    is $hv->rollback_possible('nosnaps.test'), 0, 'one on a plan that does not has none';
+    is $hv->rollback_possible('gone.test'),    0, 'and nor does a guest that is not there';
+
+    like $hv->snapshot_before_rebuild( 'snaps.test', capacity => 1 ), qr/\A before-reprovision-/, 'the snapshot a rebuild takes is named for the operator to restore';
+    ok scalar( asked_for( 'POST', '/servers/1/snapshots' ) ), 'and was asked of the node';
+
+    @ASKED = ();
+    is $hv->snapshot_before_rebuild( 'nosnaps.test', capacity => 1 ), undef, 'a guest whose plan has no snapshots is rebuilt with no rollback point, rather than not at all';
+    is scalar( asked_for( 'POST', '/servers/2/snapshots' ) ),         0,     'without asking the node for a snapshot it would refuse';
+
+    my $warned = q{};
+    local $SIG{__WARN__} = sub { $warned .= join( q{}, @_ ) };
+    is $hv->create_snapshot( 'nosnaps.test', 'by-hand' ), 0, 'a snapshot the node refuses is false rather than fatal, as snapshot_before_rebuild expects of a backend';
+    like $warned, qr/\A Could[ ]not[ ]snapshot[ ]nosnaps[.]test: /x, 'the warning names the guest';
+    like $warned, qr/Snapshots[ ]must[ ]be[ ]enabled/,               'and carries what the node said';
+
+    like exception { $hv->create_snapshot( 'gone.test', 'by-hand' ) }, qr/no[ ]guest[ ]called[ ]'gone.test'/, 'a guest that is not there is still an error';
 };
 
 subtest 'taking one away' => sub {
