@@ -606,99 +606,75 @@ sub scaffold {
     my ( $class, $name, %opts ) = @_;
 
     my %spec = $class->spec( $name, output_dir => $opts{output_dir} );
-    my ( $config, @todo ) = $class->_scaffold_object( \%spec, $name, \%opts );
 
+    # A node is an object of the schema, or a value in one.  The nodes are
+    # listed first, and then each is decided after all the nodes under it.
+    my @nodes = ( { object => 1, prop => \%spec, path => $name, opts => \%opts } );
+    for ( my $i = 0; $i < scalar(@nodes); $i++ ) {
+        my $node = $nodes[$i];
+        my ( $prop, $path, $opts ) = @$node{qw{prop path opts}};
+
+        my @under;
+        if ( $node->{object} ) {
+            my $props    = $class->properties($prop);
+            my %required = map { $_ => 1 } @{ $prop->{required} // [] };
+            my $provided = ref $opts->{provided} eq 'HASH' ? $opts->{provided} : {};
+
+            # The build fills in a readOnly field, so an operator writes
+            # nothing there.
+            @under = map { { key => $_, prop => $props->{$_}, path => "$path.$_", opts => { %$opts, provided => $provided->{$_} } } }
+              grep { ref $props->{$_} eq 'HASH' && !exists $provided->{$_} && !$props->{$_}{readOnly} && ( $required{$_} || $opts->{all} ) }
+              sort keys %$props;
+        }
+        elsif ( !exists $prop->{default} ) {
+            my $type = $prop->{type} // '';
+            @under = ( { object => 1, prop => $prop, path => $path, opts => $opts } ) if $type eq 'object';
+            @under = ( { prop   => $prop->{items} // {}, path => "$path\[0]", opts => $opts } ) if $type eq 'array';
+        }
+
+        $node->{under} = \@under;
+        push( @nodes, @under );
+    }
+
+    foreach my $node ( reverse @nodes ) {
+        my ( $prop, $path ) = @$node{qw{prop path}};
+        my $type = $prop->{type} // '';
+        my ($only) = map { $_->{result} } @{ $node->{under} };
+
+        if ( $node->{object} ) {
+            my ( %out, @todo );
+            foreach my $field ( grep { defined $_->{result}[0] } @{ $node->{under} } ) {
+                my ( $value, @sub ) = @{ $field->{result} };
+                $out{ $field->{key} } = $value;
+                push @todo, @sub;
+            }
+            $node->{result} = [ \%out, @todo ];
+        }
+        elsif ( exists $prop->{default} ) {
+            $node->{result} = [ clone( $prop->{default} ) ];
+        }
+        elsif ( $type eq 'object' && %{ $only->[0] } ) {
+            $node->{result} = $only;
+        }
+        elsif ( $type eq 'object' && !$prop->{minProperties} ) {
+
+            # An object with only additionalProperties has nothing to
+            # scaffold.  It is left out, unless it must have a property, and
+            # then a person must choose one, below.
+            $node->{result} = [undef];
+        }
+        elsif ( $type eq 'array' ) {
+            my ( $item, @todo ) = @$only;
+            $node->{result} = defined $item ? [ [$item], @todo ] : [ [] ];
+        }
+        else {
+            $node->{result} = [ $class->PLACEHOLDER, $path ];
+        }
+    }
+
+    my ( $config, @todo ) = @{ $nodes[0]{result} };
     return ( undef,   @todo ) unless ref $config eq 'HASH' && %$config;
     return ( $config, @todo );
-}
-
-# What to write for an object of the schema, and the paths left to fill in.  A
-# node is an object, or a value in one; each is decided after all under it.
-sub _scaffold_object {
-    my ( $class, $spec, $path, $opts ) = @_;
-
-    my @nodes = ( { object => 1, prop => $spec, path => $path, opts => $opts } );
-    for ( my $i = 0; $i < scalar(@nodes); $i++ ) {
-        $nodes[$i]{under} = [ $class->_scaffold_under( $nodes[$i] ) ];
-        push( @nodes, @{ $nodes[$i]{under} } );
-    }
-    $_->{result} = [ $class->_scaffold_result($_) ] foreach reverse @nodes;
-
-    return @{ $nodes[0]{result} };
-}
-
-sub _scaffold_under {
-    my ( $class, $node ) = @_;
-    my ( $prop, $path, $opts ) = @$node{qw{prop path opts}};
-
-    if ( !$node->{object} ) {
-        return () if exists $prop->{default};
-
-        my $type = $prop->{type} // '';
-        return ( { object => 1, prop => $prop, path => $path, opts => $opts } ) if $type eq 'object';
-        return ( { prop => $prop->{items} // {}, path => "$path\[0]", opts => $opts } ) if $type eq 'array';
-        return ();
-    }
-
-    my $props    = $class->properties($prop);
-    my %required = map { $_ => 1 } @{ $prop->{required} // [] };
-    my $provided = ref $opts->{provided} eq 'HASH' ? $opts->{provided} : {};
-
-    my @under;
-    foreach my $key ( sort keys %$props ) {
-        my $field = $props->{$key};
-        next unless ref $field eq 'HASH';
-
-        next if exists $provided->{$key};
-
-        # The build fills in a readOnly field, so an operator writes nothing
-        # there.
-        next if $field->{readOnly};
-        next unless $required{$key} || $opts->{all};
-
-        push( @under, { key => $key, prop => $field, path => "$path.$key", opts => { %$opts, provided => $provided->{$key} } } );
-    }
-    return @under;
-}
-
-sub _scaffold_result {
-    my ( $class, $node ) = @_;
-    my ( $prop,  $path ) = @$node{qw{prop path}};
-
-    if ( $node->{object} ) {
-        my ( %out, @todo );
-        foreach my $field ( @{ $node->{under} } ) {
-            my ( $value, @sub ) = @{ $field->{result} };
-            next unless defined $value;
-
-            $out{ $field->{key} } = $value;
-            push @todo, @sub;
-        }
-        return ( \%out, @todo );
-    }
-
-    return ( clone( $prop->{default} ), () ) if exists $prop->{default};
-
-    my $type = $prop->{type} // '';
-
-    if ( $type eq 'object' ) {
-
-        # An object with only additionalProperties has nothing to scaffold.  It
-        # is left out, unless it must have a property, and then a person must
-        # choose one.
-        my ( $sub, @todo ) = @{ $node->{under}[0]{result} };
-        return ( $sub,                @todo ) if %$sub;
-        return ( $class->PLACEHOLDER, $path ) if ( $prop->{minProperties} // 0 ) > 0;
-        return ( undef,               () );
-    }
-
-    if ( $type eq 'array' ) {
-        my ( $item, @todo ) = @{ $node->{under}[0]{result} };
-        return ( [],      () ) unless defined $item;
-        return ( [$item], @todo );
-    }
-
-    return ( $class->PLACEHOLDER, $path );
 }
 
 =head2 scaffold_dependencies(\@named, %opts)
@@ -970,6 +946,11 @@ sub resolve_dependencies {
     my %builders;
     my %required_by;
 
+    # An object, so that a Hash::Merge behavior set elsewhere cannot change it.
+    # It keeps the left, because these merges build the options of a dependency
+    # one requester at a time, and reconcile settles where two disagree.
+    state $dep_merger = Hash::Merge->new('STORAGE_PRECEDENT');
+
     # The configuration of each recipe as the domain wrote it, taken on the
     # first visit.  A recipe is visited once for each recipe that depends on
     # it, and each visit merges into this copy.  Hash::Merge appends lists, so a
@@ -1032,7 +1013,7 @@ sub resolve_dependencies {
             # mention, which puts a dependency after everything that requires it.
             push( @modules, $required );
             $required_by{$required}{$module} = 1;
-            $depmod_conf = $class->_dep_merger->merge( $depmod_conf, \%cur_args );
+            $depmod_conf = $dep_merger->merge( $depmod_conf, \%cur_args );
 
             # Hash::Merge picks a side where two dependents disagree.  Only the
             # required recipe knows which side is right, so it is asked, and it
@@ -1043,7 +1024,7 @@ sub resolve_dependencies {
         # Merge in what every dependent asked of this recipe.
         $as_written{$module} //= clone($pconf);
         if ( $depmod_conf->{$module} ) {
-            $domain_conf->{$module} = $class->_dep_merger->merge( $depmod_conf->{$module}, $as_written{$module} );
+            $domain_conf->{$module} = $dep_merger->merge( $depmod_conf->{$module}, $as_written{$module} );
 
             # Also compare what the operator wrote for this recipe with what
             # its dependents asked for.
@@ -1052,48 +1033,22 @@ sub resolve_dependencies {
     }
 
     my @resolved = Provisioner::Utils::lastuniq(@modules);
-    _refuse_exclusive( $domain, \@resolved, \%builders, \%required_by );
 
-    return ( \@resolved, \%builders, { map { $_ => [ sort keys %{ $required_by{$_} } ] } keys %required_by } );
-}
-
-# Dies when two recipes of the domain cannot be on one domain, as
-# exclusive_with in Provisioner::Recipe says, naming what brought each in.
-sub _refuse_exclusive {
-    my ( $domain, $modules, $builders, $required_by ) = @_;
-    my %on = map { $_ => 1 } @$modules;
-
-    my $named = sub {
-        my ($recipe) = @_;
-        my @by = sort keys %{ $required_by->{$recipe} // {} };
+    # Two recipes that cannot be on one domain, as exclusive_with in
+    # Provisioner::Recipe says, are refused, naming what brought each in.
+    my %on    = map { $_ => 1 } @resolved;
+    my $named = sub ($recipe) {
+        my @by = sort keys %{ $required_by{$recipe} // {} };
         return @by ? "$recipe (required by " . join( q{, }, @by ) . q{)} : $recipe;
     };
-    foreach my $module ( grep { $builders->{$_} } @$modules ) {
-        foreach my $other ( grep { $on{$_} } $builders->{$module}->exclusive_with ) {
+    foreach my $module ( grep { $builders{$_} } @resolved ) {
+        foreach my $other ( grep { $on{$_} } $builders{$module}->exclusive_with ) {
             die "$domain has both " . $named->($module) . ' and ' . $named->($other) . ".\n" . "They cannot be on one domain; see exclusive_with in Provisioner::Recipe::$module.\n" . "Remove one of them, or the recipe that requires it, or give one of them a domain of its own.\n";
         }
     }
-    return;
+
+    return ( \@resolved, \%builders, { map { $_ => [ sort keys %{ $required_by{$_} } ] } keys %required_by } );
 }
-
-# Two merges that want opposite things, so two mergers.  Each is an object, so
-# a process-wide Hash::Merge behavior set elsewhere cannot change it.
-#
-# _base holds defaults and a domain overrides them, so that merge keeps the
-# right.  See domain_config().
-#
-# The file merge keeps the left on purpose.  The file of a domain adds to
-# recipes.yaml and does not override it.  See configuration().
-sub _base_merger { state $merger = Hash::Merge->new('RIGHT_PRECEDENT');   return $merger }
-sub _file_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
-
-# The merger of the depsolver, for the two merges that collect what several
-# recipes ask of a shared dependency.  An object, for the reason above.
-#
-# It keeps the left on purpose.  These merges build the options of a dependency
-# one requester at a time.  Where two requesters disagree, reconcile sees both
-# sides and settles it.
-sub _dep_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
 
 =head2 configuration($path)
 
@@ -1117,6 +1072,15 @@ configuration under a command that is already running on it.
 # read of one file does no work.
 my %CONFIGURATION;
 
+# Every libdir that a _global names: _base first, then each domain by name, so
+# that the order of the search is the same on every run.
+my sub libdirs_in ($conf) {
+    return () unless ref $conf eq 'HASH';
+
+    my @globals = grep { ref eq 'HASH' } map { ref $conf->{$_} eq 'HASH' ? $conf->{$_}{_global} : () } ( '_base', sort grep { $_ ne '_base' } keys %$conf );
+    return map { @{ Provisioner::Utils::coerce_arrayref( $_->{libdir} ) } } @globals;
+}
+
 sub configuration {
     my ( $class, $path ) = @_;
     $path //= Trog::Config->path('recipes.yaml');
@@ -1129,8 +1093,11 @@ sub configuration {
 
     my $conf = YAML::XS::Load( File::Slurper::read_binary($path) );
 
-    my $merger = _file_merger();
-    my $extra  = File::Basename::dirname($key) . '/recipes.d';
+    # An object, so that a Hash::Merge behavior set elsewhere cannot change it.
+    # It keeps the left, because the file of a domain adds to recipes.yaml and
+    # does not override it.
+    state $merger = Hash::Merge->new('STORAGE_PRECEDENT');
+    my $extra = File::Basename::dirname($key) . '/recipes.d';
     File::Find::find(
         {
             wanted => sub {
@@ -1149,18 +1116,8 @@ sub configuration {
         $extra
     ) if -d $extra;
 
-    $class->use_libdirs( _libdirs_in($conf) );
+    $class->use_libdirs( libdirs_in($conf) );
     return $CONFIGURATION{$key} = $conf;
-}
-
-# Every libdir that a _global names: _base first, then each domain by name, so
-# that the order of the search is the same on every run.
-sub _libdirs_in {
-    my ($conf) = @_;
-    return () unless ref $conf eq 'HASH';
-
-    my @globals = grep { ref eq 'HASH' } map { ref $conf->{$_} eq 'HASH' ? $conf->{$_}{_global} : () } ( '_base', sort grep { $_ ne '_base' } keys %$conf );
-    return map { @{ Provisioner::Utils::coerce_arrayref( $_->{libdir} ) } } @globals;
 }
 
 =head2 remember($path, $conf)
@@ -1185,7 +1142,7 @@ sub remember {
 
     my $key = Cwd::abs_path( $path // Trog::Config->path('recipes.yaml') );
 
-    $class->use_libdirs( _libdirs_in($conf) );
+    $class->use_libdirs( libdirs_in($conf) );
 
     # A copy, because the caller keeps using its own.  bin/new_config deletes
     # _base from its copy, and every other domain still needs _base.
@@ -1227,7 +1184,9 @@ sub domain_config {
     delete $base->{_global};
     delete $own->{_global};
 
-    return _base_merger()->merge( $base, $own );
+    # An object, so that a Hash::Merge behavior set elsewhere cannot change it.
+    state $merger = Hash::Merge->new('RIGHT_PRECEDENT');
+    return $merger->merge( $base, $own );
 }
 
 =head2 host_of($domain, $conf)
@@ -1313,27 +1272,24 @@ sub upstream_domains {
         push( @order, @ready );
     }
     if ( my @left = grep { !$out{$_} } @found ) {
-        die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } _cycle( $left[0], \%named, \%out ) ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n";
+
+        # The cycle that the first guest left reaches, as the names that lead
+        # round it.  Every guest left needs one that is left, so the path
+        # meets itself.
+        my @path = ( $left[0] );
+        my @steps;
+        my $at;
+        while ( !defined $at ) {
+            my ($next) = grep { !$out{ $_->{domain} } } @{ $named{ $path[-1] } };
+            push( @steps, $next );
+            $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
+            push( @path, $next->{domain} );
+        }
+
+        die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @steps[ $at .. $#steps ] ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n";
     }
 
     return grep { $_ ne $domain } @order;
-}
-
-# The cycle that $from reaches, as the names that lead round it.
-sub _cycle {
-    my ( $from, $named, $out ) = @_;
-
-    # Every guest left needs one that is left, so the path meets itself.
-    my @path = ($from);
-    my @steps;
-    my $at;
-    while ( !defined $at ) {
-        my ($next) = grep { !$out->{ $_->{domain} } } @{ $named->{ $path[-1] } };
-        push( @steps, $next );
-        $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
-        push( @path, $next->{domain} );
-    }
-    return @steps[ $at .. $#steps ];
 }
 
 =head2 @domains = $class->direct_upstream_domains($domain, $conf)
@@ -1383,28 +1339,24 @@ sub named_guests {
 
         foreach my $block ( sort keys %blocks ) {
             foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
-                my $name = _guest_named( ${ $slot->[1] } );
+                my $value = ${ $slot->[1] };
+                next if !defined $value || ref $value || $value eq q{};
+
+                # The host of a URL, or else a value that is a host alone, with
+                # or without a port: the whole authority of a URI, with no user.
+                my $uri  = URI->new($value);
+                my $name = $uri->can('host') ? $uri->host : undef;
+                if ( !defined $name || $name eq q{} ) {
+                    my $bare = URI->new("ssh://$value");
+                    $name = $bare->authority eq $value && !defined $bare->userinfo ? $bare->host : undef;
+                }
+
                 next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
                 push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
             }
         }
     }
     return @named;
-}
-
-# The host that a value names, if it names one: the host of a URL, or a value
-# that is a host alone, with or without a port.
-sub _guest_named {
-    my ($value) = @_;
-    return if !defined $value || ref $value || $value eq q{};
-
-    my $uri = URI->new($value);
-    return $uri->host if $uri->can('host') && defined $uri->host && $uri->host ne q{};
-
-    # A host alone is the whole authority of a URI, with no user in it.
-    my $bare = URI->new("ssh://$value");
-    return $bare->host if $bare->authority eq $value && !defined $bare->userinfo;
-    return;
 }
 
 =head2 global_config($domain, $conf)
@@ -1536,6 +1488,25 @@ sub global_schema {
     );
 }
 
+# The keys a _global may set, and the readOnly keys that nothing lets it set,
+# each as a set.
+my sub global_keys ($class) {
+    my %global = $class->global_schema;
+    my ( %settable, %computed );
+    $settable{$_} = 1 foreach keys %{ $global{properties} };
+
+    foreach my $name ( $class->names, $class->directors ) {
+        my %schema = $class->load($name)->schema;
+        my $props  = $schema{properties} // {};
+        foreach my $key ( keys %$props ) {
+            ( $props->{$key}{readOnly} ? \%computed : \%settable )->{$key} = 1;
+        }
+    }
+    delete @computed{ keys %settable };
+
+    return ( \%settable, \%computed );
+}
+
 =head2 globals($domain, $conf)
 
 The settings that C<global_schema> declares, for a domain, validated, with the defaults
@@ -1568,7 +1539,7 @@ sub globals {
 
     my @errors = $validator->validate( $said, \%schema );
 
-    my ( $settable, $computed ) = $class->_global_keys;
+    my ( $settable, $computed ) = global_keys($class);
     foreach my $key ( grep { !$settable->{$_} } sort keys %$said ) {
         push( @errors, $computed->{$key} ? "/$key: The build works this out, so _global cannot set it." : "/$key: Nothing declares this setting, so nothing reads it." );
     }
@@ -1598,30 +1569,9 @@ It loads every recipe, and so dies as C<load> does.
 sub declared_globals {
     my ($class) = @_;
 
-    my ($settable) = $class->_global_keys;
+    my ($settable) = global_keys($class);
     my @declared = sort keys %$settable;
     return @declared;
-}
-
-# The keys a _global may set, and the readOnly keys that nothing lets it set,
-# each as a set.
-sub _global_keys {
-    my ($class) = @_;
-
-    my %global = $class->global_schema;
-    my ( %settable, %computed );
-    $settable{$_} = 1 foreach keys %{ $global{properties} };
-
-    foreach my $name ( $class->names, $class->directors ) {
-        my %schema = $class->load($name)->schema;
-        my $props  = $schema{properties} // {};
-        foreach my $key ( keys %$props ) {
-            ( $props->{$key}{readOnly} ? \%computed : \%settable )->{$key} = 1;
-        }
-    }
-    delete @computed{ keys %settable };
-
-    return ( \%settable, \%computed );
 }
 
 =head2 \%aliases = alias_map($conf)
