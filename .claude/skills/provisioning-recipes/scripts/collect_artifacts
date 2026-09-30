@@ -12,16 +12,23 @@ use re '/aasx';
 
 use FindBin::libs;
 
+use Cwd();
 use Config::Simple();
+use File::Basename();
 use File::Path qw{make_path};
 use File::Slurper::Temp();
 use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
+use Trog::Config();
 use Trog::Guest();
 use Trog::HV();
 use Trog::Hypervisors();
+
+# For the marker of a scratch configuration, which teardown owns.  At compile
+# time, so that the name of the marker is known where it is read.
+BEGIN { require( Cwd::abs_path( File::Basename::dirname(__FILE__) ) . q{/teardown} ) }
 
 =head1 NAME
 
@@ -104,8 +111,8 @@ finding.  A guest with no setup.log never got as far as the Makefile.
 
 =item B<--into> DIR
 
-Where to put them.  Defaults to a fresh temporary directory, whose path is
-printed.
+Where to put them.  The default is a new directory, whose path is printed.
+See L</artifacts_dir>.
 
 =item B<--user> NAME, B<--key> FILE, B<--host> ADDRESS
 
@@ -143,7 +150,7 @@ sub main {
 
     my $guest = connect_to( $domain, user => $user, key => $key, host => $host, hypervisor => $hv_name, hvconf => $hvconf );
 
-    $into //= File::Temp::tempdir( "trog-artifacts-$domain-XXXXXX", TMPDIR => 1 );
+    $into //= artifacts_dir($domain);
     make_path($into);
 
     # Asked for, not read: a failed `systemctl restart` says only "Job for
@@ -164,6 +171,28 @@ sub main {
 
     print "$into\n";
     return 0;
+}
+
+=head2 $dir = artifacts_dir($domain)
+
+Makes and returns a new directory for the artifacts of C<$domain>.
+
+Under a scratch configuration, it is in F<artifacts/> of that configuration.
+teardown removes the configuration after its last domain, so the artifacts go
+with it.  Under any other configuration, it is a new directory in the
+temporary directory, and nothing removes it.
+
+=cut
+
+sub artifacts_dir {
+    my ($domain) = @_;
+
+    my $cfg = Trog::Config->dir;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the marker is a file, and only whether it is there matters
+    return File::Temp::tempdir( "trog-artifacts-$domain-XXXXXX", TMPDIR => 1 ) unless -f "$cfg/$Trog::Skill::Teardown::MARKER";
+
+    make_path("$cfg/artifacts");
+    return File::Temp::tempdir( "$domain-XXXXXX", DIR => "$cfg/artifacts" );
 }
 
 sub artifacts {

@@ -18,6 +18,8 @@ use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use File::Spec();
 use IPC::Run3();
 
 use FindBin;
@@ -104,6 +106,26 @@ subtest 'the deferred work comes back out of the queue' => sub {
     IPC::Run3::run3( [ $^X, $post_install ], \undef, \undef, \undef );
     is( $ask->('post_install.sh'),     q{},                            'and nothing once it has' );
     is( $ask->('post_install.ran.sh'), "10\t0\ttrue\n20\t3\texit 3\n", 'what ran, with what each exited with' );
+};
+
+subtest 'the artifacts of a scratch guest go inside its configuration, which teardown removes' => sub {
+    my $cfg = $ENV{TROG_PROVISIONER_CONFIG};
+
+    # The script is required at runtime, so this is the only mention of the
+    # package variable that the compiler sees.
+    my $marker = do { no warnings 'once'; "$cfg/$Trog::Skill::Teardown::MARKER" };
+
+    my $tmp       = File::Spec->tmpdir;
+    my $elsewhere = Trog::Skill::CollectArtifacts::artifacts_dir('vm.test');
+    like( $elsewhere, qr{\A\Q$tmp\E/trog-artifacts-vm[.]test-}, 'without the marker, a new directory in the temporary directory' );
+    ok( -d $elsewhere, 'which is made' );
+    rmdir $elsewhere or diag "Could not remove $elsewhere: $!";
+
+    File::Slurper::Temp::write_text( $marker, "Built by this test.\n" );
+    my $inside = Trog::Skill::CollectArtifacts::artifacts_dir('vm.test');
+    like( $inside, qr{\A\Q$cfg\E/artifacts/vm[.]test-}, 'with the marker, a new directory in artifacts/ of the scratch configuration' );
+    ok( -d $inside, 'which is made' );
+    unlink $marker;
 };
 
 subtest 'a file that is genuinely not there is still reported missing' => sub {

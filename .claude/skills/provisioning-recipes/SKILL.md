@@ -233,7 +233,9 @@ the cache did about it: `MISS`, `HIT`, `STALE`. Tear both guests down at the end
 echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/collect_artifacts "$DOMAIN"
 ```
 
-Prints a directory holding whichever of these it found:
+Prints a directory holding whichever of these it found.  Under a scratch
+configuration the directory is inside it, in `artifacts/`, so the teardown of
+the last domain removes it with the rest:
 
 | file | what it answers |
 |---|---|
@@ -698,7 +700,8 @@ is a regression test you are guessing about.
 **Always, including after a failure.** A half-built guest still holds an address
 out of the pool, a disk in the storage pool and a definition in libvirt, and the
 next run collides with all three. Collect the artifacts first — they are gone
-after this.
+after this, and after the teardown of the last domain, so are the artifacts
+that collect_artifacts wrote.  Copy out anything that you want to keep.
 
 Tearing down is also what gives the address back: `bin/destroy` releases it, and
 nothing else does. A guest abandoned without one keeps its address reserved
