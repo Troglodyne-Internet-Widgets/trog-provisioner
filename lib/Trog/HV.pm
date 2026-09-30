@@ -1407,7 +1407,7 @@ sub note_plaintext_secrets {
     my @found;
     foreach my $file (@files) {
         my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($file) ) } or next;
-        push( @found, map { { file => $file, at => $_ } } _plaintext_in( $conf, q{} ) );
+        push( @found, map { { file => $file, at => $_ } } _plaintext_in($conf) );
     }
     return { ok => 1 } unless @found;
 
@@ -1430,42 +1430,52 @@ Rotate anything that has been sitting in a file long enough to have been read.
 FIX
 }
 
-=head2 @paths = _plaintext_in($node, $path)
+=head2 @paths = _plaintext_in($conf)
 
-Returns the path of each value under C<$node> that is a secret written out, not
-a reference.  C<$path> is the path of C<$node> itself.
+Returns the path of each value in C<$conf>, one file of the configuration,
+that is a secret written out, not a reference.
 
-It uses two tests, because neither one catches what the other catches.  The
-common case is a field named for a password that holds something other than a
-reference.  Also, any value that is a private key is a secret wherever it is.
-So a key pasted into a field with another name is found too.
+A secret is what the schema of its recipe marks C<x-secret>; see
+L<Provisioner::Recipe/secrets_in>.  A block for a recipe that does not load is
+skipped, because preflight has other checks for that.  Also, any value that is
+a private key is a secret wherever it is, so a key pasted into a field that no
+schema marks is found too.
 
 =cut
 
 sub _plaintext_in {
-    my ( $node, $path ) = @_;
-    return map { $_->[0] } grep { _is_plaintext( ${ $_->[1] }, $_->[0] ) } Trog::Utils::slots_in( \$node, $path );
+    my ($conf) = @_;
+    return () if ref $conf ne 'HASH';
+
+    my %found;
+    foreach my $top ( sort keys %$conf ) {
+        my $recipes = $conf->{$top};
+        next if ref $recipes ne 'HASH';
+        foreach my $name ( sort grep { !m/\A_/ } keys %$recipes ) {
+            my $class = eval { Provisioner::Cookbook->load($name) } or next;
+            $found{"$top.$name.$_->[0]"} = 1 for grep { _is_plaintext( $_->[1] ) } $class->secrets_in( $recipes->{$name} );
+        }
+    }
+
+    $found{ $_->[0] } = 1 for grep { _is_private_key( ${ $_->[1] } ) } Trog::Utils::slots_in( \$conf, q{} );
+    my @paths = sort keys %found;
+    return @paths;
 }
 
 sub _is_plaintext {
-    my ( $value, $path ) = @_;
-    return 0 if ref $value || !$value;
+    my ($value) = @_;
 
     # A reference is not a secret.  Neither is a placeholder from bin/new_guest,
     # because new_config refuses to build from one.
     return 0 if $value =~ m/\Asecret:/;
-    return 1 if $value =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
     return 0 if $value eq Provisioner::Cookbook->PLACEHOLDER;
+    return 1;
+}
 
-    my ($field) = $path =~ m/([^.\[\]]+)\z/;
-    return 0 unless defined $field;
-
-    # _file and _path name a location, not a secret: the key_file of backup
-    # holds a filename such as "backup.rsa".
-    return 0 if $field =~ m/_(?:file|path)\z/;
-    return 1 if $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/;
-
-    return 0;
+sub _is_private_key {
+    my ($value) = @_;
+    return 0 if ref $value || !defined $value;
+    return $value =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/ ? 1 : 0;
 }
 
 sub _readable {

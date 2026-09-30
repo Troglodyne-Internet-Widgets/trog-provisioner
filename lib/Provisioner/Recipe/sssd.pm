@@ -49,7 +49,7 @@ sub args {
             ldap_uri      => { type => 'string' },
             base_dn       => { type => 'string' },
             bind_dn       => { type => 'string' },
-            bind_password => { type => 'string' },
+            bind_password => { type => 'string', 'x-secret' => 1 },
         },
     );
 }

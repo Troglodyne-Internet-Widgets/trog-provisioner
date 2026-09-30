@@ -112,16 +112,16 @@ sub args {
         required   => [qw{version admin_password}],
         properties => {
             version         => { type => 'string' },
-            admin_password  => { type => 'string' },
-            gogs_admin      => { type => 'string', default => 'git' },
-            github_users    => { type => 'array',  default => [], items => { type => 'string' } },
-            github_orgs     => { type => 'array',  default => [], items => { type => 'string' } },
-            github_token    => { type => 'string' },
-            mirror_interval => { type => 'integer', minimum => 1, maximum => 23, default => 6 },
+            admin_password  => { type => 'string',  'x-secret' => 1 },
+            gogs_admin      => { type => 'string',  default    => 'git' },
+            github_users    => { type => 'array',   default    => [], items => { type => 'string' } },
+            github_orgs     => { type => 'array',   default    => [], items => { type => 'string' } },
+            github_token    => { type => 'string',  'x-secret' => 1 },
+            mirror_interval => { type => 'integer', minimum    => 1, maximum => 23, default => 6 },
 
             # No default, on purpose: the guest owns the key.  See the POD above.
-            secret_key => { type => 'string' },
-            ipv6       => { type => 'boolean', default => 1 },
+            secret_key => { type => 'string',  'x-secret' => 1 },
+            ipv6       => { type => 'boolean', default    => 1 },
         },
     );
 }

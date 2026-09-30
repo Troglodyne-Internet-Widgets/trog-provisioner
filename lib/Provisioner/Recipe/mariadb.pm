@@ -108,7 +108,7 @@ sub args {
         type       => 'object',
         required   => [qw{root_pw dumpfile version}],
         properties => {
-            root_pw => { type => 'string' },
+            root_pw => { type => 'string', 'x-secret' => 1 },
 
             # A seed, not what a rebuild loads.  See "What a rebuild keeps" above.
             dumpfile => { type => 'string' },

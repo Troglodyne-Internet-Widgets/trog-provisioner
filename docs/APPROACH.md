@@ -44,8 +44,9 @@ Several recipes write into `[% install_dir %]/[% domain %]`, and the last `chown
 
 make prints each command before it runs it.  `ubuntu.setup.sh.tt` keeps that output in `/var/log/<domain>.setup.log` on the guest, and that log stays after the build.  The provisioning skill also copies it back to this machine.  So a secret on a command line is a secret in a log that more people and machines can read.
 
-* `bin/new_config` keeps secrets out of that log for you.  It knows each value that a `secret:` reference resolved to.  In every fragment it renders, `Provisioner::Recipe->quiet_secrets` starts each command that holds one of those values with `@`, and make does not print a command that starts with `@`.
-* So give a recipe its secret through a `secret:` reference in the configuration.  A value that is not in the store is not a secret to `bin/new_config`, and it gets no `@`.
+* `bin/new_config` keeps secrets out of that log for you.  It knows each value that a `secret:` reference resolved to, and each value in a field that the schema of its recipe marks `'x-secret' => 1`.  In every fragment it renders, `Provisioner::Recipe->quiet_secrets` starts each command that holds one of those values with `@`, and make does not print a command that starts with `@`.
+* So mark every field of `args()` that takes a password, a token or a key.  `t/recipes.t` refuses a field named like one that is not marked.  The mark also lets `bin/preflight` report a secret written into the configuration in the clear, where the store could hold it.
+* A guest test is not quieted.  Test::More prints what a failed `like` or `is` compared, so compare a secret with `eq` inside `ok`.
 * Keep the secret out of argv as well, because `ps` shows argv to every user on the guest.  Write the secret with `printf` or `echo`, which are shell builtins, and give the program a file or stdin.
 * Make the file with `install -m 0600 /dev/null <file>` before the secret goes into it, so that the file is never readable by other users.  After the command, remove the file.
 * A secret that a service reads each time it starts goes in a file from `template_files` or `guest_secrets`, not in a command.  `templates/ubuntu/github.tt` writes its token that way.

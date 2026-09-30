@@ -893,6 +893,13 @@ sub handle_domain {
         $MACHINE_LISTENERS{$machine} = clone( $ufw->{listeners} );
     }
 
+    # And every value that a schema marks secret, because a literal one is no
+    # less secret than one the store held.  Across the domain, as the store's
+    # are, because a recipe can render the credential of another.
+    foreach my $module (@modules) {
+        push( @secret_values, map { $_->[1] } $builders{$module}->secrets_in( $rconf->{$domain}{$module} // {} ) );
+    }
+
     my %guest_secrets;
 
     foreach my $module (@modules) {

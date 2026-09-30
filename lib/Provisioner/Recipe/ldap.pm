@@ -101,7 +101,7 @@ sub args {
         type       => 'object',
         required   => [qw{admin_password}],
         properties => {
-            admin_password => { type => 'string' },
+            admin_password => { type => 'string', 'x-secret' => 1 },
             base_dn        => { type => 'string' },
             port           => { type => 'integer', default => 636 },
             users          => {

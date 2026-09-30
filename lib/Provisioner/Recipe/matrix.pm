@@ -116,19 +116,19 @@ sub args {
         properties => {
             server_name => { type => 'string' },
 
-            redis_password => { type => 'string', description => 'Password for the redis the homeserver caches in.  Unset configures the homeserver without one.' },
+            redis_password => { type => 'string', 'x-secret' => 1, description => 'Password for the redis the homeserver caches in.  Unset configures the homeserver without one.' },
 
             # Listed on the index page of the guest.
-            channels                   => { type => 'array',  items   => { type => 'string' }, default => [] },
-            admin_user                 => { type => 'string', default => 'admin' },
-            admin_password             => { type => 'string' },
+            channels                   => { type => 'array',  items      => { type => 'string' }, default => [] },
+            admin_user                 => { type => 'string', default    => 'admin' },
+            admin_password             => { type => 'string', 'x-secret' => 1 },
             smtp_host                  => { type => 'string' },
             smtp_port                  => { type => 'integer', default     => 465, minimum => 0 },
             smtp_user                  => { type => 'string',  description => 'The login to smtp_host, which is not always an address.' },
-            smtp_pass                  => { type => 'string' },
-            smtp_from                  => { type => 'string',  format  => 'email', description => 'The address that notices from the homeserver come from.' },
-            require_transport_security => { type => 'boolean', default => 1 },
-            ipv6                       => { type => 'boolean', default => 1 },
+            smtp_pass                  => { type => 'string',  'x-secret'  => 1 },
+            smtp_from                  => { type => 'string',  format      => 'email', description => 'The address that notices from the homeserver come from.' },
+            require_transport_security => { type => 'boolean', default     => 1 },
+            ipv6                       => { type => 'boolean', default     => 1 },
 
             # Off by default, because the operator decides whether to report
             # usage.  See matrix.homeserver.yaml.tt for why synapse needs it.

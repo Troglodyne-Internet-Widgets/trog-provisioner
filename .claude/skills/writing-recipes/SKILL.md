@@ -35,6 +35,12 @@ code fills in behind it is a value nobody can find out about.
 **So the question to ask of anything you are about to write in `enrich` is:
 which schema construct says this?**  Most of the time there is one.
 
+The schema is also where a secret is declared.  Give every field that takes a
+password, a token or a key `'x-secret' => 1`.  `bin/new_config` keeps each such
+value out of the setup log, and `bin/preflight` reports one written into the
+configuration in the clear.  An unmarked secret gets neither, and
+`t/recipes.t` refuses a field named like a secret that is not marked.
+
 ## Put a default at the level of the thing it defaults
 
 This is the one that has actually gone wrong, and it is worth knowing by heart.
