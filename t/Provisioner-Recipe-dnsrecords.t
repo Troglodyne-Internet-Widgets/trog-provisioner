@@ -15,7 +15,8 @@ which have nothing to publish
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 
 use FindBin::libs;
 
@@ -75,6 +76,17 @@ subtest 'the fragment queues the publish where there is one, and nothing where t
 
     my $nothing = fresh()->render( %COMMON, domain => 'pub.test', main_ip => undef );
     unlike( $nothing, qr/\S/, 'and with no address the fragment is empty rather than a target that does nothing' );
+};
+
+subtest 'an address that the domain names is published instead of the one it was built with' => sub {
+    my $queued = fresh()->render( %COMMON, domain => 'pub.test', main_ip => '192.0.2.50', address => '203.0.113.7' );
+    like( $queued, qr/pub[.]test[ ]203[.]0[.]113[.]7[ ]/, 'the A record names the address the domain gave' );
+    unlike( $queued, qr/192[.]0[.]2[.]50/, 'and not the one behind the gateway' );
+
+    my %opts = fresh()->validate( %COMMON, domain => 'pub.test', main_ip => undef, address => '203.0.113.7' );
+    is( $opts{publish_records}, 1, 'a guest whose address the hypervisor allocates publishes one that the domain names' );
+
+    ok( exception { fresh()->validate( %COMMON, domain => 'pub.test', main_ip => '192.0.2.50', address => 'gateway.pub.test' ) }, 'and an address that is not IPv4 is refused' );
 };
 
 subtest 'it depends on the client it writes the records with' => sub {

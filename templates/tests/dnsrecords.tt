@@ -28,7 +28,7 @@ sub why { my ($type) = @_; return scalar `$shortcut list $type --output=JSON 2>&
 
 my $a_records = listed('A');
 ok($a_records, 'the provider answered with a list of A records') or diag why('A');
-ok((grep { ($_->{content} // '') eq '[% main_ip %]' } @{ $a_records // [] }), 'holding the address this guest was built with')
+ok((grep { ($_->{content} // '') eq '[% address %]' } @{ $a_records // [] }), 'holding the address this domain publishes')
     or diag explain $a_records;
 
 my $cnames = listed('CNAME');

@@ -8,7 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use Socket qw{inet_aton};
+use Socket qw{inet_aton inet_ntoa};
+
+use Provisioner::IPPool();
 
 use parent qw{Provisioner::Recipe};
 
@@ -28,6 +30,10 @@ In recipes.yaml:
             # dns is optional. Without it, the server pushes no DNS servers to clients.
             interface: eth0
             redirect_gateway: false
+            # Optional.  Without it, the halves of each cidr of the ip_pool.
+            routes:
+                - 192.0.2.0/25
+                - 192.0.2.128/25
 
 =head2 DESCRIPTION
 
@@ -68,6 +74,31 @@ C<redirect_gateway> tells clients to send all of their traffic through the
 tunnel, not only the traffic for hosts on the VPN.  The default is off.  The
 server pushes this at connect time.  So a change takes effect on every deployed
 client when it next reconnects.
+
+=head3 The networks that a client reaches
+
+C<routes> lists the networks that the server tells a client to send through the
+tunnel, as CIDR blocks.  The guest forwards that traffic onto its own network,
+and the MASQUERADE rule above gives it the address of the guest.  So a guest
+of the installation answers a client with no route back to the VPN subnet.  The
+C<A> records of the installation already hold the addresses of the guests, so
+a name that resolves anywhere is reachable through the tunnel.
+
+Without C<routes>, the recipe routes the C<ip_pool> in the C<_global> of the
+installation, the pool that F<ips.db> hands addresses out of.  Each C<cidr>
+block goes as its two halves, and each item of C<addresses> goes as a C</32>.
+Without either, the server pushes no route.
+
+The halves are for a client on a home network with the same numbers, such as
+C<192.168.1.0/24>, the default of many home routers.  The client then has two
+routes to the addresses of the guests, and the longer prefix wins.  A half is
+longer than the home network, so traffic to a guest goes through the tunnel.
+
+The cost is that the client cannot reach its own home network while it is
+connected, for example its printer or its router, if that network has the same
+numbers.  Its traffic for those addresses goes into the tunnel too.  If that
+matters for a client, give C<routes> a C</32> for each guest, which takes only
+those addresses away from the home network.
 
 =head3 The PKI is the part that cannot be made again
 
@@ -177,14 +208,98 @@ sub args {
 
             # Off, because a change reaches every deployed client.  See DESCRIPTION.
             redirect_gateway => { type => 'boolean', default => 0 },
+
+            # No default here, because the default comes from ip_pool.  See enrich.
+            routes => {
+                type        => 'array',
+                description => 'The networks a client sends through the tunnel, as CIDR blocks.  The default is each cidr of ip_pool as its two halves, and each of its addresses as a /32.',
+                items       => { type => 'string', pattern => '^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$' },
+            },
         },
     );
 }
 
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<cidr>, the prefix length of C<netmask>.  Fills in C<routes> from
+C<ip_pool>, and adds C<pushes>, each route as the C<network> and the C<netmask> that
+the C<route> directive of OpenVPN takes.  See L</The networks that a client
+reaches>.
+
+=cut
+
 sub enrich {
     my ( $self, %opts ) = @_;
     $opts{cidr} = _netmask_to_cidr( $opts{netmask} );
+    $opts{routes} //= [ _pool_routes( $opts{ip_pool} // {} ) ];
+    $opts{pushes} = [ map { _route_push($_) } @{ $opts{routes} } ];
     return %opts;
+}
+
+=head2 @routes = _pool_routes($pool)
+
+Returns the default of C<routes> for C<$pool>, an C<ip_pool>: the two halves of
+each C<cidr> block, then a C</32> for each of its C<addresses>.  A C</32> block
+has no halves, so it goes as it is.  Each route appears once.
+
+=cut
+
+sub _pool_routes {
+    my ($pool) = @_;
+
+    my @routes;
+    foreach my $block ( Provisioner::IPPool::pool_items( $pool->{cidr} ) ) {
+        my ( $network, $prefix ) = _block($block);
+        if ( $prefix == 32 ) {
+            push @routes, "$network/32";
+            next;
+        }
+
+        my $half = 2**( 31 - $prefix );
+        my $base = unpack( 'N', inet_aton($network) );
+        push @routes, map { inet_ntoa( pack( 'N', $base + $_ * $half ) ) . '/' . ( $prefix + 1 ) } 0, 1;
+    }
+    push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $pool->{addresses} );
+
+    my %seen;
+    return grep { !$seen{$_}++ } @routes;
+}
+
+=head2 \%push = _route_push($route)
+
+Takes a CIDR block, such as C<192.0.2.0/25>.  Returns its C<network> and its
+C<netmask>, such as C<192.0.2.0> and C<255.255.255.128>.  The C<network> has the
+host bits cleared, so C<192.0.2.5/24> gives C<192.0.2.0>.
+
+=cut
+
+sub _route_push {
+    my ($route) = @_;
+    my ( $network, $prefix ) = _block($route);
+    return { network => $network, netmask => inet_ntoa( pack( 'N', _mask($prefix) ) ) };
+}
+
+=head2 ($network, $prefix) = _block($block)
+
+Takes a CIDR block.  Returns its address with the host bits cleared, and its
+prefix length.  Dies if C<$block> is not an IPv4 CIDR block.
+
+=cut
+
+sub _block {
+    my ($block) = @_;
+
+    my ( $address, $prefix ) = $block =~ m{\A(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})\z};
+    my $packed = defined $prefix && $prefix <= 32 && inet_aton($address);
+    die "'$block' is not an IPv4 CIDR block\n" unless $packed;
+
+    return ( inet_ntoa( pack( 'N', unpack( 'N', $packed ) & _mask($prefix) ) ), $prefix );
+}
+
+# The netmask of a prefix length, as an integer.
+sub _mask {
+    my ($prefix) = @_;
+    return $prefix ? ( 0xFFFFFFFF << ( 32 - $prefix ) ) & 0xFFFFFFFF : 0;
 }
 
 =head2 $prefix = _netmask_to_cidr($netmask)
