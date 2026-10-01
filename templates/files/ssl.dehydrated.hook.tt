@@ -141,7 +141,7 @@ exit_hook() {
   chown -R root:root /var/lib/dehydrated
   find /var/lib/dehydrated -type d -exec chmod 0755 {} +
   find /var/lib/dehydrated -type f -exec chmod 0644 {} +
-  find /var/lib/dehydrated -type f -name 'priv*' -exec chmod 0600 {} +
+  find /var/lib/dehydrated -type f -name 'priv*' -exec chgrp ssl-cert {} + -exec chmod 0640 {} +
   :
 }
 

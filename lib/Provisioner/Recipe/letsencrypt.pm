@@ -53,7 +53,13 @@ the guest.
 
 On the guest, the certificates are world readable, because they are public.
 dehydrated writes each private key and the account key as C<0600 root>.  The
-fetch reads the guest as root, so nothing here makes them wider.
+fetch reads the guest as root, so the salvage needs nothing wider.
+
+The private key of each certificate is C<0640 root:ssl-cert>.  Some services
+read the key after they drop root.  slapd is one of them, and the ldap recipe
+puts its account in C<ssl-cert>.  That group is the convention of Debian for
+this, and it holds service accounts only, not the admin account.  The account
+key stays C<0600 root>, because no service reads it.
 
 Three places set these modes again, one for each moment that a new key exists:
 
