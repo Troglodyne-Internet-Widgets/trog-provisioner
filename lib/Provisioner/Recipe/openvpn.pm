@@ -167,6 +167,15 @@ from cron each day.  The guest test fails when less than 30 days are left.
 Run C<easyrsa revoke> through C<openvpn-revoke-client>, not by itself.  Alone,
 it changes the index of the CA and not the list that the server reads.
 
+=head3 Which clients there are
+
+    openvpn-list-clients [--all]
+
+This lists each name that can connect, when its certificate expires, and its
+tunnel address if it is connected now.  C<--all> also lists the revoked and the
+expired certificates.  The script reads the index of the CA and the status file
+of the server, which the server rewrites each minute.
+
 =cut
 
 sub rate_limits {
@@ -328,6 +337,7 @@ sub template_files {
         'openvpn.stage-pki.tt'        => 'openvpn-stage-pki',
         'openvpn.client-config.tt'    => 'openvpn-client-config',
         'openvpn.revoke-client.tt'    => 'openvpn-revoke-client',
+        'openvpn.list-clients.tt'     => 'openvpn-list-clients',
         'openvpn.refresh-crl.tt'      => 'openvpn-refresh-crl',
         'openvpn.refresh-crl.cron.tt' => 'openvpn-refresh-crl.cron',
 
