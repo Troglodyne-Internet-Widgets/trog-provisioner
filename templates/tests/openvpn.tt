@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use File::Temp qw{tempdir};
 
 sub slurp {
     my ($file) = @_;
@@ -149,5 +150,51 @@ like($server_conf, qr{^push "redirect-gateway def1 bypass-dhcp"$}m,
 unlike($server_conf, qr{redirect-gateway},
     'and pushes no default route, which is what this domain asked for');
 [% END -%]
+
+ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is installed, for remote_prepare to run');
+
+# openvpn-client-config, against a copy of the PKI, so that a provision leaves
+# no working client certificate on the real one.
+{
+    my $copy = tempdir(CLEANUP => 1);
+    is(system('cp', '-a', '/etc/openvpn/easy-rsa/.', $copy), 0, 'copied the easy-rsa directory to issue a test client from');
+
+    my $client = 'provisioner-test';
+    my $ovpn   = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config $client 2>&1 >'$copy/out'`;
+    is($?, 0, 'openvpn-client-config issues a client and prints its configuration') or diag $ovpn;
+    $ovpn = slurp("$copy/out");
+
+    like($ovpn, qr{^remote \Q[% domain %] [% port %]\E$}m, 'the client connects to this domain on the port the server listens on') or diag $ovpn;
+    like($ovpn, qr{^proto \Q[% proto %]\E$}m, 'with the protocol the server listens with');
+    like($ovpn, qr{^cipher \Q[% cipher %]\E$}m, 'and the cipher the server uses');
+
+    my %inline = $ovpn =~ m{^<([a-z-]+)>\n(.*?)^</\1>$}msg;
+    foreach my $block (qw{ca cert key tls-auth}) {
+        ok(length($inline{$block} // ''), "the configuration carries <$block> inline");
+    }
+    is($inline{'tls-auth'}, slurp('/etc/openvpn/easy-rsa/pki/ta.key'), 'and the tls-auth key is the one the server reads');
+
+    open(my $fh, '>', "$copy/client.crt") or die "$copy/client.crt: $!";
+    print $fh $inline{cert} // '';
+    close $fh;
+    my $verify = `openssl verify -CAfile /etc/openvpn/easy-rsa/pki/ca.crt '$copy/client.crt' 2>&1`;
+    like($verify, qr/: OK$/m, 'the client certificate is signed by the CA of this server') or diag $verify;
+
+    open($fh, '>', "$copy/client.key") or die "$copy/client.key: $!";
+    print $fh $inline{key} // '';
+    close $fh;
+    my $from_cert = `openssl x509 -noout -pubkey -in '$copy/client.crt' 2>&1`;
+    my $from_key  = `openssl pkey -pubout -in '$copy/client.key' 2>&1`;
+    is($from_key, $from_cert, 'and the key in the configuration is the key of that certificate');
+
+    my $again = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config $client 2>/dev/null`;
+    my ($second) = $again =~ m{^<cert>\n(.*?)^</cert>$}ms;
+    is($second, $inline{cert}, 'a second run prints the same certificate rather than issuing another');
+
+    ok(!-e "/etc/openvpn/easy-rsa/pki/issued/$client.crt", 'and the real pki issued nothing');
+
+    my $refused = system("OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config server >/dev/null 2>&1");
+    isnt($refused, 0, 'the script refuses to hand out the certificate of the server');
+}
 
 done_testing();

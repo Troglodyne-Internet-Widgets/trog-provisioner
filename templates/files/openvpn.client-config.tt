@@ -1,0 +1,88 @@
+#!/bin/bash
+# Print an OpenVPN client configuration for NAME, with its keys inline:
+#
+#     openvpn-client-config NAME [REMOTE] > NAME.ovpn
+#
+# If NAME has no certificate yet, this issues one from the CA of this server.
+# REMOTE is the name that the client connects to, and defaults to
+# [% domain %].  The port, the protocol and the cipher are the ones that this
+# server listens with.
+#
+# The output holds a private key.  Send it to its client the way that you send
+# a password.
+#
+# OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to issue from
+# instead.  The guest test uses it, so that a provision issues no certificate
+# from the real CA.
+
+set -euo pipefail
+
+NAME="${1:-}"
+REMOTE="${2:-[% domain %]}"
+EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+PKI="$EASYRSA_DIR/pki"
+
+if [ -z "$NAME" ] || [ $# -gt 2 ]; then
+    echo "usage: $0 NAME [REMOTE] > NAME.ovpn" >&2
+    exit 2
+fi
+
+# easyrsa makes file names out of NAME.
+if ! [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "$0: '$NAME' is not a client name: use letters, digits, '.', '_' and '-'" >&2
+    exit 2
+fi
+
+# The server has the certificate called server.  A client with that name gets
+# the key of the server.
+if [ "$NAME" = server ] || [ "$NAME" = ca ]; then
+    echo "$0: '$NAME' is a name that the server itself uses" >&2
+    exit 2
+fi
+
+if [ ! -f "$PKI/issued/$NAME.crt" ]; then
+    # stdout is the configuration, so easyrsa reports on stderr.
+    (
+        cd "$EASYRSA_DIR"
+        EASYRSA_PKI="$PKI" ./easyrsa --batch gen-req "$NAME" nopass
+        EASYRSA_PKI="$PKI" ./easyrsa --batch sign-req client "$NAME"
+    ) >&2
+
+    # A certificate that is only on this guest goes with it.
+    if [ "$EASYRSA_DIR" = /etc/openvpn/easy-rsa ]; then
+        /usr/local/sbin/openvpn-stage-pki
+    fi
+fi
+
+cat <<EOF
+client
+dev tun
+proto [% proto %]
+remote $REMOTE [% port %]
+resolv-retry infinite
+nobind
+
+persist-key
+persist-tun
+
+remote-cert-tls server
+tls-version-min 1.2
+cipher [% cipher %]
+auth SHA256
+key-direction 1
+
+verb 3
+
+<ca>
+$(openssl x509 -in "$PKI/ca.crt")
+</ca>
+<cert>
+$(openssl x509 -in "$PKI/issued/$NAME.crt")
+</cert>
+<key>
+$(cat "$PKI/private/$NAME.key")
+</key>
+<tls-auth>
+$(cat "$PKI/ta.key")
+</tls-auth>
+EOF
