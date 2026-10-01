@@ -22,7 +22,13 @@ ok(-x '/etc/dehydrated/hooks/[% domain %].sh', 'the hook is executable');
 my $san = `openssl x509 -noout -ext subjectAltName -in /etc/ssl/certs/[% domain %].pem 2>&1`;
 like($san, qr/DNS:\Q[% domain %]\E(?![\w.-])/, 'the certificate covers the domain itself')
     or diag $san;
-like($san, qr/DNS:www\.\Q[% domain %]\E/, 'and www');
+
+# And every alias that ssl.domains.tt asked for.  Those are the subdomains that
+# the recipes of this guest declare, so a guest without nginx has no www.
+[% FOR alias IN full_aliases.sort() -%]
+like($san, qr/DNS:\Q[% alias %]\E(?![\w.-])/, 'and [% alias %]')
+    or diag $san;
+[% END -%]
 
 # A truncated or half-written pem does not parse.
 my $subject = `openssl x509 -noout -subject -in /etc/ssl/certs/[% domain %].pem 2>&1`;

@@ -95,7 +95,7 @@ foreach my $used ($vhost =~ m{^\s*proxy_pass\s+http://([A-Za-z0-9_]+);}gm) {
 foreach my $names ($vhost =~ m/^\s*server_name\s+([^;]+);/gm) {
     unlike($names, qr/,/, 'no comma in server_name');
 
-    # new_config adds www to the aliases of every domain.  If a name is here
+    # nginx declares www, so new_config adds it to the aliases.  If a name is here
     # twice, nginx reports a conflicting server name and ignores one of them.
     my %seen;
     my @dupes = grep { $seen{$_}++ } split ' ', $names;
