@@ -1,0 +1,42 @@
+#!/bin/bash
+# Revoke the certificate of client NAME, so that it cannot connect again:
+#
+#     openvpn-revoke-client NAME
+#
+# A client that is connected now keeps its tunnel until its next TLS
+# renegotiation, which openvpn does each hour.  The server checks the list
+# then, and drops it.
+#
+# openvpn-client-config NAME issues a new certificate for the name afterwards.
+#
+# OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to revoke in
+# instead.  The guest test uses it, so that a provision revokes nothing real.
+
+set -euo pipefail
+
+NAME="${1:-}"
+EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+PKI="$EASYRSA_DIR/pki"
+
+if [ -z "$NAME" ] || [ $# -gt 1 ]; then
+    echo "usage: $0 NAME" >&2
+    exit 2
+fi
+
+# Revoking the certificate of the server stops every client.
+if [ "$NAME" = server ] || [ "$NAME" = ca ]; then
+    echo "$0: '$NAME' is a name that the server itself uses" >&2
+    exit 2
+fi
+
+if [ ! -f "$PKI/issued/$NAME.crt" ]; then
+    echo "$0: '$NAME' has no certificate to revoke" >&2
+    exit 1
+fi
+
+(
+    cd "$EASYRSA_DIR"
+    EASYRSA_PKI="$PKI" ./easyrsa --batch revoke "$NAME"
+) >&2
+
+/usr/local/sbin/openvpn-refresh-crl

@@ -195,6 +195,34 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
 
     my $refused = system("OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config server >/dev/null 2>&1");
     isnt($refused, 0, 'the script refuses to hand out the certificate of the server');
+
+    # And take the client away again, in the copy.
+    my $live_crl = slurp('/etc/openvpn/server/crl.pem');
+    my $revoked  = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-revoke-client $client 2>&1`;
+    is($?, 0, 'openvpn-revoke-client revokes the client') or diag $revoked;
+
+    my $check = `openssl verify -crl_check -CRLfile '$copy/pki/crl.pem' -CAfile '$copy/pki/ca.crt' '$copy/client.crt' 2>&1`;
+    like($check, qr/certificate revoked/, 'and the new revocation list names its certificate') or diag $check;
+    is(slurp('/etc/openvpn/server/crl.pem'), $live_crl, 'while the list the server reads stays as it was');
+
+    $refused = system("OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-revoke-client server >/dev/null 2>&1");
+    isnt($refused, 0, 'the script refuses to revoke the certificate of the server');
 }
+
+# The revocation list.  Once it expires, openvpn refuses every client, so it
+# must be in place, in date, and renewed.  Provisioner::Recipe::openvpn has the
+# whole account.
+like(slurp('/etc/openvpn/server/server.conf'), qr{^crl-verify /etc/openvpn/server/crl\.pem$}m, 'the server checks the revocation list');
+is(slurp('/etc/openvpn/server/crl.pem'), slurp('/etc/openvpn/easy-rsa/pki/crl.pem'), 'and reads the one in the pki');
+is((stat('/etc/openvpn/server/crl.pem'))[2] & 07777, 0600, 'which only root can read, as with the other files of the server');
+
+my ($next) = `openssl crl -noout -nextupdate -in /etc/openvpn/server/crl.pem 2>&1` =~ /^nextUpdate=(.+)$/m;
+my $expires = $next ? `date -d '$next' +%s 2>/dev/null` : '';
+chomp $expires;
+$expires = 0 unless $expires =~ /^\d+$/;
+cmp_ok($expires, '>', time + 30 * 86400, 'the revocation list has more than 30 days left') or diag($next // 'no nextUpdate');
+
+ok(-f '/etc/cron.d/openvpn-refresh-crl', 'and cron signs it again each day');
+ok(-x '/usr/local/sbin/openvpn-revoke-client', 'the script that revokes a client is installed');
 
 done_testing();
