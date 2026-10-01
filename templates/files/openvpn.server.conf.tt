@@ -8,6 +8,9 @@ key  /etc/openvpn/server/server.key
 dh   /etc/openvpn/server/dh.pem
 
 tls-auth /etc/openvpn/server/ta.key 0
+[%# openvpn-refresh-crl writes this file.  Provisioner::Recipe::openvpn says
+    why it must not expire. -%]
+crl-verify /etc/openvpn/server/crl.pem
 tls-version-min 1.2
 
 cipher [% cipher %]

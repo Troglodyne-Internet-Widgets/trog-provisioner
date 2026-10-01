@@ -45,9 +45,16 @@
 	# Stage the copy that remote_files names.  Provisioner::Recipe::openvpn
 	# says why it is a copy, and what it costs.
 	install -m 0700 -o root -g root openvpn-stage-pki /usr/local/sbin/openvpn-stage-pki
-	/usr/local/sbin/openvpn-stage-pki
-	# What an operator runs to give a client its configuration.
+	# The revocation list, signed again on each run and each day.  The server
+	# refuses every client once it expires.  openvpn-refresh-crl also stages
+	# the PKI.
+	install -m 0700 -o root -g root openvpn-refresh-crl /usr/local/sbin/openvpn-refresh-crl
+	/usr/local/sbin/openvpn-refresh-crl
+	install -m 0644 -o root -g root openvpn-refresh-crl.cron /etc/cron.d/openvpn-refresh-crl
+	# What an operator runs to give a client its configuration, and to take it
+	# away again.
 	install -m 0700 -o root -g root openvpn-client-config /usr/local/sbin/openvpn-client-config
+	install -m 0700 -o root -g root openvpn-revoke-client /usr/local/sbin/openvpn-revoke-client
 	# Deploy server configuration
 	# The firewall profile for this port and protocol.  ufw does not get them,
 	# so this recipe renders it.

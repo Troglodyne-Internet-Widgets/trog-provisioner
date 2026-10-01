@@ -1,0 +1,26 @@
+#!/bin/bash
+# Sign a new certificate revocation list and give it to the server.
+#
+# The server refuses every client, not only the revoked ones, once the list is
+# past its nextUpdate.  So cron runs this each day, and openvpn-revoke-client
+# runs it after each revocation.  Provisioner::Recipe::openvpn has the whole
+# account.
+#
+# OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to sign in instead.
+# The list then stays in that copy, and the server keeps the one it has.
+
+set -euo pipefail
+
+EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+PKI="$EASYRSA_DIR/pki"
+
+(
+    cd "$EASYRSA_DIR"
+    EASYRSA_PKI="$PKI" ./easyrsa --batch gen-crl
+) >&2
+
+if [ "$EASYRSA_DIR" = /etc/openvpn/easy-rsa ]; then
+    # openvpn reads the file again at each handshake, so it needs no restart.
+    install -m 0600 -o root -g root "$PKI/crl.pem" /etc/openvpn/server/crl.pem
+    /usr/local/sbin/openvpn-stage-pki
+fi

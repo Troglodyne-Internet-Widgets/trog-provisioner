@@ -150,8 +150,22 @@ and runs C<openvpn-stage-pki>.  If it has one, the script prints the same
 certificate again.  The output holds the private key of the client, so treat it
 like a password.
 
-The server reads no revocation list.  So C<easyrsa revoke> does not stop a
-client that holds a certificate.
+=head3 Taking a client away
+
+    openvpn-revoke-client NAME
+
+This revokes the certificate of C<NAME>, signs a new revocation list, and gives
+the list to the server.  openvpn reads the list at each TLS handshake, so a new
+connection from C<NAME> fails at once.  A client that is connected keeps its
+tunnel until its next renegotiation, which openvpn does each hour.
+
+A revocation list has an expiry, and easyrsa sets it to 180 days after it
+signs.  An expired list stops B<every> client, because openvpn then refuses all
+certificates.  So C<openvpn-refresh-crl> signs it again on each provision and
+from cron each day.  The guest test fails when less than 30 days are left.
+
+Run C<easyrsa revoke> through C<openvpn-revoke-client>, not by itself.  Alone,
+it changes the index of the CA and not the list that the server reads.
 
 =cut
 
@@ -310,9 +324,12 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'openvpn.server.conf.tt'   => 'server.conf',
-        'openvpn.stage-pki.tt'     => 'openvpn-stage-pki',
-        'openvpn.client-config.tt' => 'openvpn-client-config',
+        'openvpn.server.conf.tt'      => 'server.conf',
+        'openvpn.stage-pki.tt'        => 'openvpn-stage-pki',
+        'openvpn.client-config.tt'    => 'openvpn-client-config',
+        'openvpn.revoke-client.tt'    => 'openvpn-revoke-client',
+        'openvpn.refresh-crl.tt'      => 'openvpn-refresh-crl',
+        'openvpn.refresh-crl.cron.tt' => 'openvpn-refresh-crl.cron',
 
         # The ufw application profile.  This recipe renders it, because ufw
         # gets only rate_limits and not the port or the protocol.
