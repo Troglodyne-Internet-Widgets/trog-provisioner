@@ -1,0 +1,76 @@
+#!/bin/bash
+# List the clients that the CA of this server signed:
+#
+#     openvpn-list-clients [--all]
+#
+# Each line is a name, whether its certificate is valid, when it expires, and
+# the tunnel address of the client if it is connected now.  Without --all, the
+# list holds only the names that can connect.  With it, the list also holds
+# revoked and expired certificates.  The certificate of the server is not a
+# client, so it is never listed.
+#
+# OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to read instead,
+# and OPENVPN_STATUS_FILE a status file other than the one of the server.
+
+set -euo pipefail
+
+ALL=0
+case "${1:-}" in
+    '') ;;
+    --all) ALL=1 ;;
+    *)
+        echo "usage: $0 [--all]" >&2
+        exit 2
+        ;;
+esac
+
+EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+INDEX="$EASYRSA_DIR/pki/index.txt"
+
+# The server rewrites it each minute.  server.conf pins status-version 2,
+# because the parse below reads that format and no other.
+STATUS="${OPENVPN_STATUS_FILE:-/var/log/openvpn/openvpn-status.log}"
+
+if [ ! -r "$INDEX" ]; then
+    echo "$0: cannot read $INDEX" >&2
+    exit 1
+fi
+
+# The status file is optional, because a server that is stopped has none.
+STATUS_FILE=/dev/null
+if [ -r "$STATUS" ]; then
+    STATUS_FILE="$STATUS"
+fi
+
+NOW=$(date -u +%Y%m%d%H%M%S)
+
+awk -F'\t' -v now="$NOW" -v all="$ALL" -v status="$STATUS_FILE" '
+    BEGIN {
+        # CLIENT_LIST,name,real address,tunnel address,...
+        while ((getline line < status) > 0) {
+            if (line !~ /^CLIENT_LIST,/) continue
+            split(line, f, ",")
+            connected[f[2]] = (f[2] in connected) ? connected[f[2]] " " f[4] : f[4]
+        }
+        printf "%-32s %-8s %-17s %s\n", "NAME", "STATUS", "EXPIRES (UTC)", "CONNECTED"
+    }
+
+    # Fields: status, expiry, revocation date, serial, file name, subject.
+    {
+        name = $6
+        sub(/^.*\/CN=/, "", name)
+        sub(/\/.*$/, "", name)
+        if (name == "server") next
+
+        # UTCTime has a two-digit year and GeneralizedTime a four-digit one.
+        expiry = $2
+        sub(/Z$/, "", expiry)
+        if (length(expiry) == 12) expiry = "20" expiry
+
+        state = ($1 == "R") ? "revoked" : ($1 == "E" || expiry < now) ? "expired" : "valid"
+        if (state != "valid" && !all) next
+
+        when = substr(expiry, 1, 4) "-" substr(expiry, 5, 2) "-" substr(expiry, 7, 2) " " substr(expiry, 9, 2) ":" substr(expiry, 11, 2)
+        printf "%-32s %-8s %-17s %s\n", name, state, when, (state == "valid" && name in connected) ? connected[name] : "-"
+    }
+' "$INDEX"

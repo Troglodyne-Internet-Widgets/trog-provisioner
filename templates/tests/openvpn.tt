@@ -196,6 +196,23 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
     my $refused = system("OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config server >/dev/null 2>&1");
     isnt($refused, 0, 'the script refuses to hand out the certificate of the server');
 
+    my $listed = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-list-clients 2>&1`;
+    like($listed, qr/^\Q$client\E\s+valid\s+\d{4}-\d\d-\d\d /m, 'openvpn-list-clients lists the new client as valid, with its expiry') or diag $listed;
+    unlike($listed, qr/^server\s/m, 'and leaves out the certificate of the server');
+
+    # A status file in the format that server.conf pins, as openvpn 2.6 writes it.
+    open(my $sfh, '>', "$copy/status.log") or die "$copy/status.log: $!";
+    print $sfh join("\n",
+        'TITLE,OpenVPN 2.6',
+        'HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher',
+        "CLIENT_LIST,$client,127.0.0.1:47238,10.8.0.2,,3940,3897,2026-10-01 02:46:35,1790822795,UNDEF,0,0,AES-256-GCM",
+        'HEADER,ROUTING_TABLE,Virtual Address,Common Name,Real Address,Last Ref,Last Ref (time_t)',
+        "ROUTING_TABLE,10.8.0.2,$client,127.0.0.1:47238,2026-10-01 02:46:35,1790822795",
+        'END', '');
+    close $sfh;
+    $listed = `OPENVPN_EASYRSA_DIR='$copy' OPENVPN_STATUS_FILE='$copy/status.log' /usr/local/sbin/openvpn-list-clients 2>&1`;
+    like($listed, qr/^\Q$client\E\s+valid\s.*\s10\.8\.0\.2$/m, 'and shows the tunnel address of a client that is connected') or diag $listed;
+
     # And take the client away again, in the copy.
     my $live_crl = slurp('/etc/openvpn/server/crl.pem');
     my $revoked  = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-revoke-client $client 2>&1`;
@@ -203,6 +220,11 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
 
     my $check = `openssl verify -crl_check -CRLfile '$copy/pki/crl.pem' -CAfile '$copy/pki/ca.crt' '$copy/client.crt' 2>&1`;
     like($check, qr/certificate revoked/, 'and the new revocation list names its certificate') or diag $check;
+
+    $listed = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-list-clients 2>&1`;
+    unlike($listed, qr/^\Q$client\E\s/m, 'a revoked client is no longer listed') or diag $listed;
+    $listed = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-list-clients --all 2>&1`;
+    like($listed, qr/^\Q$client\E\s+revoked\s/m, 'except by --all, as revoked') or diag $listed;
     is(slurp('/etc/openvpn/server/crl.pem'), $live_crl, 'while the list the server reads stays as it was');
 
     $refused = system("OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-revoke-client server >/dev/null 2>&1");
@@ -212,6 +234,7 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
 # The revocation list.  Once it expires, openvpn refuses every client, so it
 # must be in place, in date, and renewed.  Provisioner::Recipe::openvpn has the
 # whole account.
+like(slurp('/etc/openvpn/server/server.conf'), qr{^status-version 2$}m, 'the server writes its status in the format openvpn-list-clients reads');
 like(slurp('/etc/openvpn/server/server.conf'), qr{^crl-verify /etc/openvpn/server/crl\.pem$}m, 'the server checks the revocation list');
 is(slurp('/etc/openvpn/server/crl.pem'), slurp('/etc/openvpn/easy-rsa/pki/crl.pem'), 'and reads the one in the pki');
 is((stat('/etc/openvpn/server/crl.pem'))[2] & 07777, 0600, 'which only root can read, as with the other files of the server');

@@ -48,4 +48,6 @@ persist-key
 persist-tun
 
 status      /var/log/openvpn/openvpn-status.log
+[%# openvpn-list-clients reads this format. -%]
+status-version 2
 verb 3
