@@ -65,6 +65,17 @@
 # current directory rather than out of the files it was handed.
 
 # Redirect output to stderr.
+# The tree says use 5.041, which a distribution's perl may be older than, so a
+# machine builds its own into /opt/perl5 (scripts/build_latest_perl.sh).  Only
+# a login shell has that on its PATH, and a commit from any other -- a shell
+# that is not one, an editor, a git GUI -- would compile with the old perl and
+# find none of the tools installed into the new one.
+if [ -x /opt/perl5/current/bin/perl ]
+then
+    PATH="/opt/perl5/current/bin:$PATH"
+    export PATH
+fi
+
 exec 1>&2
 
 # The tests that skip unless these are set run too.  t/TESTING.md says which
