@@ -19,4 +19,14 @@ unlike($commands, qr/&>>?/, 'no &> redirection, which dash does not do');
 like($text, qr{> ?/var/log/autoupdate\.log 2>&1}, 'output and errors both go to the log')
     or diag $text;
 
+# This test runs inside the build, so the build must be holding reboots now.  A
+# reboot from the autorestart cron in the middle of a build leaves a half-built
+# guest.  scripts/reboot_if_needed has the whole account.
+ok(-e '/run/provisioner/no-reboot/[% domain %]', 'the build holds reboots while it runs');
+[% IF autorestart -%]
+like(slurp('/etc/cron.d/[% domain %]-autorestart'), qr{reboot_if_needed \Q[% autorestart %]\E$}m, 'the reboot cron passes the switch that holds it');
+[% END -%]
+
+sub slurp { my ($f) = @_; return do { local (@ARGV, $/) = $f; <> } // '' }
+
 done_testing();

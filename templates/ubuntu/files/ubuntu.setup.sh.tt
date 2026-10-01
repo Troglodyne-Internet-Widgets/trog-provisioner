@@ -5,6 +5,12 @@
 # Provisioner::Recipe::ubuntu renders it, and cloud-init carries it onto the
 # guest in write_files.  So it is not in the payload that it fetches.
 
+# Hold reboots until this build ends, however it ends.  reboot_if_needed
+# refuses while any file is in this directory, and an update that asks for a
+# reboot is likely during the first build.  /run is emptied at boot.
+mkdir -p /run/provisioner/no-reboot
+touch /run/provisioner/no-reboot/[% domain %]
+trap 'rm -f /run/provisioner/no-reboot/[% domain %]' EXIT
 cloud-init status --wait
 [% IF secrets_marker -%]
 
