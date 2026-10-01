@@ -116,9 +116,9 @@ when the old PKI is still on the disk, which is a re-provision.  A guest that is
 built again from nothing has an empty disk.  It passes the guard and signs a new
 CA for itself.  The restore that comes first prevents that.
 
-C<remote_files> names a staged copy, not the PKI itself.  The fragment writes it
-at F</etc/openvpn/pki-salvage>.  The fetch reads the guest as root, so it can
-read the real PKI.  Issue #98 decides whether the recipe names the real PKI.
+C<remote_files> names a staged copy, not the PKI itself.
+C<openvpn-stage-pki> writes it at F</etc/openvpn/pki-salvage>.  The fetch reads
+the guest as root, so it can read the real PKI.  Issue #98 decides whether the recipe names the real PKI.
 The staged copy also keeps the copy that travels apart from the one that the
 running VPN uses.
 
@@ -128,9 +128,30 @@ read the CA private key.  The key travels into the data directory, and into any
 backup of that directory.  That is the cost of a VPN that survives the loss of
 its guest.
 
-The copy is only as new as the last provision.  A client certificate that
-somebody issues by hand after that is not in it until the next provision.  The
-CA that signed it is in the copy, so the certificate continues to work.
+The provision runs C<openvpn-stage-pki>, and so does C<remote_prepare> before
+each fetch.  So a client certificate issued since the last provision is in the
+copy that the next rebuild restores.
+
+=head3 A configuration for a client
+
+Not every client of the VPN is a guest that runs
+L<Provisioner::Recipe::openvpnclient>.  For any other client, run this as root
+on the server:
+
+    openvpn-client-config NAME [REMOTE] > NAME.ovpn
+
+It prints one file that C<openvpn --config> reads.  The CA, the certificate and key of the client, and the
+C<tls-auth> key are inline.  The port, the protocol and the cipher are the ones
+that the server uses.  C<REMOTE> is the name that the client connects to, and
+defaults to the domain.
+
+If C<NAME> has no certificate, the script issues one from the CA of the server
+and runs C<openvpn-stage-pki>.  If it has one, the script prints the same
+certificate again.  The output holds the private key of the client, so treat it
+like a password.
+
+The server reads no revocation list.  So C<easyrsa revoke> does not stop a
+client that holds a certificate.
 
 =cut
 
@@ -289,7 +310,9 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'openvpn.server.conf.tt' => 'server.conf',
+        'openvpn.server.conf.tt'   => 'server.conf',
+        'openvpn.stage-pki.tt'     => 'openvpn-stage-pki',
+        'openvpn.client-config.tt' => 'openvpn-client-config',
 
         # The ufw application profile.  This recipe renders it, because ufw
         # gets only rate_limits and not the port or the protocol.
@@ -304,6 +327,17 @@ sub restores {
     # The PKI with its CA.  It must arrive before the fragment asks easyrsa for
     # a CA, because a new CA is one that no existing client trusts.
     return ( '/etc/openvpn/easy-rsa/pki' => { from => "$install_dir/$domain/openvpn/pki", owner => 'root:root' } );
+}
+
+=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Returns C<openvpn-stage-pki>, so that the fetch gets the PKI as it is now and
+not as it was at the last provision.
+
+=cut
+
+sub remote_prepare {
+    return ('/usr/local/sbin/openvpn-stage-pki');
 }
 
 sub remote_files {

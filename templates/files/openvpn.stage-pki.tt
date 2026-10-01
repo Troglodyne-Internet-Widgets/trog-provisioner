@@ -1,0 +1,22 @@
+#!/bin/bash
+# Copy the PKI to /etc/openvpn/pki-salvage, which remote_files names, so that a
+# rebuild keeps the CA and every certificate issued so far.
+#
+# The provision runs this, bin/new_config runs it before each fetch, and so does
+# openvpn-client-config after it issues.  Provisioner::Recipe::openvpn says why
+# it is a copy, and what it costs.
+
+set -euo pipefail
+
+PKI=/etc/openvpn/easy-rsa/pki
+STAGE=/etc/openvpn/pki-salvage
+OWNER='[% admin_user %]'
+
+# Made again each time, so that a certificate revoked since the last run does
+# not stay here and look current.
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp -a "$PKI/." "$STAGE/"
+chown -R "$OWNER:$OWNER" "$STAGE"
+find "$STAGE" -type d -exec chmod 0700 {} +
+find "$STAGE" -type f -exec chmod 0600 {} +

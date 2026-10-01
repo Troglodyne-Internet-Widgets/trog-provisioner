@@ -44,15 +44,10 @@
 	chmod 0600 /etc/openvpn/server/ca.crt /etc/openvpn/server/server.crt /etc/openvpn/server/server.key /etc/openvpn/server/dh.pem /etc/openvpn/server/ta.key
 	# Stage the copy that remote_files names.  Provisioner::Recipe::openvpn
 	# says why it is a copy, and what it costs.
-	#
-	# Made again on each run, so that a certificate revoked since the last run
-	# does not stay here and look current.
-	rm -rf /etc/openvpn/pki-salvage
-	mkdir -p /etc/openvpn/pki-salvage
-	cp -a /etc/openvpn/easy-rsa/pki/. /etc/openvpn/pki-salvage/
-	chown -R [% admin_user %]:[% admin_user %] /etc/openvpn/pki-salvage
-	find /etc/openvpn/pki-salvage -type d -exec chmod 0700 {} +
-	find /etc/openvpn/pki-salvage -type f -exec chmod 0600 {} +
+	install -m 0700 -o root -g root openvpn-stage-pki /usr/local/sbin/openvpn-stage-pki
+	/usr/local/sbin/openvpn-stage-pki
+	# What an operator runs to give a client its configuration.
+	install -m 0700 -o root -g root openvpn-client-config /usr/local/sbin/openvpn-client-config
 	# Deploy server configuration
 	# The firewall profile for this port and protocol.  ufw does not get them,
 	# so this recipe renders it.
