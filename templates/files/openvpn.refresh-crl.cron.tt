@@ -1,8 +1,7 @@
 # Sign a new certificate revocation list each day.
 #
-# The server refuses every client once the list expires, which easyrsa sets to
-# 180 days after it signs.  A daily run leaves months to notice a cron that
-# stopped.
+# The server refuses every client once the list expires, [% easyrsa.crl_days %]
+# days after it is signed.  That is how long a cron that stopped goes unnoticed.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 41 3 * * * root /usr/local/sbin/openvpn-refresh-crl > /var/log/openvpn-refresh-crl.log 2>&1
