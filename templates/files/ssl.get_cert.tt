@@ -43,13 +43,14 @@ else
 fi
 
 # Set the ownership and the modes of the certificates and the account.
-# Certificates are public and stay world readable.  The private keys and the
-# account key are 0600 root.  Provisioner::Recipe::letsencrypt says why.
+# Certificates are public and stay world readable.  The private keys are 0640
+# root:ssl-cert, and the account key is 0600 root.
+# Provisioner::Recipe::letsencrypt says why.
 echo "Fixing cert/account ownership...";
 sudo chown -R root:root /etc/dehydrated/certs /etc/dehydrated/accounts /var/lib/dehydrated/certs
 sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type d -exec chmod 0755 {} +
 sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type f -exec chmod 0644 {} +
-sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type f -name 'priv*' -exec chmod 0600 {} +
+sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type f -name 'priv*' -exec chgrp ssl-cert {} + -exec chmod 0640 {} +
 sudo find /etc/dehydrated/accounts -type d -exec chmod 0700 {} +
 sudo find /etc/dehydrated/accounts -type f -exec chmod 0600 {} +
 

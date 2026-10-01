@@ -18,6 +18,9 @@ chmod +x /etc/letsencrypt/fetchers/[% domain %]
 [% IF modules.grep('nginxproxy').size() %]
 [% script_dir %]/queue_postrun_task systemctl restart nginx
 [% END -%]
+[% IF modules.grep('^ldap$').size() %]
+[% script_dir %]/queue_postrun_task systemctl restart slapd
+[% END -%]
 [% IF modules.grep('mail').size() %]
 [% script_dir %]/queue_postrun_task systemctl restart postfix
 [% script_dir %]/queue_postrun_task systemctl restart dovecot

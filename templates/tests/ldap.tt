@@ -45,9 +45,9 @@ unlike($ca, qr{olcTLSCACertificateFile:\s*/etc/ssl/certs/}, 'the server certific
     or diag $ca;
 ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
 
-# slapd reads the key through the openldap group.
+# slapd reads the key through the ssl-cert group.
 my @stat = stat('/etc/ssl/private/[% domain %].pem');
-is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
+is(scalar getgrgid($stat[5] // -1), 'ssl-cert', 'the key is group ssl-cert');
 
 # AppArmor decides whether slapd can open the key.  It confines the executable,
 # not the account, and it checks the real path behind the symlink.  So a read

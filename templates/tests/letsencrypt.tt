@@ -35,8 +35,9 @@ my $subject = `openssl x509 -noout -subject -in /etc/ssl/certs/[% domain %].pem 
 like($subject, qr/subject=/, 'the certificate parses') or diag $subject;
 
 # What the next rebuild can salvage.  bin/new_config fetches the certificate
-# store as root, so the keys stay 0600 root.  Provisioner::Recipe::letsencrypt
-# has the whole account.
+# store as root.  The private keys are 0640 root:ssl-cert, for the services that
+# read them after they drop root, and the account key is 0600 root.
+# Provisioner::Recipe::letsencrypt has the whole account.
 #
 # Run the exit hook first, because it leaves the tree in the state that the
 # nightly renewal leaves it in.
@@ -51,23 +52,29 @@ isnt($accounts_gripe, '', 'the admin user can no longer walk the accounts tree')
 my $certs_gripe = `sudo -u '[% admin_user %]' find '/var/lib/dehydrated' -print 2>&1 >/dev/null`;
 is($certs_gripe, '', 'but can still walk the certificate tree, since the certificates in it are public');
 
-# Only root can read each key: not the admin account, and not the rest of the
-# guest.  A guest that never reached the CA has no keys, so there is nothing to
-# test.
-my @keys = grep { -f $_ && !-l $_ } (
-    glob('/var/lib/dehydrated/certs/*/priv*.pem'),
-    glob('/etc/dehydrated/accounts/*/account_key.pem'),
-);
+# The admin account can read no key.  The ssl-cert group can read the key of a
+# certificate, and nobody else can.  Only root can read the account key.  A
+# guest that never reached the CA has no keys, so there is nothing to test.
+my @certkeys    = grep { -f $_ && !-l $_ } glob('/var/lib/dehydrated/certs/*/priv*.pem');
+my @accountkeys = grep { -f $_ && !-l $_ } glob('/etc/dehydrated/accounts/*/account_key.pem');
 SKIP: {
-    skip 'dehydrated has issued nothing and registered nothing here', 2 unless @keys;
+    skip 'dehydrated has issued nothing and registered nothing here', 4 unless @certkeys || @accountkeys;
 
-    my @readable = grep { system('sudo', '-u', '[% admin_user %]', 'test', '-r', $_) == 0 } @keys;
-    is(scalar @readable, 0, 'no private key is readable by the admin account any more')
+    my @readable = grep { system('sudo', '-u', '[% admin_user %]', 'test', '-r', $_) == 0 } @certkeys, @accountkeys;
+    is(scalar @readable, 0, 'no private key is readable by the admin account')
         or diag join("\n", @readable);
 
-    my @exposed = grep { (stat $_)[2] & 0077 } @keys;
-    is(scalar @exposed, 0, 'and none of them is readable by anyone but root')
+    my @exposed = grep { (stat $_)[2] & 0037 } @certkeys;
+    is(scalar @exposed, 0, 'no certificate key is readable by anyone but root and its group')
         or diag join("\n", @exposed);
+
+    my @strangers = grep { (getgrgid((stat $_)[5]) // '') ne 'ssl-cert' } @certkeys;
+    is(scalar @strangers, 0, 'and that group is ssl-cert')
+        or diag join("\n", @strangers);
+
+    my @shared = grep { (stat $_)[2] & 0077 } @accountkeys;
+    is(scalar @shared, 0, 'the account key is readable by nobody but root')
+        or diag join("\n", @shared);
 }
 
 done_testing();

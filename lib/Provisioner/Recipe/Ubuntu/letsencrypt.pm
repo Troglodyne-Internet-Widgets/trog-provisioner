@@ -17,7 +17,9 @@ Provisioner::Recipe::Ubuntu::letsencrypt - Ubuntu's C<deps> for L<Provisioner::R
 =cut
 
 sub deps {
-    return qw{certbot dehydrated};
+
+    # ssl-cert is here for its group, which owns each private key.
+    return qw{certbot dehydrated ssl-cert};
 }
 
 1;

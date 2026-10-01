@@ -19,8 +19,10 @@ systemctl restart slapd
 install -m 0644 -o root -g root slapd.apparmor /etc/apparmor.d/local/usr.sbin.slapd
 apparmor_parser -r /etc/apparmor.d/usr.sbin.slapd; /bin/true
 adduser openldap ssl-cert
-# chown and chmod follow the symlink to the key itself.
-chown root:openldap /etc/ssl/private/[% domain %].pem
+# chown and chmod follow the symlink to the key itself.  This is the key of the
+# ssl target.  The letsencrypt fetcher sets the same group on the key that
+# replaces it.
+chown root:ssl-cert /etc/ssl/private/[% domain %].pem
 chmod 0640 /etc/ssl/private/[% domain %].pem
 [%# Restart after adduser and before the modify.  A process gets its groups
     when it starts, and the slapd started above is not in ssl-cert. -%]
