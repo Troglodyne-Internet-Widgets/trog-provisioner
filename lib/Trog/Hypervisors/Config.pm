@@ -124,6 +124,21 @@ sub secret_references ($self) {
     return uniq( sort values %needed );
 }
 
+=head2 secret_blocks
+
+Returns the names of the blocks that name a C<secret:> reference, in the order
+of the file.  Empty when there is no fleet.
+
+=cut
+
+sub secret_blocks ($self) {
+
+    # The place of a reference starts with the name of its block.
+    my %needed = Trog::Secrets->needed( $self->{blocks} );
+    my %named  = map { ( split m{/}, $_ )[0] => 1 } keys %needed;
+    return grep { $named{$_} } $self->names;
+}
+
 =head1 SEE ALSO
 
 L<Trog::Hypervisors>

@@ -4,8 +4,8 @@ trigger: Writing, changing or debugging a Provisioner::Recipe, when you need to 
 description: |
   Build a throwaway guest, run the recipe on it, and read back what happened.
   Uses a scratch configuration and a throwaway secret store, so the real one is
-  opened only for a hypervisor's own credential, and collects the four logs that
-  say what a recipe actually did.
+  never opened unless you ask, and collects the four logs that say what a
+  recipe actually did.
 ---
 
 I'm using the provisioning-recipes skill to check a recipe on a real guest.
@@ -74,17 +74,16 @@ its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
 `recipes.d/` empty, and builds a KeePass DB holding a made-up value for every
 `secret:` reference in that file.
 
-**A fleet whose blocks name a secret** -- the token of a Linode or SolusVM
-block -- needs the real value of it, because a scratch guest is built on the
-real hypervisor.  That is copied out of the installation's store, which is the
-one thing that opens it, so give it the store's password:
+**A hypervisor that needs a credential is left out** -- the token of a Linode or
+SolusVM block.  The scratch configuration never opens the installation's
+store on its own, so it drops each block that names a secret and says which.
+A scratch guest then builds on a hypervisor that needs none, and the teardown
+asks only those.  To build a scratch guest on one that does need its
+credential, give the store's password, and its real value is copied in:
 
 ```
 eval "$(printf 'keepass: %s\n\n' "$STORE_PASS" | .claude/skills/provisioning-recipes/scripts/scratch_config --credentials)"
 ```
-
-It stops naming the references if it has no way to ask.  A fleet of libvirt
-machines names none, and nothing is asked.
 
 Three things about it worth understanding:
 

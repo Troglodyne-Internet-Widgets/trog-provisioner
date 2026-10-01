@@ -24,6 +24,7 @@ use YAML::XS();
 use FindBin;
 use FindBin::libs;
 
+use Trog::Hypervisors::Config();
 use Trog::Secrets();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
@@ -194,14 +195,44 @@ subtest 'a hypervisor\'s credential is the real one, and nothing else is' => sub
     );
 
     like(
-        exception { Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ) ) }, qr/names[ ]secret:solusvm\/api\/password/,
-        'without a way to ask for the password, it stops naming what it needed'
+        exception { Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ) ) }, qr/Every[ ]hypervisor\N+--credentials/,
+        'without the password, a fleet that is all credentials leaves nothing to build on, and it says how to give one'
     );
 
     unlink "$source/hypervisors.conf";
     $asked = 0;
     Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ), store_password => sub { $asked++; 'the-real-one' } );
     is( $asked, 0, 'and with no fleet naming a secret, the installation\'s store is never opened' );
+};
+
+# The usual scratch guest goes to a hypervisor that needs no credential.  The
+# store stays shut, and nothing that cannot be reached is left in the fleet for
+# bin/provision to choose or for bin/destroy to ask.
+subtest 'without the password, a hypervisor that needs a credential is left out' => sub {
+    my $source = installation();
+    File::Slurper::Temp::write_text( "$source/hypervisors.conf", <<'CONF' );
+[local]
+libvirt_uri = qemu+ssh://somebody@local.test.test/system
+
+[node1]
+solusvm       = node.test.test
+solusvm_token = secret:solusvm/api/password
+
+[spare]
+libvirt_uri = qemu+ssh://somebody@spare.test.test/system
+CONF
+
+    my $dir = tempdir( CLEANUP => 1 );
+    my ( undef, $has_fleet, undef, $real, $left_out ) = Trog::Skill::ScratchConfig::build( $source, $dir );
+
+    ok( $has_fleet, 'the fleet comes with it' );
+    is_deeply( $left_out, ['node1'], 'without the hypervisor that names a credential, which is said' );
+    is_deeply( $real,     [],        'and nothing came out of the installation\'s store' );
+
+    my $fleet = Trog::Hypervisors::Config->load("$dir/hypervisors.conf");
+    is_deeply( [ $fleet->names ],             [qw{local spare}], 'the others are still there, in their order' );
+    is_deeply( [ $fleet->secret_references ], [],                'and the scratch fleet names no secret' );
+    ok( !-e "$source/secrets.kdbx", 'the installation has no store here, so nothing could have opened one' );
 };
 
 done_testing();
