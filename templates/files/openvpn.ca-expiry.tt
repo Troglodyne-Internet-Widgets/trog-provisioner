@@ -1,0 +1,25 @@
+#!/bin/bash
+# Print a warning if the CA of this server has [% ca_warning_days %] days or
+# fewer left, and print nothing if not.  Cron mails what it prints to the admin.
+#
+# OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to check instead.
+
+set -euo pipefail
+
+EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+CA="$EASYRSA_DIR/pki/ca.crt"
+DAYS=[% ca_warning_days %]
+
+if openssl x509 -noout -checkend $((DAYS * 86400)) -in "$CA" > /dev/null; then
+    exit 0
+fi
+
+END=$(openssl x509 -noout -enddate -in "$CA")
+cat <<WARNING
+The OpenVPN CA of [% domain %] expires on ${END#notAfter=}.
+
+When it expires, the server and every client stop connecting.  Every client
+needs a configuration from a new CA before then.
+
+This mail comes each day while the CA has $DAYS days or fewer left.
+WARNING

@@ -162,6 +162,7 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
     my $client = 'provisioner-test';
     my $ovpn   = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config $client 2>&1 >'$copy/out'`;
     is($?, 0, 'openvpn-client-config issues a client and prints its configuration') or diag $ovpn;
+    unlike($ovpn, qr/No Easy-RSA 'vars' configuration file exists/, 'and easyrsa finds the vars file this recipe wrote') or diag $ovpn;
     $ovpn = slurp("$copy/out");
 
     like($ovpn, qr{^remote \Q[% domain %] [% port %]\E$}m, 'the client connects to this domain on the port the server listens on') or diag $ovpn;
@@ -247,5 +248,44 @@ cmp_ok($expires, '>', time + 30 * 86400, 'the revocation list has more than 30 d
 
 ok(-f '/etc/cron.d/openvpn-refresh-crl', 'and cron signs it again each day');
 ok(-x '/usr/local/sbin/openvpn-revoke-client', 'the script that revokes a client is installed');
+
+# What easyrsa signs with.  A certificate issued on this guest has the lifetime
+# that the vars file asks for, give or take the day it was issued on.
+my $vars = slurp('/etc/openvpn/easy-rsa/vars');
+like($vars, qr/^set_var EASYRSA_CRL_DAYS\s+[% easyrsa.crl_days %]$/m, 'the vars file sets the lifetime of the revocation list') or diag $vars;
+my ($crl_next) = `openssl crl -noout -nextupdate -in /etc/openvpn/server/crl.pem 2>&1` =~ /^nextUpdate=(.+)$/m;
+my $crl_left = $crl_next ? `date -d '$crl_next' +%s 2>/dev/null` : '';
+chomp $crl_left;
+$crl_left = $crl_left =~ /^\d+$/ ? int( ( $crl_left - time ) / 86400 ) : -1;
+cmp_ok($crl_left, '>=', [% easyrsa.crl_days %] - 1, 'and easyrsa signed the list for that long') or diag("days left: $crl_left");
+
+# The warning about the end of the CA.  Silent while the CA has time left, and
+# loud about a CA that has less.
+ok(-f '/etc/cron.d/openvpn-ca-expiry', 'cron checks the end of the CA each day');
+foreach my $cron (qw{openvpn-ca-expiry openvpn-refresh-crl}) {
+    my $text = slurp("/etc/cron.d/$cron");
+    my ($mailto)   = $text =~ /^MAILTO="([^"]*)"$/m;
+    my ($mailfrom) = $text =~ /^MAILFROM="([^"]*)"$/m;
+    is($mailto,   '[% admin_email %]', "$cron mails what it finds to the admin");
+    is($mailfrom, '[% mail_from %]',   'from the address that the cron recipe gives');
+}
+
+# Only cronie reads MAILFROM.  The cron of Debian sends as the user that runs the
+# job, whatever the file says.
+my $cronie = `systemctl is-active cronie 2>&1`;
+chomp $cronie;
+is($cronie, 'active', 'cronie runs these, so that MAILFROM counts');
+SKIP: {
+    my $ca_ok = system('openssl', 'x509', '-noout', '-checkend', [% ca_warning_days %] * 86400, '-in', '/etc/openvpn/easy-rsa/pki/ca.crt') == 0;
+    skip 'the CA of this guest is really near its end, so the check is meant to warn', 1 unless $ca_ok;
+    is(`/usr/local/sbin/openvpn-ca-expiry 2>&1`, '', 'openvpn-ca-expiry says nothing about a CA with time left');
+}
+{
+    my $short = tempdir(CLEANUP => 1);
+    mkdir "$short/pki";
+    system("openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=short -days 10 -keyout '$short/ca.key' -out '$short/pki/ca.crt' >/dev/null 2>&1");
+    my $warning = `OPENVPN_EASYRSA_DIR='$short' /usr/local/sbin/openvpn-ca-expiry 2>&1`;
+    like($warning, qr/expires on/, 'and warns about a CA with ten days left') or diag $warning;
+}
 
 done_testing();

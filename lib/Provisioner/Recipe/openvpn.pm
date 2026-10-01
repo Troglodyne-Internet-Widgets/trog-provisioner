@@ -11,6 +11,7 @@ use re '/aasx';
 use Socket qw{inet_aton inet_ntoa};
 
 use Provisioner::IPPool();
+use Provisioner::Cookbook();
 
 use parent qw{Provisioner::Recipe};
 
@@ -159,13 +160,23 @@ the list to the server.  openvpn reads the list at each TLS handshake, so a new
 connection from C<NAME> fails at once.  A client that is connected keeps its
 tunnel until its next renegotiation, which openvpn does each hour.
 
-A revocation list has an expiry, and easyrsa sets it to 180 days after it
-signs.  An expired list stops B<every> client, because openvpn then refuses all
+A revocation list expires C<easyrsa.crl_days> days after it is signed.  An
+expired list stops B<every> client, because openvpn then refuses all
 certificates.  So C<openvpn-refresh-crl> signs it again on each provision and
 from cron each day.  The guest test fails when less than 30 days are left.
 
 Run C<easyrsa revoke> through C<openvpn-revoke-client>, not by itself.  Alone,
 it changes the index of the CA and not the list that the server reads.
+
+=head3 When the CA expires
+
+The CA expires C<easyrsa.ca_days> days after the guest that first made it.  The
+salvage keeps the same CA on every rebuild, so a rebuild does not move that
+date.  When the CA expires, the server and every client stop connecting.
+
+So C<openvpn-ca-expiry> runs from cron each day.  Once the CA has
+C<ca_warning_days> days or fewer left, it prints a warning, and cron mails it to
+C<admin_email>.  Until then it prints nothing, and cron sends nothing.
 
 =head3 Which clients there are
 
@@ -253,6 +264,33 @@ sub args {
             # Off, because a change reaches every deployed client.  See DESCRIPTION.
             redirect_gateway => { type => 'boolean', default => 0 },
 
+            # The defaults are on the members, so that a block that sets one of
+            # them still gets the rest.
+            easyrsa => {
+                type        => 'object',
+                default     => {},
+                description => 'What easyrsa signs with, rendered into its vars file.  The defaults are the defaults of easy-rsa 3.1.',
+                properties  => {
+                    key_size  => { type => 'integer', enum    => [ 2048, 3072, 4096 ],       default => 2048,     description => 'The RSA key size of each new key.' },
+                    digest    => { type => 'string',  enum    => [qw{sha256 sha384 sha512}], default => 'sha256', description => 'The digest that each signature uses.' },
+                    ca_days   => { type => 'integer', minimum => 1,                          default => 3650,     description => 'How long a new CA lasts.  The CA that a guest already has, or gets back from the salvage, keeps its own date.' },
+                    cert_days => { type => 'integer', minimum => 1,                          default => 825,      description => 'How long a new client or server certificate lasts.' },
+                    crl_days  => {
+                        type        => 'integer',
+                        minimum     => 31,
+                        default     => 180,
+                        description => 'How long a revocation list lasts.  Cron signs a new one each day, and the server refuses every client once the list expires, so this is how long a stopped cron goes unnoticed.  At least 31, which the guest test asks for.',
+                    },
+                },
+            },
+
+            ca_warning_days => {
+                type        => 'integer',
+                minimum     => 1,
+                default     => 60,
+                description => 'Mail admin_email each day once the CA has this many days or fewer left.  When the CA expires, no client and not the server can connect.',
+            },
+
             # No default here, because the default comes from ip_pool.  See enrich.
             routes => {
                 type        => 'array',
@@ -283,6 +321,9 @@ my sub network ($block) {
 Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
 VPN subnet.
 
+Adds C<mail_from>, the MAILFROM of the cron files, from
+L<Provisioner::Recipe::cron/mail_from>.
+
 Fills in C<routes> from C<ip_pool>: the two halves of each C<cidr> block, then a
 C</32> for each of its C<addresses>, each route once.  A C</32> block has no
 halves, so it goes as it is.  See L</The networks that a client reaches>.
@@ -293,11 +334,27 @@ Dies if a route is not an IPv4 CIDR block.
 
 =cut
 
+=head2 %required = $recipe->required_recipes(%opts)
+
+Requires the cron recipe, because the cron files of this recipe set MAILFROM,
+and only the cronie that the cron recipe installs reads it.  Also returns what
+the base class requires.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    return ( cron => sub { return () }, $self->SUPER::required_recipes(%opts) );
+}
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
     # The schema makes netmask an IPv4 address, so inet_aton resolves no name.
     $opts{cidr} = unpack( '%32b*', inet_aton( $opts{netmask} ) );
+
+    $opts{mail_from} = Provisioner::Cookbook->load('cron')->mail_from( $opts{domain} );
 
     unless ( $opts{routes} ) {
         my $pool = $opts{ip_pool} // {};
@@ -340,6 +397,9 @@ sub template_files {
         'openvpn.list-clients.tt'     => 'openvpn-list-clients',
         'openvpn.refresh-crl.tt'      => 'openvpn-refresh-crl',
         'openvpn.refresh-crl.cron.tt' => 'openvpn-refresh-crl.cron',
+        'openvpn.easyrsa.vars.tt'     => 'easyrsa.vars',
+        'openvpn.ca-expiry.tt'        => 'openvpn-ca-expiry',
+        'openvpn.ca-expiry.cron.tt'   => 'openvpn-ca-expiry.cron',
 
         # The ufw application profile.  This recipe renders it, because ufw
         # gets only rate_limits and not the port or the protocol.

@@ -1,0 +1,8 @@
+# Mail the admin each day once the CA has [% ca_warning_days %] days or fewer
+# left.  openvpn-ca-expiry prints nothing until then, and cron sends nothing for
+# a job that prints nothing.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO="[% admin_email %]"
+MAILFROM="[% mail_from %]"
+17 8 * * * root /usr/local/sbin/openvpn-ca-expiry

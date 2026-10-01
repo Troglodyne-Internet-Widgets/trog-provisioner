@@ -1,6 +1,9 @@
 	# Set up easy-rsa PKI
 	mkdir -p /etc/openvpn/easy-rsa
 	cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+	# What easyrsa signs with.  Without it, easyrsa uses its own defaults and
+	# says so on each run.
+	install -m 0644 -o root -g root easyrsa.vars /etc/openvpn/easy-rsa/vars
 	# The data target already put back the PKI of the last guest.  The guards
 	# below protect only a PKI that is on the disk.  Provisioner::Recipe::openvpn
 	# has the whole account.
@@ -51,6 +54,9 @@
 	install -m 0700 -o root -g root openvpn-refresh-crl /usr/local/sbin/openvpn-refresh-crl
 	/usr/local/sbin/openvpn-refresh-crl
 	install -m 0644 -o root -g root openvpn-refresh-crl.cron /etc/cron.d/openvpn-refresh-crl
+	# A mail to the admin each day once the CA is near its end.
+	install -m 0700 -o root -g root openvpn-ca-expiry /usr/local/sbin/openvpn-ca-expiry
+	install -m 0644 -o root -g root openvpn-ca-expiry.cron /etc/cron.d/openvpn-ca-expiry
 	# What an operator runs to give a client its configuration, to take it away
 	# again, and to see who has one.
 	install -m 0700 -o root -g root openvpn-client-config /usr/local/sbin/openvpn-client-config

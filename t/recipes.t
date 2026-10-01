@@ -765,6 +765,29 @@ subtest 'cron addresses: a local part gets the domain, an address does not' => s
         $cron->()->render_file( 'files/cron.root.tt', %G, from => 'someone@example.test' ),
         qr/^MAILFROM="someone\@example\.test"$/m, 'an address is left exactly as it stands'
     );
+
+    # Mail from a job comes from cron@ and not from whoever ran it, unless the
+    # domain says otherwise.
+    like(
+        $cron->()->render_file( 'files/cron.root.tt', %G ),
+        qr/^MAILFROM="cron\@\Q$d\E"$/m, 'with no from at all, the mail comes from cron at the domain'
+    );
+    is( 'Provisioner::Recipe::cron'->mail_from($d), "cron\@$d", 'and mail_from gives another recipe the same answer' );
+};
+
+# Only cronie reads MAILFROM, so a recipe that writes it into a cron file of its
+# own needs the cron recipe, which installs cronie.
+subtest 'openvpn sends its cron mail from the address the cron recipe gives' => sub {
+    my $d = $G{domain};
+    my $r = Provisioner::Cookbook->load( 'openvpn', distro => $DISTRO )->new(%PROV);
+
+    my %required = $r->required_recipes(%G);
+    ok( exists $required{cron}, 'openvpn requires cron' );
+
+    foreach my $file (qw{files/openvpn.ca-expiry.cron.tt files/openvpn.refresh-crl.cron.tt}) {
+        my $text = Provisioner::Cookbook->load( 'openvpn', distro => $DISTRO )->new(%PROV)->render_file( $file, %G );
+        like( $text, qr/^MAILFROM="cron\@\Q$d\E"$/m, "$file sets MAILFROM to cron at the domain" ) or diag $text;
+    }
 };
 
 subtest 'cron MAILTO per script' => sub {

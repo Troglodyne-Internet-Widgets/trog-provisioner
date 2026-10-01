@@ -1,0 +1,7 @@
+# What easyrsa signs with.  The easyrsa block of Provisioner::Recipe::openvpn
+# sets these values, and a provision writes this file again.
+set_var EASYRSA_KEY_SIZE    [% easyrsa.key_size %]
+set_var EASYRSA_DIGEST      "[% easyrsa.digest %]"
+set_var EASYRSA_CA_EXPIRE   [% easyrsa.ca_days %]
+set_var EASYRSA_CERT_EXPIRE [% easyrsa.cert_days %]
+set_var EASYRSA_CRL_DAYS    [% easyrsa.crl_days %]
