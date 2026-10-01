@@ -282,6 +282,16 @@ sub template_files {
     );
 }
 
+=head2 %required = $recipe->required_recipes()
+
+C<cron>, which installs F<garage-snapshot.cron> as F</etc/cron.d/garage-snapshot>.
+
+=cut
+
+sub required_recipes {
+    return ( cron => sub { return ( files => { 'garage-snapshot' => 'garage-snapshot.cron' } ) } );
+}
+
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<garage-snapshot.sh>, which the guest runs before the fetch.  The

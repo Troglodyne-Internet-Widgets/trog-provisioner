@@ -118,6 +118,19 @@ sub template_files {
     );
 }
 
+=head2 %required = $recipe->required_recipes(%opts)
+
+C<cron>, which installs F<backupdestination.cron> as
+F</etc/cron.d/E<lt>domainE<gt>-backups>.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    return ( cron => sub { return ( files => { "$opts{domain}-backups" => 'backupdestination.cron' } ) } );
+}
+
 sub tests {
     return qw{backupdestination.tt};
 }

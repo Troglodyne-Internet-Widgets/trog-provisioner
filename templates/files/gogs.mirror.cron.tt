@@ -1,0 +1,2 @@
+# Mirror the configured GitHub users and organizations into gogs.
+0 */[% mirror_interval %] * * * [% gogs_admin %] [% script_dir %]/gogs.mirror.sh

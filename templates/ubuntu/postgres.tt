@@ -3,7 +3,6 @@
     neither goes over a database that is already there. -%]
 install -m 0750 postgres-restore.sh /usr/local/sbin/postgres-restore.sh
 /usr/local/sbin/postgres-restore.sh "[% install_dir %]/[% domain %]/postgres"[% FOR dump_file IN dumps %] "[% install_dir %]/[% domain %]/[% dump_file %]"[% END %]
-# Install nightly logical backup script and cron job
+# Install the nightly logical backup script.  The cron recipe installs its job.
 install -m 0750 postgres-backup.sh /usr/local/sbin/postgres-backup.sh
-install -m 0644 postgres-backup.cron /etc/cron.d/postgres-backup
 mkdir -p /var/backups/postgres

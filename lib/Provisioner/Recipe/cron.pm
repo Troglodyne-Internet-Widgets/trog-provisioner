@@ -10,7 +10,6 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::cron
@@ -28,6 +27,8 @@ In recipes.yaml:
                   mailto: "whee@test.test"
             root_scripts:
                 ...
+            files:
+                ldap-export: ldap-export.cron
 
 If you do not want the output of a script, set its C<mailto> to C<none>.  If
 you do not set C<mailto>, the output goes to the admin.
@@ -40,10 +41,20 @@ local part gets this domain appended.  An address does not change.
 Sets up the cron jobs of root, and the cron jobs of the service user.
 
 C<from> sets MAILFROM, and defaults to C<cron>, so mail from a job comes from
-C<cron@> the domain and not from the user that ran it.  Only cronie reads
-MAILFROM.  The C<cron> of Debian ignores it and sends as the user, so a recipe
-that writes MAILFROM into a cron file must require this recipe, which installs
-cronie.
+C<cron@> the domain and not from the user that ran it.  Only cronie, which this
+recipe installs, reads MAILFROM.  The C<cron> of Debian ignores it and sends as
+the user.
+
+C<files> installs files of the payload into F</etc/cron.d>.  Each key is the
+name in F</etc/cron.d>, and its value is the file that a recipe generated.  A
+recipe that runs jobs passes its files through C<required_recipes>, and the
+depsolver merges what each recipe passes into one map.  Two recipes that give
+one name different files are refused.  Each file gets C<MAILTO> and C<MAILFROM>
+lines at the top, so its jobs mail the admin from C<from>, as the crontabs of
+this recipe do.  So the template of such a file sets neither.
+
+Debian's C<cron> also skips a file in F</etc/cron.d> whose name has a dot, such
+as one named after the domain.  cronie runs it.
 
 The cron jobs of root run:
 
@@ -100,34 +111,23 @@ sub enrich {
     return %opts;
 }
 
-=head3 $address = Provisioner::Recipe::cron->mail_from($domain)
-
-Returns the MAILFROM of C<$domain>: its C<from>, or the default of the schema,
-with the domain appended to a local part.  This is the value that the crontabs
-of this recipe get.  A recipe that writes a cron file of its own renders this
-into it, and requires this recipe.
-
-Reads the configuration of the domain, so it gives the same answer before and
-after validation.
-
-=cut
-
-sub mail_from {
-    my ( $class, $domain ) = @_;
-
-    my %args = $class->args();
-    my $from = Provisioner::Cookbook->domain_config($domain)->{cron}{from} // $args{properties}{from}{default};
-
-    return Provisioner::Utils::qualify_address( $from, $domain );
-}
-
 sub args {
     return (
         type       => 'object',
         properties => {
 
             # Not an email type: a local part is valid here, see enrich().
-            from         => { type => 'string', default => 'cron', description => 'The MAILFROM of every cron file, as a local part of this domain or a whole address.' },
+            from  => { type => 'string', default => 'cron', description => 'The MAILFROM of every cron file, as a local part of this domain or a whole address.' },
+            files => {
+                type        => 'object',
+                default     => {},
+                description => 'Files of the payload to install into /etc/cron.d, as the name there and the file.  Recipes that run jobs pass theirs through required_recipes.',
+
+                # One path component each, so that no name or file leaves its
+                # directory.
+                propertyNames        => { pattern => '\A[A-Za-z0-9][A-Za-z0-9_.-]*\z' },
+                additionalProperties => { type    => 'string', pattern => '\A[A-Za-z0-9][A-Za-z0-9_.-]*\z' },
+            },
             user_scripts => {
                 type  => 'array',
                 items => {

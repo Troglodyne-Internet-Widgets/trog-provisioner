@@ -90,6 +90,16 @@ sub template_files {
     );
 }
 
+=head2 %required = $recipe->required_recipes()
+
+C<cron>, which installs F<postgres-backup.cron> as F</etc/cron.d/postgres-backup>.
+
+=cut
+
+sub required_recipes {
+    return ( cron => sub { return ( files => { 'postgres-backup' => 'postgres-backup.cron' } ) } );
+}
+
 =head3 @commands = $recipe->remote_prepare($install_dir, $domain)
 
 Returns the backup script, so the guest takes a fresh dump just before the fetch.

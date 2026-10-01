@@ -62,10 +62,9 @@ printf '%s' '[% admin_password %]' > ldap.admin_password
 @ldapadd -c -x -D "cn=admin,[% base_dn %]" -y ldap.admin_password -f seed.ldif || { ldapsearch -x -b '[% base_dn %]' -s base >/dev/null 2>&1 || { echo "ldap: could not seed [% base_dn %]; the directory is empty" >&2; exit 1; }; }
 rm -f seed.ldif ldap.admin_password
 
-# Export the directory as LDIF each hour, for the next rebuild.
+# The cron recipe runs this export each hour, for the next rebuild.
 # templates/files/ldap.export.sh.tt says why.
 install -m 0750 -o root -g root ldap-export.sh /usr/local/sbin/ldap-export.sh
-install -m 0644 -o root -g root ldap-export.cron /etc/cron.d/ldap-export
 # Once now, so that a rebuild within the first hour has an export to load.
 /usr/local/sbin/ldap-export.sh
 

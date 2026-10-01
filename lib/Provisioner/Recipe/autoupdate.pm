@@ -52,6 +52,23 @@ sub template_files {
     );
 }
 
+=head2 %required = $recipe->required_recipes(%opts)
+
+C<cron>, which installs F<autoupdate_cron> as F</etc/cron.d/autoupdate>.  When
+C<autorestart> is set, it also installs F<autorestart_cron> as
+F</etc/cron.d/E<lt>domainE<gt>-autorestart>.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    my %files = ( autoupdate => 'autoupdate_cron' );
+    $files{"$opts{domain}-autorestart"} = 'autorestart_cron' if $opts{autorestart};
+
+    return ( cron => sub { return ( files => \%files ) } );
+}
+
 sub tests {
     return qw{autoupdate.tt};
 }

@@ -14,10 +14,32 @@ my $user_tab = `crontab -u [% user %] -l 2>&1`;
 is($?, 0, 'the crontab for [% user %] is installed') or diag $user_tab;
 like($user_tab, qr/^MAILTO="[^"]+"/m, 'and sets MAILTO') or diag $user_tab;
 
+# The files that the other recipes of this guest gave this recipe to install.
+[% FOR name IN files.keys().sort() -%]
+subtest '/etc/cron.d/[% name %]' => sub { check_recipe_file('/etc/cron.d/[% name %]') };
+[% END -%]
+
 my $status = `systemctl is-active cronie 2>/dev/null || systemctl is-active cron 2>/dev/null`;
 like($status, qr/active/, 'cron is running');
 
 done_testing();
+
+# What this recipe adds to each file that another recipe gave it: the two mail
+# lines at the top, and no later line that overrides either of them.
+sub check_recipe_file {
+    my ($file) = @_;
+
+    ok(-f $file, 'it is installed');
+    my @st = stat $file;
+    is(scalar getpwuid($st[4] // -1), 'root', 'and is owned by root');
+    is($st[2] & 022, 0, 'and is not group or world writable');
+
+    my @lines = split m/\n/, ( do { local (@ARGV, $/) = $file; <> } // '' );
+    is($lines[0], 'MAILTO="[% admin_email %]"', 'its jobs mail the admin');
+    is($lines[1], 'MAILFROM="[% from %]"', 'from cron at the domain');
+    is(scalar( grep { m/^MAIL(?:TO|FROM)=/ } @lines ), 2, 'and nothing later in the file changes either') or diag join("\n", @lines);
+    return;
+}
 
 sub check_crontab {
     my ($file) = @_;

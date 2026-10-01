@@ -210,7 +210,10 @@ subtest 'no setting every recipe is handed carries a default' => sub {
 # passing here.  registrar is the credentials for a zone somebody else holds --
 # what reaches the guest from it is installed by the recipes that read them,
 # lexicon's shortcut and letsencrypt's hook.
-my %NO_FRAGMENT = ( registrar => 'the credentials for a zone somebody else holds' );
+my %NO_FRAGMENT = (
+    registrar  => 'the credentials for a zone somebody else holds',
+    autoupdate => 'cron files, which the cron recipe installs',
+);
 
 # Test that a recipe renders without error given %G merged with $extra.
 sub renders_ok {
@@ -772,22 +775,79 @@ subtest 'cron addresses: a local part gets the domain, an address does not' => s
         $cron->()->render_file( 'files/cron.root.tt', %G ),
         qr/^MAILFROM="cron\@\Q$d\E"$/m, 'with no from at all, the mail comes from cron at the domain'
     );
-    is( 'Provisioner::Recipe::cron'->mail_from($d), "cron\@$d", 'and mail_from gives another recipe the same answer' );
 };
 
-# Only cronie reads MAILFROM, so a recipe that writes it into a cron file of its
-# own needs the cron recipe, which installs cronie.
-subtest 'openvpn sends its cron mail from the address the cron recipe gives' => sub {
-    my $d = $G{domain};
-    my $r = Provisioner::Cookbook->load( 'openvpn', distro => $DISTRO )->new(%PROV);
+# Only cronie reads MAILFROM, and the cron recipe is what installs it.  So every
+# file in /etc/cron.d goes through that recipe, which puts the two mail lines on
+# top.  A recipe that installed one itself would mail whoever ran the job.
+subtest 'only the cron recipe installs into /etc/cron.d' => sub {
 
-    my %required = $r->required_recipes(%G);
-    ok( exists $required{cron}, 'openvpn requires cron' );
+    # What makes a recipe install a cron file that it installs only sometimes.
+    my %when = ( autoupdate => { autorestart => '/bogus' }, gogs => { github_users => ['nobody'] } );
 
-    foreach my $file (qw{files/openvpn.ca-expiry.cron.tt files/openvpn.refresh-crl.cron.tt}) {
-        my $text = Provisioner::Cookbook->load( 'openvpn', distro => $DISTRO )->new(%PROV)->render_file( $file, %G );
-        like( $text, qr/^MAILFROM="cron\@\Q$d\E"$/m, "$file sets MAILFROM to cron at the domain" ) or diag $text;
+    my $givers = 0;
+    foreach my $recipe ( sort grep { $_ ne 'cron' } @available ) {
+        my $fragments = join "\n", map { File::Slurper::read_text($_) } grep { defined } ( fragment_for($recipe), fragment_for( $recipe, 'global.tt' ) );
+        unlike( $fragments, qr{/etc/cron[.]d}, "$recipe installs nothing into /etc/cron.d itself" );
+
+        my $r        = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my %required = ( Provisioner::Recipe::required_recipes( $r, %G ), $r->required_recipes( %G, %{ $when{$recipe} // {} } ) );
+        next unless $required{cron};
+
+        my %given = $required{cron}->(%G);
+        my %made  = map { $_ => 1 } values %{ { $r->template_files() } };
+        foreach my $name ( sort keys %{ $given{files} // {} } ) {
+            $givers++;
+            ok( $made{ $given{files}{$name} }, "$recipe: /etc/cron.d/$name is $given{files}{$name}, one of its template_files" );
+        }
     }
+    ok( $givers, 'some recipe gave the cron recipe a file, so the loop above checked something' );
+};
+
+# The fragment, run as make would run it: the file that a recipe made, with the
+# two mail lines on top.
+subtest 'the cron recipe puts the mail lines on top of each file that it is given' => sub {
+    my $d        = $G{domain};
+    my $fragment = Provisioner::Cookbook->load( 'cron', distro => $DISTRO )->new(%PROV)->render( %G, files => { 'job-name' => 'job.cron' } );
+    my ($line)   = grep { m/>\s*job-name[.]crond\z/ } split m/\n/, $fragment;
+    ok( $line, 'the fragment writes the file' ) or return diag $fragment;
+    my $install = 'install -m 0644 -o root -g root job-name.crond /etc/cron.d/job-name';
+    ok( ( any { $_ eq $install } split m/\n/, $fragment ), 'and installs it root-owned under its name' ) or diag $fragment;
+
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/job.cron", "17 * * * * root /bogus/job\n" );
+    IPC::Run3::run3( [ 'bash', '-c', "cd '$dir' && $line" ], \undef, \my $out, \my $err );
+    is( $?,                                              0,                                                                               'the line runs' ) or diag $err;
+    is( File::Slurper::read_text("$dir/job-name.crond"), qq{MAILTO="$G{admin_email}"\nMAILFROM="cron\@$d"\n17 * * * * root /bogus/job\n}, 'and the file mails the admin, from cron at the domain' );
+};
+
+# The depsolver joins what each recipe gives into one map, and keeps what the
+# operator wrote under cron beside it.
+subtest 'the cron files of every recipe on a domain land in one map' => sub {
+    my %provisioner = ( template_dirs => Provisioner::Cookbook->template_dirs($DISTRO), output_dir => tempdir( CLEANUP => 1 ) );
+    my $resolve     = sub ($conf) {
+        Provisioner::Cookbook->resolve_dependencies(
+            modules       => [ sort keys %$conf ],
+            domain_conf   => $conf,
+            global_config => \%G,
+            distro        => $DISTRO,
+            provisioner   => \%provisioner,
+            domain        => $G{domain},
+        );
+        return $conf;
+    };
+
+    my $conf = $resolve->( { ldap => { admin_password => 'bogus' }, postgres => {}, cron => { files => { mine => 'mine.cron' } } } );
+    is_deeply(
+        $conf->{cron}{files},
+        { mine => 'mine.cron', 'ldap-export' => 'ldap-export.cron', 'postgres-backup' => 'postgres-backup.cron' },
+        'what each recipe gave, and what the operator wrote'
+    );
+
+    like(
+        exception { $resolve->( { ldap => { admin_password => 'bogus' }, cron => { files => { 'ldap-export' => 'other.cron' } } } ) },
+        qr/files[.]ldap-export/, 'and two files under one name are refused, naming the name'
+    );
 };
 
 subtest 'cron MAILTO per script' => sub {

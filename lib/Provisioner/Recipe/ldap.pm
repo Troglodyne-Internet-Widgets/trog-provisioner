@@ -162,6 +162,16 @@ sub template_files {
     );
 }
 
+=head2 %required = $recipe->required_recipes()
+
+C<cron>, which installs F<ldap-export.cron> as F</etc/cron.d/ldap-export>.
+
+=cut
+
+sub required_recipes {
+    return ( cron => sub { return ( files => { 'ldap-export' => 'ldap-export.cron' } ) } );
+}
+
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<ldap-export.sh>, which the guest runs before the fetch.  The cron runs

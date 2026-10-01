@@ -13,11 +13,6 @@ runuser -u apt-mirror -- mkdir -p '[% mirror_root %]' '[% spool %]/skel' '[% spo
 install -o root -g root -m 0644 aptmirror.mirror.list /etc/apt/mirror.list
 install -o apt-mirror -g apt-mirror -m 0755 aptmirror.postmirror.sh '[% spool %]/var/postmirror.sh'
 install -o root -g root -m 0644 aptmirror.service /etc/systemd/system/apt-mirror.service
-[%# Root-owned, or cron ignores it.  A file moved out of the payload keeps the
-    transfer user as its owner, and cron applies owner rules to cron.d.  This
-    replaces the packaged file, so only one file says when a sync happens.  The
-    packaged file is all comments and schedules nothing. -%]
-install -o root -g root -m 0644 aptmirror.cron /etc/cron.d/apt-mirror
 systemctl daemon-reload
 install -o root -g root -m 0644 aptmirror.nginx.conf /etc/nginx/sites-enabled/[% domain %]-aptmirror.conf
 [%# Deferred for the reason that nginxdirindex gives.  nginx is a dependency of
