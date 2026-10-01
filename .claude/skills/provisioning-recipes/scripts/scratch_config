@@ -23,6 +23,8 @@ use Pod::Usage   qw{pod2usage};
 use YAML::XS();
 
 use Trog::Config();
+use Trog::Credentials();
+use Trog::Hypervisors::Config();
 use Provisioner::Cookbook();
 use Trog::Secrets();
 use Provisioner::Utils();
@@ -37,6 +39,9 @@ scratch_config - a throwaway configuration directory, with a throwaway secret st
     # TROG_PROVISIONER_CONFIG and TROG_SCRATCH_PASS are now set
 
     scratch_config --print-dir       # just the path
+
+    # A fleet whose blocks name a secret, with the installation store's password
+    printf 'keepass: %s\n\n' "$PASS" | scratch_config --credentials
     scratch_config --remove DIR      # throw one away
 
 =head1 DESCRIPTION
@@ -110,12 +115,19 @@ Not copied.  A new one is built holding a made-up value for every C<secret:>
 reference in the scratch F<recipes.yaml> -- normally none, what is built there
 naming no credential -- under a password printed to stdout.
 
+What F<hypervisors.conf> names is the exception, such as the token of a Linode
+or SolusVM block.  A scratch guest is built on the real hypervisor, which a
+made-up token cannot reach, so those values, and only those, are read out of
+the installation's store and put in this one.  That is the one time this opens
+the installation's store, and only when the fleet names a secret at all: it
+asks for the store's password, or takes it from C<--credentials>.
+
 =back
 
-The values in it are visibly fake -- C<throwaway:group/entry/field>.  Anything
-that reaches a real service with one gets rejected, which is the intent: a
-recipe that talks to a registrar will fail at the point it tries, rather than
-succeeding against somebody's live DNS.
+The values it makes up are visibly fake -- C<throwaway:group/entry/field>.
+Anything that reaches a real service with one gets rejected, which is the
+intent: a recipe that talks to a registrar will fail at the point it tries,
+rather than succeeding against somebody's live DNS.
 
 =head1 OPTIONS
 
@@ -141,6 +153,13 @@ Provision through the fetch cache NAME, by writing C<cache: NAME> into the
 scratch C<_base>'s C<_global>.  NAME is a cache built from this same scratch
 configuration, which has an authority of its own; the skill says how.
 
+=item B<--credentials>
+
+Read the password of the installation's store from a credentials block on
+standard input, for a fleet whose blocks name a secret.  See
+L<Trog::Credentials> for the format.  Without it, the password is asked for
+when it is needed, and not otherwise.
+
 =item B<--remove> DIR
 
 Delete a scratch directory.  Refuses anything that does not look like one, so a
@@ -155,10 +174,11 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, $help );
+    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, $credentials, $help );
     GetOptionsFromArray(
         \@args,
-        'dir=s'      => \$dir,
+        'dir=s'       => \$dir,
+        'credentials' => \$credentials,
         'cpan-tests' => \$cpan_tests,
         'cache=s'    => \$cache,
         'print-dir'  => \$print_dir,
@@ -169,10 +189,17 @@ sub main {
 
     return remove($remove) if $remove;
 
+    Trog::Credentials->load() if $credentials;
+
     my $source = Trog::Config->dir;
     $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
-    my ( $password, $has_fleet, $keys_copied, @refs ) = build( $source, $dir, cpan_tests => $cpan_tests, cache => $cache );
+    my ( $password, $has_fleet, $keys_copied, $real, @refs ) = build(
+        $source, $dir,
+        cpan_tests     => $cpan_tests,
+        cache          => $cache,
+        store_password => sub { Trog::Credentials->prompt( 'Enter password:', 'keepass' ) },
+    );
 
     if ($print_dir) {
         print "$dir\n";
@@ -190,6 +217,8 @@ sub main {
     $report .= "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
     $report .= "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     $report .= join( q{}, map { "    $_\n" } @refs );
+    $report .= "  and the real value of what hypervisors.conf names, out of $source/secrets.kdbx:\n" . join( q{}, map { "    $_\n" } @$real )
+      if @$real;
     $report .= "\n";
 
     # STDERR because the caller runs this as eval "$(scratch_config)": whatever
@@ -264,6 +293,15 @@ sub build {
     my %unique = map { $_ => 1 } values %needed;
     my @refs   = sort keys %unique;
 
+    # The hypervisor is the real one, so what its block names has to be real too.
+    my @fleet_refs = Trog::Hypervisors::Config->load( $has_fleet ? "$dir/$fleet" : undef )->secret_references;
+    my %real;
+    if (@fleet_refs) {
+        die 'hypervisors.conf names ' . join( ', ', @fleet_refs ) . ", so a scratch configuration needs the password of $source/secrets.kdbx to copy them\n"
+          unless $opts{store_password};
+        %real = Trog::Secrets->lookup( "$source/secrets.kdbx", $opts{store_password}->(), map { $_ => $_ } @fleet_refs );
+    }
+
     my $password = Crypt::PRNG::random_string(20);
 
     # Visibly fake, so that anything reaching a real service with one is refused
@@ -271,11 +309,12 @@ sub build {
     # business; making the database is Trog::Secrets'.
     Trog::Secrets->create(
         "$dir/secrets.kdbx", $password,
-        map { $_ => 'throwaway:' . substr( $_, length 'secret:' ) } @refs
+        ( map { $_ => 'throwaway:' . substr( $_, length 'secret:' ) } @refs ),
+        %real,
     );
     chmod 0600, "$dir/secrets.kdbx";
 
-    return ( $password, $has_fleet, $keys_copied, @refs );
+    return ( $password, $has_fleet, $keys_copied, \@fleet_refs, @refs );
 }
 
 # What the installation configures its guests with, and its mirror.  Read key by

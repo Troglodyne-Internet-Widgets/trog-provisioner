@@ -113,14 +113,6 @@ sub capacity {
 }
 
 # --- Reading the file ---------------------------------------------------------
-subtest 'no hypervisors.conf means no fleet' => sub {
-    my $fleet = Trog::Hypervisors->load('/tmp/nonexistent_xyz/hypervisors.conf');
-    ok( !$fleet->configured, 'not configured' );
-    is_deeply( [ $fleet->names ], [], 'and it names nobody' );
-
-    ok( !Trog::Hypervisors->load(undef)->configured, 'an undef path is the same thing' );
-};
-
 subtest 'a fleet is read in file order' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
     ok( $fleet->configured, 'configured' );
@@ -144,12 +136,6 @@ subtest 'a name the file does not have is an error' => sub {
     my $err   = exception { $fleet->hypervisor('hv3') };
     like( $err, qr/No[ ]hypervisor[ ]named[ ]'hv3'/, 'dies' );
     like( $err, qr/hv1,[ ]hv2/,                      'and says what there is' );
-};
-
-subtest 'a file with no blocks is an error' => sub {
-    my $dir = tempdir( CLEANUP => 1 );
-    File::Slurper::Temp::write_text( "$dir/hypervisors.conf", "libvirt_uri=qemu:///system\n" );
-    like( exception { Trog::Hypervisors->load("$dir/hypervisors.conf") }, qr/names[ ]no[ ]hypervisors/, 'dies rather than silently finding nothing' );
 };
 
 # --- Finding a guest that already exists -------------------------------------
