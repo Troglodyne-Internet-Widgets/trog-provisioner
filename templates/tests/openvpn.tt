@@ -262,8 +262,19 @@ cmp_ok($crl_left, '>=', [% easyrsa.crl_days %] - 1, 'and easyrsa signed the list
 # The warning about the end of the CA.  Silent while the CA has time left, and
 # loud about a CA that has less.
 ok(-f '/etc/cron.d/openvpn-ca-expiry', 'cron checks the end of the CA each day');
-my ($mailto) = slurp('/etc/cron.d/openvpn-ca-expiry') =~ /^MAILTO="([^"]*)"$/m;
-is($mailto, '[% admin_email %]', 'and mails what it finds to the admin');
+foreach my $cron (qw{openvpn-ca-expiry openvpn-refresh-crl}) {
+    my $text = slurp("/etc/cron.d/$cron");
+    my ($mailto)   = $text =~ /^MAILTO="([^"]*)"$/m;
+    my ($mailfrom) = $text =~ /^MAILFROM="([^"]*)"$/m;
+    is($mailto,   '[% admin_email %]', "$cron mails what it finds to the admin");
+    is($mailfrom, '[% mail_from %]',   'from the address that the cron recipe gives');
+}
+
+# Only cronie reads MAILFROM.  The cron of Debian sends as the user that runs the
+# job, whatever the file says.
+my $cronie = `systemctl is-active cronie 2>&1`;
+chomp $cronie;
+is($cronie, 'active', 'cronie runs these, so that MAILFROM counts');
 SKIP: {
     my $ca_ok = system('openssl', 'x509', '-noout', '-checkend', [% ca_warning_days %] * 86400, '-in', '/etc/openvpn/easy-rsa/pki/ca.crt') == 0;
     skip 'the CA of this guest is really near its end, so the check is meant to warn', 1 unless $ca_ok;

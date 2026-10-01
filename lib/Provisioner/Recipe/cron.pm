@@ -10,6 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::cron
@@ -38,7 +39,11 @@ local part gets this domain appended.  An address does not change.
 
 Sets up the cron jobs of root, and the cron jobs of the service user.
 
-C<from> sets MAILFROM.  If you do not set it, no cron file sets MAILFROM.
+C<from> sets MAILFROM, and defaults to C<cron>, so mail from a job comes from
+C<cron@> the domain and not from the user that ran it.  Only cronie reads
+MAILFROM.  The C<cron> of Debian ignores it and sends as the user, so a recipe
+that writes MAILFROM into a cron file must require this recipe, which installs
+cronie.
 
 The cron jobs of root run:
 
@@ -95,13 +100,34 @@ sub enrich {
     return %opts;
 }
 
+=head3 $address = Provisioner::Recipe::cron->mail_from($domain)
+
+Returns the MAILFROM of C<$domain>: its C<from>, or the default of the schema,
+with the domain appended to a local part.  This is the value that the crontabs
+of this recipe get.  A recipe that writes a cron file of its own renders this
+into it, and requires this recipe.
+
+Reads the configuration of the domain, so it gives the same answer before and
+after validation.
+
+=cut
+
+sub mail_from {
+    my ( $class, $domain ) = @_;
+
+    my %args = $class->args();
+    my $from = Provisioner::Cookbook->domain_config($domain)->{cron}{from} // $args{properties}{from}{default};
+
+    return Provisioner::Utils::qualify_address( $from, $domain );
+}
+
 sub args {
     return (
         type       => 'object',
         properties => {
 
             # Not an email type: a local part is valid here, see enrich().
-            from         => { type => 'string' },
+            from         => { type => 'string', default => 'cron', description => 'The MAILFROM of every cron file, as a local part of this domain or a whole address.' },
             user_scripts => {
                 type  => 'array',
                 items => {

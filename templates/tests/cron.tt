@@ -34,6 +34,8 @@ sub check_crontab {
     my $text = do { local (@ARGV, $/) = $file; <> } // '';
 
     like($text, qr/^MAILTO="[^"]+"/m, 'it sets MAILTO, so failures reach somebody');
+    my ($mailfrom) = $text =~ /^MAILFROM="([^"]*)"$/m;
+    is($mailfrom, '[% from %]', 'and MAILFROM, so the mail comes from cron and not from the user of the job');
     like($text, qr/^PATH="[^"]+"/m,   'and a PATH for the jobs to find their commands in');
 
     # Look up each command of the jobs in the PATH that the file declares.  If

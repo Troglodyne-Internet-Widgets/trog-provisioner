@@ -219,7 +219,9 @@ cpm
 cpuid
 cpus
 cron
+cronie
 crons
+crontabs
 crt
 csplit
 datadir

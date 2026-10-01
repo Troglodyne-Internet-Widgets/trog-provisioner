@@ -11,6 +11,7 @@ use re '/aasx';
 use Socket qw{inet_aton inet_ntoa};
 
 use Provisioner::IPPool();
+use Provisioner::Cookbook();
 
 use parent qw{Provisioner::Recipe};
 
@@ -320,6 +321,9 @@ my sub network ($block) {
 Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
 VPN subnet.
 
+Adds C<mail_from>, the MAILFROM of the cron files, from
+L<Provisioner::Recipe::cron/mail_from>.
+
 Fills in C<routes> from C<ip_pool>: the two halves of each C<cidr> block, then a
 C</32> for each of its C<addresses>, each route once.  A C</32> block has no
 halves, so it goes as it is.  See L</The networks that a client reaches>.
@@ -330,11 +334,27 @@ Dies if a route is not an IPv4 CIDR block.
 
 =cut
 
+=head2 %required = $recipe->required_recipes(%opts)
+
+Requires the cron recipe, because the cron files of this recipe set MAILFROM,
+and only the cronie that the cron recipe installs reads it.  Also returns what
+the base class requires.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    return ( cron => sub { return () }, $self->SUPER::required_recipes(%opts) );
+}
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
     # The schema makes netmask an IPv4 address, so inet_aton resolves no name.
     $opts{cidr} = unpack( '%32b*', inet_aton( $opts{netmask} ) );
+
+    $opts{mail_from} = Provisioner::Cookbook->load('cron')->mail_from( $opts{domain} );
 
     unless ( $opts{routes} ) {
         my $pool = $opts{ip_pool} // {};
