@@ -157,7 +157,7 @@ Cloud Firewall to put a new guest behind, and C<private_ip> gives it an address
 on Linode's private network.  C<monthly_budget> is in the currency Linode bills
 in.
 
-What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
+What a guest boots is not the block's to say: see L</image_for_distro($distro, $release)>.
 Neither is what size it is.  A guest names that in its C<_global>, as
 C<linode_type>, and one that names none is not built here at all: see
 L</shortfalls(%needs)>.
@@ -292,15 +292,16 @@ sub monthly_spend {
     } linodes($self);
 }
 
-=head2 image_for_distro($distro)
+=head2 image_for_distro($distro, $release)
 
-The Linode image for the distro's distribution and release, which Linode names
+The Linode image for the distro's distribution and C<$release>, or the release
+it pins, which Linode names
 by both run together: C<linode/ubuntu24.04>.  Whether Linode has it, and whether
 it reads cloud-init, is C<check_linode_resources>'s to find out before a build.
 
 =cut
 
-sub image_for_distro ( $, $distro ) { return 'linode/' . $distro->distribution . $distro->release_version }
+sub image_for_distro ( $, $distro, $release = undef ) { return 'linode/' . $distro->distribution . $distro->release_version($release) }
 
 =head2 cheapest_for(%needs)
 
@@ -521,7 +522,7 @@ Builds a guest, and waits until Linode reports it C<running>.
 
 C<name> is required, and is the label.  So is C<size>, the type the guest
 names in C<linode_type>, and C<image>, which
-L</image_for_distro($distro)> answered when F<bin/new_config> wrote the guest's
+L</image_for_distro($distro, $release)> answered when F<bin/new_config> wrote the guest's
 F<provision.conf>.  C<region> and C<type> default to the values in
 F<hypervisors.conf>.  C<user_data> is the cloud-init payload, which Linode's
 metadata service gives to the guest.
@@ -840,7 +841,7 @@ FIX
 
     my @types = $self->globals_in_use( $self->size_key );
 
-    my @images = map { $self->image_for_distro($_) } $self->distros_in_use;
+    my @images = map { $self->image_for_distro(@$_) } $self->distros_in_use;
 
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };

@@ -97,10 +97,11 @@ it to tell that a directory belongs to a guest that still exists.
 
 =item * C<guest_ssh_ip>, the address at which you reach a built guest.
 
-=item * C<image_for_distro($distro)>, what this hypervisor boots a guest of that
-distribution from: a URL, a Glance image, a Linode image.  The distro recipe
-decides the distribution and the release, and every kind of hypervisor answers
-for the same pair.  F<bin/new_config> writes the answer into F<provision.conf>
+=item * C<image_for_distro($distro, $release)>, what this hypervisor boots a
+guest of that distribution and release from: a URL, a Glance image, a Linode
+image.  Without C<$release>, the release that the distro recipe pins.  The
+domain decides the release, and every kind of hypervisor answers for the same
+pair.  F<bin/new_config> writes the answer into F<provision.conf>
 as C<image>.  Dies when this hypervisor has no image for it.
 
 =item * C<inspection_address($domain)>, the address at which a person reaches a
@@ -1225,23 +1226,32 @@ the guest boots, which delays every provision and fails when GitHub is down.
 FIX
 }
 
-=head2 @distros = $hv->distros_in_use()
+=head2 @pairs = $hv->distros_in_use()
 
-The distro recipes that the configuration builds guests of, loaded: the
-C<distro> of each domain's C<_global>, C<ubuntu> where it names none, and
-C<ubuntu> alone for a configuration with no domains yet.  A preflight check that
-asks whether a hypervisor has an image asks it for each of these.
+The distributions and releases that the configuration builds guests of, as
+pairs of a loaded distro recipe and a release: the C<distro> of each domain's
+C<_global>, C<ubuntu> where it names none, and the C<release> there, or the one
+that recipe pins.  For a configuration with no domains yet, the
+pinned release of C<ubuntu> alone.  A preflight check that asks whether a
+hypervisor has an image asks it for each pair.
 
 =cut
 
 sub distros_in_use {
-    my $conf  = eval { Provisioner::Cookbook->configuration() } // {};
-    my %named = map {
-        ( ( eval { Provisioner::Cookbook->global_config( $_, $conf ) } // {} )->{distro} // 'ubuntu' ) => 1
-    } grep { !m/\A_/ } keys %$conf;
-    %named = ( ubuntu => 1 ) unless %named;
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
 
-    return map { Provisioner::Cookbook->load($_) } sort keys %named;
+    my %named;
+    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+        my $global = eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {};
+        my $name   = $global->{distro}                                               // 'ubuntu';
+        $named{$name}{ $global->{release} // Provisioner::Cookbook->load($name)->release } = 1;
+    }
+    $named{ubuntu} = { Provisioner::Cookbook->load('ubuntu')->release => 1 } unless %named;
+
+    return map {
+        my $name = $_;
+        map { [ Provisioner::Cookbook->load($name), $_ ] } sort keys %{ $named{$name} }
+    } sort keys %named;
 }
 
 =head2 @values = $hv->globals_in_use($key)

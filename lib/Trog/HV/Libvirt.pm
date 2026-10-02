@@ -740,12 +740,30 @@ sub volume_path {
     return eval { $volume->get_path() };
 }
 
+=head2 $name = image_volume_name($url)
+
+The name of the volume that C<base_image> keeps the image at C<$url> in.  The
+file name keeps it readable in C<virsh vol-list>.  The hash keeps two images with
+one file name apart, such as the image of a mirror and the image of the archive.
+
+=cut
+
+sub image_volume_name ($url) {
+    my ($file) = ( URI->new($url)->path // q{} ) =~ m{([^/]+)\z};
+    $file = ( $file // 'image' ) =~ s/[^\w.-]/_/gr;
+    return 'baseimage-' . $file . '-' . substr( Digest::SHA::sha256_hex($url), 0, 12 );
+}
+
 =head2 base_image($url, $name)
 
-Returns the path of the base image under the disk of each guest.  If the pool has
-no volume C<$name>, this downloads C<$url> to the hypervisor first.  C<$name>
-defaults to C<baseimage-qcow2>.  Dies if there is no image and no URL, or if
-the download fails.
+Returns the path of the base image under the disk of a guest.  If the pool has
+no volume C<$name>, this downloads C<$url> to the hypervisor first.  Dies if
+there is no image and no URL, or if the download fails.
+
+C<$name> defaults to a name of C<$url>: C<baseimage->, the file name in the URL,
+and the start of a hash of the whole URL.  So each image has a volume of its own,
+and a guest of one release is never built over the image of another.  Without a
+URL, it defaults to C<baseimage-qcow2>, the one volume that a pool held before.
 
 libvirt cannot fetch a URL.  So this runs curl on the hypervisor, into the pool
 directory, and then refreshes the pool.  curl runs without sudo on purpose.  If
@@ -756,7 +774,7 @@ sudo hides that.
 
 sub base_image {
     my ( $self, $url, $name ) = @_;
-    $name //= 'baseimage-qcow2';
+    $name //= defined $url ? image_volume_name($url) : 'baseimage-qcow2';
 
     my $path = $self->volume_path($name);
     return $path if $path;
@@ -1885,14 +1903,14 @@ sub guest_ssh_ip {
     return $ip;
 }
 
-=head2 image_for_distro($distro)
+=head2 image_for_distro($distro, $release)
 
-The distro's C<base_image>: a URL, which C<base_image> here downloads into the
-pool.
+The distro's C<base_image> for C<$release>: a URL, which C<base_image> here
+downloads into the pool.
 
 =cut
 
-sub image_for_distro ( $, $distro ) { return $distro->base_image }
+sub image_for_distro ( $, $distro, $release = undef ) { return $distro->base_image($release) }
 
 =head2 inspection_address($domain)
 

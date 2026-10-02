@@ -285,12 +285,13 @@ What size a guest is is not the block's to say: a guest names its flavor in its
 C<_global>, as C<openstack_flavor>, and one that names none is not built here.
 See L<Trog::HV/size_key> and L</shortfalls(%needs)>.
 
-What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
+What a guest boots is not the block's to say: see L</image_for_distro($distro, $release)>.
 
-=head2 image_for_distro($distro)
+=head2 image_for_distro($distro, $release)
 
 The id of the newest active Glance image whose C<os_distro> and C<os_version>
-properties are the distro's C<distribution> and C<release_version>.  Those are
+properties are the distro's C<distribution> and the C<release_version> of
+C<$release>, or of the release it pins.  Those are
 the properties Glance defines for saying what an image is, and the images a
 cloud offers set them.  A snapshot is never the answer, though it inherits them
 from the image it was taken of.
@@ -306,9 +307,9 @@ sub keypair           ($self) { return $self->setting('keypair') }
 sub security_group    ($self) { return $self->setting('security_group') // 'default' }
 
 sub image_for_distro {
-    my ( $self, $distro ) = @_;
+    my ( $self, $distro, $release ) = @_;
 
-    my %wanted = ( os_distro => $distro->distribution, os_version => $distro->release_version );
+    my %wanted = ( os_distro => $distro->distribution, os_version => $distro->release_version($release) );
     my ($image) =
       reverse sort { ( $a->{created_at} // q{} ) cmp ( $b->{created_at} // q{} ) }
       grep { ref $_ && ( $_->{status} // q{} ) eq 'active' && ( $_->{image_type} // q{} ) ne 'snapshot' } $self->api->list_images(%wanted);
@@ -506,8 +507,8 @@ sub capacity {
 
 =head2 image_for(%needs)
 
-The image a guest of this C<distro> boots, as the cloud describes it, or undef
-when there is none.  L</image_for_distro($distro)> answers which it is; this
+The image a guest of this C<distro> and C<release> boots, as the cloud describes
+it, or undef when there is none.  L</image_for_distro($distro, $release)> answers which it is; this
 answers what it is, because an image says the least it can be booted on in its
 C<min_disk> and C<min_ram>, and Nova refuses a flavor under either.
 
@@ -517,8 +518,8 @@ sub image_for {
     my ( $self, %needs ) = @_;
 
     my $distro  = eval { Provisioner::Cookbook->load( $needs{distro} // 'ubuntu' ) } or return undef;
-    my $id      = eval { $self->image_for_distro($distro) }                          or return undef;
-    my ($image) = grep { ref $_ && ( $_->{id} // q{} ) eq $id } $self->api->list_images( os_distro => $distro->distribution, os_version => $distro->release_version );
+    my $id      = eval { $self->image_for_distro( $distro, $needs{release} ) }       or return undef;
+    my ($image) = grep { ref $_ && ( $_->{id} // q{} ) eq $id } $self->api->list_images( os_distro => $distro->distribution, os_version => $distro->release_version( $needs{release} ) );
 
     return $image;
 }
@@ -749,7 +750,7 @@ sub revert_snapshot {
 Builds a guest, and waits until Nova reports it C<ACTIVE>.  If there is a
 C<floating_network>, it also attaches a floating IP from that network.
 
-C<name> is required, and so is C<image>, which L</image_for_distro($distro)>
+C<name> is required, and so is C<image>, which L</image_for_distro($distro, $release)>
 answered when F<bin/new_config> wrote the guest's F<provision.conf>, and
 C<size>, the flavor it names in C<openstack_flavor>.  C<flavor> is that same
 value under Nova's name for it.  C<network>,
@@ -1060,8 +1061,8 @@ Ask the cloud what it has:
 FIX
 
     my ( @images, @no_image );
-    foreach my $distro ( $self->distros_in_use ) {
-        my $image = eval { $self->image_for_distro($distro) };
+    foreach my $pair ( $self->distros_in_use ) {
+        my $image = eval { $self->image_for_distro(@$pair) };
         $image ? push( @images, $image ) : push( @no_image, $@ );
     }
     return $self->verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;

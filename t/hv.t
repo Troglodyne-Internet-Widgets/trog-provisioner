@@ -1422,6 +1422,30 @@ subtest 'the base image is fetched once' => sub {
     like( exception { $hv->base_image(undef) }, qr/No[ ]image[ ]URL[ ]configured/, 'and nothing to fetch is an error' );
 };
 
+# One volume for every URL meant that the first image a hypervisor fetched was
+# the image of every guest after it, whichever release the guest named.
+subtest 'base_image: each image has a volume of its own' => sub {
+    my $hv = fresh();
+    my @asked;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( volume_path => sub { my ( $s, $name ) = @_; push @asked, $name; return "/pool/$name" } );
+
+    my $noble    = 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img';
+    my $resolute = 'https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img';
+    my $mirror   = 'https://mirror.test.test/resolute/current/resolute-server-cloudimg-amd64.img';
+
+    isnt( $hv->base_image($resolute), $hv->base_image($noble), 'an image of resolute is not the image of noble' );
+    my $file = 'baseimage-resolute-server-cloudimg-amd64.img-';
+    is( substr( $asked[0], 0, length $file ), $file, 'and its volume is named after its file, readably' );
+    like( substr( $asked[0], length $file ), qr/\A[[:xdigit:]]{12}\z/, 'and a hash of its URL' );
+    isnt( $hv->base_image($mirror), $hv->base_image($resolute), 'and one file name from two places is two volumes' );
+    is( $hv->base_image($noble), $hv->base_image($noble), 'while one URL is always the same volume' );
+
+    @asked = ();
+    $hv->base_image( $noble, 'chosen' );
+    is_deeply( \@asked, ['chosen'], 'a name that the caller gives is used as it is' );
+};
+
 {
 
     package FakeBuildPool;
@@ -1539,6 +1563,38 @@ subtest 'setting: a block may hold a secret: reference, as recipes.yaml may' => 
 subtest 'image_for_distro: libvirt builds from the distro\'s cloud image' => sub {
     my $ubuntu = Provisioner::Cookbook->load('ubuntu');
     is( fresh()->image_for_distro($ubuntu), $ubuntu->base_image, 'the URL the distro recipe names, which base_image downloads' );
+};
+
+subtest 'image_for_distro: and the image of the release a domain names' => sub {
+    my $ubuntu = Provisioner::Cookbook->load('ubuntu');
+    is( fresh()->image_for_distro( $ubuntu, 'resolute' ), $ubuntu->base_image('resolute'), 'resolute, for a domain on resolute' );
+};
+
+# A preflight check asks each hypervisor for an image of each pair, so a domain
+# that names a release has to be among them.
+subtest 'distros_in_use: each distribution with each release a domain builds on' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $ubuntu   = Provisioner::Cookbook->load('ubuntu');
+    my $pinned   = $ubuntu->release;
+
+    $cookbook->redefine(
+        configuration => sub {
+            return {
+                _base        => { _global => { distro => 'ubuntu' } },
+                'old.test'   => {},
+                'moved.test' => { _global => { release => 'resolute' } },
+                'also.test'  => { _global => { release => 'resolute' } },
+            };
+        }
+    );
+    is_deeply(
+        [ map { [ $_->[0], $_->[1] ] } Trog::HV->distros_in_use ],
+        [ [ $ubuntu, $pinned ], [ $ubuntu, 'resolute' ] ],
+        'the pinned release for a domain that names none, and each release that one names, once'
+    );
+
+    $cookbook->redefine( configuration => sub { return { _base => {} } } );
+    is_deeply( [ map { [ $_->[0], $_->[1] ] } Trog::HV->distros_in_use ], [ [ $ubuntu, $pinned ] ], 'and the pinned release of ubuntu for a configuration with no domains' );
 };
 
 subtest 'leases are looked up by MAC, not by name' => sub {

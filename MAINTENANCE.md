@@ -86,10 +86,12 @@ change without this repository changing.
 
 ## The base image
 
-`Provisioner::Recipe::ubuntu::release` names the release, and everything else is
-derived from it.  It is pinned on purpose -- a release moves and a fleet does
-not have to move with it -- and `bin/preflight` *notes* when the pin is behind
-what Ubuntu currently calls current, rather than failing.  Note the image URL
+`Provisioner::Recipe::ubuntu::release` names the release that a domain gets when
+its `_global` names no `release`, and everything else is derived from the release
+of the domain.  It is pinned on purpose -- a release moves and a fleet does not
+have to move with it, and a domain can move alone -- and `bin/preflight` *notes*
+when the pin is behind what Ubuntu currently calls current, rather than
+failing.  Note the image URL
 contains `/current/`, so its contents move under a fixed name: two guests built
 months apart from the same pin are not the same guest.
 

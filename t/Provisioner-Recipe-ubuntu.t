@@ -496,6 +496,25 @@ subtest 'release_version: the pinned release, as the image catalogs name it' => 
     like( exception { $recipe->release_version }, qr/version[ ]of[ ]the[ ]release[ ]'bogus'/, 'a release with no version recorded is refused, not guessed at' );
 };
 
+# A domain names its release in _global, so that the fleet can move one domain
+# at a time.
+subtest 'a release that a domain names' => sub {
+    my $recipe = Provisioner::Cookbook->load('ubuntu');
+
+    is( $recipe->release_version('resolute'), '26.04',                        'its version, for a catalog' );
+    is( $recipe->base_image('resolute'),      $recipe->image_for('resolute'), 'and its image, for libvirt' );
+    isnt( $recipe->base_image('resolute'), $recipe->base_image, 'which is not the image of the pinned release' );
+
+    is( $recipe->release_of( release => 'resolute' ), 'resolute', 'release_of takes the release that _global names' );
+    is( $recipe->release_of(),                        'noble',    'and the pinned one when it names none' );
+    like( exception { $recipe->release_of( release => 'bogus' ) }, qr/version[ ]of[ ]the[ ]release[ ]'bogus'/, 'and refuses one it does not know' );
+
+    my %schema = $recipe->args;
+    is( $schema{properties}{release}{default}, $recipe->release, 'the schema defaults it to the pinned release' );
+    ok( ( grep { $_ eq 'resolute' } @{ $schema{properties}{release}{enum} } ), 'and takes each release whose version it knows' );
+    ok( !( grep { $_ eq 'bogus' } @{ $schema{properties}{release}{enum} } ),   'and nothing else' );
+};
+
 subtest 'which release is current is read, not inferred' => sub {
     my $recipe = Provisioner::Cookbook->load('ubuntu');
 

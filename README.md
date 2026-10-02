@@ -34,6 +34,7 @@ Even business units at giant corporations can do just fine with this approach.
     * image: What base image to use
     * packages: What packages to install
     * distro: Which distribution the guest is, which decides the base image, the packager, and which version of each recipe names its packages.  Written out of `_global` by `bin/new_config`; defaults to `ubuntu`.
+    * release: Which release of that distribution the guest is, such as `noble`.  Written out of `_global` by `bin/new_config`; defaults to the release that the distro recipe pins.
     * contact\_email: Email address to send root's mail to
     * depends\_on: Whether this system is to be provisioned on something that may or may not already exist
     * admin\_user: What the name of the admin user is in the event we want to provision on already existing systems.  This user needs passwordless sudo; when omitted we use root.
