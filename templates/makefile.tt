@@ -61,7 +61,7 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
 [% state_dir %]/sysctl:
 	echo "net.ipv4.conf.all.arp_announce=1" > /etc/sysctl.d/10-arp-flux.conf
 	echo "net.ipv4.conf.all.arp_ignore=2" >> /etc/sysctl.d/10-arp-flux.conf
-	sysctl -p
+	sysctl -p /etc/sysctl.d/10-arp-flux.conf
 	touch $@
 
 [%# Only the upgrade: cloud-init installs the packages, out of the user-data the distro recipe renders. -%]

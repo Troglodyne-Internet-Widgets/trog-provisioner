@@ -135,10 +135,11 @@ sub rerun_modules {
     );
 }
 
-=head2 $url = $distro->base_image()
+=head2 $url = $distro->base_image($release)
 
-The cloud image that is the base layer of the disk of every guest.  It is a URL
-that the hypervisor can fetch.
+The cloud image of C<$release> that is the base layer of the disk of a guest,
+or of the pinned C<release> without one.  It is a URL that the hypervisor can
+fetch.
 
 It is what a libvirt hypervisor builds from: L<Trog::HV::Libvirt/image_for_distro>
 answers with it, C<bin/new_config> writes it into the F<provision.conf> of a
@@ -150,16 +151,41 @@ C<release_version> instead.
 
 sub base_image { return unanswered( shift, 'base_image' ) }
 
-=head2 $version = $distro->release_version()
+=head2 $version = $distro->release_version($release)
 
-The version of the release that this distribution pins, as image catalogs name
-it: C<24.04>, not C<noble>.  A cloud finds the image a guest boots from by it,
-with C<distribution>: Linode as C<linode/ubuntu24.04>, Glance by its
-C<os_distro> and C<os_version> properties.
+The version of C<$release>, or of the pinned C<release> without one, as image
+catalogs name it: C<24.04>, not C<noble>.  A cloud finds the image a guest boots
+from by it, with C<distribution>: Linode as C<linode/ubuntu24.04>, Glance by its
+C<os_distro> and C<os_version> properties.  Dies for a release that the
+distribution does not know.
 
 =cut
 
 sub release_version { return unanswered( shift, 'release_version' ) }
+
+=head2 $release = $distro->release()
+
+The release that a domain gets when its C<_global> names none, such as
+C<noble>.  It is pinned on purpose: see C<current_image>.
+
+=cut
+
+sub release { return unanswered( shift, 'release' ) }
+
+=head2 $release = $distro->release_of(%global)
+
+The release that a domain builds on, from C<%global>, its C<_global>: its
+C<release>, or the pinned C<release> when it names none.  Dies for a
+release that C<release_version> does not know, so a typo stops the build before
+anything asks a hypervisor or an archive for it.
+
+=cut
+
+sub release_of ( $class, %conf ) {
+    my $release = $conf{release} // $class->release;
+    $class->release_version($release);
+    return $release;
+}
 
 =head2 $name = $distro->distribution()
 
@@ -209,8 +235,10 @@ sub is_module { return 0 }
 The image that this distribution names as current today, or C<undef>.
 
 C<base_image> is the image that guests are built on, and it is pinned on
-purpose.  A new release does not force the fleet to move.  C<bin/preflight>
-compares the two and reports a pin that is a release behind.
+purpose.  A new release does not force the fleet to move, and a domain can move
+alone by naming a C<release> in its C<_global>.
+C<bin/preflight> compares the pinned image with this one and reports a pin that
+is a release behind.
 
 C<undef> is a valid answer and the default.  It means that this distribution
 has no way to be asked, or that it did not answer.  A preflight run must not

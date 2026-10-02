@@ -268,6 +268,23 @@ is refused up front, rather than quietly falling back to recipes that name no
 packages at all. `perldoc Provisioner::DistroRecipe` is what a distribution has
 to answer for; adding one is adding files.
 
+`release` names the release of that distribution, by codename. It defaults to
+the release that the distro recipe pins, `noble` for `ubuntu`, so the fleet moves
+only when the pin moves. A domain that names another moves alone:
+
+```yaml
+somedomain.example.test:
+    _global:
+        release: resolute
+```
+
+The release decides the cloud image of the guest, and the suite of every vendor
+archive that follows the release, such as PostgreSQL's `resolute-pgdg`. The
+schema of the distro recipe takes only the releases whose version it knows, so a
+typo is refused before anything is built. A domain on the guest of another
+domain has to name the same release as its host, and is refused when it does
+not. `perldoc Provisioner::Recipe::ubuntu` has the rest.
+
 `mirror` names a package mirror for guests to prefer over the distribution's own
 archive. Two shapes:
 

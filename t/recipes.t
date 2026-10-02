@@ -2448,6 +2448,28 @@ subtest 'every archive a recipe names is one its packager can use, and no fragme
     }
 };
 
+# A domain can name a release other than the pinned one, and bin/new_config hands
+# it to package_sources as distro_release.  An archive whose suite names the
+# release has to follow it, or the guest gets the archive of another release.
+subtest 'an archive that names the release follows the release of the domain' => sub {
+    my $pinned      = Provisioner::Cookbook->load('ubuntu')->release;
+    my $other       = 'resolute';
+    my $followed    = 0;
+    my %provisioner = ( %PROV, distro => 'ubuntu', template_dirs => Provisioner::Cookbook->template_dirs('ubuntu') );
+    foreach my $recipe ( sort @available ) {
+        my $r      = Provisioner::Cookbook->load( $recipe, distro => 'ubuntu' )->new(%provisioner);
+        my %config = %{ $required_config{$recipe} // {} };
+
+        my @pinned = map { @{ $_->{suites} } } $r->package_sources(%config);
+        next unless any { m/\A\Q$pinned\E\b/ } @pinned;
+        $followed++;
+
+        my @moved = map { @{ $_->{suites} } } $r->package_sources( %config, distro_release => $other );
+        ok( ( grep { m/\A\Q$other\E\b/ } @moved ) && !( grep { m/\A\Q$pinned\E\b/ } @moved ), "$recipe names the suite of $other for a domain on $other" ) or diag "@moved";
+    }
+    cmp_ok( $followed, '>=', 4, 'and mariadb, matrix, pdns and postgres are among the recipes checked' );
+};
+
 # Every package goes in deps, and every package that must stay out in
 # dep_conflicts, so cloud-init does the work once, before the makefile runs apt
 # beside itself.  Two cannot: nosnap takes out a package that the image ships,

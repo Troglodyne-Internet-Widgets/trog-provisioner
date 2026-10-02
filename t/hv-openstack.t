@@ -33,9 +33,11 @@ use Trog::HV::OpenStack();
 {
 
     package Test::Distro;
-    sub new             ( $class, $distribution, $version ) { return bless { distribution => $distribution, version => $version }, $class }
-    sub distribution    ($self)                             { return $self->{distribution} }
-    sub release_version ($self)                             { return $self->{version} }
+
+    # The version of the pinned release, then the version of each release by name.
+    sub new             ( $class, $distribution, $version, %versions ) { return bless { distribution => $distribution, version => $version, versions => \%versions }, $class }
+    sub distribution    ($self)                                        { return $self->{distribution} }
+    sub release_version ( $self, $release = undef )                    { return defined $release ? $self->{versions}{$release} : $self->{version} }
 }
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
@@ -553,15 +555,17 @@ subtest 'image_for_distro' => sub {
     my $hv = cloud();
     $FAKE = Test::FakeCloud->new(
         images => [
-            { id => 'old',    os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z' },
-            { id => 'new',    os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-06-01T00:00:00Z' },
-            { id => 'queued', os_distro => 'ubuntu', os_version => '24.04', status => 'queued', created_at => '2026-07-01T00:00:00Z' },
-            { id => 'snap',   os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-08-01T00:00:00Z', image_type => 'snapshot' },
-            { id => 'jammy',  os_distro => 'ubuntu', os_version => '22.04', status => 'active', created_at => '2026-09-01T00:00:00Z' },
+            { id => 'old',      os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z' },
+            { id => 'new',      os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-06-01T00:00:00Z' },
+            { id => 'queued',   os_distro => 'ubuntu', os_version => '24.04', status => 'queued', created_at => '2026-07-01T00:00:00Z' },
+            { id => 'snap',     os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-08-01T00:00:00Z', image_type => 'snapshot' },
+            { id => 'jammy',    os_distro => 'ubuntu', os_version => '22.04', status => 'active', created_at => '2026-09-01T00:00:00Z' },
+            { id => 'resolute', os_distro => 'ubuntu', os_version => '26.04', status => 'active', created_at => '2026-05-01T00:00:00Z' },
         ]
     );
 
-    is $hv->image_for_distro( Test::Distro->new( ubuntu => '24.04' ) ), 'new', 'the newest active image of that distribution and version, and never a snapshot of one';
+    is $hv->image_for_distro( Test::Distro->new( ubuntu => '24.04' ) ),                                  'new',      'the newest active image of that distribution and version, and never a snapshot of one';
+    is $hv->image_for_distro( Test::Distro->new( ubuntu => '24.04', resolute => '26.04' ), 'resolute' ), 'resolute', 'and the version of the release a domain names, rather than the pinned one';
 
     my $err = exception { $hv->image_for_distro( Test::Distro->new( debian => '12' ) ) };
     like $err, qr/os_distro=debian[ ]and[ ]os_version=12/, 'one the cloud has none of is said';

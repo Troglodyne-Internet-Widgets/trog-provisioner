@@ -150,6 +150,28 @@ subtest 'two domains on one guest generate when the recipe can be shared' => sub
     );
 };
 
+# A tenant runs on the guest of its host, so the release of the tenant is the
+# release of that guest.
+subtest 'a tenant on another release than its host is refused' => sub {
+    my ( $err, $domains ) = generate( tenant => { _global => { release => 'resolute' }, nosnap => undef } );
+
+    ok( $err, 'the generation stops' ) or return;
+    like( $err, qr/names[ ]the[ ]release[ ]resolute/, 'naming the release of the tenant' );
+    like( $err, qr/\Q$HOST\E[ ]is[ ]on[ ]noble/,      'and the host and its release' );
+    ok( !-f "$domains/$TENANT/Makefile", 'and nothing is generated for it' );
+};
+
+subtest 'a host and its tenant on one release that is not the pinned one' => sub {
+    my %resolute = ( _global => { release => 'resolute' }, nosnap => undef );
+    my ( $err, $domains ) = generate( host => {%resolute}, tenant => {%resolute} );
+
+    is( $err, undef, 'the generation runs to the end' ) or return diag $err;
+
+    my $conf = File::Slurper::read_text("$domains/$TENANT/provision.conf");
+    like( $conf, qr/^\s*release=resolute$/m,                                       'provision.conf names the release of the domain' );
+    like( $conf, qr{^\s*image=https://cloud-images[.]ubuntu[.]com/resolute/\S+$}m, 'and the hypervisor image of that release' );
+};
+
 subtest 'a recipe that cannot be shared is refused rather than replacing the first domain' => sub {
 
     # One of these on a guest, and it cannot be told about a second domain: the

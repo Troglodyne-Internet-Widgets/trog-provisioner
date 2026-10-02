@@ -96,9 +96,11 @@ sub reset_linode {
 {
 
     package Test::Distro;
-    sub new             ( $class, $distribution, $version ) { return bless { distribution => $distribution, version => $version }, $class }
-    sub distribution    ($self)                             { return $self->{distribution} }
-    sub release_version ($self)                             { return $self->{version} }
+
+    # The version of the pinned release, then the version of each release by name.
+    sub new             ( $class, $distribution, $version, %versions ) { return bless { distribution => $distribution, version => $version, versions => \%versions }, $class }
+    sub distribution    ($self)                                        { return $self->{distribution} }
+    sub release_version ( $self, $release = undef )                    { return defined $release ? $self->{versions}{$release} : $self->{version} }
 }
 
 sub linode_of ($label) {
@@ -546,13 +548,14 @@ subtest 'snapshots' => sub {
 };
 
 subtest 'image_for_distro' => sub {
-    is( linode_hv()->image_for_distro( Test::Distro->new( ubuntu => '24.04' ) ), 'linode/ubuntu24.04', 'the distribution and its version, run together, as Linode names its images' );
-    is( linode_hv()->image_for_distro( Test::Distro->new( debian => '12' ) ),    'linode/debian12',    'whichever distribution it is' );
+    is( linode_hv()->image_for_distro( Test::Distro->new( ubuntu => '24.04' ) ),                                  'linode/ubuntu24.04', 'the distribution and its version, run together, as Linode names its images' );
+    is( linode_hv()->image_for_distro( Test::Distro->new( debian => '12' ) ),                                     'linode/debian12',    'whichever distribution it is' );
+    is( linode_hv()->image_for_distro( Test::Distro->new( ubuntu => '24.04', resolute => '26.04' ), 'resolute' ), 'linode/ubuntu26.04', 'and the release a domain names, rather than the pinned one' );
 };
 
 subtest 'check_linode_resources' => sub {
     reset_linode();
-    my @distros = ( Test::Distro->new( ubuntu => '24.04' ) );
+    my @distros = ( [ Test::Distro->new( ubuntu => '24.04' ), undef ] );
     my $in_use  = Test::MockModule->new('Trog::HV');
     $in_use->redefine( distros_in_use => sub { return @distros } );
 
@@ -560,16 +563,16 @@ subtest 'check_linode_resources' => sub {
     ok( $result->{ok}, 'a region with the metadata service and an image for each distro that reads it' );
     like( $result->{what}, qr/from[ ]linode\/ubuntu24[.]04/, 'naming the image it builds from' );
 
-    @distros = ( Test::Distro->new( ubuntu => '24.04' ), Test::Distro->new( arch => q{} ) );
+    @distros = ( [ Test::Distro->new( ubuntu => '24.04' ), undef ], [ Test::Distro->new( arch => q{} ), undef ] );
     $result  = linode_hv( region => 'us-west' )->check_linode_resources;
     ok( !$result->{ok}, 'a region without it, and a second distro whose image does not read it' );
     like( $result->{what}, qr/no[ ]metadata[ ]service[ ]in[ ]us-west/,        'each named' );
     like( $result->{what}, qr/linode\/arch[ ]does[ ]not[ ]read[ ]cloud-init/, 'both of them' );
 
-    @distros = ( Test::Distro->new( debian => '99' ) );
+    @distros = ( [ Test::Distro->new( debian => '99' ), undef ] );
     like( linode_hv()->check_linode_resources->{what}, qr/no[ ]image[ ]'linode\/debian99'/, 'and a release Linode has no image of' );
 
-    @distros = ( Test::Distro->new( ubuntu => '24.04' ) );
+    @distros = ( [ Test::Distro->new( ubuntu => '24.04' ), undef ] );
     my $in_config = Test::MockModule->new('Trog::HV');
     $in_config->redefine( globals_in_use => sub { return ('g1-bogus') } );
     $result = linode_hv( region => 'mars-1' )->check_linode_resources;

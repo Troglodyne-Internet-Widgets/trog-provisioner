@@ -377,8 +377,9 @@ sub place {
     return $best;
 }
 
-# What a guest asks for: memory_mb, cpus and disk_bytes, the distro it boots,
-# and the size_key of each backend that has one.  $config is as for select_for.
+# What a guest asks for: memory_mb, cpus and disk_bytes, the distro and release
+# it boots, and the size_key of each backend that has one.  $config is as for
+# select_for.
 my sub needs ($config) {
     my %needs = (
         memory_mb  => Trog::HV->config_value( $config, 'memory' ),
@@ -387,7 +388,8 @@ my sub needs ($config) {
 
         # What it boots, because what a hypervisor has to hold is the image of
         # that distribution rather than the guest's own figures alone.
-        distro => Trog::HV->config_value( $config, 'distro' ) // 'ubuntu',
+        distro  => Trog::HV->config_value( $config, 'distro' ) // 'ubuntu',
+        release => Trog::HV->config_value( $config, 'release' ),
     );
 
     # And what the guest is on each kind of hypervisor that sells sizes by
