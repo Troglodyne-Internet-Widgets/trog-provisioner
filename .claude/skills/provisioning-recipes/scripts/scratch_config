@@ -23,7 +23,6 @@ use Pod::Usage   qw{pod2usage};
 use YAML::XS();
 
 use Trog::Config();
-use Trog::Credentials();
 use Trog::Hypervisors::Config();
 use Provisioner::Cookbook();
 use Trog::Secrets();
@@ -40,8 +39,8 @@ scratch_config - a throwaway configuration directory, with a throwaway secret st
 
     scratch_config --print-dir       # just the path
 
-    # A fleet whose blocks name a secret, with the installation store's password
-    printf 'keepass: %s\n\n' "$PASS" | scratch_config --credentials
+    # Keep a hypervisor that needs a credential, with a temporary token on stdin
+    printf '%s\n' "$TEMPORARY_TOKEN" | scratch_config --keep NAME
     scratch_config --remove DIR      # throw one away
 
 =head1 DESCRIPTION
@@ -115,17 +114,24 @@ Not copied.  A new one is built holding a made-up value for every C<secret:>
 reference in the scratch F<recipes.yaml> -- normally none, what is built there
 naming no credential -- under a password printed to stdout.
 
-What F<hypervisors.conf> names is the exception, such as the token of a Linode
-or SolusVM block.  A scratch guest is built on the real hypervisor, which a
-made-up token cannot reach.  With C<--credentials>, those values, and only
-those, are read out of the installation's store and put in this one.  That is
-the one time this opens the installation's store.
+This never opens the installation's store.  The password of the scratch store
+is printed, so whatever is in it can end up in a transcript or a log.  A
+production credential must never be there.
 
-Without C<--credentials>, the blocks that name a secret are left out of the
-scratch F<hypervisors.conf>, and the report names them.  A scratch guest then
-goes to a hypervisor that needs no credential, and C<bin/destroy> asks only
-those.  If every block names a secret, this dies, because nothing would be
-left to build on.
+What F<hypervisors.conf> names is the exception to the made-up values, such as
+the token of a Linode or SolusVM block.  A made-up token cannot reach a real
+hypervisor.  So each block that names a secret is left out of the scratch
+F<hypervisors.conf>, and the report names it.  A scratch guest then goes to a
+hypervisor that needs no credential, and C<bin/destroy> asks only those.
+
+C<--keep> keeps a block for a scratch guest that must go to such a hypervisor.
+Its value is a temporary token that the operator made for this, with only the
+access that a build needs, and that the operator revokes after the teardown.
+It is read from standard input, one line for each reference that the kept
+blocks name, in sorted order.
+
+If every block that is not kept names a secret and nothing is kept, this dies,
+because nothing would be left to build on.
 
 =back
 
@@ -158,12 +164,11 @@ Provision through the fetch cache NAME, by writing C<cache: NAME> into the
 scratch C<_base>'s C<_global>.  NAME is a cache built from this same scratch
 configuration, which has an authority of its own; the skill says how.
 
-=item B<--credentials>
+=item B<--keep> NAME
 
-Read the password of the installation's store from a credentials block on
-standard input, and copy the credentials that F<hypervisors.conf> names.  See
-L<Trog::Credentials> for the format.  Use it only for a scratch guest on a
-hypervisor that needs a credential.  Without it, the store is never opened.
+Keep the block NAME of F<hypervisors.conf>, which names a secret, and read a
+temporary token for each of its references from standard input.  Repeat it to
+keep more than one.  See F<secrets.kdbx> above for what the token must be.
 
 =item B<--remove> DIR
 
@@ -179,11 +184,11 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, $credentials, $help );
+    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, @keep, $help );
     GetOptionsFromArray(
         \@args,
         'dir=s'       => \$dir,
-        'credentials' => \$credentials,
+        'keep=s'      => \@keep,
         'cpan-tests' => \$cpan_tests,
         'cache=s'    => \$cache,
         'print-dir'  => \$print_dir,
@@ -194,8 +199,6 @@ sub main {
 
     return remove($remove) if $remove;
 
-    Trog::Credentials->load() if $credentials;
-
     my $source = Trog::Config->dir;
     $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
@@ -203,7 +206,8 @@ sub main {
         $source, $dir,
         cpan_tests     => $cpan_tests,
         cache          => $cache,
-        store_password => $credentials ? sub { Trog::Credentials->prompt( 'Enter password:', 'keepass' ) } : undef,
+        keep           => \@keep,
+        token_for      => \&read_token,
     );
 
     if ($print_dir) {
@@ -222,9 +226,9 @@ sub main {
     $report .= "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
     $report .= "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     $report .= join( q{}, map { "    $_\n" } @refs );
-    $report .= "  and the real value of what hypervisors.conf names, out of $source/secrets.kdbx:\n" . join( q{}, map { "    $_\n" } @$real )
+    $report .= "  and the temporary token for each of these, from standard input.  Revoke each after the teardown:\n" . join( q{}, map { "    $_\n" } @$real )
       if @$real;
-    $report .= "  left out of hypervisors.conf, because they name a credential and --credentials was not given: " . join( ', ', @$left_out ) . "\n"
+    $report .= "  left out of hypervisors.conf, because they name a credential: " . join( ', ', @$left_out ) . "\n"
       if @$left_out;
     $report .= "\n";
 
@@ -300,24 +304,27 @@ sub build {
     my %unique = map { $_ => 1 } values %needed;
     my @refs   = sort keys %unique;
 
-    # The hypervisor is the real one, so what its block names has to be real
-    # too.  Without the store's password, a block that names a secret goes.
-    my $config     = Trog::Hypervisors::Config->load( $has_fleet ? "$dir/$fleet" : undef );
-    my @fleet_refs = $config->secret_references;
-    my ( %real, @left_out );
-    if ( @fleet_refs && $opts{store_password} ) {
-        %real = Trog::Secrets->lookup( "$source/secrets.kdbx", $opts{store_password}->(), map { $_ => $_ } @fleet_refs );
+    # A block that names a secret goes, unless it is kept, and then its secret
+    # is the temporary token that the operator gives.  The installation's store
+    # is never opened: see secrets.kdbx in the POD.
+    my $config = Trog::Hypervisors::Config->load( $has_fleet ? "$dir/$fleet" : undef );
+    my %named  = map { $_ => 1 } $config->names;
+    my @kept   = @{ $opts{keep} // [] };
+    foreach my $name (@kept) {
+        die "There is no hypervisor called $name in $source/$fleet to keep.\n" unless $named{$name};
     }
-    elsif (@fleet_refs) {
-        @left_out = $config->secret_blocks;
-        my @all = $config->names;
-        die "Every hypervisor in $source/$fleet names a credential, so a scratch configuration needs the password of $source/secrets.kdbx.  Give it with --credentials.\n"
-          if @left_out == @all;
 
+    my %keep     = map { $_ => 1 } @kept;
+    my @left_out = grep { !$keep{$_} } $config->secret_blocks;
+    die "Every hypervisor in $source/$fleet names a credential, so nothing is left to build a scratch guest on.  Keep one with --keep and a temporary token.\n"
+      if %named && @left_out == keys %named;
+    if (@left_out) {
         my %drop = map { $_ => 1 } @left_out;
         File::Slurper::Temp::write_text( "$dir/$fleet", without_blocks( File::Slurper::read_text("$dir/$fleet"), %drop ) );
-        @fleet_refs = ();
     }
+
+    my @fleet_refs = @kept ? $config->secret_references(@kept) : ();
+    my %real       = map { $_ => $opts{token_for}->($_) } @fleet_refs;
 
     my $password = Crypt::PRNG::random_string(20);
 
@@ -332,6 +339,17 @@ sub build {
     chmod 0600, "$dir/secrets.kdbx";
 
     return ( $password, $has_fleet, $keys_copied, \@fleet_refs, \@left_out, @refs );
+}
+
+# A temporary token from standard input, one line for each reference.
+sub read_token {
+    my ($ref) = @_;
+
+    my $token = readline STDIN;
+    die "No temporary token on standard input for $ref.\n" unless defined $token;
+    chomp $token;
+    die "The temporary token for $ref is empty.\n" unless length $token;
+    return $token;
 }
 
 # The text of a fleet without the blocks in %drop.  A block runs from its

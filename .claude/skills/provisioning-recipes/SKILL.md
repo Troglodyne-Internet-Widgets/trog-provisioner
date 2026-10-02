@@ -4,8 +4,8 @@ trigger: Writing, changing or debugging a Provisioner::Recipe, when you need to 
 description: |
   Build a throwaway guest, run the recipe on it, and read back what happened.
   Uses a scratch configuration and a throwaway secret store, so the real one is
-  never opened unless you ask, and collects the four logs that say what a
-  recipe actually did.
+  never opened, and collects the four logs that say what a recipe actually
+  did.
 ---
 
 I'm using the provisioning-recipes skill to check a recipe on a real guest.
@@ -75,15 +75,30 @@ its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
 `secret:` reference in that file.
 
 **A hypervisor that needs a credential is left out** -- the token of a Linode or
-SolusVM block.  The scratch configuration never opens the installation's
-store on its own, so it drops each block that names a secret and says which.
-A scratch guest then builds on a hypervisor that needs none, and the teardown
-asks only those.  To build a scratch guest on one that does need its
-credential, give the store's password, and its real value is copied in:
+SolusVM block.  The scratch configuration never opens the installation's store,
+so it drops each block that names a secret and says which.  A scratch guest then
+builds on a hypervisor that needs none, and the teardown asks only those.  That
+is the usual case, and it needs nothing from the user.
 
-```
-eval "$(printf 'keepass: %s\n\n' "$STORE_PASS" | .claude/skills/provisioning-recipes/scripts/scratch_config --credentials)"
-```
+**Never put a production credential in a scratch store.**  Its password is
+printed, so anything in it can reach a transcript, and transcripts leak.  If a
+scratch guest must go to a hypervisor that needs a credential:
+
+1. Ask the user for a temporary token for that hypervisor.  It gets only the
+   access that a build needs, and an expiry if the provider has one.  Do not ask
+   for a value out of the real store, and do not open the real store.
+2. Give the user this command to run with `!`.  It reads the token without an
+   echo, so the token is not in the transcript:
+
+   ```
+   read -rsp 'temporary token: ' T; echo; printf '%s\n' "$T" | .claude/skills/provisioning-recipes/scripts/scratch_config --keep NAME > "$SCRATCHPAD/scratch.env"; unset T
+   ```
+
+   `NAME` is the block in `hypervisors.conf`.  Write out the path of your
+   scratchpad in place of `$SCRATCHPAD`, because the shell of the user does not
+   have that variable.  Then `eval "$(cat "$SCRATCHPAD/scratch.env")"` as usual.
+3. After the teardown, ask the user to revoke the token, and say so in the
+   report.
 
 Three things about it worth understanding:
 
@@ -108,9 +123,8 @@ Three things about it worth understanding:
 - **The values are visibly fake** — `throwaway:group/entry/field`. A recipe that
   talks to a registrar or an API will fail at the point it tries. That is the
   intent. If a recipe needs a credential that actually works, that is a thing to
-  tell the user about, not to solve by opening the real store.  The hypervisor's
-  credential above is the one exception, and the scratch configuration makes it
-  itself.
+  tell the user about, not to solve by opening the real store.  A temporary
+  token for a hypervisor, as above, is the one exception.
 
 The password is printed because `new_config` prompts for it. Feed it on stdin:
 
