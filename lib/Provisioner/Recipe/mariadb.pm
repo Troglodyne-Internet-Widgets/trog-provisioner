@@ -149,6 +149,16 @@ sub template_files {
     );
 }
 
+=head2 %required = $recipe->required_recipes()
+
+C<cron>, which installs F<mariadb-backup.cron> as F</etc/cron.d/mariadb-backup>.
+
+=cut
+
+sub required_recipes {
+    return ( cron => sub { return ( files => { 'mariadb-backup' => 'mariadb-backup.cron' } ) } );
+}
+
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<mariadb-backup.sh>, which the guest runs before the fetch.  The cron

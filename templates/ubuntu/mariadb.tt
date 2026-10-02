@@ -15,5 +15,4 @@ install -m 0600 -o [% admin_user %] -g "$$(id -gn [% admin_user %])" mariadb-cli
 install -m 0600 -o [% user %] -g "$$(id -gn [% user %])" mariadb-client-service.cnf "$$(getent passwd [% user %] | cut -d: -f6)/.my.cnf"
 [% END -%]
 install -m 0750 mariadb-backup.sh /usr/local/sbin/mariadb-backup.sh
-install -m 0644 mariadb-backup.cron /etc/cron.d/mariadb-backup
 mkdir -p /var/backups/mysql

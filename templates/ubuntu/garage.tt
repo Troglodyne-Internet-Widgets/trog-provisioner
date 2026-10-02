@@ -36,9 +36,6 @@ install -m 0755 garage_init.sh [% script_dir %]/garage_init.sh
 [%# The next rebuild restores from these snapshots.  The cron job takes one
     every night, and the last postrun task below takes one now. -%]
 install -m 0750 garage-snapshot.sh /usr/local/sbin/garage-snapshot.sh
-install -m 0644 garage-snapshot.cron /etc/cron.d/garage-snapshot
-chown root:root /etc/cron.d/garage-snapshot
-chmod 0644 /etc/cron.d/garage-snapshot
 # Enable and start garage, then apply the layout and make the buckets.
 systemctl daemon-reload
 systemctl enable garage

@@ -43,10 +43,6 @@ systemctl enable gogs
 # Install setup and mirror scripts
 install -m 0750 gogs_setup.sh [% script_dir %]/gogs_setup.sh
 install -m 0750 gogs.mirror.sh [% script_dir %]/gogs.mirror.sh
-[% IF github_users.size OR github_orgs.size -%]
-# Schedule periodic mirroring from GitHub
-echo "0 */[% mirror_interval %] * * * [% gogs_admin %] [% script_dir %]/gogs.mirror.sh" > /etc/cron.d/gogs-mirror
-[% END -%]
 # Queue the service start, the initial setup and the nginx reload for postrun
 [% script_dir %]/queue_postrun_task systemctl start gogs
 [% script_dir %]/queue_postrun_task [% script_dir %]/gogs_setup.sh

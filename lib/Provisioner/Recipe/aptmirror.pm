@@ -258,10 +258,17 @@ sub args {
 C<nginx>, which serves the copy.  C<ufw> comes in through nginx, because nginx
 declares rate limits for ports 80 and 443.
 
+C<cron>, which installs F<aptmirror.cron> as F</etc/cron.d/apt-mirror>.  That
+replaces the file of the package, so only one file says when a sync happens.
+The file of the package is all comments and schedules nothing.
+
 =cut
 
 sub required_recipes {
-    return ( nginx => sub { return () } );
+    return (
+        nginx => sub { return () },
+        cron  => sub { return ( files => { 'apt-mirror' => 'aptmirror.cron' } ) },
+    );
 }
 
 =head2 %files = $recipe->template_files()

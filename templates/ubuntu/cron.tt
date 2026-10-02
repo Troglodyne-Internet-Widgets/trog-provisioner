@@ -1,6 +1,14 @@
 mv root.domain.crontab /etc/cron.d/[% domain %]
 chown root:root /etc/cron.d/[% domain %]
 chmod 0644 /etc/cron.d/[% domain %]
+[%# The cron files of the other recipes.  Provisioner::Recipe::cron says why
+    each one gets the two mail lines here and not in its template.  install,
+    because cron skips a file in cron.d that root does not own, and a file of
+    the payload belongs to whoever built it. -%]
+[% FOR name IN files.keys().sort() -%]
+{ echo 'MAILTO="[% admin_email %]"'; echo 'MAILFROM="[% from %]"'; cat [% files.$name %]; } > [% name %].crond
+install -m 0644 -o root -g root [% name %].crond /etc/cron.d/[% name %]
+[% END -%]
 # crontab -u replaces the whole crontab, so give each domain its own service user.
 [% IF user %]
 crontab -u [% user %] user.crontab

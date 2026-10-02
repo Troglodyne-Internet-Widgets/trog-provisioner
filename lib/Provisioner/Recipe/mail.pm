@@ -161,6 +161,7 @@ sub required_recipes {
     # fragment directories that the templates here write into.
     return (
         configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
+        cron    => sub { return ( files     => { "$opts{domain}-mailcron" => 'mailcron' } ) },
         $self->SUPER::required_recipes(%opts),
     );
 }

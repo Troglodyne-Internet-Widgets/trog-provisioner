@@ -148,7 +148,8 @@ subtest 'nothing depends on it, and it salvages nothing' => sub {
     my ( undef, undef, $recipe ) = generated();
 
     my %required = $recipe->required_recipes();
-    is_deeply( [ sort keys %required ], ['nginx'], 'it needs nginx to serve the copy, and nothing else' );
+    is_deeply( [ sort keys %required ], [qw{cron nginx}],                                  'it needs nginx to serve the copy, cron to start the sync, and nothing else' );
+    is_deeply( { $required{cron}->() }, { files => { 'apt-mirror' => 'aptmirror.cron' } }, 'and cron installs its file as apt-mirror, over the file of the package' );
 
     # Salvage lands in the domain's data directory and from there into
     # data.tar.gz and every backup taken of it.  This is hundreds of gigabytes

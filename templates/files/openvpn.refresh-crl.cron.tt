@@ -4,8 +4,6 @@
 # days after it is signed.  That is how long a cron that stopped goes unnoticed.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-MAILTO="[% admin_email %]"
-MAILFROM="[% mail_from %]"
 # The log keeps the output of easyrsa.  A failure prints one line, which cron
 # mails, so a renewal that stops does not go unnoticed for months.
 41 3 * * * root /usr/local/sbin/openvpn-refresh-crl > /var/log/openvpn-refresh-crl.log 2>&1 || echo "openvpn-refresh-crl failed on [% domain %].  Read /var/log/openvpn-refresh-crl.log."

@@ -49,12 +49,19 @@ Requires C<nginxproxy>, with a vhost on port 80 that redirects to SSL and a vhos
 on port 443 that proxies to gogs on C<127.0.0.1:3000>.  C<ipv6> in C<%opts>
 turns IPv6 on or off for the port 443 vhost, and it is on by default.
 
+Also requires C<cron> when C<github_users> or C<github_orgs> names anything.  It
+installs F<gogs-mirror.cron> as F</etc/cron.d/gogs-mirror>, which mirrors them
+into gogs.
+
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
     my $ipv6 = $opts{ipv6} // 1;
+
+    my $mirrors = @{ $opts{github_users} // [] } || @{ $opts{github_orgs} // [] };
     return (
+        ( $mirrors ? ( cron => sub { return ( files => { 'gogs-mirror' => 'gogs-mirror.cron' } ) } ) : () ),
         nginxproxy => sub {
             (
                 vhosts => {
@@ -135,10 +142,11 @@ installs: the systemd unit, F<app.ini>, the setup script and the mirror script.
 
 sub template_files {
     return (
-        'gogs.service.tt'   => 'gogs.service',
-        'gogs.app.ini.tt'   => 'app.ini',
-        'gogs.setup.sh.tt'  => 'gogs_setup.sh',
-        'gogs.mirror.sh.tt' => 'gogs.mirror.sh',
+        'gogs.service.tt'     => 'gogs.service',
+        'gogs.app.ini.tt'     => 'app.ini',
+        'gogs.setup.sh.tt'    => 'gogs_setup.sh',
+        'gogs.mirror.sh.tt'   => 'gogs.mirror.sh',
+        'gogs.mirror.cron.tt' => 'gogs-mirror.cron',
     );
 }
 
