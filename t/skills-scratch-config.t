@@ -24,6 +24,7 @@ use YAML::XS();
 use FindBin;
 use FindBin::libs;
 
+use Trog::Hypervisors::Config();
 use Trog::Secrets();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
@@ -170,38 +171,72 @@ subtest 'CPAN suites and a fetch cache, when they are asked for' => sub {
     is( $recipes->{_base}{_global}{cpan_notest}, 0,                 'and the suites' );
 };
 
-subtest 'a hypervisor\'s credential is the real one, and nothing else is' => sub {
+# A kept hypervisor gets the temporary token that the operator gave, and the
+# installation's store, which holds the production one, stays shut.
+subtest 'a kept hypervisor gets the temporary token, and the real store is never opened' => sub {
     my $source = installation();
     Trog::Secrets->create(
         "$source/secrets.kdbx", 'the-real-one',
-        'secret:solusvm/api/password' => 'a token that works',
-        'secret:group/entry/field'    => 'a registrar key that works',
+        'secret:solusvm/api/password' => 'the production token',
     );
     File::Slurper::Temp::write_text( "$source/hypervisors.conf", "[node1]\nsolusvm = node.test.test\nsolusvm_token = secret:solusvm/api/password\n" );
 
-    my $asked = 0;
-    my $dir   = tempdir( CLEANUP => 1 );
-    my ( $password, undef, undef, $real ) = Trog::Skill::ScratchConfig::build( $source, $dir, store_password => sub { $asked++; 'the-real-one' } );
+    my $dir = tempdir( CLEANUP => 1 );
+    my @asked;
+    my ( $password, undef, undef, $real, $left_out ) = Trog::Skill::ScratchConfig::build(
+        $source, $dir,
+        keep      => ['node1'],
+        token_for => sub ($ref) { push @asked, $ref; return 'a temporary token' },
+    );
 
-    is( $asked, 1, 'the installation\'s store is opened, once, because the fleet names a secret' );
-    is_deeply( $real, ['secret:solusvm/api/password'], 'and what came out of it is said' );
+    is_deeply( \@asked,   ['secret:solusvm/api/password'], 'the operator is asked for a token for what the kept block names' );
+    is_deeply( $real,     ['secret:solusvm/api/password'], 'and the report says which' );
+    is_deeply( $left_out, [],                              'and the kept block stays' );
 
     my %held = Trog::Secrets->lookup( "$dir/secrets.kdbx", $password, token => 'secret:solusvm/api/password' );
-    is( $held{token}, 'a token that works', 'so a scratch guest can be built on the real hypervisor' );
-    like(
-        exception { Trog::Secrets->lookup( "$dir/secrets.kdbx", $password, key => 'secret:group/entry/field' ) }, qr/No[ ]group[ ]'group'/,
-        'while a credential only the recipes of the installation name stays behind'
-    );
+    is( $held{token}, 'a temporary token', 'the scratch store holds the temporary token, not the production one' );
 
     like(
-        exception { Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ) ) }, qr/names[ ]secret:solusvm\/api\/password/,
-        'without a way to ask for the password, it stops naming what it needed'
+        exception { Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ) ) }, qr/Every[ ]hypervisor\N+--keep/,
+        'without a kept block, a fleet that is all credentials leaves nothing to build on, and it says what to do'
     );
+    like(
+        exception {
+            Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ), keep => ['bogus'], token_for => sub { 'x' } )
+        },
+        qr/no[ ]hypervisor[ ]called[ ]bogus/,
+        'and a block that is not there cannot be kept'
+    );
+};
 
-    unlink "$source/hypervisors.conf";
-    $asked = 0;
-    Trog::Skill::ScratchConfig::build( $source, tempdir( CLEANUP => 1 ), store_password => sub { $asked++; 'the-real-one' } );
-    is( $asked, 0, 'and with no fleet naming a secret, the installation\'s store is never opened' );
+# The usual scratch guest goes to a hypervisor that needs no credential.  The
+# store stays shut, and nothing that cannot be reached is left in the fleet for
+# bin/provision to choose or for bin/destroy to ask.
+subtest 'a hypervisor that needs a credential is left out, unless it is kept' => sub {
+    my $source = installation();
+    File::Slurper::Temp::write_text( "$source/hypervisors.conf", <<'CONF' );
+[local]
+libvirt_uri = qemu+ssh://somebody@local.test.test/system
+
+[node1]
+solusvm       = node.test.test
+solusvm_token = secret:solusvm/api/password
+
+[spare]
+libvirt_uri = qemu+ssh://somebody@spare.test.test/system
+CONF
+
+    my $dir = tempdir( CLEANUP => 1 );
+    my ( undef, $has_fleet, undef, $real, $left_out ) = Trog::Skill::ScratchConfig::build( $source, $dir );
+
+    ok( $has_fleet, 'the fleet comes with it' );
+    is_deeply( $left_out, ['node1'], 'without the hypervisor that names a credential, which is said' );
+    is_deeply( $real,     [],        'and no token was asked for' );
+
+    my $fleet = Trog::Hypervisors::Config->load("$dir/hypervisors.conf");
+    is_deeply( [ $fleet->names ],             [qw{local spare}], 'the others are still there, in their order' );
+    is_deeply( [ $fleet->secret_references ], [],                'and the scratch fleet names no secret' );
+    ok( !-e "$source/secrets.kdbx", 'the installation has no store here, so nothing could have opened one' );
 };
 
 done_testing();

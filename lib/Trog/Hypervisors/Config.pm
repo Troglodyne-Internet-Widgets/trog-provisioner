@@ -111,17 +111,34 @@ Returns the hypervisor names, in the order of the file.
 sub configured ($self) { return scalar @{ $self->{order} } ? 1 : 0 }
 sub names      ($self) { return @{ $self->{order} } }
 
-=head2 secret_references
+=head2 secret_references(@names)
 
 Returns every C<secret:> reference that a block of the fleet names, sorted and
 without duplicates.  A hypervisor's credential is one, such as the token of a
-Linode or SolusVM block.  Empty when there is no fleet.
+Linode or SolusVM block.  With C<@names>, only the references of those blocks.
+Empty when there is no fleet.
 
 =cut
 
-sub secret_references ($self) {
-    my %needed = Trog::Secrets->needed( $self->{blocks} );
+sub secret_references ( $self, @names ) {
+    my $blocks = @names ? { map { $_ => $self->{blocks}{$_} } grep { $self->{blocks}{$_} } @names } : $self->{blocks};
+    my %needed = Trog::Secrets->needed($blocks);
     return uniq( sort values %needed );
+}
+
+=head2 secret_blocks
+
+Returns the names of the blocks that name a C<secret:> reference, in the order
+of the file.  Empty when there is no fleet.
+
+=cut
+
+sub secret_blocks ($self) {
+
+    # The place of a reference starts with the name of its block.
+    my %needed = Trog::Secrets->needed( $self->{blocks} );
+    my %named  = map { ( split m{/}, $_ )[0] => 1 } keys %needed;
+    return grep { $named{$_} } $self->names;
 }
 
 =head1 SEE ALSO

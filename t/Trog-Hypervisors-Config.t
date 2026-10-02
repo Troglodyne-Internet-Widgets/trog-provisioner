@@ -63,10 +63,28 @@ linode_token  = secret:linode/api/password
 libvirt_uri   = qemu:///system
 CONF
 
-    is_deeply( [ $fleet->secret_references ], [qw{secret:linode/api/password secret:solusvm/api/password}], 'every reference a block names, once each and sorted' );
+    is_deeply( [ $fleet->secret_references ],                [qw{secret:linode/api/password secret:solusvm/api/password}], 'every reference a block names, once each and sorted' );
+    is_deeply( [ $fleet->secret_references(qw{lin local}) ], ['secret:linode/api/password'],                               'and with names, only what those blocks name' );
+    is_deeply( [ $fleet->secret_references('bogus') ],       [],                                                           'which is nothing for a block that is not there' );
 
     is_deeply( [ Trog::Hypervisors::Config->load( fleet_of("[local]\nlibvirt_uri = qemu:///system\n") )->secret_references ], [], 'a fleet that names no secret wants none' );
     is_deeply( [ Trog::Hypervisors::Config->load(undef)->secret_references ],                                                 [], 'and nor does no fleet at all' );
+};
+
+subtest 'secret_blocks' => sub {
+    my $fleet = Trog::Hypervisors::Config->load( fleet_of(<<'CONF') );
+[node1]
+solusvm       = node1.test.test
+solusvm_token = secret:solusvm/api/password
+
+[local]
+libvirt_uri   = qemu:///system
+
+[lin]
+linode_token  = secret:linode/api/password
+CONF
+    is_deeply( [ $fleet->secret_blocks ],                                 [qw{node1 lin}], 'the blocks that name a secret, in the order of the file' );
+    is_deeply( [ Trog::Hypervisors::Config->load(undef)->secret_blocks ], [],              'and none with no fleet' );
 };
 
 done_testing();
