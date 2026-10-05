@@ -1,0 +1,13 @@
+[%# sshd uses the first value that it reads for most options, so these lines
+    win over the include below.  ListenAddress and Port are the exceptions,
+    because sshd adds them up.  The address names its port, so a Port line in
+    the include changes nothing here.  A ListenAddress line in the include is
+    bound as well, and the guest test reports it. -%]
+# The fast lane sshd.  perldoc Provisioner::Recipe::sshfastlane says why.
+ListenAddress 0.0.0.0:[% port %]
+PidFile /run/sshd-fastlane.pid
+MaxStartups [% max_startups %]
+IPQoS [% ipqos %]
+
+# Everything else is the main sshd: host keys, authentication, users.
+Include /etc/ssh/sshd_config

@@ -1,0 +1,14 @@
+install -o root -g root -m 0755 sshfastlane.sh /usr/local/sbin/ssh-fastlane
+install -o root -g root -m 0644 sshfastlane.sshd_config /etc/ssh/sshd_fastlane_config
+install -o root -g root -m 0644 sshfastlane.service /etc/systemd/system/ssh-fastlane.service
+install -o root -g root -m 0644 sshfastlane_ufw.conf /etc/ufw/applications.d/ssh-fastlane
+install -o root -g root -m 0750 sshfastlane.after.init /etc/ufw/after.init
+install -d -o root -g root -m 0700 /var/lib/ssh-fastlane
+[%# Optional, so that a failure of the hook never stops a login.  pam_exec
+    runs it as root, in the session of each login of either sshd. -%]
+grep -qF 'ssh-fastlane trust' /etc/pam.d/sshd || printf '%s\n' 'session optional pam_exec.so quiet /usr/local/sbin/ssh-fastlane trust' >> /etc/pam.d/sshd
+systemctl daemon-reload
+systemctl enable ssh-fastlane
+[%# Queued, so that it comes before the restart of ufw that the ufw target
+    queues.  ufw then runs after.init with the set already there. -%]
+[% script_dir %]/queue_postrun_task systemctl restart ssh-fastlane

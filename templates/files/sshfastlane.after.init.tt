@@ -1,0 +1,14 @@
+#!/bin/sh
+# ufw-init runs this after it loads the rules, and again when it unloads them.
+# The sshfastlane recipe owns this file.  ufw reset restores the .rules files
+# and leaves this one, so the fast lane survives the reset of the ufw target.
+#
+# It never fails, because ufw-init reports a failure here as a failure of the
+# whole firewall, and the rules of ufw are already loaded by then.
+case "$1" in
+start | stop | flush-all)
+    /usr/local/sbin/ssh-fastlane firewall "$1" \
+        || echo "after.init: ssh-fastlane firewall $1 failed" >&2
+    ;;
+esac
+exit 0
