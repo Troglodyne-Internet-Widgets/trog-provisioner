@@ -77,6 +77,11 @@ our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 # closes.  A missing file does not come later, so a longer wait only hangs.
 our $STATUS_GRACE = '60s';
 
+# How many seconds in a row the guest has nothing that could start make, before
+# wait_for_makefile gives up.  A few, so that the moment between atd taking the
+# job and the job starting setup.sh is not taken for nothing.
+our $NEVER_GRACE = 10;
+
 # The keys that key_path fetched from the store in this run, by domain, each
 # with the temporary file that holds it.
 my %MATERIALISED;
@@ -206,7 +211,12 @@ C<at> starts the Makefile, so there are five waits, in this order:
 
 =item * The at queue empties.
 
-=item * The log, F</var/log/$domain.setup.log>, appears.
+=item * The log, F</var/log/$domain.setup.log>, appears.  This wait gives up
+when the log is not there, nothing is in the at queue, and no F<setup.sh> runs,
+for C<$NEVER_GRACE> seconds in a row.  Then nothing is going to start make, and
+this dies with the reason and the end of F</var/log/cloud-init-output.log>.  An
+example is a guest whose packages failed to install, so that C<at> is not there
+and cloud-init never queued F<setup.sh>.
 
 =item * No process has the log open.
 
@@ -236,8 +246,19 @@ sub wait_for_makefile {
     print "Waiting up to $timeout for ATD queue to flush...\n";
     $self->run_cmd($atq);
 
+    # Exit 3 when nothing is queued or running that could start make.  The
+    # bracket keeps pgrep from matching this command line, which names setup.sh.
     print "Waiting up to $timeout for Makefile payload to start...\n";
-    $self->run_cmd(qq{sudo timeout $timeout bash -c 'until [ -f $log ]; do sleep 1; done;'});
+    my $never = 3;
+    my $start = $self->run_cmd( qq{sudo timeout $timeout bash -c 'idle=0; until [ -f $log ]; do } . qq{if [ "\$(atq 2>/dev/null | wc -l)" = 0 ] && ! pgrep -f "/root/setu[p][.]sh" >/dev/null; then idle=\$((idle + 1)); [ \$idle -ge $NEVER_GRACE ] && exit $never; else idle=0; fi; } . q{sleep 1; done;'} );
+    if ( $start == $never ) {
+        my $why =
+          $self->run_cmd('command -v atq >/dev/null') == 0
+          ? 'setup.sh is not queued and not running, so it was never queued or it ended before make'
+          : 'at is not installed, so cloud-init could not queue setup.sh';
+        my $tail = $self->capture_cmd('sudo tail -n 20 /var/log/cloud-init-output.log') // '';
+        die "The build of $domain never started on " . $self->describe . ": $why.\n" . "The end of /var/log/cloud-init-output.log:\n$tail\n";
+    }
 
     print "Waiting up to $timeout for Makefile payload to finish...\n";
     $self->run_cmd(qq{sudo timeout $timeout bash -c 'while lsof | grep $log; do sleep 1; done;'});

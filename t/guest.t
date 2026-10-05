@@ -20,6 +20,8 @@ use Test::MockModule qw{strict};
 use Test::NoWarnings;
 use File::Slurper();
 use File::Slurper::Temp();
+use IPC::Run3();
+use Time::HiRes();
 use FindBin::libs;
 use Trog::Config();
 use Trog::Secrets();
@@ -200,7 +202,7 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
 
     ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'finishes' );
 
-    my @queue = grep { index( $_, 'atq' ) >= 0 } @ran;
+    my @queue = grep { index( $_, 'until [ $(atq | wc -l) = 0 ]' ) >= 0 } @ran;
     is( scalar @queue, 2, 'twice, because the Makefile may queue work of its own' );
     ok( ( grep { index( $_, 'until [ -f /var/log/vm.example.test.setup.log ]' ) >= 0 } @ran ),      'waited for the log to appear' );
     ok( ( grep { index( $_, 'while lsof | grep /var/log/vm.example.test.setup.log' ) >= 0 } @ran ), 'and to stop being written' );
@@ -225,6 +227,118 @@ subtest 'a build make failed is not a build that finished' => sub {
 
     $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
     ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'and true when it exited zero' );
+};
+
+# A guest whose cloud-init never queued setup.sh, because its packages failed and
+# at was not there, had nothing to start make.  The wait for the log ran its
+# whole 90 minutes all the same.
+subtest 'a build that is never going to start is given up on, saying why' => sub {
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
+
+    my ( $at, @ran ) = (1);
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine(
+        run_cmd => sub {
+            my ( $s, @c ) = @_;
+            my $cmd = join( ' ', @c );
+            push @ran, $cmd;
+            return $cmd eq 'command -v atq >/dev/null' ? ( $at ? 0 : 1 ) : index( $cmd, 'until [ -f /var/log/vm.example.test.setup.log ]' ) >= 0 ? 3 : 0;
+        }
+    );
+    $machine->redefine( run_sudo    => sub { 0 } );
+    $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/cloud-init-output/ ? "E: Unable to correct problems\n" : q{} } );
+
+    my $err = exception {
+        quietly( sub { $guest->wait_for_makefile('vm.example.test') } )
+    };
+    like( $err, qr/build[ ]of[ ]vm[.]example[.]test[ ]never[ ]started/, 'it dies, naming the domain' );
+    like( $err, qr/ended[ ]before[ ]make/,                              'and the reason' );
+    like( $err, qr/E:[ ]Unable[ ]to[ ]correct[ ]problems/,              'with the end of the cloud-init log, where the cause is' );
+    ok( !( grep { index( $_, 'lsof' ) >= 0 } @ran ), 'and waits for nothing after it' );
+
+    $at = 0;
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_makefile('vm.example.test') } )
+        },
+        qr/at[ ]is[ ]not[ ]installed/,
+        'a guest with no at is told so'
+    );
+};
+
+# What the guest runs, run here, with an atq and a pgrep that say what each case
+# needs.  The command is the one wait_for_makefile builds, with the log moved
+# into a directory of this test.
+subtest 'the wait on the guest gives up only when nothing could start make' => sub {
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
+    my $cmd;
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( run_cmd     => sub { my ( $s, @c ) = @_; my $c = join( ' ', @c ); $cmd //= $c if index( $c, 'until [ -f' ) >= 0; return 0 } );
+    $machine->redefine( run_sudo    => sub { 0 } );
+    $machine->redefine( capture_cmd => sub { "0\n" } );
+    local $Trog::Guest::NEVER_GRACE = 2;
+    quietly( sub { $guest->wait_for_makefile('vm.example.test') } );
+    ok( $cmd, 'wait_for_makefile waits for the log' ) or return;
+
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    my $log = "$dir/setup.log";
+    $cmd =~ s{/var/log/vm[.]example[.]test[.]setup[.]log}{$log}g;
+    $cmd =~ s{\Asudo[ ]timeout[ ]\S+[ ]}{timeout 6 };
+
+    File::Slurper::Temp::write_text( "$dir/atq",   qq{#!/bin/sh\n[ -n "\$NO_AT" ] && { echo "atq: not found" >&2; exit 127; }\nprintf '%s' "\$QUEUED"\n} );
+    File::Slurper::Temp::write_text( "$dir/pgrep", qq{#!/bin/sh\nexit \${RUNNING:-1}\n} );
+    chmod 0755, "$dir/atq", "$dir/pgrep";
+
+    my $run = sub (%env) {
+        local $ENV{PATH} = "$dir:$ENV{PATH}";
+        local @ENV{ keys %env } = values %env;
+        IPC::Run3::run3( [ 'bash', '-c', $cmd ], \undef, \my $out, \my $err );
+        return $? >> 8;
+    };
+
+    is( $run->(), 3, 'nothing queued, nothing running and no log: it gives up' );
+    is( $run->( NO_AT   => 1 ),                              3,   'and so it does with no at at all' );
+    is( $run->( QUEUED  => "7\t2026-10-05 10:00 = root\n" ), 124, 'but not while a job is in the queue' );
+    is( $run->( RUNNING => 0 ),                              124, 'or while setup.sh runs' );
+
+    File::Slurper::Temp::write_text( $log, "make: started\n" );
+    is( $run->(), 0, 'and a log that is there ends the wait at once' );
+};
+
+# pgrep -f matches the whole command line, and the shell that runs the wait has
+# the pattern in its own.  The bracket in the pattern is what stops a match
+# with itself, which would make the wait never give up.
+subtest 'the pattern finds setup.sh, and not the shell that looks for it' => sub {
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
+    my $cmd;
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( run_cmd     => sub { my ( $s, @c ) = @_; my $c = join( ' ', @c ); $cmd //= $c if index( $c, 'pgrep' ) >= 0; return 0 } );
+    $machine->redefine( run_sudo    => sub { 0 } );
+    $machine->redefine( capture_cmd => sub { "0\n" } );
+    quietly( sub { $guest->wait_for_makefile('vm.example.test') } );
+
+    my ($pattern) = ( $cmd // q{} ) =~ m{pgrep[ ]-f[ ]"([^"]+)"};
+    ok( $pattern, 'the wait looks for setup.sh by a pattern' ) or return;
+
+    # The PIDs that match, and the PID of the shell that looked, which prints its
+    # own first.  Any other process on this machine can match too, so the shell
+    # is judged by its PID.  The true after pgrep keeps bash alive, as the loop of
+    # the wait does: bash -c runs its last command in place of itself.
+    my $look = sub {
+        IPC::Run3::run3( [ 'bash', '-c', qq{echo \$\$; pgrep -f "$pattern"; true} ], \undef, \my $out, \my $err );
+        my ( $self, @found ) = split m/\n/, $out // q{};
+        return ( $self, @found );
+    };
+    my ( $self, @found ) = $look->();
+    ok( !( grep { $_ eq $self } @found ), 'it does not find the shell that looks for it' );
+
+    my $pid = fork() // die "fork: $!";
+    if ( !$pid ) { $0 = 'bash /root/setup.sh'; Time::HiRes::sleep(10); exit 0 }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the child is the stand-in for setup.sh, and only its own name changes
+    Time::HiRes::sleep(1);
+    ( undef, @found ) = $look->();
+    ok( ( grep { $_ eq $pid } @found ), 'and it finds a setup.sh that runs' );
+    kill 'TERM', $pid;
+    waitpid( $pid, 0 );
 };
 
 # These print their progress; the tests do not need to read it.
