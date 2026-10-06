@@ -73,7 +73,7 @@ smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, rej
 # Delivery, the content filter and the milters.
 mailbox_transport = lmtp:unix:private/dovecot-lmtp
 virtual_transport = lmtp:unix:private/dovecot-lmtp
-content_filter = smtp-amavis:[127.0.0.1]:10024, spamassassin
+content_filter = smtp-amavis:[127.0.0.1]:10024
 milter_default_action = accept
 smtpd_milters = local:opendkim/opendkim.sock, local:opendmarc/opendmarc.sock
 non_smtpd_milters = $smtpd_milters

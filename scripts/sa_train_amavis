@@ -1,0 +1,33 @@
+#!/bin/bash
+# Train the Bayes database that amavis scores mail with, from the mailboxes it
+# is given:
+#
+#     sa_train_amavis MAILDIR...
+#
+# Spam is every message in the Junk folder of each MAILDIR.  Ham is mail in its
+# INBOX that is more than a week old and read.  Unread mail is left out, because
+# its owner may not have looked at it yet, and it can still be spam.  dovecot
+# keeps the date that a message arrived as the mtime of its file.
+#
+# As root, because the mail is dovecot's and amavis cannot read it.  amavis gets
+# its database back when this exits, however it exits.
+set -u
+
+DB=/var/lib/amavis/.spamassassin
+trap 'chown -R amavis:amavis "$DB"' EXIT
+
+for maildir in "$@"; do
+    # new as well as cur, because spam that nobody opens stays in new.
+    for junk in "$maildir/.Junk/new" "$maildir/.Junk/cur"; do
+        if [ -d "$junk" ]; then
+            sa-learn --dbpath "$DB" --no-sync --spam "$junk" > /dev/null
+        fi
+    done
+    if [ -d "$maildir/cur" ]; then
+        # S is the flag that dovecot writes for a message that was read.
+        find "$maildir/cur" -type f -name '*:2,*S*' -mtime +7 -print0 \
+            | xargs -0 -r sa-learn --dbpath "$DB" --no-sync --ham > /dev/null
+    fi
+done
+
+sa-learn --dbpath "$DB" --sync > /dev/null

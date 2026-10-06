@@ -71,8 +71,10 @@ chown dovecot:dovecot /mail/[% domain %]/passwd
 chmod 0640 /mail/[% domain %]/passwd
 [% script_dir %]/queue_postrun_task systemctl restart dovecot
 # amavisd-new
-mv 50-user /etc/amavis/conf.d/
-chown root:root /etc/amavis/conf.d/50-user
+[%# Readable by all, as the packaged files beside it are.  amavis reads its
+    configuration as the amavis account, and a file that it cannot read changes
+    nothing.  A mv keeps the 0600 of the payload. -%]
+install -m 0644 -o root -g root 50-user /etc/amavis/conf.d/50-user
 [% script_dir %]/queue_postrun_task systemctl restart amavis
 # postfix
 mv aliases /etc/aliases

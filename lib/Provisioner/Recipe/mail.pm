@@ -45,6 +45,20 @@ Set up and configure a mail server.  postfix sends and receives mail.  dovecot
 serves IMAP and POP3, and puts the mail that postfix gives it into the
 mailboxes.  amavis, opendmarc and opendkim filter and sign the mail.
 
+=head3 Spam
+
+amavis scores each message with SpamAssassin, and marks spam with
+C<X-Spam-Flag: YES>.  The package turns that check off, and the recipe turns it
+back on.  A global sieve, which runs before the sieve of each user, files marked
+mail into C<Junk>.  Every account has that folder, with the C<\Junk> special
+use that mail clients look for.
+
+Each night, C<sa_train_amavis> trains the Bayes database of amavis from the
+mailboxes of C<names>.  Spam is what is in C<Junk>.  Ham is mail in the INBOX
+that is more than a week old and read.  So a user who moves a message into or
+out of C<Junk> teaches the filter.  SpamAssassin uses Bayes only after it has
+learned 200 messages of each kind.
+
 The recipe can relay SMTP through another host.  C<relay.to> limits the relay
 to mail for the destinations it names.  The other defaults are sane.
 
@@ -299,6 +313,7 @@ sub template_files {
         'mail.autodiscover.tt'           => 'autodiscover.xml',
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',
+        'mail.junk.sieve'                => 'junk.sieve',
     );
 }
 

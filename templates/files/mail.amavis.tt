@@ -11,4 +11,15 @@ $final_banned_destiny = D_REJECT; # (defaults to D_BOUNCE)
 
 $final_spam_destiny = D_PASS; # (defaults to D_REJECT but we handle elsewhere)
 
+# Score mail with SpamAssassin.  The package turns that off, with
+# @bypass_spam_checks_maps = (1) in /usr/share/amavis/conf.d/20-package.
+@bypass_spam_checks_maps = (\%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re);
+
+# No copy in /var/lib/amavis, which nothing cleans.  Spam is delivered to Junk.
+$spam_quarantine_to = undef;
+
+# amavis adds the spam headers only for a local recipient.  The leading dot
+# covers the subdomains as well.
+@local_domains_acl = ( ".[% domain %]" );
+
 1;
