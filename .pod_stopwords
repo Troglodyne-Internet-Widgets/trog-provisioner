@@ -289,6 +289,7 @@ iothreads
 ip
 ipmap
 ips
+ipset
 ipv
 js
 journald
@@ -333,6 +334,7 @@ mysqldump
 nameserver
 nameservers
 namespace
+nat
 nd
 netplan
 nginx
@@ -426,6 +428,7 @@ snapshotted
 specced
 sqlite
 sshd
+sshfastlane
 ssl
 sssd
 starman

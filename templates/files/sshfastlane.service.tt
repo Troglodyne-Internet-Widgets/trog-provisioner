@@ -1,0 +1,29 @@
+[Unit]
+Description=OpenSSH fast lane for sources that logged in before
+After=network.target auditd.service ufw.service
+ConditionPathExists=!/etc/ssh/sshd_not_to_be_run
+
+[Service]
+# notify, so that ExecStartPost fills the set only after sshd listens.  A
+# source in the set before that is redirected to a closed port.
+Type=notify
+ExecStartPre=/usr/sbin/sshd -t -f /etc/ssh/sshd_fastlane_config
+ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_fastlane_config
+ExecStartPost=/usr/local/sbin/ssh-fastlane open
+# Every stop, a crash too, empties the set, so every client goes back to the
+# main sshd while this one is down.
+ExecStopPost=/usr/local/sbin/ssh-fastlane close
+ExecReload=/usr/sbin/sshd -t -f /etc/ssh/sshd_fastlane_config
+ExecReload=/bin/kill -HUP $MAINPID
+# As ssh.service does: a restart leaves the open sessions alone.
+KillMode=process
+Restart=always
+RestartSec=5
+# The privilege separation directory, shared with ssh.service.  Preserve, so
+# that a stop of one unit does not remove it under the other.
+RuntimeDirectory=sshd
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=multi-user.target

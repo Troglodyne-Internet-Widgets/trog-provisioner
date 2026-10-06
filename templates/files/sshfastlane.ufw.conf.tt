@@ -1,0 +1,8 @@
+[%# Allows the connections that the redirect sends to the fast lane.  The
+    filter chain trog-fastlane drops every other connection to this port
+    before ufw sees it.  An allow here, and not an ACCEPT in that chain, so
+    that the deny of a fail2ban ban in ufw-user-input comes first. -%]
+[ssh-fastlane]
+title=ssh fast lane
+description=sshd for sources that logged in before, reached only through a redirect of port 22
+ports=[% port %]/tcp

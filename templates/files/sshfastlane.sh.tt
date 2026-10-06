@@ -1,0 +1,107 @@
+#!/bin/sh
+# The fast lane of sshd: the ipset of trusted sources, and the firewall rules
+# that read it.  perldoc Provisioner::Recipe::sshfastlane says why it exists.
+#
+#   ssh-fastlane open             fill the set from the saved members
+#   ssh-fastlane close            save the members and empty the set
+#   ssh-fastlane trust            add PAM_RHOST, from pam_exec in a session
+#   ssh-fastlane firewall start   from /etc/ufw/after.init
+#   ssh-fastlane firewall stop
+#
+# POSIX sh, because pam_exec and ufw-init run it, and neither promises bash.
+set -u
+
+SET=ssh-fastlane
+CHAIN=trog-fastlane
+PORT=[% port %]
+TIMEOUT=[% trust_days * 86400 %]
+SAVED=/var/lib/ssh-fastlane/members
+
+# Made with a timeout, or no member can have one.  -exist, because every
+# caller can be the first one after a boot.
+make_set() {
+    ipset -exist create "$SET" hash:ip family inet timeout "$TIMEOUT"
+}
+
+# Each rule once.  ufw-init runs after.init start twice on a reload: once in
+# ufw_start, and once after it.
+jump_once() {
+    table=$1
+    chain=$2
+    iptables -t "$table" -C "$chain" -j "$CHAIN" 2>/dev/null \
+        || iptables -t "$table" -I "$chain" 1 -j "$CHAIN"
+}
+
+unjump() {
+    table=$1
+    chain=$2
+    while iptables -t "$table" -D "$chain" -j "$CHAIN" 2>/dev/null; do :; done
+    iptables -t "$table" -F "$CHAIN" 2>/dev/null
+    iptables -t "$table" -X "$CHAIN" 2>/dev/null
+    return 0
+}
+
+firewall_start() {
+    make_set || return 1
+
+    iptables -t nat -N "$CHAIN" 2>/dev/null
+    iptables -t nat -F "$CHAIN"
+    iptables -t nat -A "$CHAIN" -p tcp --dport 22 -m set --match-set "$SET" src \
+        -j REDIRECT --to-ports "$PORT"
+    jump_once nat PREROUTING
+
+    # Only what the redirect sent gets to the fast lane.  A scanner that
+    # connects to the port itself is dropped here, and does not fill the
+    # MaxStartups of the fast lane.
+    iptables -N "$CHAIN" 2>/dev/null
+    iptables -F "$CHAIN"
+    iptables -A "$CHAIN" -i lo -j RETURN
+    iptables -A "$CHAIN" -p tcp --dport "$PORT" -m conntrack ! --ctstate DNAT -j DROP
+    jump_once filter INPUT
+}
+
+firewall_stop() {
+    unjump nat PREROUTING
+    unjump filter INPUT
+}
+
+case "${1:-}" in
+open)
+    make_set || exit 1
+    # Only the members.  The create line in the file has the timeout of the
+    # run that saved it, and a create that differs from the set fails.
+    if [ -s "$SAVED" ]; then
+        grep "^add $SET " "$SAVED" | ipset -exist restore
+    fi
+    ;;
+close)
+    ipset list -n "$SET" >/dev/null 2>&1 || exit 0
+    mkdir -p "${SAVED%/*}"
+    ipset save "$SET" > "$SAVED.new" && mv "$SAVED.new" "$SAVED"
+    ipset flush "$SET"
+    ;;
+trust)
+    # pam_exec runs this when a session opens and when it closes.
+    [ "${PAM_TYPE:-}" = open_session ] || exit 0
+
+    # A source in the set goes to the fast lane, so a source added while the
+    # fast lane is down is a source locked out.
+    systemctl is-active --quiet ssh-fastlane || exit 0
+
+    # IPv4 only, as the set is.  PAM_RHOST is a name if UseDNS is on.
+    case "${PAM_RHOST:-}" in
+        '' | *[!0-9.]*) exit 0 ;;
+    esac
+    ipset -exist add "$SET" "$PAM_RHOST" timeout "$TIMEOUT"
+    ;;
+firewall)
+    case "${2:-}" in
+        start) firewall_start ;;
+        stop | flush-all) firewall_stop ;;
+    esac
+    ;;
+*)
+    echo "usage: ssh-fastlane open|close|trust|firewall start|firewall stop" >&2
+    exit 2
+    ;;
+esac

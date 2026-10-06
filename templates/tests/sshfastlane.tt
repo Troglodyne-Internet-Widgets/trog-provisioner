@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+use IO::Socket::INET;
+
+my $port = [% port %];
+
+is( system('systemctl is-active --quiet ssh-fastlane'), 0, 'the fast lane sshd runs' );
+
+# What sshd reads, not what the file says.  The include can add a ListenAddress,
+# because sshd adds them up, and then the fast lane binds a port of the main sshd.
+my $effective = `sshd -T -f /etc/ssh/sshd_fastlane_config 2>&1`;
+my @listen    = $effective =~ m/^listenaddress (\S+)$/mg;
+is_deeply( \@listen, ["0.0.0.0:$port"], 'it listens on its own port and nothing else' ) or diag $effective;
+like( $effective, qr/^maxstartups \Q[% max_startups %]\E$/m, 'with its own MaxStartups' ) or diag $effective;
+like( $effective, qr/^passwordauthentication no$/m, 'and the authentication policy of the main sshd' ) or diag $effective;
+
+# Loopback is exempt from the drop, so this reaches the sshd itself.
+my $sock = IO::Socket::INET->new( PeerAddr => '127.0.0.1', PeerPort => $port, Timeout => 5 );
+my $banner = $sock ? ( <$sock> // '' ) : '';
+like( $banner, qr/^SSH-2\.0-/, 'and answers as sshd' ) or diag "connect: $!";
+
+my $set = `ipset list ssh-fastlane 2>&1`;
+like( $set, qr/^Header:.*\btimeout \d+/m, 'the set exists, with a timeout for its members' ) or diag $set;
+
+# After a reload as well.  ufw-init runs after.init start twice on a reload,
+# so a rule that is not added once is added twice.
+system('ufw reload >/dev/null 2>&1');
+
+my $nat = `iptables -t nat -S 2>&1`;
+my @nat_jumps = $nat =~ m/^-A PREROUTING -j trog-fastlane$/mg;
+is( scalar @nat_jumps, 1, 'PREROUTING enters the fast lane once' ) or diag $nat;
+like( $nat, qr/^-A trog-fastlane -p tcp .*--dport 22 .*--match-set ssh-fastlane src .*--to-ports \Q$port\E$/m,
+    'and redirects port 22 from the set to the fast lane' ) or diag $nat;
+
+my $filter = `iptables -S 2>&1`;
+my @in_jumps = $filter =~ m/^-A INPUT -j trog-fastlane$/mg;
+is( scalar @in_jumps, 1, 'INPUT enters the fast lane once' ) or diag $filter;
+like( $filter, qr/^-A trog-fastlane -p tcp .*--dport \Q$port\E .*! --ctstate DNAT -j DROP$/m,
+    'and drops a connection to the fast lane that the redirect did not send' ) or diag $filter;
+
+my $ufw = `ufw status 2>&1`;
+like( $ufw, qr/^ssh-fastlane\s+ALLOW/m, 'ufw lets the redirected connections through' ) or diag $ufw;
+
+my $pam   = do { local ( @ARGV, $/ ) = '/etc/pam.d/sshd'; <> } // '';
+my @hooks = $pam =~ m/^session\s+optional\s+pam_exec\.so .*ssh-fastlane trust$/mg;
+is( scalar @hooks, 1, 'each login of sshd runs the trust hook once' ) or diag $pam;
+
+# Addresses from the documentation ranges, which no client has.
+my $v4 = '192.0.2.7';
+sub trust {
+    my ( $rhost, $type ) = @_;
+    return system("env PAM_TYPE='$type' PAM_RHOST='$rhost' /usr/local/sbin/ssh-fastlane trust");
+}
+sub member { return system("ipset test ssh-fastlane '$_[0]' >/dev/null 2>&1") == 0 }
+
+trust( $v4, 'close_session' );
+ok( !member($v4), 'the end of a session trusts nobody' );
+
+trust( $v4, 'open_session' );
+ok( member($v4), 'a login puts its address in the set' );
+
+is( trust( '2001:db8::7', 'open_session' ), 0, 'an IPv6 login is left alone, and the hook does not fail it' );
+
+# The set is full only while the fast lane runs, and it keeps its members across
+# a restart.
+system('systemctl stop ssh-fastlane');
+ok( !member($v4), 'a stopped fast lane empties the set, so nobody is redirected to a closed port' );
+trust( $v4, 'open_session' );
+ok( !member($v4), 'and a login while it is down adds nobody' );
+
+system('systemctl start ssh-fastlane');
+ok( member($v4), 'a started fast lane takes its members back' );
+
+system("ipset del ssh-fastlane $v4 >/dev/null 2>&1");
+system('systemctl restart ssh-fastlane');
+ok( !member($v4), 'and the removed test address does not come back' );
+
+done_testing();
