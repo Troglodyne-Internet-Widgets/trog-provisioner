@@ -27,6 +27,7 @@ use File::Slurper::Temp();
 use IPC::Run3();
 
 use FindBin::libs;
+use Provisioner::Vars();
 
 use_ok('Trog::Machine') or BAIL_OUT('Trog::Machine does not load; the install is incomplete');
 
@@ -304,7 +305,7 @@ subtest 'a file copied here with sudo gets the mode it was asked for' => sub {
         my ($self) = @_;
         ## no critic (Variables::RequireLocalizedPunctuationVars) -- run_sudo reads it afterwards, as it would from the real call
         if ( !$self->{sent}++ ) {
-            $? = 1 << 8;
+            $? = $Provisioner::Vars::STATUS_EXIT_1;
             return ( undef, $self->{said} );
         }
         $? = 0;

@@ -31,6 +31,7 @@ use Time::HiRes qw{sleep time};
 use FindBin;
 
 use FindBin::libs;
+use Provisioner::Vars();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -585,10 +586,10 @@ subtest 'a sudo password is asked for once and then remembered' => sub {
 
             # -n gets the message sudo gives when it cannot ask.
             if ( any { $_ eq '-n' } @cmd ) {
-                $? = 1 << 8;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+                $? = $Provisioner::Vars::STATUS_EXIT_1;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
                 return ( '', "sudo: a password is required\n" );
             }
-            $? = 0;             ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+            $? = 0;                                        ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );
@@ -669,7 +670,7 @@ subtest 'a sudo password that is wrong three times stops the command' => sub {
         capture2 => sub {
             my ( $self, $opts, @cmd ) = @_;
             push @attempts, $opts->{stdin_data};
-            $? = 1 << 8;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+            $? = $Provisioner::Vars::STATUS_EXIT_1;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', defined $opts->{stdin_data} ? "Sorry, try again.\n" : "sudo: a password is required\n" );
         }
     );
@@ -695,12 +696,12 @@ subtest 'with no terminal to ask at, say what to configure' => sub {
 
     my $mock = Test::MockModule->new('Net::OpenSSH::More');
     $mock->redefine( new      => sub { bless {}, shift } );
-    $mock->redefine( capture2 => sub { $? = 1 << 8; return ( '', "sudo: a password is required\n" ) } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+    $mock->redefine( capture2 => sub { $? = $Provisioner::Vars::STATUS_EXIT_1; return ( '', "sudo: a password is required\n" ) } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
 
     local $Trog::Credentials::TERMINAL = '/bogus/tty';
 
     my $err = exception { $hv->run_sudo(qw{systemctl restart rsyslog}) };
-    like( $err, qr/wants[ ]a[ ]password,[ ]and[ ]it[ ]could[ ]not[ ]be[ ]asked[ ]for/, 'says what happened' );           ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr/wants[ ]a[ ]password,[ ]and[ ]it[ ]could[ ]not[ ]be[ ]asked[ ]for/, 'says what happened' );                         ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $err, qr{Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal:[ ]/bogus/tty},       'and why it could not ask' );
     like( $err, qr/NOPASSWD/,                                                          'and what to put in sudoers' );
     like( $err, qr/\broot\b/,                                                          'for the right user' );
@@ -719,10 +720,10 @@ subtest 'the sudo password is asked for the same way every other one is' => sub 
 
             # -n is the probe; it fails by design, which is what sends us to ask.
             if ( any { $_ eq '-n' } @cmd ) {
-                $? = 1 << 8;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+                $? = $Provisioner::Vars::STATUS_EXIT_1;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
                 return ( '', "sudo: a password is required\n" );
             }
-            $? = 0;             ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+            $? = 0;                                        ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );
@@ -852,30 +853,30 @@ subtest 'how big a qcow2 has to be before its layout changes' => sub {
     # Subclusters are the point of the exercise: every guest disk is an overlay
     # on the shared base image, and without them a 4K write into a hole rewrites
     # a whole cluster out of the backing file.  Size has nothing to do with it.
-    my %small = $hv->qcow2_tuning( 40 * 1024**3 );
+    my %small = $hv->qcow2_tuning( 40 * $Provisioner::Vars::GB );
     ok( $small{extended_l2}, 'a 40G overlay gets subcluster allocation' );
     is( $small{cluster_size},   undef, 'at the default cluster size' );
     is( $small{metadata_cache}, undef, 'and qemu is left to size its own metadata cache' );
 
     # 128 GiB is where the default 32 MiB of metadata cache stops covering the
     # whole image once extended L2 entries have doubled in width.
-    my %edge = $hv->qcow2_tuning( 128 * 1024**3 );
+    my %edge = $hv->qcow2_tuning( 128 * $Provisioner::Vars::GB );
     is( $edge{cluster_size}, undef, 'the last size the default cluster still covers is left alone' );
 
-    my %large = $hv->qcow2_tuning( 200 * 1024**3 );
-    is( $large{cluster_size},   1024 * 1024, 'past it, 1M clusters buy the coverage back' );
-    is( $large{metadata_cache}, undef,       'which is enough on its own, so the cache is still qemu default' );
+    my %large = $hv->qcow2_tuning( 200 * $Provisioner::Vars::GB );
+    is( $large{cluster_size},   $Provisioner::Vars::MB, 'past it, 1M clusters buy the coverage back' );
+    is( $large{metadata_cache}, undef,                  'which is enough on its own, so the cache is still qemu default' );
 
     # And past what even that covers, the cache is raised rather than the
     # clusters made coarser again.
-    my %huge = $hv->qcow2_tuning( 8 * 1024**4 );
-    is( $huge{cluster_size},   1024 * 1024,       '8T keeps the 1M clusters' );
-    is( $huge{metadata_cache}, 128 * 1024 * 1024, 'and asks for the metadata cache it actually needs' );
+    my %huge = $hv->qcow2_tuning( 8 * $Provisioner::Vars::TB );
+    is( $huge{cluster_size},   $Provisioner::Vars::MB,       '8T keeps the 1M clusters' );
+    is( $huge{metadata_cache}, 128 * $Provisioner::Vars::MB, 'and asks for the metadata cache it actually needs' );
 
     # Host memory, held for as long as the domain runs, and not counted by
     # anything in Trog::Hypervisors.  So there is a ceiling on it.
-    my %vast = $hv->qcow2_tuning( 64 * 1024**4 );
-    is( $vast{metadata_cache}, 256 * 1024 * 1024, 'up to a limit, past which it stops asking' );
+    my %vast = $hv->qcow2_tuning( 64 * $Provisioner::Vars::TB );
+    is( $vast{metadata_cache}, 256 * $Provisioner::Vars::MB, 'up to a limit, past which it stops asking' );
 };
 
 subtest 'the disk is created with the tuning that was decided for it' => sub {
@@ -887,7 +888,7 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
     $mock->redefine( pool         => sub { FakeBuildPool->new( \@created ) } );
     $mock->redefine( qcow2_tuning => sub { ( extended_l2 => 1, cluster_size => 1048576 ) } );
 
-    quietly( sub { $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ) } );
+    quietly( sub { $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * $Provisioner::Vars::GB ) } );
 
     like( $created[0], qr{<clusterSize[ ]unit='bytes'>1048576</clusterSize>}, 'the cluster size reaches the volume' );
     like( $created[0], qr{<features><extended_l2/></features>},               'and so does subcluster allocation' );
@@ -896,7 +897,7 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
     # a disk that already exists stays exactly as it is.  It is a filesystem.
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/big-qcow2' } );
     is(
-        $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ),
+        $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * $Provisioner::Vars::GB ),
         '/opt/terraform/disks/big-qcow2', 'an existing disk is not remade to suit a new opinion'
     );
     is( scalar @created, 1, 'and nothing new was created' );
@@ -1697,7 +1698,7 @@ subtest 'a command that names its own timeout is not called hung before it' => s
 
     is(
         Trog::Machine::hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),
-        180 * 60 + 60, 'one that says 180m gets 180m and a minute'
+        10_860, 'one that says 180m gets 180m and a minute'
     );
 
     is(

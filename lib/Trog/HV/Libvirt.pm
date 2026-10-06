@@ -20,6 +20,7 @@ use File::Basename();
 use File::Slurper();
 use Cpanel::JSON::XS();
 use Provisioner::Cookbook();
+use Provisioner::Vars();
 
 # The snapshot of a new, empty overlay, which a rebuild that keeps the disk
 # reverts to.  create_disk takes it and clear_guest reverts to it.  It is
@@ -1403,18 +1404,18 @@ sub zfs_version {
 
 # The default qemu cluster size, and the size for a disk too large for the
 # metadata cache.
-my $QCOW2_DEFAULT_CLUSTER = 64 * 1024;
-my $QCOW2_LARGE_CLUSTER   = 1024 * 1024;
+my $QCOW2_DEFAULT_CLUSTER = 64 * $Provisioner::Vars::KB;
+my $QCOW2_LARGE_CLUSTER   = $Provisioner::Vars::MB;
 
 # The default qemu memory for qcow2 metadata, and the most that we ask for.  Both
 # are for each running domain, in host memory that Trog::Hypervisors does not
 # count.
-my $QCOW2_METADATA_DEFAULT = 32 * 1024 * 1024;
-my $QCOW2_METADATA_CAP     = 256 * 1024 * 1024;
+my $QCOW2_METADATA_DEFAULT = 32 * $Provisioner::Vars::MB;
+my $QCOW2_METADATA_CAP     = 256 * $Provisioner::Vars::MB;
 
 # Above this size, the default metadata cache does not cover the whole image.
 # qcow2_tuning gives the arithmetic.
-my $QCOW2_LARGE_DISK = 128 * 1024 * 1024 * 1024;
+my $QCOW2_LARGE_DISK = 128 * $Provisioner::Vars::GB;
 
 =head2 qcow2_tuning($capacity)
 
@@ -1799,11 +1800,11 @@ sub capacity {
         my $info = eval { $domain->get_info() } or next;
 
         # maxMem is the most memory the guest can use, so it counts in full.
-        $memory_committed += ( $info->{maxMem}    // 0 ) / 1024;
+        $memory_committed += ( $info->{maxMem}    // 0 ) / $Provisioner::Vars::KB;
         $cpus_committed   += ( $info->{nrVirtCpu} // 0 ) if eval { $domain->is_active() };
     }
 
-    my $memory_mb        = ( $node->{memory} // 0 ) / 1024;
+    my $memory_mb        = ( $node->{memory} // 0 ) / $Provisioner::Vars::KB;
     my $cpus             = $node->{cpus} // 0;
     my $cpus_allocatable = $cpus * $self->cpu_overcommit;
 
@@ -2282,7 +2283,7 @@ sub note_pool_quota {
     my $under = $fstype eq 'zfs' ? 'the zpool ' . zpool_of( $space->{source} ) : "the filesystem at $space->{mount}";
     return {
         ok   => 0,
-        what => sprintf( 'The %s pool has no quota: %s has all %.1fGB that %s has free', $name, $space->{path}, $space->{avail} / 1_073_741_824, $under ),
+        what => sprintf( 'The %s pool has no quota: %s has all %.1fGB that %s has free', $name, $space->{path}, $space->{avail} / $Provisioner::Vars::GB, $under ),
         fix  => pool_quota_advice( $fstype, $name, $space ),
     };
 }

@@ -22,6 +22,7 @@ use Config::Simple();
 
 use FindBin;
 use FindBin::libs;
+use Provisioner::Vars();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -36,7 +37,7 @@ use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Trog::Hypervisors();
 
-my $GB = 1024 * 1024 * 1024;
+my $GB = $Provisioner::Vars::GB;
 
 # A hypervisors.conf with two machines in it.
 sub fleet_file {
@@ -545,14 +546,14 @@ subtest 'capacity counts what is committed, not what is used' => sub {
     $mock->redefine( pool_free => sub { 200 * $GB } );
 
     my $have = $hv->capacity;
-    is( $have->{memory_mb},        32768,                'physical memory in MB' );
-    is( $have->{memory_committed}, 12288,                'the sum of what guests may grow into, idle or not' );
-    is( $have->{memory_free},      32768 - 12288 - 2048, 'free is physical less committed less the reserve' );
-    is( $have->{cpus},             8,                    'physical CPUs' );
-    is( $have->{cpus_allocatable}, 32,                   'times the overcommit ratio' );
-    is( $have->{cpus_committed},   6,                    'vCPUs of running guests only' );
-    is( $have->{cpus_free},        32 - 6 - 2,           'free CPUs after the reserve' );
-    is( $have->{guests},           3,                    'domains, running or not' );
+    is( $have->{memory_mb},        32768,  'physical memory in MB' );
+    is( $have->{memory_committed}, 12288,  'the sum of what guests may grow into, idle or not' );
+    is( $have->{memory_free},      18_432, 'free is physical less committed less the reserve' );
+    is( $have->{cpus},             8,      'physical CPUs' );
+    is( $have->{cpus_allocatable}, 32,     'times the overcommit ratio' );
+    is( $have->{cpus_committed},   6,      'vCPUs of running guests only' );
+    is( $have->{cpus_free},        24,     'free CPUs after the reserve' );
+    is( $have->{guests},           3,      'domains, running or not' );
 
     is( $hv->capacity, $have, 'cached, so we ask libvirt once' );
 };
@@ -587,15 +588,15 @@ subtest 'shortfalls and headroom' => sub {
     package FakeVMM;
 
     sub new           { return bless {}, shift }
-    sub get_node_info { return { memory => 32768 * 1024, cpus => 8, model => 'x86_64' } }
+    sub get_node_info { return { memory => 32768 * $Provisioner::Vars::KB, cpus => 8, model => 'x86_64' } }
 
     sub list_all_domains {
         return (
-            FakeDomain->new( maxMem => 4096 * 1024, nrVirtCpu => 2, active => 1 ),
-            FakeDomain->new( maxMem => 4096 * 1024, nrVirtCpu => 4, active => 1 ),
+            FakeDomain->new( maxMem => 4096 * $Provisioner::Vars::KB, nrVirtCpu => 2, active => 1 ),
+            FakeDomain->new( maxMem => 4096 * $Provisioner::Vars::KB, nrVirtCpu => 4, active => 1 ),
 
             # Shut off, so its memory is still committed but its vCPUs are not.
-            FakeDomain->new( maxMem => 4096 * 1024, nrVirtCpu => 8, active => 0 ),
+            FakeDomain->new( maxMem => 4096 * $Provisioner::Vars::KB, nrVirtCpu => 8, active => 0 ),
         );
     }
 }

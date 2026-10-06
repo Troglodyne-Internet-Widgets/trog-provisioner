@@ -20,6 +20,7 @@ use Test::MockModule qw{strict};
 use Cpanel::JSON::XS();
 
 use FindBin::libs;
+use Provisioner::Vars();
 
 use SolusVM::Client();      ## no critic (ProhibitUnusedImports) -- loaded so that HTTP::Tiny, which it pulls in, is there to mock below
 use Trog::HV();
@@ -48,8 +49,8 @@ sub reset_node {
             { name => 'Ubuntu', versions => [ { id => 40, version => '24.04' } ] },
         ],
         plans => [
-            { id => 2375, name => 'c8.d80.r1024 - Shared LVM', tokens_per_month => 0, params => { ram => 1024 * 1024 * 1024,     vcpu => 8, cores => 1, disk => 80 } },
-            { id => 2335, name => 'c2.d40.r4096 - Shared LVM', tokens_per_month => 0, params => { ram => 4 * 1024 * 1024 * 1024, vcpu => 2, cores => 2, disk => 40 } },
+            { id => 2375, name => 'c8.d80.r1024 - Shared LVM', tokens_per_month => 0, params => { ram => $Provisioner::Vars::GB,     vcpu => 8, cores => 1, disk => 80 } },
+            { id => 2335, name => 'c2.d40.r4096 - Shared LVM', tokens_per_month => 0, params => { ram => 4 * $Provisioner::Vars::GB, vcpu => 2, cores => 2, disk => 40 } },
         ],
         servers   => [],
         snapshots => {},
@@ -238,14 +239,14 @@ subtest 'what the node sells' => sub {
     is $hv->plan('c2.d40.r4096 - Shared LVM')->{id}, 2335, 'and by name, which is what a person writes';
     like exception { $hv->plan('nonesuch') }, qr/no[ ]plan[ ]'nonesuch'/, 'and one the node does not sell is refused by name';
 
-    my $cheapest = $hv->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 10 * 1024 * 1024 * 1024 );
+    my $cheapest = $hv->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 10 * $Provisioner::Vars::GB );
     is $cheapest->{key},   'solusvm_plan', 'an offer names the key the guest would set';
     is $cheapest->{value}, 2375,           'and the smallest plan that holds it, every plan here costing nothing';
 
     $cheapest = $hv->cheapest_for( memory_mb => 2048 );
     is $cheapest->{value}, 2335, 'a guest too big for the small one is offered the next';
 
-    is $hv->cheapest_for( memory_mb => 1024 * 1024 ), undef, 'and one too big for anything is offered nothing';
+    is $hv->cheapest_for( memory_mb => 1_048_576 ), undef, 'and one too big for anything is offered nothing';
 };
 
 subtest 'an image is a version, not an image' => sub {

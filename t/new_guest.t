@@ -20,6 +20,7 @@ use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stderr};
 use FindBin;
 use FindBin::libs;
+use Provisioner::Vars();
 use Provisioner::Cookbook();
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -90,9 +91,9 @@ subtest 'the domain block asks the hypervisor for enough to build with' => sub {
 
     # And they are the ones that matter, said once so that changing them here
     # is a deliberate act rather than a drift.
-    is( $vm{memory}, 8092,         'enough memory to build perl in' );
-    is( $vm{cpus},   4,            'and enough CPUs' );
-    is( $vm{size},   40 * 1024**3, 'on a 40GB overlay' );
+    is( $vm{memory}, 8092,                        'enough memory to build perl in' );
+    is( $vm{cpus},   4,                           'and enough CPUs' );
+    is( $vm{size},   40 * $Provisioner::Vars::GB, 'on a 40GB overlay' );
     ok( !exists $global->{user}, 'no service account unless asked for: a scratch guest wants none' );
 
     ($config) = Trog::Bin::NewGuest::build(

@@ -24,6 +24,7 @@ use File::Path       qw{make_path};
 
 use FindBin;
 use FindBin::libs;
+use Provisioner::Vars();
 
 my $script = "$FindBin::Bin/../scripts/cpan_install";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
@@ -159,10 +160,10 @@ subtest 'test: the prove of that perl, in the checkout' => sub {
 };
 
 subtest 'exit_code: what a child exit status says, the way a shell says it' => sub {
-    is( Trog::Script::CpanInstall::exit_code(0),        0,   'success' );
-    is( Trog::Script::CpanInstall::exit_code( 2 << 8 ), 2,   'the code it exited with' );
-    is( Trog::Script::CpanInstall::exit_code(-1),       127, 'a command that never ran' );
-    is( Trog::Script::CpanInstall::exit_code(9),        137, 'a command killed by a signal, rather than a success' );
+    is( Trog::Script::CpanInstall::exit_code(0),                                 0,   'success' );
+    is( Trog::Script::CpanInstall::exit_code($Provisioner::Vars::STATUS_EXIT_2), 2,   'the code it exited with' );
+    is( Trog::Script::CpanInstall::exit_code(-1),                                127, 'a command that never ran' );
+    is( Trog::Script::CpanInstall::exit_code(9),                                 137, 'a command killed by a signal, rather than a success' );
 };
 
 subtest 'which installer: cpm for what the mirror index names, cpanm for what it cannot' => sub {

@@ -15,6 +15,7 @@ use MIME::Base64();
 
 use Time::HiRes qw{sleep time};
 use Provisioner::Cookbook();
+use Provisioner::Vars();
 
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
@@ -78,9 +79,6 @@ the guest can reach, and F<bin/preflight> checks it.
 =head1 CLASS METHODS
 
 =cut
-
-# Cinder reports its quota in gigabytes.
-my $GB = 1024 * 1024 * 1024;
 
 # Written into the Nova metadata of every guest this tool builds, to mark the
 # guest as ours.
@@ -371,7 +369,7 @@ sub cheapest_for {
                  ref $_
               && ( $_->{ram}   // 0 ) >= ( $needs{memory_mb} // 0 )
               && ( $_->{vcpus} // 0 ) >= ( $needs{cpus}      // 0 )
-              && ( $_->{disk}  // 0 ) * $GB >=
+              && ( $_->{disk}  // 0 ) * $Provisioner::Vars::GB >=
               ( $needs{disk_bytes} // 0 )
 
               # What the image asks of what it is booted on.
@@ -436,8 +434,8 @@ sub shortfalls {
       if ( $needs{memory_mb} // 0 ) > ( $flavor->{ram} // 0 );
     push @reasons, sprintf( 'wants %d vCPUs, and %s has %d', $needs{cpus}, $named, $flavor->{vcpus} )
       if ( $needs{cpus} // 0 ) > ( $flavor->{vcpus} // 0 );
-    push @reasons, sprintf( 'wants %dGB of disk, and %s has %dGB', ( $needs{disk_bytes} // 0 ) / $GB, $named, $flavor->{disk} // 0 )
-      if ( $needs{disk_bytes} // 0 ) > ( $flavor->{disk} // 0 ) * $GB;
+    push @reasons, sprintf( 'wants %dGB of disk, and %s has %dGB', ( $needs{disk_bytes} // 0 ) / $Provisioner::Vars::GB, $named, $flavor->{disk} // 0 )
+      if ( $needs{disk_bytes} // 0 ) > ( $flavor->{disk} // 0 ) * $Provisioner::Vars::GB;
 
     # And what the image asks of whatever it is booted on, which Nova refuses
     # a flavor under: "Flavor's disk is smaller than the minimum size specified

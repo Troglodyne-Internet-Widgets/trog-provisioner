@@ -17,6 +17,7 @@ use Test::MockModule qw{strict};
 use IO::String;
 
 use FindBin::libs;
+use Provisioner::Vars();
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
@@ -173,7 +174,7 @@ subtest 'sudo on a machine nobody is watching' => sub {
             my ( $self, $opts ) = @_;
             push( @stdin, $opts->{stdin_data} );
             ## no critic (Variables::RequireLocalizedPunctuationVars) -- run_sudo reads it afterwards, as it would from the real call
-            $? = ( $opts->{stdin_data} // q{} ) eq "hunter2\n" ? 0 : 1 << 8;
+            $? = ( $opts->{stdin_data} // q{} ) eq "hunter2\n" ? 0 : $Provisioner::Vars::STATUS_EXIT_1;
             return ( q{}, $? ? "sudo: a password is required\n" : q{} );
         }
     );

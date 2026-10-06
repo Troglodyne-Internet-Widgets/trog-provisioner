@@ -15,6 +15,7 @@ use MIME::Base64();
 use Cpanel::JSON::XS();
 use Crypt::PRNG();
 use Time::HiRes qw{sleep time};
+use Provisioner::Vars();
 
 =head1 NAME
 
@@ -76,12 +77,6 @@ our $IMAGE_TIMEOUT  = 3600;
 our $BUSY_TIMEOUT   = 300;
 our $DELETE_TIMEOUT = 300;
 our $POLL           = 5;
-
-# What Linode's own monthly prices are a month of.
-our $HOURS_A_MONTH = 730;
-
-# What Linode reports in megabytes.
-my $MB = 1024 * 1024;
 
 =head2 config_keys
 
@@ -230,7 +225,7 @@ my sub type_of ( $self, $id ) {
 
 # The monthly price of a type in a region, or of its backup service.  Linode
 # gives 30 of its 75 types an hourly price and no monthly one -- the GPU and
-# accelerated ones -- so a month of one of those is $HOURS_A_MONTH hours of it,
+# accelerated ones -- so a month of one of those is $Provisioner::Vars::HOURS_A_MONTH hours of it,
 # which is the most it can cost rather than what it will.
 my sub price ( $self, $type_id, $region, $addon = undef ) {
     my $type = type_of( $self, $type_id );
@@ -239,8 +234,8 @@ my sub price ( $self, $type_id, $region, $addon = undef ) {
     my ($local) = grep { $_->{id} eq $region } @{ $item->{region_prices} // [] };
     my $price = $local // $item->{price} // {};
 
-    return $price->{monthly}                 if defined $price->{monthly};
-    return $price->{hourly} * $HOURS_A_MONTH if defined $price->{hourly};
+    return $price->{monthly}                                    if defined $price->{monthly};
+    return $price->{hourly} * $Provisioner::Vars::HOURS_A_MONTH if defined $price->{hourly};
 
     die "Linode reports no price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n";
 }
@@ -312,7 +307,7 @@ A type that would take the account over C<monthly_budget> is not offered: an
 offer that cannot be accepted is noise.
 
 Linode prices 30 of its 75 types by the hour alone, its GPU and accelerated
-ones.  Those are offered too, priced at C<$HOURS_A_MONTH> hours of the hourly
+ones.  Those are offered too, priced at C<$Provisioner::Vars::HOURS_A_MONTH> hours of the hourly
 rate, and the offer comes back with C<hourly> as well, so that what is said
 about it can say that it is billed by the hour and has no monthly price to be
 capped at.  Undef when no type holds the guest,
@@ -324,7 +319,7 @@ sub cheapest_for {
     my ( $self, %needs ) = @_;
 
     my @fit = eval {
-        grep { $_->{memory} >= ( $needs{memory_mb} // 0 ) && $_->{vcpus} >= ( $needs{cpus} // 0 ) && $_->{disk} * $MB >= ( $needs{disk_bytes} // 0 ) } every_page( $self, 'get-linode-types' );
+        grep { $_->{memory} >= ( $needs{memory_mb} // 0 ) && $_->{vcpus} >= ( $needs{cpus} // 0 ) && $_->{disk} * $Provisioner::Vars::MB >= ( $needs{disk_bytes} // 0 ) } every_page( $self, 'get-linode-types' );
     };
     return undef unless @fit;
 
@@ -390,7 +385,7 @@ sub capacity {
         cpus_allocatable => $type->{vcpus},
         cpus_committed   => 0,
         cpus_free        => $type->{vcpus},
-        disk_free        => $type->{disk} * $MB,
+        disk_free        => $type->{disk} * $Provisioner::Vars::MB,
         guests           => scalar linodes($self),
     };
 }

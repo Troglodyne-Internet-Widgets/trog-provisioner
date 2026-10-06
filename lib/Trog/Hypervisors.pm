@@ -12,6 +12,7 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Utils();
 use Provisioner::Cookbook();
+use Provisioner::Vars();
 
 =head1 NAME
 
@@ -361,7 +362,7 @@ sub place {
     die "Nowhere to put $domain: it wants " . sprintf(
         "%dMB of memory, %d CPUs and %dGB of disk, and no hypervisor in %s can spare that.\n",
         $needs{memory_mb} // 0,                               $needs{cpus} // 0,
-        ( $needs{disk_bytes} // 0 ) / ( 1024 * 1024 * 1024 ), $self->{path}
+        ( $needs{disk_bytes} // 0 ) / $Provisioner::Vars::GB, $self->{path}
       )
       . join( "\n", @why_not ) . "\n"
       unless @fits;

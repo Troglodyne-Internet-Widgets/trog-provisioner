@@ -25,6 +25,7 @@ use List::Util();
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use FindBin::libs;
+use Provisioner::Vars();
 
 use Trog::HV();
 use Trog::HV::OpenStack();
@@ -234,14 +235,14 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     );
 
     my $have = $hv->capacity;
-    my $GB   = 1024 * 1024 * 1024;
+    my $GB   = $Provisioner::Vars::GB;
 
-    is $have->{memory_mb},        51200,                               'the allowance is the memory figure, not a physical count';
-    is $have->{memory_committed}, 32768,                               'and the usage comes with it';
-    is $have->{memory_free},      51200 - 32768 - $hv->reserve_memory, 'less what we hold back';
-    is $have->{cpus},             40,                                  'cores';
-    is $have->{cpus_allocatable}, 40,                                  'and no overcommit applied to them';
-    is $have->{cpus_free},        40 - 20 - $hv->reserve_cpus,         'less the reserve';
+    is $have->{memory_mb},        51200,                        'the allowance is the memory figure, not a physical count';
+    is $have->{memory_committed}, 32768,                        'and the usage comes with it';
+    is $have->{memory_free},      18_432 - $hv->reserve_memory, 'less what we hold back';
+    is $have->{cpus},             40,                           'cores';
+    is $have->{cpus_allocatable}, 40,                           'and no overcommit applied to them';
+    is $have->{cpus_free},        20 - $hv->reserve_cpus,       'less the reserve';
 
     # Not from Cinder: a guest boots from an image onto the disk of its flavor,
     # and takes nothing out of the volume quota.  A project with none of that
@@ -304,7 +305,7 @@ subtest 'an unlimited quota has room for anything, rather than for nothing' => s
     is $have->{cpus_free},   undef, 'nor of cores';
     is $hv->max_guests,      0,     'and an unlimited instance quota caps nothing';
 
-    is_deeply [ $hv->shortfalls( openstack_flavor => 'm1.medium', memory_mb => 4096, cpus => 2, disk_bytes => 40 * 1024**3 ) ], [],
+    is_deeply [ $hv->shortfalls( openstack_flavor => 'm1.medium', memory_mb => 4096, cpus => 2, disk_bytes => 40 * $Provisioner::Vars::GB ) ], [],
       'a guest its flavor holds fits, where before nothing did';
 
     my $ok = $hv->check_cloud_quota;
@@ -326,11 +327,11 @@ subtest 'cheapest_for' => sub {
     $FAKE = Test::FakeCloud->new( flavors_detail => \@flavors, limits => $roomy );
 
     # Smallest rather than cheapest: Nova gives a flavor no price at all.
-    is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 10 * 1024**3 ),
+    is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 10 * $Provisioner::Vars::GB ),
       { key => 'openstack_flavor', value => 'm1.small', monthly_cost => 0 },
       'the smallest flavor that holds the guest, costing nothing that Nova will say';
 
-    is_deeply $hv->cheapest_for( memory_mb => 4096, cpus => 2, disk_bytes => 30 * 1024**3 ),
+    is_deeply $hv->cheapest_for( memory_mb => 4096, cpus => 2, disk_bytes => 30 * $Provisioner::Vars::GB ),
       { key => 'openstack_flavor', value => 'm1.medium', monthly_cost => 0 },
       'a bigger guest gets a bigger one';
 
