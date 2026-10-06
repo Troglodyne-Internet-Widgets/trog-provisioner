@@ -262,10 +262,10 @@ subtest 'capacity is the plan the guest named' => sub {
     my $hv = node();
 
     my $have = $hv->capacity( solusvm_plan => 2375 );
-    is $have->{memory_mb}, 1024,                    "the plan's memory, in MB out of the bytes the node reports";
-    is $have->{cpus},      8,                       'its vcpus';
-    is $have->{disk_free}, 80 * 1024 * 1024 * 1024, 'and its disk, in bytes out of the gigabytes';
-    is $have->{guests},    0,                       'with the project counted for the guest count';
+    is $have->{memory_mb}, 1024,           "the plan's memory, in MB out of the bytes the node reports";
+    is $have->{cpus},      8,              'its vcpus';
+    is $have->{disk_free}, 85_899_345_920, 'and its disk, in bytes out of the gigabytes';
+    is $have->{guests},    0,              'with the project counted for the guest count';
 
     is $hv->reserve_memory, 0, 'no reserve is held back from a plan that is sold whole';
     is $hv->cpu_overcommit, 1, 'and a plan is already what you may run';

@@ -73,8 +73,8 @@ our $POLL = 5;
 # What SolusVM charges a plan by, when it charges at all.
 our $HOURS_A_MONTH = 730;
 
-my $MB = 1024 * 1024;
-my $GB = 1024 * 1024 * 1024;
+my $MB = 1_048_576;
+my $GB = 1_073_741_824;
 
 =head2 config_keys
 
