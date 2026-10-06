@@ -12,6 +12,7 @@ t/Provisioner-Vars.t - the shared numbers mean what their names say
 =cut
 
 use Test::More;
+use Test::Fatal qw{exception};
 use IPC::Run3();
 use Time::Piece();
 
@@ -44,6 +45,11 @@ subtest 'a month of hours is a year of them over twelve' => sub {
 
 subtest 'a day of seconds is what a timestamp moves in a day' => sub {
     is( $Provisioner::Vars::SECONDS_A_DAY, Time::Piece->strptime( '2026-01-02', '%Y-%m-%d' )->epoch - Time::Piece->strptime( '2026-01-01', '%Y-%m-%d' )->epoch, 'the seconds between two midnights' );
+};
+
+subtest 'nothing can change one' => sub {
+    like( exception { $Provisioner::Vars::GB = 1 }, qr/read-only/i, 'an assignment dies' );
+    is( $Provisioner::Vars::GB, 1_073_741_824, 'and the value is what it was' );
 };
 
 done_testing();

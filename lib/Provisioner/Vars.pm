@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Readonly;
+
 =head1 NAME
 
 Provisioner::Vars - the numbers that more than one module uses, each named once.
@@ -26,8 +28,10 @@ itself, and a reader has to work out what C<1024 * 1024 * 1024> or C<1 << 8>
 means each time.  Each one is here once, as the value, under a name that says
 what it is.
 
-They are package variables, as the other settings of this tree are, so a test
-can C<local>ise one.  Nothing exports them: write the whole name.
+They are package variables made with C<Readonly::Scalar>: a variable
+interpolates and can be searched for by its C<$>, and C<Readonly> refuses an
+assignment, so that nothing changes a number that every module reads.  Nothing
+exports them: write the whole name.
 
 =head2 Bytes
 
@@ -62,16 +66,16 @@ timeout given in days.
 
 =cut
 
-our $KB = 1_024;
-our $MB = 1_048_576;
-our $GB = 1_073_741_824;
-our $TB = 1_099_511_627_776;
+Readonly::Scalar our $KB => 1_024;
+Readonly::Scalar our $MB => 1_048_576;
+Readonly::Scalar our $GB => 1_073_741_824;
+Readonly::Scalar our $TB => 1_099_511_627_776;
 
-our $STATUS_EXIT_1    = 256;
-our $STATUS_EXIT_2    = 512;
-our $STATUS_NOT_FOUND = 32_512;
+Readonly::Scalar our $STATUS_EXIT_1    => 256;
+Readonly::Scalar our $STATUS_EXIT_2    => 512;
+Readonly::Scalar our $STATUS_NOT_FOUND => 32_512;
 
-our $HOURS_A_MONTH = 730;
-our $SECONDS_A_DAY = 86_400;
+Readonly::Scalar our $HOURS_A_MONTH => 730;
+Readonly::Scalar our $SECONDS_A_DAY => 86_400;
 
 1;
