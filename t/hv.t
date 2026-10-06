@@ -38,6 +38,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
+use Provisioner::Cookbook();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
@@ -155,6 +156,14 @@ subtest 'a backend that leaves something out is told what' => sub {
         my @missing = grep { $backend->can($_) == Trog::HV->can($_) } @owed;
         is_deeply( \@missing, [], "$backend implements every one of them" );
     }
+};
+
+subtest 'what a guest names to be sized on a backend is a setting the schema declares' => sub {
+    my %schema   = Provisioner::Cookbook->global_schema;
+    my @backends = grep { defined $_->size_key } Trog::HV->backends;
+
+    ok scalar @backends,                           'there are backends that size a guest by a key of their own, so this checks something';
+    ok exists $schema{properties}{ $_->size_key }, "$_ sizes a guest by " . $_->size_key . ', which _global accepts' foreach @backends;
 };
 
 subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
@@ -1881,7 +1890,8 @@ subtest 'each backend names the client it talks through' => sub {
     my %client = (
         'Trog::HV::Libvirt'   => ['Sys::Virt'],
         'Trog::HV::OpenStack' => ['OpenStack::MetaAPI'],
-        'Trog::HV::Linode'    => [ 'Linode::API', '0.002' ],
+        'Trog::HV::Linode'    => [ 'Linode::API',     '0.002' ],
+        'Trog::HV::SolusVM'   => [ 'SolusVM::Client', '0.001' ],
     );
 
     foreach my $backend ( sort Trog::HV->backends ) {
@@ -1892,18 +1902,18 @@ subtest 'each backend names the client it talks through' => sub {
 subtest 'a backend loads where its client is not installed' => sub {
 
     # The whole point: an installation of libvirt machines runs every script
-    # without either cloud's client, and a fleet of clouds without Sys::Virt.
+    # without any cloud's client, and a fleet of clouds without Sys::Virt.
     my $hide = <<'PERL';
-unshift( @INC, sub { my ( undef, $file ) = @_; die "not installed here\n" if $file =~ m{\A(?:Sys/Virt|OpenStack/MetaAPI|Linode/API)[.]pm\z}; return } );
+unshift( @INC, sub { my ( undef, $file ) = @_; die "not installed here\n" if $file =~ m{\A(?:Sys/Virt|OpenStack/MetaAPI|Linode/API|SolusVM/Client)[.]pm\z}; return } );
 require Trog::HV;
 my @backends = Trog::HV->backends;
-my @pulled = grep { $INC{$_} } qw{Sys/Virt.pm OpenStack/MetaAPI.pm Linode/API.pm};
+my @pulled = grep { $INC{$_} } qw{Sys/Virt.pm OpenStack/MetaAPI.pm Linode/API.pm SolusVM/Client.pm};
 print scalar(@backends) . " backends, clients loaded: " . ( join( q{,}, @pulled ) || 'none' ) . "\n";
 PERL
 
     IPC::Run3::run3( [ $^X, "-I$FindBin::Bin/../lib", '-e', $hide ], \undef, \my $out, \my $err );
-    is( $?,   0,                                    'every backend compiles with all three clients hidden' ) or diag($err);
-    is( $out, "3 backends, clients loaded: none\n", 'and loading them pulls in none of the three' );
+    is( $?,   0,                                    'every backend compiles with every client hidden' ) or diag($err);
+    is( $out, "4 backends, clients loaded: none\n", 'and loading them pulls in none of them' );
 };
 
 subtest 'a client that will not load says which, and how to install it' => sub {

@@ -1490,8 +1490,9 @@ sub global_schema {
                 description => 'The nameservers a guest asks, in order.  A loopback address belongs to a guest that runs its own, and nostubresolver puts that one in front.',
             },
 
-            linode_type      => { type => 'string', description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
-            openstack_flavor => { type => 'string', description => 'What this guest is on an OpenStack cloud: a flavor, by name or id.  A guest that names none is not built on one.  `openstack flavor list` lists them.' },
+            linode_type      => { type => 'string',             description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
+            openstack_flavor => { type => 'string',             description => 'What this guest is on an OpenStack cloud: a flavor, by name or id.  A guest that names none is not built on one.  `openstack flavor list` lists them.' },
+            solusvm_plan     => { type => [qw{string integer}], description => 'What this guest is on a SolusVM node: a plan, by name or id.  A guest that names none is not built on one.  bin/preflight says how many plans the node offers the project.' },
 
             libdir => { type => 'array', items => { type => 'string' }, description => 'Directories outside this checkout.  bin/new_config puts the lib/ of each on @INC and looks for templates in its templates/ after the ones here.' },
 

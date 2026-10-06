@@ -121,6 +121,7 @@ SSL
 SSSD
 statfs
 statvfs
+SolusVM
 SUDO
 Subclasses
 Subclusters
@@ -336,6 +337,7 @@ nameservers
 namespace
 nat
 nd
+netmask
 netplan
 nginx
 nginxdirindex
