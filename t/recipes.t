@@ -1266,9 +1266,11 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
             my ($program) = $command =~ m{\A(\S+)};
 
             # Installed by the fragment, under the name the command calls it by.
+            # Or rsync, which the salvage runs on the guest itself, so a guest
+            # without it has nothing to salvage anyway: see Trog::Machine/get_dir.
             my ($leaf) = $program =~ m{([^/]+)\z};
             ok(
-                index( $fragments, $program ) >= 0 || ( grep { $_ eq $leaf } values %generated ),
+                $program eq 'rsync' || index( $fragments, $program ) >= 0 || ( grep { $_ eq $leaf } values %generated ),
                 "$recipe: $program is something this recipe puts on the guest"
             ) or diag "remote_prepare wants $command and nothing in $recipe installs it";
         }

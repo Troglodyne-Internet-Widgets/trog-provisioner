@@ -32,7 +32,9 @@ C<simple-english> plugins on every guest.  They enable more plugins when the
 domain runs the C<perl> or C<perllsp> recipe.  Each enabled plugin comes with
 the marketplace that publishes it.
 
-The recipe salvages F<.claude.json> from that directory on the old guest.
+The recipe salvages F<.claude.json> from that directory on the old guest, and
+the memories that the agent saved, but not its transcripts.  See
+C<remote_prepare>.
 
 SLOP in the ice machine.
 
@@ -133,11 +135,55 @@ sub template_files {
     );
 }
 
+=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Copies the F<memory/> directory of each project under F<.claude/projects> into
+F<.claude-memory-salvage>, beside it in the directory of the domain, and
+nothing else, so that C<remote_files> fetches the memories and not the rest of
+that directory.  The rest is the transcript of every session and the output of
+its tools: hundreds of megabytes, and whatever passed through a session, secrets
+included.  It names what to keep, because a salvage can only exclude, and an
+exclude list lets through whatever Claude Code starts to keep there next.
+
+The command is rsync and not an installed script, so that it also runs on a
+guest built before this recipe salvaged memories.  Every guest has rsync,
+because the salvage itself runs it there.  On a guest with no
+F<.claude/projects>, it stages nothing and succeeds.
+
+=cut
+
+sub remote_prepare {
+    my ( $self, $install_dir, $domain ) = @_;
+    my $home = "$install_dir/$domain";
+
+    # No slash after projects, because --delete-missing-args covers only a
+    # source that names a file or directory, not the contents of one.  The
+    # include of /projects itself, because rsync takes a missing source for a
+    # file, and the exclude of everything else would keep its copy.
+    return ("rsync -a --delete --delete-missing-args --prune-empty-dirs --include='/projects' --include='*/' --include='/projects/*/memory/***' --exclude='*' '$home/.claude/projects' '$home/.claude-memory-salvage/'");
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        "$install_dir/$domain/.claude.json" => '.claude.json',
+        "$install_dir/$domain/.claude.json"            => '.claude.json',
+        "$install_dir/$domain/.claude-memory-salvage/" => 'claude/memory/',
     );
+}
+
+=head2 %restores = $recipe->restores(%opts)
+
+The salvaged memories go back to F<.claude/projects>, owned by the admin, whose
+C<HOME> the directory of the domain is.  On a guest that already has memories,
+C<restore_state> keeps them.
+
+=cut
+
+sub restores {
+    my ( $self, %opts ) = @_;
+    my ( $install_dir, $domain, $admin_user ) = @opts{qw{install_dir domain admin_user}};
+
+    return ( "$install_dir/$domain/.claude/projects" => { from => "$install_dir/$domain/claude/memory/projects", owner => "$admin_user:$admin_user" } );
 }
 
 sub tests {
