@@ -6,17 +6,27 @@
 install -d -m 2750 -o dovecot -g dovecot /mail/[% domain %]
 # opendkim
 mkdir -p /etc/opendkim/keys/[% domain %]
-mv TrustedHosts /etc/opendkim
-mv SigningTable /etc/opendkim
-mv KeyTable /etc/opendkim
-mv InternalHosts /etc/opendkim
+[%# opendkim reads one file for each table, for the whole guest.  So each
+    domain keeps its rows in a directory of its own, and the files that opendkim
+    reads are all of those rows, joined.  The host lists are sorted and made
+    unique, because each domain names the guest too.  The order of the signing
+    rows does not matter, because each names only its own domain. -%]
+install -d -m 0755 /etc/opendkim/tables.d/[% domain %]
+mv TrustedHosts SigningTable KeyTable InternalHosts /etc/opendkim/tables.d/[% domain %]/
+cat /etc/opendkim/tables.d/*/SigningTable > /etc/opendkim/SigningTable
+cat /etc/opendkim/tables.d/*/KeyTable > /etc/opendkim/KeyTable
+sort -u /etc/opendkim/tables.d/*/TrustedHosts > /etc/opendkim/TrustedHosts
+sort -u /etc/opendkim/tables.d/*/InternalHosts > /etc/opendkim/InternalHosts
 # The signing key that the last guest used, or a new one.  The data target
 # restores the key of this domain before this target runs.  If there is no
 # key, make one.
 [ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
-chmod 0600 /etc/opendkim/keys/[% domain %]/*
+[%# Every key on the guest, not only the key of this domain, because the chmod
+    above opened all of them.  opendkim refuses a key that others can read,
+    and then tempfails every message of that domain. -%]
+find /etc/opendkim/keys -type f -exec chmod 0600 {} +
 # Put a copy in /mail for the fetch to read.  remote_files names this copy,
 # not /etc/opendkim/keys.  Provisioner::Recipe::mail says why.
 #
