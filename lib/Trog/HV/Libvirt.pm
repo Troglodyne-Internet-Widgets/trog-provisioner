@@ -16,6 +16,7 @@ use URI::Split();
 
 use Time::HiRes qw{sleep time};
 use Trog::Local();
+use File::Basename();
 use File::Slurper();
 use Cpanel::JSON::XS();
 use Provisioner::Cookbook();
@@ -749,8 +750,7 @@ one file name apart, such as the image of a mirror and the image of the archive.
 =cut
 
 sub image_volume_name ($url) {
-    my ($file) = ( URI->new($url)->path // q{} ) =~ m{([^/]+)\z};
-    $file = ( $file // 'image' ) =~ s/[^\w.-]/_/gr;
+    my $file = File::Basename::basename( URI->new($url)->path // q{} ) =~ s/[^\w.-]/_/gr;
     return 'baseimage-' . $file . '-' . substr( Digest::SHA::sha256_hex($url), 0, 12 );
 }
 
