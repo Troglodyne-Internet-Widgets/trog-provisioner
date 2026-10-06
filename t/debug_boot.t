@@ -22,6 +22,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use FindBin;
 use FindBin::libs;
+use Provisioner::Vars();
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
@@ -289,7 +290,7 @@ subtest 'a screenshot is streamed straight here, and named for what it is' => su
 # are missing.  Two package names for one fix is one too many.
 subtest 'a missing disk tool names the package preflight names' => sub {
     my $mock = with_vmm();
-    $mock->redefine( capture_cmd => sub { $? = 127 << 8; return q{} } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
+    $mock->redefine( capture_cmd => sub { $? = $Provisioner::Vars::STATUS_NOT_FOUND; return q{} } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
     $mock->redefine( run_cmd     => sub { return 1 } );
 
     my $hv  = bless( {}, 'Trog::HV::Libvirt' );

@@ -24,6 +24,7 @@ use MIME::Base64();
 use Mojolicious();
 
 use FindBin::libs;
+use Provisioner::Vars();
 
 use Linode::API();
 use Trog::HV();
@@ -322,14 +323,14 @@ subtest 'monthly_cost and monthly_spend' => sub {
     add_linode( label => 'a.test.test' );
     add_linode( label => 'b.test.test', type   => 'g6-nanode-1', backups => { enabled => Cpanel::JSON::XS::true() } );
     add_linode( label => 'c.test.test', region => 'br-gru' );
-    is( linode_hv()->monthly_spend, 24 + 5 + 2 + 28.8, 'the account is every Linode on it, with backups where they are on, at its region\'s price' );
+    is( linode_hv()->monthly_spend, 59.8, 'the account is every Linode on it, with backups where they are on, at its region\'s price' );
 };
 
 subtest 'capacity and shortfalls' => sub {
     reset_linode();
     add_linode( label => 'a.test.test' );
     my $hv   = linode_hv( monthly_budget => 60 );
-    my %big  = ( memory_mb => 4096, cpus => 2, disk_bytes => 40 * 1024**3, linode_type => 'g6-standard-2' );
+    my %big  = ( memory_mb => 4096, cpus => 2, disk_bytes => 40 * $Provisioner::Vars::GB, linode_type => 'g6-standard-2' );
     my %tiny = ( memory_mb => 1024, cpus => 1, disk_bytes => 1, linode_type => 'g6-nanode-1' );
 
     is_deeply(
@@ -337,7 +338,7 @@ subtest 'capacity and shortfalls' => sub {
         {
             memory_mb => 4096, memory_committed => 0, memory_free    => 4096,
             cpus      => 2,    cpus_allocatable => 2, cpus_committed => 0, cpus_free => 2,
-            disk_free => 81920 * 1024 * 1024,
+            disk_free => 81920 * $Provisioner::Vars::MB,
             guests    => 1,
         },
         'one guest of the type it named, nothing committed against it, and the Linodes on the account',
@@ -366,7 +367,7 @@ subtest 'capacity and shortfalls' => sub {
 
 subtest 'cheapest_for' => sub {
     reset_linode();
-    my %needs = ( memory_mb => 2048, cpus => 1, disk_bytes => 30 * 1024**3 );
+    my %needs = ( memory_mb => 2048, cpus => 1, disk_bytes => 30 * $Provisioner::Vars::GB );
 
     # g6-nanode-1 is cheaper and too small; the standard holds it.
     is_deeply( linode_hv()->cheapest_for(%needs),                                         { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 }, 'the cheapest type that holds the guest, and what it costs' );
@@ -377,10 +378,10 @@ subtest 'cheapest_for' => sub {
     # free, one of those is the cheapest thing it sells, and it is not.
     is_deeply(
         linode_hv()->cheapest_for( memory_mb => 8192, cpus => 4, disk_bytes => 1 ),
-        { key => 'linode_type', value => 'g1-gpu-rtx6000-1', monthly_cost => 1.5 * 730, hourly => 1.5 },
+        { key => 'linode_type', value => 'g1-gpu-rtx6000-1', monthly_cost => 1.5 * $Provisioner::Vars::HOURS_A_MONTH, hourly => 1.5 },
         'a type Linode prices by the hour alone is offered at a month of that rate, and says it is hourly'
     );
-    is( linode_hv()->monthly_cost( linode_type => 'g1-gpu-rtx6000-1' ), 1.5 * 730, 'which is what it costs for a month, since Linode publishes no price to cap it' );
+    is( linode_hv()->monthly_cost( linode_type => 'g1-gpu-rtx6000-1' ), 1.5 * $Provisioner::Vars::HOURS_A_MONTH, 'which is what it costs for a month, since Linode publishes no price to cap it' );
     ok( !exists linode_hv()->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 1 )->{hourly}, 'while a type it does price by the month says nothing about hours' );
 
     # An offer that cannot be accepted is noise, so the budget rules it out.

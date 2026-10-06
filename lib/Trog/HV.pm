@@ -22,6 +22,7 @@ use YAML::XS();
 use File::Which();
 use Time::Piece();
 use List::Util qw{any uniq};
+use Provisioner::Vars();
 
 =head1 NAME
 
@@ -747,7 +748,7 @@ physical CPU.  The defaults are 2048MB, 1 CPU, 10GB, no cap, and 4.
 
 sub reserve_memory ($self) { return $self->{reserve_memory} // 2048 }
 sub reserve_cpus   ($self) { return $self->{reserve_cpus}   // 1 }
-sub reserve_disk   ($self) { return $self->{reserve_disk}   // 10 * 1024 * 1024 * 1024 }
+sub reserve_disk   ($self) { return $self->{reserve_disk}   // 10 * $Provisioner::Vars::GB }
 sub max_guests     ($self) { return $self->{max_guests}     // 0 }
 sub cpu_overcommit ($self) { return $self->{cpu_overcommit} // 4 }
 
@@ -819,7 +820,7 @@ act on.  An empty list means that the guest fits.
 =cut
 
 # Whole gigabytes in a count of bytes, for a reason a person reads.
-my sub gb ($bytes) { return int( ( $bytes // 0 ) / ( 1024 * 1024 * 1024 ) ) }
+my sub gb ($bytes) { return int( ( $bytes // 0 ) / $Provisioner::Vars::GB ) }
 
 sub shortfalls {
     my ( $self, %needs ) = @_;
