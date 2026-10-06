@@ -2,6 +2,11 @@
 # its staged DKIM key under /mail closed.
 install -d -m 0775 -o dovecot -g dovecot /mail /mail/scripts
 install -m 0775 -o dovecot -g dovecot [% script_dir %]/dovecot_overquota /mail/scripts/
+[%# Compiled here as root, because dovecot cannot write the binary into /etc
+    when it delivers. -%]
+install -d -m 0755 -o root -g root /etc/dovecot/sieve
+install -m 0644 -o root -g root junk.sieve /etc/dovecot/sieve/junk.sieve
+sievec /etc/dovecot/sieve/junk.sieve
 # The half of the mail configuration that is about this guest, not about a
 # domain.  It goes into the fragment directories that configd makes the files
 # of postfix and opendkim from.  It is said once, here, because configd joins

@@ -31,7 +31,20 @@ service quota-warning {
     }
 }
 
-# Sieve
+# Junk, for every account, with the special use that mail clients look for
+# (RFC 6154).  The sieve below files spam there.
+namespace inbox {
+  inbox = yes
+  mailbox Junk {
+    special_use = \Junk
+    auto = subscribe
+  }
+}
+
+# Sieve.  The spam filter runs before the sieve of each user.
+plugin {
+  sieve_before = /etc/dovecot/sieve/junk.sieve
+}
 protocol lda {
   mail_plugins = $mail_plugins sieve
 }

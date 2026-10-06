@@ -155,6 +155,50 @@ SKIP: {
     system('doveadm', 'expunge', '-u', $to, 'mailbox', 'INBOX', 'subject', $subject);
 }
 
+# Spam, end to end: GTUBE is the message that SpamAssassin always scores as
+# spam.  amavis must mark it, and the global sieve must file it into Junk.
+{
+    my $to      = 'catchall@[% domain %]';
+    my $subject = 'spam probe of the guest tests';
+    open( my $mail, '|-', '/usr/sbin/sendmail', '-oi', $to ) or die "sendmail: $!";
+    print {$mail} "From: postmaster\@[% domain %]\nTo: $to\nSubject: $subject\n\n"
+      . "XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\n";
+    close($mail) or die "sendmail exited $?";
+
+    my $found = '';
+    foreach ( 1 .. 60 ) {
+        $found = `doveadm search -u '$to' mailbox Junk subject '$subject' 2>&1`;
+        last if $found =~ m/\S/;
+        sleep 1;
+    }
+    like($found, qr/\S/, 'spam is filed into Junk') or diag `doveadm search -u '$to' mailbox INBOX subject '$subject' 2>&1`;
+
+    my $headers = `doveadm fetch -u '$to' hdr mailbox Junk subject '$subject' 2>&1`;
+    like($headers, qr/^X-Spam-Flag:\s*YES/mi, 'because amavis marked it as spam') or diag $headers;
+
+    # The nightly training, on the probe.  Then the database forgets it, because
+    # this test also runs on a guest whose filter is in use.
+    my $db = '/var/lib/amavis/.spamassassin';
+    my $trained = `[% script_dir %]/sa_train_amavis /mail/[% domain %]/catchall/Maildir 2>&1`;
+    is($?, 0, 'the nightly training runs') or diag $trained;
+    my $magic = `sudo -u amavis sa-learn --dump magic 2>&1`;
+    my ($nspam) = $magic =~ m/^\S+\s+\S+\s+(\d+)\s+.*non-token data: nspam$/m;
+    ok(($nspam // 0) >= 1, 'and amavis reads the spam that it learned') or diag $magic;
+    my $owners = `find $db ! -user amavis 2>&1`;
+    is($owners, '', 'and still owns all of its database') or diag $owners;
+
+    my ($file) = `grep -rl '$subject' /mail/[% domain %]/catchall/Maildir/.Junk 2>/dev/null` =~ m/^(.*\S)/m;
+    system("sa-learn --dbpath $db --forget '$file' >/dev/null 2>&1; chown -R amavis:amavis $db") if $file;
+    system('doveadm', 'expunge', '-u', $to, 'mailbox', 'Junk', 'subject', $subject);
+}
+
+# The postfix filter goes to amavis, which scores the spam, and only there.
+{
+    my $filter = `postconf -h content_filter 2>&1`;
+    chomp $filter;
+    is($filter, 'smtp-amavis:[127.0.0.1]:10024', 'postfix filters mail through amavis alone') or diag $filter;
+}
+
 # install_dkim_records publishes the key into a zone this guest serves itself,
 # once for each selector however many times the guest has been provisioned.
 SKIP: {

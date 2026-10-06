@@ -1,4 +1,7 @@
 # Mail cron jobs for [% domain %]
-[% FOR user IN names.keys() %]
-21 2 * * * root command sa-learn --spam -u spamd --dir /mail/[% domain %]/[% user %]/INBOX/spam
+[%# Trains the Bayes database of amavis, which scores the mail, from the Junk
+    and the INBOX of every account.  scripts/sa_train_amavis says which mail
+    counts as spam and which as ham. -%]
+[% IF names.keys().size() %]
+21 2 * * * root [% script_dir %]/sa_train_amavis[% FOR user IN names.keys().sort() %] /mail/[% domain %]/[% user %]/Maildir[% END %]
 [% END %]
