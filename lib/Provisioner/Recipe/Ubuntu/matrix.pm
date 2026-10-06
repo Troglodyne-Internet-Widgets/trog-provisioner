@@ -51,19 +51,20 @@ sub deps {
     };
 }
 
-=head2 @sources = $recipe->package_sources()
+=head2 @sources = $recipe->package_sources(%opts)
 
-The archive of matrix.org.  It has the synapse package and its keyring, and
+The archive of matrix.org, for C<distro_release>, the release of the domain.  It has the synapse package and its keyring, and
 nothing else.  The package carries its own Python dependencies, so
 C<txredisapi>, which synapse uses for redis, is inside it.
 
 =cut
 
 sub package_sources {
+    my ( $self, %opts ) = @_;
     return {
         name       => 'matrix-org',
         uri        => 'https://packages.matrix.org/debian',
-        suites     => [ 'Provisioner::Recipe::ubuntu'->release() ],
+        suites     => [ 'Provisioner::Recipe::ubuntu'->release_of( release => $opts{distro_release} ) ],
         components => ['main'],
         key        => 'https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg',
     };

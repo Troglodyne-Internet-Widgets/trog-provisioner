@@ -26,11 +26,13 @@ sub deps {
 
 =head2 @sources = $recipe->package_sources(%opts)
 
-The archive of MariaDB for C<version>, pinned above 1000.  The pin lets apt
-install a version below the one in Ubuntu, which ships 10.11.14.  MariaDB
-publishes an archive for a release only for the distributions that existed when
-it made the release.  For example, 11.4.4 and 10.11.10 have noble, and 10.11.7
-does not.  L<Provisioner::Packager::Deb> asks for the suite, and says so.
+The archive of MariaDB for C<version> and C<distro_release>, pinned above 1000.
+The pin lets apt install a version below the one in Ubuntu, which ships 10.11.14
+in noble.  MariaDB publishes an archive for a release only for the
+distributions that existed when it made the release.  For example, 11.4.4 and
+10.11.10 have noble, and 10.11.7 does not.  For resolute, only 11.8.8 and later
+and 12.3.2 and later have one, and no 10.11 or 11.4 release does.
+L<Provisioner::Packager::Deb> asks for the suite, and says so.
 
 =cut
 
@@ -39,7 +41,7 @@ sub package_sources {
     return {
         name          => 'mariadb',
         uri           => "https://archive.mariadb.org/mariadb-$opts{version}/repo/ubuntu",
-        suites        => [ 'Provisioner::Recipe::ubuntu'->release() ],
+        suites        => [ 'Provisioner::Recipe::ubuntu'->release_of( release => $opts{distro_release} ) ],
         components    => ['main'],
         architectures => ['amd64'],
         key           => 'https://mariadb.org/mariadb_release_signing_key.pgp',

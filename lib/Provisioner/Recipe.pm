@@ -104,7 +104,7 @@ keeps what make prints in F</var/log/E<lt>domainE<gt>.setup.log> on the guest.
 C<bin/new_config> starts each command that holds a secret with C<@>, through
 C<quiet_secrets>, so a fragment does not do that itself.  A secret is a value
 from the store, or a value in a field that the schema marks
-C<'x-secret' =E<gt> 1>, so mark every such field; see L</secrets_in>.  Start a
+C<'x-secret' =E<gt> 1>, so mark every such field; see C<secrets_in>.  Start a
 command with C<@> yourself when its text names a failure, such as C<|| echo
 "could not ...">.  In the log, that text reads as a failure even on a run that
 worked.  Put the C<@> on the first line of the command.  Keep a secret out of
@@ -558,6 +558,11 @@ sub formatters {
 
 The system packages that this recipe needs installed.
 
+C<%recipe_config> is the configuration of this recipe for the domain, with
+C<distro_release> added: the release of the domain, such as C<noble>, which
+C<bin/new_config> gets from the distro recipe.  C<package_sources>,
+C<package_answers> and C<dep_conflicts> get the same.
+
 Override this in the distro subclass, not in the recipe.  See L</Where the
 packages are named>.  A recipe whose packages are the same on every
 distribution answers here instead.  C<adminconfig> is one, because the operator
@@ -576,7 +581,8 @@ sub deps {
 The vendor archives that C<deps> installs from, in the terms of the packager of
 the distribution, which L<Provisioner::Packager> chooses.  For Ubuntu that is
 L<Provisioner::Packager::Deb/A source>.  Override it in the distro subclass,
-beside C<deps>.
+beside C<deps>.  An archive whose suites follow the release of the
+distribution names its suite from C<distro_release>.  See C<deps>.
 
 The guest has these archives before it installs its packages at first boot, so
 a package from a vendor goes in C<deps> like any other.  A fragment does not

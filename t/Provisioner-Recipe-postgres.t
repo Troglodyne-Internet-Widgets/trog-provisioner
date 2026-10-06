@@ -163,6 +163,15 @@ subtest 'the version it installs' => sub {
 
     recipe()->deps() for 1 .. 2;
     is( scalar @asked, 2, 'asked once, however many times the packages are' );
+
+    # A domain that names another release gets the index of that release, and
+    # its own answer, rather than the one cached for the pinned release.
+    ok( ( grep { $_ eq 'postgresql-18' } recipe()->deps( distro_release => 'resolute' ) ), 'a domain on another release' );
+    like( $asked[-1], qr{/dists/resolute-pgdg/main/binary-amd64/Packages[.]gz\z}, 'is answered from the index of that release' );
+    is( scalar @asked, 3, 'which is asked for once more, not answered from the cache of the other' );
+
+    is_deeply( [ map { @{ $_->{suites} } } recipe()->package_sources( distro_release => 'resolute' ) ], ['resolute-pgdg'], 'and its archive is the suite of that release' );
+    is_deeply( [ map { @{ $_->{suites} } } recipe()->package_sources() ],                               ['noble-pgdg'],    'while a domain that names none gets the pinned one' );
 };
 
 Test::NoWarnings::had_no_warnings();

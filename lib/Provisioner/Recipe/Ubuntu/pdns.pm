@@ -25,7 +25,7 @@ sub deps {
 =head2 @sources = $recipe->package_sources(%opts)
 
 The release train of the authoritative server that C<repo_branch> names, from
-C<repo.powerdns.com>.  It pins C<pdns-*> above Ubuntu, as PowerDNS says to, so
+C<repo.powerdns.com>, for C<distro_release>, the release of the domain.  It pins C<pdns-*> above Ubuntu, as PowerDNS says to, so
 the server and its backend come from one release.  The recursor is not in this
 archive, and comes from Ubuntu.
 
@@ -39,7 +39,7 @@ sub package_sources {
     return {
         name       => 'powerdns',
         uri        => 'https://repo.powerdns.com/ubuntu',
-        suites     => [ 'Provisioner::Recipe::ubuntu'->release() . "-$branch" ],
+        suites     => [ 'Provisioner::Recipe::ubuntu'->release_of( release => $opts{distro_release} ) . "-$branch" ],
         components => ['main'],
         key        => 'https://repo.powerdns.com/FD380FBB-pub.asc',
         pin        => { packages => 'pdns-*', priority => 600 },

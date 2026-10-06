@@ -62,8 +62,25 @@ guest as C<&amp;>.
 
 C<packager>, C<base_image>, C<packager_invocation>, C<packager_up_invocation>
 and C<packager_remove_invocation>.  The packages are deb packages, installed
-with apt-get.  The image is the cloud image for the release that C<release>
-pins.
+with apt-get.  The image is the cloud image for the release of the domain.
+
+=head2 Which release
+
+C<release> pins the release that a domain gets by default.  A domain can name
+another in its C<_global>, beside C<distro>, so that the fleet can move one
+domain at a time:
+
+    somedomain:
+        _global:
+            release: resolute
+
+A tenant runs on the guest of its host, so the two must name the same release,
+and C<bin/new_config> refuses them when they do not.
+
+The schema takes the release names whose version this recipe knows, which is what
+an image catalog needs.  C<bin/new_config> hands the release of the domain to
+the hypervisor, for the image, and to every recipe, as C<distro_release> in
+C<package_sources>, for the suites of vendor archives.
 
 The install invocation accepts as much as it can:
 
@@ -91,10 +108,13 @@ and that is not a reason to fail a build.
 # The version of each release that the image catalogs name it by.
 my %VERSION_OF = ( jammy => '22.04', noble => '24.04', plucky => '25.04', questing => '25.10', resolute => '26.04' );
 
+# The release of a domain that names none.
+my $PINNED = 'noble';
+
 sub packager                   { return 'deb' }
-sub release                    { return 'noble' }
+sub release                    { return $PINNED }
 sub mirror_path                { return '/ubuntu' }
-sub base_image                 { my ($self) = @_; return $self->image_for( $self->release ) }
+sub base_image                 { my ( $self, $release ) = @_; return $self->image_for( $release // $self->release ) }
 sub packager_up_invocation     { return 'DEBIAN_FRONTEND="noninteractive" apt-get upgrade -Uy -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold' }
 sub packager_remove_invocation { return 'DEBIAN_FRONTEND="noninteractive" apt-get remove -y' }
 
@@ -102,18 +122,38 @@ sub packager_invocation {
     return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-overwrite --autoremove';
 }
 
-=head2 $version = $recipe->release_version()
+=head2 $version = $recipe->release_version($release)
 
-The version of the release that C<release> pins, such as C<24.04> for C<noble>.
-Dies for a release this does not know the version of, rather than guessing at
-an image name from a codename.
+The version of C<$release>, or of the release that C<release> pins, such as
+C<24.04> for C<noble>.  Dies for a release this does not know the version of,
+rather than guessing at an image name from a codename.
 
 =cut
 
 sub release_version {
-    my ($self) = @_;
-    my $release = $self->release;
+    my ( $self, $release ) = @_;
+    $release //= $self->release;
     return $VERSION_OF{$release} // die "The ubuntu recipe does not know the version of the release '$release'; add it to \%VERSION_OF\n";
+}
+
+=head2 %schema = $recipe->args()
+
+The schema of L<Provisioner::DistroRecipe>, with C<release>.  See
+L</Which release>.
+
+=cut
+
+sub args {
+    my ($self) = @_;
+
+    my %args = $self->SUPER::args();
+    $args{properties}{release} = {
+        type        => 'string',
+        enum        => [ sort keys %VERSION_OF ],
+        default     => $PINNED,
+        description => 'The Ubuntu release of this domain, by codename.  The default is the release this installation pins, so a domain that names one moves alone.',
+    };
+    return %args;
 }
 
 =head2 $url = $recipe->image_for($release)
