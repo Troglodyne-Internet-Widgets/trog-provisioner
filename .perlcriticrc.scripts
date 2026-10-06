@@ -132,6 +132,7 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
 [Subroutines::ProhibitTailRecursion]
 [Variables::ProhibitUselessVarClearing]
+[ValuesAndExpressions::ProhibitLiteralArithmetic]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 [BuiltinFunctions::ProhibitBooleanGrep]
