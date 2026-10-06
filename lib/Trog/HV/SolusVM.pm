@@ -12,6 +12,7 @@ use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
 use Socket();
+use Time::HiRes qw{sleep time};
 
 =head1 NAME
 
@@ -147,6 +148,21 @@ Return what to call this node in a message, and the address of its API.
 sub describe ($self) { return 'the SolusVM node ' . $self->{solusvm} }
 sub uri      ($self) { return 'https://' . $self->{solusvm} . '/api/v1' }
 
+# Every page of a listing.  The project's plans run to three pages on a node of
+# any size, and a plan missed because it was on page two is a build that fails
+# saying the plan does not exist.
+my sub list_all ( $self, $operation, %params ) {
+    return grep { ref $_ } $self->api->paginate( $operation, %params );
+}
+
+# Whether a thing the node listed is the one named, by id or by name.  Both,
+# because a configuration may say either and the name is the readable one.
+my sub is_named ( $thing, $wanted ) {
+    return 1 if defined $thing->{id}   && "$thing->{id}" eq "$wanted";
+    return 1 if defined $thing->{name} && $thing->{name} eq $wanted;
+    return 0;
+}
+
 =head2 location
 
 Returns the location new guests are built in, as F<hypervisors.conf> named it.
@@ -169,8 +185,8 @@ sub location_id {
     die 'Building on ' . $self->describe . " needs a location.\nSet solusvm_location in its block in hypervisors.conf.\n"
       unless $wanted;
 
-    my @locations = $self->_list('get_list_of_locations');
-    my $found     = first { _is( $_, $wanted ) } @locations;
+    my @locations = list_all( $self, 'get_list_of_locations' );
+    my $found     = first { is_named( $_, $wanted ) } @locations;
 
     die "There is no location '$wanted' on " . $self->describe . ".\nIt has: " . join( ', ', map { "$_->{name} ($_->{id})" } @locations ) . "\n"
       unless $found;
@@ -195,14 +211,6 @@ sub api {
     };
 }
 
-# Every page of a listing.  The project's plans run to three pages on a node of
-# any size, and a plan missed because it was on page two is a build that fails
-# saying the plan does not exist.
-sub _list {
-    my ( $self, $operation, %params ) = @_;
-    return grep { ref $_ } $self->api->paginate( $operation, %params );
-}
-
 =head2 project
 
 Returns the project guests are built in: what F<hypervisors.conf> named, or the
@@ -221,7 +229,7 @@ sub project {
     return $named            if $named;
     return $self->{_project} if $self->{_project};
 
-    my @projects = $self->_list('get_list_of_projects');
+    my @projects = list_all( $self, 'get_list_of_projects' );
 
     die 'The account on ' . $self->describe . " has no projects, so there is nowhere to build.\n"
       unless @projects;
@@ -232,8 +240,7 @@ sub project {
     return $self->{_project} = $projects[0]{id};
 }
 
-sub _account {
-    my ($self) = @_;
+my sub account ($self) {
     return $self->{_account} //= $self->api->get_user_info()->{data} // {};
 }
 
@@ -246,7 +253,7 @@ account that uses the node; anything else administers some part of it.
 
 sub roles {
     my ($self) = @_;
-    return map { $_->{name} // () } @{ $self->_account->{roles} // [] };
+    return map { $_->{name} // () } @{ account($self)->{roles} // [] };
 }
 
 =head1 WHAT THE NODE SELLS
@@ -265,27 +272,18 @@ to type twice.
 
 sub plans {
     my ($self) = @_;
-    return @{ $self->{_plans} //= [ $self->_list( 'get_list_of_project_plans', id => $self->project ) ] };
+    return @{ $self->{_plans} //= [ list_all( $self, 'get_list_of_project_plans', id => $self->project ) ] };
 }
 
 sub plan {
     my ( $self, $wanted ) = @_;
 
-    my $found = first { _is( $_, $wanted ) } $self->plans;
+    my $found = first { is_named( $_, $wanted ) } $self->plans;
 
     die "There is no plan '$wanted' on " . $self->describe . ".\n" . 'The project has ' . scalar( $self->plans ) . " to choose from.\n"
       unless $found;
 
     return $found;
-}
-
-# Whether a thing the node listed is the one named, by id or by name.  Both,
-# because a configuration may say either and the name is the readable one.
-sub _is {
-    my ( $thing, $wanted ) = @_;
-    return 1 if defined $thing->{id}   && "$thing->{id}" eq "$wanted";
-    return 1 if defined $thing->{name} && $thing->{name} eq $wanted;
-    return 0;
 }
 
 =head2 image_for_distro($distro)
@@ -305,27 +303,28 @@ sub image_for_distro {
     my $wanted  = lc $distro->distribution;
     my $release = $distro->release_version;
 
-    foreach my $image ( $self->_list('get_list_of_os_images') ) {
+    foreach my $image ( list_all( $self, 'get_list_of_os_images' ) ) {
         next unless lc( $image->{name} // q{} ) eq $wanted;
 
         my $version = first { ( $_->{version} // q{} ) eq $release } @{ $image->{versions} // [] };
         return $version->{id} if $version;
     }
 
-    die 'There is no ' . $distro->distribution . " $release on " . $self->describe . ".\n" . "It has: " . join( ', ', map { $_->{label} } $self->_os_versions ) . "\n";
+    # Labelled the way somebody reading it would recognise: the image's name and
+    # the version's, together.
+    my @offered = map {
+        my $image = $_;
+        map { "$image->{name} $_->{version}" } @{ $image->{versions} // [] }
+    } list_all( $self, 'get_list_of_os_images' );
+
+    die 'There is no ' . $distro->distribution . " $release on " . $self->describe . ".\n" . "It has: " . join( ', ', @offered ) . "\n";
 }
 
-# Every OS image version the node offers, labelled the way somebody reading a
-# preflight would recognise: the image's name and the version's, together.
-sub _os_versions {
-    my ($self) = @_;
-
-    my @versions;
-    foreach my $image ( $self->_list('get_list_of_os_images') ) {
-        push @versions, map { { id => $_->{id}, label => "$image->{name} $_->{version}" } } @{ $image->{versions} // [] };
-    }
-
-    return @versions;
+# A plan says what it costs a month, or only what it costs an hour.  An hourly
+# one is reported at a month of hours, so that two plans can be compared at all.
+my sub monthly ($plan) {
+    return $plan->{tokens_per_month} if $plan->{tokens_per_month};
+    return ( $plan->{tokens_per_hour} // 0 ) * $HOURS_A_MONTH;
 }
 
 =head2 cheapest_for(%needs)
@@ -344,11 +343,17 @@ sub cheapest_for {
     my ( $self, %needs ) = @_;
 
     my @fit = eval {
-        grep { _holds( $_, %needs ) } $self->plans;
+        grep {
+            my $params = $_->{params} // {};
+            ( $params->{ram} // 0 ) >= ( $needs{memory_mb} // 0 ) * $MB
+              && ( $params->{vcpu} // $params->{cores} // 0 ) >= ( $needs{cpus} // 0 )
+              && ( $params->{disk} // 0 ) * $GB >=
+              ( $needs{disk_bytes} // 0 )
+        } $self->plans;
     };
     return undef unless @fit;
 
-    my @priced = sort { $a->{monthly_cost} <=> $b->{monthly_cost} || $a->{params}{ram} <=> $b->{params}{ram} } map { +{ %{$_}, monthly_cost => _monthly($_) } } @fit;
+    my @priced = sort { $a->{monthly_cost} <=> $b->{monthly_cost} || $a->{params}{ram} <=> $b->{params}{ram} } map { +{ %{$_}, monthly_cost => monthly($_) } } @fit;
 
     return {
         key          => $self->size_key,
@@ -367,25 +372,7 @@ sub monthly_cost {
     my ( $self, %needs ) = @_;
 
     my $named = $needs{ $self->size_key } or return 0;
-    return _monthly( $self->plan($named) );
-}
-
-# A plan says what it costs a month, or only what it costs an hour.  An hourly
-# one is reported at a month of hours, so that two plans can be compared at all.
-sub _monthly {
-    my ($plan) = @_;
-    return $plan->{tokens_per_month} if $plan->{tokens_per_month};
-    return ( $plan->{tokens_per_hour} // 0 ) * $HOURS_A_MONTH;
-}
-
-sub _holds {
-    my ( $plan, %needs ) = @_;
-    my $params = $plan->{params} // {};
-
-    return 0 if ( $params->{ram} // 0 ) < ( $needs{memory_mb} // 0 ) * $MB;
-    return 0 if ( $params->{vcpu} // $params->{cores} // 0 ) < ( $needs{cpus} // 0 );
-    return 0 if ( $params->{disk} // 0 ) * $GB < ( $needs{disk_bytes} // 0 );
-    return 1;
+    return monthly( $self->plan($named) );
 }
 
 =head1 CAPACITY
@@ -450,7 +437,7 @@ that this tool can read, and 0 is how that is spelled.
 sub max_guests {
     my ($self) = @_;
     return $self->{max_guests} if $self->{max_guests};
-    return ( $self->_account->{limit_usage} // {} )->{servers} // 0;
+    return ( account($self)->{limit_usage} // {} )->{servers} // 0;
 }
 
 =head2 shortfalls(%needs)
@@ -485,7 +472,7 @@ done with the answer rebuilds it or deletes it.
 
 sub servers {
     my ($self) = @_;
-    return $self->_list( 'get_list_of_project_servers', id => $self->project );
+    return list_all( $self, 'get_list_of_project_servers', id => $self->project );
 }
 
 sub server {
@@ -514,6 +501,12 @@ sub guest_names ($self) {
 }
 sub domain_exists ( $self, $name ) { return defined $self->server($name) ? 1 : 0 }
 
+# One server as the node records it, asked for by id.
+my sub detail ( $self, $name ) {
+    my $server = $self->server($name) or return undef;
+    return $self->api->get_an_existing_server( id => $server->{id} )->{data};
+}
+
 =head2 guest_ssh_ip($config, $lease)
 
 Returns the address to reach a guest at: its primary IPv4, which is the one the
@@ -527,7 +520,7 @@ sub guest_ssh_ip {
 
     my $name = ref $config ? $config->param('domain') : $config;
 
-    my $server = $self->_detail($name)
+    my $server = detail( $self, $name )
       or die "There is no guest called '$name' on " . $self->describe . "\n";
 
     my @addresses = @{ $server->{ip_addresses}{ipv4} // [] };
@@ -567,12 +560,12 @@ sub guest_network_of {
     return;
 }
 
-# One server as the node records it, asked for by id.
-sub _detail {
-    my ( $self, $name ) = @_;
+my sub snapshots ( $self, $domain ) {
+    my $server = $self->server($domain)
+      or die "There is no guest called '$domain' to ask about snapshots\n";
 
-    my $server = $self->server($name) or return undef;
-    return $self->api->get_an_existing_server( id => $server->{id} )->{data};
+    my @newest_last = sort { ( $a->{created_at} // q{} ) cmp ( $b->{created_at} // q{} ) } list_all( $self, 'get_list_of_server_snapshots', id => $server->{id} );
+    return reverse @newest_last;
 }
 
 =head1 SNAPSHOTS
@@ -588,17 +581,7 @@ Returns them newest first.
 
 sub snapshot_names {
     my ( $self, $domain ) = @_;
-    return map { $_->{name} // () } $self->_snapshots($domain);
-}
-
-sub _snapshots {
-    my ( $self, $domain ) = @_;
-
-    my $server = $self->server($domain)
-      or die "There is no guest called '$domain' to ask about snapshots\n";
-
-    my @newest_last = sort { ( $a->{created_at} // q{} ) cmp ( $b->{created_at} // q{} ) } $self->_list( 'get_list_of_server_snapshots', id => $server->{id} );
-    return reverse @newest_last;
+    return map { $_->{name} // () } snapshots( $self, $domain );
 }
 
 =head2 rollback_possible($domain, %opts)
@@ -615,7 +598,7 @@ node cannot be asked, since that is not an answer about the guest.
 sub rollback_possible {
     my ( $self, $domain, %opts ) = @_;
 
-    my $server = $self->_detail($domain) or return 0;
+    my $server = detail( $self, $domain ) or return 0;
     return $server->{plan}{is_snapshots_enabled} ? 1 : 0;
 }
 
@@ -649,11 +632,38 @@ sub create_snapshot {
 sub revert_snapshot {
     my ( $self, $domain, $name ) = @_;
 
-    my $snapshot = first { ( $_->{name} // q{} ) eq $name } $self->_snapshots($domain);
+    my $snapshot = first { ( $_->{name} // q{} ) eq $name } snapshots( $self, $domain );
     die "The guest '$domain' has no snapshot called '$name'\n" unless $snapshot;
 
     $self->api->revert_snapshot( id => $snapshot->{id} );
     return 1;
+}
+
+# Poll until the node has finished with the server.
+#
+# Waits for 'started' rather than watching the states in between, because the
+# states in between are not all documented: the API reference gives status five
+# values, and a server part way through a reinstall reports a sixth,
+# 'reinstalling', seen on a live one.  Treating anything that is not 'started'
+# as still working is what makes that a non-event, and only 'unavailable' is
+# worth giving up on, because it is the one the node will not leave by itself.
+my sub wait_for_started ( $self, $id, $name ) {
+    my $deadline = time + $BUILD_TIMEOUT;
+
+    while (1) {
+        my $detail = $self->api->get_an_existing_server( id => $id )->{data} // {};
+        my $status = $detail->{status}                                       // q{};
+
+        return $detail if $status eq 'started' && !$detail->{is_processing};
+
+        die "Building '$name' left it unavailable, which it will not come out of on its own.\n"
+          if $status eq 'unavailable';
+
+        last if time >= $deadline;
+        sleep $POLL;
+    }
+
+    die "The guest '$name' had not started ${BUILD_TIMEOUT}s after being asked for.\n" . "Look at it in the panel: a task that failed stays failed.\n";
 }
 
 =head1 BUILDING AND TEARING DOWN
@@ -696,7 +706,7 @@ sub create_guest {
         %optional,
     );
 
-    return $self->_wait_for_started( $made->{data}{id}, $name );
+    return wait_for_started( $self, $made->{data}{id}, $name );
 }
 
 =head2 rebuild_guest($name, image => $image, user_data => $seed)
@@ -729,54 +739,19 @@ sub rebuild_guest {
     $self->api->reinstall_server( id => $server->{id}, os => $image, %optional );
 
     # The node says started for a moment after it takes the request, so waiting
-    # for started alone returns before the reinstall has begun.
-    $self->_wait_for_change( $server->{id}, $name );
-    return $self->_wait_for_started( $server->{id}, $name );
-}
-
-# Wait until the node stops calling the server started, so that the wait for it
-# to be started again is waiting for this reinstall rather than seeing the state
-# the last one left.
-sub _wait_for_change {
-    my ( $self, $id, $name ) = @_;
-
+    # for started alone returns before the reinstall has begun.  This waits for
+    # it to stop saying so first, so that the wait for started is waiting for
+    # this reinstall rather than seeing the state the last one left.
     my $deadline = time + $BUILD_TIMEOUT;
-    while ( time < $deadline ) {
-        my $detail = $self->api->get_an_existing_server( id => $id )->{data} // {};
-        return 1 if ( $detail->{status} // q{} ) ne 'started' || $detail->{is_processing};
-        sleep $POLL;
-    }
-
-    die "The node never started reinstalling '$name'; it still says the guest is up.\n";
-}
-
-# Poll until the node has finished with the server.
-#
-# Waits for 'started' rather than watching the states in between, because the
-# states in between are not all documented: the API reference gives status five
-# values, and a server part way through a reinstall reports a sixth,
-# 'reinstalling', seen on a live one.  Treating anything that is not 'started'
-# as still working is what makes that a non-event, and only 'unavailable' is
-# worth giving up on, because it is the one the node will not leave by itself.
-sub _wait_for_started {
-    my ( $self, $id, $name ) = @_;
-
-    my $deadline = time + $BUILD_TIMEOUT;
-
     while (1) {
-        my $detail = $self->api->get_an_existing_server( id => $id )->{data} // {};
-        my $status = $detail->{status}                                       // q{};
+        my $detail = $self->api->get_an_existing_server( id => $server->{id} )->{data} // {};
+        last if ( $detail->{status} // q{} ) ne 'started' || $detail->{is_processing};
 
-        return $detail if $status eq 'started' && !$detail->{is_processing};
-
-        die "Building '$name' left it unavailable, which it will not come out of on its own.\n"
-          if $status eq 'unavailable';
-
-        last if time >= $deadline;
+        die "The node never started reinstalling '$name'; it still says the guest is up.\n" if time >= $deadline;
         sleep $POLL;
     }
 
-    die "The guest '$name' had not started ${BUILD_TIMEOUT}s after being asked for.\n" . "Look at it in the panel: a task that failed stays failed.\n";
+    return wait_for_started( $self, $server->{id}, $name );
 }
 
 =head2 annihilate_domain($name)
@@ -828,7 +803,7 @@ that account may do.  Everything below needs this to have worked.
 sub check_reachable {
     my ($self) = @_;
 
-    my $account = eval { $self->_account };
+    my $account = eval { account($self) };
     return $self->verdict( 0, 'Could not reach ' . $self->describe . ' with that token', <<"FIX" ) unless $account && $account->{email};
 $@
 A SolusVM token is made in the panel under Account and does not expire, so one

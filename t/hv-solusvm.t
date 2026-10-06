@@ -58,6 +58,8 @@ sub reset_node {
     return;
 }
 
+my sub page ($rows) { return { data => $rows, meta => { current_page => 1, last_page => 1, total => scalar @{$rows} } } }
+
 # What the node answers, by verb and path below /api/v1.  A request nobody
 # accounted for dies rather than escaping to the network, because a test that
 # reaches a real management node passes for the wrong reason.
@@ -66,93 +68,73 @@ sub answer {
 
     return { data => $STATE{account} } if $method eq 'GET' && $path eq '/account';
 
-    return _page( $STATE{projects} )  if $method eq 'GET' && $path eq '/projects';
-    return _page( $STATE{locations} ) if $method eq 'GET' && $path eq '/locations';
-    return _page( $STATE{os_images} ) if $method eq 'GET' && $path eq '/os_images';
+    return page( $STATE{projects} )  if $method eq 'GET' && $path eq '/projects';
+    return page( $STATE{locations} ) if $method eq 'GET' && $path eq '/locations';
+    return page( $STATE{os_images} ) if $method eq 'GET' && $path eq '/os_images';
 
-    return _page( $STATE{plans} )   if $method eq 'GET'  && $path =~ m{\A /projects/\d+/plans \z}x;
-    return _page( $STATE{servers} ) if $method eq 'GET'  && $path =~ m{\A /projects/\d+/servers \z}x;
-    return _create($body)           if $method eq 'POST' && $path =~ m{\A /projects/\d+/servers \z}x;
+    return page( $STATE{plans} )   if $method eq 'GET' && $path =~ m{\A /projects/\d+/plans \z}x;
+    return page( $STATE{servers} ) if $method eq 'GET' && $path =~ m{\A /projects/\d+/servers \z}x;
+
+    if ( $method eq 'POST' && $path =~ m{\A /projects/\d+/servers \z}x ) {
+        my $made = {
+            id           => 1003,
+            name         => $body->{name},
+            status       => 'started',
+            ip_addresses => { ipv4 => [ { ip => '10.99.32.97', is_primary => 1 } ], ipv6 => [] },
+        };
+        push @{ $STATE{servers} }, $made;
+        return { data => $made };
+    }
 
     if ( $path =~ m{\A /servers/\d+ \z}x ) {
         my $id = substr( $path, length '/servers/' );
-        return { data => _server($id) } if $method eq 'GET';
-        return _delete($id)             if $method eq 'DELETE';
+
+        if ( $method eq 'DELETE' ) {
+            @{ $STATE{servers} } = grep { $_->{id} != $id } @{ $STATE{servers} } unless $STATE{keep_deleted};
+            return { data => {} };
+        }
+
+        # Reading a server is what moves a reinstall along, so that the two
+        # waits in rebuild_guest each have something real to wait for: the node
+        # reports 'reinstalling' while it works -- a sixth value for a field the
+        # API reference documents five of -- and 'started' once it is done.
+        if ( $method eq 'GET' ) {
+            my ($found) = grep { $_->{id} == $id } @{ $STATE{servers} };
+            return { data => undef } unless $found;
+            return { data => $found } if ( $found->{status} // q{} ) ne 'reinstalling';
+
+            my $was = { %{$found} };
+            $found->{status} = 'started' if --$found->{busy_for} <= 0;
+            return { data => $was };
+        }
     }
 
+    # A reinstall the node has taken but not begun still says started, which is
+    # what rebuild_guest waits out first: this says so once, then reports the
+    # state the node really reports while it works.
     if ( my ($id) = $path =~ m{\A /servers/(\d+)/reinstall \z}x ) {
-        return _reinstall( $id, $body ) if $method eq 'POST';
+        if ( $method eq 'POST' ) {
+            my ($server) = grep { $_->{id} == $id } @{ $STATE{servers} };
+            @{$server}{qw{status busy_for}} = ( 'reinstalling', 2 );
+            return { data => {} };
+        }
     }
 
     if ( my ($id) = $path =~ m{\A /servers/(\d+)/snapshots \z}x ) {
-        return _page( $STATE{snapshots}{$id} // [] ) if $method eq 'GET';
-        return _snapshot($id)                        if $method eq 'POST';
+        return page( $STATE{snapshots}{$id} // [] ) if $method eq 'GET';
+
+        # The node refuses a snapshot of a server whose plan does not allow
+        # them, with the 400 and the message a live one gave.
+        if ( $method eq 'POST' ) {
+            my ($server) = grep { $_->{id} == $id } @{ $STATE{servers} };
+            return { data        => {} } if $server->{plan}{is_snapshots_enabled};
+            return { http_status => 400, message => 'Snapshots must be enabled in the plan and the server must be available.' };
+        }
     }
 
     return { data => {} } if $method eq 'POST' && $path =~ m{\A /snapshots/\d+/revert \z}x;
 
     die "the fake node was asked for $method $path, which it does not answer\n";
-}
-
-sub _page ($rows) { return { data => $rows, meta => { current_page => 1, last_page => 1, total => scalar @{$rows} } } }
-
-# Reading a server is what moves a reinstall along, so that the two waits in
-# rebuild_guest each have something real to wait for: the node reports
-# 'reinstalling' while it works -- a sixth value for a field the API reference
-# documents five of -- and 'started' once it is done.
-sub _server {
-    my ($id) = @_;
-
-    my ($found) = grep { $_->{id} == $id } @{ $STATE{servers} };
-    return undef unless $found;
-
-    if ( ( $found->{status} // q{} ) eq 'reinstalling' ) {
-        my $was = { %{$found} };
-        $found->{status} = 'started' if --$found->{busy_for} <= 0;
-        return $was;
-    }
-
-    return $found;
-}
-
-sub _create {
-    my ($body) = @_;
-
-    my $made = {
-        id           => 1003,
-        name         => $body->{name},
-        status       => 'started',
-        ip_addresses => { ipv4 => [ { ip => '10.99.32.97', is_primary => 1 } ], ipv6 => [] },
-    };
-    push @{ $STATE{servers} }, $made;
-    return { data => $made };
-}
-
-# A reinstall the node has taken but not begun still says started, which is
-# what _wait_for_change is for: this says so once, then reports the state the
-# node really reports while it works.
-sub _reinstall {
-    my ( $id, $body ) = @_;
-
-    my ($server) = grep { $_->{id} == $id } @{ $STATE{servers} };
-    @{$server}{qw{status busy_for}} = ( 'reinstalling', 2 );
-    return { data => {} };
-}
-
-# The node refuses a snapshot of a server whose plan does not allow them, with
-# the 400 and the message a live one gave.
-sub _snapshot {
-    my ($id) = @_;
-
-    my ($server) = grep { $_->{id} == $id } @{ $STATE{servers} };
-    return { data        => {} } if $server->{plan}{is_snapshots_enabled};
-    return { http_status => 400, message => 'Snapshots must be enabled in the plan and the server must be available.' };
-}
-
-sub _delete {
-    my ($id) = @_;
-    @{ $STATE{servers} } = grep { $_->{id} != $id } @{ $STATE{servers} } unless $STATE{keep_deleted};
-    return { data => {} };
 }
 
 my $transport = Test::MockModule->new('HTTP::Tiny');
