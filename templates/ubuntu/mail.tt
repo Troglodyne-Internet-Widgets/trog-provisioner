@@ -74,8 +74,9 @@ chmod 0640 /mail/[% domain %]/passwd
 # amavisd-new
 [%# Readable by all, as the packaged files beside it are.  amavis reads its
     configuration as the amavis account, and a file that it cannot read changes
-    nothing.  A mv keeps the 0600 of the payload. -%]
-install -m 0644 -o root -g root 50-user /etc/amavis/conf.d/50-user
+    nothing.  No dot in the name, because run-parts skips such a name, and
+    amavis lists its files with run-parts. -%]
+install -m 0644 -o root -g root amavis.domain /etc/amavis/conf.d/50-[% domain.replace('[.]', '_') %]
 [% script_dir %]/queue_postrun_task systemctl restart amavis
 # postfix
 mv aliases /etc/aliases

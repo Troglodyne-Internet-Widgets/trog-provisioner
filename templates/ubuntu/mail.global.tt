@@ -4,6 +4,11 @@ install -d -m 0775 -o dovecot -g dovecot /mail /mail/scripts
 install -m 0775 -o dovecot -g dovecot [% script_dir %]/dovecot_overquota /mail/scripts/
 [%# Compiled here as root, because dovecot cannot write the binary into /etc
     when it delivers. -%]
+[%# The amavis configuration of the guest.  Each domain adds its own file after
+    it.  50-user is what a domain used to write: it assigned the list of local
+    domains, after this file empties it, so it must not stay. -%]
+install -m 0644 -o root -g root amavis.global /etc/amavis/conf.d/40-trog-mail
+rm -f /etc/amavis/conf.d/50-user
 install -d -m 0755 -o root -g root /etc/dovecot/sieve
 install -m 0644 -o root -g root junk.sieve /etc/dovecot/sieve/junk.sieve
 sievec /etc/dovecot/sieve/junk.sieve

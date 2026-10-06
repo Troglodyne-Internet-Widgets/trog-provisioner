@@ -155,6 +155,15 @@ SKIP: {
     system('doveadm', 'expunge', '-u', $to, 'mailbox', 'INBOX', 'subject', $subject);
 }
 
+# amavis lists its files with run-parts, which skips a name with a dot in it,
+# and so would skip a file named for the domain as it is spelled.
+{
+    my $listed = `run-parts --list /etc/amavis/conf.d 2>&1`;
+    like($listed, qr{^/etc/amavis/conf.d/50-\Q[% domain.replace('[.]', '_') %]\E$}m, 'amavis reads the file of [% domain %]') or diag $listed;
+    like($listed, qr{^/etc/amavis/conf.d/40-trog-mail$}m, 'and the file of the guest') or diag $listed;
+    unlike($listed, qr{/50-user$}m, 'and no 50-user, which would replace the list of domains') or diag $listed;
+}
+
 # Spam, end to end: GTUBE is the message that SpamAssassin always scores as
 # spam.  amavis must mark it, and the global sieve must file it into Junk.
 {

@@ -98,6 +98,14 @@ across domains.  So each domain gets what it asked for.
 =item * C</etc/opendkim.conf.d/40-mail>, from the global half, because nothing
 in it is specific to a domain.
 
+=item * C</etc/amavis/conf.d/40-trog-mail>, from the global half, and
+C</etc/amavis/conf.d/50-E<lt>domainE<gt>> for each domain, with each dot of the
+domain written as an underscore.  amavis needs no configd: it reads every file
+in that directory as Perl, in C<run-parts> order, and C<run-parts> skips a name
+with a dot in it.  The file of the guest empties C<@local_domains_acl>, and the
+file of each domain adds the domain to it.  amavis adds the spam headers only
+for a recipient in that list.
+
 =item * C</etc/postfix/domains/E<lt>domainE<gt>/>.  This is not a configd
 fragment directory.  It holds the lookup tables of the domain: the virtual
 maps, the transport and relay maps, the header checks and the sender-login
@@ -309,7 +317,8 @@ sub template_files {
         'mail.postfix.master.tt'         => 'master.cf',
         'mail.postfix.main.global.tt'    => 'main.cf.global',
         'mail.postfix.main.tt'           => 'main.cf.domain',
-        'mail.amavis.tt'                 => '50-user',
+        'mail.amavis.tt'                 => 'amavis.domain',
+        'mail.amavis.global.tt'          => 'amavis.global',
         'mail.autodiscover.tt'           => 'autodiscover.xml',
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',

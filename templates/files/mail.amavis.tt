@@ -1,25 +1,8 @@
 use strict;
 
-@mynetworks = qw{[% main_ip %]/32 127.0.0.0/8 [::1]};
-@inet_acl   = qw{[% main_ip %] 127.0.0.1 [::1]};
-
-$X_HEADER_LINE = "[% domain %] Thought Police";
-
-$final_virus_destiny = D_DISCARD; # (defaults to D_BOUNCE)
-
-$final_banned_destiny = D_REJECT; # (defaults to D_BOUNCE)
-
-$final_spam_destiny = D_PASS; # (defaults to D_REJECT but we handle elsewhere)
-
-# Score mail with SpamAssassin.  The package turns that off, with
-# @bypass_spam_checks_maps = (1) in /usr/share/amavis/conf.d/20-package.
-@bypass_spam_checks_maps = (\%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re);
-
-# No copy in /var/lib/amavis, which nothing cleans.  Spam is delivered to Junk.
-$spam_quarantine_to = undef;
-
-# amavis adds the spam headers only for a local recipient.  The leading dot
-# covers the subdomains as well.
-@local_domains_acl = ( ".[% domain %]" );
+# amavis adds the spam headers only for a local recipient.  This adds the
+# domain to the list that the configuration of the guest starts empty.  The
+# leading dot covers the subdomains as well.
+push @local_domains_acl, '.[% domain %]';
 
 1;
