@@ -52,8 +52,11 @@ chmod 0770 /var/spool/postfix/opendmarc
 # First, move the packaged conf.d out of the way.
 mv /etc/dovecot/conf.d /etc/dovecot/conf-available
 mkdir -p /etc/dovecot/conf.d
-mv dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
-mv dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
+[%# Readable by all, as the packaged configuration is.  A mv keeps 0600 and the
+    account that shipped the payload, and then dovecot-lda, which the quota
+    warning runs as dovecot, cannot read its configuration. -%]
+install -m 0644 -o root -g root dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
+install -m 0644 -o root -g root dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
 # The accounts come from the recipe, so keep the salvaged passwd file as
 # passwd.old.  The data target restored the mailboxes before this target ran.
 # TODO make the old one take precedence via configuration

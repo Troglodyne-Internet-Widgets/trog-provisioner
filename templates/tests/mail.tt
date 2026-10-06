@@ -142,6 +142,19 @@ SKIP: {
     is($catchall, '/mail/[% domain %]/catchall', 'dovecot knows the catchall of [% domain %]') or diag $catchall;
 }
 
+# The quota warning, run as dovecot runs it.  Nothing else delivers it, so a
+# script that cannot find dovecot-lda warns nobody and logs nothing we read.
+{
+    my $to      = 'catchall@[% domain %]';
+    my $subject = 'This mailbox is nearly over its quota';
+    my $said    = `sudo -u dovecot /mail/scripts/dovecot_overquota '$to' 2>&1`;
+    is($?, 0, 'the over-quota script runs as dovecot') or diag $said;
+
+    my $found = `doveadm search -u '$to' mailbox INBOX subject '$subject' 2>&1`;
+    like($found, qr/\S/, 'and its warning arrives in the mailbox') or diag $found;
+    system('doveadm', 'expunge', '-u', $to, 'mailbox', 'INBOX', 'subject', $subject);
+}
+
 # install_dkim_records publishes the key into a zone this guest serves itself,
 # once for each selector however many times the guest has been provisioned.
 SKIP: {
