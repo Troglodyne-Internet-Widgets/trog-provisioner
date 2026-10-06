@@ -4,10 +4,11 @@ use warnings;
 use Test::More;
 
 # Both files in cron.d: the one for this domain, and the one for the guest that
-# the global half installs with the SAR, rkhunter and watcher jobs.
-foreach my $file ( '/etc/cron.d/[% domain %]', '/etc/cron.d/default' ) {
-    subtest $file => sub { check_crontab($file) };
-}
+# the global half installs with the SAR, rkhunter and watcher jobs.  The guest
+# file is written once, by the first domain built on the guest, so its MAILFROM
+# names that domain, which need not be this one.
+subtest '/etc/cron.d/[% domain %]' => sub { check_crontab( '/etc/cron.d/[% domain %]', '[% from %]' ) };
+subtest '/etc/cron.d/default'     => sub { check_crontab('/etc/cron.d/default') };
 
 # The crontab of the service user, which crontab(1) installs, not cron.d.
 my $user_tab = `crontab -u [% user %] -l 2>&1`;
@@ -41,8 +42,9 @@ sub check_recipe_file {
     return;
 }
 
+# MAILFROM must be $from when it is given, and only set when it is not.
 sub check_crontab {
-    my ($file) = @_;
+    my ( $file, $from ) = @_;
 
     ok(-f $file, 'crontab file exists');
 
@@ -57,7 +59,12 @@ sub check_crontab {
 
     like($text, qr/^MAILTO="[^"]+"/m, 'it sets MAILTO, so failures reach somebody');
     my ($mailfrom) = $text =~ /^MAILFROM="([^"]*)"$/m;
-    is($mailfrom, '[% from %]', 'and MAILFROM, so the mail comes from cron and not from the user of the job');
+    if ( defined $from ) {
+        is($mailfrom, $from, 'and MAILFROM, so the mail comes from cron and not from the user of the job');
+    }
+    else {
+        like($mailfrom // '', qr/\S/, 'and MAILFROM, so the mail comes from cron and not from the user of the job');
+    }
     like($text, qr/^PATH="[^"]+"/m,   'and a PATH for the jobs to find their commands in');
 
     # Look up each command of the jobs in the PATH that the file declares.  If
