@@ -14,6 +14,10 @@ t/Provisioner-Recipe-claude.t - what the claude recipe installs, and in what ord
 use Test::More;
 use Test::NoWarnings;
 use File::Temp qw{tempdir};
+use File::Basename();
+use File::Find();
+use File::Path();
+use IPC::Run3();
 use Cpanel::JSON::XS();
 
 use FindBin::libs;
@@ -154,6 +158,76 @@ subtest 'the perl plugin is enabled only where the perl recipe runs' => sub {
     ok( $with->{enabledPlugins}{'perl-development@perigrin-marketplace'},     'a guest with perl gets it' );
     ok( !$without->{enabledPlugins}{'perl-development@perigrin-marketplace'}, 'a guest with perllsp and no perl does not' );
     ok( !$without->{extraKnownMarketplaces}{'perigrin-marketplace'},          'nor its marketplace' );
+};
+
+# The exit code of a command line, as the guest runs it, and what it said.
+sub run_sh {
+    my ($command) = @_;
+    IPC::Run3::run3( [ '/bin/sh', '-c', $command ], \undef, \my $out, \my $err );
+    return ( $? >> 8, $err );
+}
+
+# The command runs here, on a fake home, because what it lets through is the
+# whole point of it.  A transcript that comes down is a secret in every backup.
+subtest 'only the memories are staged for the salvage' => sub {
+    my $install_dir = tempdir( CLEANUP => 1 );
+    my $home        = "$install_dir/agent.test.test";
+    my $project     = "$home/.claude/projects/-bogus-project";
+
+    my %files = (
+        "$project/memory/MEMORY.md"                                        => 'kept',
+        "$project/memory/some-fact.md"                                     => 'kept',
+        "$project/0123abcd-0000-0000-0000-000000000000.jsonl"              => 'transcript',
+        "$project/0123abcd-0000-0000-0000-000000000000/tool-results/x.txt" => 'tool output',
+        "$project/0123abcd-0000-0000-0000-000000000000/subagents/y.jsonl"  => 'transcript',
+        "$home/.claude/projects/-other/memory/MEMORY.md"                   => 'kept',
+    );
+    foreach my $path ( sort keys %files ) {
+        File::Path::make_path( File::Basename::dirname($path) );
+        open( my $fh, '>', $path ) or die "Cannot write $path: $!";
+        print {$fh} $files{$path};
+        close($fh) or die "Cannot close $path: $!";
+    }
+
+    my @commands = recipe()->remote_prepare( $install_dir, 'agent.test.test' );
+    is( scalar @commands, 1, 'one command' );
+    my ( $rc, $err ) = run_sh( $commands[0] );
+    is( $rc, 0, 'which succeeds' ) or diag "$commands[0]\n$err";
+
+    my $staged = "$home/.claude-memory-salvage";
+    my @got;
+    File::Find::find( { no_chdir => 1, wanted => sub { push @got, $File::Find::name =~ s{\A\Q$staged\E/}{}r unless -d } }, $staged );
+    is_deeply(
+        [ sort @got ],
+        [qw{projects/-bogus-project/memory/MEMORY.md projects/-bogus-project/memory/some-fact.md projects/-other/memory/MEMORY.md}],
+        'the memory of every project, and no transcript or tool output'
+    );
+
+    unlink "$project/memory/some-fact.md" or die "Cannot unlink: $!";
+    run_sh( $commands[0] );
+    ok( !-e "$staged/projects/-bogus-project/memory/some-fact.md", 'a memory that was deleted is not salvaged again' );
+
+    File::Path::remove_tree("$home/.claude/projects");
+    is( ( run_sh( $commands[0] ) )[0], 0, 'a guest whose projects are gone is not a failure' );
+    ok( !-e "$staged/projects", 'and the copy staged before goes with them' );
+
+    my %remote = recipe()->remote_files( $install_dir, 'agent.test.test' );
+    is( $remote{"$home/.claude-memory-salvage/"}, 'claude/memory/', 'the staged copy is what comes down' );
+
+    my $empty = tempdir( CLEANUP => 1 );
+    File::Path::make_path("$empty/agent.test.test/.claude");
+    my ($none) = recipe()->remote_prepare( $empty, 'agent.test.test' );
+    is( ( run_sh($none) )[0], 0, 'a guest with no projects is not a failure' );
+    ok( !-e "$empty/agent.test.test/.claude-memory-salvage/projects", 'and stages nothing' );
+};
+
+subtest 'the memories go back where the agent reads them' => sub {
+    my %restores = recipe()->restores(%G);
+    is_deeply(
+        \%restores,
+        { '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects', owner => 'someadmin:someadmin' } },
+        'into .claude/projects of the domain, for the admin'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();
