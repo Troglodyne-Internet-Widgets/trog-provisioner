@@ -13,6 +13,7 @@ use parent 'Trog::HV::Cloud';
 use List::Util qw{first};
 use Socket();
 use Time::HiRes qw{sleep time};
+use Provisioner::Vars();
 
 =head1 NAME
 
@@ -69,12 +70,6 @@ our $DELETE_TIMEOUT = 300;
 # How often to ask again while waiting.  A build took about thirty seconds on
 # the node this was written against, so this is a handful of requests.
 our $POLL = 5;
-
-# What SolusVM charges a plan by, when it charges at all.
-our $HOURS_A_MONTH = 730;
-
-my $MB = 1_048_576;
-my $GB = 1_073_741_824;
 
 =head2 config_keys
 
@@ -324,7 +319,7 @@ sub image_for_distro {
 # one is reported at a month of hours, so that two plans can be compared at all.
 my sub monthly ($plan) {
     return $plan->{tokens_per_month} if $plan->{tokens_per_month};
-    return ( $plan->{tokens_per_hour} // 0 ) * $HOURS_A_MONTH;
+    return ( $plan->{tokens_per_hour} // 0 ) * $Provisioner::Vars::HOURS_A_MONTH;
 }
 
 =head2 cheapest_for(%needs)
@@ -345,9 +340,9 @@ sub cheapest_for {
     my @fit = eval {
         grep {
             my $params = $_->{params} // {};
-            ( $params->{ram} // 0 ) >= ( $needs{memory_mb} // 0 ) * $MB
+            ( $params->{ram} // 0 ) >= ( $needs{memory_mb} // 0 ) * $Provisioner::Vars::MB
               && ( $params->{vcpu} // $params->{cores} // 0 ) >= ( $needs{cpus} // 0 )
-              && ( $params->{disk} // 0 ) * $GB >=
+              && ( $params->{disk} // 0 ) * $Provisioner::Vars::GB >=
               ( $needs{disk_bytes} // 0 )
         } $self->plans;
     };
@@ -406,7 +401,7 @@ sub capacity {
 
     my $params = $self->plan($named)->{params} // {};
 
-    my $memory_mb = int( ( $params->{ram} // 0 ) / $MB );
+    my $memory_mb = int( ( $params->{ram} // 0 ) / $Provisioner::Vars::MB );
     my $cpus      = $params->{vcpu} // $params->{cores} // 0;
 
     return {
@@ -417,7 +412,7 @@ sub capacity {
         cpus_allocatable => $cpus,
         cpus_committed   => 0,
         cpus_free        => $cpus,
-        disk_free        => ( $params->{disk} // 0 ) * $GB,
+        disk_free        => ( $params->{disk} // 0 ) * $Provisioner::Vars::GB,
         guests           => scalar $self->servers,
     };
 }

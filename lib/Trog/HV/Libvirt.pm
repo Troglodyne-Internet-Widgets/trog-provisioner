@@ -2283,7 +2283,7 @@ sub note_pool_quota {
     my $under = $fstype eq 'zfs' ? 'the zpool ' . zpool_of( $space->{source} ) : "the filesystem at $space->{mount}";
     return {
         ok   => 0,
-        what => sprintf( 'The %s pool has no quota: %s has all %.1fGB that %s has free', $name, $space->{path}, $space->{avail} / 1_073_741_824, $under ),
+        what => sprintf( 'The %s pool has no quota: %s has all %.1fGB that %s has free', $name, $space->{path}, $space->{avail} / $Provisioner::Vars::GB, $under ),
         fix  => pool_quota_advice( $fstype, $name, $space ),
     };
 }
