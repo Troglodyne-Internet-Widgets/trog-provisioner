@@ -89,6 +89,7 @@ allow_subs = inspection_address secret_blocks check_client check_transfer_route 
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
 [Subroutines::ProhibitTailRecursion]
 [Variables::ProhibitUselessVarClearing]
+[ValuesAndExpressions::ProhibitLiteralArithmetic]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 ;
