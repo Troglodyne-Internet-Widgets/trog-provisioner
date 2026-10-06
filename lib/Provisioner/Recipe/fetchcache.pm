@@ -18,6 +18,8 @@ use IO::Socket::SSL::Utils();
 use Time::HiRes qw{time};
 use Provisioner::Cookbook();
 use Provisioner::Utils();
+use Provisioner::Vars();
+use Readonly;
 use Trog::Config();
 
 =head1 NAME
@@ -520,11 +522,8 @@ not there, it makes them first.  See L</The certificate, and who signs it>.
 
 =cut
 
-use constant {
-    AUTHORITY_DAYS   => 3650,
-    CERTIFICATE_DAYS => 397,
-    DAY              => 86_400,
-};
+Readonly my $AUTHORITY_DAYS   => 3650;
+Readonly my $CERTIFICATE_DAYS => 397;
 
 sub authority {
     my ($class) = @_;
@@ -537,7 +536,7 @@ sub authority {
     my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
         CA        => 1,
         subject   => { commonName => 'trog-provisioner fetch cache authority' },
-        not_after => int(time) + AUTHORITY_DAYS * DAY,
+        not_after => int(time) + $AUTHORITY_DAYS * $Provisioner::Vars::SECONDS_A_DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
     );
 
@@ -574,7 +573,7 @@ sub certify {
         subject   => { commonName => $hosts[0] },
         purpose   => 'server',
         issuer    => [ $ca_cert, $ca_key ],
-        not_after => int(time) + CERTIFICATE_DAYS * DAY,
+        not_after => int(time) + $CERTIFICATE_DAYS * $Provisioner::Vars::SECONDS_A_DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
         ext       => [ { sn => 'subjectAltName', data => join( ',', map { "DNS:$_" } @hosts ) } ],
     );
