@@ -13,6 +13,7 @@ t/Provisioner-Vars.t - the shared numbers mean what their names say
 
 use Test::More;
 use IPC::Run3();
+use Time::Piece();
 
 use FindBin::libs;
 
@@ -39,6 +40,10 @@ subtest 'each wait status is what $? holds after a child that did it' => sub {
 
 subtest 'a month of hours is a year of them over twelve' => sub {
     is( $Provisioner::Vars::HOURS_A_MONTH * 12, 8760, '730 hours, twelve times, is 365 days' );
+};
+
+subtest 'a day of seconds is what a timestamp moves in a day' => sub {
+    is( $Provisioner::Vars::SECONDS_A_DAY, Time::Piece->strptime( '2026-01-02', '%Y-%m-%d' )->epoch - Time::Piece->strptime( '2026-01-01', '%Y-%m-%d' )->epoch, 'the seconds between two midnights' );
 };
 
 done_testing();

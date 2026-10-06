@@ -18,6 +18,7 @@ use File::Slurper::Temp();
 use Net::OpenSSH::More();
 use Time::HiRes qw{alarm};
 use Trog::Credentials();
+use Provisioner::Vars();
 
 =head1 NAME
 
@@ -292,7 +293,7 @@ own limit then decides, and the alarm does not stop it early.
 sub hang_limit ($what) {
     return $HANG_TIMEOUT unless defined $what;
 
-    my %seconds = ( '' => 1, s => 1, m => 60, h => 3600, d => 86400 );
+    my %seconds = ( '' => 1, s => 1, m => 60, h => 3600, d => $Provisioner::Vars::SECONDS_A_DAY );
     my $limit   = $HANG_TIMEOUT;
 
     while ( $what =~ m/\btimeout\s+(\d+)([smhd]?)\b/g ) {

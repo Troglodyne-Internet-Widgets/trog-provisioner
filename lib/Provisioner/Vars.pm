@@ -57,6 +57,9 @@ find the command.
 C<$HOURS_A_MONTH> is 730, which is how a cloud that bills by the hour states
 a monthly price: 8760 hours in a year, over twelve.
 
+C<$SECONDS_A_DAY> is 86 400, for a certificate's lifetime in days and a
+timeout given in days.
+
 =cut
 
 our $KB = 1_024;
@@ -69,5 +72,6 @@ our $STATUS_EXIT_2    = 512;
 our $STATUS_NOT_FOUND = 32_512;
 
 our $HOURS_A_MONTH = 730;
+our $SECONDS_A_DAY = 86_400;
 
 1;

@@ -16,6 +16,7 @@ use IO::Socket::SSL::Utils();
 use Time::HiRes qw{time};
 use Provisioner::Cookbook();
 use Provisioner::DNSRecipe();
+use Provisioner::Vars();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::acmeca
@@ -121,7 +122,6 @@ our $DEFAULT_PORT = 9000;
 # Five years.  This is shorter than the ten years of the authority, so it
 # expires before its signer.  It is far longer than any guest lives.
 our $INTERMEDIATE_DAYS = 1825;
-my $DAY = 86_400;
 
 =head2 @claims = $recipe->listens(%opts)
 
@@ -297,7 +297,7 @@ sub intermediate {
         CA        => 1,
         subject   => { commonName => "trog-provisioner acme intermediate for .$tld" },
         issuer    => [ $ca_cert, $ca_key ],
-        not_after => int(time) + $INTERMEDIATE_DAYS * $DAY,
+        not_after => int(time) + $INTERMEDIATE_DAYS * $Provisioner::Vars::SECONDS_A_DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
         ext       => [ { sn => 'nameConstraints', data => "critical,permitted;DNS:.$tld,permitted;DNS:localhost" } ],
     );
