@@ -1,6 +1,8 @@
 #!/bin/bash
 
-PATH="/usr/libexec/dovecot:$PATH"
+# Debian and Ubuntu install dovecot-lda in /usr/lib/dovecot, and other
+# distributions in /usr/libexec/dovecot.  Neither is on a default PATH.
+PATH="/usr/lib/dovecot:/usr/libexec/dovecot:$PATH"
 
 # $1 is the mail recipient that dovecot passes to this script.
 
