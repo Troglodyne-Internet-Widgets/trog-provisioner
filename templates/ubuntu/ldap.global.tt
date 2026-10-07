@@ -1,7 +1,8 @@
-# Give debconf the slapd answers before dpkg-reconfigure
-DEBIAN_FRONTEND=noninteractive debconf-set-selections slapd.debconf
+# Give debconf the slapd answers before dpkg-reconfigure.  serially, because
+# both take the lock of debconf.  scripts/serially says why.
+DEBIAN_FRONTEND=noninteractive [% script_dir %]/serially debconf-set-selections slapd.debconf
 rm -f slapd.debconf
-DEBIAN_FRONTEND=noninteractive dpkg-reconfigure slapd
+DEBIAN_FRONTEND=noninteractive [% script_dir %]/serially dpkg-reconfigure slapd
 
 [%# The empty host part makes ldaps://:port/ bind every interface, the same
     as a bare ldaps:///. -%]

@@ -2,10 +2,11 @@ install -m 0600 sssd.conf /etc/sssd/sssd.conf
 chown root:root /etc/sssd/sssd.conf
 
 # Wire PAM to SSSD with pam-auth-update, which is the Debian-family tool.
-pam-auth-update --enable sss
+# serially, because it takes the lock of debconf.  scripts/serially says why.
+[% script_dir %]/serially pam-auth-update --enable sss
 
 # Make the home directory of a user at the first login.
-pam-auth-update --enable mkhomedir; /bin/true
+[% script_dir %]/serially pam-auth-update --enable mkhomedir; /bin/true
 
 [% script_dir %]/queue_postrun_task systemctl enable sssd
 [% script_dir %]/queue_postrun_task systemctl restart sssd

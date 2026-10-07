@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Run a command under the lock that scripts/serial_apt holds for apt, for the
+# length of a build under make -j.
+#
+# debconf keeps one lock, on /var/cache/debconf/config.dat.  An apt install, a
+# dpkg-reconfigure and a pam-auth-update each take it, and one that finds it
+# taken fails at once: "debconf: DbDriver "config":
+# /var/cache/debconf/config.dat is locked by another process".  So a fragment
+# that runs one of them in its own right runs it through this.
+#
+# It is not on PATH under their names, as serial_apt is for apt.  The postinst
+# of a package calls pam-auth-update while its apt holds the lock, and would
+# wait for that apt.
+exec flock -w 1800 "${SERIAL_APT_LOCK:-/run/trog-provisioner-apt.lock}" "$@"
