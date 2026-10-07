@@ -30,7 +30,7 @@ chown -R root:root /mail/keys
 # it.  The fetch also copies it into the data directory of the provisioner.
 find /mail/keys -type d -exec chmod 0700 {} +
 find /mail/keys -type f -exec chmod 0600 {} +
-mkdir /var/spool/postfix/opendkim
+mkdir -p /var/spool/postfix/opendkim
 chown opendkim:postfix /var/spool/postfix/opendkim
 chmod 0770 /var/spool/postfix/opendkim
 [% script_dir %]/queue_postrun_task systemctl restart opendkim
@@ -42,15 +42,16 @@ mv ignore.hosts /etc/opendmarc
 chown -R opendmarc:opendmarc /etc/opendmarc/
 install -d -m 0755 -o root -g root /etc/opendmarc.conf.d
 install -m 0600 -o root -g root opendmarc.conf /etc/opendmarc.conf.d/50-[% domain %]
-mkdir /var/spool/postfix/opendmarc
+mkdir -p /var/spool/postfix/opendmarc
 chown opendmarc:postfix /var/spool/postfix/opendmarc
 chmod 0770 /var/spool/postfix/opendmarc
 [% script_dir %]/queue_postrun_task systemctl restart opendmarc
 # Update the DNS records, if this guest runs a DNS server.
 [% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %]
 # dovecot
-# First, move the packaged conf.d out of the way.
-mv /etc/dovecot/conf.d /etc/dovecot/conf-available
+# First, move the packaged conf.d out of the way, once.  The target of a second
+# domain on this guest must not move the conf.d that the first one wrote.
+test -d /etc/dovecot/conf-available || mv /etc/dovecot/conf.d /etc/dovecot/conf-available
 mkdir -p /etc/dovecot/conf.d
 [%# Readable by all, as the packaged configuration is.  A mv keeps 0600 and the
     account that shipped the payload, and then dovecot-lda, which the quota
@@ -73,8 +74,9 @@ chmod 0640 /mail/[% domain %]/passwd
 # amavisd-new
 [%# Readable by all, as the packaged files beside it are.  amavis reads its
     configuration as the amavis account, and a file that it cannot read changes
-    nothing.  A mv keeps the 0600 of the payload. -%]
-install -m 0644 -o root -g root 50-user /etc/amavis/conf.d/50-user
+    nothing.  No dot in the name, because run-parts skips such a name, and
+    amavis lists its files with run-parts. -%]
+install -m 0644 -o root -g root amavis.domain /etc/amavis/conf.d/50-[% domain.replace('[.]', '_') %]
 [% script_dir %]/queue_postrun_task systemctl restart amavis
 # postfix
 mv aliases /etc/aliases

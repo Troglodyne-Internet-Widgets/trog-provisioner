@@ -1,0 +1,29 @@
+use strict;
+
+# The amavis configuration of this guest, said once, whatever domains it holds.
+# Each domain adds itself to @local_domains_acl in a file of its own, after this
+# one.  Provisioner::Recipe::mail has the whole account.
+
+@mynetworks = qw{[% main_ip %]/32 127.0.0.0/8 [::1]};
+@inet_acl   = qw{[% main_ip %] 127.0.0.1 [::1]};
+
+$X_HEADER_LINE = "$myhostname Thought Police";
+
+$final_virus_destiny = D_DISCARD; # (defaults to D_BOUNCE)
+
+$final_banned_destiny = D_REJECT; # (defaults to D_BOUNCE)
+
+$final_spam_destiny = D_PASS; # (defaults to D_REJECT but we handle elsewhere)
+
+# Score mail with SpamAssassin.  The package turns that off, with
+# @bypass_spam_checks_maps = (1) in /usr/share/amavis/conf.d/20-package.
+@bypass_spam_checks_maps = (\%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re);
+
+# No copy in /var/lib/amavis, which nothing cleans.  Spam is delivered to Junk.
+$spam_quarantine_to = undef;
+
+# Empty, so that the files of the domains start from nothing rather than from
+# the ".$mydomain" that 05-domain_id sets.
+@local_domains_acl = ();
+
+1;
