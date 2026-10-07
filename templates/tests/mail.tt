@@ -39,6 +39,32 @@ isnt($gripes, '', 'the admin user can no longer walk the mail store');
 # not the original.  Provisioner::Recipe::mail says why.  restores() takes the
 # key back from exactly this path.
 ok(-s '/etc/opendkim/keys/[% domain %]/default.private', 'this domain has a DKIM signing key');
+
+# The tables that opendkim reads are the rows of every domain on the guest.  If
+# the domain built last replaced them, the other domains would go out unsigned.
+{
+    my $keys = do { local (@ARGV, $/) = '/etc/opendkim/KeyTable'; <> } // '';
+    like($keys, qr{^\Q[% domain %]\E\s+\Q[% domain %]\E:default:}m, 'opendkim has the key of [% domain %]') or diag $keys;
+
+    # Of every domain on the guest, because the target of this domain chmods
+    # the whole of /etc/opendkim.
+    my $open = `find /etc/opendkim/keys -type f -perm /077 2>&1`;
+    is($open, '', 'and no key on the guest is readable by anyone but opendkim') or diag $open;
+
+    my $subject = 'dkim probe of the guest tests';
+    open( my $mail, '|-', '/usr/sbin/sendmail', '-oi', '-f', 'postmaster@[% domain %]', 'catchall@[% domain %]' ) or die "sendmail: $!";
+    print {$mail} "From: postmaster\@[% domain %]\nTo: catchall\@[% domain %]\nSubject: $subject\n\nprobe\n";
+    close($mail) or die "sendmail exited $?";
+
+    my $headers = '';
+    foreach ( 1 .. 60 ) {
+        $headers = `doveadm fetch -u 'catchall\@[% domain %]' hdr mailbox INBOX subject '$subject' 2>&1`;
+        last if $headers =~ m/\S/;
+        sleep 1;
+    }
+    like($headers, qr/^DKIM-Signature:.*\bd=\Q[% domain %]\E;/msx, 'and signs the mail of [% domain %]') or diag $headers;
+    system('doveadm', 'expunge', '-u', 'catchall@[% domain %]', 'mailbox', 'INBOX', 'subject', $subject);
+}
 ok(!-e '/mail/keys/keys', 'staged once, rather than into itself');
 SKIP: {
     my $staged = '/mail/keys/[% domain %]/default.private';
