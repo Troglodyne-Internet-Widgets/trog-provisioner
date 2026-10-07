@@ -20,4 +20,18 @@ like($nsswitch, qr/^group:.*\bsss\b/m,  'and for group');
 my $pam = `grep -rl pam_sss.so /etc/pam.d 2>/dev/null`;
 ok($pam, 'PAM is wired to sss') or diag 'pam-auth-update --enable sss did not take';
 
+# sshd takes the keys of a user of the directory from SSSD.  sshd -T is
+# what sshd made of every file, not what one file says.
+my $sshd = `sshd -T 2>&1`;
+like($sshd, qr{^authorizedkeyscommand /usr/bin/sss_ssh_authorizedkeys$}m, 'sshd asks SSSD for keys') or diag $sshd;
+like($sshd, qr{^authorizedkeyscommanduser nobody$}m, 'as nobody');
+ok(-x '/usr/bin/sss_ssh_authorizedkeys', 'and the command it asks is there');
+
+my $sudoers = do { local (@ARGV, $/) = '/etc/sudoers.d/sssd'; <> } // '';
+my $visudo  = `visudo -c 2>&1`;
+is($? >> 8, 0, 'sudo reads every file in sudoers.d') or diag $visudo;
+[% FOR group IN sudo_groups %]
+like($sudoers, qr/^%\Q[% group %]\E ALL=\(ALL:ALL\) NOPASSWD: ALL$/m, '[% group %] gets sudo without a password') or diag $sudoers;
+[% END %]
+
 done_testing();

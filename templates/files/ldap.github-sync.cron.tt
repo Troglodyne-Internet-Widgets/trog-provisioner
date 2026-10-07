@@ -1,0 +1,5 @@
+# Make the accounts in the directory match the members of [% github.org %] on
+# GitHub, each hour.  A member who leaves loses the account within the hour.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+41 * * * * root /usr/local/sbin/ldap-github-sync > /var/log/ldap-github-sync.log 2>&1

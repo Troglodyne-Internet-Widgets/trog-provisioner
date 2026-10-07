@@ -196,6 +196,39 @@ SKIP: {
     like($status, qr/^\s*slapd\b/m, 'and the ufw target turned it into a rule') or diag $status;
 }
 
+# ldap-configure.sh gives slapd the schema of sshPublicKey, and lets root
+# manage the data through ldapi, which ldap-github-sync binds as.
+my $lpk = `ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=schema,cn=config '(cn=*openssh-lpk)' dn 2>&1`;
+like($lpk, qr/^dn:.*openssh-lpk/m, 'slapd knows sshPublicKey') or diag $lpk;
+
+my $acl = `ldapsearch -Q -LLL -o ldif-wrap=no -Y EXTERNAL -H ldapi:/// -b cn=config '(olcSuffix=[% base_dn %])' olcAccess 2>&1`;
+like($acl, qr/by\s+dn\.exact="gidNumber=0\+uidNumber=0,cn=peercred,cn=external,cn=auth"\s+manage/, 'and root manages [% base_dn %] through ldapi') or diag $acl;
+[% IF github %]
+
+# The accounts of [% github.org %] on GitHub.
+my @tstat = stat('/etc/ldap/github-sync.token');
+is(scalar getpwuid($tstat[4] // -1), 'root', 'the token belongs to root');
+is(($tstat[2] // 0) & 07777, 0600, 'and only root can read it') or diag sprintf('mode %04o', ($tstat[2] // 0) & 07777);
+
+my $sync_cron = do { local (@ARGV, $/) = '/etc/cron.d/ldap-github-sync'; <> } // '';
+like($sync_cron, qr{^\S+ \S+ \S+ \S+ \S+ +root +/usr/local/sbin/ldap-github-sync}m, 'the sync runs on a cron') or diag $sync_cron;
+
+my $synced = `ldapsearch -Q -LLL -o ldif-wrap=no -Y EXTERNAL -H ldapi:/// -b 'ou=People,[% base_dn %]' '(description=github:[% github.org %])' uid uidNumber 2>&1`;
+my @uids = $synced =~ m/^uid:\s*(\S+)$/mg;
+ok(scalar @uids, 'the sync made an account for each member: ' . join(' ', @uids)) or diag $synced;
+my @low = grep { $_ < [% github.uid_base %] } $synced =~ m/^uidNumber:\s*(\d+)$/mg;
+is(scalar @low, 0, 'each with a uidNumber above uid_base, so none is the uid of a seeded user') or diag $synced;
+
+# An organization has an owner, and a token that can see members sees them.
+my $group  = `ldapsearch -Q -LLL -o ldif-wrap=no -Y EXTERNAL -H ldapi:/// -b 'ou=Groups,[% base_dn %]' '(cn=[% github.admin_group %])' memberUid 2>&1`;
+like($group, qr/^memberUid:\s*\S+/m, 'the owners are in [% github.admin_group %]') or diag $group;
+
+# The second run finds nothing to do, so the first got the directory right.
+my $again = `/usr/local/sbin/ldap-github-sync 2>&1`;
+is($? >> 8, 0, 'the sync runs again') or diag $again;
+like($again, qr/0 added, 0 updated, 0 removed/, 'and changes nothing') or diag $again;
+[% END %]
+
 # The seed step writes the admin password to a file for ldapadd -y.  The
 # seeded entries above show that the password worked.
 ok(!-e 'ldap.admin_password', 'the file that carried the password to ldapadd is gone');

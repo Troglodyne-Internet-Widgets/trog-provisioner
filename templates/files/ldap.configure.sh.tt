@@ -1,0 +1,44 @@
+#!/bin/bash
+# Give slapd what the accounts from GitHub need.  Each step asks slapd first,
+# so a second provision of the same guest changes nothing.
+#
+# It runs before ldap-reload.sh, because slapadd refuses an entry whose
+# attributes the schema does not know.  Provisioner::Recipe::ldap, under
+# ACCOUNTS FROM GITHUB, has the full account.
+
+set -euo pipefail
+
+BASE_DN='[% base_dn %]'
+LDAP=(-Q -LLL -o ldif-wrap=no -Y EXTERNAL -H ldapi:///)
+
+# sshPublicKey and ldapPublicKey, from openssh-lpk.  Ubuntu ships no schema
+# for them, so the definition is here.
+if ! ldapsearch "${LDAP[@]}" -b cn=schema,cn=config '(cn=*openssh-lpk)' dn | grep -q '^dn:'; then
+    ldapadd -Q -Y EXTERNAL -H ldapi:/// <<'LDIF'
+dn: cn=openssh-lpk,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: openssh-lpk
+olcAttributeTypes: ( 1.3.6.1.4.1.24552.500.1.1.1.13 NAME 'sshPublicKey' DESC 'OpenSSH public key' EQUALITY octetStringMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.40 )
+olcObjectClasses: ( 1.3.6.1.4.1.24552.500.1.1.2.0 NAME 'ldapPublicKey' DESC 'OpenSSH LPK objectclass' SUP top AUXILIARY MAY ( sshPublicKey $ uid ) )
+LDIF
+    echo "ldap-configure: added the openssh-lpk schema"
+fi
+
+# root, through ldapi, manages the data as it already manages cn=config.  So
+# ldap-github-sync needs no password on the disk.
+ROOT='gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth'
+DB=$(ldapsearch "${LDAP[@]}" -b cn=config "(olcSuffix=$BASE_DN)" dn | sed -n 's/^dn: //p')
+if [ -z "$DB" ]; then
+    echo "ldap-configure: no database in cn=config has the suffix $BASE_DN" >&2
+    exit 1
+fi
+
+if ! ldapsearch "${LDAP[@]}" -b "$DB" -s base olcAccess | grep -qF "by dn.exact=\"$ROOT\" manage"; then
+    ldapmodify -Q -Y EXTERNAL -H ldapi:/// <<LDIF
+dn: $DB
+changetype: modify
+add: olcAccess
+olcAccess: {0}to * by dn.exact="$ROOT" manage by * break
+LDIF
+    echo "ldap-configure: root manages $BASE_DN through ldapi"
+fi

@@ -1,0 +1,15 @@
+[%# Read by ldap-github-sync, which Provisioner::Recipe::ldap installs.  The
+    token is not here: bin/provision puts it in token_file from the secret
+    store. -%]
+[% IF github -%]
+[% json({
+    org         => github.org,
+    base_dn     => base_dn,
+    admin_group => github.admin_group,
+    admin_gid   => github.admin_gid,
+    users_gid   => 10000,
+    uid_base    => github.uid_base,
+    token_file  => '/etc/ldap/github-sync.token',
+    api         => 'https://api.github.com',
+}) %]
+[% END -%]

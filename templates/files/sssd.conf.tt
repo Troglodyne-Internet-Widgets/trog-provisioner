@@ -1,5 +1,5 @@
 [sssd]
-services = nss, pam
+services = nss, pam, ssh
 config_file_version = 2
 domains = LDAP
 
@@ -20,8 +20,11 @@ ldap_group_object_class = posixGroup
 enumerate = true
 cache_credentials = true
 ldap_schema = rfc2307
+ldap_user_ssh_public_key = sshPublicKey
 
 [nss]
 homedir_substring = /home
 
 [pam]
+
+[ssh]

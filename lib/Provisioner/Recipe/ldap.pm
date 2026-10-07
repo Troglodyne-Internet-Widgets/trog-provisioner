@@ -10,6 +10,9 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Cpanel::JSON::XS();
+use Text::Xslate();
+
 =head1 Provisioner::Recipe::ldap
 
 =head2 SYNOPSIS
@@ -25,6 +28,14 @@ Or with a base DN and an LDAPS port of your choice:
             admin_password: s3cr3t
             base_dn: dc=example,dc=test
             port: 636
+
+Or with an account for each member of a GitHub organization:
+
+    somedomain:
+        ldap:
+            admin_password: s3cr3t
+            github:
+                org: someorg
 
 =head2 DESCRIPTION
 
@@ -68,6 +79,42 @@ can read an ACL or an overlay and add it again by hand.
 
 A rebuild can lose at most the changes of the last hour.
 
+=head2 ACCOUNTS FROM GITHUB
+
+With C<github>, the directory has an account for each member of the GitHub
+organization C<org>, and C<ldap-github-sync> keeps the accounts in step with
+it each hour.  A member who joins gets an account, a member who leaves loses
+it, and the public keys of each member on GitHub are its C<sshPublicKey>.  The
+owners of the organization are the members of the group C<admin_group>.
+L<Provisioner::Recipe::sssd> lets these accounts log in with those keys, and
+its C<sudo_groups> gives C<admin_group> sudo without a password.
+
+The sync asks GitHub with a token, because only a member of the organization
+can see who its owners are.  A fine-grained token that can read the members
+of the organization is enough.  It is in the secret store and not in the
+configuration, so that it never travels in the payload or a backup:
+
+    bin/add_secret --group ldap --title somedomain-github-token --prompt
+
+C<bin/provision> puts it on the guest as F</etc/ldap/github-sync.token>.
+
+The sync changes nothing unless GitHub answered every request.  A token that
+sees no members gets an empty list and not an error, so an empty list stops
+the sync too.  Otherwise an outage of GitHub, or an expired token, would remove
+every account.
+
+Each account that the sync makes has C<github:org> in its C<description>, and
+the sync changes and removes only those.  If a member has the name of an
+account that it did not make, such as one from C<users>, it leaves that
+account alone and says so in F</var/log/ldap-github-sync.log>.
+
+The C<uidNumber> of an account is C<uid_base> plus the id of the member on
+GitHub, which does not change when the member renames the account.  So a member
+who leaves and comes back owns the same files.  The primary group of each
+account is C<ldapusers>.
+
+An account has no password.  It logs in with a key.
+
 =cut
 
 =head2 @claims = $recipe->listens(%opts)
@@ -104,7 +151,18 @@ sub args {
             admin_password => { type => 'string', 'x-secret' => 1 },
             base_dn        => { type => 'string' },
             port           => { type => 'integer', default => 636 },
-            users          => {
+            github         => {
+                type        => 'object',
+                required    => [qw{org}],
+                description => 'An account for each member of a GitHub organization, kept in step each hour.  The token is in the secret store: see ACCOUNTS FROM GITHUB in perldoc Provisioner::Recipe::ldap.',
+                properties  => {
+                    org         => { type => 'string',  pattern => '^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$', description => 'The organization, by its login.' },
+                    admin_group => { type => 'string',  pattern => '^[a-z_][a-z0-9_-]*$', default => 'github-admins', description => 'The group of the owners of the organization.  Name it in sudo_groups of sssd for sudo without a password.' },
+                    admin_gid   => { type => 'integer', minimum => 1000,                  default => 10001,           description => 'The gidNumber of admin_group.' },
+                    uid_base    => { type => 'integer', minimum => 1000,                  default => 1000000,         description => 'Added to the id of a member on GitHub to make its uidNumber.' },
+                },
+            },
+            users => {
                 type    => 'array',
                 default => [],
                 items   => {
@@ -155,6 +213,12 @@ sub template_files {
         'ldap.export.sh.tt'     => 'ldap-export.sh',
         'ldap.export.cron.tt'   => 'ldap-export.cron',
         'ldap.reload.sh.tt'     => 'ldap-reload.sh',
+        'ldap.configure.sh.tt'  => 'ldap-configure.sh',
+
+        # Rendered for every domain, and installed only with github.
+        'ldap.github-sync'         => 'ldap-github-sync',
+        'ldap.github-sync.json.tt' => 'ldap-github-sync.json',
+        'ldap.github-sync.cron.tt' => 'ldap-github-sync.cron',
 
         # A ufw application profile for the port.  setup-ufw-rules allows each
         # profile that `ufw app list` shows.
@@ -162,14 +226,53 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes()
+=head2 %required = $recipe->required_recipes(%opts)
 
 C<cron>, which installs F<ldap-export.cron> as F</etc/cron.d/ldap-export>.
+With C<github>, it also installs F<ldap-github-sync.cron> as
+F</etc/cron.d/ldap-github-sync>.
 
 =cut
 
 sub required_recipes {
-    return ( cron => sub { return ( files => { 'ldap-export' => 'ldap-export.cron' } ) } );
+    my ( $self, %opts ) = @_;
+    my %files = ( 'ldap-export' => 'ldap-export.cron', ( $opts{github} ? ( 'ldap-github-sync' => 'ldap-github-sync.cron' ) : () ) );
+    return ( cron => sub { return ( files => {%files} ) } );
+}
+
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+
+With C<github>, the token that C<ldap-github-sync> asks GitHub with, as
+F</etc/ldap/github-sync.token>.  Nothing without it.
+
+An operator adds the token to the store.  A provision that finds none stops and
+says how to add it, because no value that the provisioner can make is a token.
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain, %opts ) = @_;
+    return () unless $opts{github};
+
+    my $ref = "secret:ldap/$domain-github-token/password";
+    return (
+        '/etc/ldap/github-sync.token' => {
+            ref      => $ref,
+            generate => sub { die "ldap: the secret store has no GitHub token for $domain at $ref.\nAdd one that can read the members of $opts{github}{org}: bin/add_secret --group ldap --title $domain-github-token --prompt\n" },
+            mode     => '0600',
+        },
+    );
+}
+
+=head2 %formatters = $recipe->formatters()
+
+C<json>, which F<ldap.github-sync.json.tt> writes the configuration of the
+sync with.
+
+=cut
+
+sub formatters {
+    return ( json => Text::Xslate::html_builder( sub { return Cpanel::JSON::XS->new->canonical->pretty->encode(shift) } ) );
 }
 
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)

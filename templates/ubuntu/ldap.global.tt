@@ -37,6 +37,11 @@ systemctl restart slapd
 # Declare the firewall profile for LDAPS
 install -o root -g root -m 0644 ldap_ufw.conf /etc/ufw/applications.d/ldap
 
+# The schema of sshPublicKey, and root as a manager of the data through ldapi.
+# This must come before the reload, which refuses an attribute it does not know.
+install -m 0750 -o root -g root ldap-configure.sh /usr/local/sbin/ldap-configure.sh
+/usr/local/sbin/ldap-configure.sh
+
 # Load the directory that this domain had before the rebuild, if there is one.
 # This must come before the seed, which only fills in what is missing.
 [%# The data target already put any salvage in /var/backups/ldap: see restores()
@@ -62,6 +67,16 @@ install -m 0600 /dev/null ldap.admin_password
 printf '%s' '[% admin_password %]' > ldap.admin_password
 @ldapadd -c -x -D "cn=admin,[% base_dn %]" -y ldap.admin_password -f seed.ldif || { ldapsearch -x -b '[% base_dn %]' -s base >/dev/null 2>&1 || { echo "ldap: could not seed [% base_dn %]; the directory is empty" >&2; exit 1; }; }
 rm -f seed.ldif ldap.admin_password
+[% IF github %]
+
+# An account for each member of [% github.org %] on GitHub, and once now, so
+# that the export below has them.  bin/provision placed the token.
+install -m 0755 -o root -g root ldap-github-sync /usr/local/sbin/ldap-github-sync
+install -m 0644 -o root -g root ldap-github-sync.json /etc/ldap/github-sync.json
+chown root:root /etc/ldap/github-sync.token
+chmod 0600 /etc/ldap/github-sync.token
+/usr/local/sbin/ldap-github-sync
+[% END %]
 
 # The cron recipe runs this export each hour, for the next rebuild.
 # templates/files/ldap.export.sh.tt says why.

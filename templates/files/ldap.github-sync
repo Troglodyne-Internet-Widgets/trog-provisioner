@@ -1,0 +1,301 @@
+#!/usr/bin/perl
+package LdapGithubSync;
+
+# Make the accounts under ou=People match the members of a GitHub organization,
+# and the admin group match its owners.  Provisioner::Recipe::ldap, under
+# ACCOUNTS FROM GITHUB, has the full account.
+
+use strict;
+use warnings;
+
+use HTTP::Tiny;
+use JSON;
+use MIME::Base64 qw{decode_base64 encode_base64};
+
+our $CONFIG = '/etc/ldap/github-sync.json';
+
+# The directory as root sees it through ldapi, which ldap-configure.sh lets
+# manage the data.
+our @LDAP = qw{-Q -Y EXTERNAL -H ldapi:///};
+
+main() unless caller;
+
+sub main {
+    my $conf = load_config($CONFIG);
+    my $plan = plan( $conf, members($conf), people($conf), group($conf) );
+
+    my $ldif = ldif( $conf, $plan );
+    ldap_modify($ldif) if length $ldif;
+
+    warn "ldap-github-sync: $_ is in $conf->{org}, but an account of that name that this script did not make is in the way\n" foreach @{ $plan->{blocked} };
+    printf "ldap-github-sync: %d members of %s, %d added, %d updated, %d removed, %d in %s\n",
+      scalar keys %{ $plan->{members} }, $conf->{org},
+      scalar @{ $plan->{add} }, scalar @{ $plan->{update} }, scalar @{ $plan->{remove} },
+      scalar @{ $plan->{admins} }, $conf->{admin_group};
+    return 0;
+}
+
+sub load_config {
+    my ($path) = @_;
+    open( my $fh, '<', $path ) or die "ldap-github-sync: cannot read $path: $!\n";
+    my $conf = JSON->new->decode( do { local $/; <$fh> } );
+
+    open( my $tfh, '<', $conf->{token_file} ) or die "ldap-github-sync: cannot read the token at $conf->{token_file}: $!\n";
+    chomp( $conf->{token} = do { local $/; <$tfh> } // '' );
+    die "ldap-github-sync: the token at $conf->{token_file} is empty\n" unless length $conf->{token};
+
+    return $conf;
+}
+
+# GET a path of the API and every page after it.  Dies on any answer but a 200,
+# because a member list that stopped early would remove the members it lost.
+sub github_get {
+    my ( $conf, $path ) = @_;
+
+    my $http = HTTP::Tiny->new(
+        verify_SSL      => 1,
+        timeout         => 30,
+        agent           => 'ldap-github-sync',
+        default_headers => {
+            Accept                 => 'application/vnd.github+json',
+            Authorization          => "Bearer $conf->{token}",
+            'X-GitHub-Api-Version' => '2022-11-28',
+        },
+    );
+
+    my @items;
+    my $url = "$conf->{api}$path";
+    while ($url) {
+        my $res = $http->get($url);
+
+        # 599 is HTTP::Tiny itself: the request never reached GitHub.
+        die "ldap-github-sync: GET $url: $res->{status} $res->{reason}\n" . ( $res->{status} == 599 ? $res->{content} : '' )
+          unless $res->{status} == 200;
+
+        my $page = JSON->new->decode( $res->{content} );
+        die "ldap-github-sync: GET $url did not answer with a list\n" unless ref $page eq 'ARRAY';
+        push( @items, @$page );
+
+        ($url) = ( $res->{headers}{link} // '' ) =~ m/<([^>]+)>;\s*rel="next"/;
+    }
+
+    return @items;
+}
+
+# login => { id, keys, admin }, for each member of the organization.
+sub members {
+    my ($conf) = @_;
+    my $org = $conf->{org};
+
+    my %members;
+    foreach my $m ( github_get( $conf, "/orgs/$org/members?per_page=100" ) ) {
+        my $login = lc( $m->{login} // '' );
+
+        # The rule GitHub holds a login to.  Anything else is not a login, and
+        # it would go into a DN and a home directory.
+        die "ldap-github-sync: $org has a member whose login is not one: '$login'\n"
+          unless $login =~ m/\A[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\z/;
+        die "ldap-github-sync: $login has no numeric id\n" unless ( $m->{id} // '' ) =~ m/\A[1-9][0-9]*\z/;
+
+        $members{$login} = { id => $m->{id}, admin => 0 };
+    }
+
+    # A token that cannot see the organization gets an empty list, not an
+    # error, and an empty list would remove every account.
+    die "ldap-github-sync: the token sees no members of $org, so nothing changes\n" unless %members;
+
+    foreach my $m ( github_get( $conf, "/orgs/$org/members?role=admin&per_page=100" ) ) {
+        my $login = lc( $m->{login} // '' );
+        $members{$login}{admin} = 1 if $members{$login};
+    }
+
+    foreach my $login ( sort keys %members ) {
+        my @keys = map { $_->{key} } github_get( $conf, "/users/$login/keys?per_page=100" );
+        die "ldap-github-sync: a key of $login spans more than one line\n" if grep { !defined || m/[\r\n]/ } @keys;
+        $members{$login}{keys} = [ sort @keys ];
+    }
+
+    return \%members;
+}
+
+# uid => { dn, mine, keys }, for each account under ou=People.
+sub people {
+    my ($conf) = @_;
+    my %people;
+    foreach my $entry ( ldap_search( "ou=People,$conf->{base_dn}", '(uid=*)', qw{uid description sshPublicKey} ) ) {
+        my ($uid) = @{ $entry->{uid} // [] } or next;
+        $people{$uid} = {
+            dn   => $entry->{dn},
+            mine => !!grep( { $_ eq mark($conf) } @{ $entry->{description} // [] } ),
+            keys => [ sort @{ $entry->{sshPublicKey} // [] } ],
+        };
+    }
+    return \%people;
+}
+
+# The admin group as the directory has it: undef when there is none.
+sub group {
+    my ($conf) = @_;
+    my ($entry) = ldap_search( "ou=Groups,$conf->{base_dn}", "(cn=$conf->{admin_group})", qw{memberUid} );
+    return $entry && [ sort @{ $entry->{memberUid} // [] } ];
+}
+
+sub mark {
+    my ($conf) = @_;
+    return "github:$conf->{org}";
+}
+
+# What has to change.  A pure function of what GitHub and the directory said.
+sub plan {
+    my ( $conf, $members, $people, $group ) = @_;
+    my %plan = ( members => $members, add => [], update => [], remove => [], blocked => [] );
+
+    foreach my $login ( sort keys %$members ) {
+        my $has = $people->{$login};
+        if ( !$has ) {
+            push( @{ $plan{add} }, $login );
+        }
+        elsif ( !$has->{mine} ) {
+            push( @{ $plan{blocked} }, $login );
+        }
+        elsif ( "@{ $has->{keys} }" ne "@{ $members->{$login}{keys} }" ) {
+            push( @{ $plan{update} }, $login );
+        }
+    }
+
+    $plan{remove} = [ sort grep { $people->{$_}{mine} && !$members->{$_} } keys %$people ];
+
+    my %blocked = map { $_ => 1 } @{ $plan{blocked} };
+    $plan{admins}       = [ sort grep { $members->{$_}{admin} && !$blocked{$_} } keys %$members ];
+    $plan{group_exists} = defined $group;
+    $plan{group_change} = !defined $group || "@$group" ne "@{ $plan{admins} }";
+
+    return \%plan;
+}
+
+# The plan as one LDIF for ldapmodify: accounts first, so that the group
+# never names an account that is not there yet, and removals last.
+sub ldif {
+    my ( $conf, $plan ) = @_;
+    my $people = "ou=People,$conf->{base_dn}";
+    my @records;
+
+    foreach my $login ( @{ $plan->{add} } ) {
+        my $m = $plan->{members}{$login};
+        push(
+            @records,
+            join(
+                '',
+                line( dn         => "uid=$login,$people" ),
+                line( changetype => 'add' ),
+                ( map { line( objectClass => $_ ) } qw{inetOrgPerson posixAccount shadowAccount ldapPublicKey} ),
+                line( uid           => $login ),
+                line( cn            => $login ),
+                line( sn            => $login ),
+                line( uidNumber     => $conf->{uid_base} + $m->{id} ),
+                line( gidNumber     => $conf->{users_gid} ),
+                line( homeDirectory => "/home/$login" ),
+                line( loginShell    => '/bin/bash' ),
+                line( description   => mark($conf) ),
+                ( map { line( sshPublicKey => $_ ) } @{ $m->{keys} } ),
+            )
+        );
+    }
+
+    foreach my $login ( @{ $plan->{update} } ) {
+        my $m = $plan->{members}{$login};
+
+        # A replace with no values removes the attribute, which is what a
+        # member who deleted every key on GitHub wants.
+        push(
+            @records,
+            join(
+                '',
+                line( dn         => "uid=$login,$people" ),
+                line( changetype => 'modify' ),
+                line( replace    => 'sshPublicKey' ),
+                ( map { line( sshPublicKey => $_ ) } @{ $m->{keys} } ),
+                "-\n",
+            )
+        );
+    }
+
+    if ( $plan->{group_change} ) {
+        my $dn = "cn=$conf->{admin_group},ou=Groups,$conf->{base_dn}";
+        my @members = map { line( memberUid => $_ ) } @{ $plan->{admins} };
+        push(
+            @records,
+            $plan->{group_exists}
+            ? join( '', line( dn => $dn ), line( changetype => 'modify' ), line( replace => 'memberUid' ), @members, "-\n" )
+            : join(
+                '',
+                line( dn          => $dn ),
+                line( changetype  => 'add' ),
+                line( objectClass => 'posixGroup' ),
+                line( cn          => $conf->{admin_group} ),
+                line( gidNumber   => $conf->{admin_gid} ),
+                line( description => mark($conf) ),
+                @members,
+            )
+        );
+    }
+
+    push( @records, line( dn => "uid=$_,$people" ) . line( changetype => 'delete' ) ) foreach @{ $plan->{remove} };
+
+    return join( "\n", @records );
+}
+
+# One attribute of an LDIF record.  A value that LDIF cannot carry as it is
+# goes in base64, as RFC 2849 says.
+sub line {
+    my ( $attr, $value ) = @_;
+    return "$attr: $value\n" if $value =~ m/\A[\x01-\x09\x0b\x0c\x0e-\x1f\x21-\x39\x3b\x3d-\x7f][\x01-\x09\x0b\x0c\x0e-\x7f]*\z/ && $value !~ m/ \z/;
+    return "${attr}:: " . encode_base64( $value, '' ) . "\n";
+}
+
+# Each entry under $base that matches $filter, as attr => [values], with its dn.
+sub ldap_search {
+    my ( $base, $filter, @attrs ) = @_;
+
+    my $out = run( 'ldapsearch', @LDAP, '-LLL', '-o', 'ldif-wrap=no', '-b', $base, $filter, @attrs );
+
+    my @entries;
+    foreach my $block ( split m/\n\n+/, $out ) {
+        my %entry;
+        foreach my $l ( split m/\n/, $block ) {
+            my ( $attr, $b64, $value ) = $l =~ m/\A([\w;-]+):(:?)\s?(.*)\z/ or next;
+            $value = decode_base64($value) if $b64;
+            if   ( $attr eq 'dn' ) { $entry{dn} = $value }
+            else                   { push( @{ $entry{$attr} }, $value ) }
+        }
+        push( @entries, \%entry ) if $entry{dn};
+    }
+    return @entries;
+}
+
+sub ldap_modify {
+    my ($ldif) = @_;
+    return run_with_input( $ldif, 'ldapmodify', @LDAP );
+}
+
+# Runs a program and returns what it printed.  Dies if it fails, and ldapsearch
+# answers 32 for a base that does not exist, which is no entries.
+sub run {
+    my (@cmd) = @_;
+    open( my $fh, '-|', @cmd ) or die "ldap-github-sync: cannot run $cmd[0]: $!\n";
+    my $out = do { local $/; <$fh> } // '';
+    close($fh);
+    my $status = $? >> 8;
+    die "ldap-github-sync: $cmd[0] exited with $status\n" if $? && !( $cmd[0] eq 'ldapsearch' && $status == 32 );
+    return $out;
+}
+
+sub run_with_input {
+    my ( $input, @cmd ) = @_;
+    open( my $fh, '|-', @cmd ) or die "ldap-github-sync: cannot run $cmd[0]: $!\n";
+    print {$fh} $input;
+    close($fh) or die "ldap-github-sync: $cmd[0] exited with " . ( $? >> 8 ) . "\n";
+    return 1;
+}
+
+1;
