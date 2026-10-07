@@ -1027,32 +1027,50 @@ subtest 'the settings of an installation are validated in one place' => sub {
     );
 };
 
+# Every setting that global_schema requires, and nothing else.
+my %BASE_GLOBAL = (
+    basedir     => '/bogus',
+    admin_user  => 'someadmin',
+    admin_gecos => 'Some Admin',
+    admin_email => 'someadmin@test.test',
+    gateway     => '192.0.2.254',
+    resolvers   => ['192.0.2.254'],
+);
+
 # A recipe receives only the keys of _global that its schema names, so a key
 # that nothing declares reaches nothing, whoever wrote it.
 subtest 'a setting that nothing declares is refused' => sub {
-    my %base = (
-        basedir     => '/bogus',
-        admin_user  => 'someadmin',
-        admin_gecos => 'Some Admin',
-        admin_email => 'someadmin@test.test',
-        gateway     => '192.0.2.254',
-        resolvers   => ['192.0.2.254'],
-    );
-
     my %declared = map { $_ => 1 } Provisioner::Cookbook->declared_globals;
     ok( $declared{basedir}, 'what global_schema declares is declared' );
     ok( $declared{cpus},    'and so is what a director declares' );
     ok( $declared{skel},    'and what a recipe declares' );
     ok( !$declared{wibble}, 'but not a key that nothing declares' );
 
-    ok( Provisioner::Cookbook->globals( undef, { _base => { _global => { %base, cpus => 2, libdir => ['/bogus'] } } } ), 'a key a recipe owns passes, and so does libdir' );
+    ok( Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, cpus => 2, libdir => ['/bogus'] } } } ), 'a key a recipe owns passes, and so does libdir' );
 
-    my $err = exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { %base, wibble => 1, wobble => 2 } } } ) };
+    my $err = exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, wibble => 1, wobble => 2 } } } ) };
     like( $err, qr{/wibble:[ ]Nothing[ ]declares}, 'a key nothing declares is refused' );
     like( $err, qr{/wobble:},                      'every one of them, in the same refusal' );
 
-    $err = exception { Provisioner::Cookbook->globals( 'own.test.test', { _base => { _global => \%base }, 'own.test.test' => { _global => { wibble => 1 } } } ) };
+    $err = exception { Provisioner::Cookbook->globals( 'own.test.test', { _base => { _global => \%BASE_GLOBAL }, 'own.test.test' => { _global => { wibble => 1 } } } ) };
     like( $err, qr{own[.]test[.]test.*/wibble:}s, 'including one in the _global of a domain, naming the domain' );
+};
+
+# bin/new_config and the hypervisors read distro from _global, which is where
+# docs/CONFIGURATION.md tells an operator to write it.
+subtest 'distro is a setting of _global' => sub {
+    my %declared = map { $_ => 1 } Provisioner::Cookbook->declared_globals;
+    ok( $declared{distro}, 'distro is declared' );
+
+    my $said = Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, distro => 'ubuntu' } } } );
+    is( $said->{distro}, 'ubuntu', 'a distribution that has recipes passes' );
+
+    $said = Provisioner::Cookbook->globals( undef, { _base => { _global => \%BASE_GLOBAL } } );
+    is( $said->{distro}, 'ubuntu', 'and one that names none gets ubuntu, which every guest ran before it could be named' );
+
+    # A typing error that fell back to the generic recipes would build a guest
+    # with no packages.
+    like( exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, distro => 'unbuntu' } } } ) }, qr{/distro:}, 'and one that has no recipes is refused' );
 };
 
 # A YAML scalar is a string, and a list of one written as a scalar is what an

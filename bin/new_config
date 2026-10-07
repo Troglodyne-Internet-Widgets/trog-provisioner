@@ -645,11 +645,7 @@ sub handle_domain {
     die "The resolvers of this installation name @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out of the _global in recipes.yaml: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
       if @loopback;
 
-    # Refused here, because a typing error such as `distro: unbuntu` that falls
-    # back to the generic recipes builds a guest with no packages.
-    my $distro_name = $global_config->{distro} // 'ubuntu';
-    die "There is no '$distro_name' distro recipe, which $domain asks for as its distro.\n" . 'There is: ' . join( ', ', Provisioner::Cookbook->distros() ) . "\n"
-      unless any { $_ eq $distro_name } Provisioner::Cookbook->distros();
+    my $distro_name = $global_config->{distro};
 
     # The release of the domain, from its _global or the release that the distro
     # recipe pins.  Settled before placement, because a cloud needs an image of

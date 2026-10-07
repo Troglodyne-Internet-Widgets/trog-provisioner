@@ -1464,8 +1464,11 @@ F<ipmap.cfg> until they moved here, where every other setting a guest is built
 from already lived.  See L<Provisioner::Recipe/args> for the same argument
 about a recipe.
 
+C<distro> is declared here and not by a recipe, because it decides which distro
+recipe there is to ask.
+
 C<additionalProperties> stays on in this schema, because C<_global> also
-carries settings that a recipe owns, such as C<cpus> for C<vm> and C<distro>
+carries settings that a recipe owns, such as C<cpus> for C<vm> and C<release>
 for the distro recipe.  The recipe declares each of those itself.  C<globals>
 refuses a key that neither this schema nor a recipe declares.  See
 C<declared_globals>.
@@ -1473,6 +1476,7 @@ C<declared_globals>.
 =cut
 
 sub global_schema {
+    my ($class) = @_;
     return (
         type       => 'object',
         required   => [qw{basedir admin_user admin_gecos admin_email gateway resolvers}],
@@ -1493,6 +1497,13 @@ sub global_schema {
             linode_type      => { type => 'string',             description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
             openstack_flavor => { type => 'string',             description => 'What this guest is on an OpenStack cloud: a flavor, by name or id.  A guest that names none is not built on one.  `openstack flavor list` lists them.' },
             solusvm_plan     => { type => [qw{string integer}], description => 'What this guest is on a SolusVM node: a plan, by name or id.  A guest that names none is not built on one.  bin/preflight says how many plans the node offers the project.' },
+
+            distro => {
+                type        => 'string',
+                enum        => [ $class->distros ],
+                default     => 'ubuntu',
+                description => 'The distribution a guest is built on, which picks its cloud image, its packager and the version of each recipe that names its packages.  The default is the one every guest ran before this could be named.',
+            },
 
             libdir => { type => 'array', items => { type => 'string' }, description => 'Directories outside this checkout.  bin/new_config puts the lib/ of each on @INC and looks for templates in its templates/ after the ones here.' },
 
