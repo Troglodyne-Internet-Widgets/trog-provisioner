@@ -1,3 +1,18 @@
+[%# postfix tries the whole address before the @domain wildcard at the end.  So
+    an alias, root, and each account with a mailbox keep their own mail, and
+    only an address with none of those goes to the catchall.
+
+    The catchall must be here and not only in virtual_maps.  That map makes
+    postfix accept the address, but dovecot gets it over LMTP as written, and
+    refuses an address that it has no user for. -%]
 [% FOREACH alias IN mail_aliases %]
 [% alias.from %]@[% domain %] [% alias.to %]
 [%- END %]
+[% IF admin_email %]
+root@[% domain %] [% admin_email %]
+[% END %]
+[% FOREACH name IN names.keys().sort() %]
+[% name %]@[% domain %] [% name %]@[% domain %]
+[%- END %]
+catchall@[% domain %] catchall@[% domain %]
+@[% domain %] catchall@[% domain %]

@@ -142,6 +142,37 @@ SKIP: {
     is($catchall, '/mail/[% domain %]/catchall', 'dovecot knows the catchall of [% domain %]') or diag $catchall;
 }
 
+# Where an address goes.  postfix answers from virtual_aliases as it delivers.
+{
+    my $aliases = '/etc/postfix/domains/[% domain %]/virtual_aliases';
+    my $lookup  = sub { my $r = `postmap -q '$_[0]' hash:$aliases 2>&1`; chomp $r; $r };
+[% IF admin_email %]
+    is($lookup->('root@[% domain %]'), '[% admin_email %]', 'mail to root goes to the admin');
+[% END %]
+[% FOR name IN names.keys().sort() %]
+    is($lookup->('[% name %]@[% domain %]'), '[% name %]@[% domain %]', '[% name %] keeps its own mail');
+[% END %]
+    is($lookup->('@[% domain %]'), 'catchall@[% domain %]', 'and every other address goes to the catchall');
+}
+
+# And a real delivery to such an address, which used to bounce at dovecot.
+{
+    my $subject = 'catchall probe of the guest tests';
+    open( my $mail, '|-', '/usr/sbin/sendmail', '-oi', 'nobody-has-this-mailbox@[% domain %]' ) or die "sendmail: $!";
+    print {$mail} "From: postmaster\@[% domain %]\nTo: nobody-has-this-mailbox\@[% domain %]\nSubject: $subject\n\nprobe\n";
+    close($mail) or die "sendmail exited $?";
+
+    my $found = '';
+    foreach ( 1 .. 60 ) {
+        $found = `doveadm search -u 'catchall\@[% domain %]' mailbox INBOX subject '$subject' 2>&1`;
+        last if $found =~ m/\S/;
+        sleep 1;
+    }
+    like($found, qr/\S/, 'mail to an address with no mailbox reaches the catchall')
+      or diag `journalctl -u postfix\@- --since '-2min' --no-pager -o cat 2>&1 | grep nobody-has-this-mailbox`;
+    system('doveadm', 'expunge', '-u', 'catchall@[% domain %]', 'mailbox', 'INBOX', 'subject', $subject);
+}
+
 # The quota warning, run as dovecot runs it.  Nothing else delivers it, so a
 # script that cannot find dovecot-lda warns nobody and logs nothing we read.
 {
