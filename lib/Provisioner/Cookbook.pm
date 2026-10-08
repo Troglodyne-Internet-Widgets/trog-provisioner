@@ -1288,11 +1288,7 @@ my sub weigh ( $class, @named ) {
     my %weak_global;
     my $globals_read;
     foreach my $ref ( grep { !defined $_->{weak} } @named ) {
-        my @steps;
-        while ( $ref->{setting} =~ m/([^.\[\]]+)|\[(\d+)\]/g ) {
-            push( @steps, $1 // $2 );
-        }
-        my ( $block, @path ) = @steps;
+        my ( $block, @path ) = Trog::Utils::slot_steps( $ref->{setting} );
 
         if ( $block eq '_global' ) {
             if ( !$globals_read++ ) {
@@ -1307,18 +1303,20 @@ my sub weigh ( $class, @named ) {
         }
 
         # Down the schema by the path of the setting.  The field that is
-        # marked, or one above it, such as a list of hosts, makes it weak.
+        # marked, or one above it, such as a list of hosts, makes it weak.  A
+        # step that the schema does not declare ends the walk, strong.
         my %schema = $class->load($block)->schema;
         my $node   = \%schema;
         my $weak   = 0;
         foreach my $step (@path) {
-            last if ref $node ne 'HASH';
-            $node =
-                $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH'             ? $node->{items}
-              : ref $node->{properties} eq 'HASH' && $node->{properties}{$step} ? $node->{properties}{$step}
-              : ref $node->{additionalProperties} eq 'HASH'                     ? $node->{additionalProperties}
-              :                                                                   undef;
-            $weak ||= ref $node eq 'HASH' && $node->{'x-weak'};
+            my $props = ref $node->{properties} eq 'HASH' ? $node->{properties} : {};
+            my $next =
+                $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH' ? $node->{items}
+              : ref $props->{$step} eq 'HASH'                       ? $props->{$step}
+              : ref $node->{additionalProperties} eq 'HASH'         ? $node->{additionalProperties}
+              :                                                       last;
+            $node = $next;
+            $weak ||= $node->{'x-weak'};
         }
         $ref->{weak} = $weak ? 1 : 0;
     }
@@ -1347,12 +1345,15 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
     # or none can go.  Then each guest left waits round a cycle.
     my %up = map { $_ => 1 } @up;
     my ( @order, %out );
-    my sub waiting_on ( $guest, $strength ) {
-        return grep { !$out{ $_->{domain} } && ( $strength eq 'any' || !$_->{weak} ) } @{ $named{$guest} };
-    }
-    while (1) {
-        my @left  = grep { !$out{$_} } @found or last;
-        my @ready = grep { $up{$_} || !waiting_on( $_, 'any' ) } @left;
+    while ( my @left = grep { !$out{$_} } @found ) {
+
+        # What each guest left still waits on: the references to a guest that
+        # is not out yet.
+        my %waits = map {
+            my $guest = $_;
+            $guest => [ grep { !$out{ $_->{domain} } } @{ $named{$guest} } ]
+        } @left;
+        my @ready = grep { $up{$_} || !@{ $waits{$_} } } @left;
 
         # A cycle with a weak step in it stops nothing: the guest at that step
         # uses the next one when it is up, and builds without it.  So a guest
@@ -1361,8 +1362,11 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
         if ( !@ready ) {
             weigh( $class, map { @{ $named{$_} } } @found );
             my %named_by;
-            $named_by{ $_->{domain} }++ foreach map { waiting_on( $_, 'any' ) } @left;
-            my @free = grep { !waiting_on( $_, 'strong' ) } @left or last;
+            $named_by{ $_->{domain} }++ foreach map { @{ $waits{$_} } } @left;
+            my @free = grep {
+                !any { !$_->{weak} }
+                  @{ $waits{$_} }
+            } @left or last;
             @ready = ( List::Util::reduce { ( $named_by{$b} // 0 ) > ( $named_by{$a} // 0 ) ? $b : $a } @free );
         }
 
@@ -1379,7 +1383,7 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
     my @steps;
     my $at;
     while ( !defined $at ) {
-        my ($next) = waiting_on( $path[-1], 'strong' );
+        my $next = List::Util::first { !$out{ $_->{domain} } && !$_->{weak} } @{ $named{ $path[-1] } };
         push( @steps, $next );
         $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
         push( @path, $next->{domain} );

@@ -622,6 +622,14 @@ destination rebuilds each of them. The schema of a recipe marks a weak field
 with `'x-weak' => 1`. A setting that nothing marks is strong: a build waits for
 the guest that it names.
 
+A weak setting must also take effect on its own once the named guest comes up,
+with no rebuild. rsyslog retries the collector, and SSSD goes online when the
+directory answers. The cache is the other kind: a guest uses it only while it
+builds, so a guest built without it lost time and nothing else. That is what
+makes a loop of weak settings safe to ignore: when every guest in it is up, the
+loop has resolved itself, or cost a build some time. A setting that a guest
+needs, and reads only when it is built, does not resolve, so leave it strong.
+
 So a loop of guests that name each other is ignored when one of its settings is
 weak. The one line above and a `logshipper` in `_base` make such a loop: the
 cache ships its logs to the collector, and the collector downloads through the

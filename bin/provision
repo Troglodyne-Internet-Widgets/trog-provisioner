@@ -208,8 +208,14 @@ only.  When one fails, the run stops, and DOMAIN is not built.
 
 A setting that the schema marks weak, such as C<cache> or the host of
 C<logshipper>, orders the build the same way, but a guest builds without the
-guest that it names.  So a cycle with a weak setting in it is ignored.
-L<Provisioner::Cookbook/upstream_domains> says which goes first.
+guest that it names.  So a cycle with a weak setting in it is ignored: once
+every guest in it is up, each uses the others, with no rebuild, and the cycle
+has resolved itself.  The cache is the other kind: a guest uses it only while
+it builds, so a guest built without it lost time and nothing else.  That is the
+test for marking a setting weak.  A guest that reads the setting only when it is
+built, and so needs a rebuild to work, names the other through a strong
+setting.  L<Provisioner::Cookbook/upstream_domains>
+says which goes first.
 
 Two guests that each need the other through strong settings are refused before
 anything is built, because no order builds both.  One line in the configuration
