@@ -342,6 +342,14 @@ sub exclusive_with { return () }
 Declares the arguments of the recipe as a hash for the schema() method of
 L<JSON::Validator>.  The schema must be openapiv3.
 
+Two keys of a field are ours, and the validator ignores them.
+C<'x-secret' =E<gt> 1> marks a password, a token or a key; see C<secrets_in>.
+C<'x-weak' =E<gt> 1> marks a field that can name another guest of the
+installation, when the guest builds and runs without that guest, as through a
+fetch cache that is down.  L<Provisioner::Cookbook/named_guests> reads it, and
+F<bin/provision> then ignores a loop of guests that has such a field in it.
+Leave it off a field whose guest a build needs, such as a repository to clone.
+
 =cut
 
 sub args {
@@ -1576,6 +1584,21 @@ literally.  An unmarked secret gets neither.
 =cut
 
 sub secrets_in ( $self, $config ) {
+    return grep { defined $_->[1] && !ref $_->[1] && $_->[1] ne q{} } $self->marked_in( $config, 'x-secret' );
+}
+
+=head3 @found = $recipe->marked_in(\%config, $marker)
+
+Returns a pair C<[ $path, $value ]> for each value in C<%config> whose field the
+C<schema> of this recipe marks with C<$marker>, such as C<x-secret> or
+C<x-weak>.  The value is whatever the configuration holds there, so a marked
+list comes back whole, and nothing below a marked field is looked at.  C<$path>
+is spelled as L<Trog::Utils/slots_in> spells it.  The config is raw, as for
+C<secrets_in>.
+
+=cut
+
+sub marked_in ( $self, $config, $marker ) {
     my %schema = $self->schema();
 
     # A stack, popped, with each level pushed in reverse, so the pairs come out
@@ -1585,8 +1608,8 @@ sub secrets_in ( $self, $config ) {
     while ( my $at = pop @stack ) {
         my ( $schema, $data, $path ) = @$at;
         next if ref $schema ne 'HASH';
-        if ( $schema->{'x-secret'} ) {
-            push( @found, [ $path, $data ] ) if defined $data && !ref $data && $data ne q{};
+        if ( $schema->{$marker} ) {
+            push( @found, [ $path, $data ] );
             next;
         }
 

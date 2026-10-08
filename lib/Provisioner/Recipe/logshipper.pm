@@ -144,6 +144,7 @@ sub args {
         properties => {
             host => {
                 type        => 'string',
+                'x-weak'    => 1,
                 description => 'Where to send this guest logs.  Required: a guest that does not run this recipe already ships nowhere, so there is no off.  A name the ip pool knows is resolved to its address; anything else is used as written.  A host, not a URL.',
             },
             port => {

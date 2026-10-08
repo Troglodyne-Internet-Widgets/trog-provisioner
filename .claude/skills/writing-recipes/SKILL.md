@@ -41,6 +41,13 @@ value out of the setup log, and `bin/preflight` reports one written into the
 configuration in the clear.  An unmarked secret gets neither, and
 `t/recipes.t` refuses a field named like a secret that is not marked.
 
+The schema also says how much a guest needs another guest that a field names.
+A field such as a log host or a directory URI, whose guest builds and runs
+without the other one, gets `'x-weak' => 1`.  `bin/provision` still builds the
+named guest first when it can, but it ignores a loop of guests that has a weak
+field in it.  Leave the marker off a field whose guest the build needs, such as
+a repository to clone, because an unmarked field is strong.
+
 ## Put a default at the level of the thing it defaults
 
 This is the one that has actually gone wrong, and it is worth knowing by heart.

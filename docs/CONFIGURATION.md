@@ -587,14 +587,15 @@ is one of these:
 An address, an email address, a `secret:` reference, a path and a host outside
 this installation name nothing. So does a setting that names the domain itself.
 In practice the settings that name guests are `cache` and `mirror` in `_global`,
-the `host` of `logshipper`, and the `hosts` of `backupdestination`. A new recipe
-whose setting names a guest takes part with no extra code.
+the `host` of `logshipper`, the `ldap_uri` of `sssd`, and the `hosts` of
+`backupdestination`. A new recipe whose setting names a guest takes part with no
+extra code.
 
 Before it builds anything, `bin/provision` prints each setting that it found,
 for example:
 
 ```
-web.example.test names logs.example.test in logshipper.host, so it needs that guest up first.
+web.example.test names logs.example.test in logshipper.host, so it is built after that guest when it can be, and uses it once it is up.
 ```
 
 `bin/provision` builds each of those guests first when no hypervisor has it,
@@ -611,30 +612,33 @@ _base:
 
 The cache guest names itself there too, and does not wait for itself.
 
-A named guest must be one that a build can go on without. A guest downloads
-from upstream while the cache is down, installs from the archive while the
-mirror is down, and queues its logs while the collector is down. A backup
+Each of those settings is weak. A weak setting names a guest that a build can go
+on without. A guest downloads from upstream while the cache is down, installs
+from the archive while the mirror is down, and queues its logs while the
+collector is down. SSSD starts offline while the directory is down. A backup
 destination pulls from its hosts at night, so it needs none of them to build.
 They are built first all the same, and `--rebuild-upstream-guests` on the
-destination rebuilds each of them.
+destination rebuilds each of them. The schema of a recipe marks a weak field
+with `'x-weak' => 1`. A setting that nothing marks is strong: a build waits for
+the guest that it names.
 
-Two guests that each name the other are refused, because no order builds both.
-The message names each setting in the loop. The one line above and a
-`logshipper` in `_base` make one such pair: the cache ships its logs to the
-collector, and the collector downloads through the cache. Break it on one of the
-two, for example with no cache for the collector:
+So a loop of guests that name each other is ignored when one of its settings is
+weak. The one line above and a `logshipper` in `_base` make such a loop: the
+cache ships its logs to the collector, and the collector downloads through the
+cache. Both settings are weak, so `bin/provision` builds the cache first and then
+the collector. Of the guests in a loop, it builds first the one that the others
+name most. That is usually the cache, so that the others build through it.
 
-```yaml
-logs.example.test:
-    _global:
-        cache: ''
-```
+A loop in which every setting is strong is refused, because no order builds
+those guests. The message names each setting in the loop. Change one of them so
+that it does not name the next guest.
 
-A loop of guests that are all up stops nothing, because `bin/provision` leaves
-them as they are. So for the build of another guest, `bin/provision` names the
-loop and asks whether to go on. The loop still stops the next rebuild of one of
-its guests, and `--rebuild-upstream-guests` on another guest. With no terminal
-to ask on, `bin/provision` refuses, as it does for any loop.
+A loop of that kind stops nothing when all of its guests are up, because
+`bin/provision` leaves them as they are. So for the build of another guest,
+`bin/provision` names the loop and asks whether to go on. The loop still stops
+the next rebuild of one of its guests, and `--rebuild-upstream-guests` on
+another guest. If there is no terminal to ask on, `bin/provision` refuses, as it
+does for any loop.
 
 A guest is placed only on the network of the guests it needs; see
 [Networks](#networks). A guest that should run somewhere else, such as a cloud

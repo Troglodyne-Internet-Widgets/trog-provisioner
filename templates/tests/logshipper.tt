@@ -4,6 +4,8 @@ use warnings;
 use Test::More;
 use IO::Socket::INET();
 
+our $TODO;
+
 # The point of this file is the connection test below.
 #
 # From the guest, a destination that listens and one that does not look the
@@ -45,9 +47,14 @@ subtest 'and something is actually listening at the other end' => sub {
     ok( 1, 'nothing to connect to over UDP; this guest cannot tell whether the destination exists' );
     diag "protocol is udp, so delivery is unverifiable from here -- use tcp if you want this checked";
 [% ELSE %]
+
+    # A TODO, because the collector can be built after this guest: host is a
+    # weak setting, and a loop of guests that name each other builds one of
+    # them first.  The failure stays in the log, and the build goes on.
+    local $TODO = "$target is built after this guest when a loop of guests puts it later";
     my $sock = IO::Socket::INET->new( PeerAddr => $target, PeerPort => $port, Proto => 'tcp', Timeout => 10 );
     ok( $sock, "$target:$port accepts a connection" )
-      or diag "Could not reach $target:$port -- $!.  rsyslog will queue, retry, suspend and then drop every message, silently, so nothing else on this guest will ever tell you.";
+      or diag "Could not reach $target:$port -- $!.  If $target is up, this is its listener or a firewall between the two.  rsyslog will queue, retry, suspend and then drop every message, silently, so nothing else on this guest will ever tell you.";
     close($sock) if $sock;
 [% END %]
 };
