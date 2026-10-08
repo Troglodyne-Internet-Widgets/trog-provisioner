@@ -1245,6 +1245,86 @@ my sub global_properties ($class) {
     return \%declared;
 }
 
+# Each place in the configuration of $domain that names another guest, as
+# named_guests returns it, without whether the reference is weak.  The weight
+# is a walk over schemas, and upstream_order needs it only for a cycle.
+my sub references ( $class, $domain, $conf ) {
+
+    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
+    my $host       = $class->host_of( $domain, $conf ) // q{};
+
+    my @named;
+    foreach my $guest ( $domain, $host || () ) {
+        my $config = $class->domain_config( $guest, $conf );
+        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
+
+        foreach my $block ( sort keys %blocks ) {
+            foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
+                my $value = ${ $slot->[1] };
+                next if !defined $value || ref $value || $value eq q{};
+
+                # The host of a URL, or else a value that is a host alone, with
+                # or without a port: the whole authority of a URI, with no user.
+                my $uri  = URI->new($value);
+                my $name = $uri->can('host') ? $uri->host : undef;
+                if ( !defined $name || $name eq q{} ) {
+                    my $bare = URI->new("ssh://$value");
+                    $name = $bare->authority eq $value && !defined $bare->userinfo ? $bare->host : undef;
+                }
+
+                next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
+                push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
+            }
+        }
+    }
+    return @named;
+}
+
+# Sets weak on each reference that has none yet, from the field that holds the
+# setting.  A recipe block asks the schema of that recipe alone.  A key of
+# _global asks every schema that can declare it, so that walk happens once, and
+# only when a reference is in _global.
+my sub weigh ( $class, @named ) {
+    my %weak_global;
+    my $globals_read;
+    foreach my $ref ( grep { !defined $_->{weak} } @named ) {
+        my @steps;
+        while ( $ref->{setting} =~ m/([^.\[\]]+)|\[(\d+)\]/g ) {
+            push( @steps, $1 // $2 );
+        }
+        my ( $block, @path ) = @steps;
+
+        if ( $block eq '_global' ) {
+            if ( !$globals_read++ ) {
+                my $declared = global_properties($class);
+                %weak_global = map { $_ => 1 } grep {
+                    List::Util::all { $_->{'x-weak'} }
+                    @{ $declared->{$_} }
+                } keys %$declared;
+            }
+            $ref->{weak} = $weak_global{ $path[0] } ? 1 : 0;
+            next;
+        }
+
+        # Down the schema by the path of the setting.  The field that is
+        # marked, or one above it, such as a list of hosts, makes it weak.
+        my %schema = $class->load($block)->schema;
+        my $node   = \%schema;
+        my $weak   = 0;
+        foreach my $step (@path) {
+            last if ref $node ne 'HASH';
+            $node =
+                $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH'             ? $node->{items}
+              : ref $node->{properties} eq 'HASH' && $node->{properties}{$step} ? $node->{properties}{$step}
+              : ref $node->{additionalProperties} eq 'HASH'                     ? $node->{additionalProperties}
+              :                                                                   undef;
+            $weak ||= ref $node eq 'HASH' && $node->{'x-weak'};
+        }
+        $ref->{weak} = $weak ? 1 : 0;
+    }
+    return;
+}
+
 # The order to build the guests that $domain needs, $domain among them, and
 # the steps of the cycle of strong references that stops the rest, as array
 # references.  A guest of @up waits for nothing, because this run does not
@@ -1259,7 +1339,7 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
     my %named;
     for ( my $i = 0; $i < scalar(@found); $i++ ) {
         my $guest = $found[$i];
-        $named{$guest} = [ $class->named_guests( $guest, $conf ) ];
+        $named{$guest} = [ references( $class, $guest, $conf ) ];
         push( @found, grep { !$seen{$_}++ } map { $_->{domain} } @{ $named{$guest} } );
     }
 
@@ -1279,6 +1359,7 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
         # that waits on nothing strong goes next, and of those the one that the
         # others name most, such as a cache, so that they build through it.
         if ( !@ready ) {
+            weigh( $class, map { @{ $named{$_} } } @found );
             my %named_by;
             $named_by{ $_->{domain} }++ foreach map { waiting_on( $_, 'any' ) } @left;
             my @free = grep { !waiting_on( $_, 'strong' ) } @left or last;
@@ -1406,50 +1487,8 @@ does not count.
 
 sub named_guests {
     my ( $class, $domain, $conf ) = @_;
-    $conf //= $class->configuration();
-
-    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
-    my $host       = $class->host_of( $domain, $conf ) // q{};
-
-    my $declared    = global_properties($class);
-    my %weak_global = map { $_ => 1 } grep {
-        List::Util::all { $_->{'x-weak'} }
-        @{ $declared->{$_} }
-    } keys %$declared;
-
-    my @named;
-    foreach my $guest ( $domain, $host || () ) {
-        my $config = $class->domain_config( $guest, $conf );
-        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
-
-        foreach my $block ( sort keys %blocks ) {
-            my @weak =
-              $block eq '_global'
-              ? map { "_global.$_" } grep { $weak_global{$_} } keys %{ $blocks{$block} }
-              : map { "$block.$_->[0]" } $class->load($block)->marked_in( $blocks{$block} // {}, 'x-weak' );
-
-            foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
-                my $value = ${ $slot->[1] };
-                next if !defined $value || ref $value || $value eq q{};
-
-                # The host of a URL, or else a value that is a host alone, with
-                # or without a port: the whole authority of a URI, with no user.
-                my $uri  = URI->new($value);
-                my $name = $uri->can('host') ? $uri->host : undef;
-                if ( !defined $name || $name eq q{} ) {
-                    my $bare = URI->new("ssh://$value");
-                    $name = $bare->authority eq $value && !defined $bare->userinfo ? $bare->host : undef;
-                }
-
-                next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
-
-                # The marked field itself, or a slot below it, such as one host
-                # of a list.
-                my $weak = any { $slot->[0] eq $_ || index( $slot->[0], "$_." ) == 0 || index( $slot->[0], "$_\[" ) == 0 } @weak;
-                push( @named, { domain => $name, setting => $slot->[0], by => $guest, weak => $weak ? 1 : 0 } );
-            }
-        }
-    }
+    my @named = references( $class, $domain, $conf // $class->configuration() );
+    weigh( $class, @named );
     return @named;
 }
 
