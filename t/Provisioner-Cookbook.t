@@ -1120,17 +1120,28 @@ subtest 'upstream_domains: the guests a domain needs up first, in the order to b
     $conf{'apt.test'}{_global}{mirror} = 'http://archive.elsewhere.test/ubuntu';
     is_deeply( $up->('apt.test'), [], 'and one whose host is not, nothing' );
 
+    # The cache and the collector each use the other when it is up, and each
+    # builds without the other.
     $conf{'cache.test'}{logshipper} = { host => 'logs.test' };
+    is_deeply( $up->('web.test'),                                               [qw{cache.test logs.test}], 'a cycle of weak settings is ignored, and the order still holds where it can' );
+    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf ) ], [],                         'and upstream_cycle finds none' );
+
+    # A setting that no schema marks may be one that a build needs.  With one
+    # step strong, the guest at the weak step builds first, without the other.
+    $conf{'logs.test'}{_global} = { api => 'https://cache.test/v1' };
+    is_deeply( $up->('web.test'), [qw{cache.test logs.test}], 'a cycle with one weak step is ignored too, and the guest that needs the other strongly waits for it' );
+
+    $conf{'cache.test'}{_global} = { api => 'https://logs.test/v1' };
     my $cycle = exception { $up->('web.test') };
     $cycle //= q{};
-    like( $cycle, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming each setting in the cycle' );
-    like( $cycle, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/,   'both of them' );
-    unlike( $cycle, qr/web[.]test[ ]names/, 'and not the guest that only leads into it' );
-    like( $cycle, qr/set[ ]cache[ ]to[ ]empty/, 'saying how to break it' );
+    like( $cycle, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]api/, 'a cycle in which every step is strong is refused, naming each setting' );
+    like( $cycle, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'both of them' );
+    unlike( $cycle, qr/logshipper[.]host/,  'and not a weak setting beside them' );
+    unlike( $cycle, qr/web[.]test[ ]names/, 'nor the guest that only leads into it' );
 
     is_deeply(
         [ map { "$_->{by} $_->{setting}" } Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf ) ],
-        [ 'cache.test logshipper.host', 'logs.test _global.cache' ],
+        [ 'cache.test _global.api', 'logs.test _global.api' ],
         'upstream_cycle returns the same cycle, and does not die'
     );
     is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf, 'cache.test' ) ], [], 'with one of its guests up, there is none' );
@@ -1142,13 +1153,44 @@ subtest 'upstream_domains: the guests a domain needs up first, in the order to b
     is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'plain.test', \%conf ) ], [], 'a domain that needs no guest of the cycle has none' );
 };
 
+# Each guest that serves the fleet configured in _base, as an installation
+# turns them on, so that each of them names the others.
+subtest 'upstream_domains: the guests that serve the fleet, each configured to use the others' => sub {
+    my %conf = (
+        _base => {
+            _global    => { cache    => 'cache.test' },
+            logshipper => { host     => 'logs.test' },
+            sssd       => { ldap_uri => 'ldaps://ldap.test', base_dn => 'dc=ldap,dc=test' },
+        },
+        'cache.test' => { fetchcache   => {} },
+        'logs.test'  => { logcollector => {} },
+        'ldap.test'  => { ldap         => { admin_password => 'throwaway' } },
+        'web.test'   => { nginx        => {} },
+    );
+    my $up = sub { [ Provisioner::Cookbook->upstream_domains( $_[0], \%conf ) ] };
+
+    is( $up->('web.test')->[0], 'cache.test', 'the cache comes first, because every other guest names it' );
+    is_deeply( [ sort @{ $up->('web.test') } ], [qw{cache.test ldap.test logs.test}], 'and a guest that uses all three gets all three' );
+    is( $up->('ldap.test')->[0], 'cache.test', 'which holds for the directory too' );
+    is_deeply( [ sort @{ $up->('ldap.test') } ], [qw{cache.test logs.test}], 'which uses the others, and not itself' );
+
+    # Found in the order a, c, b, and b is the one that the most guests name.
+    my %named = (
+        'a.test'   => { logshipper        => { host  => 'b.test' } },
+        'b.test'   => { logshipper        => { host  => 'a.test' } },
+        'c.test'   => { logshipper        => { host  => 'b.test' } },
+        'web.test' => { backupdestination => { hosts => [ 'a.test', 'c.test' ] }, logshipper => { host => 'b.test' } },
+    );
+    is_deeply( [ Provisioner::Cookbook->upstream_domains( 'web.test', \%named ) ], [qw{b.test a.test c.test}], 'of the guests in a loop, the one that the others name most goes first, and not the one found first' );
+};
+
 subtest 'named_guests: each setting that names a guest here, and which' => sub {
     my %conf = (
         _base        => { _global      => { cache => 'cache.test' } },
         'cache.test' => { fetchcache   => {} },
         'logs.test'  => { logcollector => {} },
         'web.test'   => {
-            _global           => { admin_email => 'root@logs.test', contact => 'mailto:root@logs.test', note => 'secret:logs.test/x/y', path => 'logs.test/var' },
+            _global           => { admin_email => 'root@logs.test', contact => 'mailto:root@logs.test', note => 'secret:logs.test/x/y', path => 'logs.test/var', api => 'https://cache.test/v1' },
             backupdestination => { hosts       => [ 'elsewhere.test', 'logs.test:2222' ] },
             logshipper        => { host        => 'https://logs.test/in' },
         },
@@ -1159,16 +1201,27 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
     is_deeply(
         [ Provisioner::Cookbook->named_guests( 'web.test', \%conf ) ],
         [
-            { domain => 'cache.test', setting => '_global.cache',              by => 'web.test' },
-            { domain => 'logs.test',  setting => 'backupdestination.hosts[1]', by => 'web.test' },
-            { domain => 'logs.test',  setting => 'logshipper.host',            by => 'web.test' },
+            { domain => 'cache.test', setting => '_global.api',                by => 'web.test', weak => 0 },
+            { domain => 'cache.test', setting => '_global.cache',              by => 'web.test', weak => 1 },
+            { domain => 'logs.test',  setting => 'backupdestination.hosts[1]', by => 'web.test', weak => 1 },
+            { domain => 'logs.test',  setting => 'logshipper.host',            by => 'web.test', weak => 1 },
         ],
         'a domain, a domain with a port and a URL name a guest, and an address, a reference, a path and a host elsewhere do not'
     );
+    ok( !( grep { !$_->{weak} && $_->{setting} ne '_global.api' } Provisioner::Cookbook->named_guests( 'web.test', \%conf ) ), 'only a setting that a schema marks is weak, and one that nothing declares is strong' );
+
+    # host is weak in logshipper, and a recipe that needs its host to build can
+    # declare host too.  _global hands the value to both.
+    my $strong = Test::MockModule->new('Provisioner::Recipe::nginx');
+    $strong->redefine( args => sub { return ( type => 'object', properties => { host => { type => 'string' } } ) } );
+    $conf{'web.test'}{_global}{host} = 'logs.test';
+    my ($host) = grep { $_->{setting} eq '_global.host' } Provisioner::Cookbook->named_guests( 'web.test', \%conf );
+    is( $host->{weak}, 0, 'a key of _global that one recipe marks weak and another does not is strong' );
+    delete $conf{'web.test'}{_global}{host};
     is_deeply( [ Provisioner::Cookbook->direct_upstream_domains( 'web.test', \%conf ) ], [qw{cache.test logs.test}], 'each guest once' );
     is_deeply(
         [ map { $_->{by} } Provisioner::Cookbook->named_guests( 'tenant.test', \%conf ) ],
-        [qw{tenant.test web.test web.test web.test}],
+        [qw{tenant.test web.test web.test web.test web.test}],
         'a domain on the guest of another names what that guest names, and says whose setting it is'
     );
     is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );

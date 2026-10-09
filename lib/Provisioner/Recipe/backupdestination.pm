@@ -74,8 +74,9 @@ sub args {
         properties => {
             base_dir => { type => 'string' },
             hosts    => {
-                type  => 'array',
-                items => { type => 'string' },
+                type     => 'array',
+                items    => { type => 'string' },
+                'x-weak' => 1,
             },
             targets => {
                 type  => 'array',

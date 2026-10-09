@@ -76,4 +76,25 @@ sub slots_in {
     return @found;
 }
 
+=head2 @steps = slot_steps($path)
+
+Returns the steps of a path as C<slots_in> spells it: each key, and each list
+index as a number.  C<nginx.listen[0].port> is C<nginx>, C<listen>, C<0> and
+C<port>.
+
+A path does not quote its keys, so a key that holds a dot or a bracket, such as
+a domain name, comes back as more than one step.
+
+=cut
+
+sub slot_steps {
+    my ($path) = @_;
+
+    my @steps;
+    while ( $path =~ m/([^.\[\]]+)|\[(\d+)\]/g ) {
+        push( @steps, $1 // $2 );
+    }
+    return @steps;
+}
+
 1;

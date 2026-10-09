@@ -1230,9 +1230,103 @@ sub host_of {
     return;
 }
 
+# Each key that a _global can hold, and the schema of each field that declares
+# it: the one in global_schema, and one in each recipe that has the key.
+my sub global_properties ($class) {
+    my %global = $class->global_schema;
+    my %declared;
+    push( @{ $declared{$_} }, $global{properties}{$_} ) foreach keys %{ $global{properties} };
+
+    foreach my $name ( $class->names, $class->directors ) {
+        my %schema = $class->load($name)->schema;
+        my $props  = $schema{properties} // {};
+        push( @{ $declared{$_} }, $props->{$_} ) foreach keys %$props;
+    }
+    return \%declared;
+}
+
+# Each place in the configuration of $domain that names another guest, as
+# named_guests returns it, without whether the reference is weak.  The weight
+# is a walk over schemas, and upstream_order needs it only for a cycle.
+my sub references ( $class, $domain, $conf ) {
+
+    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
+    my $host       = $class->host_of( $domain, $conf ) // q{};
+
+    my @named;
+    foreach my $guest ( $domain, $host || () ) {
+        my $config = $class->domain_config( $guest, $conf );
+        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
+
+        foreach my $block ( sort keys %blocks ) {
+            foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
+                my $value = ${ $slot->[1] };
+                next if !defined $value || ref $value || $value eq q{};
+
+                # The host of a URL, or else a value that is a host alone, with
+                # or without a port: the whole authority of a URI, with no user.
+                my $uri  = URI->new($value);
+                my $name = $uri->can('host') ? $uri->host : undef;
+                if ( !defined $name || $name eq q{} ) {
+                    my $bare = URI->new("ssh://$value");
+                    $name = $bare->authority eq $value && !defined $bare->userinfo ? $bare->host : undef;
+                }
+
+                next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
+                push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
+            }
+        }
+    }
+    return @named;
+}
+
+# Sets weak on each reference that has none yet, from the field that holds the
+# setting.  A recipe block asks the schema of that recipe alone.  A key of
+# _global asks every schema that can declare it, so that walk happens once, and
+# only when a reference is in _global.
+my sub weigh ( $class, @named ) {
+    my %weak_global;
+    my $globals_read;
+    foreach my $ref ( grep { !defined $_->{weak} } @named ) {
+        my ( $block, @path ) = Trog::Utils::slot_steps( $ref->{setting} );
+
+        if ( $block eq '_global' ) {
+            if ( !$globals_read++ ) {
+                my $declared = global_properties($class);
+                %weak_global = map { $_ => 1 } grep {
+                    List::Util::all { $_->{'x-weak'} }
+                    @{ $declared->{$_} }
+                } keys %$declared;
+            }
+            $ref->{weak} = $weak_global{ $path[0] } ? 1 : 0;
+            next;
+        }
+
+        # Down the schema by the path of the setting.  The field that is
+        # marked, or one above it, such as a list of hosts, makes it weak.  A
+        # step that the schema does not declare ends the walk, strong.
+        my %schema = $class->load($block)->schema;
+        my $node   = \%schema;
+        my $weak   = 0;
+        foreach my $step (@path) {
+            my $props = ref $node->{properties} eq 'HASH' ? $node->{properties} : {};
+            my $next =
+                $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH' ? $node->{items}
+              : ref $props->{$step} eq 'HASH'                       ? $props->{$step}
+              : ref $node->{additionalProperties} eq 'HASH'         ? $node->{additionalProperties}
+              :                                                       last;
+            $node = $next;
+            $weak ||= $node->{'x-weak'};
+        }
+        $ref->{weak} = $weak ? 1 : 0;
+    }
+    return;
+}
+
 # The order to build the guests that $domain needs, $domain among them, and
-# the steps of the cycle that stops the rest, as array references.  A guest of
-# @up waits for nothing, because this run does not build it.
+# the steps of the cycle of strong references that stops the rest, as array
+# references.  A guest of @up waits for nothing, because this run does not
+# build it.
 my sub upstream_order ( $class, $domain, $conf, @up ) {
     $conf //= $class->configuration();
 
@@ -1243,33 +1337,53 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
     my %named;
     for ( my $i = 0; $i < scalar(@found); $i++ ) {
         my $guest = $found[$i];
-        $named{$guest} = [ $class->named_guests( $guest, $conf ) ];
+        $named{$guest} = [ references( $class, $guest, $conf ) ];
         push( @found, grep { !$seen{$_}++ } map { $_->{domain} } @{ $named{$guest} } );
     }
 
     # Each guest once all it needs is out, in the order found, until none is left
-    # or none can go: then what is left needs itself, round a cycle.
+    # or none can go.  Then each guest left waits round a cycle.
     my %up = map { $_ => 1 } @up;
     my ( @order, %out );
-    while (
-        my @ready = grep {
-            !$out{$_}
-              && ( $up{$_} || !( any { !$out{ $_->{domain} } } @{ $named{$_} } ) )
-        } @found
-    ) {
+    while ( my @left = grep { !$out{$_} } @found ) {
+
+        # What each guest left still waits on: the references to a guest that
+        # is not out yet.
+        my %waits = map {
+            my $guest = $_;
+            $guest => [ grep { !$out{ $_->{domain} } } @{ $named{$guest} } ]
+        } @left;
+        my @ready = grep { $up{$_} || !@{ $waits{$_} } } @left;
+
+        # A cycle with a weak step in it stops nothing: the guest at that step
+        # uses the next one when it is up, and builds without it.  So a guest
+        # that waits on nothing strong goes next, and of those the one that the
+        # others name most, such as a cache, so that they build through it.
+        if ( !@ready ) {
+            weigh( $class, map { @{ $named{$_} } } @found );
+            my %named_by;
+            $named_by{ $_->{domain} }++ foreach map { @{ $waits{$_} } } @left;
+            my @free = grep {
+                !any { !$_->{weak} }
+                  @{ $waits{$_} }
+            } @left or last;
+            @ready = ( List::Util::reduce { ( $named_by{$b} // 0 ) > ( $named_by{$a} // 0 ) ? $b : $a } @free );
+        }
+
         $out{$_} = 1 for @ready;
         push( @order, @ready );
     }
     my @left = grep { !$out{$_} } @found;
     return ( \@order, [] ) unless @left;
 
-    # The cycle that the first guest left reaches, as the names that lead round
-    # it.  Every guest left needs one that is left, so the path meets itself.
+    # The cycle that the first guest left reaches, as the strong names that lead
+    # round it.  Every guest left waits on a strong name that is left, so the
+    # path meets itself.
     my @path = ( $left[0] );
     my @steps;
     my $at;
     while ( !defined $at ) {
-        my ($next) = grep { !$out{ $_->{domain} } } @{ $named{ $path[-1] } };
+        my $next = List::Util::first { !$out{ $_->{domain} } && !$_->{weak} } @{ $named{ $path[-1] } };
         push( @steps, $next );
         $at = List::Util::first { $path[$_] eq $next->{domain} } 0 .. $#path;
         push( @path, $next->{domain} );
@@ -1284,6 +1398,13 @@ The domains whose guests must be up before the guest of C<$domain> builds, in
 the order to build them: each after the ones it needs itself.  C<$domain> is
 not among them.  C<$conf> is as in C<domain_config>.
 
+A weak reference, see C<named_guests>, orders the build like any other, so a
+new fleet gets its cache before the guests that use it.  But a cycle with a weak
+step in it stops nothing, because the guest at that step builds without the
+guest that it names.  It is ignored: of the guests that wait round it on weak
+references alone, the one that the others name most is built first, and the
+rest follow.
+
 A domain needs every other domain of the configuration that one of its settings
 names, as C<named_guests> finds them, and each domain that those need in turn.
 A domain built onto the guest of another, see C<host_of>, also needs what that
@@ -1294,9 +1415,10 @@ C<@up> names guests that are up and that the caller does not build.  Each of
 them waits for nothing, so a cycle through them stops nothing.  They are still
 in the list, and so are the guests that they need.
 
-Dies on a cycle, because no order builds each guest after the ones it needs.
-The message names each guest in the cycle and the setting that names the next
-one, so that a person can change one of those settings.
+Dies on a cycle in which every step is strong, because no order builds each
+guest after the ones it needs.  The message names each guest in the cycle and
+the setting that names the next one, so that a person can change one of those
+settings.
 
 =cut
 
@@ -1304,7 +1426,7 @@ sub upstream_domains {
     my ( $class, $domain, $conf, @up ) = @_;
 
     my ( $order, $cycle ) = upstream_order( $class, $domain, $conf, @up );
-    die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @{$cycle} ) . "Change one of these settings so that it does not name the next guest.\n" . "For a cache, set cache to empty in the _global of that domain.\n"
+    die "These guests cannot be built, because each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @{$cycle} ) . "Change one of these settings so that it does not name the next guest.\n"
       if @{$cycle};
 
     return grep { $_ ne $domain } @{$order};
@@ -1348,6 +1470,13 @@ C<setting> is the path of the setting, such as C<_global.cache> or
 C<logshipper.host>, and C<by> is the domain whose configuration holds it.
 C<$conf> is as in C<domain_config>.
 
+C<weak> is true when the schema marks the setting C<'x-weak' =E<gt> 1>: the
+guest uses the named guest when it is up, and builds without it when it is not,
+as it does through a fetch cache that does not answer.  A reference is strong
+otherwise, because a setting that nothing marks can be one that a build needs.
+A key of C<_global> reaches each recipe that declares it, so it is weak only
+when every field that declares it is marked.
+
 It reads every setting of the C<_global> of the domain and of each of its
 recipes.  A value names a guest when it is that domain, the domain with a port,
 such as C<logs.example.test:514>, or a URL whose host is that domain.  An
@@ -1362,35 +1491,8 @@ does not count.
 
 sub named_guests {
     my ( $class, $domain, $conf ) = @_;
-    $conf //= $class->configuration();
-
-    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
-    my $host       = $class->host_of( $domain, $conf ) // q{};
-
-    my @named;
-    foreach my $guest ( $domain, $host || () ) {
-        my $config = $class->domain_config( $guest, $conf );
-        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
-
-        foreach my $block ( sort keys %blocks ) {
-            foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
-                my $value = ${ $slot->[1] };
-                next if !defined $value || ref $value || $value eq q{};
-
-                # The host of a URL, or else a value that is a host alone, with
-                # or without a port: the whole authority of a URI, with no user.
-                my $uri  = URI->new($value);
-                my $name = $uri->can('host') ? $uri->host : undef;
-                if ( !defined $name || $name eq q{} ) {
-                    my $bare = URI->new("ssh://$value");
-                    $name = $bare->authority eq $value && !defined $bare->userinfo ? $bare->host : undef;
-                }
-
-                next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
-                push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
-            }
-        }
-    }
+    my @named = references( $class, $domain, $conf // $class->configuration() );
+    weigh( $class, @named );
     return @named;
 }
 
@@ -1538,19 +1640,12 @@ sub global_schema {
 # The keys a _global may set, and the readOnly keys that nothing lets it set,
 # each as a set.
 my sub global_keys ($class) {
-    my %global = $class->global_schema;
+    my $declared = global_properties($class);
     my ( %settable, %computed );
-    $settable{$_} = 1 foreach keys %{ $global{properties} };
-
-    foreach my $name ( $class->names, $class->directors ) {
-        my %schema = $class->load($name)->schema;
-        my $props  = $schema{properties} // {};
-        foreach my $key ( keys %$props ) {
-            ( $props->{$key}{readOnly} ? \%computed : \%settable )->{$key} = 1;
-        }
+    foreach my $key ( keys %$declared ) {
+        my $settable = any { !$_->{readOnly} } @{ $declared->{$key} };
+        ( $settable ? \%settable : \%computed )->{$key} = 1;
     }
-    delete @computed{ keys %settable };
-
     return ( \%settable, \%computed );
 }
 

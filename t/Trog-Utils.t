@@ -83,4 +83,14 @@ subtest 'slots_in: every place in a structure, with its path' => sub {
     is( scalar( () = Trog::Utils::slots_in( \$deep ) ), 501, 'five hundred levels deep, without a call for each' );
 };
 
+subtest 'slot_steps: a path of slots_in, back into its steps' => sub {
+    is_deeply( [ Trog::Utils::slot_steps('nginx.listen[0].port') ], [ 'nginx', 'listen', 0, 'port' ], 'each key, and each index as a number' );
+    is_deeply( [ Trog::Utils::slot_steps('hosts[1]') ],             [ 'hosts', 1 ],                   'an index at the end' );
+    is_deeply( [ Trog::Utils::slot_steps(q{}) ],                    [],                               'and nothing for the root' );
+
+    my $config = { a => [ { b => 'c' } ] };
+    my ($deep) = grep { ref ${ $_->[1] } eq q{} } Trog::Utils::slots_in( \$config );
+    is_deeply( [ Trog::Utils::slot_steps( $deep->[0] ) ], [ 'a', 0, 'b' ], 'which is the path that slots_in gave' );
+};
+
 done_testing();

@@ -64,7 +64,7 @@ sub args {
         type       => 'object',
         required   => [qw{ldap_uri base_dn}],
         properties => {
-            ldap_uri      => { type => 'string' },
+            ldap_uri      => { type => 'string', 'x-weak' => 1 },
             base_dn       => { type => 'string' },
             bind_dn       => { type => 'string' },
             bind_password => { type => 'string', 'x-secret' => 1 },

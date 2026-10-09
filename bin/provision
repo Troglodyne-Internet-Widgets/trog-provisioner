@@ -206,9 +206,20 @@ and leaves each that is up alone, wherever it is.  B<--rebuild-upstream-guests>
 rebuilds those too.  B<--existing> and B<--salvage-gaps-ok> are for DOMAIN
 only.  When one fails, the run stops, and DOMAIN is not built.
 
-Two guests that each need the other are refused before anything is built,
-because no order builds both.  One line in the configuration of one of them
-breaks it, for example an empty C<cache> in the C<_global> of the log collector.
+A setting that the schema marks weak, such as C<cache> or the host of
+C<logshipper>, orders the build the same way, but a guest builds without the
+guest that it names.  So a cycle with a weak setting in it is ignored: once
+every guest in it is up, each uses the others, with no rebuild, and the cycle
+has resolved itself.  The cache is the other kind: a guest uses it only while
+it builds, so a guest built without it lost time and nothing else.  That is the
+test for marking a setting weak.  A guest that reads the setting only when it is
+built, and so needs a rebuild to work, names the other through a strong
+setting.  L<Provisioner::Cookbook/upstream_domains>
+says which goes first.
+
+Two guests that each need the other through strong settings are refused before
+anything is built, because no order builds both.  One line in the configuration
+of one of them breaks it.
 If both are up, and this run does not rebuild them, the pair stops nothing that
 this run does.  Then provision names the pair and asks whether to go on.  With
 no terminal to ask on, it refuses, as before.
@@ -498,7 +509,9 @@ sub main {
     my %there    = $rebuild_upstream ? () : cycles_left_up( $domain, $conf, %build );
     my @upstream = Provisioner::Cookbook->upstream_domains( $domain, $conf, keys %there );
     foreach my $named ( map { Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
-        print "$named->{by} names $named->{domain} in $named->{setting}, so it needs that guest up first.\n";
+        print $named->{weak}
+          ? "$named->{by} names $named->{domain} in $named->{setting}, so it is built after that guest when it can be, and uses it once it is up.\n"
+          : "$named->{by} names $named->{domain} in $named->{setting}, so it needs that guest up first.\n";
     }
     foreach my $upstream (@upstream) {
         if ( !$rebuild_upstream && ( my $there = $there{$upstream} // guest_is_up( $upstream, %build ) ) ) {

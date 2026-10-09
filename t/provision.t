@@ -1283,6 +1283,8 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     my $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
     like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'it says which setting makes a guest needed' );
     like( $said, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/, 'for the guests needed in turn too' );
+    my $weak = 'in _global.cache, so it is built after that guest when it can be';
+    like( $said, qr/\Q$weak\E/, 'and that it can build without a guest that a weak setting names' );
 
     %up = ( 'cache.test' => 'hv9' );
     $run->('web.test');
@@ -1299,8 +1301,19 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     like( $failed, qr/makefile[ ]failed/,                       'and why it failed' );
     is( scalar @built, 1, 'before the next one' );
 
+    # The cache ships its logs to the collector, which downloads through the
+    # cache.  Both settings are weak, so neither guest waits for the other.
+    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); return 0 } );
     $recipes = upstream_fixture( 'cache.test' => { fetchcache => {}, logshipper => { host => 'logs.test' } } );
-    like( $run->('web.test'), qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'two guests that need each other are refused, naming the setting' );
+    is( $run->('web.test'), undef, 'two guests that need each other only through weak settings are built' );
+    is_deeply( [ map { $_->{domain} } @built ], [qw{cache.test logs.test web.test}], 'the cache first, then the collector, then the domain' );
+
+    # A setting that no schema marks is strong.
+    $recipes = upstream_fixture(
+        'cache.test' => { fetchcache   => {}, _global => { api => 'https://logs.test/v1' } },
+        'logs.test'  => { logcollector => {}, _global => { api => 'https://cache.test/v1' } },
+    );
+    like( $run->('web.test'), qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'two guests that need each other through strong settings are refused, naming the setting' );
     is_deeply( \@built, [], 'before anything is built' );
 
     %up = ( 'cache.test' => 'hv9' );
@@ -1329,8 +1342,8 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
         undef,
         'and yes goes on'
     );
-    like( $said, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'after it names the cycle' );
-    like( $said, qr/none[ ]of[ ]them[ ]can[ ]be[ ]rebuilt/,                       'and what it stops' );
+    like( $said, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'after it names the cycle' );
+    like( $said, qr/none[ ]of[ ]them[ ]can[ ]be[ ]rebuilt/,                   'and what it stops' );
     is_deeply( [ map { $_->{domain} } @built ], ['web.test'], 'building only the domain, and leaving both guests of the cycle alone' );
 
     like( $run->(qw{--rebuild-upstream-guests web.test}), qr/cannot[ ]be[ ]built/, 'but --rebuild-upstream-guests, which would rebuild them, is refused' );

@@ -342,6 +342,18 @@ sub exclusive_with { return () }
 Declares the arguments of the recipe as a hash for the schema() method of
 L<JSON::Validator>.  The schema must be openapiv3.
 
+Two keys of a field are ours, and the validator ignores them.
+C<'x-secret' =E<gt> 1> marks a password, a token or a key; see C<secrets_in>.
+C<'x-weak' =E<gt> 1> marks a field that can name another guest of the
+installation, when the guest builds and runs without that guest, as through a
+fetch cache that is down, and starts to use it on its own once it is up, or
+needs it only to save time while it builds.
+L<Provisioner::Cookbook/named_guests> reads it, and F<bin/provision> then
+ignores a loop of guests that has such a field in it, because the loop resolves
+itself once all of them are up.  Leave it off a field whose guest a build needs,
+such as a repository to clone, and off one that the guest reads only when it is
+built, which would need a rebuild to take effect.
+
 =cut
 
 sub args {

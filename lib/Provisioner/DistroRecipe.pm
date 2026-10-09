@@ -291,12 +291,14 @@ sub args {
             mirror => {
                 type        => 'string',
                 default     => q{},
+                'x-weak'    => 1,
                 description =>
                   'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
             },
             cache => {
                 type        => 'string',
                 default     => q{},
+                'x-weak'    => 1,
                 description =>
                   'A fetch cache for guests to provision through: a guest built by the fetchcache recipe, named by its domain -- resolved out of the ip pool -- or by its IPv4 address.  Empty, the default, means none, and every download goes straight upstream.  For the length of a build, each host its recipes name in fetch_hosts is pointed at the cache, and only if the cache answers for that host when the build starts, so a cache that is down costs a build nothing.',
             },
