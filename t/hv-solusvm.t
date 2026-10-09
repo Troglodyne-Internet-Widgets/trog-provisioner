@@ -14,6 +14,7 @@ guest is built, reinstalled and torn down, and what is asked for each
 =cut
 
 use Test::More;
+use List::Util ();
 use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
@@ -182,9 +183,21 @@ sub node {
     );
 }
 
+# Whether one request that was made is $method on $path.
+sub is_request {
+    my ( $asked, $method, $path ) = @_;
+    return $asked->{method} eq $method && $asked->{path} eq $path;
+}
+
 sub asked_for {
     my ( $method, $path ) = @_;
-    return grep { $_->{method} eq $method && $_->{path} eq $path } @ASKED;
+    return grep { is_request( $_, $method, $path ) } @ASKED;
+}
+
+# The first request that was made as $method on $path.
+sub first_asked_for {
+    my ( $method, $path ) = @_;
+    return List::Util::first { is_request( $_, $method, $path ) } @ASKED;
 }
 
 subtest 'a block has to name a node and a token' => sub {
@@ -332,7 +345,7 @@ subtest 'building a guest' => sub {
     my $made = $hv->create_guest( name => 'new.test', image => 28, size => 2375, user_data => "#cloud-config\n" );
     is $made->{id}, 1003, 'the server comes back, having been waited for';
 
-    my ($asked) = asked_for( 'POST', '/projects/69/servers' );
+    my $asked = first_asked_for( 'POST', '/projects/69/servers' );
     is_deeply $asked->{body},
       {
         name                => 'new.test',
@@ -356,7 +369,7 @@ subtest 'reinstalling one that is already there' => sub {
 
     $hv->rebuild_guest( 'one.test', image => 28, user_data => "#cloud-config\nkey\n" );
 
-    my ($asked) = asked_for( 'POST', '/servers/1001/reinstall' );
+    my $asked = first_asked_for( 'POST', '/servers/1001/reinstall' );
     is_deeply $asked->{body}, { os => 28, user_data => "#cloud-config\nkey\n" },
       "reinstall calls 'os' what create calls 'os_image_version_id', and the payload is why this is not a delete and a rebuild";
 

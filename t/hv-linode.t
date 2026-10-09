@@ -14,6 +14,7 @@ snapshotted and torn down, and what Linode is asked for each
 =cut
 
 use Test::More;
+use List::Util ();
 use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
@@ -259,8 +260,18 @@ sub warned ($code) {
     return ( $warned, @result );
 }
 
+# Whether one request that was made is $method on $path.
+sub is_request ( $asked, $method, $path ) {
+    return $asked->[0] eq $method && $asked->[1] eq $path;
+}
+
 sub asked_to ( $method, $path ) {
-    return grep { $_->[0] eq $method && $_->[1] eq $path } @ASKED;
+    return grep { is_request( $_, $method, $path ) } @ASKED;
+}
+
+# The first request that was made as $method on $path.
+sub first_asked_to ( $method, $path ) {
+    return List::Util::first { is_request( $_, $method, $path ) } @ASKED;
 }
 
 sub config_for ($domain) {
@@ -416,8 +427,8 @@ subtest 'create_guest' => sub {
     my $linode = $hv->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'new.test.test', user_data => "#cloud-config\n" );
     is( $linode->{status}, 'running', 'it waits until Linode says the guest is running' );
 
-    my ($created) = asked_to( POST => '/v4/linode/instances' );
-    my $body = $created->[2];
+    my $created = first_asked_to( POST => '/v4/linode/instances' );
+    my $body    = $created->[2];
     is( $body->{label},       'new.test.test',      'labeled with the domain' );
     is( $body->{region},      'us-east',            'in the region of the block' );
     is( $body->{type},        'g6-standard-2',      'of the type the guest named' );
