@@ -17,6 +17,7 @@ and what it leaves alone
 =cut
 
 use Test::More;
+use List::Util       ();
 use Test::Fatal      qw{exception};
 use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
@@ -87,10 +88,23 @@ sub holding {
     };
 }
 
+# Whether one line of what the run sent is a call of $action.
+sub is_action {
+    my ( $line, $action ) = @_;
+    return index( $line, " $action " ) >= 0;
+}
+
 sub sent {
     my ( $ran, $action ) = @_;
 
-    return grep { index( $_, " $action " ) >= 0 } @{$ran};
+    return grep { is_action( $_, $action ) } @{$ran};
+}
+
+# The first call of $action that the run sent.
+sub first_sent {
+    my ( $ran, $action ) = @_;
+
+    return List::Util::first { is_action( $_, $action ) } @{$ran};
 }
 
 subtest 'a record the provider does not hold is created' => sub {
@@ -103,7 +117,7 @@ subtest 'a record the provider does not hold is created' => sub {
             capture { $rc = Trog::PublishDNSRecords::main( $DOMAIN, $ADDRESS ) };
             is( $rc, 0, 'the run succeeds' );
 
-            my ($create) = sent( $ran, 'create' );
+            my $create = first_sent( $ran, 'create' );
             ok( $create, 'a create was sent' ) or return;
             like( $create, qr/[ ]create[ ]A[ ]/,         'for an A record' );
             like( $create, qr/--name='\Q$DOMAIN\E'/,     'named for the domain' );
@@ -131,7 +145,7 @@ subtest 'a record holding the wrong address is updated through its identifier' =
             capture { $rc = Trog::PublishDNSRecords::main( $DOMAIN, $ADDRESS ) };
             is( $rc, 0, 'the run succeeds' );
 
-            my ($update) = sent( $ran, 'update' );
+            my $update = first_sent( $ran, 'update' );
             ok( $update, 'an update was sent rather than a second create' ) or return;
 
             # The identifier is how a provider is told which of its records to

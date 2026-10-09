@@ -133,6 +133,9 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 [Subroutines::ProhibitTailRecursion]
 [Variables::ProhibitUselessVarClearing]
 [ValuesAndExpressions::ProhibitLiteralArithmetic]
+# A sub that returns a grep, called for truth or for its first element, which
+# ProhibitBooleanGrep cannot see because the grep is one call away.
+[BuiltinFunctions::ProhibitIndirectBooleanGrep]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 [BuiltinFunctions::ProhibitBooleanGrep]
