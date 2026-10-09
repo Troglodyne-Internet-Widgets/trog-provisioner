@@ -136,6 +136,13 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 # A sub that returns a grep, called for truth or for its first element, which
 # ProhibitBooleanGrep cannot see because the grep is one call away.
 [BuiltinFunctions::ProhibitIndirectBooleanGrep]
+# What ProhibitMutatingListFunctions reports, which this replaces, and a block
+# that changes $_ through a sub that it calls.
+[ControlStructures::ProhibitMutatingListFunctionsStricter]
+# A sub that returns the result of a syscall or an eval, called where nothing
+# looks at the result.  The same functions as RequireCheckedSyscalls below.
+[ErrorHandling::RequireCheckedIndirectResults]
+exclude_functions = print
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 [BuiltinFunctions::ProhibitBooleanGrep]
@@ -166,7 +173,6 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 ; [CodeLayout::RequireTidyCode]
 [CodeLayout::RequireTrailingCommas]
 [ControlStructures::ProhibitLabelsWithSpecialBlockNames]
-[ControlStructures::ProhibitMutatingListFunctions]
 [ControlStructures::ProhibitNegativeExpressionsInUnlessAndUntilConditions]
 [ControlStructures::ProhibitUnreachableCode]
 [ControlStructures::ProhibitUntilBlocks]
