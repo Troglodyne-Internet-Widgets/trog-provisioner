@@ -93,6 +93,13 @@ allow_subs = inspection_address secret_blocks check_client check_transfer_route 
 # A sub that returns a grep, called for truth or for its first element, which
 # ProhibitBooleanGrep cannot see because the grep is one call away.
 [BuiltinFunctions::ProhibitIndirectBooleanGrep]
+# What ProhibitMutatingListFunctions reports, which this replaces, and a block
+# that changes $_ through a sub that it calls.
+[ControlStructures::ProhibitMutatingListFunctionsStricter]
+# A sub that returns the result of a syscall or an eval, called where nothing
+# looks at the result.  The same functions as RequireCheckedSyscalls below.
+[ErrorHandling::RequireCheckedIndirectResults]
+exclude_functions = print
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 ;
@@ -102,6 +109,10 @@ allow_subs = inspection_address secret_blocks check_client check_transfer_route 
 ;   ControlStructures::ProhibitDeepNests          scores nesting and every
 ;   Subroutines::ProhibitExcessComplexity         break in flow, where these
 ;                                                 count branches
+;   ControlStructures::ProhibitMutatingListFunctions
+;                                               ProhibitMutatingListFunctionsStricter,
+;                                                 which reports all of it, and
+;                                                 a sub that the block calls
 ;   InputOutput::ProhibitBacktickOperators      logicLAB::ProhibitShellDispatch
 ;   Modules::ProhibitEvilModules                PreferredModules
 ;   Subroutines::ProhibitUnusedPrivateSubroutines  ProhibitUnusedDefinitions,
@@ -154,7 +165,6 @@ allow_subs = inspection_address secret_blocks check_client check_transfer_route 
 ; [CodeLayout::RequireTidyCode]
 [CodeLayout::RequireTrailingCommas]
 [ControlStructures::ProhibitLabelsWithSpecialBlockNames]
-[ControlStructures::ProhibitMutatingListFunctions]
 [ControlStructures::ProhibitNegativeExpressionsInUnlessAndUntilConditions]
 [ControlStructures::ProhibitUnreachableCode]
 [ControlStructures::ProhibitUntilBlocks]
