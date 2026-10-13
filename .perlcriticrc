@@ -14,12 +14,12 @@ allow-unsafe = 1
 [Documentation::RequirePod]
 # Security
 [ValuesAndExpressions::PreventSQLInjection]
-; [CodeLayout::RequireASCII] is not here on purpose.  Every file declares
-; use 5.041, which turns on source::encoding "ascii" and makes a non-ASCII
-; character in code a compile error -- stricter than the policy, and not
-; skippable.  The policy also applies to POD, where the only thing it ever
-; caught was a contributor's name in the section Dist::Zilla generates, and
-; spelling somebody's name wrong is not a code standard.
+# [CodeLayout::RequireASCII] is not here on purpose.  Every file declares
+# use 5.041, which turns on source::encoding "ascii" and makes a non-ASCII
+# character in code a compile error -- stricter than the policy, and not
+# skippable.  The policy also applies to POD, where the only thing it ever
+# caught was a contributor's name in the section Dist::Zilla generates, and
+# spelling somebody's name wrong is not a code standard.
 [RegularExpressions::RequireDefault]
 strict = 1
 # PEBCAK catches
@@ -102,41 +102,41 @@ allow_subs = inspection_address secret_blocks check_client check_transfer_route 
 exclude_functions = print
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
-;
-; Not here on purpose, because something above already does the job better:
-;   CodeLayout::ProhibitQuotedWordLists         RequireQwForLiteralLists
-;   ControlStructures::ProhibitCascadingIfElse  CognitiveComplexity, which
-;   ControlStructures::ProhibitDeepNests          scores nesting and every
-;   Subroutines::ProhibitExcessComplexity         break in flow, where these
-;                                                 count branches
-;   ControlStructures::ProhibitMutatingListFunctions
-;                                               ProhibitMutatingListFunctionsStricter,
-;                                                 which reports all of it, and
-;                                                 a sub that the block calls
-;   InputOutput::ProhibitBacktickOperators      logicLAB::ProhibitShellDispatch
-;   Modules::ProhibitEvilModules                PreferredModules
-;   Subroutines::ProhibitUnusedPrivateSubroutines  ProhibitUnusedDefinitions,
-;                                                 which counts only calls from
-;                                                 bin/ and lib/, private or not
-;   TestingAndDebugging::RequireUseWarnings     RequireFatalWarnings
-;   ValuesAndExpressions::ProhibitLeadingZeros  ProhibitLeadingZeros
-;   Modules::RequireVersionVar                  [PkgVersion] in dist.ini
-;   ErrorHandling::RequireCarping               STYLE.md: die with context,
-;                                                 and Carp::Always for the trace
-;
-; Nor these, because every file declares use 5.041, and under it perl will not
-; compile what they report -- or, for the last, no longer needs what it asks for:
-;   InputOutput::ProhibitBarewordDirHandles     no feature "bareword_filehandles"
-;   InputOutput::ProhibitBarewordFileHandles
-;   Objects::ProhibitIndirectSyntax             no feature "indirect"
-;   TestingAndDebugging::RequireUseStrict       strict, which use 5.012 and later
-;                                                 turn on
-;   Variables::ProhibitPerl4PackageNames        no apostrophe as package separator
-;   Modules::RequireEndWithOne                  feature "module_true"
-;
-; Documentation::RequirePodSections is out as well: the sections it asks for are
-; the ones Pod::Weaver writes at build, and weaver.ini names them AUTHORS and
-; COPYRIGHT AND LICENSE where the policy wants AUTHOR and LICENSE AND COPYRIGHT.
+#
+# Not here on purpose, because something above already does the job better:
+#   CodeLayout::ProhibitQuotedWordLists         RequireQwForLiteralLists
+#   ControlStructures::ProhibitCascadingIfElse  CognitiveComplexity, which
+#   ControlStructures::ProhibitDeepNests          scores nesting and every
+#   Subroutines::ProhibitExcessComplexity         break in flow, where these
+#                                                 count branches
+#   ControlStructures::ProhibitMutatingListFunctions
+#                                               ProhibitMutatingListFunctionsStricter,
+#                                                 which reports all of it, and
+#                                                 a sub that the block calls
+#   InputOutput::ProhibitBacktickOperators      logicLAB::ProhibitShellDispatch
+#   Modules::ProhibitEvilModules                PreferredModules
+#   Subroutines::ProhibitUnusedPrivateSubroutines  ProhibitUnusedDefinitions,
+#                                                 which counts only calls from
+#                                                 bin/ and lib/, private or not
+#   TestingAndDebugging::RequireUseWarnings     RequireFatalWarnings
+#   ValuesAndExpressions::ProhibitLeadingZeros  ProhibitLeadingZeros
+#   Modules::RequireVersionVar                  [PkgVersion] in dist.ini
+#   ErrorHandling::RequireCarping               STYLE.md: die with context,
+#                                                 and Carp::Always for the trace
+#
+# Nor these, because every file declares use 5.041, and under it perl will not
+# compile what they report -- or, for the last, no longer needs what it asks for:
+#   InputOutput::ProhibitBarewordDirHandles     no feature "bareword_filehandles"
+#   InputOutput::ProhibitBarewordFileHandles
+#   Objects::ProhibitIndirectSyntax             no feature "indirect"
+#   TestingAndDebugging::RequireUseStrict       strict, which use 5.012 and later
+#                                                 turn on
+#   Variables::ProhibitPerl4PackageNames        no apostrophe as package separator
+#   Modules::RequireEndWithOne                  feature "module_true"
+#
+# Documentation::RequirePodSections is out as well: the sections it asks for are
+# the ones Pod::Weaver writes at build, and weaver.ini names them AUTHORS and
+# COPYRIGHT AND LICENSE where the policy wants AUTHOR and LICENSE AND COPYRIGHT.
 [BuiltinFunctions::ProhibitBooleanGrep]
 [BuiltinFunctions::ProhibitLvalueSubstr]
 [BuiltinFunctions::ProhibitReverseSortBlock]
@@ -158,11 +158,11 @@ exclude_functions = print
 [CodeLayout::ProhibitHardTabs]
 [CodeLayout::ProhibitTrailingWhitespace]
 [CodeLayout::RequireConsistentNewlines]
-; [CodeLayout::RequireTidyCode] is off on purpose.  git-hooks/pre-commit runs
-; perltidy over every staged Perl file before it runs this profile, so every
-; commit is tidy whatever this policy would say.  In an editor, the policy only
-; repeated that, and ran perltidy over the whole file on every check.
-; [CodeLayout::RequireTidyCode]
+# [CodeLayout::RequireTidyCode] is off on purpose.  git-hooks/pre-commit runs
+# perltidy over every staged Perl file before it runs this profile, so every
+# commit is tidy whatever this policy would say.  In an editor, the policy only
+# repeated that, and ran perltidy over the whole file on every check.
+# [CodeLayout::RequireTidyCode]
 [CodeLayout::RequireTrailingCommas]
 [ControlStructures::ProhibitLabelsWithSpecialBlockNames]
 [ControlStructures::ProhibitNegativeExpressionsInUnlessAndUntilConditions]
@@ -235,8 +235,8 @@ package_exemptions = main [a-z][a-z0-9_]*
 [ValuesAndExpressions::RequireUpperCaseHeredocTerminator]
 [Variables::ProhibitAugmentedAssignmentInDeclaration]
 [Variables::ProhibitConditionalDeclarations]
-; Variables::ProhibitEvilVariables is not listed: it declines to load until
-; it is given variables to prohibit, and nobody has named any.
+# Variables::ProhibitEvilVariables is not listed: it declines to load until
+# it is given variables to prohibit, and nobody has named any.
 [Variables::ProhibitLocalVars]
 [Variables::ProhibitMatchVars]
 [Variables::ProhibitReusedNames]
