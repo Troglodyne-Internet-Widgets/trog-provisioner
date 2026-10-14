@@ -31,6 +31,12 @@ OURS='root|mariadb\.sys|mysql'
 # nobody knows.
 SKIP='mysql|information_schema|performance_schema|sys'
 
+# mariadb-dump --system=users wraps the grants in a role of its own: it creates
+# the role, grants it to the importer, and drops it after the last grant.  The
+# filter below keeps no CREATE ROLE, so the GRANT of that role fails and stops
+# the import.  This restore runs as root and needs no role.
+IMPORT_ROLE='mariadb_dump_import_role'
+
 # The last thing mariadb-backup.sh writes is `complete`.  A directory without it
 # is a backup that nobody knows to be whole.  Half a database restored is worse
 # than none.  The server then holds data, and so the next provision does not try
@@ -108,6 +114,7 @@ if [ -n "$GRANTS" ]; then
     pigz -dc "$GRANTS" \
         | { grep -E '^(CREATE USER|ALTER USER|GRANT|REVOKE|SET DEFAULT ROLE|SET PASSWORD) ' || true; } \
         | { grep -vE "[\`']($OURS)[\`']@" || true; } \
+        | { grep -vF "$IMPORT_ROLE" || true; } \
         | mariadb
 fi
 
