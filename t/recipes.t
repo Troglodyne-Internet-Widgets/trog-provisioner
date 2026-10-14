@@ -156,6 +156,7 @@ my %G = (
     transfer_user              => 'transfer',
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
     full_aliases               => ['www.test.test.test'],
+    vhost_aliases              => ['www.test.test.test'],
     modules                    => [],
     ipmap                      => { test => '192.0.2.100' },
     ip_pool                    => { cidr => '192.0.2.0/24' },

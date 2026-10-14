@@ -14,7 +14,7 @@ server {
 [% IF ipv6 -%]
     listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
-    server_name [% domain %] [% main_ip %][% FOR alias IN full_aliases %] [% alias %][% END %];
+    server_name [% domain %] [% main_ip %][% FOR alias IN vhost_aliases %] [% alias %][% END %];
 
     access_log off;
 

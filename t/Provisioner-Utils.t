@@ -147,6 +147,19 @@ subtest 'subdomain_aliases qualifies what the recipes declare' => sub {
     );
 };
 
+subtest 'vhost_aliases leaves out what a recipe serves with a vhost of its own' => sub {
+    my @aliases = qw{www.test.test mail.test.test autodiscover.test.test autoconfig.test.test files.test.test};
+    my $ask     = sub { [ Provisioner::Utils::vhost_aliases( 'test.test', \@aliases, @_ ) ] };
+
+    is_deeply( $ask->(),                             \@aliases, 'with no recipes, the vhost of the domain serves every alias' );
+    is_deeply( $ask->('Provisioner::Recipe::nginx'), \@aliases, 'nginx serves www through the vhost of the domain' );
+    is_deeply(
+        $ask->( 'Provisioner::Recipe::nginx', 'Provisioner::Recipe::mail' ),
+        [qw{www.test.test mail.test.test files.test.test}],
+        'mail keeps autodiscover and autoconfig for its own vhost, and not mail, which has none'
+    );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

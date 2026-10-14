@@ -293,6 +293,17 @@ sub subdomains {
     return qw{mail autodiscover autoconfig};
 }
 
+=head2 @names = $recipe->vhost_subdomains()
+
+C<autodiscover> and C<autoconfig>, because F<mail.autodiscover_vhost.tt> is
+their vhost.  C<mail> has none of its own.
+
+=cut
+
+sub vhost_subdomains {
+    return qw{autodiscover autoconfig};
+}
+
 sub template_files {
     my ( $self, @recipes ) = @_;
 

@@ -181,6 +181,27 @@ sub subdomain_aliases {
     } @recipes;
 }
 
+=head3 vhost_aliases($domain, \@aliases, @recipes)
+
+C<@aliases> without each name that one of C<@recipes> serves with a vhost of
+its own, as L<Provisioner::Recipe/vhost_subdomains> declares.  The order of
+C<@aliases> stays.
+
+Returns ARRAY.
+
+=cut
+
+sub vhost_aliases {
+    my ( $domain, $aliases, @recipes ) = @_;
+
+    my %own = map {
+        my $recipe = $_;
+        map { ( "$_.$domain" => 1 ) } $recipe->vhost_subdomains
+    } @recipes;
+
+    return grep { !$own{$_} } @$aliases;
+}
+
 =head3 qualify_address($value, $domain)
 
 Adds C<$domain> to a local part to make an address.  An address stays exactly

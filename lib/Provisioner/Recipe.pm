@@ -452,9 +452,10 @@ sub global_args {
 
             cache_ip => { type => 'string', description => 'The fetch cache, as an address, or empty for none.' },
 
-            resolvers    => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
-            full_aliases => { type => 'array', items => { type => 'string' }, description => "This domain's aliases, built from the ip map." },
-            modules      => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
+            resolvers     => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
+            full_aliases  => { type => 'array', items => { type => 'string' }, description => "This domain's aliases, built from the ip map." },
+            vhost_aliases => { type => 'array', items => { type => 'string' }, description => 'The aliases that the vhost of the domain answers for: full_aliases without what a recipe serves with a vhost of its own.' },
+            modules       => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
 
             ipmap   => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
             ip_pool => {
@@ -1277,6 +1278,21 @@ itself declares nothing.
 =cut
 
 sub subdomains {
+    return ();
+}
+
+=head3 @names = $recipe->vhost_subdomains()
+
+The labels of C<subdomains> that a vhost of this recipe answers for, rather than
+the vhost of the domain.  C<vhost_aliases> is C<full_aliases> without them, and
+the vhost of the domain lists C<vhost_aliases>.  nginx gives a name that two
+vhosts claim to the first one it loads, and ignores the other.
+
+Empty by default: the vhost of the domain serves every name.
+
+=cut
+
+sub vhost_subdomains {
     return ();
 }
 

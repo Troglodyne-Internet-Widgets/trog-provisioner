@@ -42,12 +42,13 @@ sub generated {
     );
 
     my %vars = (
-        domain       => $DOMAIN,
-        main_ip      => '192.0.2.9',
-        full_aliases => ["www.$DOMAIN"],
-        install_dir  => '/opt/domains',
-        script_dir   => '/root/bin',
-        releases     => ['noble'],
+        domain        => $DOMAIN,
+        main_ip       => '192.0.2.9',
+        full_aliases  => ["www.$DOMAIN"],
+        vhost_aliases => ["www.$DOMAIN"],
+        install_dir   => '/opt/domains',
+        script_dir    => '/root/bin',
+        releases      => ['noble'],
         %extra,
     );
 

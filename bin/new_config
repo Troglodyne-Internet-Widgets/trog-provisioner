@@ -914,6 +914,7 @@ sub handle_domain {
             Provisioner::Utils::subdomain_aliases( $domain, map { $builders{$_} } @modules )
         )
     ];
+    my $vhost_aliases = [ Provisioner::Utils::vhost_aliases( $domain, $alias_conf->{$domain}, map { $builders{$_} } @modules ) ];
 
     # A recipe that cannot serve a second domain replaces the first, so refuse
     # it here.  This compares a tenant with its host only, not with the other
@@ -963,8 +964,9 @@ sub handle_domain {
                 $builder->render_global(
                     $builder->takes(%$global_config),
                     %$pconf,
-                    full_aliases => $full_aliases,
-                    modules      => \@modules,
+                    full_aliases  => $full_aliases,
+                    vhost_aliases => $vhost_aliases,
+                    modules       => \@modules,
                 ),
                 @secret_values
             );
@@ -976,8 +978,9 @@ sub handle_domain {
                 $builder->render(
                     $builder->takes(%$global_config),
                     %$pconf,
-                    full_aliases => $full_aliases,
-                    modules      => \@modules,
+                    full_aliases  => $full_aliases,
+                    vhost_aliases => $vhost_aliases,
+                    modules       => \@modules,
                 ),
                 @secret_values
             );
@@ -1038,13 +1041,13 @@ sub handle_domain {
         }
 
         # These go in the payload, unlike the files of the distro recipe below.
-        push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules ) );
+        push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, vhost_aliases => $vhost_aliases, modules => \@modules ) );
 
         my @tests = $builder->tests();
         foreach my $test (@tests) {
             my $tname = $test;
             $tname =~ s/tt$/t/;
-            my $rendered = $builder->render_file( "tests/$test", $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules );
+            my $rendered = $builder->render_file( "tests/$test", $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, vhost_aliases => $vhost_aliases, modules => \@modules );
             print "Writing $test as $tname\n";
             File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $rendered );
         }

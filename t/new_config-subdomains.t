@@ -90,7 +90,7 @@ sub generate {
 
     my $makefile = "$tmpdir/domains/$domain/Makefile";
 
-    return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ) );
+    return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ), "$tmpdir/domains/$domain" );
 }
 
 # Every name the guest is told to answer for, out of the self-signed certificate
@@ -164,6 +164,23 @@ subtest 'a name belonging to a dependency is added as well' => sub {
     # that answers there has to be on the guest rather than assumed.
     ok( ( grep { $_ eq 'mail.mail.test' } @names ), 'and mail, which roundcube requires for the host its IMAP settings name' )
       or diag explain \@names;
+};
+
+subtest 'a name with a vhost of its own is not in the vhost of the domain' => sub {
+    my ( $err, $makefile, $dir ) = generate( 'site.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' } );
+    is( $err, undef, 'the generation runs to the end' ) or diag $err;
+
+    my $site = -f "$dir/nginx.domain.conf" ? File::Slurper::read_text("$dir/nginx.domain.conf") : '';
+    my %listed;
+    $listed{$_}++ for map { split ' ' } $site =~ m/^\s*server_name\s+([^;]+);/mg;
+
+    ok( $listed{'www.site.test'},  'the vhost of the domain answers for www' )     or diag $site;
+    ok( $listed{'mail.site.test'}, 'and for mail, which has no vhost of its own' ) or diag $site;
+    ok( !$listed{$_},              "and not for $_, which has its own" )           or diag $site foreach qw{webmail.site.test autodiscover.site.test autoconfig.site.test};
+
+    my $webmail = -f "$dir/webmail_nginx.conf" ? File::Slurper::read_text("$dir/webmail_nginx.conf") : '';
+    like( $webmail, qr/^\s*server_name\s+webmail\.site\.test;/m, 'roundcube answers for webmail' ) or diag $webmail;
+    ok( ( grep { $_ eq 'webmail.site.test' } names_in($makefile) ), 'and the certificate still names webmail' );
 };
 
 subtest 'the certificate list is the aliases, and invents nothing' => sub {

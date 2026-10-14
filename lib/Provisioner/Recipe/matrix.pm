@@ -102,6 +102,17 @@ sub subdomains {
     return qw{matrix admin.matrix};
 }
 
+=head2 @names = $recipe->vhost_subdomains()
+
+C<admin.matrix>, because F<matrix.admin.nginx.tt> is its vhost.  synapse is
+reached through the vhost of the domain, which nginxproxy configures.
+
+=cut
+
+sub vhost_subdomains {
+    return qw{admin.matrix};
+}
+
 =head2 %args = $recipe->args()
 
 The configuration that this recipe takes.  C<bin/recipes> lists it.

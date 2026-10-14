@@ -77,6 +77,16 @@ sub subdomains {
     return qw{webmail};
 }
 
+=head2 @names = $recipe->vhost_subdomains()
+
+C<webmail>, because F<roundcube.nginx.tt> is its vhost.
+
+=cut
+
+sub vhost_subdomains {
+    return qw{webmail};
+}
+
 sub template_files {
     my ( $class, @modules ) = @_;
     return (

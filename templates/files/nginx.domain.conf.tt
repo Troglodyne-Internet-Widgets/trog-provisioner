@@ -21,7 +21,7 @@ server {
 
 [%# server_name is a list separated by spaces.  It has no www of its own,
     because new_config adds www and mail to the aliases of every domain. -%]
-    server_name [% domain %] [% full_aliases.join(' ') %];
+    server_name [% domain %] [% vhost_aliases.join(' ') %];
     return 301 https://$host$request_uri;
 }
 [% ELSE -%]
@@ -40,7 +40,7 @@ server {
     [% END -%]
 
 [%# Spaces and no www, as in the redirect vhost above. -%]
-    server_name [% domain %] [% full_aliases.join(' ') %];
+    server_name [% domain %] [% vhost_aliases.join(' ') %];
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
