@@ -62,10 +62,31 @@ them for the password. Say what preflight said and stop.
 ## Set up a scratch configuration
 
 ```
-eval "$(.claude/skills/provisioning-recipes/scripts/scratch_config)"
+scratch=.claude/skills/provisioning-recipes/scripts/scratch_config
+env=$($scratch --fleet-cache) || env=$($scratch)
+eval "$env"
 ```
 
-This sets `TROG_PROVISIONER_CONFIG` and `TROG_SCRATCH_PASS` for the shell. Every
+Try the fleet's fetch cache first.  With `--fleet-cache`, a scratch guest gets
+what it downloads from the hosts that the cache serves, CPAN among them, through
+the cache that the real guests use.  A
+fetch that the cache already holds then does not depend on the upstream host.
+One scratch build here failed because the CPAN index did not answer for a
+minute.
+
+`--fleet-cache` asks the cache for `fetchcache-status` the way that a guest
+does.  If the installation names no cache, or the cache does not answer, it
+prints why and builds nothing, and the second command builds without a cache.
+Capture the output before the `eval`, as above: `eval "$(command)"` returns 0
+when the command fails, so it cannot choose between the two.
+
+The option copies the authority of the cache, key included, into the scratch
+directory, because `fetchcache` makes a new authority wherever the key is
+missing.  The teardown of the last scratch domain removes the directory.  Do not
+use it when you test the `fetchcache` recipe itself: see *Through a fetch
+cache*.
+
+The `eval` sets `TROG_PROVISIONER_CONFIG` and `TROG_SCRATCH_PASS` for the shell. Every
 command after it must run with that variable set — if you run each `Bash` call
 separately, re-export it or the tools will read `/etc/trog-provisioner` instead.
 
@@ -247,7 +268,9 @@ cache from the same scratch configuration, first, and name it there:
 and then build the guest under test as usual. The same configuration because a
 scratch configuration has an authority of its own, made the first time the
 cache is configured, and a guest trusts only the one its configuration has --
-it will point nothing at a cache another one signed, the fleet's included.
+it will point nothing at a cache another one signed.  `--fleet-cache` does not
+mix with this: it gives the scratch configuration the authority of the fleet,
+and a cache built here would then be signed by it.
 
 What happened is in two places. The guest's `setup.log` says which hosts went
 through the cache on its `fetch_via_cache:` line, and names each it left going

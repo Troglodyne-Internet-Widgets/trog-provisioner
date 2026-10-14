@@ -19,6 +19,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
+use HTTP::Tiny();
 use Pod::Usage   qw{pod2usage};
 use YAML::XS();
 
@@ -27,6 +28,7 @@ use Trog::Hypervisors::Config();
 use Provisioner::Cookbook();
 use Trog::Secrets();
 use Provisioner::Utils();
+use Provisioner::IPPool();
 
 =head1 NAME
 
@@ -164,6 +166,22 @@ Provision through the fetch cache NAME, by writing C<cache: NAME> into the
 scratch C<_base>'s C<_global>.  NAME is a cache built from this same scratch
 configuration, which has an authority of its own; the skill says how.
 
+=item B<--fleet-cache>
+
+Provision through the fetch cache that the installation's guests use: the
+C<cache> in the C<_global> of its C<_base>.  The address of the cache, out of
+the installation's ip pool, goes into the scratch C<_base>'s C<_global>.  The
+authority of the cache, F<fetchcache-ca.crt> and F<fetchcache-ca.key>, is copied
+in, so that a scratch guest trusts the certificate of the cache.  The teardown
+of the last scratch domain removes the copy with the directory.
+
+It asks the cache first, as a guest does, for C<fetchcache-status> under the
+name of a host that it caches.  If the installation names no cache, or the cache
+has no address or authority, or it does not answer, this dies with the reason
+and builds nothing.  Run it again without this option to build without a cache.
+
+Not with B<--cache>, which names a cache of this scratch configuration.
+
 =item B<--keep> NAME
 
 Keep the block NAME of F<hypervisors.conf>, which names a secret, and read a
@@ -184,13 +202,14 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, @keep, $help );
+    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, $fleet_cache, @keep, $help );
     GetOptionsFromArray(
         \@args,
         'dir=s'       => \$dir,
         'keep=s'      => \@keep,
         'cpan-tests' => \$cpan_tests,
         'cache=s'    => \$cache,
+        'fleet-cache' => \$fleet_cache,
         'print-dir'  => \$print_dir,
         'remove=s'   => \$remove,
         'help'       => \$help,
@@ -198,14 +217,20 @@ sub main {
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     return remove($remove) if $remove;
+    die "--cache and --fleet-cache name two different caches; ask for one.\n" if $cache && $fleet_cache;
 
     my $source = Trog::Config->dir;
+    # Before the directory exists, so that a cache that does not answer leaves
+    # nothing behind.
+    my $fleet = $fleet_cache ? fleet_cache($source) : undef;
+
     $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
     my ( $password, $has_fleet, $keys_copied, $real, $left_out, @refs ) = build(
         $source, $dir,
         cpan_tests     => $cpan_tests,
         cache          => $cache,
+        fleet          => $fleet,
         keep           => \@keep,
         token_for      => \&read_token,
     );
@@ -224,6 +249,7 @@ sub main {
     $report .= "  recipes.d/ left empty, so a guest gets what new_guest names and nothing else\n";
     $report .= "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n"       if $cpan_tests;
     $report .= "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
+    $report .= "  cache: the fleet's, $fleet->{name} at $fleet->{address}, which answered for $fleet->{answered}; its authority copied, so guests trust it\n" if $fleet;
     $report .= "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     $report .= join( q{}, map { "    $_\n" } @refs );
     $report .= "  and the temporary token for each of these, from standard input.  Revoke each after the teardown:\n" . join( q{}, map { "    $_\n" } @$real )
@@ -239,6 +265,49 @@ sub main {
 
     print "export TROG_PROVISIONER_CONFIG=$dir\n" . "export TROG_SCRATCH_PASS=$password\n";
     return 0;
+}
+
+# The fetch cache that the installation's guests use, as name, address,
+# authority and the host it answered for.  Dies with the reason when there is
+# none, or when it does not answer, so that the caller can build without one.
+sub fleet_cache {
+    my ($source) = @_;
+
+    my $conf = YAML::XS::Load( File::Slurper::read_binary("$source/recipes.yaml") );
+    my $name = $conf->{_base}{_global}{cache}
+      or die "The installation names no cache in the _global of _base, so there is no fleet cache to use.\n";
+
+    my $address = $name =~ m/\A(?:\d{1,3}\.){3}\d{1,3}\z/ ? $name : do {
+        local $ENV{TROG_PROVISIONER_CONFIG} = $source;
+        Provisioner::IPPool::held_by($name);
+    } or die "The fleet cache $name has no address in the ip pool of the installation.\n";
+
+    my %authority = map { $_ => "$source/fetchcache-ca.$_" } qw{crt key};
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether the authority exists is the question
+    -f $authority{$_} or die "The fleet cache has no $authority{$_}, so a guest could not trust it.\n" for sort keys %authority;
+
+    my $answered = cache_answers( $address, $authority{crt}, Provisioner::Cookbook->fetch_hosts )
+      or die "The fleet cache $name at $address did not answer, so build without it.\n";
+
+    return { name => $name, address => $address, authority => \%authority, answered => $answered };
+}
+
+# The first of @hosts that the cache at $address answers for, as
+# scripts/fetch_via_cache asks it on a guest: /fetchcache-status at that address,
+# under the name of the host, verified against the authority.  The cache holds
+# a certificate only for the hosts it caches, so a host that it does not cache
+# fails verification and the next is tried.  A connection that fails ends the
+# search, because no host will do better.
+sub cache_answers {
+    my ( $address, $authority, @hosts ) = @_;
+
+    my $http = HTTP::Tiny->new( timeout => 5, SSL_options => { SSL_ca_file => $authority } );
+    foreach my $host (@hosts) {
+        my $res = $http->get( "https://$host/fetchcache-status", { peer => $address } );
+        return $host if $res->{success} && $res->{content} =~ m/\Aok\b/;
+        return if $res->{status} == 599 && $res->{content} =~ m/Could[ ]not[ ]connect|timed[ ]out/i;
+    }
+    return;
 }
 
 sub build {
@@ -291,6 +360,16 @@ sub build {
     # Provisioner::Recipe::fetchcache.
     $global{cpan_notest} = 0            if $opts{cpan_tests};
     $global{cache}       = $opts{cache} if $opts{cache};
+
+    # The fleet's cache, by address, because the scratch ips.db does not hold
+    # the installation's guests.  Its authority comes too, or
+    # Provisioner::Recipe::fetchcache->authority makes a new one here, and a
+    # guest then refuses the certificate of the cache.
+    if ( my $fleet = $opts{fleet} ) {
+        my %mode = ( crt => 0644, key => 0600 );
+        Provisioner::Utils::write_pem( "$dir/fetchcache-ca.$_", File::Slurper::read_binary( $fleet->{authority}{$_} ), $mode{$_} ) for sort keys %mode;
+        $global{cache} = $fleet->{address};
+    }
 
     File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump( { _base => { _global => \%global } } ) );
 
