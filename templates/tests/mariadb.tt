@@ -147,7 +147,30 @@ is(system("/usr/local/sbin/mariadb-restore.sh $half > /tmp/mariadb-restore.log 2
 is(sql("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='never_finished'"), '',
    'but it is not restored either');
 
-system(qq{mariadb -e "DROP DATABASE IF EXISTS $probe"});
-system("rm -rf $half");
+# The accounts of a salvaged dump come back.  The backup on this guest cannot
+# dump them, so the file is written here, in the shape that mariadb-dump
+# --system=users gives it, the role of the dump included.
+my $accounts = '/tmp/a-dump-with-accounts';
+my $grantee  = 'restore_grantee';
+system("rm -rf $accounts && mkdir -p $accounts/20200101-000000/$grantee");
+system("cp $newest/$probe/t.sql.gz $accounts/20200101-000000/$grantee/");
+system("touch $accounts/20200101-000000/complete");
+open( my $gfh, '|-', "pigz > $accounts/20200101-000000/$grantee/grants.sql.gz" ) or die "pigz: $!";
+print $gfh <<"SQL";
+CREATE USER IF NOT EXISTS `$grantee`\@`localhost` IDENTIFIED BY 'restore-probe';
+CREATE ROLE IF NOT EXISTS mariadb_dump_import_role;
+GRANT mariadb_dump_import_role TO CURRENT_USER();
+SET ROLE mariadb_dump_import_role;
+GRANT SELECT ON `$grantee`.* TO `$grantee`\@`localhost`;
+DROP ROLE mariadb_dump_import_role;
+SQL
+close($gfh) or die "pigz: $!";
+system(qq{mariadb -e "DROP DATABASE IF EXISTS $grantee; DROP USER IF EXISTS '$grantee'\@'localhost'"});
+is(system("/usr/local/sbin/mariadb-restore.sh $accounts > /tmp/mariadb-restore.log 2>&1"), 0, 'a dump with accounts restores')
+    or diag `cat /tmp/mariadb-restore.log`;
+like(sql("SHOW GRANTS FOR '$grantee'\@'localhost'"), qr/GRANT SELECT ON `$grantee`/, 'and its accounts come back with their grants');
+
+system(qq{mariadb -e "DROP DATABASE IF EXISTS $probe; DROP DATABASE IF EXISTS $grantee; DROP USER IF EXISTS '$grantee'\@'localhost'"});
+system("rm -rf $half $accounts");
 
 done_testing();
