@@ -124,6 +124,17 @@ ok(scalar @dumps, 'and left a dump behind') or diag `ls -la /var/backups/mysql`;
 my $newest = $dumps[-1] // '';
 ok(-f "$newest/complete", 'which says it finished, since nothing will restore one that does not');
 ok(-f "$newest/$probe/t.sql.gz", 'with the probe database in it');
+ok(-s "$newest/$probe/grants.sql.gz", 'and the accounts, which a rebuild restores from the same dump')
+    or diag `cat /tmp/mariadb-backup.log`;
+
+# The collations behind the accounts dump.  Root compares against the views of
+# the mysql schema, and an application account keeps the collation of the server.
+like(sql("SELECT COUNT(*) FROM mysql.user WHERE is_role='N'"), qr/^[1-9]/, 'root can compare a literal with the views of the mysql schema');
+system(qq{mariadb -e "CREATE USER IF NOT EXISTS 'collation_probe'\@'localhost' IDENTIFIED BY 'collation-probe'"});
+my $app_collation = `mariadb -ucollation_probe -pcollation-probe -sN -e 'SELECT \@\@collation_connection' 2>/dev/null`;
+chomp $app_collation;
+is($app_collation, 'utf8mb4_unicode_ci', 'an application account connects with the collation of the server');
+system(qq{mariadb -e "DROP USER IF EXISTS 'collation_probe'\@'localhost'"});
 
 # The rebuild.  The database is gone, and only the salvage holds its contents.
 system(qq{mariadb -e "DROP DATABASE $probe"});

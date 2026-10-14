@@ -44,9 +44,8 @@ dump_db() {
         --skip-triggers --routines "$db" \
         | pigz > "$dbdir/routines.sql.gz"
 
-    # The accounts.  This step can fail and the backup continues, because
-    # MariaDB 11.4 answers --system=users with "Illegal mix of collations".  The
-    # table data is what a rebuild cannot do without.  Remove the partial file,
+    # The accounts.  If this step fails, the backup continues, because the table
+    # data is what a rebuild cannot do without.  Remove the partial file,
     # so that the restore does not read part of the accounts as all of them.
     # The error goes to stderr, and cron mails it.
     if ! $MYSQLDUMP --system=users --insert-ignore "$db" | pigz > "$dbdir/grants.sql.gz"; then

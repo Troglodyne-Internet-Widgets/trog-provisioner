@@ -13,9 +13,14 @@ max_allowed_packet = 256M
 sql_mode = ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 local-infile = 0
 max_delayed_threads = 0
-character-set-client-handshake = FALSE
 character-set-server = utf8mb4
 collation-server = utf8mb4_unicode_ci
+
+# The connection collation of the application accounts.  The server skips
+# init_connect for an account with CONNECTION ADMIN, so root, and any account
+# with that privilege, keeps the one of its client, which the views of the
+# mysql schema can compare against.  mariadb-dump --system=users needs that.
+init_connect = 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci'
 symbolic-links = 0
 
 general_log = 1
@@ -24,3 +29,8 @@ general_log_file = /var/log/mysql/query.log
 slow_query_log = 1
 slow_query_log_file = /var/log/mysql/slow-query.log
 long_query_time = 30
+
+# Every client on the guest, root and cron included.  Unset, a client here
+# connects as utf8mb3.
+[client]
+default-character-set = utf8mb4
