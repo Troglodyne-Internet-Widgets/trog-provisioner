@@ -20,7 +20,7 @@ use Path::Tiny();
         tpsgi:
             routers:
                 - my/lib/Router.pm
-	        basedir: "path/to/tcms/install"
+            app_dir: "path/to/tcms/install"
         # Example: running on other port than default 80/443
         nginxproxy:
             vhosts:
@@ -80,8 +80,8 @@ sub args {
         type       => 'object',
         required   => [qw{routers}],
         properties => {
-            basedir => { type => 'string' },
-            routers => { type => 'array', items => { type => 'string' } },
+            app_dir => { type => 'string', description => 'The directory of the application, relative to the directory of the domain.  tPSGI changes into it before each request.  Unset is the directory of the domain.' },
+            routers => { type => 'array',  items       => { type => 'string' } },
             loggers => {
                 type        => 'array',
                 items       => { type => 'string', pattern => '^\\w+(?:::\\w+)*$' },

@@ -97,7 +97,7 @@ sub required_recipes {
         tpsgi => sub {
             return (
                 routers => [qq{tCMS/lib/TCMS.pm}],
-                basedir => 'tCMS',
+                app_dir => 'tCMS',
 
                 # Beside tpsgi.log, so that logshipper forwards the lines that
                 # the tpsgi jail reads.

@@ -12,6 +12,6 @@ domain = [% domain %]
 user = [% user %]
 http_user=www-data
 indices=
-[% IF basedir -%]
-basedir=[% basedir %]
+[% IF app_dir -%]
+basedir=[% app_dir %]
 [% END -%]

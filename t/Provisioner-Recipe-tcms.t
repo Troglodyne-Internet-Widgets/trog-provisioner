@@ -43,6 +43,7 @@ subtest 'tpsgi is told to add the syslog output of tCMS' => sub {
     );
     $recipe->generate_files( $dir, domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', user => 'bogus', %tpsgi );
     like( File::Slurper::read_text("$dir/tpsgi.ini"), qr/^loggers[ ]=[ ]Trog::Log::Syslog$/m, 'and tpsgi.ini names it' );
+    like( File::Slurper::read_text("$dir/tpsgi.ini"), qr/^basedir=tCMS$/m,                    'and tPSGI changes into the checkout of tCMS' );
 };
 
 Test::NoWarnings::had_no_warnings();
