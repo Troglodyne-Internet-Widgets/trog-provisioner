@@ -32,15 +32,16 @@ fleet usually has one registrar.  A domain that its own C<pdns> serves needs
 none.  A domain under a TLD that RFC 2606 reserves cannot use one, because no
 public registrar holds a zone for C<.test>.
 
-=head2 It installs nothing
+=head2 It installs nothing, and publishes the records of the domain
 
 A registrar is an external service, so this recipe configures nothing and
 starts no service.  It supplies the credentials and C<lexicon_credentials>.
 That makes it one of the two answers to L<Provisioner::DNSRecipe>.
 
-The recipes that read those install what the guest needs: the shortcut of
-L<Provisioner::Recipe::lexicon>, and the dehydrated hook of
-L<Provisioner::Recipe::letsencrypt>.
+When it holds the zone of the domain, it publishes the C<A> record of the domain
+and a C<CNAME> for each of its names, through the lexicon shortcut.  See
+C<publication> in L<Provisioner::DNSRecipe>, which also says how to publish
+another address.
 
 =cut
 
@@ -98,6 +99,22 @@ sub lexicon_credentials {
         opts  => q{},
         extra => [],
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds what C<publication> in L<Provisioner::DNSRecipe> says this recipe
+publishes.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    return ( %opts, $self->publication(%opts) );
+}
+
+sub tests {
+    return qw{registrar.tt};
 }
 
 =head2 %required = $recipe->required_recipes(%opts)

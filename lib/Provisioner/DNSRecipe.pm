@@ -158,9 +158,21 @@ sub reserved_tlds { return @RESERVED_TLDS }
 
 =head2 %schema = $recipe->schema()
 
-The schema of L<Provisioner::Recipe>, with the C<hostnames> option added: the
-names that the recipes on the domain serve.  The base class hands them to
-every implementation, so an implementation does not declare the option.
+The schema of L<Provisioner::Recipe>, with two options added, so that an
+implementation does not declare them:
+
+=over 4
+
+=item * C<hostnames>: the names that the recipes on the domain serve.  The base
+class hands them to every implementation.
+
+=item * C<address>: the address that the C<A> record of the domain names.  The
+default is C<main_ip>, the address that the guest was built with.  Set it for a
+guest that the outside world reaches through a port forward on a gateway: the
+record then names the public address of the gateway, and the guest keeps its
+own address everywhere else.
+
+=back
 
 =cut
 
@@ -174,8 +186,55 @@ sub schema {
         default     => [],
         description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
     };
+    $schema{properties}{address} = {
+        type        => 'string',
+        format      => 'ipv4',
+        description => 'The address that the A record of the domain names.  The default is main_ip, the address the guest was built with.  Set it for a guest that is reached through a port forward on a gateway.',
+    };
 
     return %schema;
+}
+
+=head2 %publication = $recipe->publication(%opts)
+
+What this implementation publishes for C<$opts{domain}>, as options for its
+templates: C<address>, C<domain_aliases>, and C<publish_records>, which is true
+when there is something to publish and this implementation holds the zone.
+
+The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
+each name in C<domain_aliases>: the aliases that the operator configured and
+the C<hostnames> that the recipes handed over.  F<scripts/publish_dns_records>
+writes them through the lexicon shortcut of the domain, in the postrun.  It
+never deletes a record, and changes only a record of ours that has the wrong
+content, so a rebuild from the same configuration sends nothing.
+
+The address goes up as it is, an RFC 1918 address of a fleet behind NAT
+included: a zone that holds internal addresses for internal names is ordinary,
+and it is the address that the client needs.  There is no C<ns1> among the
+records.  pdns writes one into its own zone, because a guest that serves its
+own zone is its own nameserver, and a zone that a registrar holds has
+nameservers of its own.
+
+Only the implementation that C<provider_for> chooses publishes.  A guest that
+serves its own zone also has the registrar of C<_base>, and a registrar must not
+write the records of a zone that the guest serves into the zone above it.
+
+There is nothing to publish where the hypervisor allocates the address, and
+leaves C<main_ip> empty when the makefile is written.
+
+=cut
+
+sub publication {
+    my ( $self, %opts ) = @_;
+
+    my $address = $opts{address} // $opts{main_ip};
+    my $holder  = $self->provider_for(%opts);
+
+    return (
+        address         => $address,
+        domain_aliases  => [ $self->domain_aliases(%opts) ],
+        publish_records => ( $address && $holder eq $self->recipe_name ) ? 1 : 0,
+    );
 }
 
 # 1 if $recipe is a key of one of the hashes in @where, and 0 if not.  See

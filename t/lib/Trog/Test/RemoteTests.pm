@@ -71,7 +71,7 @@ credentials for a zone that somebody else holds, and installs nothing to test.
 =cut
 
 sub recipes {
-    return ( 'data', grep { $_ ne 'data' && $_ ne 'registrar' } Provisioner::Cookbook->names() );
+    return ( 'data', grep { $_ ne 'data' } Provisioner::Cookbook->names() );
 }
 
 =head2 run($recipe)
