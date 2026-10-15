@@ -1,0 +1,6 @@
+[%# pdns creates its API socket with its umask, and has no setting for the
+    mode.  0002 gives the group write, which a client of a unix socket needs,
+    and the proxy runs in that group.  A chmod after the start would race pdns
+    to the socket. -%]
+[Service]
+UMask=0002
