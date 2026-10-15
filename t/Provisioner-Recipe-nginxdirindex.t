@@ -40,14 +40,14 @@ $r->generate_files(
 my $conf = do { local ( @ARGV, $/ ) = "$dir/nginxdirindex.domain.conf"; <> }
   // q{};
 
-# Each server block reads its names from the file that nginx writes for this
-# site.  Provisioner::Recipe::nginx decides what is in it.
+# Each server block reads its names from the file that nginx writes for the
+# vhost of the domain.  Provisioner::Recipe::nginx decides what is in it.
 my @includes = $conf =~ m{^ \s* include \s+ (\S+) ; }xmg;
-is_deeply( \@includes, [ ('/etc/nginx/names/index.test.test/nginxdirindex.conf') x 2 ], 'each server block includes the names of this site' );
+is_deeply( \@includes, [ ('/etc/nginx/names/index.test.test.conf') x 2 ], 'each server block includes the names of the vhost of the domain' );
 unlike( $conf, qr/^ \s* server_name /xm, 'and names none itself' );
 
 my %required = $r->required_recipes( domain => 'index.test.test' );
-is_deeply( { $required{nginx}->() }, { sites => { nginxdirindex => { domain => 1 } } }, 'the site is declared to nginx as the one that serves the domain' );
+is_deeply( { $required{nginx}->( domain => 'index.test.test' ) }, { sites => ['index.test.test'] }, 'the vhost is declared to nginx as the one that serves the domain' );
 
 Test::NoWarnings::had_no_warnings();
 

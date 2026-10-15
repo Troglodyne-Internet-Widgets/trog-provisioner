@@ -59,9 +59,9 @@ subtest 'an operator can keep them in the files alone' => sub {
     unlike( global_conf( syslog => 0 ), qr/syslog:/, 'nothing is sent to syslog' );
 };
 
-# The server_name of each site, as the domain fragment writes it: a map from
-# the site to the names in its file.
-sub site_names {
+# The server_name that the domain fragment writes for the vhost of the domain,
+# or undef when it writes none.
+sub domain_names {
     my (%extra) = @_;
 
     my $recipe = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new(
@@ -71,46 +71,33 @@ sub site_names {
     );
     my $fragment = $recipe->render( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %extra );
 
-    my %names;
-    my $printf = qr{^printf[ ]\x27server_name[ ]%s;\\n\x27[ ]}m;
-    my $file   = qr{/etc/nginx/names/web\.test\.test/([^/]+)\.conf$}m;
-    while ( $fragment =~ m{$printf\x27([^\x27]*)\x27[ ]>[ ]$file}mg ) {
-        $names{$2} = [ split ' ', $1 ];
-    }
-    return \%names;
+    my $printf  = qr{^printf[ ]\x27server_name[ ]%s;\\n\x27[ ]}m;
+    my $file    = qr{/etc/nginx/names/web\.test\.test\.conf$}m;
+    my ($names) = $fragment =~ m{$printf\x27([^\x27]*)\x27[ ]>[ ]$file}m;
+    return defined $names ? [ split ' ', $names ] : undef;
 }
 
-subtest 'each vhost answers for its own names, and the vhost of the domain for the rest' => sub {
-    my %sites = (
-        nginxproxy => { domain => 1 },
-        webmail    => { names  => ['webmail.web.test.test'] },
-    );
+subtest 'the vhost of the domain answers for every alias that no other vhost lists' => sub {
     is_deeply(
-        site_names( sites => \%sites, full_aliases => [qw{www.web.test.test webmail.web.test.test mail.web.test.test}] ),
-        {
-            nginxproxy => [qw{web.test.test www.web.test.test mail.web.test.test}],
-            webmail    => ['webmail.web.test.test'],
-        },
+        domain_names( sites => [qw{web.test.test webmail.web.test.test}], full_aliases => [qw{www.web.test.test webmail.web.test.test mail.web.test.test}] ),
+        [qw{web.test.test www.web.test.test mail.web.test.test}],
         'webmail is the vhost of roundcube alone, and the domain keeps every other alias'
     );
-    is_deeply( site_names(), {}, 'a domain that declares no site gets no file' );
-    is_deeply(
-        site_names( sites => { autodiscover => { names => [qw{autodiscover.web.test.test autodiscover.web.test.test}] } } ),
-        { autodiscover => ['autodiscover.web.test.test'] },
-        'a site that the resolver handed over twice lists each name once'
-    );
+    is( domain_names( sites => ['webmail.web.test.test'] ), undef, 'a domain that no vhost serves gets no file' );
+    is( domain_names(),                                     undef, 'nor does a domain that lists no vhost' );
 };
 
 subtest 'a name that nginx would give to only one vhost stops the build' => sub {
+    my $invalid = qr/\Anginx:[ ]invalid[ ]configuration:[ ]/m;
+    my $refusal = qr/${invalid}multiple[ ]recipes[ ]configured[ ]to[ ]serve[ ]/m;
     like(
-        exception { site_names( sites => { one => { names => ['x.web.test.test'] }, two => { names => ['x.web.test.test'] } } ) },
-        qr/x\.web\.test\.test[ ]is[ ]a[ ]name[ ]of[ ]both/, 'one name in two sites'
+        exception { domain_names( sites => [qw{x.web.test.test x.web.test.test}] ) },
+        qr/${refusal}x\.web\.test\.test$/m, 'one name that two recipes list'
     );
     like(
-        exception { site_names( sites => { one => { domain => 1 }, two => { domain => 1 } } ) },
-        qr/all[ ]serve[ ]web\.test\.test/, 'two sites that each serve the domain'
+        exception { domain_names( sites => [qw{web.test.test web.test.test}] ) },
+        qr/${refusal}web\.test\.test$/m, 'and two recipes that each serve the domain'
     );
-    like( exception { site_names( sites => { empty => {} } ) }, qr/answers[ ]for[ ]no[ ]name/, 'and a site with no name' );
 };
 
 Test::NoWarnings::had_no_warnings();

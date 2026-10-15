@@ -10,8 +10,6 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use List::Util qw{uniq};
-
 =head1 Provisioner::Recipe::nginx
 
 =head2 SYNOPSIS
@@ -40,23 +38,25 @@ Use this recipe as a dependency of other nginx recipes, not on its own.
 
 nginx gives a name that two server blocks claim to the first one it loads, and
 only warns about the other.  So the names of every vhost of a domain are decided
-here, in one place, and each vhost reads its own.
+here, in one place.
 
-A recipe that installs a vhost declares it in C<sites>, from its
-C<required_recipes>, under a name of its own choosing:
+A recipe that installs a vhost lists the names of its vhost in C<sites>, from
+its C<required_recipes>:
 
     nginx => sub {
         my (%opts) = @_;
-        return ( sites => { webmail => { names => ["webmail.$opts{domain}"] } } );
+        return ( sites => ["webmail.$opts{domain}"] );
     },
 
-A site with C<domain> set serves the domain, and every alias of it that no other
-site names.  A site without it serves C<names> alone.  The fragment of this
-recipe writes one file for each site, F</etc/nginx/names/$domain/$site.conf>,
-which holds its C<server_name>, and the vhost includes that file.
+A vhost that serves the primary domain being provisioned lists that domain.
+That vhost also answers for every alias of the domain that no other vhost
+lists, so it does not know its names in advance.  The fragment of this recipe
+writes them to F</etc/nginx/names/$domain.conf> as its C<server_name>, and
+that vhost includes the file.  Any other vhost writes its own C<server_name>.
 
-A name that two sites claim, or two sites that each serve the domain, stop the
-build, because nginx would serve only one of them.
+A name that two recipes list stops the build, because nginx would serve only
+one of them.  So two recipes whose vhosts serve the domain cannot be on one
+guest.
 
 =cut
 
@@ -109,17 +109,10 @@ sub args {
             },
 
             sites => {
-                type                 => 'object',
-                default              => {},
-                description          => 'The vhosts of the domain, keyed on a name for each, which the recipes that install them hand over.  See "The names that each vhost answers for".',
-                additionalProperties => {
-                    type                 => 'object',
-                    additionalProperties => 0,
-                    properties           => {
-                        names  => { type => 'array',   items   => { type => 'string' }, default => [], description => 'The names that only this vhost answers for.' },
-                        domain => { type => 'boolean', default => 0, description => 'This vhost serves the domain, and each alias of it that no other site names.' },
-                    },
-                },
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'The names that the vhosts of the domain answer for, which the recipes that install them hand over.  The vhost that serves the primary domain being provisioned lists it, and also answers for each alias that no other vhost lists.  See "The names that each vhost answers for".',
             },
         },
     );
@@ -127,41 +120,21 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Adds C<server_names>: for each site, the names that its vhost answers for.  Dies
-when two sites name one name, or when two sites serve the domain.
+When a vhost serves the domain, adds C<domain_names>: the domain, and each
+alias of it that no vhost lists.  Dies when two recipes list one name.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # A recipe that the resolver visits twice hands its site over twice, and
-    # the merge appends the names, so a site can list a name more than once.
-    my $sites    = $opts{sites};
-    my %names_of = map { $_ => [ uniq @{ $sites->{$_}{names} } ] } keys %$sites;
-
-    my %owner;
-    foreach my $site ( sort keys %$sites ) {
-        foreach my $name ( @{ $names_of{$site} } ) {
-            die "nginx: $name is a name of both the $owner{$name} site and the $site site of $opts{domain}, and nginx would serve only one.\n"
-              if $owner{$name};
-            $owner{$name} = $site;
-        }
+    my %listed;
+    $listed{$_}++ foreach @{ $opts{sites} };
+    foreach my $name ( sort keys %listed ) {
+        die "nginx: invalid configuration: multiple recipes configured to serve $name\n" if $listed{$name} > 1;
     }
 
-    my @serve_domain = grep { $sites->{$_}{domain} } sort keys %$sites;
-    die "nginx: the sites @serve_domain all serve $opts{domain}, and nginx would serve only one.\n" if @serve_domain > 1;
-
-    my %server_names = map { $_ => [ @{ $names_of{$_} } ] } keys %$sites;
-    if (@serve_domain) {
-        my @rest = grep { !$owner{$_} } ( $opts{domain}, @{ $opts{full_aliases} // [] } );
-        unshift( @{ $server_names{ $serve_domain[0] } }, @rest );
-    }
-
-    foreach my $site ( sort keys %server_names ) {
-        die "nginx: the $site site of $opts{domain} answers for no name.\n" unless @{ $server_names{$site} };
-    }
-    $opts{server_names} = \%server_names;
+    $opts{domain_names} = [ $opts{domain}, grep { !$listed{$_} } @{ $opts{full_aliases} // [] } ] if $listed{ $opts{domain} };
 
     return %opts;
 }

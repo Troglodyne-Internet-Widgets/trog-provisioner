@@ -185,7 +185,7 @@ sub required_recipes {
         configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
         cron    => sub { return ( files     => { "$opts{domain}-mailcron" => 'mailcron' } ) },
         nginx   => sub {
-            return ( sites => { autodiscover => { names => [ map { "$_.$opts{domain}" } qw{autodiscover autoconfig} ] } } );
+            return ( sites => [ map { "$_.$opts{domain}" } qw{autodiscover autoconfig} ] );
         },
         $self->SUPER::required_recipes(%opts),
     );
@@ -289,7 +289,7 @@ sub jails {
 C<mail>, which the MX names and the SRV records point at, and C<autodiscover>
 and C<autoconfig>, which F<mail.autodiscover_vhost.tt> answers for so a client
 can find its own settings.  That vhost is why this recipe requires nginx, and
-it declares the two names to nginx as the site C<autodiscover>.
+it lists the two names in the C<sites> of nginx.
 
 =cut
 

@@ -2,7 +2,7 @@ server {
     listen 443 ssl;
 [% IF ipv6 %]    listen [::]:443 ssl;
 [% END -%]
-    include /etc/nginx/names/[% domain %]/webmail.conf;
+    server_name webmail.[% domain %];
 	server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/[% domain -%].pem;
@@ -36,6 +36,6 @@ server {
 	listen 80;
 [% IF ipv6 %]	listen [::]:80;
 [% END -%]
-	include /etc/nginx/names/[% domain %]/webmail.conf;
+	server_name webmail.[% domain %];
 	return 301 https://$host$request_uri;
 }

@@ -91,10 +91,10 @@ foreach my $used ($vhost =~ m{^\s*proxy_pass\s+http://([A-Za-z0-9_]+);}gm) {
 }
 
 # The vhost reads its server_name from the file that the nginx recipe writes
-# for this site.  The names are a list separated by spaces.  A name with a
+# for the vhost of the domain.  The names are a list separated by spaces.  A name with a
 # comma attached matches nothing, and nginx does not report it.
 my @includes = $vhost =~ m{^\s*include\s+(/etc/nginx/names/\S+);}gm;
-ok(scalar @includes, 'the vhost includes the names of its site') or diag $vhost;
+ok(scalar @includes, 'the vhost includes the names that nginx gives it') or diag $vhost;
 foreach my $file (@includes) {
     my $names = do { local (@ARGV, $/) = $file; <> } // '';
     ($names) = $names =~ m/^\s*server_name\s+([^;]+);/m;

@@ -19,8 +19,8 @@ server {
     [% END -%]
     server_tokens off;
 
-[%# The names of this site, which Provisioner::Recipe::nginx decides. -%]
-    include /etc/nginx/names/[% domain %]/nginxproxy.conf;
+[%# The names of the vhost of the domain, which Provisioner::Recipe::nginx decides. -%]
+    include /etc/nginx/names/[% domain %].conf;
     return 301 https://$host$request_uri;
 }
 [% ELSE -%]
@@ -38,7 +38,7 @@ server {
     listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
-    include /etc/nginx/names/[% domain %]/nginxproxy.conf;
+    include /etc/nginx/names/[% domain %].conf;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;

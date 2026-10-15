@@ -64,7 +64,7 @@ sub required_recipes {
 
     return (
         nginx => sub {
-            return ( sites => { webmail => { names => [ map { "$_.$opts{domain}" } $self->subdomains ] } } );
+            return ( sites => [ map { "$_.$opts{domain}" } $self->subdomains ] );
         },
         mail => sub { () },
     );

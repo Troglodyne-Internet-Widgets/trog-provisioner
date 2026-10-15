@@ -46,7 +46,7 @@ sub required_recipes {
     return (
         # The vhost of the domain: see "The names that each vhost answers for" in
         # Provisioner::Recipe::nginx.
-        nginx => sub { return ( sites => { nginxdirindex => { domain => 1 } } ) },
+        nginx => sub { my (%opts) = @_; return ( sites => [ $opts{domain} ] ) },
     );
 }
 

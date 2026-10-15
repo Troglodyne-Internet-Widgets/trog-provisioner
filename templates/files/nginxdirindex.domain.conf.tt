@@ -3,7 +3,7 @@ server {
 [% IF ipv6 %]    listen [::]:443 ssl[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 
-    include /etc/nginx/names/[% domain %]/nginxdirindex.conf;
+    include /etc/nginx/names/[% domain %].conf;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
@@ -25,7 +25,7 @@ server {
 [% IF ipv6 %]    listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 
-    include /etc/nginx/names/[% domain %]/nginxdirindex.conf;
+    include /etc/nginx/names/[% domain %].conf;
 
     root [% install_dir %]/[% domain %];
 
