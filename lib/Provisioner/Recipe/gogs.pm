@@ -36,8 +36,8 @@ public repositories on a schedule.
 This recipe requires the C<nginxproxy> recipe.
 
 Gogs answers at the domain itself, not at C<git.$domain>.  The vhost that
-C<nginxproxy> writes answers on the domain and on the aliases that C<new_config>
-gives it, and C<git> is not one of them.  The recipe keeps its files under
+C<nginxproxy> writes answers on the domain and on the aliases that the nginx
+recipe gives it, and C<git> is not one of them.  The recipe keeps its files under
 C<$install_dir/git.$domain>, which is a directory name and not a hostname.
 
 The package names are in the subclass for each distribution, for example

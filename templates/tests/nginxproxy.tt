@@ -90,13 +90,19 @@ foreach my $used ($vhost =~ m{^\s*proxy_pass\s+http://([A-Za-z0-9_]+);}gm) {
     ok($declared{$used}, "upstream $used is declared in this file") or diag $vhost;
 }
 
-# server_name is a list separated by spaces.  A name with a comma attached
-# matches nothing, and nginx does not report it.
-foreach my $names ($vhost =~ m/^\s*server_name\s+([^;]+);/gm) {
+# The vhost reads its server_name from the file that the nginx recipe writes
+# for this site.  The names are a list separated by spaces.  A name with a
+# comma attached matches nothing, and nginx does not report it.
+my @includes = $vhost =~ m{^\s*include\s+(/etc/nginx/names/\S+);}gm;
+ok(scalar @includes, 'the vhost includes the names of its site') or diag $vhost;
+foreach my $file (@includes) {
+    my $names = do { local (@ARGV, $/) = $file; <> } // '';
+    ($names) = $names =~ m/^\s*server_name\s+([^;]+);/m;
+    ok(defined $names, "$file holds a server_name") or next;
     unlike($names, qr/,/, 'no comma in server_name');
 
-    # nginx declares www, so new_config adds it to the aliases.  If a name is here
-    # twice, nginx reports a conflicting server name and ignores one of them.
+    # If a name is here twice, nginx reports a conflicting server name and
+    # ignores one of them.
     my %seen;
     my @dupes = grep { $seen{$_}++ } split ' ', $names;
     is_deeply(\@dupes, [], 'and no name listed twice') or diag $names;

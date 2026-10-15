@@ -88,7 +88,7 @@ chomp $port;
 ok($port >= 1, 'gogs is listening on port 3000');
 
 # The host name that gogs uses.  The vhost from nginxproxy answers on the domain
-# and on the aliases that new_config gives it, and git. is not one of them.
+# and on the aliases that the nginx recipe gives it, and git. is not one of them.
 like($ini, qr{^ROOT_URL\s*=\s*https://\Q[% domain %]\E/?\s*$}m, 'ROOT_URL is the domain the vhost answers on')
     or diag $ini;
 like($ini, qr/^DOMAIN\s*=\s*\Q[% domain %]\E\s*$/m, 'and so is DOMAIN');
