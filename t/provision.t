@@ -1088,6 +1088,48 @@ subtest 'the marker that setup.sh waits for is written after every secret' => su
     );
 };
 
+subtest 'a secret that another guest issues is asked of that guest, and not of the store' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $domain = 'issued.test.test';
+    mkdir "$dir/$domain";
+    my $issue = { guest => 'ns.test.test', command => q{print 'the token'} };
+    File::Slurper::Temp::write_text( "$dir/$domain/guest-secrets.yaml", YAML::XS::Dump( { '/bogus/web.token' => { issue => $issue, mode => '0600', owner => 'root:root' } } ) );
+
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { die "asked for the password of the store\n" } );
+
+    my ( @asked, %wrote );
+    my $answer = "a-token\n";
+    no warnings 'once';
+
+    # It reads a file with the loop variable of Config::Simple, which is $_.
+    local *IssuerProbe::capture_cmd = sub { my ( undef, $cmd ) = @_; push( @asked, $cmd ); $_ = 'clobbered'; return $answer };
+    local *SecretsProbe::run_sudo   = sub { return 0 };
+    local *SecretsProbe::write_text = sub { my ( undef, $path, $text ) = @_; $wrote{$path} = $text; return 1 };
+    use warnings;
+
+    my @issuers;
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    $bin->redefine( authorize_runner_key => sub { return 0 } );
+    $bin->redefine( guest_of             => sub { push( @issuers, $_[0] ); return bless {}, 'IssuerProbe' } );
+
+    is( quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( bless( {}, 'SecretsProbe' ), $domain ) } ), 1, 'the secrets are placed, without the password of the store' );
+    is_deeply( \@issuers, ['ns.test.test'],                             'by the guest that the manifest names' );
+    is_deeply( \@asked,   [q{sudo -n sh -c 'print '\''the token'\'''}], 'which runs the command as root, quoted for its shell' );
+    is( $wrote{'/bogus/web.token'}, "a-token\n", 'and the guest gets what it printed' );
+
+    $answer = q{};
+    like( exception { Trog::Bin::Provisioner::issue_secret( $domain, '/bogus/web.token', $issue ) }, qr/did[ ]not[ ]issue/, 'a command that prints nothing has failed' );
+    $answer = "two\nlines\n";
+    like( exception { Trog::Bin::Provisioner::issue_secret( $domain, '/bogus/web.token', $issue ) }, qr/did[ ]not[ ]issue/, 'and so has one that prints more than a secret' );
+
+    $bin->redefine( guest_of => sub { return } );
+    like( exception { Trog::Bin::Provisioner::issue_secret( $domain, '/bogus/web.token', $issue ) }, qr/ns[.]test[.]test[ ]is[ ]not[ ]up/, 'and a guest that is not up is named' );
+};
+
 # --- Letting a runner in to a hypervisor --------------------------------------
 #
 # A change to a machine that is not the guest, and the reason this lives here

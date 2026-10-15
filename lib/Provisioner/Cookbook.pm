@@ -815,6 +815,9 @@ configuration of the machine that the domain is layered onto.  C<host> names
 that machine, so a refusal can say which guest it looked at.  Both are undef
 for a domain with a guest of its own.
 
+C<delegated_by> is the guest that C<delegating_guest> finds for the domain, in
+the configuration of the installation.
+
 C<requiring_conf> is the configuration of the recipe that declared the
 dependency.  The interface names the key that holds a preference, and reads it
 from there.  So a domain settles a tie in the block where it already configures
@@ -848,12 +851,37 @@ sub resolve_substitutable_dependency {
         configured      => $domain_conf // {},
         host            => $host,
         host_configured => $host_conf,
+
+        # Read by Provisioner::DNSRecipe, and ignored by other interfaces.
+        delegated_by => scalar $class->delegating_guest($domain),
     );
 
     die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
       unless List::Util::any { $_ eq $chosen } @known;
 
     return $chosen;
+}
+
+=head2 $bool = requires_transitively(\%required_by, $recipe, $dependency)
+
+True when C<$recipe> requires C<$dependency>, directly or through other
+recipes, as far as C<%required_by> knows so far.  C<%required_by> maps a
+dependency to the recipes that require it, as C<resolve_dependencies> builds
+it.  A function.
+
+=cut
+
+sub requires_transitively {
+    my ( $required_by, $recipe, $dependency ) = @_;
+    my %seen  = ( $dependency => 1 );
+    my @queue = ($dependency);
+    while ( defined( my $at = shift @queue ) ) {
+        foreach my $requirer ( keys %{ $required_by->{$at} // {} } ) {
+            return 1 if $requirer eq $recipe;
+            push( @queue, $requirer ) unless $seen{$requirer}++;
+        }
+    }
+    return 0;
 }
 
 =head2 resolve_dependencies(%args)
@@ -907,6 +935,15 @@ the C<required_recipes> of the recipe.  This calls the base class version
 directly, not through the recipe.  The base class decides what every recipe
 owes: C<ufw> its rate limits, and C<data> its restores.  An override that does
 not call C<SUPER> must not drop those, and many overrides do not call it.
+
+=head3 Recipes that require each other
+
+A dependency comes after each recipe that requires it, so two recipes that
+require each other, directly or through others, have no such order.  The
+requirement that closes the cycle still configures its dependency, at once,
+but does not move it.  The dependency is not asked again what it requires.  So the recipes of a cycle keep the order in which this found them,
+which is the same on every run.  A recipe that requires itself, as pdns does
+when it holds the zone of a name that it serves, configures itself.
 
 =head3 When a recipe cannot say what it wants
 
@@ -1025,8 +1062,14 @@ sub resolve_dependencies {
 
             # Push it each time something names it.  lastuniq keeps the last
             # mention, which puts a dependency after everything that requires it.
-            push( @modules, $required );
-            $required_by{$required}{$module} = 1;
+            # Not where it closes a cycle, which has no such order, and where
+            # each push would go round the cycle again.  See L</Recipes that
+            # require each other>.
+            my $closes = requires_transitively( \%required_by, $required, $module );
+            unless ( $required eq $module || $closes ) {
+                push( @modules, $required );
+                $required_by{$required}{$module} = 1;
+            }
 
             my $request = $request_encoder->encode( \%cur_args );
             next if ( $asked{$module}{$required} // q{} ) eq $request;
@@ -1038,6 +1081,9 @@ sub resolve_dependencies {
             # required recipe knows which side is right, so it is asked, and it
             # dies if it does not know.
             $class->load( $required, distro => $distro )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
+
+            # The walk does not visit it again, so it takes this now.
+            $domain_conf->{$required} = $dep_merger->merge( $depmod_conf->{$required}, $as_written{$required} // {} ) if $closes;
         }
 
         # Merge in what every dependent asked of this recipe.
@@ -1243,6 +1289,66 @@ sub host_of {
     }
 
     return;
+}
+
+=head2 %guest_of = delegations($conf)
+
+Each zone that a pdns guest of C<$conf> serves for other guests, mapped to that
+guest: the C<authoritative_for> of L<Provisioner::Recipe::pdns>, in lower case
+and without a trailing dot.  C<$conf> is as in C<domain_config>.
+
+Dies when two domains name the same zone, because one guest holds a zone.
+
+=cut
+
+sub delegations {
+    my ( $class, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my %guest_of;
+    foreach my $domain ( sort grep { !m/\A_/ } keys %{$conf} ) {
+        my $pdns = $class->domain_config( $domain, $conf )->{pdns};
+        next unless ref $pdns eq 'HASH';
+
+        foreach my $zone ( map { Provisioner::Utils::dns_name($_) } @{ Provisioner::Utils::coerce_arrayref( $pdns->{authoritative_for} ) } ) {
+            die "Both $guest_of{$zone} and $domain name $zone in the authoritative_for of their pdns, but one guest holds a zone.  Take it out of one of them.\n"
+              if defined $guest_of{$zone} && $guest_of{$zone} ne $domain;
+            $guest_of{$zone} = $domain;
+        }
+    }
+
+    return %guest_of;
+}
+
+=head2 ($guest, $zone) = delegating_guest($name, $conf, %opts)
+
+The pdns guest that holds C<$name>, and the zone of C<delegations> that it
+holds the name in.  That is the longest zone that is C<$name> or that
+C<$name> is below.  Returns nothing when no zone of C<delegations> holds it.
+C<$conf> is as in C<domain_config>.
+
+In scalar context it returns the guest, or undef.
+
+With C<< above => 1 >>, only a zone that C<$name> is below counts, and not a
+zone that is C<$name> itself.  That is where a zone is delegated from.
+
+=cut
+
+sub delegating_guest {
+    my ( $class, $name, $conf, %opts ) = @_;
+    return unless defined $name;
+
+    my %guest_of = $class->delegations($conf);
+    $name = Provisioner::Utils::dns_name($name);
+
+    my @labels = split m/[.]/, $name;
+    foreach my $skip ( ( $opts{above} ? 1 : 0 ) .. $#labels ) {
+        my $zone = join q{.}, @labels[ $skip .. $#labels ];
+        next unless defined $guest_of{$zone};
+        return wantarray ? ( $guest_of{$zone}, $zone ) : $guest_of{$zone};
+    }
+
+    return wantarray ? () : undef;
 }
 
 # Each key that a _global can hold, and the schema of each field that declares

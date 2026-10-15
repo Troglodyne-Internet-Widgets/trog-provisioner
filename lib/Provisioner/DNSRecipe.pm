@@ -93,6 +93,10 @@ because most providers take only a token.
 
 =item * C<key>: the token that lexicon authenticates with.
 
+=item * C<key_file>: optional.  A file on the guest that holds the token, in
+place of C<key>.  A token that is not in the payload is in a file that
+C<guest_secrets> in L<Provisioner::Recipe> places.
+
 =item * C<opts>: flags that every lexicon command for this provider needs, as a
 string.  Usually it is empty.
 
@@ -267,6 +271,13 @@ Error messages name it.
 =item * C<host_configured>: the configuration of that guest, as a hash
 reference, or undef.
 
+=item * C<delegated_by>: the pdns guest whose C<authoritative_for> holds the
+domain, as L<Provisioner::Cookbook/delegating_guest> finds it, or undef.  The
+registrar implementation then reaches that guest, through its API proxy.  See
+L<Provisioner::Recipe::pdns/The API proxy>.  This counts as registrar credentials, also
+under a reserved TLD and also where no registrar is configured.  It does not
+count where it names the guest of the domain itself.
+
 =item * C<dns_preference>: optional.  The key is the one that
 C<tiebreaker_key> names.  Without it, the preference is the one that any recipe
 in C<configured> states, such as the C<dns_preference> of
@@ -294,8 +305,8 @@ It does not guess.  It dies in these conditions:
 
 =item * Two recipes of the domain state different preferences.
 
-=item * The preference names the registrar for a name under a reserved TLD.
-No registrar can answer for such a name.
+=item * The preference names the registrar for a name under a reserved TLD
+that no pdns guest holds.  No registrar can answer for such a name.
 
 =item * The preference names C<pdns>, but the guest has no C<pdns>
 configuration.
@@ -323,8 +334,9 @@ sub implementation_for {
     # Look in the host configuration too, because the guest that a domain is
     # layered onto serves it.
     my @where     = ( $opts{configured}, $opts{host_configured} );
-    my $local     = ( $reserved || configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
-    my $registrar = configures( 'registrar', @where );
+    my $delegated = ( defined $opts{delegated_by} && $opts{delegated_by} ne $server ) ? 1 : 0;
+    my $local     = ( ( $reserved && !$delegated ) || configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
+    my $registrar = ( $delegated                   || configures( 'registrar',           @where ) ) ? 1 : 0;
 
     # Without a preference of its own, the requirer gets the one that the
     # recipes of the domain state.  One server holds the zone, so two answers
@@ -338,7 +350,7 @@ sub implementation_for {
     }
     if ($stated) {
         die "$domain is under .$reserved, which RFC 2606 and RFC 6761 reserve, so no public registrar can hold a zone for it -- dns_preference: registrar names a provider that could never answer its challenge.  The guest serves this name itself; drop the preference.\n"
-          if $stated eq 'registrar' && $reserved;
+          if $stated eq 'registrar' && $reserved && !$delegated;
 
         die "$domain asks for dns_preference: $LOCAL_IMPLEMENTATION, but $server is configured with no $LOCAL_IMPLEMENTATION recipe, so nothing on the guest could answer its dns-01 challenge.  Add $LOCAL_IMPLEMENTATION, or name the registrar that holds the zone.\n"
           if $stated eq $LOCAL_IMPLEMENTATION && !$local;
@@ -348,7 +360,7 @@ sub implementation_for {
 
     # A registrar cannot serve a reserved TLD, so inherited credentials do not
     # make a tie.
-    return $LOCAL_IMPLEMENTATION if $reserved;
+    return $LOCAL_IMPLEMENTATION if $reserved && !$delegated;
 
     return 'registrar'           if $registrar && !$local;
     return $LOCAL_IMPLEMENTATION if $local     && !$registrar;
@@ -364,7 +376,8 @@ sub implementation_for {
 Returns the implementation that serves C<$opts{domain}>.  It reads the
 configuration that the environment names, from L<Provisioner::Cookbook>.
 
-This is C<implementation_for>, but it fetches the three configurations itself.
+This is C<implementation_for>, but it fetches the three configurations and
+C<delegated_by> itself.
 If you already have them, call C<implementation_for>, as the depsolver of
 F<bin/new_config> does.  If not, call this method.  It dies as
 C<implementation_for> does.
@@ -381,6 +394,7 @@ sub provider_for {
         configured      => Provisioner::Cookbook->domain_config( $opts{domain} ),
         host            => $host,
         host_configured => ( defined $host ? Provisioner::Cookbook->domain_config($host) : undef ),
+        delegated_by    => scalar Provisioner::Cookbook->delegating_guest( $opts{domain} ),
     );
 }
 

@@ -1,4 +1,4 @@
-# The PSGI application of the pdnsacl recipe.  The key of the API comes from
+# The PSGI application of the API proxy of the pdns recipe.  The key of the API comes from
 # the environment, which the unit reads from a file only root and pdns can read.
 use strict;
 use warnings;

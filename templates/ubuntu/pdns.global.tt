@@ -29,7 +29,7 @@ grep -qF 'addNTA("[% zone %]"' /etc/powerdns/recursor.lua || echo 'addNTA("[% zo
 [% END -%]
 # The sqlite backend, which holds the zones
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
-# The API, which lexicon and synczones use
+# The API, which lexicon uses
 mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
 [%# pdns must read these files, and a file moved out of the payload keeps the
     transfer user and mode 0600.  If pdns cannot read them, it uses the
@@ -37,9 +37,6 @@ mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
     api.conf holds the API key, so the group can read, not everybody. -%]
 chown root:pdns /etc/powerdns/pdns.d/00-global.conf /etc/powerdns/pdns.d/sqlite.conf /etc/powerdns/pdns.d/api.conf
 chmod 0640 /etc/powerdns/pdns.d/00-global.conf /etc/powerdns/pdns.d/sqlite.conf /etc/powerdns/pdns.d/api.conf
-mv synczones.conf /etc/synczones.conf
-chown root:root /etc/synczones.conf
-chmod 0600 /etc/synczones.conf
 [%# The data target restores the zones.db of the previous guest before this
     runs.  See restores() in Provisioner::Recipe::pdns.  sqlite3 stops on a
     table that already exists, and the target fails with it. -%]

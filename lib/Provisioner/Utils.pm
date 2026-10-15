@@ -269,6 +269,32 @@ sub tld_of {
     return $tld;
 }
 
+=head3 dns_name($name)
+
+Returns C<$name> in lower case and without a trailing dot, which is how a
+name compares to another.
+
+=cut
+
+sub dns_name {
+    my ($name) = @_;
+    return lc( $name // q{} ) =~ s/[.]+\z//r;
+}
+
+=head3 in_zone($name, $zone)
+
+True when C<$name> is C<$zone> or a name below it, compared as C<dns_name>
+compares them.  A name that only ends in the text of the zone, such as
+C<xlab.example.net> for C<lab.example.net>, is not in it.
+
+=cut
+
+sub in_zone {
+    my ( $name, $zone ) = @_;
+    ( $name, $zone ) = map { dns_name($_) } $name, $zone;
+    return ( $name eq $zone || substr( $name, -length(".$zone") ) eq ".$zone" ) ? 1 : 0;
+}
+
 =head3 write_pem($path, $pem, $mode)
 
 Writes a PEM to C<$path> and sets its mode.  The PEM is a certificate, a key,

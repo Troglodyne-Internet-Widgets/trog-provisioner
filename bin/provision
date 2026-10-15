@@ -261,6 +261,10 @@ reference in the store that holds the value.  It holds the reference and never
 the value.  So nobody can read a secret from the domain directory or from a
 backup of it.
 
+A file can name C<issue> in place of a reference.  Another guest issues that
+secret when this guest is built, and the store never holds it.  See
+C<issue_secret>.
+
 Most guests ask for no secret, and F<bin/new_config> writes no manifest for
 them.  With no manifest, this sub does nothing and returns an empty list.  It
 also returns an empty list on a second call for the same domain.  It returns 1
@@ -268,7 +272,8 @@ after it places the files, calls C<authorize_runner_key>, and writes the file
 that L<Trog::Guest/secrets_marker> names.  F<setup.sh> waits for that file
 before it starts make, so the makefile never runs without the secrets.
 
-It asks for the password of the store through L<Trog::Credentials>.  It dies if
+It asks for the password of the store through L<Trog::Credentials>, when a
+file names a reference.  It dies if
 it cannot open the store, if the store has no value for a reference, or if it
 cannot write a file to the guest.  A guest that does not get its signing key, or
 a similar secret, makes a new identity for itself.  This sub exists to stop
@@ -291,8 +296,11 @@ sub place_guest_secrets {
     my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
     return unless ref $wanted eq 'HASH' && %$wanted;
 
-    my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
-    my %values = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed );
+    my %needed = map { $_ => $wanted->{$_}{ref} } grep { $wanted->{$_}{ref} } keys %$wanted;
+    my %values = %needed ? Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed ) : ();
+    foreach my $path ( sort grep { $wanted->{$_}{issue} } keys %$wanted ) {
+        $values{$path} = issue_secret( $domain, $path, $wanted->{$path}{issue} );
+    }
 
     foreach my $path ( sort keys %$wanted ) {
         my $value = $values{$path};
@@ -315,7 +323,7 @@ sub place_guest_secrets {
         warn "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n"
           if $guest->run_sudo( 'chown', $owner, $path );
 
-        print "Placed $path on $domain from $wanted->{$path}{ref}\n";
+        print "Placed $path on $domain from " . ( $wanted->{$path}{ref} // "$wanted->{$path}{issue}{guest}" ) . "\n";
     }
 
     authorize_runner_key( $domain, \%values );
@@ -324,6 +332,59 @@ sub place_guest_secrets {
     $guest->write_text( $marker, "placed\n", sudo => 1, mode => '0600' )
       or die "Could not write $marker on $domain, which its build waits for\n";
     return 1;
+}
+
+=head2 $secret = issue_secret($domain, $path, $issue)
+
+Asks another guest for a secret that C<$domain> needs at C<$path>.  C<$issue>
+is the C<issue> of a C<guest_secrets> entry: C<guest> is the guest that issues
+it, and C<command> is a shell command that root runs there.  The command prints
+the secret, and prints nothing when it fails.  Returns the secret.
+
+Dies when no hypervisor runs that guest, or the command prints nothing, or
+more than one line.  The guest that issues it must be up first.
+
+=cut
+
+sub issue_secret {
+    my ( $domain, $path, $issue ) = @_;
+    my $issuer = $issue->{guest};
+
+    my $guest = guest_of($issuer)
+      or die "$domain needs a secret at $path from $issuer, and $issuer is not up.  Build $issuer first.\n";
+
+    ( my $quoted = $issue->{command} ) =~ s/'/'\\''/g;
+    my $secret = $guest->capture_cmd("sudo -n sh -c '$quoted'") // q{};
+    chomp $secret;
+    die "$issuer did not issue the secret that $domain needs at $path.  Ask it why: the command is in the guest-secrets.yaml of $domain.\n"
+      unless $secret =~ m/\A\S+\z/;
+
+    print "$issuer issued $path for $domain\n";
+    return $secret;
+}
+
+=head2 $guest = guest_of($domain)
+
+A L<Trog::Guest> for the guest of C<$domain> that is up, as its admin user,
+with its key from the store.  Returns undef when no hypervisor runs it.
+
+=cut
+
+sub guest_of {
+    my ($domain) = @_;
+
+    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $hv    = $fleet->configured ? $fleet->hosting($domain) : Trog::HV->new();
+    return unless $hv;
+
+    my $host = $hv->inspection_address($domain) or return;
+
+    my $cfg_dir = $hv->domain_dir . "/$domain";
+    my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
+    my $key     = Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" )
+      or die "No key for $domain, in the store or at $cfg_dir/key.rsa\n";
+
+    return Trog::Guest->new( name => $domain, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', key_path => $key );
 }
 
 =head2 authorize_runner_key($domain, $values)
