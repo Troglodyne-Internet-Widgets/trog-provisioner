@@ -21,12 +21,11 @@ use FindBin::libs;
 use Provisioner::Cookbook();
 
 my %BASE = (
-    domain       => 'proxy.test.test',
-    install_dir  => '/opt/domains',
-    admin_user   => 'someadmin',
-    script_dir   => '/root/bin',
-    main_ip      => '192.0.2.9',
-    full_aliases => [],
+    domain      => 'proxy.test.test',
+    install_dir => '/opt/domains',
+    admin_user  => 'someadmin',
+    script_dir  => '/root/bin',
+    main_ip     => '192.0.2.9',
 );
 
 # The listen lines of the rendered vhost file, as "port" or "[::]:port".

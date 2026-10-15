@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::DNSRecipe};
+use parent qw{Provisioner::DNSRecipe Provisioner::HostnamesRecipe};
 
 =head1 Provisioner::Recipe::pdns
 
@@ -95,9 +95,13 @@ sub required_recipes {
 }
 
 sub args {
+    my ($self) = @_;
+
     return (
         type       => 'object',
         properties => {
+            $self->hostnames_property,
+
             api_key => {
                 type        => 'string',
                 'x-secret'  => 1,
@@ -209,7 +213,8 @@ sub enrich {
 
     $opts{serial} = int time;
 
-    $opts{api_socket} = $API_SOCKET;
+    $opts{api_socket}     = $API_SOCKET;
+    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
 
     return %opts;
 }

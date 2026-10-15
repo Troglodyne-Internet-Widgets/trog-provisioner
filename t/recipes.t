@@ -155,7 +155,6 @@ my %G = (
     transfer_port              => 22,
     transfer_user              => 'transfer',
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
-    full_aliases               => ['www.test.test.test'],
     modules                    => [],
     ipmap                      => { test => '192.0.2.100' },
     ip_pool                    => { cidr => '192.0.2.0/24' },
@@ -1035,18 +1034,18 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
     # the result is Perl and has assertions in it, not what it would assert.
     my %vars = (
         %G,
-        domain       => 'd.test',       install_dir => '/opt/domains',
-        admin_user   => 'someadmin',    user        => 'svc',
-        script_dir   => '/root/bin',    version     => '1.2.3-4',
-        zone         => 'dc1',          buckets     => ['a'],
-        channels     => ['x'],          disks       => [],
-        fuse         => [],             gogs_admin  => 'git',
-        key_file     => 'key.rsa',      pubkey      => 'ssh-rsa AAAA',
-        admin_email  => 'a@b.test',     base_dn     => 'dc=d,dc=test',
-        full_aliases => ['www.d.test'], modules     => ['perl'],
-        vhosts       => {},             upstreams   => {},
-        tcms_dir     => 'tCMS',         basedir     => 'code',
-        port         => 636,            users       => [],
+        domain      => 'd.test',       install_dir => '/opt/domains',
+        admin_user  => 'someadmin',    user        => 'svc',
+        script_dir  => '/root/bin',    version     => '1.2.3-4',
+        zone        => 'dc1',          buckets     => ['a'],
+        channels    => ['x'],          disks       => [],
+        fuse        => [],             gogs_admin  => 'git',
+        key_file    => 'key.rsa',      pubkey      => 'ssh-rsa AAAA',
+        admin_email => 'a@b.test',     base_dn     => 'dc=d,dc=test',
+        hostnames   => ['www.d.test'], modules     => ['perl'],
+        vhosts      => {},             upstreams   => {},
+        tcms_dir    => 'tCMS',         basedir     => 'code',
+        port        => 636,            users       => [],
     );
 
     my $dir = tempdir( CLEANUP => 1 );
@@ -2119,14 +2118,13 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
 # came to take `modules`, the recipes on the guest, and ask cpanm on a guest to
 # install nginx and ufw.
 #
-# The exemptions are the four recipes that mean something else by the name, or
+# The exemptions are the three recipes that mean something else by the name, or
 # that describe what bin/new_config hands them.  Each says so where it declares
 # the field.
 my %MEANS_SOMETHING_ELSE_BY_IT = (
-    registrar => { user         => 1 },
-    matrix    => { admin_user   => 1 },
-    ldap      => { users        => 1 },
-    mail      => { full_aliases => 1 },
+    registrar => { user       => 1 },
+    matrix    => { admin_user => 1 },
+    ldap      => { users      => 1 },
 );
 
 subtest 'no recipe redeclares a setting every recipe is handed' => sub {

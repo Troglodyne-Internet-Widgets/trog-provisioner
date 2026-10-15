@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
 
 =head1 Provisioner::Recipe::nginx
 
@@ -94,8 +94,12 @@ sub subdomains {
 }
 
 sub args {
+    my ($self) = @_;
+
     return (
         properties => {
+            $self->hostnames_property,
+
             backlog => { type => 'integer', default => 32768, minimum => 0 },
 
             # A domain name is at most 253 characters.  256 is the next multiple
@@ -134,7 +138,7 @@ sub enrich {
         die "nginx: invalid configuration: multiple recipes configured to serve $name\n" if $listed{$name} > 1;
     }
 
-    $opts{domain_names} = [ $opts{domain}, grep { !$listed{$_} } @{ $opts{full_aliases} // [] } ] if $listed{ $opts{domain} };
+    $opts{domain_names} = [ $opts{domain}, grep { !$listed{$_} } $self->domain_aliases(%opts) ] if $listed{ $opts{domain} };
 
     return %opts;
 }

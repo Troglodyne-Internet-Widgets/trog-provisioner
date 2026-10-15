@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
 
 use Provisioner::Utils();
 
@@ -192,9 +192,13 @@ sub required_recipes {
 }
 
 sub args {
+    my ($self) = @_;
+
     return (
         type       => 'object',
         properties => {
+            $self->hostnames_property,
+
             names => {
                 type                 => 'object',
                 additionalProperties => {
@@ -241,13 +245,6 @@ sub args {
                 },
             },
 
-            # bin/new_config fills this from the aliases block of the
-            # configuration.
-            full_aliases => {
-                type    => 'array',
-                default => [],
-                items   => { type => 'string' },
-            },
             ipv6 => { type => 'boolean', default => 1 },
         },
     );
@@ -350,7 +347,8 @@ sub enrich {
         }
     } @{ $opts{mail_aliases} // [] };
 
-    $opts{sender_logins} = \@logins;
+    $opts{sender_logins}  = \@logins;
+    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
 
     return %opts;
 }

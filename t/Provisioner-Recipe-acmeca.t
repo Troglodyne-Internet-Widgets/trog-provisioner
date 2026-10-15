@@ -52,12 +52,11 @@ sub generated {
     );
 
     my %vars = (
-        domain       => $DOMAIN,
-        main_ip      => '192.0.2.9',
-        full_aliases => ["www.$DOMAIN"],
-        install_dir  => '/opt/domains',
-        script_dir   => '/root/bin',
-        resolvers    => [ '192.0.2.253', '8.8.8.8' ],
+        domain      => $DOMAIN,
+        main_ip     => '192.0.2.9',
+        install_dir => '/opt/domains',
+        script_dir  => '/root/bin',
+        resolvers   => [ '192.0.2.253', '8.8.8.8' ],
         %extra,
     );
 

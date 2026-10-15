@@ -34,7 +34,7 @@ ok((grep { ($_->{content} // '') eq '[% address %]' } @{ $a_records // [] }), 'h
 my $cnames = listed('CNAME');
 ok($cnames, 'and with a list of CNAMEs') or diag why('CNAME');
 my %cname = map { ($_->{name} // '') => 1 } @{ $cnames // [] };
-[% FOREACH alias IN full_aliases.sort() %]
+[% FOREACH alias IN domain_aliases.sort() %]
 ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
 [% ELSE %]

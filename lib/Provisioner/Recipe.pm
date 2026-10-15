@@ -452,9 +452,8 @@ sub global_args {
 
             cache_ip => { type => 'string', description => 'The fetch cache, as an address, or empty for none.' },
 
-            resolvers    => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
-            full_aliases => { type => 'array', items => { type => 'string' }, description => "This domain's aliases, built from the ip map." },
-            modules      => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
+            resolvers => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
+            modules   => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
 
             ipmap   => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
             ip_pool => {
@@ -1267,9 +1266,9 @@ sub datadirs {
 The names under the domain that this recipe serves, as labels rather than whole
 names: C<www>, not C<www.$domain>.
 
-C<bin/new_config> adds one alias per label, asked of every recipe the depsolver
-settled on -- so a name belonging to a dependency is added too.  C<full_aliases>
-is where the zone, the vhost and the certificate all read it from.
+C<configures> hands these, qualified with the domain, to every recipe on the
+domain that needs the names, such as the zone, the certificate and the vhost of
+the domain.  See L<Provisioner::HostnamesRecipe>.
 
 Empty by default, which is the ordinary answer: a recipe reached at the domain
 itself declares nothing.
@@ -1278,6 +1277,39 @@ itself declares nothing.
 
 sub subdomains {
     return ();
+}
+
+=head3 %configured = $recipe->configures(%opts)
+
+The recipes that this recipe configures if they are on the domain, as pairs of
+a recipe name and a sub, the same as C<required_recipes>.  It adds none of them.
+A key that names an interface configures every recipe on the domain that
+implements it.
+
+C<required_recipes> puts a recipe on the domain because this one needs it.
+This is for a recipe that has something to tell another recipe only when that
+other recipe is there anyway: a name for a certificate means nothing on a
+domain that gets no certificate.
+
+C<resolve_dependencies> in L<Provisioner::Cookbook> calls the sub after it has
+settled what is on the domain, with the final configuration of this recipe.
+What it returns merges into the configuration of each recipe that it names.
+It adds no order between the two, so the sub must not hand over anything that
+needs one to run before the other.
+
+The base class configures every L<Provisioner::HostnamesRecipe> with the
+C<subdomains> of this recipe.  The resolver asks the base class itself, as it
+does for C<required_recipes>.
+
+=cut
+
+sub configures {
+    my ( $self, %opts ) = @_;
+
+    my @hostnames = map { "$_.$opts{domain}" } $self->subdomains;
+    return () unless @hostnames;
+
+    return ( 'Provisioner::HostnamesRecipe' => sub { return ( hostnames => [@hostnames] ) } );
 }
 
 =head3 @commands = $recipe->remote_prepare($install_dir, $domain)

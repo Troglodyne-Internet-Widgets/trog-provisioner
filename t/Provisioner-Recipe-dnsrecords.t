@@ -29,10 +29,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Provisioner::Cookbook();
 
 my %COMMON = (
-    install_dir  => '/opt/domains',
-    admin_user   => 'someadmin',
-    script_dir   => '/root/bin',
-    full_aliases => [ 'www.pub.test', 'mail.pub.test' ],
+    install_dir => '/opt/domains',
+    admin_user  => 'someadmin',
+    script_dir  => '/root/bin',
+    hostnames   => [ 'www.pub.test', 'mail.pub.test' ],
 );
 
 # A fresh recipe per case: validated() memoises onto the object, so a second

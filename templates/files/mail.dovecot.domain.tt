@@ -16,7 +16,7 @@ local_name [% domain %] {
   ssl_key = </etc/ssl/private/[% domain %].pem
 }
 
-[% FOREACH alias IN full_aliases.sort() %]
+[% FOREACH alias IN domain_aliases.sort() %]
 local_name [% alias %] {
   ssl_cert = </etc/ssl/certs/[% domain %].pem
   ssl_key = </etc/ssl/private/[% domain %].pem

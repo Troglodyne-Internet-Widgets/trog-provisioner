@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
 
 use List::Util qw{any};
 
@@ -184,9 +184,13 @@ my sub auto_ca (%opts) {
 }
 
 sub args {
+    my ($self) = @_;
+
     return (
         type       => 'object',
         properties => {
+            $self->hostnames_property,
+
             ca => {
                 type        => 'string',
                 description =>
@@ -242,6 +246,7 @@ sub enrich {
     # which get_cert waits for before it asks for a challenge.
     my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
     $params{lexicon_socket} = $extra{PDNS_SERVER} // q{};
+    $params{domain_aliases} = [ $self->domain_aliases(%params) ];
 
     return %params;
 }

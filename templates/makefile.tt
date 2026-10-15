@@ -147,10 +147,10 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
 # Every domain gets this, whatever its recipes are, because it costs one
 # openssl command and a guest has no certificate otherwise.
 [% state_dir %]/ssl:
-	# Name the domain first, then every alias.  new_config adds www and mail to
-	# the aliases of each domain.
+	# The domain and the aliases configured for it.  The names that recipes
+	# serve come with the real certificate, from the letsencrypt recipe.
 	mkdir -p '/etc/letsencrypt/live/[% domain %]'
-	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:[% domain %][% FOR alias IN full_aliases %],DNS:[% alias %][% END %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
+	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:[% domain %][% FOR alias IN configured_aliases %],DNS:[% alias %][% END %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
 	# Link to the certificate where letsencrypt keeps it.  Use -sf, because the
 	# letsencrypt fetcher repoints these links later.  A guest restored from a
 	# snapshot and provisioned again already has them.  A plain ln then fails
