@@ -23,16 +23,12 @@ ns1     IN A    [% ipmap.$subdo %]
 ;[% ipmap.$subdo | reverse_ip %] IN PTR  [% subdo %]
 [% END -%]
 
-[%# Absolute, with the trailing dot.  An alias is spelled out in full in the
-    configuration -- bin/new_config appends www and mail to the domain, and
-    a domain names the rest in full -- and a name written relative here has
-    $ORIGIN put on it again.  That is how www.<domain> came to answer only as
-    www.<domain>.<domain>, on every guest that serves its own zone. -%]
-[% FOREACH sub IN aliases.keys().sort() %]
-[% NEXT IF sub != domain %]
-[% FOREACH alias IN aliases.$sub.sort() %]
+[%# Absolute, with the trailing dot.  Each alias is a whole name, and a name
+    written relative here has $ORIGIN put on it again.  That is how
+    www.<domain> came to answer only as www.<domain>.<domain>, on every guest
+    that serves its own zone. -%]
+[% FOREACH alias IN domain_aliases.sort() %]
 [% alias %]. IN CNAME @
-[% END -%]
 [% END -%]
 
 [%# Only where the guest serves mail: every record below names mail.<domain> or

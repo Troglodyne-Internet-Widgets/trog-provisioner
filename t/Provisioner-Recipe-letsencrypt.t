@@ -58,13 +58,13 @@ sub generated {
 
     $recipe->generate_files(
         $dir,
-        domain       => $DOMAIN,
-        install_dir  => '/opt/domains',
-        script_dir   => '/root/bin',
-        admin_user   => 'someadmin',
-        main_ip      => '192.0.2.9',
-        full_aliases => ["www.$DOMAIN"],
-        modules      => [qw{pdns letsencrypt}],
+        domain      => $DOMAIN,
+        install_dir => '/opt/domains',
+        script_dir  => '/root/bin',
+        admin_user  => 'someadmin',
+        main_ip     => '192.0.2.9',
+        hostnames   => ["www.$DOMAIN"],
+        modules     => [qw{pdns letsencrypt}],
         %extra,
     );
 

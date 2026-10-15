@@ -25,7 +25,7 @@ like($san, qr/DNS:\Q[% domain %]\E(?![\w.-])/, 'the certificate covers the domai
 
 # And every alias that ssl.domains.tt asked for.  Those are the subdomains that
 # the recipes of this guest declare, so a guest without nginx has no www.
-[% FOR alias IN full_aliases.sort() -%]
+[% FOR alias IN domain_aliases.sort() -%]
 like($san, qr/DNS:\Q[% alias %]\E(?![\w.-])/, 'and [% alias %]')
     or diag $san;
 [% END -%]

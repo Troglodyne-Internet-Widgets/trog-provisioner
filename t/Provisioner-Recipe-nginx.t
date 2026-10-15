@@ -79,9 +79,9 @@ sub domain_names {
 
 subtest 'the vhost of the domain answers for every alias that no other vhost lists' => sub {
     is_deeply(
-        domain_names( sites => [qw{web.test.test webmail.web.test.test}], full_aliases => [qw{www.web.test.test webmail.web.test.test mail.web.test.test}] ),
+        domain_names( sites => [qw{web.test.test webmail.web.test.test}], aliases => { 'web.test.test' => [qw{www.web.test.test webmail.web.test.test mail.web.test.test}] } ),
         [qw{web.test.test www.web.test.test mail.web.test.test}],
-        'webmail is the vhost of roundcube alone, and the domain keeps every other alias'
+        'webmail is the vhost of roundcube alone, and the domain keeps every other alias that the operator configured'
     );
     is( domain_names( sites => ['webmail.web.test.test'] ), undef, 'a domain that no vhost serves gets no file' );
     is( domain_names(),                                     undef, 'nor does a domain that lists no vhost' );

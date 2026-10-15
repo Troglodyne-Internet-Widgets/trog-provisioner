@@ -241,13 +241,6 @@ sub args {
                 },
             },
 
-            # bin/new_config fills this from the aliases block of the
-            # configuration.
-            full_aliases => {
-                type    => 'array',
-                default => [],
-                items   => { type => 'string' },
-            },
             ipv6 => { type => 'boolean', default => 1 },
         },
     );
@@ -350,7 +343,8 @@ sub enrich {
         }
     } @{ $opts{mail_aliases} // [] };
 
-    $opts{sender_logins} = \@logins;
+    $opts{sender_logins}  = \@logins;
+    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
 
     return %opts;
 }

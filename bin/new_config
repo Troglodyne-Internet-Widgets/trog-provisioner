@@ -904,17 +904,6 @@ sub handle_domain {
     # template gets `modules` as the list of what is on the guest.
     @modules = grep { $builders{$_}->is_module } @modules;
 
-    # Here rather than where the map is read, because that is before the
-    # depsolver has run and a name belonging to a dependency would be missed.
-    # $global_config->{aliases} holds this same hash, so everything rendered
-    # below sees what this adds.
-    $alias_conf->{$domain} = [
-        uniq(
-            @{ $alias_conf->{$domain} // [] },
-            Provisioner::Utils::subdomain_aliases( $domain, map { $builders{$_} } @modules )
-        )
-    ];
-
     # A recipe that cannot serve a second domain replaces the first, so refuse
     # it here.  This compares a tenant with its host only, not with the other
     # tenants.
@@ -956,15 +945,12 @@ sub handle_domain {
         my $builder = $builders{$module};
         my $pconf   = $rconf->{$domain}{$module};
 
-        my $aliases      = $alias_conf->{$domain} // [];
-        my $full_aliases = [@$aliases];
         if ( $builder->has_global_template() ) {
             $global_fragments{$module} = Provisioner::Recipe->quiet_secrets(
                 $builder->render_global(
                     $builder->takes(%$global_config),
                     %$pconf,
-                    full_aliases => $full_aliases,
-                    modules      => \@modules,
+                    modules => \@modules,
                 ),
                 @secret_values
             );
@@ -976,8 +962,7 @@ sub handle_domain {
                 $builder->render(
                     $builder->takes(%$global_config),
                     %$pconf,
-                    full_aliases => $full_aliases,
-                    modules      => \@modules,
+                    modules => \@modules,
                 ),
                 @secret_values
             );
@@ -1038,13 +1023,13 @@ sub handle_domain {
         }
 
         # These go in the payload, unlike the files of the distro recipe below.
-        push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules ) );
+        push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, modules => \@modules ) );
 
         my @tests = $builder->tests();
         foreach my $test (@tests) {
             my $tname = $test;
             $tname =~ s/tt$/t/;
-            my $rendered = $builder->render_file( "tests/$test", $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules );
+            my $rendered = $builder->render_file( "tests/$test", $builder->takes(%$global_config), %$pconf, modules => \@modules );
             print "Writing $test as $tname\n";
             File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $rendered );
         }
@@ -1121,14 +1106,14 @@ sub handle_domain {
                 )
             ],
 
-            # The ssl target puts each of these names in its certificate.
-            full_aliases     => $alias_conf->{$fqdn} // [],
-            vars             => \%mf_vars,
-            state_dir        => "/etc/provisioner/state/$fqdn",
-            global_state_dir => "/etc/provisioner/state",
-            testdeps         => \@testdeps,
-            testdeps_flags   => [ Trog::Script::CpanInstall::mirror_only(@testdeps) ],
-            fetch_hosts      => @fetch_hosts ? \@fetch_hosts : undef,
+            # The stopgap certificate of the ssl target names these.
+            configured_aliases => $alias_conf->{$fqdn} // [],
+            vars               => \%mf_vars,
+            state_dir          => "/etc/provisioner/state/$fqdn",
+            global_state_dir   => "/etc/provisioner/state",
+            testdeps           => \@testdeps,
+            testdeps_flags     => [ Trog::Script::CpanInstall::mirror_only(@testdeps) ],
+            fetch_hosts        => @fetch_hosts ? \@fetch_hosts : undef,
         }
     );
 

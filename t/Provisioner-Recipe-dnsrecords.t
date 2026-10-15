@@ -29,10 +29,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Provisioner::Cookbook();
 
 my %COMMON = (
-    install_dir  => '/opt/domains',
-    admin_user   => 'someadmin',
-    script_dir   => '/root/bin',
-    full_aliases => [ 'www.pub.test', 'mail.pub.test' ],
+    install_dir => '/opt/domains',
+    admin_user  => 'someadmin',
+    script_dir  => '/root/bin',
+    aliases     => { 'pub.test' => [ 'www.pub.test', 'mail.pub.test' ] },
 );
 
 # A fresh recipe per case: validated() memoises onto the object, so a second
@@ -72,7 +72,7 @@ subtest 'the fragment queues the publish where there is one, and nothing where t
     like( $queued, qr/queue_postrun_task/,   'it is deferred to the postrun, where the shortcut and the provider are both settled' );
     like( $queued, qr/publish_dns_records/,  'running the publisher' );
     like( $queued, qr/[ ]192[.]0[.]2[.]50/,  'with the address the guest was built with' );
-    like( $queued, qr/[ ]mail[.]pub[.]test/, 'and each alias, sorted' );
+    like( $queued, qr/[ ]mail[.]pub[.]test/, 'and each alias that the operator configured, sorted' );
 
     my $nothing = fresh()->render( %COMMON, domain => 'pub.test', main_ip => undef );
     unlike( $nothing, qr/\S/, 'and with no address the fragment is empty rather than a target that does nothing' );

@@ -216,6 +216,17 @@ subtest 'the interface says which implementation serves a domain' => sub {
         is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $both, dns_preference => $named ), $named, "naming $named settles it" );
     }
 
+    # The base class requires the interface for every recipe that serves a
+    # name, and states no preference, so the one the domain states elsewhere
+    # settles it.
+    my $stated = { %$both, letsencrypt => { dns_preference => 'registrar' } };
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $stated ), 'registrar', 'a requirer that states none gets the one another recipe of the domain states' );
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => { %$stated, lexicon => { dns_preference => 'pdns' } } ) },
+        qr/states[ ]dns_preference[ ]as[ ]each[ ]of[ ]pdns[ ]registrar/,
+        'and two recipes that state different ones are refused'
+    );
+
     # A domain layered onto another is served by what that guest runs, so the
     # host's configuration counts as well as its own.
     is(
@@ -278,6 +289,22 @@ subtest 'credentials_for tells a missing provider from a broken one' => sub {
         qr/syntax[ ]error[ ]at[ ]broken[.]pm/,
         'a provider whose recipe does not load shows why it did not'
     );
+};
+
+subtest 'each implementation takes the names it is handed without declaring them' => sub {
+    foreach my $interface (qw{Provisioner::DNSRecipe Provisioner::SSLRecipe}) {
+        my @implementations = Provisioner::Cookbook->implementations($interface);
+        ok( scalar @implementations, "$interface has implementations to ask" ) or next;
+        foreach my $recipe (@implementations) {
+            my %schema = Provisioner::Cookbook->load($recipe)->schema;
+            is( $schema{properties}{hostnames}{type}, 'array', "$recipe, a $interface, has the hostnames option" );
+        }
+    }
+
+    # The schema refuses a key that nothing declares, so a recipe that
+    # implements neither interface must not be handed the names.
+    my %nginx = Provisioner::Cookbook->load('nginx')->schema;
+    ok( !exists $nginx{properties}{hostnames}, 'and a recipe that implements neither does not' );
 };
 
 Test::NoWarnings::had_no_warnings();

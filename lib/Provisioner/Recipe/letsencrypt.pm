@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::SSLRecipe};
 
 use List::Util qw{any};
 
@@ -242,6 +242,7 @@ sub enrich {
     # which get_cert waits for before it asks for a challenge.
     my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
     $params{lexicon_socket} = $extra{PDNS_SERVER} // q{};
+    $params{domain_aliases} = [ $self->domain_aliases(%params) ];
 
     return %params;
 }

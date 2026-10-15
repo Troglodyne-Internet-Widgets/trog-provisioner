@@ -17,11 +17,10 @@ use FindBin::libs;
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Net::IP;
-use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Provisioner::Cookbook();
-use Provisioner::Utils();
+use Provisioner::Recipe();
 use Trog::Config();
 use Provisioner::IPPool();
 use File::Slurper::Temp;
@@ -125,17 +124,18 @@ sub main {
 
         my @recipes = recipes_for($domain);
 
-        my $aliases = Provisioner::Utils::coerce_arrayref( $alias_conf->{$domain} );
-        $alias_conf->{$domain} = [ uniq( @$aliases, Provisioner::Utils::subdomain_aliases( $domain, map { Provisioner::Cookbook->load($_) } @recipes ) ) ];
+        # The names that the recipes hand whatever holds the zone: see
+        # served_names in Provisioner::Recipe.
+        my @hostnames = map { Provisioner::Cookbook->load($_)->served_names( domain => $domain ) } @recipes;
 
         my %vars = (
-            domain        => $domain,
-            ipmap         => $ip_conf,
-            aliases       => $alias_conf,
-            nameservers   => $ns_conf,
-            admin_email   => $global_conf->{admin_email},
-            serial        => int time,
-            extra_records => '',
+            domain         => $domain,
+            ipmap          => $ip_conf,
+            domain_aliases => [ Provisioner::Recipe->domain_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames ) ],
+            nameservers    => $ns_conf,
+            admin_email    => $global_conf->{admin_email},
+            serial         => int time,
+            extra_records  => '',
 
             # The zone needs this for more than the names: the mail records are
             # written only where something answers on what they point at.

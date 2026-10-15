@@ -102,21 +102,23 @@ sub enrich {
 
     $opts{address} //= $opts{main_ip};
     $opts{publish_records} = $opts{address} ? 1 : 0;
+    $opts{domain_aliases}  = [ $self->domain_aliases(%opts) ];
 
     return %opts;
 }
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-lexicon: the client this writes the records with, and the per-domain shortcut it
-reads the credential out of.
+C<Provisioner::DNSRecipe>: whatever holds the zone that the records go into.
+And lexicon: the client this writes the records with, and the per-domain
+shortcut it reads the credential out of.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
+    return ( 'Provisioner::DNSRecipe' => sub { return () }, lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
 }
 
 =head2 @tests = $recipe->tests()

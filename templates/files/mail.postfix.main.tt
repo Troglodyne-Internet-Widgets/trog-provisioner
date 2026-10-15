@@ -13,7 +13,7 @@
 mydomain = [% domain %]
 myhostname = mail.[% domain %]
 myorigin = $mydomain
-masquerade_domains = [% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
+masquerade_domains = [% domain %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
 
 # Only the domain itself, and nothing added to mydestination.  A domain must
 # not be in two address classes.  Provisioner::Recipe::mail has the whole

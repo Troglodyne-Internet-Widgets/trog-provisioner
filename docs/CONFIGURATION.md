@@ -96,6 +96,12 @@ admin rights and authorizing the keys from `admin_authorized_keys`; you can add
 to that with a `users.yaml` in the data directory. Aliases become vhost aliases
 and CNAMEs if you have picked the recipes that do that.
 
+A recipe that serves a name under the domain, such as `webmail` for
+`roundcube`, needs a DNS record and a certificate for it. So it requires a DNS
+recipe and a certificate recipe, and hands each one the name. The DNS recipe is
+`pdns` or `registrar`, as `Provisioner::DNSRecipe` decides. The certificate
+recipe is `letsencrypt`. You do not add these names to `aliases`.
+
 ## admin_authorized_keys
 
 The administrator's public keys, one per line, in the format sshd reads. Blank

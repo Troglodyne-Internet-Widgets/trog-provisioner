@@ -93,27 +93,36 @@ sub generate {
     return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ), "$tmpdir/domains/$domain" );
 }
 
-# Every name the guest is told to answer for, out of the self-signed certificate
-# the makefile makes first.  Read from there rather than from inside the
-# generator: the same full_aliases reaches the zone, the vhost and the ACME
-# certificate, and this is where it is written down in full.
-sub names_in {
+# The names that the stopgap certificate of the makefile names.
+sub stopgap_names {
     my ($makefile) = @_;
-    return () unless defined $makefile;
-
-    my ($san) = $makefile =~ m/subjectAltName=([^']+)/;
-    return () unless $san;
-
-    my @names = sort map { s/\ADNS://r } split m/,/, $san;
-
+    my ($san)      = ( $makefile // q{} ) =~ m/subjectAltName=([^']+)/;
+    my @names      = sort map { s/\ADNS://r } split m/,/, $san // q{};
     return @names;
+}
+
+# The names that a generated domain hands its certificate and its zone, out of
+# domains.txt of letsencrypt and the zonefile of pdns.  Each is the
+# implementation that the domain resolved Provisioner::SSLRecipe and
+# Provisioner::DNSRecipe to, so these are what the recipes on it handed over.
+sub certificate_names {
+    my ($dir) = @_;
+    my $list = -f "$dir/domains.txt" ? File::Slurper::read_text("$dir/domains.txt") : q{};
+    return [ sort split ' ', $list ];
+}
+
+sub zone_names {
+    my ( $dir, $domain ) = @_;
+    my $zone = -f "$dir/zonefile" ? File::Slurper::read_text("$dir/zonefile") : q{};
+    return [ sort map { "$_.$domain" } $zone =~ m/^(\S+)[.]\Q$domain\E[.]\s+IN\s+CNAME\b/mg ];
 }
 
 subtest 'a recipe says which names it serves' => sub {
 
-    # The names are labels rather than whole names: bin/new_config puts the
-    # domain on the end of each.
-    is_deeply( [ Provisioner::Cookbook->load('nginx')->subdomains ],       ['www'],                            'nginx serves www' );
+    # The names are labels rather than whole names: configures in
+    # Provisioner::Recipe puts the domain on the end of each.
+    is_deeply( [ Provisioner::Cookbook->load('nginxproxy')->subdomains ],  ['www'],                            'the vhost of the domain serves www' );
+    is_deeply( [ Provisioner::Cookbook->load('nginx')->subdomains ],       [],                                 'and nginx itself serves none, because not every vhost serves the domain' );
     is_deeply( [ Provisioner::Cookbook->load('roundcube')->subdomains ],   ['webmail'],                        'roundcube serves webmail' );
     is_deeply( [ sort Provisioner::Cookbook->load('mail')->subdomains ],   [qw{autoconfig autodiscover mail}], 'mail serves its own three' );
     is_deeply( [ sort Provisioner::Cookbook->load('matrix')->subdomains ], [qw{admin.matrix matrix}],          'matrix serves two' );
@@ -126,61 +135,32 @@ subtest 'a recipe says which names it serves' => sub {
     is_deeply( [ Provisioner::Recipe->subdomains ], [], 'and a recipe that says nothing serves none' );
 };
 
-subtest 'a domain gets the names its recipes serve, and no others' => sub {
-    my ( $err, $makefile ) = generate( 'plain.test', ntp => undef );
+subtest 'the stopgap certificate names the domain and its configured aliases' => sub {
+    my ( $err, $makefile ) = generate( 'plain.test', ntp => undef, _global => { aliases => ['alt.plain.test'] } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
-
-    my @names = names_in($makefile);
-    is_deeply( \@names, ['plain.test'], 'a domain running neither a web server nor mail answers for itself alone' )
-      or diag explain \@names;
+    is_deeply( [ stopgap_names($makefile) ], [qw{alt.plain.test plain.test}], 'and nothing that a recipe serves' );
 };
 
-subtest 'a web server brings www with it' => sub {
-    my ( $err, $makefile ) = generate( 'web.test', nginx => undef );
+subtest 'a web server brings www with it, and nothing it does not serve' => sub {
+    my ( $err, undef, $dir ) = generate( 'web.test', nginxproxy => { proxy_uri => 'run/bogus.sock' } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
-    my @names = names_in($makefile);
-    ok( ( grep { $_ eq 'www.web.test' } @names ), 'www is there, because nginx serves it' )
-      or diag explain \@names;
-    ok( !( grep { $_ eq 'mail.web.test' } @names ), 'and mail is not, because nothing serves that' )
-      or diag explain \@names;
+    is_deeply( certificate_names($dir),        [qw{web.test www.web.test}], 'the certificate names www, because nginxproxy serves it, and no mail, because nothing serves that' );
+    is_deeply( zone_names( $dir, 'web.test' ), ['www.web.test'],            'and so does the zone' );
 };
 
-subtest 'a name belonging to a dependency is added as well' => sub {
+subtest 'a name belonging to a dependency is handed over as well' => sub {
 
-    # roundcube is served at webmail. and requires nginx, which serves www, and
-    # mail, which serves mail.  Asking what recipes.d names would find only
-    # webmail: the list has to be the one the depsolver settled on.
-    my ( $err, $makefile ) = generate( 'mail.test', roundcube => { version => '1.6.0' } );
+    # roundcube is served at webmail. and requires mail, which serves mail,
+    # autodiscover and autoconfig.  Asking what recipes.d names would find only
+    # roundcube and nginxproxy: the names come from every recipe that the
+    # depsolver settled on.
+    my ( $err, undef, $dir ) = generate( 'mail.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
-    my @names = names_in($makefile);
-    ok( ( grep { $_ eq 'webmail.mail.test' } @names ), 'webmail is there, which nothing used to give it' )
-      or diag explain \@names;
-    ok( ( grep { $_ eq 'www.mail.test' } @names ), 'and www, which arrived with the nginx roundcube requires' )
-      or diag explain \@names;
-
-    # config.inc.php names mail.$domain for IMAP and submission, so the recipe
-    # that answers there has to be on the guest rather than assumed.
-    ok( ( grep { $_ eq 'mail.mail.test' } @names ), 'and mail, which roundcube requires for the host its IMAP settings name' )
-      or diag explain \@names;
-};
-
-subtest 'a name with a vhost of its own is not a name of the vhost of the domain' => sub {
-    my ( $err, $makefile ) = generate( 'site.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' } );
-    is( $err, undef, 'the generation runs to the end' ) or diag $err;
-
-    # What the fragment of nginx writes for the vhost of the domain, which
-    # includes the file, so these are the names that nginx serves there.
-    my $printf = qr{^\s*printf[ ]\x27server_name[ ]%s;\\n\x27[ ]}m;
-    my $file   = qr{/etc/nginx/names/site\.test\.conf$}m;
-    my ($line) = ( $makefile // q{} ) =~ m{$printf\x27([^\x27]*)\x27[ ]>[ ]$file}m;
-    my %domain = map { $_ => 1 } split ' ', $line // q{};
-
-    ok( $domain{'site.test'} && $domain{'www.site.test'}, 'the vhost of the domain answers for the domain and www' ) or diag explain \%domain;
-    ok( $domain{'mail.site.test'},                        'and for mail, which no vhost of its own lists' )          or diag explain \%domain;
-    ok( !$domain{$_},                                     "but not for $_, which has a vhost of its own" )           or diag explain \%domain foreach qw{webmail.site.test autodiscover.site.test autoconfig.site.test};
-    ok( ( grep { $_ eq 'webmail.site.test' } names_in($makefile) ), 'and the certificate still names webmail' );
+    my @served = qw{autoconfig.mail.test autodiscover.mail.test mail.mail.test webmail.mail.test www.mail.test};
+    is_deeply( certificate_names($dir),         [ sort 'mail.test', @served ], 'the certificate names what each recipe serves' );
+    is_deeply( zone_names( $dir, 'mail.test' ), \@served,                      'and the zone carries each of them' );
 };
 
 subtest 'the certificate list is the aliases, and invents nothing' => sub {
@@ -192,15 +172,17 @@ subtest 'the certificate list is the aliases, and invents nothing' => sub {
 
     my $domains = $recipe->render_file(
         'files/ssl.domains.tt',
-        domain       => 'cert.test',
-        full_aliases => [ 'www.cert.test', 'matrix.cert.test' ],
-        install_dir  => '/opt/domains',
-        admin_user   => 'someadmin',
-        modules      => ['matrix'],
+        domain      => 'cert.test',
+        hostnames   => [ 'www.cert.test', 'matrix.cert.test' ],
+        aliases     => { 'cert.test' => ['alt.cert.test'] },
+        install_dir => '/opt/domains',
+        admin_user  => 'someadmin',
+        modules     => ['matrix'],
     );
 
     like( $domains, qr/\bwww[.]cert[.]test\b/,    'the aliases are listed' );
     like( $domains, qr/\bmatrix[.]cert[.]test\b/, 'including one a recipe declared' );
+    like( $domains, qr/\balt[.]cert[.]test\b/,    'and the alias configured for the domain' );
 
     # A certificate must not cover a name the zone does not carry.
     unlike( $domains, qr/admin[.]matrix/, 'and it adds no name of its own for a recipe on the guest' )

@@ -199,7 +199,7 @@ unlike($served, qr/\Q[% domain %].[% domain %]\E/, 'nor in the zone the server a
     or diag $served;
 
 # Each alias resolves.
-my @aliases = qw([% FOREACH alias IN full_aliases.sort() %][% alias %] [% END %]);
+my @aliases = qw([% FOREACH alias IN domain_aliases.sort() %][% alias %] [% END %]);
 foreach my $alias (@aliases) {
     my $answer = `dig \@127.0.0.1 -p 53 +short '$alias' 2>&1`;
     like($answer, qr/\S/, "$alias resolves to something") or diag $answer;

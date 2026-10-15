@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use List::Util qw{any};
+use List::Util qw{any uniq};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
@@ -452,9 +452,8 @@ sub global_args {
 
             cache_ip => { type => 'string', description => 'The fetch cache, as an address, or empty for none.' },
 
-            resolvers    => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
-            full_aliases => { type => 'array', items => { type => 'string' }, description => "This domain's aliases, built from the ip map." },
-            modules      => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
+            resolvers => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
+            modules   => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
 
             ipmap   => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
             ip_pool => {
@@ -810,6 +809,10 @@ it names the configuration key that settles a tie.  So the depsolver knows
 nothing about the capability itself.  See
 L<Provisioner::DNSRecipe/implementation_for>.
 
+The base class requires two of these for a recipe that serves a name:
+C<Provisioner::DNSRecipe> and C<Provisioner::SSLRecipe>.  Each gets the names
+in its C<hostnames> option.  See C<served_names> below.
+
 The answer must be a recipe that this installation has and that implements the
 interface.  A configuration that names anything else is refused there, before
 any target runs.
@@ -839,6 +842,16 @@ sub required_recipes {
     # interpolate into the paths they restore.
     my %restores = $self->restores(%opts);
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
+
+    # Likewise for a name: whatever holds the zone of the domain and whatever
+    # issues its certificate get each name that a recipe serves.
+    my @hostnames = $self->served_names(%opts);
+    push(
+        @required,
+        map {
+            $_ => sub { return ( hostnames => [@hostnames] ) }
+        } qw{Provisioner::DNSRecipe Provisioner::SSLRecipe}
+    ) if @hostnames;
 
     return @required;
 }
@@ -1267,10 +1280,6 @@ sub datadirs {
 The names under the domain that this recipe serves, as labels rather than whole
 names: C<www>, not C<www.$domain>.
 
-C<bin/new_config> adds one alias per label, asked of every recipe the depsolver
-settled on -- so a name belonging to a dependency is added too.  C<full_aliases>
-is where the zone, the vhost and the certificate all read it from.
-
 Empty by default, which is the ordinary answer: a recipe reached at the domain
 itself declares nothing.
 
@@ -1278,6 +1287,40 @@ itself declares nothing.
 
 sub subdomains {
     return ();
+}
+
+=head3 @names = $recipe->served_names(%opts)
+
+The C<subdomains> of this recipe, qualified with C<$opts{domain}>.
+
+The base class requires C<Provisioner::DNSRecipe> and C<Provisioner::SSLRecipe>
+for a recipe that serves a name, and hands each of them these names in their
+C<hostnames> option.  So the zone and the certificate of a domain name what its
+recipes serve, whichever recipes hold the zone and issue the certificate.  See
+L</Substitutable dependencies>.
+
+=cut
+
+sub served_names {
+    my ( $self, %opts ) = @_;
+    return map { "$_.$opts{domain}" } $self->subdomains;
+}
+
+=head3 @aliases = $recipe->domain_aliases(%opts)
+
+Every name that this recipe answers for besides the domain itself: the aliases
+that the operator configured for the domain, in their order, then the names of
+this recipe and the C<hostnames> option that other recipes handed it, sorted.  Each
+name comes once.
+
+=cut
+
+sub domain_aliases {
+    my ( $self, %opts ) = @_;
+
+    my $configured = $opts{aliases}{ $opts{domain} } // [];
+    my @served     = sort { $a cmp $b } $self->served_names(%opts), @{ $opts{hostnames} // [] };
+    return grep { $_ ne $opts{domain} } uniq( @$configured, @served );
 }
 
 =head3 @commands = $recipe->remote_prepare($install_dir, $domain)

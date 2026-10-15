@@ -82,7 +82,7 @@ sub makefile {
             data_fragment          => "echo data\n",
             testdeps               => [],
             testdeps_flags         => [],
-            full_aliases           => [],
+            configured_aliases     => [],
             packager_invocation    => 'apt-get install -y',
             packager_up_invocation => 'apt-get update',
             %extra,

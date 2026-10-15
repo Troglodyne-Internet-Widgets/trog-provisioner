@@ -209,7 +209,8 @@ sub enrich {
 
     $opts{serial} = int time;
 
-    $opts{api_socket} = $API_SOCKET;
+    $opts{api_socket}     = $API_SOCKET;
+    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
 
     return %opts;
 }

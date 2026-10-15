@@ -57,12 +57,11 @@ sub generated {
     );
 
     my %vars = (
-        domain       => $DOMAIN,
-        main_ip      => '192.0.2.9',
-        full_aliases => ["www.$DOMAIN"],
-        install_dir  => '/opt/domains',
-        script_dir   => '/root/bin',
-        resolvers    => [ '192.0.2.253', '8.8.8.8' ],
+        domain      => $DOMAIN,
+        main_ip     => '192.0.2.9',
+        install_dir => '/opt/domains',
+        script_dir  => '/root/bin',
+        resolvers   => [ '192.0.2.253', '8.8.8.8' ],
         %extra,
     );
 
@@ -290,7 +289,7 @@ subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => $mirror,
         distro        => 'ubuntu',
-    )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.0.2.9', full_aliases => [], install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
+    )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.0.2.9', install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
     my $theirs = File::Slurper::read_text("$mirror/aptmirror.nginx.conf");
 
     my ($their_names) = $theirs =~ m/^\s+server_name[ ]([^;]+);$/m;
