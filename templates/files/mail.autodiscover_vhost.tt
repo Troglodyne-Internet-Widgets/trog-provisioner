@@ -3,7 +3,7 @@ server {
 [% IF ipv6 %]    listen [::]:80;
 [% END -%]
 
-    server_name autodiscover.[% domain %] autoconfig.[% domain %];
+    include /etc/nginx/names/[% domain %]/autodiscover.conf;
 
     location / {
         root [% install_dir %]/autodiscover.[% domain %]/;

@@ -128,10 +128,8 @@ mkdir -p '[% install_dir %]/autodiscover.[% domain %]/autodiscover'; /bin/true
 mv autodiscover.xml '[% install_dir %]/autodiscover.[% domain %]/autodiscover/'
 chown -R www-data:www-data  '[% install_dir %]/autodiscover.[% domain %]'
 chmod -R 0770 '[% install_dir %]/autodiscover.[% domain %]'
-[% IF modules.grep('nginxproxy').size() %]
 mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf
 [% script_dir %]/queue_postrun_task systemctl reload nginx
-[%- END %]
 # Set up the mailboxes and sieve scripts for each user.
 [%# doveadm takes the full address, <local part>@<domain>, because the
     passwd-file userdb uses it as its key. -%]

@@ -1,0 +1,10 @@
+[%# The server_name of each vhost of the domain, which the vhost includes.  The
+    names are decided in Provisioner::Recipe::nginx, under The names that each
+    vhost answers for.  The old files go first, so that a site that is gone
+    leaves nothing behind. -%]
+mkdir -p /etc/nginx/names/[% domain %]
+rm -f /etc/nginx/names/[% domain %]/*.conf
+[% FOR site IN server_names.keys().sort() -%]
+printf 'server_name %s;\n' '[% server_names.$site.join(' ') %]' > /etc/nginx/names/[% domain %]/[% site %].conf
+[% END -%]
+[% script_dir %]/queue_postrun_task systemctl reload nginx

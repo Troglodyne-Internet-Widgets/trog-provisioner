@@ -266,7 +266,7 @@ The file of the package is all comments and schedules nothing.
 
 sub required_recipes {
     return (
-        nginx => sub { return () },
+        nginx => sub { return ( sites => { aptmirror    => { domain => 1 } } ) },
         cron  => sub { return ( files => { 'apt-mirror' => 'aptmirror.cron' } ) },
     );
 }

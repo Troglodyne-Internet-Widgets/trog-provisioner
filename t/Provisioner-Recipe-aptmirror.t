@@ -116,7 +116,8 @@ subtest 'the vhost answers for the address, not only the name' => sub {
     # A guest fetching packages reaches this by address: it runs cloud-init
     # before it has a resolver, so the request arrives with a Host that is an IP
     # and would otherwise match no server.
-    like( $vhost, qr/^\s+server_name[ ]\Q$DOMAIN\E[ ]192\.0\.2\.9[ ]www\.\Q$DOMAIN\E;$/m, 'the address is a server_name' );
+    like( $vhost, qr/^\s+server_name[ ]192\.0\.2\.9;$/m,                             'the address is a server_name' );
+    like( $vhost, qr{^\s+include[ ]/etc/nginx/names/\Q$DOMAIN\E/aptmirror\.conf;$}m, 'beside the names that nginx gives the site' );
 
     # Claiming default_server would mean deleting the packaged default site
     # first, since two of them is a configuration nginx refuses.

@@ -90,7 +90,7 @@ sub generate {
 
     my $makefile = "$tmpdir/domains/$domain/Makefile";
 
-    return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ) );
+    return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ), "$tmpdir/domains/$domain" );
 }
 
 # Every name the guest is told to answer for, out of the self-signed certificate
@@ -164,6 +164,27 @@ subtest 'a name belonging to a dependency is added as well' => sub {
     # that answers there has to be on the guest rather than assumed.
     ok( ( grep { $_ eq 'mail.mail.test' } @names ), 'and mail, which roundcube requires for the host its IMAP settings name' )
       or diag explain \@names;
+};
+
+subtest 'a name with a vhost of its own is not a name of the vhost of the domain' => sub {
+    my ( $err, $makefile ) = generate( 'site.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' } );
+    is( $err, undef, 'the generation runs to the end' ) or diag $err;
+
+    # What the fragment of nginx writes for each site.  The vhosts include
+    # these files, so they are the names that nginx serves.
+    my %site;
+    my $printf = qr{^\s*printf[ ]\x27server_name[ ]%s;\\n\x27[ ]}m;
+    my $file   = qr{/etc/nginx/names/site\.test/([^/]+)\.conf$}m;
+    while ( ( $makefile // q{} ) =~ m{$printf\x27([^\x27]*)\x27[ ]>[ ]$file}mg ) {
+        $site{$2} = { map { $_ => 1 } split ' ', $1 };
+    }
+
+    ok( $site{nginxproxy}{'site.test'} && $site{nginxproxy}{'www.site.test'}, 'the vhost of the domain answers for the domain and www' ) or diag explain \%site;
+    ok( $site{nginxproxy}{'mail.site.test'},                                  'and for mail, which no vhost of its own claims' )         or diag explain \%site;
+    ok( !$site{nginxproxy}{$_},                                               "but not for $_" )                                         or diag explain \%site foreach qw{webmail.site.test autodiscover.site.test autoconfig.site.test};
+    is_deeply( [ sort keys %{ $site{webmail} } ],      ['webmail.site.test'],                             'roundcube answers for webmail' );
+    is_deeply( [ sort keys %{ $site{autodiscover} } ], [qw{autoconfig.site.test autodiscover.site.test}], 'and mail for autodiscover and autoconfig' );
+    ok( ( grep { $_ eq 'webmail.site.test' } names_in($makefile) ), 'and the certificate still names webmail' );
 };
 
 subtest 'the certificate list is the aliases, and invents nothing' => sub {

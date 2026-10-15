@@ -15,7 +15,8 @@ files, unless told not to
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use File::Slurper();
 
 use FindBin::libs;
@@ -56,6 +57,55 @@ subtest 'by default both logs also go to syslog' => sub {
 
 subtest 'an operator can keep them in the files alone' => sub {
     unlike( global_conf( syslog => 0 ), qr/syslog:/, 'nothing is sent to syslog' );
+};
+
+# The server_name of each site, as the domain fragment writes it: a map from
+# the site to the names in its file.
+sub site_names {
+    my (%extra) = @_;
+
+    my $recipe = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+    my $fragment = $recipe->render( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %extra );
+
+    my %names;
+    my $printf = qr{^printf[ ]\x27server_name[ ]%s;\\n\x27[ ]}m;
+    my $file   = qr{/etc/nginx/names/web\.test\.test/([^/]+)\.conf$}m;
+    while ( $fragment =~ m{$printf\x27([^\x27]*)\x27[ ]>[ ]$file}mg ) {
+        $names{$2} = [ split ' ', $1 ];
+    }
+    return \%names;
+}
+
+subtest 'each vhost answers for its own names, and the vhost of the domain for the rest' => sub {
+    my %sites = (
+        nginxproxy => { domain => 1 },
+        webmail    => { names  => ['webmail.web.test.test'] },
+    );
+    is_deeply(
+        site_names( sites => \%sites, full_aliases => [qw{www.web.test.test webmail.web.test.test mail.web.test.test}] ),
+        {
+            nginxproxy => [qw{web.test.test www.web.test.test mail.web.test.test}],
+            webmail    => ['webmail.web.test.test'],
+        },
+        'webmail is the vhost of roundcube alone, and the domain keeps every other alias'
+    );
+    is_deeply( site_names(), {}, 'a domain that declares no site gets no file' );
+};
+
+subtest 'a name that nginx would give to only one vhost stops the build' => sub {
+    like(
+        exception { site_names( sites => { one => { names => ['x.web.test.test'] }, two => { names => ['x.web.test.test'] } } ) },
+        qr/x\.web\.test\.test[ ]is[ ]a[ ]name[ ]of[ ]both/, 'one name in two sites'
+    );
+    like(
+        exception { site_names( sites => { one => { domain => 1 }, two => { domain => 1 } } ) },
+        qr/all[ ]serve[ ]web\.test\.test/, 'two sites that each serve the domain'
+    );
+    like( exception { site_names( sites => { empty => {} } ) }, qr/answers[ ]for[ ]no[ ]name/, 'and a site with no name' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -34,6 +34,28 @@ C<fetchcache> do not send their traffic there.
 
 Use this recipe as a dependency of other nginx recipes, not on its own.
 
+=head2 The names that each vhost answers for
+
+nginx gives a name that two server blocks claim to the first one it loads, and
+only warns about the other.  So the names of every vhost of a domain are decided
+here, in one place, and each vhost reads its own.
+
+A recipe that installs a vhost declares it in C<sites>, from its
+C<required_recipes>, under a name of its own choosing:
+
+    nginx => sub {
+        my (%opts) = @_;
+        return ( sites => { webmail => { names => ["webmail.$opts{domain}"] } } );
+    },
+
+A site with C<domain> set serves the domain, and every alias of it that no other
+site names.  A site without it serves C<names> alone.  The fragment of this
+recipe writes one file for each site, F</etc/nginx/names/$domain/$site.conf>,
+which holds its C<server_name>, and the vhost includes that file.
+
+A name that two sites claim, or two sites that each serve the domain, stop the
+build, because nginx would serve only one of them.
+
 =cut
 
 sub rate_limits {
@@ -60,8 +82,8 @@ sub jails {
 
 =head2 @names = $recipe->subdomains()
 
-C<www>, which the vhost this writes answers for: it serves the domain and every
-alias, and www is an alias rather than a name of its own.
+C<www>, which the vhost of the domain answers for: that site serves the domain
+and every alias that no other site names, and www is one of them.
 
 =cut
 
@@ -83,8 +105,59 @@ sub args {
                 default     => 1,
                 description => 'Also send the access log and the error log to the syslog of the guest, which logshipper forwards.  The files stay either way, because fail2ban reads them.',
             },
+
+            sites => {
+                type                 => 'object',
+                default              => {},
+                description          => 'The vhosts of the domain, keyed on a name for each, which the recipes that install them hand over.  See "The names that each vhost answers for".',
+                additionalProperties => {
+                    type                 => 'object',
+                    additionalProperties => 0,
+                    properties           => {
+                        names  => { type => 'array',   items   => { type => 'string' }, default => [], description => 'The names that only this vhost answers for.' },
+                        domain => { type => 'boolean', default => 0, description => 'This vhost serves the domain, and each alias of it that no other site names.' },
+                    },
+                },
+            },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<server_names>: for each site, the names that its vhost answers for.  Dies
+when two sites name one name, or when two sites serve the domain.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    my $sites = $opts{sites};
+    my %owner;
+    foreach my $site ( sort keys %$sites ) {
+        foreach my $name ( @{ $sites->{$site}{names} } ) {
+            die "nginx: $name is a name of both the $owner{$name} site and the $site site of $opts{domain}, and nginx would serve only one.\n"
+              if $owner{$name};
+            $owner{$name} = $site;
+        }
+    }
+
+    my @serve_domain = grep { $sites->{$_}{domain} } sort keys %$sites;
+    die "nginx: the sites @serve_domain all serve $opts{domain}, and nginx would serve only one.\n" if @serve_domain > 1;
+
+    my %server_names = map { $_ => [ @{ $sites->{$_}{names} } ] } keys %$sites;
+    if (@serve_domain) {
+        my @rest = grep { !$owner{$_} } ( $opts{domain}, @{ $opts{full_aliases} // [] } );
+        unshift( @{ $server_names{ $serve_domain[0] } }, @rest );
+    }
+
+    foreach my $site ( sort keys %server_names ) {
+        die "nginx: the $site site of $opts{domain} answers for no name.\n" unless @{ $server_names{$site} };
+    }
+    $opts{server_names} = \%server_names;
+
+    return %opts;
 }
 
 sub template_files {

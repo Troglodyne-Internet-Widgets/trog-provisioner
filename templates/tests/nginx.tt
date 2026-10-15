@@ -13,6 +13,16 @@ my $check = `nginx -t 2>&1`;
 like($check, qr/syntax is ok/,     'nginx accepts the configuration') or diag $check;
 like($check, qr/test is successful/, 'and every file it includes');
 
+# A name that two server blocks claim goes to one of them, and nginx only
+# warns.  Provisioner::Recipe::nginx gives each name to one vhost.
+unlike($check, qr/conflicting server name/, 'no vhost claims a name that another vhost claims') or diag $check;
+foreach my $vhost (glob '/etc/nginx/sites-enabled/*') {
+    my $text = do { local (@ARGV, $/) = $vhost; <> } // '';
+    foreach my $include ($text =~ m{^\s*include\s+(/etc/nginx/names/\S+);}mg) {
+        ok(-s $include, "$include, which $vhost reads its names from, is there");
+    }
+}
+
 # The global configuration that this recipe installs, and the map that the vhosts use.
 my $global = '/etc/nginx/conf.d/global.conf';
 ok(-f $global, 'the global config was installed');

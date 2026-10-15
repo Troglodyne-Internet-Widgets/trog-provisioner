@@ -2,7 +2,7 @@ server {
     listen 443 ssl;
 [% IF ipv6 %]    listen [::]:443 ssl;
 [% END -%]
-    server_name admin.matrix.[% domain %];
+    include /etc/nginx/names/[% domain %]/matrix-admin.conf;
     server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
@@ -26,6 +26,6 @@ server {
     listen 80;
 [% IF ipv6 %]    listen [::]:80;
 [% END -%]
-    server_name admin.matrix.[% domain %];
+    include /etc/nginx/names/[% domain %]/matrix-admin.conf;
     return 301 https://$host$request_uri;
 }

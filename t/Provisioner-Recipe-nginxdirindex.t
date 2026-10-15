@@ -27,7 +27,7 @@ my $r   = Provisioner::Cookbook->load( 'nginxdirindex', distro => 'ubuntu' )->ne
     distro        => 'ubuntu',
 );
 
-# bin/new_config gives every domain www and mail aliases.
+# The aliases that bin/new_config hands every recipe.
 $r->generate_files(
     $dir,
     domain       => 'index.test.test',
@@ -40,13 +40,14 @@ $r->generate_files(
 my $conf = do { local ( @ARGV, $/ ) = "$dir/nginxdirindex.domain.conf"; <> }
   // q{};
 
-# nginx reports a name that two server blocks on one port both claim as a
-# conflict, and one with a comma on it matches no request.
-my @lists = $conf =~ m/^ \s* server_name \s+ ([^;]+) ; /xmg;
-is( scalar @lists, 2, 'one server_name for each server block' );
-foreach my $list (@lists) {
-    is_deeply( [ split ' ', $list ], [qw{index.test.test files.test.test www.index.test.test mail.index.test.test}], 'the domain and its aliases, each once and space separated' );
-}
+# Each server block reads its names from the file that nginx writes for this
+# site.  Provisioner::Recipe::nginx decides what is in it.
+my @includes = $conf =~ m{^ \s* include \s+ (\S+) ; }xmg;
+is_deeply( \@includes, [ ('/etc/nginx/names/index.test.test/nginxdirindex.conf') x 2 ], 'each server block includes the names of this site' );
+unlike( $conf, qr/^ \s* server_name /xm, 'and names none itself' );
+
+my %required = $r->required_recipes( domain => 'index.test.test' );
+is_deeply( { $required{nginx}->() }, { sites => { nginxdirindex => { domain => 1 } } }, 'the site is declared to nginx as the one that serves the domain' );
 
 Test::NoWarnings::had_no_warnings();
 

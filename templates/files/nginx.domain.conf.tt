@@ -19,9 +19,8 @@ server {
     [% END -%]
     server_tokens off;
 
-[%# server_name is a list separated by spaces.  It has no www of its own,
-    because new_config adds www and mail to the aliases of every domain. -%]
-    server_name [% domain %] [% full_aliases.join(' ') %];
+[%# The names of this site, which Provisioner::Recipe::nginx decides. -%]
+    include /etc/nginx/names/[% domain %]/nginxproxy.conf;
     return 301 https://$host$request_uri;
 }
 [% ELSE -%]
@@ -39,8 +38,7 @@ server {
     listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
-[%# Spaces and no www, as in the redirect vhost above. -%]
-    server_name [% domain %] [% full_aliases.join(' ') %];
+    include /etc/nginx/names/[% domain %]/nginxproxy.conf;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
