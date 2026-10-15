@@ -94,6 +94,11 @@ subtest 'each vhost answers for its own names, and the vhost of the domain for t
         'webmail is the vhost of roundcube alone, and the domain keeps every other alias'
     );
     is_deeply( site_names(), {}, 'a domain that declares no site gets no file' );
+    is_deeply(
+        site_names( sites => { autodiscover => { names => [qw{autodiscover.web.test.test autodiscover.web.test.test}] } } ),
+        { autodiscover => ['autodiscover.web.test.test'] },
+        'a site that the resolver handed over twice lists each name once'
+    );
 };
 
 subtest 'a name that nginx would give to only one vhost stops the build' => sub {

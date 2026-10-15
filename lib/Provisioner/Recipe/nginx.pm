@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util qw{uniq};
+
 =head1 Provisioner::Recipe::nginx
 
 =head2 SYNOPSIS
@@ -133,10 +135,14 @@ when two sites name one name, or when two sites serve the domain.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $sites = $opts{sites};
+    # A recipe that the resolver visits twice hands its site over twice, and
+    # the merge appends the names, so a site can list a name more than once.
+    my $sites    = $opts{sites};
+    my %names_of = map { $_ => [ uniq @{ $sites->{$_}{names} } ] } keys %$sites;
+
     my %owner;
     foreach my $site ( sort keys %$sites ) {
-        foreach my $name ( @{ $sites->{$site}{names} } ) {
+        foreach my $name ( @{ $names_of{$site} } ) {
             die "nginx: $name is a name of both the $owner{$name} site and the $site site of $opts{domain}, and nginx would serve only one.\n"
               if $owner{$name};
             $owner{$name} = $site;
@@ -146,7 +152,7 @@ sub enrich {
     my @serve_domain = grep { $sites->{$_}{domain} } sort keys %$sites;
     die "nginx: the sites @serve_domain all serve $opts{domain}, and nginx would serve only one.\n" if @serve_domain > 1;
 
-    my %server_names = map { $_ => [ @{ $sites->{$_}{names} } ] } keys %$sites;
+    my %server_names = map { $_ => [ @{ $names_of{$_} } ] } keys %$sites;
     if (@serve_domain) {
         my @rest = grep { !$owner{$_} } ( $opts{domain}, @{ $opts{full_aliases} // [] } );
         unshift( @{ $server_names{ $serve_domain[0] } }, @rest );
