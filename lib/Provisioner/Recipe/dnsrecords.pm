@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
+use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::dnsrecords
 
@@ -83,12 +83,8 @@ of every one after it, for the reason above.
 =cut
 
 sub args {
-    my ($self) = @_;
-
     return (
         properties => {
-            $self->hostnames_property,
-
             address => { type => 'string', format => 'ipv4', description => 'The address the A record names.  The default is main_ip, the address the guest was built with.' },
         },
     );
@@ -113,15 +109,16 @@ sub enrich {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-lexicon: the client this writes the records with, and the per-domain shortcut it
-reads the credential out of.
+C<Provisioner::DNSRecipe>: whatever holds the zone that the records go into.
+And lexicon: the client this writes the records with, and the per-domain
+shortcut it reads the credential out of.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
+    return ( 'Provisioner::DNSRecipe' => sub { return () }, lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
 }
 
 =head2 @tests = $recipe->tests()

@@ -885,10 +885,6 @@ nothing loads every recipe a second time.  C<domain_conf> changes in place.
 The configuration of each dependency becomes the merge of what the domain wrote
 and what each dependent gave it.
 
-When the list is settled, each recipe on it is asked what it C<configures>:
-options for other recipes, which merge into their configuration only if they
-are on the list.  See L<Provisioner::Recipe/configures>.
-
 Dies when two recipes of the list cannot be on one domain, as
 L<Provisioner::Recipe/exclusive_with> says, and names what required each.
 
@@ -1056,35 +1052,10 @@ sub resolve_dependencies {
     }
 
     my @resolved = Provisioner::Utils::lastuniq(@modules);
-    my %on       = map { $_ => 1 } @resolved;
-
-    # What each recipe configures if it is on the domain: after the walk,
-    # because only then is that settled, and with the final configuration of
-    # the recipe that configures.  The base class first, then the recipe, as
-    # for required_recipes.
-    foreach my $module ( grep { $builders{$_} } @resolved ) {
-        my $conf       = $domain_conf->{$module} // {};
-        my %configures = (
-            Provisioner::Recipe::configures( $builders{$module}, %given, %$conf ),
-            $builders{$module}->configures( %given, %$conf ),
-        );
-        foreach my $target ( sort keys %configures ) {
-            my @to =
-              index( $target, '::' ) >= 0
-              ? grep { $builders{$_} && $builders{$_}->isa($target) } @resolved
-              : grep { $on{$_} } ($target);
-            next unless @to;
-
-            my %handed = $configures{$target}->( %given, %$conf );
-            foreach my $recipe (@to) {
-                $domain_conf->{$recipe} = $dep_merger->merge( $domain_conf->{$recipe} // {}, \%handed );
-                $builders{$recipe}->reconcile( $domain_conf->{$recipe}, \%handed );
-            }
-        }
-    }
 
     # Two recipes that cannot be on one domain, as exclusive_with in
     # Provisioner::Recipe says, are refused, naming what brought each in.
+    my %on    = map { $_ => 1 } @resolved;
     my $named = sub ($recipe) {
         my @by = sort keys %{ $required_by{$recipe} // {} };
         return @by ? "$recipe (required by " . join( q{, }, @by ) . q{)} : $recipe;

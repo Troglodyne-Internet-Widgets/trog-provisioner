@@ -525,6 +525,38 @@ subtest 'each port a recipe binds is claimed for it, from ufw' => sub {
     ok( !$none{ufw}, 'and a recipe that binds nothing does not' );
 };
 
+subtest 'a recipe that serves a name requires DNS and a certificate for it' => sub {
+    {
+
+        package Provisioner::Recipe::namer;
+        use parent -norequire, 'Provisioner::Recipe';
+        sub subdomains { return qw{www webmail} }
+    }
+
+    my %req = Provisioner::Recipe::required_recipes( 'Provisioner::Recipe::namer', domain => 'd.test' );
+    foreach my $interface (qw{Provisioner::DNSRecipe Provisioner::SSLRecipe}) {
+        ok( $req{$interface}, "it requires $interface, whichever recipe implements it for the domain" ) or next;
+        is_deeply( { $req{$interface}->() }, { hostnames => [qw{www.d.test webmail.d.test}] }, 'and hands it each name, qualified with the domain' );
+    }
+
+    my %none = Provisioner::Recipe::required_recipes( 'Provisioner::Recipe::nametest', domain => 'd.test' );
+    ok( !( grep { m/::/ } keys %none ), 'a recipe reached at the domain itself requires neither' ) or diag explain [ keys %none ];
+};
+
+subtest 'domain_aliases joins the configured aliases to the names a recipe serves and is handed' => sub {
+    my %opts = (
+        domain    => 'd.test',
+        aliases   => { 'd.test' => [qw{z.d.test d.test}], 'other.test' => ['x.other.test'] },
+        hostnames => [qw{mail.d.test z.d.test}],
+    );
+    is_deeply(
+        [ 'Provisioner::Recipe::namer'->domain_aliases(%opts) ],
+        [qw{z.d.test mail.d.test webmail.d.test www.d.test}],
+        'the configured ones first and in their order, then the rest sorted, each once, without the domain or another domain'
+    );
+    is_deeply( [ 'Provisioner::Recipe::nametest'->domain_aliases( domain => 'd.test' ) ], [], 'and nothing for a recipe with none of them' );
+};
+
 subtest 'a claim carries the address it binds' => sub {
     my $mock   = Test::MockModule->new( 'Provisioner::Recipe::quiet', no_auto => 1 );
     my $claims = sub {

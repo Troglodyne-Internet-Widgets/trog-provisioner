@@ -19,7 +19,8 @@ server {
     [% END -%]
     server_tokens off;
 
-[%# The names of the vhost of the domain, which Provisioner::Recipe::nginx decides. -%]
+[%# www, which this recipe serves, and the names that Provisioner::Recipe::nginx decides for the vhost of the domain. -%]
+    server_name www.[% domain %];
     include /etc/nginx/names/[% domain %].conf;
     return 301 https://$host$request_uri;
 }
@@ -38,6 +39,7 @@ server {
     listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
+    server_name www.[% domain %];
     include /etc/nginx/names/[% domain %].conf;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;

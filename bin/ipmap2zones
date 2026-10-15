@@ -20,7 +20,6 @@ use Net::IP;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Provisioner::Cookbook();
-use Provisioner::HostnamesRecipe();
 use Provisioner::Recipe();
 use Trog::Config();
 use Provisioner::IPPool();
@@ -125,14 +124,14 @@ sub main {
 
         my @recipes = recipes_for($domain);
 
-        # The names that the recipes hand a zone, asked as the resolver asks
-        # them: see configures in Provisioner::Recipe.
-        my @hostnames = map { hostnames_from( $_, $domain ) } @recipes;
+        # The names that the recipes hand whatever holds the zone: see
+        # hostnames in Provisioner::Recipe.
+        my @hostnames = map { Provisioner::Cookbook->load($_)->hostnames( domain => $domain ) } @recipes;
 
         my %vars = (
             domain         => $domain,
             ipmap          => $ip_conf,
-            domain_aliases => [ Provisioner::HostnamesRecipe->domain_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames ) ],
+            domain_aliases => [ Provisioner::Recipe->domain_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames ) ],
             nameservers    => $ns_conf,
             admin_email    => $global_conf->{admin_email},
             serial         => int time,
@@ -156,18 +155,6 @@ sub main {
 # so a name belonging to a dependency is in the zone bin/new_config writes and
 # not necessarily in this one.  An unknown recipe is skipped rather than fatal --
 # reporting it belongs to whatever reads the configuration for real.
-# What $recipe hands every Provisioner::HostnamesRecipe on $domain.
-sub hostnames_from {
-    my ( $recipe, $domain ) = @_;
-
-    my $class      = Provisioner::Cookbook->load($recipe);
-    my %configures = ( Provisioner::Recipe::configures( $class, domain => $domain ), $class->configures( domain => $domain ) );
-    my $hand       = $configures{'Provisioner::HostnamesRecipe'} or return;
-    my %handed     = $hand->( domain => $domain );
-
-    return @{ $handed{hostnames} // [] };
-}
-
 sub recipes_for {
     my ($domain) = @_;
 

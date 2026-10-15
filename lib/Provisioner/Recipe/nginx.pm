@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
+use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::nginx
 
@@ -49,10 +49,11 @@ its C<required_recipes>:
     },
 
 A vhost that serves the primary domain being provisioned lists that domain.
-That vhost also answers for every alias of the domain that no other vhost
-lists, so it does not know its names in advance.  The fragment of this recipe
+That vhost also answers for every alias that the operator configured for the
+domain and no other vhost lists, so it does not know its names in advance.  The fragment of this recipe
 writes them to F</etc/nginx/names/$domain.conf> as its C<server_name>, and
-that vhost includes the file.  Any other vhost writes its own C<server_name>.
+that vhost includes the file.  A vhost writes the names that it lists itself
+in a C<server_name> of its own, such as C<www> beside that file.
 
 A name that two recipes list stops the build, because nginx would serve only
 one of them.  So two recipes whose vhosts serve the domain cannot be on one
@@ -82,24 +83,9 @@ sub jails {
     );
 }
 
-=head2 @names = $recipe->subdomains()
-
-C<www>, which the vhost of the domain answers for: that site serves the domain
-and every alias that no other site names, and www is one of them.
-
-=cut
-
-sub subdomains {
-    return qw{www};
-}
-
 sub args {
-    my ($self) = @_;
-
     return (
         properties => {
-            $self->hostnames_property,
-
             backlog => { type => 'integer', default => 32768, minimum => 0 },
 
             # A domain name is at most 253 characters.  256 is the next multiple

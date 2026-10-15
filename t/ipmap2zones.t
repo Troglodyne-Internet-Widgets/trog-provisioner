@@ -56,10 +56,10 @@ File::Slurper::Temp::write_text(
     "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
     YAML::XS::Dump(
         {
-            _base        => { _global => \%GLOBAL },
-            'web.test'   => { nginx   => undef },
-            'post.test'  => { mail    => undef },
-            'plain.test' => { ntp     => undef },
+            _base        => { _global    => \%GLOBAL },
+            'web.test'   => { nginxproxy => undef },
+            'post.test'  => { mail       => undef },
+            'plain.test' => { ntp        => undef },
         }
     )
 );
@@ -100,7 +100,7 @@ subtest 'the zone carries the names that domain serves' => sub {
 
     my $zone = File::Slurper::read_text("$out/web.test.zone");
 
-    like( $zone, qr/^www[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'www, because nginx serves it' ) or diag $zone;
+    like( $zone, qr/^www[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'www, because nginxproxy serves it' ) or diag $zone;
 
     # And absolute, which is the other thing this template gets wrong when
     # nobody is looking: $ORIGIN is the domain, so a relative name has it put
@@ -159,7 +159,7 @@ subtest 'a recipe this installation does not have is skipped' => sub {
     # down too.  This rewrites recipes.yaml, so it runs last.
     File::Slurper::Temp::write_text(
         "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
-        YAML::XS::Dump( { _base => { _global => \%GLOBAL }, 'odd.test' => { nginx => undef, 'not-a-recipe' => undef } } )
+        YAML::XS::Dump( { _base => { _global => \%GLOBAL }, 'odd.test' => { nginxproxy => undef, 'not-a-recipe' => undef } } )
     );
     Provisioner::Cookbook->forget();
 

@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::DNSRecipe Provisioner::HostnamesRecipe};
+use parent qw{Provisioner::DNSRecipe};
 
 =head1 Provisioner::Recipe::pdns
 

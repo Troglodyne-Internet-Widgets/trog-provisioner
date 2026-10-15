@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use List::Util qw{any};
+use List::Util qw{any uniq};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
@@ -809,6 +809,10 @@ it names the configuration key that settles a tie.  So the depsolver knows
 nothing about the capability itself.  See
 L<Provisioner::DNSRecipe/implementation_for>.
 
+The base class requires two of these for a recipe that serves a name:
+C<Provisioner::DNSRecipe> and C<Provisioner::SSLRecipe>.  Each gets the names
+in C<hostnames>.  See C<hostnames> below.
+
 The answer must be a recipe that this installation has and that implements the
 interface.  A configuration that names anything else is refused there, before
 any target runs.
@@ -838,6 +842,16 @@ sub required_recipes {
     # interpolate into the paths they restore.
     my %restores = $self->restores(%opts);
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
+
+    # Likewise for a name: whatever holds the zone of the domain and whatever
+    # issues its certificate get each name that a recipe serves.
+    my @hostnames = $self->hostnames(%opts);
+    push(
+        @required,
+        map {
+            $_ => sub { return ( hostnames => [@hostnames] ) }
+        } qw{Provisioner::DNSRecipe Provisioner::SSLRecipe}
+    ) if @hostnames;
 
     return @required;
 }
@@ -1266,10 +1280,6 @@ sub datadirs {
 The names under the domain that this recipe serves, as labels rather than whole
 names: C<www>, not C<www.$domain>.
 
-C<configures> hands these, qualified with the domain, to every recipe on the
-domain that needs the names, such as the zone, the certificate and the vhost of
-the domain.  See L<Provisioner::HostnamesRecipe>.
-
 Empty by default, which is the ordinary answer: a recipe reached at the domain
 itself declares nothing.
 
@@ -1279,37 +1289,57 @@ sub subdomains {
     return ();
 }
 
-=head3 %configured = $recipe->configures(%opts)
+=head3 @names = $recipe->hostnames(%opts)
 
-The recipes that this recipe configures if they are on the domain, as pairs of
-a recipe name and a sub, the same as C<required_recipes>.  It adds none of them.
-A key that names an interface configures every recipe on the domain that
-implements it.
+The C<subdomains> of this recipe, qualified with C<$opts{domain}>.
 
-C<required_recipes> puts a recipe on the domain because this one needs it.
-This is for a recipe that has something to tell another recipe only when that
-other recipe is there anyway: a name for a certificate means nothing on a
-domain that gets no certificate.
-
-C<resolve_dependencies> in L<Provisioner::Cookbook> calls the sub after it has
-settled what is on the domain, with the final configuration of this recipe.
-What it returns merges into the configuration of each recipe that it names.
-It adds no order between the two, so the sub must not hand over anything that
-needs one to run before the other.
-
-The base class configures every L<Provisioner::HostnamesRecipe> with the
-C<subdomains> of this recipe.  The resolver asks the base class itself, as it
-does for C<required_recipes>.
+The base class requires C<Provisioner::DNSRecipe> and C<Provisioner::SSLRecipe>
+for a recipe that serves a name, and hands each of them these names as
+C<hostnames>.  So the zone and the certificate of a domain name what its
+recipes serve, whichever recipes hold the zone and issue the certificate.  See
+L</Substitutable dependencies>.
 
 =cut
 
-sub configures {
+sub hostnames {
+    my ( $self, %opts ) = @_;
+    return map { "$_.$opts{domain}" } $self->subdomains;
+}
+
+=head3 %property = $recipe->hostnames_property()
+
+The C<hostnames> option, for the C<args> of a recipe that implements
+C<Provisioner::DNSRecipe> or C<Provisioner::SSLRecipe>: the names that the
+recipes on the domain serve, which they hand over themselves.
+
+=cut
+
+sub hostnames_property {
+    return (
+        hostnames => {
+            type        => 'array',
+            items       => { type => 'string' },
+            default     => [],
+            description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see hostnames in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
+        },
+    );
+}
+
+=head3 @aliases = $recipe->domain_aliases(%opts)
+
+Every name that this recipe answers for besides the domain itself: the aliases
+that the operator configured for the domain, in their order, then the names of
+this recipe and the C<hostnames> that other recipes handed it, sorted.  Each
+name comes once.
+
+=cut
+
+sub domain_aliases {
     my ( $self, %opts ) = @_;
 
-    my @hostnames = map { "$_.$opts{domain}" } $self->subdomains;
-    return () unless @hostnames;
-
-    return ( 'Provisioner::HostnamesRecipe' => sub { return ( hostnames => [@hostnames] ) } );
+    my $configured = $opts{aliases}{ $opts{domain} } // [];
+    my @served     = sort { $a cmp $b } $self->hostnames(%opts), @{ $opts{hostnames} // [] };
+    return grep { $_ ne $opts{domain} } uniq( @$configured, @served );
 }
 
 =head3 @commands = $recipe->remote_prepare($install_dir, $domain)

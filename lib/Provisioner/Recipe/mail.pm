@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
+use parent qw{Provisioner::Recipe};
 
 use Provisioner::Utils();
 
@@ -192,13 +192,9 @@ sub required_recipes {
 }
 
 sub args {
-    my ($self) = @_;
-
     return (
         type       => 'object',
         properties => {
-            $self->hostnames_property,
-
             names => {
                 type                 => 'object',
                 additionalProperties => {

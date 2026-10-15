@@ -216,6 +216,17 @@ subtest 'the interface says which implementation serves a domain' => sub {
         is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $both, dns_preference => $named ), $named, "naming $named settles it" );
     }
 
+    # The base class requires the interface for every recipe that serves a
+    # name, and states no preference, so the one the domain states elsewhere
+    # settles it.
+    my $stated = { %$both, letsencrypt => { dns_preference => 'registrar' } };
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $stated ), 'registrar', 'a requirer that states none gets the one another recipe of the domain states' );
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => { %$stated, lexicon => { dns_preference => 'pdns' } } ) },
+        qr/states[ ]dns_preference[ ]as[ ]each[ ]of[ ]pdns[ ]registrar/,
+        'and two recipes that state different ones are refused'
+    );
+
     # A domain layered onto another is served by what that guest runs, so the
     # host's configuration counts as well as its own.
     is(

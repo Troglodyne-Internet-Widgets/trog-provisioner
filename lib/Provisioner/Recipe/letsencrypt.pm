@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::Recipe Provisioner::HostnamesRecipe};
+use parent qw{Provisioner::SSLRecipe};
 
 use List::Util qw{any};
 

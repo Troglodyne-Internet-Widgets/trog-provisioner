@@ -457,39 +457,8 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
 # supplies, one it supplies itself, and an interface the depsolver resolves.
 {
 
-    package Provisioner::Recipe::t_namer;
-    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
-
-    sub subdomains { return qw{www} }
-
-    sub required_recipes {
-        return ( t_listener => sub { () } );
-    }
-
-    sub configures {
-        return (
-            t_listener => sub { ( greeting => 'from the namer' ) },
-            t_absent   => sub { ( greeting => 'to nobody' ) },
-        );
-    }
-}
-
-{
-
-    package Provisioner::Recipe::t_listener;
-    our @ISA = ( 'Provisioner::Recipe', 'Provisioner::HostnamesRecipe' );    ## no critic (ClassHierarchies::ProhibitExplicitISA)
-}
-
-{
-
-    package Provisioner::Recipe::t_absent;
-    our @ISA = ('Provisioner::Recipe');                                      ## no critic (ClassHierarchies::ProhibitExplicitISA)
-}
-
-{
-
     package Provisioner::Recipe::t_requirer;
-    our @ISA = ('Provisioner::Recipe');                                      ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
 
     sub required_recipes {
         return (
@@ -648,28 +617,6 @@ subtest 'a required_recipes sub always gets the domain and install_dir' => sub {
 
     dependencies_of( ['t_reader'], global_config => { install_dir => '/srv' } );
     is( $Provisioner::Recipe::t_reader::handed{install_dir}, '/srv', 'but what _global says wins' );
-};
-
-subtest 'what a recipe configures reaches only the recipes that are on the domain' => sub {
-    my $mock = Test::MockModule->new('Provisioner::Cookbook');
-    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
-
-    my %conf = ( t_namer => {} );
-    my ($modules) = Provisioner::Cookbook->resolve_dependencies(
-        modules     => ['t_namer'],
-        domain_conf => \%conf,
-        distro      => 'ubuntu',
-        provisioner => {
-            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
-            output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
-        },
-        domain => 'd.test',
-    );
-
-    is( $conf{t_listener}{greeting}, 'from the namer', 'a recipe on the domain gets what it is configured with' );
-    is_deeply( $conf{t_listener}{hostnames}, ['www.d.test'], 'and a Provisioner::HostnamesRecipe the names of the others, qualified' );
-    ok( !( grep { $_ eq 't_absent' } @$modules ), 'a recipe that is not on the domain is not added' );
-    ok( !exists $conf{t_absent},                  'nor configured' );
 };
 
 subtest 'resolve_dependencies closes the list over what its recipes require' => sub {

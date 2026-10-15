@@ -10,7 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use List::Util qw{any};
+use List::Util qw{any uniq};
 use Scalar::Util();
 
 use Provisioner::Cookbook();
@@ -187,7 +187,10 @@ Error messages name it.
 reference, or undef.
 
 =item * C<dns_preference>: optional.  The key is the one that
-C<tiebreaker_key> names.
+C<tiebreaker_key> names.  Without it, the preference is the one that any recipe
+in C<configured> states, such as the C<dns_preference> of
+L<Provisioner::Recipe::letsencrypt>.  A recipe that serves a name requires this
+interface without stating one, because the base class asks for it.
 
 =back
 
@@ -207,6 +210,8 @@ It does not guess.  It dies in these conditions:
 =over 4
 
 =item * C<configured> is not a hash reference.
+
+=item * Two recipes of the domain state different preferences.
 
 =item * The preference names the registrar for a name under a reserved TLD.
 No registrar can answer for such a name.
@@ -240,7 +245,16 @@ sub implementation_for {
     my $local     = ( $reserved || configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
     my $registrar = configures( 'registrar', @where );
 
-    my $stated = $opts{ $class->tiebreaker_key };
+    # Without a preference of its own, the requirer gets the one that the
+    # recipes of the domain state.  One server holds the zone, so two answers
+    # are refused.
+    my $key    = $class->tiebreaker_key;
+    my $stated = $opts{$key};
+    unless ($stated) {
+        my @stated = sort { $a cmp $b } uniq grep { defined } map { ref $_ eq q{HASH} ? $_->{$key} : undef } values %{ $opts{configured} };
+        die "$domain states $key as each of @stated, but one server holds its zone.  Name one.\n" if @stated > 1;
+        $stated = $stated[0];
+    }
     if ($stated) {
         die "$domain is under .$reserved, which RFC 2606 and RFC 6761 reserve, so no public registrar can hold a zone for it -- dns_preference: registrar names a provider that could never answer its challenge.  The guest serves this name itself; drop the preference.\n"
           if $stated eq 'registrar' && $reserved;
