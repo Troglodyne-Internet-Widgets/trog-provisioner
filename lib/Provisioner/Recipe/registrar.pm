@@ -52,14 +52,10 @@ documents it.
 =cut
 
 sub args {
-    my ($self) = @_;
-
     return (
         type       => 'object',
         required   => [qw{type}],
         properties => {
-            $self->hostnames_property,
-
             type => {
                 type        => 'string',
                 description => 'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.',

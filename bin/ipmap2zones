@@ -125,8 +125,8 @@ sub main {
         my @recipes = recipes_for($domain);
 
         # The names that the recipes hand whatever holds the zone: see
-        # hostnames in Provisioner::Recipe.
-        my @hostnames = map { Provisioner::Cookbook->load($_)->hostnames( domain => $domain ) } @recipes;
+        # served_names in Provisioner::Recipe.
+        my @hostnames = map { Provisioner::Cookbook->load($_)->served_names( domain => $domain ) } @recipes;
 
         my %vars = (
             domain         => $domain,

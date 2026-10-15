@@ -184,13 +184,9 @@ my sub auto_ca (%opts) {
 }
 
 sub args {
-    my ($self) = @_;
-
     return (
         type       => 'object',
         properties => {
-            $self->hostnames_property,
-
             ca => {
                 type        => 'string',
                 description =>

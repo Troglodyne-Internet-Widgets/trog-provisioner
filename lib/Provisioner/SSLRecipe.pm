@@ -30,12 +30,34 @@ Provisioner::SSLRecipe - which recipe issues the certificate of a domain.
 A recipe that serves a name needs a certificate that names it.  It requires
 this interface, and the depsolver resolves the interface to the recipe that
 issues certificates for the domain.  The base class of every recipe does this
-for the C<subdomains> of the recipe.  See C<hostnames> in L<Provisioner::Recipe>.
+for the C<subdomains> of the recipe.  See C<served_names> in L<Provisioner::Recipe>.
 
-An implementation takes the names in C<hostnames>.  Declare it with
-C<hostnames_property> of L<Provisioner::Recipe>.
+An implementation takes the names in its C<hostnames> option, which C<schema>
+declares.
 
 L<Provisioner::Recipe::letsencrypt> is the only implementation.
+
+=head2 %schema = $recipe->schema()
+
+The schema of L<Provisioner::Recipe>, with the C<hostnames> option added: the
+names that the recipes on the domain serve.  The base class hands them to
+every implementation, so an implementation does not declare the option.
+
+=cut
+
+sub schema {
+    my ($self) = @_;
+
+    my %schema = $self->SUPER::schema();
+    $schema{properties}{hostnames} = {
+        type        => 'array',
+        items       => { type => 'string' },
+        default     => [],
+        description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
+    };
+
+    return %schema;
+}
 
 =head2 $name = $recipe->implementation_for(%opts)
 

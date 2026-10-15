@@ -95,13 +95,9 @@ sub required_recipes {
 }
 
 sub args {
-    my ($self) = @_;
-
     return (
         type       => 'object',
         properties => {
-            $self->hostnames_property,
-
             api_key => {
                 type        => 'string',
                 'x-secret'  => 1,

@@ -156,6 +156,28 @@ the list with this method.  Do not keep a second copy of it.
 
 sub reserved_tlds { return @RESERVED_TLDS }
 
+=head2 %schema = $recipe->schema()
+
+The schema of L<Provisioner::Recipe>, with the C<hostnames> option added: the
+names that the recipes on the domain serve.  The base class hands them to
+every implementation, so an implementation does not declare the option.
+
+=cut
+
+sub schema {
+    my ($self) = @_;
+
+    my %schema = $self->SUPER::schema();
+    $schema{properties}{hostnames} = {
+        type        => 'array',
+        items       => { type => 'string' },
+        default     => [],
+        description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
+    };
+
+    return %schema;
+}
+
 # 1 if $recipe is a key of one of the hashes in @where, and 0 if not.  See
 # implementation_for for why the caller passes the configurations in.
 my sub configures ( $recipe, @where ) {

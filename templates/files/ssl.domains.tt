@@ -1,4 +1,4 @@
 [%# Every name the guest answers for: the aliases configured for the domain,
     and the names that the recipes on it hand over.  See
-    hostnames in Provisioner::Recipe.  Nothing is named here. -%]
+    served_names in Provisioner::Recipe.  Nothing is named here. -%]
 [% domain %] [% FOR alias IN domain_aliases %] [% alias %][% END %]
