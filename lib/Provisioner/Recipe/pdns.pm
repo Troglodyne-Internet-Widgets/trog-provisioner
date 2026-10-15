@@ -209,10 +209,9 @@ sub enrich {
 
     $opts{serial} = int time;
 
-    $opts{api_socket}     = $API_SOCKET;
-    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
+    $opts{api_socket} = $API_SOCKET;
 
-    return %opts;
+    return ( %opts, $self->publication(%opts) );
 }
 
 sub template_files {

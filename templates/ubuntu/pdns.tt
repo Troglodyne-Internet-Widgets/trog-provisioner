@@ -33,3 +33,4 @@ chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/p
     fragment.  A pdns that does not start then fails its own target. -%]
 systemctl restart pdns
 systemctl restart pdns-recursor
+[% INCLUDE "files/dnsrecipe.publish.tt" %]

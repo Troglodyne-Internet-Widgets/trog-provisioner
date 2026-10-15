@@ -84,6 +84,7 @@ Anything else is left unexplained, and the hook then runs every test.
 use File::Basename();
 use File::Spec();
 use File::Temp();
+use List::Util qw{uniq};
 use Provisioner::Cookbook();
 
 # Read by the tools that the hook runs, and by dzil, and by no test.
@@ -157,6 +158,22 @@ return sub {
                 }
             }
             $stands_for{'templates/makefile.tt'} = ['bin/new_config'];
+
+            # A template that another includes stands for what that one stands
+            # for, such as the publishing that each implementation of
+            # Provisioner::DNSRecipe includes in its fragment and its guest test.
+            my @roots = uniq map {
+                map { File::Spec->abs2rel($_) }
+                  @{ Provisioner::Cookbook->template_dirs($_) }
+            } Provisioner::Cookbook->distros;
+            foreach my $includer ( sort keys %stands_for ) {
+                open( my $fh, '<', $includer ) or next;
+                my $text = do { local $/; <$fh> };
+                close($fh) or die "$includer: $!";
+                foreach my $included ( $text =~ m{\[%\s*INCLUDE\s+["']([^"']+)["']}g ) {
+                    push @{ $stands_for{"$_/$included"} }, @{ $stands_for{$includer} } for grep { -e "$_/$included" } @roots;
+                }
+            }
         }
         my %unique = map { $_ => 1 } @{ $stands_for{$path} // [] };
         my @unique = sort keys %unique;

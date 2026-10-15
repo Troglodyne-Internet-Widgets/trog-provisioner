@@ -307,6 +307,61 @@ subtest 'each implementation takes the names it is handed without declaring them
     ok( !exists $nginx{properties}{hostnames}, 'and a recipe that implements neither does not' );
 };
 
+# What a DNS recipe publishes.  The configuration is mocked, because whether a
+# recipe publishes depends on which recipe provider_for says holds the zone.
+# A registrar cannot hold a zone under a reserved TLD, so its cases are under
+# example.net.
+sub publishing {
+    my ( $name, $configured, %opts ) = @_;
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { return $configured } );
+    $cookbook->redefine( host_of       => sub { return } );
+
+    my $recipe = fresh($name);
+    my %common = ( install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/root/bin', %{ $configured->{$name} // {} } );
+    return ( { $recipe->validate( %common, %opts ) }, fresh($name)->render( %common, %opts ) );
+}
+
+my $PUBLIC    = 'pub.example.net';
+my $REGISTRAR = { registrar => { type => 'easydns' } };
+my %ON_PUBLIC = ( domain => $PUBLIC, main_ip => '192.0.2.50', aliases => { $PUBLIC => ["alt.$PUBLIC"] }, hostnames => ["www.$PUBLIC"] );
+
+subtest 'the recipe that holds the zone publishes the records of the domain' => sub {
+    my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC );
+
+    is( $opts->{publish_records}, 1, 'a registrar that holds the zone publishes' );
+    my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]/;
+    like( $fragment, qr/${queued}\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]/, 'in the postrun, with the address the guest was built with' );
+    like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E$/m, 'and each name: the configured aliases and the names that recipes handed over, sorted' );
+
+    my ($pdns) = publishing( 'pdns', { pdns => { api_key => 'k' } }, domain => $DOMAIN, main_ip => '192.0.2.51', data_source => '/bogus' );
+    is( $pdns->{publish_records}, 1, 'and so does a pdns that serves its own zone, which corrects its records on a rebuild' );
+};
+
+subtest 'a recipe that does not hold the zone publishes nothing' => sub {
+    my ( $opts, $fragment ) = publishing( 'registrar', { %$REGISTRAR, pdns => { api_key => 'k' }, letsencrypt => { dns_preference => 'pdns' } }, %ON_PUBLIC );
+    is( $opts->{publish_records}, 0, 'a registrar on a guest whose own pdns holds the zone' );
+    unlike( $fragment, qr/\S/, 'and its fragment is empty' );
+
+    my ($reserved) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, domain => $DOMAIN, aliases => {}, hostnames => [] );
+    is( $reserved->{publish_records}, 0, 'nor one for a name under a reserved TLD, which only the guest can serve' );
+};
+
+subtest 'the address of the A record' => sub {
+    my ($allocated) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, main_ip => undef );
+    is( $allocated->{publish_records}, 0, 'nothing is published where the hypervisor allocates the address' );
+
+    my ( undef, $fragment ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, address => '203.0.113.7' );
+    like( $fragment, qr/\Q$PUBLIC\E[ ]203[.]0[.]113[.]7[ ]/, 'an address that the domain names replaces the one it was built with' );
+    unlike( $fragment, qr/192[.]0[.]2[.]50/, 'which is not published' );
+
+    my ($named) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, main_ip => undef, address => '203.0.113.7' );
+    is( $named->{publish_records}, 1, 'and a guest whose address the hypervisor allocates publishes one that the domain names' );
+
+    ok( exception { publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, address => "gateway.$PUBLIC" ) }, 'an address that is not IPv4 is refused' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

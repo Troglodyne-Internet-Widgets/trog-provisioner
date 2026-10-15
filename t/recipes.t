@@ -206,11 +206,8 @@ subtest 'no setting every recipe is handed carries a default' => sub {
 #
 # Named rather than inferred: a recipe is ordinarily a thing that installs
 # something, and one that lost its fragment by accident would otherwise go on
-# passing here.  registrar is the credentials for a zone somebody else holds --
-# what reaches the guest from it is installed by the recipes that read them,
-# lexicon's shortcut and letsencrypt's hook.
+# passing here.
 my %NO_FRAGMENT = (
-    registrar  => 'the credentials for a zone somebody else holds',
     autoupdate => 'cron files, which the cron recipe installs',
 );
 

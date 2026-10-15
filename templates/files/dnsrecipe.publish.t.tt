@@ -1,0 +1,36 @@
+[%# The checks of the records that an implementation of Provisioner::DNSRecipe
+    publishes, included in its guest test.  Asked of the provider rather than of
+    a resolver, because a resolver answers out of its cache. -%]
+[% IF publish_records -%]
+subtest 'the records of the domain are published to the zone that holds it' => sub {
+    my $shortcut = '/opt/lexicon/[% domain %]';
+    ok(-x $shortcut, 'the lexicon shortcut, which holds the credential, is installed') or return;
+
+    # stdout alone, so that a warning cannot spoil the JSON.  stderr is asked
+    # for again only to explain a failure.
+    my $listed = sub {
+        my ($type) = @_;
+        my $out  = `$shortcut list $type --output=JSON 2>/dev/null`;
+        my $ok   = $? == 0;
+        my $list = eval { JSON::PP->new->utf8->decode($out) };
+        return ($ok && ref $list eq 'ARRAY') ? $list : undef;
+    };
+    my $why = sub { my ($type) = @_; return scalar `$shortcut list $type --output=JSON 2>&1` };
+
+    my $a_records = $listed->('A');
+    ok($a_records, 'the provider answered with a list of A records') or diag $why->('A');
+    ok((grep { ($_->{content} // '') eq '[% address %]' } @{ $a_records // [] }), 'holding the address of this domain')
+        or diag explain $a_records;
+
+    my $cnames = $listed->('CNAME');
+    ok($cnames, 'and with a list of CNAMEs') or diag $why->('CNAME');
+    my %cname = map { ($_->{name} // '') => 1 } @{ $cnames // [] };
+[% FOREACH alias IN domain_aliases.sort() -%]
+    ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
+[% END -%]
+};
+[% ELSE -%]
+# Another recipe holds the zone of this domain, or the hypervisor allocates the
+# address and there was none when the makefile was written.
+pass('this recipe publishes nothing for this domain');
+[% END -%]

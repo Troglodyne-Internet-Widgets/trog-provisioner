@@ -8,7 +8,7 @@ use re q{/aasx};
 
 =head1 NAME
 
-t/remotetests-dnsrecords.t - the C<dnsrecords> recipe generates, with its guest tests
+t/remotetests-registrar.t - the C<registrar> recipe generates, with its guest tests
 (AUTHOR_TESTING only)
 
 =cut
@@ -16,4 +16,4 @@ t/remotetests-dnsrecords.t - the C<dnsrecords> recipe generates, with its guest 
 use FindBin::libs;
 use Trog::Test::RemoteTests();
 
-Trog::Test::RemoteTests::run(q{dnsrecords});
+Trog::Test::RemoteTests::run(q{registrar});
