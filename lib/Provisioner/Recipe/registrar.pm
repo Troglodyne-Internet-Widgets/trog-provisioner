@@ -10,7 +10,11 @@ use re '/aasx';
 
 use parent qw{Provisioner::DNSRecipe};
 
+use File::Copy();
+use List::Util qw{any};
+
 use Provisioner::Cookbook();
+use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::registrar
 
@@ -43,6 +47,11 @@ through its API proxy, with a token of its own name.  See
 L<Provisioner::Recipe::pdns/The API proxy>.  Such a
 domain needs no configuration here.  So C<type> is required only for a domain
 that no pdns guest holds.
+
+A pdns guest under a reserved TLD serves the API with a certificate from its own
+CA, which the fleet authority signs.  See L<Provisioner::Recipe::acmeca>.  So a
+domain that such a guest holds gets that authority as a trust anchor, at the
+path where acmeca installs it.
 
 =head2 It installs nothing, and publishes the records of the domain
 
@@ -170,13 +179,40 @@ sub guest_secrets {
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds what C<publication> in L<Provisioner::DNSRecipe> says this recipe
-publishes.
+publishes, and C<fleet_anchor>, which is true where the domain reaches a pdns
+guest under a reserved TLD.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    my $guest = $self->delegated_to( $opts{domain} );
+    my $tld   = Provisioner::Utils::tld_of( $guest // q{} ) // q{};
+    $opts{fleet_anchor} = ( defined $guest && any { $_ eq $tld } $self->reserved_tlds ) ? 1 : 0;
+
     return ( %opts, $self->publication(%opts) );
+}
+
+=head2 @written = $recipe->generate_files($output_dir, %vars)
+
+Writes the templates, and the certificate of the fleet authority as
+F<registrar-anchor.crt> where C<enrich> sets C<fleet_anchor>.
+
+=cut
+
+sub generate_files {
+    my ( $self, $output_dir, %vars ) = @_;
+
+    my @written = $self->SUPER::generate_files( $output_dir, %vars );
+    my %opts    = $self->validated(%vars);
+    return @written unless $opts{fleet_anchor};
+
+    my $authority = Provisioner::Cookbook->load('fetchcache')->authority();
+    File::Copy::copy( $authority->{cert}, "$output_dir/registrar-anchor.crt" )
+      or die "Could not give the guest the authority that the API of its pdns guest chains to: $!\n";
+
+    return ( @written, 'registrar-anchor.crt' );
 }
 
 sub tests {

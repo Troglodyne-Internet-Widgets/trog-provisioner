@@ -18,6 +18,8 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use Test::MockModule();
 use File::Temp qw{tempdir};
+use File::Slurper();
+use File::Slurper::Temp();
 
 use FindBin::libs;
 
@@ -132,6 +134,35 @@ subtest 'a domain that a pdns guest holds reaches it with a token of its own' =>
     like( $hook, qr{^\Q$token_line\E$}m, 'and so does the hook that answers a challenge' );
 
     like( exception { $registrar->lexicon_credentials( domain => 'web.example.net' ) }, qr/no[ ]type/, 'a domain that no pdns guest holds needs the type of its registrar' );
+};
+
+subtest 'a domain that a pdns guest under a reserved TLD holds trusts the authority of its API' => sub {
+    my $guest = 'ns.zone.test';
+    my $conf  = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config    => sub { return {} } );
+    $conf->redefine( host_of          => sub { return } );
+    $conf->redefine( delegating_guest => sub { return wantarray ? ( $guest, 'lab.zone.test' ) : $guest } );
+
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $anchor = "$dir/authority.crt";
+    File::Slurper::Temp::write_text( $anchor, "the authority\n" );
+    my $fetchcache = Test::MockModule->new( Provisioner::Cookbook->load('fetchcache') );
+    $fetchcache->redefine( authority => sub { return { cert => $anchor, key => '/bogus' } } );
+
+    my %common = ( domain => 'web.lab.zone.test', install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6' );
+    my $recipe = fresh('registrar');
+    my $out    = tempdir( CLEANUP => 1 );
+    my @wrote  = $recipe->generate_files( $out, %common );
+
+    ok( ( grep { $_ eq 'registrar-anchor.crt' } @wrote ), 'the payload carries the authority' );
+    is( File::Slurper::read_text("$out/registrar-anchor.crt"), "the authority\n", 'which is the fleet authority' );
+    my $install = 'install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt';
+    like( fresh('registrar')->render(%common), qr{^\Q$install\E$}m, 'and the fragment installs it where acmeca installs the same one' );
+
+    $guest = 'ns.example.net';
+    my $public = tempdir( CLEANUP => 1 );
+    fresh('registrar')->generate_files( $public, %common, domain => 'web.lab.example.net' );
+    ok( !-e "$public/registrar-anchor.crt", 'a pdns guest under a public name has a certificate that every guest trusts already' );
 };
 
 subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => sub {
