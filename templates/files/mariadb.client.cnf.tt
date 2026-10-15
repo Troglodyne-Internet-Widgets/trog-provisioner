@@ -6,6 +6,7 @@
 [client]
 socket = /run/mysqld/mysqld.sock
 user = root
+default-character-set = utf8mb4
 password = "[% root_pw_cnf | mark_raw %]"
 
 [mysqlcheck]
