@@ -15,8 +15,9 @@ it builds, and what it refuses to take from the installation
 =cut
 
 use Test::More;
-use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use YAML::XS();
@@ -169,6 +170,47 @@ subtest 'CPAN suites and a fetch cache, when they are asked for' => sub {
     ($recipes) = scratch( cache => 'fetchcache.test', cpan_tests => 1 );
     is( $recipes->{_base}{_global}{cache},       'fetchcache.test', 'both together: the cache' );
     is( $recipes->{_base}{_global}{cpan_notest}, 0,                 'and the suites' );
+};
+
+# The fleet's cache, as a guest of the installation would use it.  The cache is
+# answered by a mock: what is under test is what the configuration does with
+# the answer, not the network.
+subtest 'the fleet cache, its address and its authority, only when it answers' => sub {
+    my $source = installation( cache => '192.0.2.9' );
+    File::Slurper::Temp::write_text( "$source/fetchcache-ca.crt", "the authority of the fleet\n" );
+    File::Slurper::Temp::write_text( "$source/fetchcache-ca.key", "the key of the fleet\n" );
+
+    my @asked;
+    my $answer = { success => 1, status => 200, content => "ok\n" };
+    my $http   = Test::MockModule->new('HTTP::Tiny');
+    $http->redefine( get => sub { my ( $self, $url, $args ) = @_; push( @asked, "$url via $args->{peer}" ); return {%$answer} } );
+
+    my $fleet = Trog::Skill::ScratchConfig::fleet_cache($source);
+    is( $fleet->{address}, '192.0.2.9', 'the address of the cache is the one the installation gives it' );
+    like( $asked[0], qr{\Ahttps://[^/]+/fetchcache-status[ ]via[ ]192\.0\.2\.9\z}, 'and it was asked as a guest asks it, at that address' );
+
+    my ( $recipes, $dir ) = scratch( source => $source, fleet => $fleet );
+    is( $recipes->{_base}{_global}{cache},                  '192.0.2.9',                    'the guests provision through it, named by address' );
+    is( File::Slurper::read_text("$dir/fetchcache-ca.crt"), "the authority of the fleet\n", 'and trust its authority' );
+    is( File::Slurper::read_text("$dir/fetchcache-ca.key"), "the key of the fleet\n",       'whose key comes too' );
+    is( ( stat "$dir/fetchcache-ca.key" )[2] & oct 777,     oct 600,                        'readable by its owner alone' );
+
+    $answer = { success => 0, status => 599, content => "Could not connect to '192.0.2.9:443': Connection refused" };
+    @asked  = ();
+    like( exception { Trog::Skill::ScratchConfig::fleet_cache($source) }, qr/did[ ]not[ ]answer/, 'a cache that does not answer is refused' );
+    is( scalar @asked, 1, 'after one try, because no other host would connect either' );
+
+    $answer = { success => 0, status => 599, content => 'SSL connect attempt failed: certificate verify failed' };
+    @asked  = ();
+    exception { Trog::Skill::ScratchConfig::fleet_cache($source) };
+    ok( @asked > 1, 'a host that the cache does not hold a certificate for is passed over for the next' );
+
+    like(
+        exception { Trog::Skill::ScratchConfig::fleet_cache( installation() ) },
+        qr/names[ ]no[ ]cache/, 'an installation without a cache has none to give'
+    );
+    unlink "$source/fetchcache-ca.key";
+    like( exception { Trog::Skill::ScratchConfig::fleet_cache($source) }, qr/fetchcache-ca\.key/, 'nor does one without the key of its authority' );
 };
 
 # A kept hypervisor gets the temporary token that the operator gave, and the
