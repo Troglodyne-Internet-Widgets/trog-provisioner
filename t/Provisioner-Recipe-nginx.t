@@ -15,7 +15,8 @@ files, unless told not to
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use File::Slurper();
 
 use FindBin::libs;
@@ -56,6 +57,47 @@ subtest 'by default both logs also go to syslog' => sub {
 
 subtest 'an operator can keep them in the files alone' => sub {
     unlike( global_conf( syslog => 0 ), qr/syslog:/, 'nothing is sent to syslog' );
+};
+
+# The server_name that the domain fragment writes for the vhost of the domain,
+# or undef when it writes none.
+sub domain_names {
+    my (%extra) = @_;
+
+    my $recipe = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+    my $fragment = $recipe->render( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %extra );
+
+    my $printf  = qr{^printf[ ]\x27server_name[ ]%s;\\n\x27[ ]}m;
+    my $file    = qr{/etc/nginx/names/web\.test\.test\.conf$}m;
+    my ($names) = $fragment =~ m{$printf\x27([^\x27]*)\x27[ ]>[ ]$file}m;
+    return defined $names ? [ split ' ', $names ] : undef;
+}
+
+subtest 'the vhost of the domain answers for every alias that no other vhost lists' => sub {
+    is_deeply(
+        domain_names( sites => [qw{web.test.test webmail.web.test.test}], full_aliases => [qw{www.web.test.test webmail.web.test.test mail.web.test.test}] ),
+        [qw{web.test.test www.web.test.test mail.web.test.test}],
+        'webmail is the vhost of roundcube alone, and the domain keeps every other alias'
+    );
+    is( domain_names( sites => ['webmail.web.test.test'] ), undef, 'a domain that no vhost serves gets no file' );
+    is( domain_names(),                                     undef, 'nor does a domain that lists no vhost' );
+};
+
+subtest 'a name that nginx would give to only one vhost stops the build' => sub {
+    my $invalid = qr/\Anginx:[ ]invalid[ ]configuration:[ ]/m;
+    my $refusal = qr/${invalid}multiple[ ]recipes[ ]configured[ ]to[ ]serve[ ]/m;
+    like(
+        exception { domain_names( sites => [qw{x.web.test.test x.web.test.test}] ) },
+        qr/${refusal}x\.web\.test\.test$/m, 'one name that two recipes list'
+    );
+    like(
+        exception { domain_names( sites => [qw{web.test.test web.test.test}] ) },
+        qr/${refusal}web\.test\.test$/m, 'and two recipes that each serve the domain'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();

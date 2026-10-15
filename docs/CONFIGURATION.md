@@ -739,6 +739,19 @@ settle by merge order. `ufw` is the exception that has a rule -- two recipes
 listening on one port both get the higher of their rate limits. See
 `Provisioner::Recipe::resolve_conflict`.
 
+Some recipes cannot be on one guest, because each of them claims a name that
+only one recipe can have. Each recipe that installs an nginx vhost lists the
+names that its vhost answers for, and nginx serves a name from one vhost only.
+So two recipes whose vhosts serve the domain itself, such as `nginxproxy` and
+`nginxdirindex`, cannot be on one guest. `new_config` stops with this message:
+
+```
+nginx: invalid configuration: multiple recipes configured to serve $domain
+```
+
+The same is true for any other name that two vhosts list. "The names that each
+vhost answers for" in `perldoc Provisioner::Recipe::nginx` has the rule.
+
 ## Known gaps
 
 One, carried over from the old documentation and still true:

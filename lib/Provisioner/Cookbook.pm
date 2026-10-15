@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use Clone qw{clone};
+use Cpanel::JSON::XS();
 use Cwd();
 use File::Basename();
 use File::Find();
@@ -961,6 +962,15 @@ sub resolve_dependencies {
     # merge into the result of the previous visit repeats a list once per visit.
     my %as_written;
 
+    # What each recipe last asked of each of its dependencies.  A recipe that
+    # several recipes require is visited once for each, and asks the same each
+    # time, so a request merged again would repeat each list in it.
+    my %asked;
+    state $request_encoder = do {
+        my $encoder = Cpanel::JSON::XS->new->canonical;
+        $encoder->allow_blessed->allow_unknown;
+    };
+
     # A C-style loop reads the length of @modules on each pass, so it also
     # visits the dependencies that the walk pushes onto the list.  A foreach
     # must not see its array change.
@@ -1017,6 +1027,11 @@ sub resolve_dependencies {
             # mention, which puts a dependency after everything that requires it.
             push( @modules, $required );
             $required_by{$required}{$module} = 1;
+
+            my $request = $request_encoder->encode( \%cur_args );
+            next if ( $asked{$module}{$required} // q{} ) eq $request;
+            $asked{$module}{$required} = $request;
+
             $depmod_conf = $dep_merger->merge( $depmod_conf, \%cur_args );
 
             # Hash::Merge picks a side where two dependents disagree.  Only the

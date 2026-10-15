@@ -528,6 +528,54 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
     }
 }
 
+# Two recipes that require one more, which asks for a list of its dependency.
+# The walk visits t_lister once for each of them.
+{
+
+    package Provisioner::Recipe::t_pair;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_left => sub { () }, t_right => sub { () } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_left;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_lister => sub { () } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_right;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_lister => sub { () } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_lister;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_listed => sub { ( items => ['once'] ) } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_listed;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+}
+
 sub dependencies_of {
     my ( $named, %opts ) = @_;
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
@@ -622,6 +670,28 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     foreach my $dep ( sort keys %$required_by ) {
         cmp_ok( $at{$_}, '<', $at{$dep}, "$_ comes before $dep in the list as well" ) for @{ $required_by->{$dep} };
     }
+};
+
+subtest 'a recipe visited twice asks for its list once' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    my %conf = ( t_pair => {} );
+    Provisioner::Cookbook->resolve_dependencies(
+        modules     => ['t_pair'],
+        domain_conf => \%conf,
+        distro      => 'ubuntu',
+        provisioner => {
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+        },
+        domain => 'd.test',
+    );
+
+    # nginx dies on a name that two of its sites list, so a repeat reads as two
+    # recipes that claim one name.
+    is_deeply( $conf{t_listed}{items}, ['once'], 'what t_lister asked for is there once, though both t_left and t_right required it' )
+      or diag explain $conf{t_listed};
 };
 
 subtest 'the same configuration comes back in the same order every run' => sub {

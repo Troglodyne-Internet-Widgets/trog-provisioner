@@ -2,7 +2,7 @@ server {
     listen 443 ssl;
 [% IF ipv6 %]    listen [::]:443 ssl;
 [% END -%]
-    server_name webmail.[% domain -%];
+    server_name webmail.[% domain %];
 	server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/[% domain -%].pem;

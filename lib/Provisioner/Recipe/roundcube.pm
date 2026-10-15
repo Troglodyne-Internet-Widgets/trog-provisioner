@@ -60,9 +60,13 @@ Requires the nginx and mail recipes.
 =cut
 
 sub required_recipes {
+    my ( $self, %opts ) = @_;
+
     return (
-        nginx => sub { () },
-        mail  => sub { () },
+        nginx => sub {
+            return ( sites => [ map { "$_.$opts{domain}" } $self->subdomains ] );
+        },
+        mail => sub { () },
     );
 }
 

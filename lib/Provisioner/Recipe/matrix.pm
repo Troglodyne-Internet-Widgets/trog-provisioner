@@ -54,6 +54,7 @@ sub required_recipes {
     my ( $self, %opts ) = @_;
     my $ipv6 = $opts{ipv6} // 1;
     return (
+        nginx      => sub { return ( sites => ["admin.matrix.$opts{domain}"] ) },
         nginxproxy => sub {
             (
                 vhosts => {

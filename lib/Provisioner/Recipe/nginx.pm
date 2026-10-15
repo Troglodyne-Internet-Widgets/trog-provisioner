@@ -34,6 +34,30 @@ C<fetchcache> do not send their traffic there.
 
 Use this recipe as a dependency of other nginx recipes, not on its own.
 
+=head2 The names that each vhost answers for
+
+nginx gives a name that two server blocks claim to the first one it loads, and
+only warns about the other.  So the names of every vhost of a domain are decided
+here, in one place.
+
+A recipe that installs a vhost lists the names of its vhost in C<sites>, from
+its C<required_recipes>:
+
+    nginx => sub {
+        my (%opts) = @_;
+        return ( sites => ["webmail.$opts{domain}"] );
+    },
+
+A vhost that serves the primary domain being provisioned lists that domain.
+That vhost also answers for every alias of the domain that no other vhost
+lists, so it does not know its names in advance.  The fragment of this recipe
+writes them to F</etc/nginx/names/$domain.conf> as its C<server_name>, and
+that vhost includes the file.  Any other vhost writes its own C<server_name>.
+
+A name that two recipes list stops the build, because nginx would serve only
+one of them.  So two recipes whose vhosts serve the domain cannot be on one
+guest.
+
 =cut
 
 sub rate_limits {
@@ -60,8 +84,8 @@ sub jails {
 
 =head2 @names = $recipe->subdomains()
 
-C<www>, which the vhost this writes answers for: it serves the domain and every
-alias, and www is an alias rather than a name of its own.
+C<www>, which the vhost of the domain answers for: that site serves the domain
+and every alias that no other site names, and www is one of them.
 
 =cut
 
@@ -83,8 +107,36 @@ sub args {
                 default     => 1,
                 description => 'Also send the access log and the error log to the syslog of the guest, which logshipper forwards.  The files stay either way, because fail2ban reads them.',
             },
+
+            sites => {
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'The names that the vhosts of the domain answer for, which the recipes that install them hand over.  The vhost that serves the primary domain being provisioned lists it, and also answers for each alias that no other vhost lists.  See "The names that each vhost answers for".',
+            },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+When a vhost serves the domain, adds C<domain_names>: the domain, and each
+alias of it that no vhost lists.  Dies when two recipes list one name.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    my %listed;
+    $listed{$_}++ foreach @{ $opts{sites} };
+    foreach my $name ( sort keys %listed ) {
+        die "nginx: invalid configuration: multiple recipes configured to serve $name\n" if $listed{$name} > 1;
+    }
+
+    $opts{domain_names} = [ $opts{domain}, grep { !$listed{$_} } @{ $opts{full_aliases} // [] } ] if $listed{ $opts{domain} };
+
+    return %opts;
 }
 
 sub template_files {
