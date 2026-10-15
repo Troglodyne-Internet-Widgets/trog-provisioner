@@ -1,0 +1,67 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $domain = '[% domain %]';
+my $api    = "https://dnsapi.$domain";
+my $zone   = "/api/v1/servers/localhost/zones/$domain.";
+my $probe  = "pdnsacl-probe-$$.$domain.";
+
+# The proxy is what a guest reaches, so ask it the way a guest does: over TLS,
+# at its name.  -k, because the certificate is the business of letsencrypt.
+# A list open, so no shell reads the JSON.
+sub call {
+    my ( $method, $path, $key, $body ) = @_;
+    my @args = ( qw{curl -sk -w}, '\n%{http_code}', '--resolve', "dnsapi.$domain:443:127.0.0.1", '-X', $method );
+    push( @args, '-H', "X-API-Key: $key" ) if defined $key;
+    push( @args, '-H', 'Content-Type: application/json', '--data', $body ) if defined $body;
+    open( my $fh, '-|', @args, "$api$path" ) or die "curl: $!";
+    my $out = do { local $/; <$fh> } // '';
+    close($fh);
+    my ( $content, $code ) = $out =~ m/\A(.*)\n(\d{3})\z/s;
+    return ( $code // 0, $content // $out );
+}
+
+# The perl that the perl recipe built, by its path: pdns-acl starts with
+# /usr/bin/env perl, and the PATH of runuser finds the system perl first.
+my @pdns_acl = qw{runuser -u pdns -- /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl};
+
+is( `systemctl is-active pdns-acl 2>&1` =~ s/\s+\z//r, 'active', 'the proxy is running' );
+
+my ($anonymous) = call( 'GET', $zone );
+is( $anonymous, 401, 'a request with no key is refused' );
+my ($stranger) = call( 'GET', $zone, 'not-a-token' );
+is( $stranger, 401, 'and so is one with a key that is not a token' );
+
+# A token that may write one name, made as the operator makes one.
+open( my $made, '-|', @pdns_acl, qw{token add}, "test-$$", '--zone', "$domain.", '--name', $probe, qw{--type TXT --write} ) or die "pdns-acl: $!";
+my $secret = do { local $/; <$made> } // '';
+close($made);
+chomp $secret;
+like( $secret, qr/\A[\w-]{40,}\z/, 'pdns-acl makes a token' ) or diag $secret;
+
+my $txt = sub {
+    my ( $name, $change ) = @_;
+    my $records = $change eq 'DELETE' ? q{} : q{, "records": [{"content": "\"pdnsacl\"", "disabled": false}]};
+    return qq[{"rrsets": [{"name": "$name", "type": "TXT", "ttl": 60, "changetype": "$change"$records}]}];
+};
+
+my ( $wrote, $why ) = call( 'PATCH', $zone, $secret, $txt->( $probe, 'REPLACE' ) );
+is( $wrote, 204, 'the token writes the record it was granted' ) or diag $why;
+
+my ( $read, $zonejson ) = call( 'GET', $zone, $secret );
+is( $read, 200, 'and reads the zone' );
+like( $zonejson, qr/\Q$probe\E/, 'which holds that record' );
+unlike( $zonejson, qr/"SOA"/, 'and none of the records it was not granted' );
+
+my ($other) = call( 'PATCH', $zone, $secret, $txt->( "www.$domain.", 'REPLACE' ) );
+is( $other, 403, 'a record it was not granted is refused' );
+
+my ($list) = call( 'GET', '/api/v1/servers/localhost/zones', $secret );
+is( $list, 403, 'and so is the list of zones' );
+
+call( 'PATCH', $zone, $secret, $txt->( $probe, 'DELETE' ) );
+system( @pdns_acl, qw{token remove}, "test-$$" );
+
+done_testing();
