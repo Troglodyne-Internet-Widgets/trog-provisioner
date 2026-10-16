@@ -97,11 +97,13 @@ use Net::IP;
 use File::Slurper;
 use Crypt::PRNG();
 
+use Data::Validate::Domain();
 use List::Util  qw{uniq};
 use Time::HiRes qw{time};
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use Provisioner::Vars();
 
 # The API socket as the host sees it.  pdns binds /api.sock inside its chroot,
 # which is this path from outside.
@@ -311,35 +313,23 @@ on C<$guest>.  It is a file for the C<guest_secrets> of a recipe on the guest
 that writes the name, with C<issue> in place of C<ref>: see C<guest_secrets> in
 L<Provisioner::Recipe>.
 
-The command runs as root on C<$guest>.  It deletes the zone C<$name> and the
-token labeled C<$name>, if a build before this one made them.  Then it makes
-the zone through the API, with C<$guest> as its nameserver, and a token with
-two grants in it.  So each build starts from an empty zone, which the guest
-fills again in its postrun, and the old token stops working.  It prints the
-token only after all of that worked.
+The command is F<scripts/pdns_client> C<issue>, which root runs on C<$guest>.
+It replaces the zone and the token that a build before this one made, so each
+build starts from an empty zone, which the guest fills again in its postrun.
 
-Dies when C<$guest> or C<$name> is not a DNS name in lower case, because the
-command runs as root.
+Dies as C<checked_names> does.
 
 =cut
 
 sub client_secret {
     my ( $self, $guest, $name ) = @_;
 
-    my $api = $self->api_on_guest( $guest, $name );
-    my $acl = $self->acl_on_guest;
+    $self->checked_names( $guest, $name );
     return (
         $self->token_path($name) => {
             issue => {
                 guest   => $guest,
-                command => join(
-                    q{ },
-                    $self->release_command( $guest, $name ) . q{;},
-                    qq{$api -X POST --data '{"name": "$name.", "kind": "Native", "nameservers": ["$guest."]}' http://localhost/api/v1/servers/localhost/zones >/dev/null &&},
-                    qq{token=\$($acl token add $name --zone $name. --name $name. --write) &&},
-                    qq{$acl grant add $name --zone $name. --name '*.$name.' --write &&},
-                    'echo "$token"',
-                ),
+                command => "$Provisioner::Vars::SCRIPT_DIR/pdns_client issue $name $guest",
             },
             owner => 'root:root',
             mode  => '0600',
@@ -350,47 +340,37 @@ sub client_secret {
 =head2 $command = $recipe->release_command($guest, $name)
 
 The shell command that root runs on C<$guest> to delete the zone C<$name> and
-the token labeled C<$name>.  Each of them may be gone already.  C<bin/destroy>
-runs it for a guest that named C<$guest> as its authority.
+the token labeled C<$name>: F<scripts/pdns_client> C<release>.  C<bin/destroy>
+runs it for a guest that named C<$guest> as its authority.  Dies as
+C<checked_names> does.
 
 =cut
 
 sub release_command {
     my ( $self, $guest, $name ) = @_;
 
-    my $api = $self->api_on_guest( $guest, $name );
-    my $acl = $self->acl_on_guest;
-    return "$acl token remove $name >/dev/null 2>&1; $api -X DELETE http://localhost/api/v1/servers/localhost/zones/$name. >/dev/null 2>&1";
+    $self->checked_names( $guest, $name );
+    return "$Provisioner::Vars::SCRIPT_DIR/pdns_client release $name";
 }
 
-=head2 $curl = $recipe->api_on_guest($guest, $name)
+=head2 $recipe->checked_names(@names)
 
-The start of a curl command line that root runs on C<$guest> to reach its API on
-the socket, with its key.  C<$name> is the name that the command is about.  Dies
-when C<$guest> or C<$name> is not a DNS name in lower case, because both go
-into a command that root runs.
+Dies unless each of C<@names> is a domain in lower case, as
+L<Data::Validate::Domain> judges it, with the reserved TLDs as private ones.
+Each of them goes into a command that root runs on a pdns guest.
 
 =cut
 
-sub api_on_guest {
+sub checked_names {
     my ( $self, @names ) = @_;
 
-    foreach my $value (@names) {
-        die "A command that root runs on a pdns guest takes DNS names, and '$value' is not one\n" unless $value =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/;
+    my %private = map { $_ => 1 } $self->reserved_tlds;
+    foreach my $name (@names) {
+        die "A command that root runs on a pdns guest takes domains, and '" . ( $name // q{} ) . "' is not one\n"
+          unless defined $name && $name eq lc $name && Data::Validate::Domain::is_domain( $name, { domain_private_tld => \%private } );
     }
 
-    return qq{curl -sf --unix-socket $API_SOCKET -H "X-API-Key: \$(sed -n 's/^api-key=//p' /etc/powerdns/pdns.d/api.conf)"};
-}
-
-=head2 $command = $recipe->acl_on_guest()
-
-The start of a C<pdns-acl> command line on a pdns guest, as the C<pdns> user,
-with the perl that the perl recipe built.
-
-=cut
-
-sub acl_on_guest {
-    return 'runuser -u pdns -- /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl';
+    return 1;
 }
 
 sub enrich {

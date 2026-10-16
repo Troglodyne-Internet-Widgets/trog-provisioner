@@ -151,9 +151,8 @@ subtest 'the zone and the token of a domain come off the guest that its registra
     capture { $removed = Trog::Bin::Destroy::release_authority( $domain, 0 ) };
     is( $removed, 1, 'they are removed' );
     is_deeply( \@asked, ['ns.test.test'], 'on the authority, in the form that DNS compares' );
-    like( $ran[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]'/,    'as root' );
-    like( $ran[0], qr/token[ ]remove[ ]\Q$domain\E/, 'the token' );
-    like( $ran[0], qr{zones/\Q$domain\E[.]},         'and the zone' );
+    like( $ran[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]'/,                        'as root' );
+    like( $ran[0], qr{/root/bin/pdns_client[ ]release[ ]\Q$domain\E'\z}, 'which runs pdns_client release, for the domain' );
 
     @ran = ();
     capture { Trog::Bin::Destroy::release_authority( $domain, 1 ) };

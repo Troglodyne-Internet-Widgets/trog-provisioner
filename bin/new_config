@@ -42,6 +42,7 @@ use File::Find();
 use Provisioner::IPPool;
 use Provisioner::Utils;
 use Provisioner::Cookbook();
+use Provisioner::Vars();
 use Provisioner::Recipe();
 
 # Better stack traces
@@ -768,7 +769,7 @@ sub handle_domain {
     my %fragments;
     my %global_fragments;
 
-    my $root_scripts = '/root/bin';
+    my $root_scripts = $Provisioner::Vars::SCRIPT_DIR;
 
     my %formatters = (
         tabinate => Text::Xslate::html_builder(

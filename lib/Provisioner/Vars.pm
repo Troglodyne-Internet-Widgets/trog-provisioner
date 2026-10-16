@@ -64,6 +64,11 @@ a monthly price: 8760 hours in a year, over twelve.
 C<$SECONDS_A_DAY> is 86 400, for a certificate's lifetime in days and a
 timeout given in days.
 
+=head2 Paths on a guest
+
+C<$SCRIPT_DIR> is F</root/bin>, where the scripts of F<scripts/> land on every
+guest.  It is C<script_dir> in the templates.
+
 =cut
 
 Readonly::Scalar our $KB => 1_024;
@@ -77,5 +82,7 @@ Readonly::Scalar our $STATUS_NOT_FOUND => 32_512;
 
 Readonly::Scalar our $HOURS_A_MONTH => 730;
 Readonly::Scalar our $SECONDS_A_DAY => 86_400;
+
+Readonly::Scalar our $SCRIPT_DIR => '/root/bin';
 
 1;

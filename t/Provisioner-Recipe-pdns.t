@@ -208,20 +208,13 @@ subtest 'what a guest that names this one as its authority gets' => sub {
     is( $token->{issue}{guest}, $DOMAIN, 'issued by the authority' );
     ok( !$token->{ref}, 'and not kept in the store' );
 
-    my $command = $token->{issue}{command};
-    my $release = $recipe->release_command( $DOMAIN, $name );
-    is( index( $command, $release ), 0, 'the command first removes the zone and the token that a build before it made' );
-    like( $release, qr{\Qtoken remove $name >\E}, 'the token' );
-    my $delete = "-X DELETE http://localhost/api/v1/servers/localhost/zones/$name. ";
-    my $create = qq{-X POST --data '{"name": "$name.", "kind": "Native", "nameservers": ["$DOMAIN."]}'};
-    like( $release, qr{\Q$delete\E},                                                 'and the zone' );
-    like( $command, qr{\Q$create\E},                                                 'then makes the zone of the name, with the authority as its nameserver' );
-    like( $command, qr/\Qtoken add $name --zone $name. --name $name. --write\E/,     'and a token that writes the name' );
-    like( $command, qr/\Qgrant add $name --zone $name. --name '*.$name.' --write\E/, 'and the names below it' );
-    like( $command, qr/[&][&][ ]echo[ ]"\$token"\z/,                                 'and prints it only when all of that worked' );
-    like( $command, qr{--unix-socket[ ]\Q$Provisioner::Recipe::pdns::API_SOCKET\E},  'through the API on its socket' );
+    is( $token->{issue}{command},                   "/root/bin/pdns_client issue $name $DOMAIN", 'which runs pdns_client there, for the name, with the authority as its nameserver' );
+    is( $recipe->release_command( $DOMAIN, $name ), "/root/bin/pdns_client release $name",       'and bin/destroy runs it to remove them' );
 
-    like( Test::Fatal::exception { $recipe->client_secret( $DOMAIN, 'web;reboot' ) }, qr/not[ ]one/, 'a name that is not a DNS name never reaches the shell of root' );
+    like( Test::Fatal::exception { $recipe->client_secret( $DOMAIN, 'web;reboot' ) },      qr/not[ ]one/, 'a name that is not a domain never reaches the shell of root' );
+    like( Test::Fatal::exception { $recipe->client_secret( $DOMAIN, 'Web.Example.Net' ) }, qr/not[ ]one/, 'nor one in capitals, which the zone and the token would not match' );
+    like( Test::Fatal::exception { $recipe->release_command( 'ns.nosuchtld', $name ) }, qr/not[ ]one/, 'nor a domain under a TLD that does not exist' );
+    is( $recipe->checked_names( 'web.lab.zone.test', 'ns.example.net' ), 1, 'and a reserved TLD is a TLD here' );
 };
 
 Test::NoWarnings::had_no_warnings();
