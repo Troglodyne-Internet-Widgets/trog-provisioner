@@ -237,7 +237,7 @@ subtest 'a recipe that names rate limits depends on ufw for them' => sub {
     my %prov = ( template_dirs => ['templates'], output_dir => '/tmp', target_packager => 'deb' );
 
     my $redis = 'Provisioner::Recipe::redis'->new(%prov);
-    my %req   = $redis->required_recipes( domain => 'd.test' );
+    my %req   = Provisioner::Recipe::required_recipes( $redis, domain => 'd.test' );
     ok( $req{ufw}, 'redis requires ufw' );
     is_deeply(
         { $req{ufw}->() },
@@ -256,10 +256,9 @@ subtest 'a recipe that names rate limits depends on ufw for them' => sub {
     my $tmpfs = 'Provisioner::Recipe::tmpfs'->new(%prov);
     ok( !( $tmpfs->required_recipes( domain => 'd.test' ) )[0], 'a recipe that binds no port requires nothing for it' );
 
-    # plexmediaserver overrides required_recipes, so it has to carry SUPER's
-    # wiring as well or its limits are silently dropped.
+    # Provisioner::Cookbook asks the base class and the override, and merges the two.
     my $plex = 'Provisioner::Recipe::plexmediaserver'->new(%prov);
-    my %preq = $plex->required_recipes( domain => 'd.test' );
+    my %preq = ( Provisioner::Recipe::required_recipes( $plex, domain => 'd.test' ), $plex->required_recipes( domain => 'd.test' ) );
     ok( $preq{letsencrypt}, 'plexmediaserver keeps the dependency it declared' );
     ok( $preq{ufw},         'and gains the one its limits imply' );
 };

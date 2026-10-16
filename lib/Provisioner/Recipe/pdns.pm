@@ -155,8 +155,9 @@ systemd stub resolver does not ask it.  lexicon looks up the zone through the
 system resolver for C<--resolve-zone-name>, and step-ca validates dns-01 through
 it.  So on the stub, the guest cannot resolve its own name.
 
-L<Provisioner::Recipe::registrar> requires this recipe where the guest holds
-its own zone.  See L<Provisioner::Recipe::registrar/authority_of>.
+A guest that holds its own zone lists this recipe, and
+L<Provisioner::Recipe::registrar> refuses one that does not.  See
+L<Provisioner::Recipe::registrar/authority_of>.
 
 =cut
 
@@ -171,7 +172,6 @@ sub required_recipes {
         # postrun, when Starman and the proxy are installed.
         perl  => sub { return ( cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] ) },
         nginx => sub { return ( sites     => [@served] ) },
-        $self->SUPER::required_recipes(%opts),
     );
 }
 

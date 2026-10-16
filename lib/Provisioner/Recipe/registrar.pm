@@ -512,7 +512,6 @@ sub required_recipes {
 
     return (
         lexicon => sub { return () },
-        $self->SUPER::required_recipes(%opts),
     );
 }
 

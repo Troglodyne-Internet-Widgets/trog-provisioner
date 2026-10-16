@@ -1685,11 +1685,12 @@ subtest 'the resolver is live before anything reads a zone back through it' => s
 # recipe when this server answers its challenge; asking here too is what covers
 # a guest serving a zone without one.
 subtest 'a guest running its own DNS gets a resolver that can see the zone' => sub {
-    my %required = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->required_recipes(%G);
+    my $pdns     = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV);
+    my %required = ( Provisioner::Recipe::required_recipes( $pdns, %G ), $pdns->required_recipes(%G) );
     ok( $required{nostubresolver}, 'pdns asks for nostubresolver' );
 
-    # Chained rather than replaced: pdns declares rate_limits and restores, and
-    # the base is what turns those into ufw and data.
+    # pdns declares rate_limits and restores, and the base class, which the
+    # depsolver asks as well, turns those into ufw and data.
     ok( $required{ufw},  'without dropping the firewall its rate limits need' );
     ok( $required{data}, 'or the recipe its salvaged zone database goes back through' );
 };

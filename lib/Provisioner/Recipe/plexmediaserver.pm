@@ -90,9 +90,7 @@ too.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # SUPER adds the ufw dependency that rate_limits below asks for.  Without it,
-    # this override drops the limits on 32400 and says nothing.
-    return ( letsencrypt => sub { () }, $self->SUPER::required_recipes(%opts) );
+    return ( letsencrypt => sub { () } );
 }
 
 sub rate_limits {

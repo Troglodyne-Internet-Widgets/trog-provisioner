@@ -277,8 +277,6 @@ does.
 
 =back
 
-It also returns what the base class requires.
-
 The recipe gives acmeca no options, because the configuration of a CA is its own
 business.  The acmeca edge exists for the order.  bin/new_config puts a required
 recipe after the last recipe that requires it and before the postrun.  The
@@ -294,7 +292,7 @@ sub required_recipes {
     my @required = ( auto_ca(%opts) || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
     push( @required, registrar => sub { return () }, lexicon => sub { return () } );
 
-    return ( @required, $self->SUPER::required_recipes(%opts) );
+    return @required;
 }
 
 sub tests {

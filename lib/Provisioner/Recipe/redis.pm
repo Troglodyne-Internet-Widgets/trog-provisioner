@@ -95,7 +95,6 @@ sub required_recipes {
     # directory.  templates/ubuntu/redis.global.tt says why.
     return (
         configd => sub { return ( languages => ['redis'] ) },
-        $self->SUPER::required_recipes(%opts),
     );
 }
 
