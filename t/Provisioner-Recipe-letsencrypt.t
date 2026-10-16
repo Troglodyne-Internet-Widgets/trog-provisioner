@@ -373,11 +373,11 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
     );
 };
 
-subtest 'a public guest that runs pdns answers its own challenge' => sub {
+subtest 'a public guest that holds its own zone answers its own challenge' => sub {
 
     # A public name whose zone this fleet serves: the registrar of _base is
     # there too, and the server on the guest holds the zone.
-    my $registrar = with_registrar( pdns => { api_key => 'a-key' } );
+    my $registrar = with_registrar( pdns => { api_key => 'a-key' }, registrar => { type => 'easydns', key => 'a-token', authority => $PUBLIC } );
 
     my %opts = fresh()->enrich( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
     is( $opts{lexicon}{type}, 'powerdns', 'the local server is what lexicon is given' );

@@ -234,19 +234,20 @@ subtest 'a name somebody else holds resolves it to the registrar' => sub {
     like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'and lexicon is pointed at the registrar that holds the zone' );
 };
 
-subtest 'a guest that runs pdns holds its own zone, whatever the registrar names' => sub {
-    my ( $err, $makefile, $dir ) = generate(
-        $REMOTE,
-        letsencrypt => undef,
-        registrar   => { type    => 'easydns', user => 'somebody', key => 'a-token' },
-        pdns        => { api_key => 'an-api-key' },
-    );
+subtest 'a guest that runs pdns holds its own zone only where it says so' => sub {
+    my %registrar = ( type => 'easydns', user => 'somebody', key => 'a-token' );
 
+    # The authority of other guests, while the registrar holds its own name.
+    my ( $err, $makefile, $dir ) = generate( $REMOTE, letsencrypt => undef, registrar => {%registrar}, pdns => { api_key => 'an-api-key' } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
     ok( builds( $makefile, 'pdns' ), 'and pdns is built' );
-
     my $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
-    like( $shortcut, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$/m, 'and lexicon is pointed at it, with its key' );
+    like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'while lexicon is pointed at the registrar, which holds its name' );
+
+    ( $err, $makefile, $dir ) = generate( $REMOTE, letsencrypt => undef, registrar => { %registrar, authority => $REMOTE }, pdns => { api_key => 'an-api-key' } );
+    is( $err, undef, 'naming itself as its authority runs to the end' ) or diag $err;
+    $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
+    like( $shortcut, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$/m, 'and points lexicon at its own server, with its key' );
 };
 
 done_testing;

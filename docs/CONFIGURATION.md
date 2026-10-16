@@ -168,10 +168,12 @@ tickle.test.test:
 `registrar` is a recipe and not a `_global` setting. It usually lives in
 `_base`, so that every domain inherits one. It says which server holds the zone
 of a domain, so that dehydrated can write an `_acme-challenge` record into it.
-A guest that runs `pdns` holds its own zone. So does a guest under a TLD that
-RFC 2606 reserves, because no public registrar can hold a zone for one. The
-registrar then requires `pdns`. Every other guest uses the registrar that
-`type`, `user` and `key` name.
+A guest under a TLD that RFC 2606 reserves holds its own zone, because no
+public registrar can hold a zone for one. So does a guest whose registrar names
+the guest itself as its `authority`. The registrar then requires `pdns`. Every
+other guest uses the registrar that `type`, `user` and `key` name. That
+includes a guest that runs `pdns` for other guests and leaves its own name to
+the registrar.
 
 A pdns guest can also be the registrar of other guests. A guest names it as
 the `authority` of its registrar:

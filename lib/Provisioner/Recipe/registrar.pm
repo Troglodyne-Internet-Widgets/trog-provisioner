@@ -42,10 +42,9 @@ One of three servers holds the zone.  C<authority_of> decides which:
 
 =over 4
 
-=item * The C<pdns> of the guest itself.  That is the case for a guest that
-runs L<Provisioner::Recipe::pdns>, and for a guest under a reserved TLD that
-names no C<authority>.  No public registrar holds a zone for C<.test>.  This
-recipe then requires C<pdns>.
+=item * The C<pdns> of the guest itself, where C<authority> names the guest, or
+where the guest is under a reserved TLD and names no C<authority>.  No public
+registrar holds a zone for C<.test>.  This recipe then requires C<pdns>.
 
 =item * The C<pdns> of another guest, which C<authority> names.  See below.
 
@@ -55,9 +54,9 @@ has one registrar.
 
 =back
 
-C<authority> overrides the other two.  A guest that runs pdns for other guests
-can still name another guest as the authority of its own name.  A guest can
-also name itself, which is the same as the default for a guest with pdns.
+A guest that runs pdns does not hold its own zone for that reason alone.  It
+can be the authority of other guests while a public registrar holds its own
+name.  A guest that does hold its own zone names itself as its C<authority>.
 
 =head2 A pdns guest can be the registrar
 
@@ -121,7 +120,8 @@ sub args {
             authority => {
                 type        => 'string',
                 format      => 'hostname',
-                description => 'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  The domain needs at least three labels.  The default is the guest itself where it runs pdns or is under a reserved TLD, and otherwise the registrar of type.',
+                description =>
+                  'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  The domain needs at least three labels, unless this names the guest itself, whose own pdns then holds its zone.  The default is the guest itself under a reserved TLD, and otherwise the registrar of type.',
             },
             hostnames => {
                 type        => 'array',
@@ -250,7 +250,7 @@ record of a domain with an C<authority> goes.
 sub configured_credentials {
     my ( $self, %opts ) = @_;
 
-    die "registrar has no type for $opts{domain}, and no server of this installation holds its zone.  Name the provider that holds the zone, as lexicon calls it, or run pdns on the guest.\n"
+    die "registrar has no type for $opts{domain}, and no server of this installation holds its zone.  Name the provider that holds the zone, as lexicon calls it, or name an authority.\n"
       unless $opts{type};
 
     return (
@@ -273,7 +273,7 @@ these:
 
 =item * The C<authority> of this recipe for C<$domain>, or else for its server.
 
-=item * The server, if it runs pdns, or if C<$domain> is under a reserved TLD.
+=item * The server, if C<$domain> is under a reserved TLD.
 
 =item * undef.
 
@@ -297,7 +297,7 @@ sub authority_of {
         return Provisioner::Utils::dns_name($authority) if defined $authority;
     }
 
-    return $server if exists $where[-1]{pdns} || Provisioner::Utils::reserved_tld($domain);
+    return $server if Provisioner::Utils::reserved_tld($domain);
     return;
 }
 

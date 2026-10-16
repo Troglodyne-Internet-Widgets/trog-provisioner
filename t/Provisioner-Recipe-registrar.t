@@ -83,14 +83,15 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
 };
 
 # Makes $conf, a mock of Provisioner::Cookbook, answer with two guests: $name
-# names $authority as the authority of its registrar, and $authority runs pdns.
+# names $authority as the authority of its registrar, and $authority runs pdns
+# and holds its own zone.
 sub authority_conf {
     my ( $conf, $name, $authority, %over ) = @_;
 
     $conf->redefine(
         domain_config => sub {
             my ( undef, $domain ) = @_;
-            return { pdns      => {}, %{ $over{authority_conf} // {} } }                                     if $domain eq $authority;
+            return { pdns => {}, registrar => { authority => $authority }, %{ $over{authority_conf} // {} } } if $domain eq $authority;
             return { registrar => { type => 'easydns', key => 'a-registrar-key', authority => $authority } } if $domain eq $name;
             return {};
         }
@@ -154,6 +155,12 @@ subtest 'what a guest that names an authority sets up' => sub {
     like( $resolved, qr/^DNS=192[.]0[.]2[.]53$/m,                     'the drop-in names the authority' );
     like( $resolved, qr/^Domains=~\Q$name\E[ ]~ns[.]example[.]net$/m, 'for those zones alone' );
 
+    # An authority whose own name a public registrar holds refuses a query for
+    # it, so the guest asks a public resolver for that name instead.
+    authority_conf( $conf, $name, 'ns.example.net', authority_conf => { registrar => { type => 'easydns' } } );
+    my %public = fresh('registrar')->validate( %common, authority => 'ns.example.net', type => 'easydns' );
+    is( $public{routing_domains}, "~$name", 'and the zone of an authority that leaves its own name to a registrar is not routed to it' );
+
     like( exception { fresh('registrar')->validate( %common, domain => 'example.net', authority => 'ns.example.net', type => 'easydns' ) }, qr/fewer[ ]than[ ]three[ ]labels/, 'a registered domain cannot name an authority' );
     like( exception { fresh('registrar')->validate( %common, ipmap  => {},            authority => 'ns.example.net', type => 'easydns' ) }, qr/no[ ]address/,                  'nor can a domain whose authority has no address' );
 };
@@ -205,8 +212,14 @@ subtest 'which server holds the zone' => sub {
     is( $holder->('a.test'),        'a.test',        'a reserved name is held by the guest itself' );
     is( $holder->('a.example.net'), 'the registrar', 'and a public one by the registrar of type' );
 
-    $configured{'b.example.net'} = { pdns => {}, registrar => { type => 'easydns' } };
-    is( $holder->('b.example.net'), 'b.example.net', 'a guest that runs pdns holds its own zone, whatever registrar it inherits' );
+    # A pdns guest can be the authority of other guests while a registrar holds
+    # its own name.
+    $configured{'ns.example.net'} = { pdns => {}, registrar => { type => 'easydns' } };
+    is( $holder->('ns.example.net'), 'the registrar', 'a guest that runs pdns leaves its own name to the registrar' );
+    ok( !$registrar->serves_itself('ns.example.net'), 'and does not serve itself' );
+
+    $configured{'b.example.net'} = { pdns => {}, registrar => { type => 'easydns', authority => 'b.example.net' } };
+    is( $holder->('b.example.net'), 'b.example.net', 'while one that names itself holds its own zone, whatever registrar it inherits' );
 
     $configured{'web.c.test'} = { registrar => { authority => 'NS.C.test.' } };
     is( $holder->('web.c.test'), 'ns.c.test', 'an authority holds the zone of a guest that names it, however it is spelled' );
@@ -221,7 +234,7 @@ subtest 'which server holds the zone' => sub {
 
     # A domain layered onto another is served by what that guest runs.
     $host{'tenant.example.net'} = 'b.example.net';
-    is( $holder->('tenant.example.net'), 'b.example.net', 'a tenant is held by its host, which runs pdns' );
+    is( $holder->('tenant.example.net'), 'b.example.net', 'a tenant is held by its host, which holds its own zone' );
     ok( $registrar->serves_itself('tenant.example.net'), 'which counts as serving itself' );
 
     $host{'tenant.c.test'} = 'web.c.test';
