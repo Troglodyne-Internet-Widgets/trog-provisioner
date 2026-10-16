@@ -1339,7 +1339,9 @@ sub refresh_salvage (%args) {
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)
 
 Makes sure that the secret store at C<$store> holds a value for each file in
-C<$wanted>, and generates the values that are missing.  Then writes
+C<$wanted> that names a C<ref>, and generates the values that are missing.  A
+file that names C<issue> is not in the store, and goes into the manifest as it
+is.  Then writes
 F<guest-secrets.yaml> in C<$cfg_dir>, which tells where each file goes on the
 guest.  Asks for the password when C<$keepass> is undef.  Returns a reference to
 the values that the store holds.  When C<$wanted> is empty, it removes an old
@@ -1358,15 +1360,16 @@ sub write_guest_secrets {
     unlink $manifest;
     return unless %$wanted;
 
-    # Only now, so that a run with nothing to place asks for no password.
-    $keepass //= Trog::Credentials->prompt( 'Enter password:', 'keepass' );
+    # A secret that another guest issues is not in the store.
+    my %generator = map { $wanted->{$_}{ref} => $wanted->{$_}{generate} } grep { $wanted->{$_}{ref} } keys %$wanted;
 
-    my %generator = map { $wanted->{$_}{ref} => $wanted->{$_}{generate} } keys %$wanted;
-    my %held      = Trog::Secrets->remember( $store, $keepass, %generator );
+    # Only now, so that a run with nothing to place asks for no password.
+    $keepass //= Trog::Credentials->prompt( 'Enter password:', 'keepass' ) if %generator;
+    my %held = Trog::Secrets->remember( $store, $keepass, %generator );
 
     my %manifest = map {
         $_ => {
-            ref   => $wanted->{$_}{ref},
+            ( $wanted->{$_}{issue} ? ( issue => $wanted->{$_}{issue} ) : ( ref => $wanted->{$_}{ref} ) ),
             owner => $wanted->{$_}{owner} // 'root:root',
             mode  => $wanted->{$_}{mode}  // '0600',
         }
@@ -1375,7 +1378,7 @@ sub write_guest_secrets {
     File::Slurper::Temp::write_binary( $manifest, YAML::XS::Dump( \%manifest ) );
     chmod 0600, $manifest;
 
-    print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- $manifest{$_}{ref}\n" } sort keys %manifest );
+    print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- " . ( $manifest{$_}{ref} // "issued by $manifest{$_}{issue}{guest}" ) . "\n" } sort keys %manifest );
 
     return \%held;
 }

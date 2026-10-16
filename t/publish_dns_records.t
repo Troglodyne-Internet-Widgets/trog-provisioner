@@ -275,6 +275,43 @@ subtest 'a dry run says what it would send and sends none of it' => sub {
     );
 };
 
+subtest 'a delegation goes to the zone above, through the shortcut it is given' => sub {
+    my $zone = "lab.$DOMAIN";
+    my $ns   = "ns.$zone";
+
+    against(
+        holding(),
+        sub {
+            my ($ran) = @_;
+
+            my $rc;
+            capture { $rc = Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, $zone, $ns, $ADDRESS ) };
+            is( $rc, 0, 'the run succeeds' );
+
+            my @made = sent( $ran, 'create' );
+            is( scalar @made, 2, 'two records are sent' );
+            my ($ns_record) = grep { index( $_, ' NS ' ) >= 0 } @made;
+            like( $ns_record, qr/--name='\Q$zone\E'[ ]--content='\Q$ns\E[.]'/, 'the NS of the zone, naming its nameserver with its trailing dot, which PowerDNS wants' );
+            my ($glue) = grep { index( $_, ' A ' ) >= 0 } @made;
+            like( $glue,    qr/--name='\Q$ns\E'[ ]--content='\Q$ADDRESS\E'/, 'and the address of the nameserver, which is inside the zone' );
+            like( $made[0], qr/\A'\Q$shortcut\E'/,                           'through the shortcut on the command line' );
+        }
+    );
+
+    against(
+        holding( { name => "$zone.", type => 'NS', content => "\U$ns.", id => 'the-id' } ),
+        sub {
+            my ($ran) = @_;
+            capture { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, $zone, $ns ) };
+            is( scalar sent( $ran, 'create' ) + scalar sent( $ran, 'update' ), 0, 'a provider that answers with a trailing dot and in capitals already holds it, and there is no address to send' );
+        }
+    );
+
+    like( exception { Trog::PublishDNSRecords::main( '--delegate', $zone, $ns ) },                                qr/usage/, 'a delegation names its shortcut, because the zone above is not the zone of a domain here' );
+    like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, $zone ) },            qr/usage/, 'and its nameserver' );
+    like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, $zone, $ns, 1, 2 ) }, qr/usage/, 'and one address at most' );
+};
+
 subtest 'without the shortcut there is no credential, and it says so' => sub {
     my $mock = Test::MockModule->new( 'Trog::PublishDNSRecords', no_auto => 1 );
     $mock->redefine( shortcut_for => sub { return "$dir/nothing-is-here" } );

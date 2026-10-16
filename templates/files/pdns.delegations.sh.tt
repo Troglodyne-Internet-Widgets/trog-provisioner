@@ -1,0 +1,40 @@
+#!/bin/bash
+[%# The zones in the authoritative_for of pdns, which this guest holds for other
+    guests.  Run from the fragment of the domain, before it restarts pdns and
+    the recursor.  See
+    authoritative_for in Provisioner::Recipe::pdns.
+
+    A zone that the database already holds is left as it is, as the zone of the
+    domain is: the data target restored it, and the guests under it wrote their
+    records into it. -%]
+set -e
+set -o pipefail
+[% FOREACH d IN delegations %]
+
+# [% d.zone %]
+mkdir -p /var/spool/powerdns/[% d.zone %]
+cat > /var/spool/powerdns/[% d.zone %]/bind.zone <<'ZONE'
+$ORIGIN [% d.zone %].
+$TTL    300
+@       IN      SOA     [% d.ns %]. [% admin_email | email_for_dns %]. ( [% serial %] 300 300 1209600 10800 )
+@       300     IN NS   [% d.ns %].
+[% IF d.glue -%]
+[% d.ns %]. 300 IN A    [% d.address %]
+[% END -%]
+ZONE
+if ! sqlite3 -cmd '.timeout 10000' /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% d.zone %]'" | grep -q .; then
+    zone2sql --gsqlite --zone=/var/spool/powerdns/[% d.zone %]/bind.zone --zone-name=[% d.zone %] | sqlite3 -cmd '.timeout 10000' /var/spool/powerdns/zones.db
+fi
+grep -qxF '[% d.zone %]=127.0.0.1:2500' /etc/powerdns/forward-zones || echo '[% d.zone %]=127.0.0.1:2500' >> /etc/powerdns/forward-zones
+grep -qF 'addNTA("[% d.zone %]"' /etc/powerdns/recursor.lua || echo 'addNTA("[% d.zone %]", "unsigned zone that this guest holds for other guests")' >> /etc/powerdns/recursor.lua
+[% IF d.upstream -%]
+[%# The provider of the zone above, where the delegation goes.  It names the
+    parent, because a lexicon that resolves the zone of the name itself finds
+    the zone that this guest holds. -%]
+install -d -o root -g root -m 0700 /opt/lexicon/upstream
+cat > /opt/lexicon/upstream/[% d.zone %] <<'SHORTCUT'
+[% INCLUDE "files/lexicon.shortcut.sh.tt" WITH lexicon = d.upstream, domain = d.parent %]
+SHORTCUT
+chmod 0700 /opt/lexicon/upstream/[% d.zone %]
+[% END -%]
+[% END %]

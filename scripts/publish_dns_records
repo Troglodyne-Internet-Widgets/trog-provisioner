@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use JSON::PP     ();
 use Getopt::Long qw{GetOptionsFromArray};
 
-my $USAGE = "usage: publish_dns_records [--dryrun] DOMAIN ADDRESS [ALIAS ...]\n";
+my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
 
 # The shortcut Provisioner::Recipe::lexicon installs for this domain, which
 # already carries the provider holding the zone and the credential for it.
@@ -43,6 +43,14 @@ sub run {
     return ( $output, $? == 0 ? 1 : 0 );
 }
 
+# A name or a target as a provider compares it: some answer with the trailing
+# dot and some without, and DNS ignores case.
+sub canonical {
+    my ($value) = @_;
+
+    return lc( $value // q{} ) =~ s/[.]+\z//r;
+}
+
 # What the provider already holds of this type, as a list of rows.
 #
 # An empty list is an answer -- a zone with no records of the type -- and a
@@ -64,7 +72,7 @@ sub existing {
 sub held_for {
     my ( $rows, $name ) = @_;
 
-    my ($held) = grep { lc( $_->{name} // q{} ) eq lc($name) } @{$rows};
+    my ($held) = grep { canonical( $_->{name} ) eq canonical($name) } @{$rows};
 
     return $held;
 }
@@ -84,7 +92,7 @@ sub publish {
 
     my ( $held, $type, $name, $content ) = @opts{qw{held type name content}};
 
-    if ( $held && ( $held->{content} // q{} ) eq $content ) {
+    if ( $held && canonical( $held->{content} ) eq canonical($content) ) {
         print "$type $name is already $content\n";
         return 0;
     }
@@ -114,29 +122,49 @@ sub publish {
     return $ok ? 0 : 1;
 }
 
+# The records of a domain, by type and name: the address, and one alias for
+# each name, pointing at the name that holds the address.  No ns1: the pdns
+# recipe publishes one because a guest serving its own zone is its own
+# nameserver, and a zone somebody else holds has nameservers of theirs that
+# this is in no position to contradict.
+sub records {
+    my ( $domain, $address, @aliases ) = @_;
+    die $USAGE unless $domain && $address;
+
+    return (
+        A     => { $domain => $address },
+        CNAME => { map { $_ => $domain } @aliases },
+    );
+}
+
+# The delegation of a zone, by type and name, for the zone above it: the
+# nameserver that holds it, and the address of the nameserver where it is
+# inside the zone, because a resolver cannot find it otherwise.  The nameserver
+# with its trailing dot, because lexicon qualifies only a CNAME, and PowerDNS
+# refuses the target of an NS that is not qualified.
+sub delegation {
+    my ( $zone, $nameserver, $address, @extra ) = @_;
+    die $USAGE if !$zone || !$nameserver || @extra;
+
+    return (
+        NS => { $zone => ( $nameserver =~ s/[.]*\z/./r ) },
+        A  => { $address ? ( $nameserver => $address ) : () },
+    );
+}
+
 sub main {
     my @args = @_;
 
-    my $dryrun;
-    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun ) or die $USAGE;
+    my ( $dryrun, $shortcut, $delegate );
+    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate ) or die $USAGE;
+    die $USAGE if $delegate && !$shortcut;
 
-    my ( $domain, $address, @aliases ) = @args;
-    die $USAGE unless $domain && $address;
-
-    my $shortcut = shortcut_for($domain);
+    my %wanted = $delegate ? delegation(@args) : records(@args);
+    $shortcut //= shortcut_for( $args[0] );
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether the shortcut is there to run is the thing being decided, and saying so beats a shell error
     die "No lexicon shortcut at $shortcut.\n" . "Provisioner::Recipe::lexicon installs it, and this needs the credential in it.\n"
       unless -x $shortcut;
-
-    # The address, and then one alias pointing at the name that holds it.  No
-    # ns1: the pdns recipe publishes one because a guest serving its own zone is
-    # its own nameserver, and a zone somebody else holds has nameservers of
-    # theirs that this is in no position to contradict.
-    my %wanted = (
-        A     => { $domain => $address },
-        CNAME => { map { $_ => $domain } @aliases },
-    );
 
     my $failures = 0;
     foreach my $type ( sort keys %wanted ) {

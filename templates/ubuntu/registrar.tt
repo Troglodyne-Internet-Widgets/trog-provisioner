@@ -1,1 +1,7 @@
+[%# The authority that the API of the pdns guest chains to, at the path where
+    acmeca installs the same one.  See Provisioner::Recipe::registrar. -%]
+[% IF fleet_anchor -%]
+install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt
+update-ca-certificates >/dev/null
+[% END -%]
 [% INCLUDE "files/dnsrecipe.publish.tt" %]

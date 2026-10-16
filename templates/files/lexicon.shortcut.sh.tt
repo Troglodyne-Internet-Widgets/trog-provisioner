@@ -8,7 +8,13 @@
     lexicon makes the name of an environment variable from the provider name and
     the option name.  So the option --pdns-server is PDNS_SERVER here, with the
     LEXICON_ and provider prefix added. -%]
+[%# A key_file is a token that bin/provision put on the guest, and that is not
+    in the payload.  See guest_secrets in Provisioner::Recipe. -%]
+[% IF lexicon.key_file -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="$(cat [% lexicon.key_file %])"
+[% ELSE -%]
 export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
+[% END -%]
 [% IF lexicon.user -%]
 export LEXICON_[% lexicon.type.upper() %]_AUTH_USERNAME="[% lexicon.user %]"
 [% END -%]

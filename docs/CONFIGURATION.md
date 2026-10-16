@@ -175,6 +175,27 @@ serves this name, and a guest with both and no preference is refused rather
 than guessed at. A name under a TLD RFC 2606 reserves is always served locally,
 because no public registrar can hold a zone for one.
 
+A pdns guest can also be the registrar of other guests. Name the zones that it
+holds for them in its `authoritative_for`:
+
+```yaml
+ns.example.net:
+    pdns:
+        authoritative_for:
+            - lab.example.net
+```
+
+The guest makes each zone and writes the delegation into the zone above. A
+guest whose domain is in one of those zones then uses that pdns guest as its
+registrar, and needs no configuration for it. The longest zone that holds a
+name wins, and `_base` is the fallback. When such a guest is built, the pdns
+guest issues it a token that can write its own name and the names below it. `perldoc Provisioner::Recipe::pdns`
+has the details. Only a subdomain of a registered domain can be delegated,
+because a registered domain needs glue records at the registry.
+
+Build the pdns guest first. A guest under its zone publishes its records when
+it is built, and nothing answers for the zone before the pdns guest is up.
+
 Credentials written under `_global` are refused, naming the domain: they used to
 live there and nothing reads them now.
 

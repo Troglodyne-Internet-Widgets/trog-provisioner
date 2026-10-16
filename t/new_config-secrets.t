@@ -30,6 +30,7 @@ use File::Temp();
 use File::Slurper();
 use YAML::XS();
 use Trog::Secrets();
+use Test::MockModule qw{strict};
 
 # Deliberately not t/new_config.t: that one runs under Test::MockFile in strict
 # mode, and a secret store is a real file being really written to.
@@ -109,6 +110,22 @@ subtest 'a run that wants nothing placed leaves no manifest behind' => sub {
     # more, out of a manifest nothing rewrote.
     Trog::Provisioner::Config::Generator::write_guest_secrets( $dir, 'vm.test', {}, $kdbx, 'throwaway' );
     ok( !-e "$dir/guest-secrets.yaml", 'and asking for nothing takes it away' );
+};
+
+subtest 'a secret that another guest issues goes into the manifest, and not into the store' => sub {
+    my ( $dir, $kdbx ) = store();
+
+    my $issue  = { guest => 'ns.vm.test', command => 'issue a token' };
+    my %wanted = ( '/etc/lexicon/web.vm.test.token' => { issue => $issue, owner => 'root:root', mode => '0600' } );
+
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { die "asked for the password of the store\n" } );
+
+    my $held = Trog::Provisioner::Config::Generator::write_guest_secrets( $dir, 'vm.test', \%wanted, $kdbx, undef );
+    is_deeply( $held, {}, 'without asking for the password of the store' );
+
+    my $read = YAML::XS::Load( File::Slurper::read_binary("$dir/guest-secrets.yaml") );
+    is_deeply( $read->{'/etc/lexicon/web.vm.test.token'}, { issue => $issue, owner => 'root:root', mode => '0600' }, 'the manifest says which guest issues it, and how' );
 };
 
 subtest 'the manifest is not something the guest is handed' => sub {

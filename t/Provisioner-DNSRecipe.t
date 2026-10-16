@@ -18,6 +18,8 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use Test::MockModule();
 use File::Temp qw{tempdir};
+use File::Slurper();
+use File::Slurper::Temp();
 
 use FindBin::libs;
 
@@ -105,6 +107,64 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     like( $out, qr{^lexicon[ ]--resolve-zone-name[ ]powerdns[ ]}m, 'invoked with the flag the provider needs' );
 };
 
+subtest 'a domain that a pdns guest holds reaches it with a token of its own' => sub {
+    my $name = 'web.lab.example.net';
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config    => sub { return { registrar => { type => 'easydns', key => 'a-registrar-key' } } } );
+    $conf->redefine( host_of          => sub { return } );
+    $conf->redefine( delegating_guest => sub { my ( undef, $asked ) = @_; return $asked ne $name ? () : wantarray ? ( 'ns.example.net', 'lab.example.net' ) : 'ns.example.net' } );
+
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my %creds     = $registrar->lexicon_credentials( type => 'easydns', key => 'a-registrar-key', domain => $name );
+    is( $creds{type},     'powerdns',                 'the pdns guest, whatever the registrar of the domain is' );
+    is( $creds{key_file}, "/etc/lexicon/$name.token", 'with the token in a file' );
+    is( $creds{key},      q{},                        'and not in the payload' );
+
+    my %secrets = fresh('registrar')->guest_secrets( '/bogus', $name );
+    is_deeply( [ keys %secrets ],                                                    ["/etc/lexicon/$name.token"], 'which bin/provision puts on the guest' );
+    is_deeply( { fresh('registrar')->guest_secrets( '/bogus', 'web.example.net' ) }, {},                           'and a domain that no pdns guest holds needs none' );
+
+    my $out        = fresh('lexicon')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
+    my $token_line = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat /etc/lexicon/$name.token)"};
+    like( $out, qr{^\Q$token_line\E$}m, 'the shortcut reads the token from the file' );
+    my $server_line = 'export LEXICON_POWERDNS_PDNS_SERVER="https://dnsapi.ns.example.net"';
+    like( $out, qr{^\Q$server_line\E$}m, 'at the proxy of that guest' );
+
+    my $hook = fresh('letsencrypt')->render_file( 'files/ssl.dehydrated.hook.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
+    like( $hook, qr{^\Q$token_line\E$}m, 'and so does the hook that answers a challenge' );
+
+    like( exception { $registrar->lexicon_credentials( domain => 'web.example.net' ) }, qr/no[ ]type/, 'a domain that no pdns guest holds needs the type of its registrar' );
+};
+
+subtest 'a domain that a pdns guest under a reserved TLD holds trusts the authority of its API' => sub {
+    my $guest = 'ns.zone.test';
+    my $conf  = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config    => sub { return {} } );
+    $conf->redefine( host_of          => sub { return } );
+    $conf->redefine( delegating_guest => sub { return wantarray ? ( $guest, 'lab.zone.test' ) : $guest } );
+
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $anchor = "$dir/authority.crt";
+    File::Slurper::Temp::write_text( $anchor, "the authority\n" );
+    my $fetchcache = Test::MockModule->new( Provisioner::Cookbook->load('fetchcache') );
+    $fetchcache->redefine( authority => sub { return { cert => $anchor, key => '/bogus' } } );
+
+    my %common = ( domain => 'web.lab.zone.test', install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6' );
+    my $recipe = fresh('registrar');
+    my $out    = tempdir( CLEANUP => 1 );
+    my @wrote  = $recipe->generate_files( $out, %common );
+
+    ok( ( grep { $_ eq 'registrar-anchor.crt' } @wrote ), 'the payload carries the authority' );
+    is( File::Slurper::read_text("$out/registrar-anchor.crt"), "the authority\n", 'which is the fleet authority' );
+    my $install = 'install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt';
+    like( fresh('registrar')->render(%common), qr{^\Q$install\E$}m, 'and the fragment installs it where acmeca installs the same one' );
+
+    $guest = 'ns.example.net';
+    my $public = tempdir( CLEANUP => 1 );
+    fresh('registrar')->generate_files( $public, %common, domain => 'web.lab.example.net' );
+    ok( !-e "$public/registrar-anchor.crt", 'a pdns guest under a public name has a certificate that every guest trusts already' );
+};
+
 subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => sub {
 
     # letsencrypt resolves the provider and hands it down through
@@ -132,27 +192,6 @@ subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => su
 
     my %by_registrar = fresh('lexicon')->validate( %common, dns_preference => 'registrar' );
     is( $by_registrar{lexicon}{type}, 'easydns', 'as does naming the registrar' );
-};
-
-subtest 'the operator registrar is left alone, so synczones still has an upstream' => sub {
-
-    # synczones writes /etc/synczones.conf out of registrar, which is whoever
-    # holds the public zone this guest syncs up to.  The credentials above
-    # belong to the guest itself, so they go under their own key: written into
-    # registrar they would have the guest name itself as its own upstream.
-    my $conf = fresh('pdns')->render_file(
-        'files/pdns.synczones.tt',
-        domain    => $DOMAIN,
-        api_key   => 'an-api-key',
-        registrar => { type => 'easydns', user => 'somebody', key => 'a-token' },
-    );
-
-    like( $conf, qr/^\[powerdns\]$/m,           'the local server is a section' );
-    like( $conf, qr/^\[easydns\]$/m,            'and the registrar it syncs up to is another' );
-    like( $conf, qr/^auth_username=somebody$/m, 'carrying the credentials the operator set' );
-
-    my $alone = fresh('pdns')->render_file( 'files/pdns.synczones.tt', domain => $DOMAIN, api_key => 'an-api-key' );
-    unlike( $alone, qr/^\[easydns\]$/m, 'while a guest with no registrar syncs nowhere' );
 };
 
 subtest 'the CA depends on the capability, not on a recipe name' => sub {
@@ -255,6 +294,24 @@ subtest 'the interface says which implementation serves a domain' => sub {
         qr/was[ ]not[ ]told[ ]what/,
         'asked without a configuration at all, it says so rather than resolving against something else'
     );
+};
+
+subtest 'a domain that a pdns guest holds goes to the registrar, which reaches that guest' => sub {
+    my $nothing = {};
+    my $local   = { pdns => {} };
+
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.example.net', configured => $nothing, delegated_by => 'ns.example.net' ), 'registrar', 'with no registrar configured' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test',        configured => $nothing, delegated_by => 'ns.test' ),        'registrar', 'and under a reserved TLD, which a pdns guest can hold' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $nothing, delegated_by => 'ns.test', dns_preference => 'registrar' ), 'registrar', 'where it may also be named' );
+
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $local, delegated_by => 'ns.test' ) },
+        qr/both/,
+        'a guest that also runs a pdns of its own has a tie to settle'
+    );
+
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'ns.test', configured => $local, delegated_by => 'ns.test' ), 'pdns', 'the pdns guest itself is not delegated to itself' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'tenant.test', configured => $nothing, host => 'ns.test', host_configured => $local, delegated_by => 'ns.test' ), 'pdns', 'nor is a domain on its guest' );
 };
 
 subtest 'the interface names the key that settles a tie' => sub {

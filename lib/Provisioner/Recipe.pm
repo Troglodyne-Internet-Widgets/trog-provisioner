@@ -1245,6 +1245,12 @@ C<ref> must name a field that the store keeps: C<password> or C<username>.  The
 store keeps a multi-line value and returns it exactly.  So a private key is a
 password as far as the store is concerned.
 
+A secret that another guest issues has C<issue> in place of C<ref> and
+C<generate>: C<< { guest => $domain, command => $shell } >>.  C<bin/provision>
+runs the command as root on that guest, and places what it prints.  The store
+never holds it, and the guest must be up first.  See
+L<Provisioner::Recipe::pdns/client_secret>.
+
 C<%opts> is the configuration of the recipe, for a secret that only some
 domains want.  If the recipe returns nothing for a domain, no secret is placed
 or generated for it.  Most recipes have an unconditional secret and can ignore

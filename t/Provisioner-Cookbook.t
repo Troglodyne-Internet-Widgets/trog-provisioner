@@ -12,6 +12,7 @@ t/Provisioner-Cookbook.t - the catalog: what recipes exist, and what a config fo
 =cut
 
 use Test::More;
+use Time::HiRes();
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 
@@ -576,6 +577,46 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
     our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
 }
 
+{
+
+    package Provisioner::Recipe::t_cycle_a;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_cycle_b => sub { () } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_cycle_b;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_cycle_c => sub { () } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_cycle_c;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_cycle_a => sub { ( from_c => 'said by c' ) } );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_self;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_self => sub { ( names => ['its own'] ) } );
+    }
+}
+
 sub dependencies_of {
     my ( $named, %opts ) = @_;
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
@@ -692,6 +733,36 @@ subtest 'a recipe visited twice asks for its list once' => sub {
     # recipes that claim one name.
     is_deeply( $conf{t_listed}{items}, ['once'], 'what t_lister asked for is there once, though both t_left and t_right required it' )
       or diag explain $conf{t_listed};
+};
+
+subtest 'recipes that require each other are resolved, in the order they were found' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    my %provisioner = (
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+    );
+
+    # A cycle sent the walk round it for ever, so an alarm turns that into a
+    # failure.
+    local $SIG{ALRM} = sub { die "went round the cycle\n" };
+    Time::HiRes::alarm(10);
+    my %conf = ( t_cycle_a => {} );
+    my ( $modules, undef, $required_by ) = Provisioner::Cookbook->resolve_dependencies( modules => ['t_cycle_a'], domain_conf => \%conf, distro => 'ubuntu', provisioner => \%provisioner, domain => 'd.test' );
+    Time::HiRes::alarm(0);
+
+    is_deeply( $modules, [qw{t_cycle_a t_cycle_b t_cycle_c}], 'each comes after the one that found it' );
+    is( $conf{t_cycle_a}{from_c}, 'said by c', 'and the requirement that closes the cycle still configures its dependency' );
+    ok( !$required_by->{t_cycle_a}, 'but does not order it, because make would get two orders at once' );
+
+    Time::HiRes::alarm(10);
+    %conf = ( t_self => {} );
+    ($modules) = Provisioner::Cookbook->resolve_dependencies( modules => ['t_self'], domain_conf => \%conf, distro => 'ubuntu', provisioner => \%provisioner, domain => 'd.test' );
+    Time::HiRes::alarm(0);
+
+    is_deeply( $modules,             ['t_self'],  'a recipe that requires itself is there once' );
+    is_deeply( $conf{t_self}{names}, ['its own'], 'and configures itself' );
 };
 
 subtest 'the same configuration comes back in the same order every run' => sub {
@@ -1295,6 +1366,33 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
         'a domain on the guest of another names what that guest names, and says whose setting it is'
     );
     is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
+};
+
+subtest 'delegating_guest finds the pdns guest that holds a name' => sub {
+    my %conf = (
+        _base         => { registrar => { type              => 'bogus' } },
+        'ns.test'     => { pdns      => { authoritative_for => [ 'Lab.Zone.Test.', 'deep.lab.zone.test' ] } },
+        'ns2.test'    => { pdns      => { authoritative_for => 'other.zone.test' } },
+        'plain.test'  => { pdns      => {} },
+        'client.test' => { registrar => {} },
+    );
+
+    is_deeply( { Provisioner::Cookbook->delegations( \%conf ) }, { 'lab.zone.test' => 'ns.test', 'deep.lab.zone.test' => 'ns.test', 'other.zone.test' => 'ns2.test' }, 'delegations names each zone, in lower case and without its dot, and its guest' );
+
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'web.lab.zone.test', \%conf ) ],      [ 'ns.test', 'lab.zone.test' ],      'a name below a zone is held by its guest' );
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'LAB.zone.test.', \%conf ) ],         [ 'ns.test', 'lab.zone.test' ],      'and so is the zone itself, in any case' );
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'web.deep.lab.zone.test', \%conf ) ], [ 'ns.test', 'deep.lab.zone.test' ], 'the longest zone wins' );
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'web.other.zone.test', \%conf ) ],    [ 'ns2.test', 'other.zone.test' ],   'whichever guest holds it' );
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'xlab.zone.test', \%conf ) ],         [],                                  'a name that only ends in the text of a zone is not in it' );
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'zone.test', \%conf ) ],              [],                                  'nor is the zone above it' );
+    is( scalar Provisioner::Cookbook->delegating_guest( 'web.lab.zone.test', \%conf ), 'ns.test', 'in scalar context it is the guest' );
+    is( scalar Provisioner::Cookbook->delegating_guest( 'zone.test',         \%conf ), undef,     'or undef' );
+
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'deep.lab.zone.test', \%conf, above => 1 ) ], [ 'ns.test', 'lab.zone.test' ], 'above skips the zone that is the name, which is where it is delegated from' );
+    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'lab.zone.test',      \%conf, above => 1 ) ], [],                             'and finds nothing when no guest holds the zone above it' );
+
+    $conf{'ns3.test'} = { pdns => { authoritative_for => ['lab.zone.test.'] } };
+    like( exception { Provisioner::Cookbook->delegations( \%conf ) }, qr/ns[.]test[ ]and[ ]ns3[.]test[ ]name[ ]lab[.]zone[.]test/, 'two guests that name one zone are refused, by name' );
 };
 
 done_testing();

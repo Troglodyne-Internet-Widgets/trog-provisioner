@@ -1,6 +1,6 @@
 server {
     listen 443 ssl;
-[% IF ipv6 %]    listen [::]:443 ssl;
+[% IF api_ipv6 %]    listen [::]:443 ssl;
 [% END -%]
     server_name dnsapi.[% domain %];
     server_tokens off;
@@ -9,8 +9,8 @@ server {
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
 
 [%# The guests of this installation, this machine and the guest itself.
-    Each request still needs a token: see Provisioner::Recipe::pdnsacl. -%]
-[% FOR address IN allowed -%]
+    Each request still needs a token: see Provisioner::Recipe::pdns. -%]
+[% FOR address IN api_allowed -%]
     allow [% address %];
 [% END -%]
     deny all;
@@ -29,7 +29,7 @@ server {
 
 server {
     listen 80;
-[% IF ipv6 %]    listen [::]:80;
+[% IF api_ipv6 %]    listen [::]:80;
 [% END -%]
     server_name dnsapi.[% domain %];
     return 301 https://$host$request_uri;

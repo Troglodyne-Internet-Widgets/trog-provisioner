@@ -160,7 +160,7 @@ my $global_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/00-global.conf'
 like($global_conf, qr/^setuid=pdns$/m, 'and gives it up itself once it is inside');
 like($global_conf, qr/^setgid=pdns$/m, 'both halves of it');
 
-# The API socket is inside the chroot, where synczones and the patched lexicon
+# The API socket is inside the chroot, where the patched lexicon and the API proxy
 # look for it.
 ok(-S '/var/spool/powerdns/api.sock', 'the API socket exists, so the webserver bound it')
     or diag `systemctl status pdns --no-pager -n 15 2>&1 | tail -8`;

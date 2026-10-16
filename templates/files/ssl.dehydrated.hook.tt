@@ -17,7 +17,9 @@ export PROVIDER="[% lexicon.type %]"
 [% IF lexicon.user -%]
 export LEXICON_[% lexicon.type.upper() %]_AUTH_USERNAME="[% lexicon.user %]"
 [% END -%]
-[% IF lexicon.key -%]
+[% IF lexicon.key_file -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="$(cat [% lexicon.key_file %])"
+[% ELSIF lexicon.key -%]
 export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
 [% END -%]
 [% FOREACH lv IN lexicon.extra -%]

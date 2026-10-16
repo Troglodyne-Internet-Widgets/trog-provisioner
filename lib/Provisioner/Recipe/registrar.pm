@@ -10,6 +10,12 @@ use re '/aasx';
 
 use parent qw{Provisioner::DNSRecipe};
 
+use File::Copy();
+use List::Util qw{any};
+
+use Provisioner::Cookbook();
+use Provisioner::Utils();
+
 =head1 Provisioner::Recipe::registrar
 
 =head2 SYNOPSIS
@@ -31,6 +37,21 @@ You usually write it once in C<_base>, and every domain inherits it, because a
 fleet usually has one registrar.  A domain that its own C<pdns> serves needs
 none.  A domain under a TLD that RFC 2606 reserves cannot use one, because no
 public registrar holds a zone for C<.test>.
+
+=head2 A pdns guest can be the registrar
+
+A domain under a zone in the C<authoritative_for> of a pdns guest has that
+guest as its registrar, whatever C<type> says.  See
+L<Provisioner::Cookbook/delegating_guest>.  It reaches the API of that guest
+through its API proxy, with a token of its own name.  See
+L<Provisioner::Recipe::pdns/The API proxy>.  Such a
+domain needs no configuration here.  So C<type> is required only for a domain
+that no pdns guest holds.
+
+A pdns guest under a reserved TLD serves the API with a certificate from its own
+CA, which the fleet authority signs.  See L<Provisioner::Recipe::acmeca>.  So a
+domain that such a guest holds gets that authority as a trust anchor, at the
+path where acmeca installs it.
 
 =head2 It installs nothing, and publishes the records of the domain
 
@@ -55,11 +76,10 @@ documents it.
 sub args {
     return (
         type       => 'object',
-        required   => [qw{type}],
         properties => {
             type => {
                 type        => 'string',
-                description => 'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.',
+                description => 'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required, except for a domain that a pdns guest holds, which goes to that guest.',
             },
             user => {
                 type        => 'string',
@@ -78,9 +98,9 @@ sub args {
 
 =head2 %credentials = $recipe->lexicon_credentials(%opts)
 
-Returns C<type>, C<user> and C<key> as the operator configured them, with an
-empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
-an empty list.
+For a domain that a pdns guest holds, returns what
+L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
+Otherwise returns C<configured_credentials>.
 
 A registrar needs only a credential.  lexicon already knows where each of its
 providers is, so there is no endpoint.  There are no flags, because the domain
@@ -92,6 +112,29 @@ zone that is already known.
 sub lexicon_credentials {
     my ( $self, %opts ) = @_;
 
+    my $guest = $self->delegated_to( $opts{domain} );
+    return Provisioner::Cookbook->load('pdns')->client_credentials( $guest, $opts{domain} ) if defined $guest;
+
+    return $self->configured_credentials(%opts);
+}
+
+=head2 %credentials = $recipe->configured_credentials(%opts)
+
+Returns C<type>, C<user> and C<key> as the operator configured them, with an
+empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
+an empty list.  Dies when there is no C<type>.
+
+L<Provisioner::Recipe::pdns> asks this for the delegation of a zone that it
+holds, which C<lexicon_credentials> would send to itself.
+
+=cut
+
+sub configured_credentials {
+    my ( $self, %opts ) = @_;
+
+    die "registrar has no type for $opts{domain}, and no pdns guest holds that name.  Name the provider that holds its zone, as lexicon calls it.\n"
+      unless $opts{type};
+
     return (
         type  => $opts{type},
         user  => $opts{user} // q{},
@@ -101,16 +144,75 @@ sub lexicon_credentials {
     );
 }
 
+=head2 $guest = $recipe->delegated_to($domain)
+
+The pdns guest that holds C<$domain> through its C<authoritative_for>, or undef.
+A pdns guest is never delegated to itself, nor is a domain on it.
+
+=cut
+
+sub delegated_to {
+    my ( $self, $domain ) = @_;
+
+    my $guest = Provisioner::Cookbook->delegating_guest($domain);
+    return unless defined $guest;
+    return if $guest eq ( Provisioner::Cookbook->host_of($domain) // $domain );
+    return $guest;
+}
+
+=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+
+For a domain that a pdns guest holds, and that this recipe answers for, the
+token of the domain.  See L<Provisioner::Recipe::pdns/client_secret>.
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+
+    return () unless defined $self->delegated_to($domain) && $self->provider_for( domain => $domain ) eq $self->recipe_name;
+
+    my ( $guest, $zone ) = Provisioner::Cookbook->delegating_guest($domain);
+    return Provisioner::Cookbook->load('pdns')->client_secret( $guest, $zone, $domain );
+}
+
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds what C<publication> in L<Provisioner::DNSRecipe> says this recipe
-publishes.
+publishes, and C<fleet_anchor>, which is true where the domain reaches a pdns
+guest under a reserved TLD.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    my $guest = $self->delegated_to( $opts{domain} );
+    my $tld   = Provisioner::Utils::tld_of( $guest // q{} ) // q{};
+    $opts{fleet_anchor} = ( defined $guest && any { $_ eq $tld } $self->reserved_tlds ) ? 1 : 0;
+
     return ( %opts, $self->publication(%opts) );
+}
+
+=head2 @written = $recipe->generate_files($output_dir, %vars)
+
+Writes the templates, and the certificate of the fleet authority as
+F<registrar-anchor.crt> where C<enrich> sets C<fleet_anchor>.
+
+=cut
+
+sub generate_files {
+    my ( $self, $output_dir, %vars ) = @_;
+
+    my @written = $self->SUPER::generate_files( $output_dir, %vars );
+    my %opts    = $self->validated(%vars);
+    return @written unless $opts{fleet_anchor};
+
+    my $authority = Provisioner::Cookbook->load('fetchcache')->authority();
+    File::Copy::copy( $authority->{cert}, "$output_dir/registrar-anchor.crt" )
+      or die "Could not give the guest the authority that the API of its pdns guest chains to: $!\n";
+
+    return ( @written, 'registrar-anchor.crt' );
 }
 
 sub tests {
