@@ -1,7 +1,23 @@
-[%# The authority that the API of the pdns guest chains to, at the path where
-    acmeca installs the same one.  See Provisioner::Recipe::registrar. -%]
+[%# A guest whose registrar names an authority.  See the POD of
+    Provisioner::Recipe::registrar. -%]
+[% IF authority -%]
+install -d -o root -g root -m 0755 /etc/systemd/resolved.conf.d
+install -o root -g root -m 0644 registrar-resolved.conf /etc/systemd/resolved.conf.d/trog-authority.conf
+systemctl restart systemd-resolved
 [% IF fleet_anchor -%]
+[%# The authority that the API of the pdns guest chains to, at the path where
+    acmeca installs the same one. -%]
 install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt
 update-ca-certificates >/dev/null
+[% END -%]
+[% IF upstream -%]
+[%# The registrar of the zone above, where the NS record of the zone of this
+    domain goes.  In the postrun, before the records of the domain, which the
+    authority answers for once the zone above names it. -%]
+install -d -o root -g root -m 0700 /opt/lexicon/upstream
+install -o root -g root -m 0700 registrar-upstream.sh /opt/lexicon/upstream/[% domain %]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --delegate --shortcut /opt/lexicon/upstream/[% domain %] [% domain %] [% authority %]
+[% END -%]
+rm -f registrar-resolved.conf registrar-upstream.sh
 [% END -%]
 [% INCLUDE "files/dnsrecipe.publish.tt" %]

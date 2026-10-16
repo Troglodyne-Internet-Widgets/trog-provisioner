@@ -42,12 +42,8 @@ subtest 'fleet_address: what a name for another machine turns out to be' => sub 
     is_deeply( [ Provisioner::Utils::fleet_address( 'guest.test.test', %own ) ], [ self => q{} ], 'even when the pool knows its address' );
 };
 
-subtest 'dns_name and in_zone' => sub {
+subtest 'dns_name' => sub {
     is( Provisioner::Utils::dns_name('Lab.Example.NET.'), 'lab.example.net', 'a name compares in lower case without its dot' );
-    ok( Provisioner::Utils::in_zone( 'web.lab.example.net', 'lab.example.net.' ), 'a name below a zone is in it' );
-    ok( Provisioner::Utils::in_zone( 'LAB.example.net.',    'lab.example.net' ),  'and so is the zone itself, in any case and with any dot' );
-    ok( !Provisioner::Utils::in_zone( 'xlab.example.net',   'lab.example.net' ),  'but not a name that only ends in its text' );
-    ok( !Provisioner::Utils::in_zone( 'example.net',        'lab.example.net' ),  'nor the zone above it' );
 };
 
 subtest 'tld_of is the last label, and nothing when there is none' => sub {

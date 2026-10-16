@@ -271,13 +271,6 @@ Error messages name it.
 =item * C<host_configured>: the configuration of that guest, as a hash
 reference, or undef.
 
-=item * C<delegated_by>: the pdns guest whose C<authoritative_for> holds the
-domain, as L<Provisioner::Cookbook/delegating_guest> finds it, or undef.  The
-registrar implementation then reaches that guest, through its API proxy.  See
-L<Provisioner::Recipe::pdns/The API proxy>.  This counts as registrar credentials, also
-under a reserved TLD and also where no registrar is configured.  It does not
-count where it names the guest of the domain itself.
-
 =item * C<dns_preference>: optional.  The key is the one that
 C<tiebreaker_key> names.  Without it, the preference is the one that any recipe
 in C<configured> states, such as the C<dns_preference> of
@@ -285,6 +278,11 @@ L<Provisioner::Recipe::letsencrypt>.  A recipe that serves a name requires this
 interface without stating one, because the base class asks for it.
 
 =back
+
+A C<registrar> block with an C<authority> counts as registrar credentials, also
+under a reserved TLD: the pdns guest that it names holds the zone.  See
+L<Provisioner::Recipe::registrar>.  It does not count where it names the guest
+of the domain itself.
 
 The caller passes the configurations in, and this method does not fetch them.
 Provisioner::Cookbook answers about the configuration that the environment
@@ -305,8 +303,8 @@ It does not guess.  It dies in these conditions:
 
 =item * Two recipes of the domain state different preferences.
 
-=item * The preference names the registrar for a name under a reserved TLD
-that no pdns guest holds.  No registrar can answer for such a name.
+=item * The preference names the registrar for a name under a reserved TLD,
+and the registrar names no C<authority>.  No registrar can answer for such a name.
 
 =item * The preference names C<pdns>, but the guest has no C<pdns>
 configuration.
@@ -334,9 +332,9 @@ sub implementation_for {
     # Look in the host configuration too, because the guest that a domain is
     # layered onto serves it.
     my @where     = ( $opts{configured}, $opts{host_configured} );
-    my $delegated = ( defined $opts{delegated_by} && $opts{delegated_by} ne $server ) ? 1 : 0;
+    my $delegated = ( any { defined $_ && $_ ne $server } map { ref $_ eq 'HASH' && ref $_->{registrar} eq 'HASH' ? $_->{registrar}{authority} : undef } @where ) ? 1 : 0;
     my $local     = ( ( $reserved && !$delegated ) || configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
-    my $registrar = ( $delegated                   || configures( 'registrar',           @where ) ) ? 1 : 0;
+    my $registrar = ( $delegated || configures( 'registrar', @where ) ) ? 1 : 0;
 
     # Without a preference of its own, the requirer gets the one that the
     # recipes of the domain state.  One server holds the zone, so two answers
@@ -376,8 +374,7 @@ sub implementation_for {
 Returns the implementation that serves C<$opts{domain}>.  It reads the
 configuration that the environment names, from L<Provisioner::Cookbook>.
 
-This is C<implementation_for>, but it fetches the three configurations and
-C<delegated_by> itself.
+This is C<implementation_for>, but it fetches the three configurations itself.
 If you already have them, call C<implementation_for>, as the depsolver of
 F<bin/new_config> does.  If not, call this method.  It dies as
 C<implementation_for> does.
@@ -394,7 +391,6 @@ sub provider_for {
         configured      => Provisioner::Cookbook->domain_config( $opts{domain} ),
         host            => $host,
         host_configured => ( defined $host ? Provisioner::Cookbook->domain_config($host) : undef ),
-        delegated_by    => scalar Provisioner::Cookbook->delegating_guest( $opts{domain} ),
     );
 }
 

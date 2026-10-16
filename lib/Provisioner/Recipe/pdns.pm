@@ -17,8 +17,6 @@ use parent qw{Provisioner::DNSRecipe};
     somedomain:
         pdns:
             extra_records: zonefile_fragment.txt
-            authoritative_for:
-                - lab.example.net
 
 =head2 DESCRIPTION
 
@@ -37,44 +35,23 @@ the domain in the data source.
 The recursor lets you point a resolver at this guest for fast answers.  It also
 reduces the DNS rate limiting that RBLs apply.
 
-=head2 Zones for other guests
+=head2 Zones of other guests
 
-C<authoritative_for> names zones that this guest holds for other guests.  For
-each one, the guest makes the zone, with itself as its nameserver.  In the
-postrun it writes the delegation into the zone above: an C<NS> record of the
-zone that names this domain, and the address of this domain where this domain
-is in the zone.  It writes them through the provider that holds the zone
-above, which is one of these:
-
-=over 4
-
-=item * another pdns guest whose C<authoritative_for> holds the zone above,
-through its API proxy;
-
-=item * this guest, where its own zone or another of its zones is the zone
-above;
-
-=item * the registrar of this domain.
-
-=back
-
-Under a reserved TLD with none of them, nothing is written, and only a resolver
-that asks this guest finds the zone.
-
-A guest whose domain is in one of these zones then has this guest as its
-registrar, with no configuration of its own.  See
-L<Provisioner::Recipe::registrar>.  It reaches the API of this guest through
-the proxy below, with a token of its own.
+A guest can name this guest as the C<authority> of its registrar.  See
+L<Provisioner::Recipe::registrar>.  Then this guest holds a zone of the name of
+that guest, and that guest writes its records here, through the API proxy
+below.  C<bin/provision> makes the zone when it builds that guest, with this
+domain as its nameserver, and deletes the zone that a build before it made.
+See C<client_secret>.
 
 The server answers on port 53 of the address of the guest, as well as on
-loopback, because the zone above names it as the nameserver of each zone.  It
-answers only for the zones that it holds, and refuses everything else.  The
-recursor stays on loopback.
+loopback, because the zone above names this domain as the nameserver of each
+of those zones.  It answers only for the zones that it holds, and refuses
+everything else.  The recursor stays on loopback.
 
 =head2 The API proxy
 
-With an C<authoritative_for>, this guest also opens its API to other guests,
-through L<PowerDNS::API::ACL>.  The API itself listens only on a unix socket on
+This guest opens its API to other guests through L<PowerDNS::API::ACL>.  The API itself listens only on a unix socket on
 the guest, and its one key can rewrite every zone on the guest.
 
 A client presents a token of its own as its API key.  A grant lets a token read
@@ -98,12 +75,12 @@ C<0002>.  Other files that pdns creates become writable by the C<pdns> group
 too, which this recipe already makes of everything under
 F</var/spool/powerdns>.  The tokens are in F</var/lib/pdns-acl/acl.db>.
 
-A guest under one of the zones gets a token from this guest when it is built.
-C<bin/provision> runs C<pdns-acl> here over ssh, and puts the token on the other
-guest.  See C<client_secret>.  The token is labeled with the name that it
-writes, and a new build of that guest replaces it.  So C<pdns-acl token list>
-shows each of them, and C<pdns-acl token remove> revokes one.  This guest has to
-be up when the other guest is built.
+A guest that names this guest as its authority gets a token from this guest
+when it is built.  C<bin/provision> runs C<pdns-acl> here over ssh, and puts the
+token on the other guest.  See C<client_secret>.  The token is labeled with the
+name that it writes, and a new build of that guest replaces it.  So C<pdns-acl
+token list> shows each of them, and C<pdns-acl token remove> revokes one.
+C<bin/destroy> of that guest removes the token and the zone.
 
 Make any other token on the guest with C<pdns-acl>, as the C<pdns> user so that
 the database stays its own.  Name the perl that the perl recipe built:
@@ -113,16 +90,6 @@ system perl, which has none of the modules.
     sudo -u pdns /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl \
         token add web1 --zone lab.example.net. --name web1.lab.example.net. --write
 
-Build this guest before the guests under its zones.  A guest that is built
-first cannot publish its records, because nothing answers for its zone yet.
-
-=head3 Limitations
-
-Only a subdomain of a registered domain can be delegated, such as
-C<lab.example.net>, and never C<example.net> itself.  A registered domain is
-delegated at the registry, with glue records, and most registrars offer no API
-for those.  So the recipe refuses a zone of fewer than three labels.
-
 =cut
 
 use Text::Xslate;
@@ -130,13 +97,11 @@ use Net::IP;
 use File::Slurper;
 use Crypt::PRNG();
 
-use List::Util  qw{any uniq};
+use List::Util  qw{uniq};
 use Time::HiRes qw{time};
 
 use Provisioner::Cookbook();
-use Provisioner::DNSRecipe();
 use Provisioner::IPPool();
-use Provisioner::Utils();
 
 # The API socket as the host sees it.  pdns binds /api.sock inside its chroot,
 # which is this path from outside.
@@ -164,22 +129,20 @@ sub listens {
     return qw{127.0.0.1:2500 127.0.0.1:2500/udp};
 }
 
-=head2 @names = $recipe->served_names(%opts)
+=head2 @names = $recipe->subdomains()
 
-C<dnsapi.$domain>, where the API proxy answers, with an C<authoritative_for>,
-and nothing without one.
+C<dnsapi.$domain>, where the API proxy answers.
 
 =cut
 
-sub served_names {
-    my ( $self, %opts ) = @_;
-    return $self->delegated_zones(%opts) ? ("dnsapi.$opts{domain}") : ();
+sub subdomains {
+    return qw{dnsapi};
 }
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-Adds C<nostubresolver> and C<lexicon>.  With an C<authoritative_for>, adds
-C<perl>, which installs the API proxy, and C<nginx>, which serves it.
+Adds C<nostubresolver> and C<lexicon>, C<perl>, which installs the API proxy,
+and C<nginx>, which serves it.
 
 L<Provisioner::Recipe::lexicon> is the client that writes records into the zone
 of this server.
@@ -201,16 +164,11 @@ sub required_recipes {
     return (
         nostubresolver => sub { return () },
         lexicon        => sub { return () },
-        (
-            @served
-            ? (
-                # The perl target runs after this fragment, so the proxy starts
-                # in the postrun, when Starman and the proxy are installed.
-                perl  => sub { return ( cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] ) },
-                nginx => sub { return ( sites     => [@served] ) },
-              )
-            : ()
-        ),
+
+        # The perl target runs after this fragment, so the proxy starts in the
+        # postrun, when Starman and the proxy are installed.
+        perl  => sub { return ( cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] ) },
+        nginx => sub { return ( sites     => [@served] ) },
         $self->SUPER::required_recipes(%opts),
     );
 }
@@ -234,13 +192,6 @@ sub args {
                 description => 'More addresses or networks that may reach the API proxy, beside the guests of this installation, the addresses of this machine and the guest itself.  For a guest that reaches it through NAT, name the address it arrives from.',
             },
             api_ipv6 => { type => 'boolean', default => 1, description => 'Whether the vhost of the API proxy listens on IPv6 as well.' },
-
-            authoritative_for => {
-                type        => 'array',
-                items       => { type => 'string', format => 'hostname' },
-                default     => [],
-                description => 'Zones that this guest holds for other guests, each a subdomain of a registered domain.  The guest delegates each one from the zone above, and a guest under one has this guest as its registrar.',
-            },
 
             # The repo.powerdns.com release train to install from.  A release,
             # not auth-master, which is the development branch.  The API is on a
@@ -317,69 +268,15 @@ sub api_key_for {
     return $made{ $server // q{} } //= Crypt::PRNG::random_bytes_hex(32);
 }
 
-=head2 @zones = $recipe->delegated_zones(%opts)
-
-The C<authoritative_for> of C<%opts>, in lower case and without a trailing dot.
-Dies on a zone of fewer than three labels.  See L</Limitations>.
-
-=cut
-
-sub delegated_zones {
-    my ( $self, %opts ) = @_;
-
-    my @zones = map { Provisioner::Utils::dns_name($_) } @{ $opts{authoritative_for} // [] };
-    foreach my $zone (@zones) {
-        my $dots = $zone =~ tr/.//;
-        die "pdns cannot delegate $zone, which is a registered domain or a TLD.  That needs glue records at the registry, and most registrars have no API for them.  Name a subdomain, such as lab.$zone.\n"
-          if $dots < 2;
-    }
-
-    return @zones;
-}
-
-=head2 %delegation = $recipe->upstream_of($zone, %opts)
-
-Where the delegation of C<$zone> goes, for the guest of C<$opts{domain}>.
-Returns C<credentials>, as L<Provisioner::DNSRecipe/lexicon_credentials>
-returns them, and C<secrets>, the C<guest_secrets> that they need.  Returns
-nothing where nothing above holds the zone, under a reserved TLD.  See
-L</Zones for other guests> for the order.
-
-=cut
-
-sub upstream_of {
-    my ( $self, $zone, %opts ) = @_;
-
-    my $domain = $opts{domain};
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-    my ( $guest, $above ) = Provisioner::Cookbook->delegating_guest( $zone, undef, above => 1 );
-
-    if ( defined $guest && $guest ne $server ) {
-        return (
-            credentials => { $self->client_credentials( $guest, $zone ) },
-            secrets     => { $self->client_secret( $guest, $above, $zone ) },
-        );
-    }
-    return ( credentials => { $self->lexicon_credentials(%opts) } ) if defined $guest;
-
-    return ( credentials => { Provisioner::DNSRecipe->credentials_for( domain => $domain ) } )
-      if $zone ne $domain && Provisioner::Utils::in_zone( $zone, $domain );
-
-    my $tld = Provisioner::Utils::tld_of($zone);
-    return if any { $_ eq $tld } $self->reserved_tlds;
-
-    my $registrar = Provisioner::Cookbook->domain_config($domain)->{registrar} // {};
-    return ( credentials => { Provisioner::Cookbook->load('registrar')->configured_credentials( %{$registrar}, domain => $zone ) } );
-}
-
 =head2 %credentials = $recipe->client_credentials($guest, $name)
 
 What lexicon needs on another guest to write C<$name> through the proxy on
 C<$guest>, as L<Provisioner::DNSRecipe/lexicon_credentials> returns it.  The
 token is in C<key_file>, which C<client_secret> puts there.
 
-C<opts> is C<--resolve-zone-name>, because only the DNS knows which zone of
-C<$guest> holds the name.
+C<opts> is C<--resolve-zone-name>, so that lexicon asks the DNS for the zone.
+The guest resolves its own zone through C<$guest>.  See
+L<Provisioner::Recipe::registrar>.
 
 =cut
 
@@ -407,34 +304,42 @@ sub token_path {
     return "/etc/lexicon/$name.token";
 }
 
-=head2 %files = $recipe->client_secret($guest, $zone, $name)
+=head2 %files = $recipe->client_secret($guest, $name)
 
-The token that writes C<$name> and the names below it, in C<$zone>, through the
-proxy on C<$guest>.  It is a file for the C<guest_secrets> of a recipe on the
-guest that writes the name, with C<issue> in place of C<ref>: see
-C<guest_secrets> in L<Provisioner::Recipe>.
+The token that writes C<$name> and the names below it, in a zone of that name
+on C<$guest>.  It is a file for the C<guest_secrets> of a recipe on the guest
+that writes the name, with C<issue> in place of C<ref>: see C<guest_secrets> in
+L<Provisioner::Recipe>.
 
-The command replaces the token that has the label C<$name>, so a new build
-gets a new token and the old one stops working.  It prints the token only
-after both grants are in.  Dies when C<$zone> or C<$name> is not a DNS name in
-lower case, because the command runs as root on C<$guest>.
+The command runs as root on C<$guest>.  It deletes the zone C<$name> and the
+token labeled C<$name>, if a build before this one made them.  Then it makes
+the zone through the API, with C<$guest> as its nameserver, and a token with
+two grants in it.  So each build starts from an empty zone, which the guest
+fills again in its postrun, and the old token stops working.  It prints the
+token only after all of that worked.
+
+Dies when C<$guest> or C<$name> is not a DNS name in lower case, because the
+command runs as root.
 
 =cut
 
 sub client_secret {
-    my ( $self, $guest, $zone, $name ) = @_;
+    my ( $self, $guest, $name ) = @_;
 
-    # They go into a command that root runs on that guest.
-    foreach my $value ( $zone, $name ) {
-        die "client_secret takes DNS names, and '$value' is not one\n" unless $value =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/;
-    }
-
-    my $acl = 'runuser -u pdns -- /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl';
+    my $api = $self->api_on_guest( $guest, $name );
+    my $acl = $self->acl_on_guest;
     return (
         $self->token_path($name) => {
             issue => {
                 guest   => $guest,
-                command => "$acl token remove $name >/dev/null 2>&1; " . "token=\$($acl token add $name --zone $zone. --name $name. --write) && " . "$acl grant add $name --zone $zone. --name '*.$name.' --write && " . 'echo "$token"',
+                command => join(
+                    q{ },
+                    $self->release_command( $guest, $name ) . q{;},
+                    qq{$api -X POST --data '{"name": "$name.", "kind": "Native", "nameservers": ["$guest."]}' http://localhost/api/v1/servers/localhost/zones >/dev/null &&},
+                    qq{token=\$($acl token add $name --zone $name. --name $name. --write) &&},
+                    qq{$acl grant add $name --zone $name. --name '*.$name.' --write &&},
+                    'echo "$token"',
+                ),
             },
             owner => 'root:root',
             mode  => '0600',
@@ -442,16 +347,50 @@ sub client_secret {
     );
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 $command = $recipe->release_command($guest, $name)
 
-The tokens with which this guest writes the delegation of a zone into a zone
-that another pdns guest holds.  See C<upstream_of>.
+The shell command that root runs on C<$guest> to delete the zone C<$name> and
+the token labeled C<$name>.  Each of them may be gone already.  C<bin/destroy>
+runs it for a guest that named C<$guest> as its authority.
 
 =cut
 
-sub guest_secrets {
-    my ( $self, $install_dir, $domain, %opts ) = @_;
-    return map { my %up = $self->upstream_of( $_, %opts, domain => $domain ); %{ $up{secrets} // {} } } $self->delegated_zones( %opts, domain => $domain );
+sub release_command {
+    my ( $self, $guest, $name ) = @_;
+
+    my $api = $self->api_on_guest( $guest, $name );
+    my $acl = $self->acl_on_guest;
+    return "$acl token remove $name >/dev/null 2>&1; $api -X DELETE http://localhost/api/v1/servers/localhost/zones/$name. >/dev/null 2>&1";
+}
+
+=head2 $curl = $recipe->api_on_guest($guest, $name)
+
+The start of a curl command line that root runs on C<$guest> to reach its API on
+the socket, with its key.  C<$name> is the name that the command is about.  Dies
+when C<$guest> or C<$name> is not a DNS name in lower case, because both go
+into a command that root runs.
+
+=cut
+
+sub api_on_guest {
+    my ( $self, @names ) = @_;
+
+    foreach my $value (@names) {
+        die "A command that root runs on a pdns guest takes DNS names, and '$value' is not one\n" unless $value =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/;
+    }
+
+    return qq{curl -sf --unix-socket $API_SOCKET -H "X-API-Key: \$(sed -n 's/^api-key=//p' /etc/powerdns/pdns.d/api.conf)"};
+}
+
+=head2 $command = $recipe->acl_on_guest()
+
+The start of a C<pdns-acl> command line on a pdns guest, as the C<pdns> user,
+with the perl that the perl recipe built.
+
+=cut
+
+sub acl_on_guest {
+    return 'runuser -u pdns -- /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl';
 }
 
 sub enrich {
@@ -476,27 +415,10 @@ sub enrich {
     my @pool = map { Provisioner::IPPool::pool_items( $opts{ip_pool}{$_} ) } qw{cidr addresses};
     $opts{api_allowed} = [ uniq( qw{127.0.0.1 ::1}, @ours, @pool, sort( values %{ $opts{ipmap} // {} } ), @{ $opts{api_allow} } ) ];
 
-    # Nobody can ask a server on loopback, and a delegation names this one.
-    my @zones = $self->delegated_zones(%opts);
-    die "$opts{domain} holds zones for other guests, which ask its server on the address of the guest, and the guest has none yet.  The hypervisor allocates it after the makefile is written, so give the guest an address of the pool.\n"
-      if @zones && !$opts{main_ip};
-    $opts{public_address} = @zones ? $opts{main_ip} : undef;
+    # Nobody can ask a server on loopback, and the zone above names this one.
+    $opts{public_address} = $opts{main_ip};
 
     my %published = $self->publication(%opts);
-    $opts{delegations} = [
-        map {
-            my %up = $self->upstream_of( $_, %opts );
-            {
-                zone     => $_,
-                parent   => s/\A[^.]+[.]//r,
-                ns       => $opts{domain},
-                address  => $published{address},
-                glue     => ( $published{address} && Provisioner::Utils::in_zone( $opts{domain}, $_ ) ) ? 1 : 0,
-                upstream => $up{credentials},
-            }
-        } $self->delegated_zones(%opts)
-    ];
-
     return ( %opts, %published );
 }
 
@@ -504,19 +426,18 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'pdns.zone.tt'           => 'zonefile',
-        'pdns.domain.tt'         => 'pdns-domain.conf',
-        'pdns.global.tt'         => 'pdns-global.conf',
-        'pdns.recursor.tt'       => 'pdns-recursor-domain.conf',
-        'pdns.recursor.lua.tt'   => 'pdns-recursor-domain.lua',
-        'pdns.rsyslog.tt'        => '10-powerdns.conf',
-        'pdns.api.tt'            => 'pdns-api.conf',
-        'pdns.delegations.sh.tt' => 'pdns-delegations.sh',
-        'pdns.acl.psgi.tt'       => 'pdns-acl.psgi',
-        'pdns.acl.env.tt'        => 'pdns-acl.env',
-        'pdns.acl.service.tt'    => 'pdns-acl.service',
-        'pdns.acl.nginx.tt'      => 'pdns-acl.nginx.conf',
-        'pdns.acl.dropin.tt'     => 'pdns-acl.dropin.conf',
+        'pdns.zone.tt'         => 'zonefile',
+        'pdns.domain.tt'       => 'pdns-domain.conf',
+        'pdns.global.tt'       => 'pdns-global.conf',
+        'pdns.recursor.tt'     => 'pdns-recursor-domain.conf',
+        'pdns.recursor.lua.tt' => 'pdns-recursor-domain.lua',
+        'pdns.rsyslog.tt'      => '10-powerdns.conf',
+        'pdns.api.tt'          => 'pdns-api.conf',
+        'pdns.acl.psgi.tt'     => 'pdns-acl.psgi',
+        'pdns.acl.env.tt'      => 'pdns-acl.env',
+        'pdns.acl.service.tt'  => 'pdns-acl.service',
+        'pdns.acl.nginx.tt'    => 'pdns-acl.nginx.conf',
+        'pdns.acl.dropin.tt'   => 'pdns-acl.dropin.conf',
     );
 }
 

@@ -1114,7 +1114,8 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
     my @issuers;
     my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     $bin->redefine( authorize_runner_key => sub { return 0 } );
-    $bin->redefine( guest_of             => sub { push( @issuers, $_[0] ); return bless {}, 'IssuerProbe' } );
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => sub { push( @issuers, $_[1] ); return bless {}, 'IssuerProbe' } );
 
     is( quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( bless( {}, 'SecretsProbe' ), $domain ) } ), 1, 'the secrets are placed, without the password of the store' );
     is_deeply( \@issuers, ['ns.test.test'],                             'by the guest that the manifest names' );
@@ -1126,7 +1127,7 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
     $answer = "two\nlines\n";
     like( exception { Trog::Bin::Provisioner::issue_secret( $domain, '/bogus/web.token', $issue ) }, qr/did[ ]not[ ]issue/, 'and so has one that prints more than a secret' );
 
-    $bin->redefine( guest_of => sub { return } );
+    $fleet->redefine( guest_of => sub { return } );
     like( exception { Trog::Bin::Provisioner::issue_secret( $domain, '/bogus/web.token', $issue ) }, qr/ns[.]test[.]test[ ]is[ ]not[ ]up/, 'and a guest that is not up is named' );
 };
 

@@ -3,16 +3,10 @@ use strict;
 use warnings;
 use Test::More;
 
-[%# The proxy runs only where this guest holds zones for other guests. -%]
-[% IF delegations.size() -%]
-[% FOREACH d IN delegations -%]
-like( `sqlite3 /var/spool/powerdns/zones.db "SELECT name FROM domains WHERE name='[% d.zone %]'"`, qr/^\Q[% d.zone %]\E$/m, '[% d.zone %] is a zone of this server' );
-like( `dig +norec +time=3 +tries=1 SOA [% d.zone %] \@[% public_address %] 2>&1`, qr/flags:[^;]*\baa\b/, 'which answers for it with authority on the address of this guest' );
-[% IF d.upstream -%]
-[%# Asked of the provider of the zone above, through the shortcut that the
-    postrun published the delegation with. -%]
-like( `/opt/lexicon/upstream/[% d.zone %] list NS --name=[% d.zone %] --output=JSON 2>&1`, qr/"content":\s*"\Q[% d.ns %]\E[.]?"/, 'the zone above delegates [% d.zone %] to this guest' );
-[% END -%]
+[%# The zone above names this guest as the nameserver of the zones of other
+    guests, so its server answers on the address of the guest. -%]
+[% IF public_address -%]
+like( `dig +norec +time=3 +tries=1 SOA [% domain %] \@[% public_address %] 2>&1`, qr/flags:[^;]*\baa\b/, 'the server answers with authority on the address of this guest' );
 [% END -%]
 
 my $domain = '[% domain %]';
@@ -76,8 +70,5 @@ is( $list, 403, 'and so is the list of zones' );
 call( 'PATCH', $zone, $secret, $txt->( $probe, 'DELETE' ) );
 system( @pdns_acl, qw{token remove}, "test-$$" );
 
-[% ELSE -%]
-pass('this guest holds no zone for another guest, so it runs no proxy');
-[% END -%]
 
 done_testing();
