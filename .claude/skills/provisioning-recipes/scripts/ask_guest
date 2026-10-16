@@ -12,9 +12,6 @@ use re '/aasx';
 
 use FindBin::libs;
 
-use Config::Simple();
-use Trog::Guest();
-use Trog::HV();
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -43,24 +40,8 @@ sub main {
     my ( $domain, @command ) = @_;
     die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
 
-    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
-    my $hv    = $fleet->configured ? $fleet->hosting($domain) : Trog::HV->new();
-    die "No hypervisor in the fleet has $domain.\n" unless $hv;
-
-    my $cfg_dir = $hv->domain_dir . "/$domain";
-    my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
-    my $user    = $config ? ( $config->param('admin_user') // 'root' ) : 'root';
-    my $host    = $hv->inspection_address($domain)
-      or die "Could not find an address for $domain on " . $hv->describe . ", so there is nothing to ask.\n";
-
-    # Undef means the store was never opened: key_path prompts for its password,
-    # and a script has nothing to type into.  Unchecked, ssh is then handed no
-    # key at all and the guest refuses with "Permission denied (publickey)",
-    # which names the one thing that is not wrong.
-    my $key = Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" )
-      or die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | ask_guest $domain <command>\n};
-
-    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => $key );
+    my $guest = Trog::Hypervisors->guest_of($domain)
+      or die "No hypervisor in the fleet runs $domain at an address, so there is nothing to ask.\n";
 
     # Quoted the same way collect_artifacts does, so a command containing an
     # awk program does not close the quoting early and get answered with a
