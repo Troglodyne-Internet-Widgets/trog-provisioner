@@ -8,6 +8,8 @@ use warnings FATAL => 'all';
 use re '/aasx';
 use parent 'Trog::Hypervisors::Config';
 use List::Util qw{any reduce};
+use Config::Simple();
+use Trog::Guest();
 use Trog::HV();
 use Trog::Local();
 use Trog::Utils();
@@ -312,6 +314,34 @@ sub hosting {
       if $opts{must_answer} && @unasked;
 
     return undef;
+}
+
+=head2 $guest = Trog::Hypervisors->guest_of($domain)
+
+A L<Trog::Guest> for the guest of C<$domain> that is up, as its admin user,
+with its key from the store, or undef when no hypervisor runs it.  A class
+method: it loads the fleet that C<default_path> names.  Without a fleet, it
+asks the hypervisor that L<Trog::HV/new> returns.
+
+Dies when there is no key for the guest.
+
+=cut
+
+sub guest_of {
+    my ( $class, $domain ) = @_;
+
+    my $fleet = $class->load( $class->default_path() );
+    my $hv    = $fleet->configured ? $fleet->hosting($domain) : Trog::HV->new();
+    return unless $hv;
+
+    my $host = $hv->inspection_address($domain) or return;
+
+    my $cfg_dir = $hv->domain_dir . "/$domain";
+    my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
+    my $key     = Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" )
+      or die "No key for $domain, in the store or at $cfg_dir/key.rsa\n";
+
+    return Trog::Guest->new( name => $domain, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', key_path => $key );
 }
 
 =head2 place($domain, %needs)

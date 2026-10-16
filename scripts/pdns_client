@@ -1,0 +1,139 @@
+#!/usr/bin/perl
+
+package Trog::PdnsClient;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use IPC::Open3 ();
+use List::Util qw{any};
+
+=head1 pdns_client
+
+=head2 SYNOPSIS
+
+    pdns_client issue NAME NAMESERVER
+    pdns_client release NAME
+
+=head2 DESCRIPTION
+
+Runs as root on a pdns guest, for another guest that names this one as the
+C<authority> of its registrar.  See L<Provisioner::Recipe::registrar>.
+
+C<issue> deletes the zone NAME and the token labeled NAME, if a build before
+this one made them.  Then it makes the zone through the API on its socket, with
+NAMESERVER as its nameserver, and a token that can write NAME and every name
+below it.  It prints the token, and only after all of that worked.  So each
+build of the other guest starts from an empty zone, and its old token stops
+working.
+
+C<release> deletes the zone and the token.  Either of them can be gone already.
+
+It exits 0 when it did that, and 1 when a step failed, after it says which.
+
+=cut
+
+my $USAGE = "usage: pdns_client issue NAME NAMESERVER\n" . "       pdns_client release NAME\n";
+
+our $API_SOCKET = '/var/spool/powerdns/api.sock';
+our $API_CONF   = '/etc/powerdns/pdns.d/api.conf';
+our @ACL        = qw{runuser -u pdns -- /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl};
+
+# A name of the DNS, in lower case.  Each one goes into the path of a request
+# and into the arguments of pdns-acl.
+sub dns_name {
+    my ($name) = @_;
+    return defined $name && $name =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/ ? 1 : 0;
+}
+
+# Every command this runs, as the one thing a test stands in for.  A list, so
+# no shell reads it.  $input goes to its standard input.  Answers the output and
+# whether it succeeded.  The output holds its standard error as well, so that
+# nothing but the token reaches the output of this script: bin/provision reads
+# it over ssh on a pty, which joins the two streams.
+sub run {
+    my ( $command, $input ) = @_;
+
+    my $pid = IPC::Open3::open3( my $in, my $out, undef, @{$command} );
+    print {$in} $input // q{};
+    close $in or die "Could not give @{$command} its input: $!\n";
+    my $output = do { local $/ = undef; <$out> }
+      // q{};
+    waitpid( $pid, 0 );
+
+    return ( $output, $? == 0 ? 1 : 0 );
+}
+
+# The key of the API, which only root can read on this guest.
+sub api_key {
+    open( my $fh, '<', $API_CONF ) or die "Cannot read $API_CONF: $!\n";
+    my @lines = <$fh>;
+    close $fh or die "Cannot read $API_CONF: $!\n";
+
+    foreach my $line (@lines) {
+        return $1 if $line =~ m/\Aapi-key=(\S+)/;
+    }
+    die "$API_CONF names no api-key\n";
+}
+
+# A request to the API on its socket.  The key goes to curl on its standard
+# input, so it is not on a command line, which every user of the guest can read.
+sub api {
+    my ( $method, $path, $body ) = @_;
+
+    my @curl = ( qw{curl -sf --unix-socket}, $API_SOCKET, qw{-H @- -X}, $method );
+    push( @curl, '--data', $body ) if defined $body;
+    push( @curl, "http://localhost/api/v1/servers/localhost/$path" );
+
+    return run( \@curl, 'X-API-Key: ' . api_key() . "\n" );
+}
+
+sub acl {
+    my (@args) = @_;
+    return run( [ @ACL, @args ] );
+}
+
+sub release {
+    my ($name) = @_;
+
+    acl( qw{token remove}, $name );
+    api( 'DELETE', "zones/$name." );
+
+    return 0;
+}
+
+sub issue {
+    my ( $name, $nameserver ) = @_;
+
+    release($name);
+
+    my ( $said, $ok ) = api( 'POST', 'zones', qq[{"name": "$name.", "kind": "Native", "nameservers": ["$nameserver."]}] );
+    die "Could not make the zone $name: $said\n" unless $ok;
+
+    my $token;
+    ( $token, $ok ) = acl( qw{token add}, $name, '--zone', "$name.", '--name', "$name.", '--write' );
+    die "Could not make the token of $name: $token\n" unless $ok;
+
+    ( $said, $ok ) = acl( qw{grant add}, $name, '--zone', "$name.", '--name', "*.$name.", '--write' );
+    die "Could not let the token of $name write the names below it: $said\n" unless $ok;
+
+    print $token;
+    return 0;
+}
+
+sub main {
+    my ( $command, @args ) = @_;
+
+    die $USAGE unless defined $command;
+    die $USAGE if any { !dns_name($_) } @args;
+
+    return issue(@args)   if $command eq 'issue'   && @args == 2;
+    return release(@args) if $command eq 'release' && @args == 1;
+    die $USAGE;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

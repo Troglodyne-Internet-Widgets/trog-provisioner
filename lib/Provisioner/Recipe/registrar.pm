@@ -11,9 +11,10 @@ use re '/aasx';
 use parent qw{Provisioner::DNSRecipe};
 
 use File::Copy();
-use List::Util qw{any};
+use List::Util qw{any uniq};
 
 use Provisioner::Cookbook();
+use Provisioner::DNSRecipe();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::registrar
@@ -25,6 +26,10 @@ use Provisioner::Utils();
             type: easydns
             user: "secret:registrar/easydns_token/username"
             key:  "secret:registrar/easydns_token/password"
+
+    web.lab.example.net:
+        registrar:
+            authority: ns.example.net
 
 =head2 DESCRIPTION
 
@@ -40,18 +45,34 @@ public registrar holds a zone for C<.test>.
 
 =head2 A pdns guest can be the registrar
 
-A domain under a zone in the C<authoritative_for> of a pdns guest has that
-guest as its registrar, whatever C<type> says.  See
-L<Provisioner::Cookbook/delegating_guest>.  It reaches the API of that guest
-through its API proxy, with a token of its own name.  See
-L<Provisioner::Recipe::pdns/The API proxy>.  Such a
-domain needs no configuration here.  So C<type> is required only for a domain
-that no pdns guest holds.
+C<authority> names a guest of this installation that runs
+L<Provisioner::Recipe::pdns>.  That guest then holds a zone of the name of this
+domain, and this domain writes its records there, through the API proxy of that
+guest, with a token of its own.  See L<Provisioner::Recipe::pdns/Zones of other
+guests>.  C<bin/provision> makes the zone and the token when it builds this
+guest, and C<bin/destroy> removes them.  The setting names that guest, so
+C<bin/provision> builds that guest first.  See
+L<Provisioner::Cookbook/named_guests>.
+
+The domain needs at least three labels, as C<web.example.net> does.  Its zone
+is then delegated from the zone of the registered domain, with an C<NS> record
+that names the authority.  The guest writes that record in its postrun,
+through the registrar that C<type>, C<user> and C<key> name, which is usually
+the one of C<_base>.  Under a reserved TLD there is no zone above to write to,
+and the guest writes none.  A registered domain itself is delegated at the
+registry, with glue records, which most registrars have no API for.  So the
+recipe refuses a domain of two labels.
+
+The guest asks the authority for the names in its own zone, and for the names
+of the authority itself where the authority holds its own zone.  A drop-in of
+systemd-resolved routes those names there.  So lexicon finds the API of the
+authority, and the zone of a name, before any public resolver knows of them,
+and also under a reserved TLD.
 
 A pdns guest under a reserved TLD serves the API with a certificate from its own
 CA, which the fleet authority signs.  See L<Provisioner::Recipe::acmeca>.  So a
-domain that such a guest holds gets that authority as a trust anchor, at the
-path where acmeca installs it.
+domain whose authority is such a guest gets that authority as a trust anchor,
+at the path where acmeca installs it.
 
 =head2 It installs nothing, and publishes the records of the domain
 
@@ -79,7 +100,13 @@ sub args {
         properties => {
             type => {
                 type        => 'string',
-                description => 'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required, except for a domain that a pdns guest holds, which goes to that guest.',
+                description =>
+                  'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required, except under a reserved TLD with an authority.  With an authority, it is the registrar that the NS record of the zone of the domain goes to.',
+            },
+            authority => {
+                type        => 'string',
+                format      => 'hostname',
+                description => 'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  The domain needs at least three labels.',
             },
             user => {
                 type        => 'string',
@@ -98,7 +125,7 @@ sub args {
 
 =head2 %credentials = $recipe->lexicon_credentials(%opts)
 
-For a domain that a pdns guest holds, returns what
+For a domain with an C<authority>, returns what
 L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
 Otherwise returns C<configured_credentials>.
 
@@ -124,15 +151,15 @@ Returns C<type>, C<user> and C<key> as the operator configured them, with an
 empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
 an empty list.  Dies when there is no C<type>.
 
-L<Provisioner::Recipe::pdns> asks this for the delegation of a zone that it
-holds, which C<lexicon_credentials> would send to itself.
+C<enrich> asks this for the registrar of the zone above, where the C<NS>
+record of a domain with an C<authority> goes.
 
 =cut
 
 sub configured_credentials {
     my ( $self, %opts ) = @_;
 
-    die "registrar has no type for $opts{domain}, and no pdns guest holds that name.  Name the provider that holds its zone, as lexicon calls it.\n"
+    die "registrar has no type for $opts{domain}.  Name the provider that holds the zone, as lexicon calls it.\n"
       unless $opts{type};
 
     return (
@@ -146,50 +173,84 @@ sub configured_credentials {
 
 =head2 $guest = $recipe->delegated_to($domain)
 
-The pdns guest that holds C<$domain> through its C<authoritative_for>, or undef.
-A pdns guest is never delegated to itself, nor is a domain on it.
+The C<authority> of the registrar of C<$domain>, or of the guest that it is
+layered onto, or undef.  A guest is never its own authority.
 
 =cut
 
 sub delegated_to {
     my ( $self, $domain ) = @_;
 
-    my $guest = Provisioner::Cookbook->delegating_guest($domain);
-    return unless defined $guest;
-    return if $guest eq ( Provisioner::Cookbook->host_of($domain) // $domain );
-    return $guest;
+    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    foreach my $where ( uniq( $domain, $server ) ) {
+        my $authority = ( Provisioner::Cookbook->domain_config($where)->{ $self->recipe_name } // {} )->{authority};
+        next unless defined $authority;
+        $authority = Provisioner::Utils::dns_name($authority);
+        return $authority eq $server ? undef : $authority;
+    }
+
+    return;
 }
 
 =head2 %files = $recipe->guest_secrets($install_dir, $domain)
 
-For a domain that a pdns guest holds, and that this recipe answers for, the
-token of the domain.  See L<Provisioner::Recipe::pdns/client_secret>.
+For a domain with an C<authority>, where this recipe holds the zone, the token
+of the domain, which the authority issues.  See
+L<Provisioner::Recipe::pdns/client_secret>.
 
 =cut
 
 sub guest_secrets {
     my ( $self, $install_dir, $domain ) = @_;
 
-    return () unless defined $self->delegated_to($domain) && $self->provider_for( domain => $domain ) eq $self->recipe_name;
+    my $guest = $self->delegated_to($domain);
+    return () unless defined $guest && $self->provider_for( domain => $domain ) eq $self->recipe_name;
 
-    my ( $guest, $zone ) = Provisioner::Cookbook->delegating_guest($domain);
-    return Provisioner::Cookbook->load('pdns')->client_secret( $guest, $zone, $domain );
+    return Provisioner::Cookbook->load('pdns')->client_secret( $guest, Provisioner::Utils::dns_name($domain) );
 }
 
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds what C<publication> in L<Provisioner::DNSRecipe> says this recipe
-publishes, and C<fleet_anchor>, which is true where the domain reaches a pdns
-guest under a reserved TLD.
+publishes.  With an C<authority>, adds C<authority>, C<authority_address>, its
+address, C<routing_domains>, the zones that the guest asks it for, as
+systemd-resolved spells them,
+C<fleet_anchor>, which is true where the authority is under a reserved TLD,
+C<upstream>, the credentials of the registrar of the zone above, or undef where
+the domain is under a reserved TLD, and C<parent>, the name above the domain.
+
+Dies when the domain has fewer than three labels, when the authority runs no
+pdns, or when the installation gave the authority no address.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $guest = $self->delegated_to( $opts{domain} );
-    my $tld   = Provisioner::Utils::tld_of( $guest // q{} ) // q{};
-    $opts{fleet_anchor} = ( defined $guest && any { $_ eq $tld } $self->reserved_tlds ) ? 1 : 0;
+    my $domain = $opts{domain};
+    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $guest  = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->delegated_to($domain);
+    undef $guest if defined $guest && $guest eq $server;
+    return ( %opts, $self->publication(%opts) ) unless defined $guest;
+
+    die "$domain names $guest as the authority of its registrar, but has fewer than three labels.  Its zone is delegated with an NS record in the zone of a registered domain, and a registered domain itself needs glue at the registry, which most registrars have no API for.\n"
+      if ( $domain =~ tr/.// ) < 2;
+    die "$domain names $guest as the authority of its registrar, but $guest runs no pdns in this installation.\n"
+      unless exists Provisioner::Cookbook->domain_config($guest)->{pdns};
+
+    my $address = ( $opts{ipmap} // {} )->{$guest};
+    die "$domain names $guest as the authority of its registrar, and the installation gave $guest no address to ask it at.  Give it an address of the pool.\n"
+      unless $address;
+
+    my %reserved = map { $_ => 1 } $self->reserved_tlds;
+    my $own_zone = ( eval { $self->provider_for( domain => $guest ) } // q{} ) eq Provisioner::DNSRecipe->local_implementation;
+
+    $opts{authority}         = $guest;
+    $opts{authority_address} = $address;
+    $opts{routing_domains}   = join( q{ }, map { "~$_" } $domain, ( $own_zone ? $guest : () ) );
+    $opts{fleet_anchor}      = $reserved{ Provisioner::Utils::tld_of($guest)  // q{} } ? 1     : 0;
+    $opts{upstream}          = $reserved{ Provisioner::Utils::tld_of($domain) // q{} } ? undef : { $self->configured_credentials( %opts, domain => $domain ) };
+    $opts{parent}            = $domain =~ s/\A[^.]+[.]//r;
 
     return ( %opts, $self->publication(%opts) );
 }
@@ -213,6 +274,13 @@ sub generate_files {
       or die "Could not give the guest the authority that the API of its pdns guest chains to: $!\n";
 
     return ( @written, 'registrar-anchor.crt' );
+}
+
+sub template_files {
+    return (
+        'registrar.resolved.tt' => 'registrar-resolved.conf',
+        'registrar.upstream.tt' => 'registrar-upstream.sh',
+    );
 }
 
 sub tests {

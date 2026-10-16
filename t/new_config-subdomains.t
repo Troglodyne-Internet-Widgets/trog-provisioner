@@ -145,8 +145,10 @@ subtest 'a web server brings www with it, and nothing it does not serve' => sub 
     my ( $err, undef, $dir ) = generate( 'web.test', nginxproxy => { proxy_uri => 'run/bogus.sock' } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
-    is_deeply( certificate_names($dir),        [qw{web.test www.web.test}], 'the certificate names www, because nginxproxy serves it, and no mail, because nothing serves that' );
-    is_deeply( zone_names( $dir, 'web.test' ), ['www.web.test'],            'and so does the zone' );
+    # dnsapi, because a guest under a reserved TLD runs pdns for acmeca, and
+    # pdns serves its API there.
+    is_deeply( certificate_names($dir),        [qw{dnsapi.web.test web.test www.web.test}], 'the certificate names www, because nginxproxy serves it, and no mail, because nothing serves that' );
+    is_deeply( zone_names( $dir, 'web.test' ), [qw{dnsapi.web.test www.web.test}],          'and so does the zone' );
 };
 
 subtest 'a name belonging to a dependency is handed over as well' => sub {
@@ -158,7 +160,7 @@ subtest 'a name belonging to a dependency is handed over as well' => sub {
     my ( $err, undef, $dir ) = generate( 'mail.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
-    my @served = qw{autoconfig.mail.test autodiscover.mail.test mail.mail.test webmail.mail.test www.mail.test};
+    my @served = qw{autoconfig.mail.test autodiscover.mail.test dnsapi.mail.test mail.mail.test webmail.mail.test www.mail.test};
     is_deeply( certificate_names($dir),         [ sort 'mail.test', @served ], 'the certificate names what each recipe serves' );
     is_deeply( zone_names( $dir, 'mail.test' ), \@served,                      'and the zone carries each of them' );
 };

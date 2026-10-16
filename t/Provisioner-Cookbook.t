@@ -1368,31 +1368,4 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
     is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
 };
 
-subtest 'delegating_guest finds the pdns guest that holds a name' => sub {
-    my %conf = (
-        _base         => { registrar => { type              => 'bogus' } },
-        'ns.test'     => { pdns      => { authoritative_for => [ 'Lab.Zone.Test.', 'deep.lab.zone.test' ] } },
-        'ns2.test'    => { pdns      => { authoritative_for => 'other.zone.test' } },
-        'plain.test'  => { pdns      => {} },
-        'client.test' => { registrar => {} },
-    );
-
-    is_deeply( { Provisioner::Cookbook->delegations( \%conf ) }, { 'lab.zone.test' => 'ns.test', 'deep.lab.zone.test' => 'ns.test', 'other.zone.test' => 'ns2.test' }, 'delegations names each zone, in lower case and without its dot, and its guest' );
-
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'web.lab.zone.test', \%conf ) ],      [ 'ns.test', 'lab.zone.test' ],      'a name below a zone is held by its guest' );
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'LAB.zone.test.', \%conf ) ],         [ 'ns.test', 'lab.zone.test' ],      'and so is the zone itself, in any case' );
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'web.deep.lab.zone.test', \%conf ) ], [ 'ns.test', 'deep.lab.zone.test' ], 'the longest zone wins' );
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'web.other.zone.test', \%conf ) ],    [ 'ns2.test', 'other.zone.test' ],   'whichever guest holds it' );
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'xlab.zone.test', \%conf ) ],         [],                                  'a name that only ends in the text of a zone is not in it' );
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'zone.test', \%conf ) ],              [],                                  'nor is the zone above it' );
-    is( scalar Provisioner::Cookbook->delegating_guest( 'web.lab.zone.test', \%conf ), 'ns.test', 'in scalar context it is the guest' );
-    is( scalar Provisioner::Cookbook->delegating_guest( 'zone.test',         \%conf ), undef,     'or undef' );
-
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'deep.lab.zone.test', \%conf, above => 1 ) ], [ 'ns.test', 'lab.zone.test' ], 'above skips the zone that is the name, which is where it is delegated from' );
-    is_deeply( [ Provisioner::Cookbook->delegating_guest( 'lab.zone.test',      \%conf, above => 1 ) ], [],                             'and finds nothing when no guest holds the zone above it' );
-
-    $conf{'ns3.test'} = { pdns => { authoritative_for => ['lab.zone.test.'] } };
-    like( exception { Provisioner::Cookbook->delegations( \%conf ) }, qr/ns[.]test[ ]and[ ]ns3[.]test[ ]name[ ]lab[.]zone[.]test/, 'two guests that name one zone are refused, by name' );
-};
-
 done_testing();

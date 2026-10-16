@@ -1,5 +1,5 @@
-[%# Loopback for the recursor, and the address of the guest where it holds
-    zones for other guests, which the zone above names as their nameserver. -%]
+[%# Loopback for the recursor, and the address of the guest, which the zone
+    above names as the nameserver of the zones of other guests. -%]
 local-address=127.0.0.1[% IF public_address %], [% public_address %]:53[% END %]
 local-port=2500
 # A path inside the chroot.  The recipe makes /var/spool/powerdns/run/pdns.

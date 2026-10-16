@@ -132,6 +132,44 @@ subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
     like( $after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed' );
 };
 
+# --- release_authority ---
+subtest 'the zone and the token of a domain come off the guest that its registrar names' => sub {
+    my $domain   = 'web.lab.test.test';
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? { registrar => { authority => 'NS.test.test.' } } : {} } );
+    $cookbook->redefine( host_of       => sub { return } );
+
+    my ( @ran, $rc, @asked );
+    no warnings 'once';
+    local *AuthorityProbe::run_cmd = sub { my ( undef, $cmd ) = @_; push( @ran, $cmd ); return $rc };
+    use warnings;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => sub { push( @asked, $_[1] ); return bless {}, 'AuthorityProbe' } );
+
+    $rc = 0;
+    my $removed;
+    capture { $removed = Trog::Bin::Destroy::release_authority( $domain, 0 ) };
+    is( $removed, 1, 'they are removed' );
+    is_deeply( \@asked, ['ns.test.test'], 'on the authority, in the form that DNS compares' );
+    like( $ran[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]'/,                        'as root' );
+    like( $ran[0], qr{/root/bin/pdns_client[ ]release[ ]\Q$domain\E'\z}, 'which runs pdns_client release, for the domain' );
+
+    @ran = ();
+    capture { Trog::Bin::Destroy::release_authority( $domain, 1 ) };
+    is( scalar @ran, 0, 'a dry run sends nothing' );
+
+    $rc = 1;
+    my ( undef, $warned ) = capture { $removed = Trog::Bin::Destroy::release_authority( $domain, 0 ) };
+    is( $removed, 0, 'a command that failed removed nothing' );
+    like( $warned, qr/Could[ ]not[ ]remove/, 'and says so' );
+
+    $fleet->redefine( guest_of => sub { return } );
+    ( undef, $warned ) = capture { $removed = Trog::Bin::Destroy::release_authority( $domain, 0 ) };
+    like( $warned, qr/ns[.]test[.]test[ ]is[ ]not[ ]up/, 'an authority that is not up is named, and the destroy goes on' );
+
+    is( Trog::Bin::Destroy::release_authority( 'other.test.test', 0 ), 0, 'a domain that names no authority has nothing to remove' );
+};
+
 # --- remove_runner_key ---
 #
 # The counterpart of authorize_runner_key in bin/provision.  It reads the public

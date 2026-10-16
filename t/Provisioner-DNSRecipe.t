@@ -107,22 +107,41 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     like( $out, qr{^lexicon[ ]--resolve-zone-name[ ]powerdns[ ]}m, 'invoked with the flag the provider needs' );
 };
 
-subtest 'a domain that a pdns guest holds reaches it with a token of its own' => sub {
+# Makes $conf, a mock of Provisioner::Cookbook, answer with two guests: $name
+# names $authority as the authority of its registrar, and $authority runs pdns.
+sub authority_conf {
+    my ( $conf, $name, $authority, %over ) = @_;
+
+    $conf->redefine(
+        domain_config => sub {
+            my ( undef, $domain ) = @_;
+            return { pdns      => {}, %{ $over{authority_conf} // {} } }                                     if $domain eq $authority;
+            return { registrar => { type => 'easydns', key => 'a-registrar-key', authority => $authority } } if $domain eq $name;
+            return {};
+        }
+    );
+    $conf->redefine( host_of => sub { return } );
+    return;
+}
+
+subtest 'a domain that names an authority reaches it with a token of its own' => sub {
     my $name = 'web.lab.example.net';
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
-    $conf->redefine( domain_config    => sub { return { registrar => { type => 'easydns', key => 'a-registrar-key' } } } );
-    $conf->redefine( host_of          => sub { return } );
-    $conf->redefine( delegating_guest => sub { my ( undef, $asked ) = @_; return $asked ne $name ? () : wantarray ? ( 'ns.example.net', 'lab.example.net' ) : 'ns.example.net' } );
+    authority_conf( $conf, $name, 'ns.example.net' );
 
     my $registrar = Provisioner::Cookbook->load('registrar');
-    my %creds     = $registrar->lexicon_credentials( type => 'easydns', key => 'a-registrar-key', domain => $name );
+    is( $registrar->delegated_to($name),            'ns.example.net', 'its authority is the guest that its registrar names' );
+    is( $registrar->delegated_to('ns.example.net'), undef,            'and a guest that names none has none' );
+
+    my %creds = $registrar->lexicon_credentials( type => 'easydns', key => 'a-registrar-key', domain => $name );
     is( $creds{type},     'powerdns',                 'the pdns guest, whatever the registrar of the domain is' );
     is( $creds{key_file}, "/etc/lexicon/$name.token", 'with the token in a file' );
     is( $creds{key},      q{},                        'and not in the payload' );
 
     my %secrets = fresh('registrar')->guest_secrets( '/bogus', $name );
-    is_deeply( [ keys %secrets ],                                                    ["/etc/lexicon/$name.token"], 'which bin/provision puts on the guest' );
-    is_deeply( { fresh('registrar')->guest_secrets( '/bogus', 'web.example.net' ) }, {},                           'and a domain that no pdns guest holds needs none' );
+    is_deeply( [ keys %secrets ], ["/etc/lexicon/$name.token"], 'which bin/provision puts on the guest' );
+    is( $secrets{"/etc/lexicon/$name.token"}{issue}{guest}, 'ns.example.net', 'from the authority, which issues it' );
+    is_deeply( { fresh('registrar')->guest_secrets( '/bogus', 'web.example.net' ) }, {}, 'and a domain that names no authority needs none' );
 
     my $out        = fresh('lexicon')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
     my $token_line = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat /etc/lexicon/$name.token)"};
@@ -133,15 +152,52 @@ subtest 'a domain that a pdns guest holds reaches it with a token of its own' =>
     my $hook = fresh('letsencrypt')->render_file( 'files/ssl.dehydrated.hook.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
     like( $hook, qr{^\Q$token_line\E$}m, 'and so does the hook that answers a challenge' );
 
-    like( exception { $registrar->lexicon_credentials( domain => 'web.example.net' ) }, qr/no[ ]type/, 'a domain that no pdns guest holds needs the type of its registrar' );
+    like( exception { $registrar->lexicon_credentials( domain => 'web.example.net' ) }, qr/no[ ]type/, 'a domain that names no authority needs the type of its registrar' );
 };
 
-subtest 'a domain that a pdns guest under a reserved TLD holds trusts the authority of its API' => sub {
-    my $guest = 'ns.zone.test';
-    my $conf  = Test::MockModule->new('Provisioner::Cookbook');
-    $conf->redefine( domain_config    => sub { return {} } );
-    $conf->redefine( host_of          => sub { return } );
-    $conf->redefine( delegating_guest => sub { return wantarray ? ( $guest, 'lab.zone.test' ) : $guest } );
+subtest 'what a guest that names an authority sets up' => sub {
+    my $name = 'web.lab.example.net';
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    authority_conf( $conf, $name, 'ns.example.net', authority_conf => { lexicon => { dns_preference => 'pdns' } } );
+    my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.example.net' => '192.0.2.53' } );
+
+    my %opts = fresh('registrar')->validate( %common, authority => 'ns.example.net', type => 'easydns' );
+    is( $opts{authority_address}, '192.0.2.53',             'it asks the authority at its address' );
+    is( $opts{routing_domains},   "~$name ~ns.example.net", 'for its own zone, and for the zone of the authority, which the authority holds' );
+    is( $opts{upstream}{type},    'easydns',                'the NS record of its zone goes to its registrar' );
+    is( $opts{parent},            'lab.example.net',        'through a shortcut that names the zone above' );
+    ok( !$opts{fleet_anchor}, 'and an authority under a public name needs no anchor' );
+
+    my $fragment = fresh('registrar')->render( %common, authority => 'ns.example.net', type => 'easydns' );
+    my $dropin   = 'install -o root -g root -m 0644 registrar-resolved.conf /etc/systemd/resolved.conf.d/trog-authority.conf';
+    my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns.example.net";
+    like( $fragment, qr{^\Q$dropin\E$}m,  'the fragment routes those names to the authority' );
+    like( $fragment, qr{\Q$delegate\E$}m, 'and delegates its zone to the authority in the postrun' );
+    ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records there' );
+
+    my $resolved = fresh('registrar')->render_file( 'files/registrar.resolved.tt', %common, authority => 'ns.example.net', type => 'easydns' );
+    like( $resolved, qr/^DNS=192[.]0[.]2[.]53$/m,                     'the drop-in names the authority' );
+    like( $resolved, qr/^Domains=~\Q$name\E[ ]~ns[.]example[.]net$/m, 'for those zones alone' );
+
+    like( exception { fresh('registrar')->validate( %common, domain => 'example.net', authority => 'ns.example.net', type => 'easydns' ) }, qr/fewer[ ]than[ ]three[ ]labels/, 'a registered domain cannot name an authority' );
+    like( exception { fresh('registrar')->validate( %common, ipmap  => {},            authority => 'ns.example.net', type => 'easydns' ) }, qr/no[ ]address/,                  'nor can a domain whose authority has no address' );
+};
+
+subtest 'the authority is built first, as any guest that a setting names is' => sub {
+    my %conf = ( 'ns.test.test' => { pdns => {} }, 'web.lab.test.test' => { registrar => { authority => 'ns.test.test' } } );
+
+    is_deeply(
+        [ Provisioner::Cookbook->named_guests( 'web.lab.test.test', \%conf ) ],
+        [ { domain => 'ns.test.test', setting => 'registrar.authority', by => 'web.lab.test.test', weak => 0 } ],
+        'the setting names the authority, and the guest needs it to build'
+    );
+    is_deeply( [ Provisioner::Cookbook->upstream_domains( 'web.lab.test.test', \%conf ) ], ['ns.test.test'], 'so bin/provision builds the authority first' );
+};
+
+subtest 'a domain whose authority is under a reserved TLD trusts the authority of its API' => sub {
+    my $name = 'web.lab.zone.test';
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    authority_conf( $conf, $name, 'ns.zone.test' );
 
     my $dir    = tempdir( CLEANUP => 1 );
     my $anchor = "$dir/authority.crt";
@@ -149,20 +205,15 @@ subtest 'a domain that a pdns guest under a reserved TLD holds trusts the author
     my $fetchcache = Test::MockModule->new( Provisioner::Cookbook->load('fetchcache') );
     $fetchcache->redefine( authority => sub { return { cert => $anchor, key => '/bogus' } } );
 
-    my %common = ( domain => 'web.lab.zone.test', install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6' );
-    my $recipe = fresh('registrar');
+    my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.zone.test' => '192.0.2.53' }, authority => 'ns.zone.test' );
     my $out    = tempdir( CLEANUP => 1 );
-    my @wrote  = $recipe->generate_files( $out, %common );
+    my @wrote  = fresh('registrar')->generate_files( $out, %common );
 
     ok( ( grep { $_ eq 'registrar-anchor.crt' } @wrote ), 'the payload carries the authority' );
     is( File::Slurper::read_text("$out/registrar-anchor.crt"), "the authority\n", 'which is the fleet authority' );
     my $install = 'install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt';
     like( fresh('registrar')->render(%common), qr{^\Q$install\E$}m, 'and the fragment installs it where acmeca installs the same one' );
-
-    $guest = 'ns.example.net';
-    my $public = tempdir( CLEANUP => 1 );
-    fresh('registrar')->generate_files( $public, %common, domain => 'web.lab.example.net' );
-    ok( !-e "$public/registrar-anchor.crt", 'a pdns guest under a public name has a certificate that every guest trusts already' );
+    unlike( fresh('registrar')->render(%common), qr{--delegate}, 'and under a reserved TLD there is no zone above to delegate from' );
 };
 
 subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => sub {
@@ -296,22 +347,22 @@ subtest 'the interface says which implementation serves a domain' => sub {
     );
 };
 
-subtest 'a domain that a pdns guest holds goes to the registrar, which reaches that guest' => sub {
-    my $nothing = {};
-    my $local   = { pdns => {} };
+subtest 'a domain that names an authority goes to the registrar, which reaches that guest' => sub {
+    my $nothing = { registrar => { authority => 'ns.test' } };
+    my $local   = { pdns => {}, registrar => { authority => 'ns.test' } };
 
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.example.net', configured => $nothing, delegated_by => 'ns.example.net' ), 'registrar', 'with no registrar configured' );
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test',        configured => $nothing, delegated_by => 'ns.test' ),        'registrar', 'and under a reserved TLD, which a pdns guest can hold' );
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $nothing, delegated_by => 'ns.test', dns_preference => 'registrar' ), 'registrar', 'where it may also be named' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.example.net', configured => { registrar => { authority => 'ns.example.net' } } ), 'registrar', 'with no type configured' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test',        configured => $nothing ),                                           'registrar', 'and under a reserved TLD, where the authority holds the zone' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $nothing, dns_preference => 'registrar' ), 'registrar', 'where it may also be named' );
 
     like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $local, delegated_by => 'ns.test' ) },
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $local ) },
         qr/both/,
         'a guest that also runs a pdns of its own has a tie to settle'
     );
 
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'ns.test', configured => $local, delegated_by => 'ns.test' ), 'pdns', 'the pdns guest itself is not delegated to itself' );
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'tenant.test', configured => $nothing, host => 'ns.test', host_configured => $local, delegated_by => 'ns.test' ), 'pdns', 'nor is a domain on its guest' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'ns.test', configured => $local ), 'pdns', 'a guest that names itself is not its own authority' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'tenant.test', configured => {}, host => 'ns.test', host_configured => $local ), 'pdns', 'nor is a domain on that guest' );
 };
 
 subtest 'the interface names the key that settles a tie' => sub {

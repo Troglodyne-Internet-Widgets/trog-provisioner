@@ -175,26 +175,25 @@ serves this name, and a guest with both and no preference is refused rather
 than guessed at. A name under a TLD RFC 2606 reserves is always served locally,
 because no public registrar can hold a zone for one.
 
-A pdns guest can also be the registrar of other guests. Name the zones that it
-holds for them in its `authoritative_for`:
+A pdns guest can also be the registrar of other guests. A guest names it as
+the `authority` of its registrar:
 
 ```yaml
-ns.example.net:
-    pdns:
-        authoritative_for:
-            - lab.example.net
+web.lab.example.net:
+    registrar:
+        authority: ns.example.net
 ```
 
-The guest makes each zone and writes the delegation into the zone above. A
-guest whose domain is in one of those zones then uses that pdns guest as its
-registrar, and needs no configuration for it. The longest zone that holds a
-name wins, and `_base` is the fallback. When such a guest is built, the pdns
-guest issues it a token that can write its own name and the names below it. `perldoc Provisioner::Recipe::pdns`
-has the details. Only a subdomain of a registered domain can be delegated,
+The pdns guest then holds a zone of the name of the guest, and the guest
+writes its records there through the API of the pdns guest. The guest writes
+the NS record of its zone through the registrar of `_base`, and asks the pdns
+guest for the names in its zone. The domain needs at least three labels,
 because a registered domain needs glue records at the registry.
 
-Build the pdns guest first. A guest under its zone publishes its records when
-it is built, and nothing answers for the zone before the pdns guest is up.
+The setting names the pdns guest, so `bin/provision` builds that guest first.
+When it builds the other guest, it makes the zone and a token on the pdns
+guest, and `bin/destroy` removes them. `perldoc Provisioner::Recipe::registrar`
+has the details.
 
 Credentials written under `_global` are refused, naming the domain: they used to
 live there and nothing reads them now.

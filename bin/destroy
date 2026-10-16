@@ -230,6 +230,9 @@ sub main {
         remove_authorized_key( $domain, $dryrun );
         remove_runner_key( $domain, $dryrun );
 
+        # 3a. Remove its zone and its token on the guest that holds them
+        release_authority( $domain, $dryrun );
+
         # 4. Optionally purge the domain directory, and the data directory
         if ($purge) {
             purge_domain_dir( $domain, $dryrun );
@@ -439,6 +442,49 @@ sub remove_runner_key {
     }
 
     return;
+}
+
+=head2 release_authority($domain, $dryrun)
+
+Removes the zone of C<$domain> and its token from the pdns guest that its
+registrar names as its C<authority>.  See L<Provisioner::Recipe::registrar>.
+Does nothing for a domain that names none.  Returns 1 when it removed them.
+
+This is the counterpart of C<issue_secret> in F<bin/provision>.  It warns and
+returns 0 when that guest is not up, or did not answer.  The guest of the domain
+is gone either way, so the zone and the token answer for nothing, and
+C<bin/provision> replaces both when the domain is built again.
+
+=cut
+
+sub release_authority {
+    my ( $domain, $dryrun ) = @_;
+
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my $authority = eval { $registrar->delegated_to($domain) };
+    return 0 unless defined $authority;
+
+    my $command = Provisioner::Cookbook->load('pdns')->release_command( $authority, lc $domain );
+    if ($dryrun) {
+        print "Would remove the zone and the token of $domain on $authority\n";
+        return 0;
+    }
+
+    my $guest = eval { Trog::Hypervisors->guest_of($authority) };
+    unless ($guest) {
+        warn "$authority is not up, so the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again.\n";
+        return 0;
+    }
+
+    ( my $quoted = $command ) =~ s/'/'\\''/g;
+    my $rc = eval { $guest->run_cmd("sudo -n sh -c '$quoted'") } // $@;
+    if ($rc) {
+        warn "Could not remove the zone and the token of $domain on $authority: $rc\n";
+        return 0;
+    }
+
+    print "Removed the zone and the token of $domain on $authority\n";
+    return 1;
 }
 
 =head2 purge_domain_dir($domain, $dryrun)

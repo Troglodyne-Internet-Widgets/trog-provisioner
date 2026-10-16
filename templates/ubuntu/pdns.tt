@@ -20,11 +20,6 @@ zone2sql --gsqlite --zone=zonefile --zone-name=[% domain %] > /var/spool/powerdn
     which the unique index on name refuses, so the target fails.  Use lexicon
     to change a zone that is already there. -%]
 sqlite3 /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% domain %]'" | grep -q . || sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
-[%# The zones that this guest holds for other guests, into the database in
-    the same way, before pdns restarts and opens it. -%]
-[% IF delegations.size() -%]
-bash pdns-delegations.sh
-[% END -%]
 chown -R pdns:pdns /var/spool/powerdns
 chmod -R 0775 /var/spool/powerdns
 [%# pdns binds its control socket and its API socket as root, before it
@@ -34,12 +29,10 @@ chmod -R 0775 /var/spool/powerdns
     group. -%]
 chown root:pdns /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
 chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
-[%# The proxy that other guests reach the API through, when this guest holds
-    zones for them.  See authoritative_for in Provisioner::Recipe::pdns.  pdns
-    owns the database of tokens, because the proxy runs as pdns to reach the
-    API socket.  The key of the API is in env, which only root and pdns can
-    read. -%]
-[% IF delegations.size() -%]
+[%# The proxy that other guests reach the API through.  See "The API proxy" in
+    Provisioner::Recipe::pdns.  pdns owns the database of tokens, because the
+    proxy runs as pdns to reach the API socket.  The key of the API is in env,
+    which only root and pdns can read. -%]
 install -d -o pdns -g pdns -m 0750 /var/lib/pdns-acl
 install -d -o root -g root -m 0755 /etc/pdns-acl
 install -o root -g root -m 0644 pdns-acl.psgi /etc/pdns-acl/app.psgi
@@ -57,19 +50,9 @@ install -o root -g root -m 0644 pdns-acl.nginx.conf /etc/nginx/sites-enabled/dns
 [% script_dir %]/queue_postrun_task systemctl enable pdns-acl
 [% script_dir %]/queue_postrun_task systemctl restart pdns-acl
 [% script_dir %]/queue_postrun_task systemctl reload nginx
-[% END -%]
 rm -f pdns-acl.env
 [%# Restart here, not in the postrun queue, for the reason in the global
     fragment.  A pdns that does not start then fails its own target. -%]
 systemctl restart pdns
 systemctl restart pdns-recursor
-[%# The delegation goes in the postrun, for the reason in
-    files/dnsrecipe.publish.tt. -%]
-[% IF delegations.size() -%]
-[% FOREACH d IN delegations -%]
-[% NEXT UNLESS d.upstream -%]
-[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --delegate --shortcut /opt/lexicon/upstream/[% d.zone %] [% d.zone %] [% d.ns %][% IF d.glue %] [% d.address %][% END %]
-[% END -%]
-[% END -%]
-rm -f pdns-delegations.sh
 [% INCLUDE "files/dnsrecipe.publish.tt" %]

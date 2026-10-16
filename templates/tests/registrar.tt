@@ -4,6 +4,13 @@ use warnings;
 use Test::More;
 use JSON::PP ();
 
+[% IF authority -%]
+like( `resolvectl query --legend=no dnsapi.[% authority %] 2>&1`, qr/\Q[% authority_address %]\E/, 'the guest finds the API of its authority' );
+like( `dig +norec +time=3 +tries=1 SOA [% domain %] \@[% authority_address %] 2>&1`, qr/flags:[^;]*\baa\b/, 'the authority holds the zone of this domain' );
+[% IF upstream -%]
+like( `/opt/lexicon/upstream/[% domain %] list NS --name=[% domain %] --output=JSON 2>&1`, qr/"content":\s*"\Q[% authority %]\E[.]?"/, 'the zone above delegates the zone of this domain to the authority' );
+[% END -%]
+[% END -%]
 [% IF fleet_anchor -%]
 ok(-f '/usr/local/share/ca-certificates/trog-acmeca.crt', 'the authority that the API of the pdns guest chains to is a trust anchor');
 [% END -%]

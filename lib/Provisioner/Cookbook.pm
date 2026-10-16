@@ -815,9 +815,6 @@ configuration of the machine that the domain is layered onto.  C<host> names
 that machine, so a refusal can say which guest it looked at.  Both are undef
 for a domain with a guest of its own.
 
-C<delegated_by> is the guest that C<delegating_guest> finds for the domain, in
-the configuration of the installation.
-
 C<requiring_conf> is the configuration of the recipe that declared the
 dependency.  The interface names the key that holds a preference, and reads it
 from there.  So a domain settles a tie in the block where it already configures
@@ -851,9 +848,6 @@ sub resolve_substitutable_dependency {
         configured      => $domain_conf // {},
         host            => $host,
         host_configured => $host_conf,
-
-        # Read by Provisioner::DNSRecipe, and ignored by other interfaces.
-        delegated_by => scalar $class->delegating_guest($domain),
     );
 
     die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
@@ -1289,66 +1283,6 @@ sub host_of {
     }
 
     return;
-}
-
-=head2 %guest_of = delegations($conf)
-
-Each zone that a pdns guest of C<$conf> serves for other guests, mapped to that
-guest: the C<authoritative_for> of L<Provisioner::Recipe::pdns>, in lower case
-and without a trailing dot.  C<$conf> is as in C<domain_config>.
-
-Dies when two domains name the same zone, because one guest holds a zone.
-
-=cut
-
-sub delegations {
-    my ( $class, $conf ) = @_;
-    $conf //= $class->configuration();
-
-    my %guest_of;
-    foreach my $domain ( sort grep { !m/\A_/ } keys %{$conf} ) {
-        my $pdns = $class->domain_config( $domain, $conf )->{pdns};
-        next unless ref $pdns eq 'HASH';
-
-        foreach my $zone ( map { Provisioner::Utils::dns_name($_) } @{ Provisioner::Utils::coerce_arrayref( $pdns->{authoritative_for} ) } ) {
-            die "Both $guest_of{$zone} and $domain name $zone in the authoritative_for of their pdns, but one guest holds a zone.  Take it out of one of them.\n"
-              if defined $guest_of{$zone} && $guest_of{$zone} ne $domain;
-            $guest_of{$zone} = $domain;
-        }
-    }
-
-    return %guest_of;
-}
-
-=head2 ($guest, $zone) = delegating_guest($name, $conf, %opts)
-
-The pdns guest that holds C<$name>, and the zone of C<delegations> that it
-holds the name in.  That is the longest zone that is C<$name> or that
-C<$name> is below.  Returns nothing when no zone of C<delegations> holds it.
-C<$conf> is as in C<domain_config>.
-
-In scalar context it returns the guest, or undef.
-
-With C<< above => 1 >>, only a zone that C<$name> is below counts, and not a
-zone that is C<$name> itself.  That is where a zone is delegated from.
-
-=cut
-
-sub delegating_guest {
-    my ( $class, $name, $conf, %opts ) = @_;
-    return unless defined $name;
-
-    my %guest_of = $class->delegations($conf);
-    $name = Provisioner::Utils::dns_name($name);
-
-    my @labels = split m/[.]/, $name;
-    foreach my $skip ( ( $opts{above} ? 1 : 0 ) .. $#labels ) {
-        my $zone = join q{.}, @labels[ $skip .. $#labels ];
-        next unless defined $guest_of{$zone};
-        return wantarray ? ( $guest_of{$zone}, $zone ) : $guest_of{$zone};
-    }
-
-    return wantarray ? () : undef;
 }
 
 # Each key that a _global can hold, and the schema of each field that declares

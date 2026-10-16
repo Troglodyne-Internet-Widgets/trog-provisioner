@@ -1,0 +1,6 @@
+[%# The names that this guest asks its authority for: its own zone, and the
+    zone of the authority where the authority holds it.  See the POD of
+    Provisioner::Recipe::registrar. -%]
+[Resolve]
+DNS=[% authority_address %]
+Domains=[% routing_domains %]
