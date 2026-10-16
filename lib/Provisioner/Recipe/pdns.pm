@@ -206,8 +206,6 @@ sub required_recipes {
             ? (
                 # The perl target runs after this fragment, so the proxy starts
                 # in the postrun, when Starman and the proxy are installed.
-                # 0.002 is the first release that reaches pdns over its socket:
-                # before it, HTTP::Tiny died on every request there.
                 perl  => sub { return ( cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] ) },
                 nginx => sub { return ( sites     => [@served] ) },
               )
