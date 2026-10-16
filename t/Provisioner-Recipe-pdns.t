@@ -166,7 +166,7 @@ subtest 'the API proxy' => sub {
 
     my %required = ( Provisioner::Recipe::required_recipes( $fresh->(), %held ), $fresh->()->required_recipes(%held) );
     is_deeply( { $required{nginx}->() },                    { sites     => ["dnsapi.$DOMAIN"] },                                              'nginx gives it the name dnsapi' );
-    is_deeply( { $required{'Provisioner::SSLRecipe'}->() }, { hostnames => ["dnsapi.$DOMAIN"] },                                              'which gets a certificate' );
+    is_deeply( { $required{letsencrypt}->() },              { hostnames => ["dnsapi.$DOMAIN"] },                                              'which gets a certificate' );
     is_deeply( { $required{'Provisioner::DNSRecipe'}->() }, { hostnames => ["dnsapi.$DOMAIN"] },                                              'and a record, from this recipe itself where it holds the zone' );
     is_deeply( { $required{perl}->() },                     { cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] }, 'and perl installs the proxy and the server that runs it' );
 

@@ -400,19 +400,17 @@ subtest 'credentials_for tells a missing provider from a broken one' => sub {
 };
 
 subtest 'each implementation takes the names it is handed without declaring them' => sub {
-    foreach my $interface (qw{Provisioner::DNSRecipe Provisioner::SSLRecipe}) {
-        my @implementations = Provisioner::Cookbook->implementations($interface);
-        ok( scalar @implementations, "$interface has implementations to ask" ) or next;
-        foreach my $recipe (@implementations) {
-            my %schema = Provisioner::Cookbook->load($recipe)->schema;
-            is( $schema{properties}{hostnames}{type}, 'array', "$recipe, a $interface, has the hostnames option" );
-        }
+    my @implementations = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
+    ok( scalar @implementations, 'Provisioner::DNSRecipe has implementations to ask' );
+    foreach my $recipe ( @implementations, 'letsencrypt' ) {
+        my %schema = Provisioner::Cookbook->load($recipe)->schema;
+        is( $schema{properties}{hostnames}{type}, 'array', "$recipe has the hostnames option" );
     }
 
     # The schema refuses a key that nothing declares, so a recipe that
-    # implements neither interface must not be handed the names.
+    # is handed no names must not declare them.
     my %nginx = Provisioner::Cookbook->load('nginx')->schema;
-    ok( !exists $nginx{properties}{hostnames}, 'and a recipe that implements neither does not' );
+    ok( !exists $nginx{properties}{hostnames}, 'and a recipe that is handed none does not' );
 };
 
 # What a DNS recipe publishes.  The configuration is mocked, because whether a
