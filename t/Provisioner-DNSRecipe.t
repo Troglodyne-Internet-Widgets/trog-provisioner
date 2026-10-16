@@ -259,8 +259,8 @@ subtest 'the CA depends on the capability, not on a recipe name' => sub {
     # Asserting the key is 'pdns' would pass just as well against the hardcoded
     # string it replaced, so this moves the answer and checks the CA moved with
     # it.
-    my $iface = Test::MockModule->new('Provisioner::DNSRecipe');
-    $iface->redefine( local_implementation => sub { return 'registrar' } );
+    # The variable and not the method, because provider_for reads it too.
+    local $Provisioner::DNSRecipe::LOCAL_IMPLEMENTATION = 'registrar';
 
     my %moved = fresh('acmeca')->required_recipes(%common);
     ok( exists $moved{registrar}, 'so moving the answer moves what the CA asks for' );

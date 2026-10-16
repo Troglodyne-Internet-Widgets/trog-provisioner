@@ -60,6 +60,11 @@ A CA on another host cannot.  step-ca resolves a C<dns-01> challenge through
 the resolver of its own host, and nothing off this guest can answer for its
 zone.
 
+A guest whose C<registrar> names an C<authority> has no zone of its own to
+serve.  The authority holds it, and lexicon writes the record there.  The
+resolver of the guest sends the zone to the authority, so step-ca reads the
+record from it.  See L<Provisioner::Recipe::registrar>.
+
 The CA listens on loopback only.  Its only client is the dehydrated of this
 guest.  So there is no port to open and no rate limit to set.
 
@@ -212,8 +217,12 @@ sub enrich {
 
 Requires the DNS server on this guest, which answers the challenge that this CA
 sets.  The name comes from L<Provisioner::DNSRecipe/local_implementation>.  The
-interface decides what serves a zone.  This recipe only says that a registrar
-cannot do it, because step-ca validates through the resolver of its own host.
+interface decides what serves a zone.  This recipe only says that a public
+registrar cannot do it, because step-ca validates through the resolver of its
+own host.
+
+It requires nothing when L<Provisioner::DNSRecipe/provider_for> names another
+provider, which is the case of a guest that names an C<authority>.
 
 It hands that recipe nothing.  The DNS recipe makes its own API key when the
 operator sets none.
@@ -226,7 +235,13 @@ that points dehydrated at this CA needs the CA first.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( Provisioner::DNSRecipe->local_implementation() => sub { return () }, $self->SUPER::required_recipes(%opts) );
+    my $local = Provisioner::DNSRecipe->local_implementation();
+
+    # eval, because this runs before validation.  A domain with no provider
+    # keeps the local server, and letsencrypt refuses it with the reason.
+    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // $local;
+
+    return ( ( $provider eq $local ? ( $local => sub { return () } ) : () ), $self->SUPER::required_recipes(%opts) );
 }
 
 =head2 @hosts = $recipe->fetch_hosts()

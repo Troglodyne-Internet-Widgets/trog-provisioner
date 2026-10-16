@@ -280,6 +280,12 @@ C<opts> is C<--resolve-zone-name>, so that lexicon asks the DNS for the zone.
 The guest resolves its own zone through C<$guest>.  See
 L<Provisioner::Recipe::registrar>.
 
+C<zone> is C<$name>, because C<$guest> holds the zone of that name.  The guest
+asks C<$guest> through the stub of systemd-resolved, which answers a name with
+no record with the C<SOA> of the root and not of the zone.  So lexicon can find
+the zone of C<$name> and not the zone of C<www.$name> before the challenge of
+C<www.$name> is written.
+
 =cut
 
 sub client_credentials {
@@ -291,6 +297,7 @@ sub client_credentials {
         key      => q{},
         key_file => $self->token_path($name),
         opts     => '--resolve-zone-name',
+        zone     => $name,
         extra    => [ { key => 'PDNS_SERVER', value => "https://dnsapi.$guest" } ],
     );
 }
