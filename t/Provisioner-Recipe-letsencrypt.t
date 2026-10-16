@@ -326,11 +326,12 @@ subtest 'a guest that names an authority leaves its challenge to the authority' 
     # for its zone, nostubresolver bypassed the route to the authority, and the
     # name of the API of the authority did not resolve.
     my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( exists $required{acmeca}, 'the fleet CA still issues for a reserved TLD' );
-    ok( !exists $required{pdns},  'but the guest gets no DNS server of its own from it' );
+    ok( !exists $required{acmeca}, 'the CA of the authority issues, so the guest runs none of its own' );
+    ok( !exists $required{pdns},   'and the guest gets no DNS server of its own from it' );
 
     my %opts = fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    is( $opts{lexicon}{key_file}, '/etc/lexicon/' . $DOMAIN . '.token', 'and lexicon writes the challenge with the token that the authority issued' );
+    is( $opts{ca},                'https://dnsapi.ns.test.test/acme/trog/directory', 'dehydrated asks the CA of the authority, through its API' );
+    is( $opts{lexicon}{key_file}, '/etc/lexicon/' . $DOMAIN . '.token',              'and lexicon writes the challenge with the token that the authority issued' );
 
     # Measured on the same guest: the stub of systemd-resolved answered a name
     # with no record with the SOA of the root, so lexicon asked for the zone "."
@@ -344,6 +345,27 @@ subtest 'a guest that names an authority leaves its challenge to the authority' 
     # lexicon reaches the authority at a URL, and a URL is never a socket, so a
     # wait for one ran out its two minutes on every build.
     unlike( $slurp->('get_cert'), qr/\[[ ]-S[ ]/, 'and the fetcher waits for no socket of its own' );
+};
+
+subtest 'the CA of an authority issues only where its constraint permits the name' => sub {
+    my %authority_of = ( $DOMAIN => 'ns.example.net', 'chained.test.test' => 'mid.test.test', 'mid.test.test' => 'top.test.test' );
+    my $mock         = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine(
+        domain_config => sub {
+            my ( undef, $domain ) = @_;
+            return { pdns => {}, ( $authority_of{$domain} ? ( registrar => { authority => $authority_of{$domain} } ) : () ) };
+        }
+    );
+    $mock->redefine( host_of => sub { return } );
+
+    my $acmeca = Provisioner::Cookbook->load('acmeca');
+    is( $acmeca->fleet_ca_of($DOMAIN), undef, 'an authority under another TLD has no CA for the name' );
+    my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    ok( exists $required{acmeca}, 'so the guest runs its own' );
+    is( $acmeca->directory_for($DOMAIN), 'https://localhost:9000/acme/trog/directory', 'and asks it on loopback' );
+
+    # An authority that names an authority of its own runs no CA.
+    is( $acmeca->fleet_ca_of('chained.test.test'), 'top.test.test', 'a chain of authorities ends at the one that runs a CA' );
 };
 
 subtest 'without a zone it is told, lexicon finds the zone of each name' => sub {

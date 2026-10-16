@@ -101,10 +101,11 @@ answers the C<dns-01> challenge on loopback.  pdns makes its own C<api_key>, and
 lexicon gets the same key from it.  See L<Provisioner::Recipe::pdns/api_key_for>.
 
 A guest whose C<registrar> names an C<authority> is different.  The authority
-holds the zone of the guest, so lexicon writes the challenge there, and step-ca
-reads it through the resolver of the guest, which sends the zone to the
-authority.  So that guest gets no pdns and no C<nostubresolver> for its
-challenge.
+holds the zone of the guest, so lexicon writes the challenge there, and the
+guest gets no pdns.  Where the authority is under the same reserved TLD, the
+default is the CA on the authority, which reads the challenge from its own
+zone.  So the guest also gets no acmeca.  See
+L<Provisioner::Recipe::acmeca/fleet_ca_of>.
 
 =head2 Which server answers the challenge
 
@@ -191,14 +192,10 @@ sub enrich {
     # reserved TLD gets one at all>.
     if ( auto_ca(%params) ) {
 
-        # Where acmeca answers, on the port the domain configured for it or
-        # else the default of its schema.  It reads the port and does not set
-        # it, because resolve_conflict dies on a second value for a field that
-        # the operator set.
-        my $configured = Provisioner::Cookbook->domain_config( $params{domain} )->{acmeca}{port};
-        my %args       = Provisioner::Cookbook->load('acmeca')->args();
-        my $port       = $configured // $args{properties}{port}{default};
-        $params{ca} = "https://localhost:$port/acme/trog/directory";
+        # acmeca says where it answers, and does not set its port, because
+        # resolve_conflict dies on a second value for a field that the operator
+        # set.
+        $params{ca} = Provisioner::Cookbook->load('acmeca')->directory_for( $params{domain} );
     }
     $params{ca} //= $DEFAULT_CA;
 
@@ -223,7 +220,8 @@ rate limit, and the ACME account, but only for a CA that outlives the guest.
 
 A rebuild of the guest also rebuilds the CA when C<ca> is not set and the
 domain is under a reserved TLD, or when C<ca> is a URL whose host is
-C<localhost> or C<127.0.0.1>.  acmeca runs on the guest, on loopback.  Each
+C<localhost> or C<127.0.0.1>.  acmeca runs on the guest, on loopback, or on the
+authority of the guest, which a rebuild of the authority rebuilds.  Each
 provision starts it with an empty database and a new intermediate.  So it does
 not know an account that it issued before, and every order on that account
 returns C<accountDoesNotExist>.
@@ -268,7 +266,7 @@ returns the options to give that recipe:
 =over 4
 
 =item * C<acmeca>, when this domain uses a CA of the fleet and not a public
-preset.
+preset, unless the default CA of the domain is the CA of its authority.
 
 =item * C<registrar>, which holds the zone of this domain, or says which server
 does.
@@ -289,7 +287,8 @@ depend on where two recipes happen to sit in a list.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    my @required = ( auto_ca(%opts) || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
+    my $auto     = auto_ca(%opts) && !defined Provisioner::Cookbook->load('acmeca')->fleet_ca_of( $opts{domain} );
+    my @required = ( $auto || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
     push( @required, registrar => sub { return () }, lexicon => sub { return () } );
 
     return @required;
