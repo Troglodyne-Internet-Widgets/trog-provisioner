@@ -786,11 +786,19 @@ The sub returns options for the dependency.  It fills in mandatory options that
 the configuration leaves out.  In some cases, you can then leave the dependency
 out of the configuration entirely.
 
+An override is not expected to append to the list of the base class.
+L<Provisioner::Cookbook/resolve_dependencies>, which C<bin/new_config> and
+C<bin/new_guest> use, calls this version directly as a function on each recipe,
+not as a method.  Then it calls the method of the recipe, and merges the two
+lists.  So an override returns what its own recipe requires, and the base class
+still adds its part when the override does not call
+C<SUPER::required_recipes>.  A call to C<SUPER> adds nothing, because the same
+pairs then come back twice.  See
+L<Provisioner::Cookbook/Two sources, on purpose>.
+
 The base class requires C<ufw> when C<rate_limits> or C<listens> names a port,
 C<fail2ban> when C<jails> returns jails, and C<data> when C<restores> returns
-something.  An override does not need to call
-C<SUPER::required_recipes> for those, because C<bin/new_config> asks the base
-class itself.  See L<Provisioner::Cookbook/Two sources, on purpose>.
+something.
 
 The base class requires L<Provisioner::Recipe::registrar> and
 L<Provisioner::Recipe::letsencrypt> for a recipe that serves a name, and hands
