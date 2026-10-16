@@ -188,12 +188,16 @@ subtest 'a credential written as a secret reference reaches the hook resolved' =
 };
 
 subtest 'a reserved name is held by the server on the guest' => sub {
-    my ( $err, $makefile, $dir ) = generate( $LOCAL, letsencrypt => undef );
 
-    is( $err, undef, 'the generation runs to the end' )   or diag $err;
+    # No public registrar holds a zone under a TLD RFC 2606 reserves.  Nothing
+    # adds pdns to the guest, as nothing adds it to an authority elsewhere.
+    my ($err) = generate( $LOCAL, letsencrypt => undef );
+    my $refusal = "$LOCAL is the authority of its registrar, but runs no pdns.  Add pdns to $LOCAL.";
+    like( $err // q{}, qr/\A\Q$refusal\E/, 'a guest that does not list pdns is refused, and told to add it' );
+
+    ( $err, my $makefile, my $dir ) = generate( $LOCAL, letsencrypt => undef, pdns => undef );
+    is( $err, undef, 'the generation runs to the end once it does' ) or diag $err;
     ok( defined $makefile, 'and a makefile was written' ) or return;
-
-    # No public registrar holds a zone under a TLD RFC 2606 reserves.
     ok( builds( $makefile, 'pdns' ), 'pdns is built, because the guest answers for itself' );
 
     my $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
@@ -203,7 +207,7 @@ subtest 'a reserved name is held by the server on the guest' => sub {
 # The generator is what carries a recipe's archive, and the pin of what the
 # recipes conflict with, into the file that the guest first boots from.
 subtest 'first boot gets the archive of pdns, and the pin of what conflicts' => sub {
-    my ( $err, undef, $dir ) = generate( $LOCAL, letsencrypt => undef, nginx => undef );
+    my ( $err, undef, $dir ) = generate( $LOCAL, letsencrypt => undef, nginx => undef, pdns => undef );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
     my $user_data = YAML::XS::Load( File::Slurper::read_binary("$dir/user-data") );

@@ -627,6 +627,31 @@ subtest 'the walk reaches a dependency of a dependency' => sub {
     ok( ( grep { $_ eq 't_deep.buried' } @todo ), 'and reported with the rest' );
 };
 
+subtest 'recipes_with names every recipe that the guest is built from' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    my @recipes = Provisioner::Cookbook->recipes_with( ['t_requirer'], domain => 'd.test' );
+    is_deeply( [ sort @recipes ], [qw{t_deep t_dep t_requirer t_satisfied}], 'the recipe named, what it requires, and what that requires' ) or diag "got: @recipes";
+};
+
+subtest 'needs_recipe holds the machine of a domain to what it holds another guest to' => sub {
+    my %configured = ( 'ns.test'     => { pdns => {} } );
+    my %host       = ( 'tenant.test' => 'web.test' );
+    my $mock       = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $configured{$domain} // {} } );
+    $mock->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
+
+    my $needs = sub {
+        my @args = @_;
+        return exception { Provisioner::Cookbook->needs_recipe( @args, 'pdns', 'the authority' ) }
+    };
+    is( $needs->( 'web.test',    'ns.test' ),    undef,                                                                                                     'a guest that runs the recipe passes' );
+    is( $needs->( 'web.test',    'other.test' ), "web.test names other.test as the authority, but other.test runs no pdns in this installation.\n",         'another guest that does not is refused' );
+    is( $needs->( 'web.test',    'web.test' ),   "web.test is the authority, but runs no pdns.  Add pdns to web.test.\n",                                   'and so is the domain itself, told what to add' );
+    is( $needs->( 'tenant.test', 'web.test' ),   "tenant.test is on web.test, which is the authority, but web.test runs no pdns.  Add pdns to web.test.\n", 'and the host of a tenant, told where to add it' );
+};
+
 subtest 'a required_recipes sub always gets the domain and install_dir' => sub {
 
     dependencies_of( ['t_reader'] );

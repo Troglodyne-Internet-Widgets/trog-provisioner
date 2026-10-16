@@ -170,7 +170,9 @@ tickle.test.test:
 of a domain, so that dehydrated can write an `_acme-challenge` record into it.
 A guest under a TLD that RFC 2606 reserves holds its own zone, because no
 public registrar can hold a zone for one. So does a guest whose registrar names
-the guest itself as its `authority`. The registrar then requires `pdns`. Every
+the guest itself as its `authority`. Such a guest must list `pdns`, as a guest
+that another guest names as its `authority` must. `bin/new_config` refuses it
+otherwise, and `bin/new_guest` writes `pdns` for it. Every
 other guest uses the registrar that `type`, `user` and `key` name. That
 includes a guest that runs `pdns` for other guests and leaves its own name to
 the registrar.

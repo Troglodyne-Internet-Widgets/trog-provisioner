@@ -145,6 +145,10 @@ subtest 'a recipe that declares one of them keeps its own meaning' => sub {
         distro        => 'ubuntu',
     );
 
+    # A guest under a reserved TLD holds its own zone, which needs its pdns.
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return { pdns => {} } } );
+
     my %got = $registrar->validate( domain => 'x.test.test', type => 'easydns', admin_user => 'someadmin' );
     is( $got{user}, q{}, 'the registrar account stays empty rather than becoming the admin' );
 };

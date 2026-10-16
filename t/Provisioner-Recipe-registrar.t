@@ -241,23 +241,48 @@ subtest 'which server holds the zone' => sub {
     is( $holder->('tenant.c.test'), 'ns.c.test', 'and by the authority that its host names' );
 };
 
-subtest 'a guest that serves itself gets a server, and one that does not gets none' => sub {
+subtest 'a guest that serves itself must run a server, as an authority elsewhere must' => sub {
+    my %configured = ( 'web.lab.test' => { registrar => { authority => 'ns.test' } } );
+    my %host;
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
-    $conf->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $domain eq 'web.lab.test' ? { registrar => { authority => 'ns.test' } } : {} } );
-    $conf->redefine( host_of       => sub { return } );
+    $conf->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $configured{$domain} // {} } );
+    $conf->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
 
     my %common = ( install_dir => '/opt/domains', admin_user => 'someadmin' );
-
-    my %own = fresh('registrar')->required_recipes( %common, domain => $DOMAIN );
-    ok( exists $own{pdns}, 'a reserved name brings the pdns that holds its zone' );
-    is_deeply( [ $own{pdns}->() ], [], 'and hands it nothing, because pdns makes its own key' );
-    ok( exists $own{lexicon}, 'and lexicon, which publishes the records' );
 
     # Measured on a scratch guest: a pdns of its own made its recursor answer
     # for its zone, nostubresolver bypassed the route to the authority, and the
     # name of the API of the authority did not resolve.
-    my %delegated = fresh('registrar')->required_recipes( %common, domain => 'web.lab.test' );
-    ok( !exists $delegated{pdns}, 'while a guest that names an authority gets no DNS server of its own' );
+    foreach my $domain ( $DOMAIN, 'web.lab.test' ) {
+        my %required = fresh('registrar')->required_recipes( %common, domain => $domain );
+        ok( !exists $required{pdns},   "$domain gets no pdns from its registrar" );
+        ok( exists $required{lexicon}, 'but gets lexicon, which publishes the records' );
+    }
+
+    my %enrich = ( %common, domain => $DOMAIN, ipmap => { 'ns.test' => '192.0.2.53' } );
+    is(
+        exception { fresh('registrar')->enrich(%enrich) },
+        "$DOMAIN is the authority of its registrar, but runs no pdns.  Add pdns to $DOMAIN.\n",
+        'a reserved name that runs no pdns is refused, and told to add it'
+    );
+    is(
+        exception { fresh('registrar')->enrich( %enrich, domain => 'web.lab.test' ) },
+        "web.lab.test names ns.test as the authority of its registrar, but ns.test runs no pdns in this installation.\n",
+        'as is a guest whose authority runs none'
+    );
+
+    $configured{$DOMAIN} = { pdns => {} };
+    is( exception { fresh('registrar')->enrich(%enrich) }, undef, 'and one that runs pdns is not' );
+
+    # A tenant holds its zone on the machine of its host.
+    $host{'tenant.test'} = $DOMAIN;
+    is( exception { fresh('registrar')->enrich( %enrich, domain => 'tenant.test' ) }, undef, 'nor is a tenant whose host runs pdns' );
+    delete $configured{$DOMAIN};
+    is(
+        exception { fresh('registrar')->enrich( %enrich, domain => 'tenant.test' ) },
+        "tenant.test is on $DOMAIN, which is the authority of its registrar, but $DOMAIN runs no pdns.  Add pdns to $DOMAIN.\n",
+        'and a tenant whose host runs none is told to add it to the host'
+    );
 
     # lexicon walks the zone through the system resolver for --resolve-zone-name,
     # and step-ca validates dns-01 through it too.  On the stub the guest cannot
@@ -327,7 +352,7 @@ subtest 'the registrar publishes the records of the domain' => sub {
     is( $own->{publish_records}, 1, 'and into the zone that the pdns of the guest holds' );
     ok( !exists $own->{authority}, 'which is no authority of its own, so nothing is delegated' );
 
-    my ($reserved) = publishing( 'registrar', {}, %ON_PUBLIC, domain => $DOMAIN, aliases => {}, hostnames => [] );
+    my ($reserved) = publishing( 'registrar', { pdns => {} }, %ON_PUBLIC, domain => $DOMAIN, aliases => {}, hostnames => [] );
     is( $reserved->{publish_records}, 1, 'and for a name under a reserved TLD, which only the guest can serve' );
 };
 

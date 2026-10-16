@@ -150,6 +150,28 @@ subtest 'a dependency that needs something says so as well' => sub {
     ok( !exists $config->{'vm.test'}{logcollector}, 'as is one whose requirer supplied what it needed' );
 };
 
+subtest 'a guest that holds its own zone is written with the pdns that holds it' => sub {
+
+    # new_config refuses a guest that is the authority of its own registrar and
+    # does not list pdns, and nothing adds it, so the scaffold has to.
+    my ($config) = quietly( sub { Trog::Bin::NewGuest::build( 'vm.test', ['nginxproxy'], \%BASE_HAS_DATA ) } );
+    ok( exists $config->{'vm.test'}{pdns}, 'a reserved name that serves a name gets pdns' );
+
+    ($config) = quietly( sub { Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], \%BASE_HAS_DATA ) } );
+    ok( !exists $config->{'vm.test'}{pdns}, 'and one that serves no name has no registrar, and gets none' );
+
+    # As most installations do, so that every domain inherits the account.
+    my %inherited = ( base => { data => undef, registrar => { type => 'easydns' } } );
+    ($config) = quietly( sub { Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], \%inherited ) } );
+    ok( exists $config->{'vm.test'}{pdns}, 'but gets it where its registrar comes from _base' );
+
+    my %named = ( base => { data => undef, registrar => { authority => 'ns.test' } } );
+    my $conf  = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return { registrar => { authority => 'ns.test' } } } );
+    ($config) = quietly( sub { Trog::Bin::NewGuest::build( 'vm.test', ['nginxproxy'], \%named ) } );
+    ok( !exists $config->{'vm.test'}{pdns}, 'nor does one that names an authority' );
+};
+
 subtest 'a recipe that salvages something can still be scaffolded' => sub {
 
     # Provisioner::Recipe::required_recipes asks restores() what goes back, and

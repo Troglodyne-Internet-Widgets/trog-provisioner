@@ -653,6 +653,55 @@ sub scaffold {
     return ( $config, @todo );
 }
 
+# The walk of resolve_dependencies over the recipes of @$named, with the
+# provisioner options that a scaffold has.  Returns what resolve_dependencies
+# returns, and the domain_conf that it filled in.
+my sub scaffold_walk ( $class, $named, %opts ) {
+    my $base   = ref $opts{base} eq 'HASH'          ? $opts{base}          : {};
+    my $global = ref $opts{global_config} eq 'HASH' ? $opts{global_config} : {};
+    my $distro = $global->{distro} // 'ubuntu';
+
+    # Worked out here and not asked of the caller, because bin/new_guest does
+    # not know which packager a distribution uses.
+    # One scratch directory for the process, as in spec(), because nothing here
+    # writes to it.
+    state $scratch;
+    my %provisioner = (
+        distro          => $distro,
+        target_packager => $class->load($distro)->packager,
+        template_dirs   => $class->template_dirs($distro),
+        output_dir      => $opts{output_dir} // ( $scratch //= File::Temp::tempdir( CLEANUP => 1 ) ),
+    );
+
+    # One entry for each named recipe.  The walk merges what each dependency
+    # contributes into these.
+    my %domain_conf = map { $_ => clone( $base->{$_} // {} ) } @$named;
+
+    my ( $modules, $builders ) = $class->resolve_dependencies(
+        modules       => [@$named],
+        domain_conf   => \%domain_conf,
+        global_config => $global,
+        distro        => $distro,
+        provisioner   => \%provisioner,
+        domain        => $opts{domain},
+    );
+    return ( $modules, $builders, \%domain_conf );
+}
+
+=head2 @recipes = $class->recipes_with(\@named, %opts)
+
+Returns the recipes of C<@named> and every recipe that they require, as
+C<bin/new_config> adds them.  C<%opts> is as in C<scaffold_dependencies>.
+
+=cut
+
+sub recipes_with {
+    my ( $class, $named, %opts ) = @_;
+
+    my ( $modules, $builders ) = scaffold_walk( $class, $named, %opts );
+    return grep { $builders->{$_}->is_module } @$modules;
+}
+
 =head2 scaffold_dependencies(\@named, %opts)
 
 Returns a hash reference of the blocks that a domain needs for recipes that
@@ -686,34 +735,8 @@ that cannot answer without the global configuration.
 sub scaffold_dependencies {
     my ( $class, $named, %opts ) = @_;
 
-    my $base   = ref $opts{base} eq 'HASH'          ? $opts{base}          : {};
-    my $global = ref $opts{global_config} eq 'HASH' ? $opts{global_config} : {};
-    my $distro = $global->{distro} // 'ubuntu';
-
-    # Worked out here and not asked of the caller, because bin/new_guest does
-    # not know which packager a distribution uses.
-    # One scratch directory for the process, as in spec(), because nothing here
-    # writes to it.
-    state $scratch;
-    my %provisioner = (
-        distro          => $distro,
-        target_packager => $class->load($distro)->packager,
-        template_dirs   => $class->template_dirs($distro),
-        output_dir      => $opts{output_dir} // ( $scratch //= File::Temp::tempdir( CLEANUP => 1 ) ),
-    );
-
-    # One entry for each named recipe.  The walk merges what each dependency
-    # contributes into these.
-    my %domain_conf = map { $_ => clone( $base->{$_} // {} ) } @$named;
-
-    my ( $modules, $builders ) = $class->resolve_dependencies(
-        modules       => [@$named],
-        domain_conf   => \%domain_conf,
-        global_config => $global,
-        distro        => $distro,
-        provisioner   => \%provisioner,
-        domain        => $opts{domain},
-    );
+    my $base = ref $opts{base} eq 'HASH' ? $opts{base} : {};
+    my ( $modules, $builders, $domain_conf ) = scaffold_walk( $class, $named, %opts );
 
     # The caller already scaffolded the recipes it named.
     my %named = map { $_ => 1 } @$named;
@@ -727,7 +750,7 @@ sub scaffold_dependencies {
             $dep,
             all        => $opts{all},
             output_dir => $opts{output_dir},
-            provided   => { %{ $domain_conf{$dep} // {} }, %{ $base->{$dep} // {} } },
+            provided   => { %{ $domain_conf->{$dep} // {} }, %{ $base->{$dep} // {} } },
         );
         next unless @needed;
 
@@ -1168,6 +1191,28 @@ sub host_of {
     }
 
     return;
+}
+
+=head2 $class->needs_recipe($domain, $guest, $recipe, $role)
+
+Dies unless the configuration of C<$guest> names C<$recipe>, where C<$domain>
+takes C<$guest> as C<$role>, such as C<the authority of its registrar>.
+
+C<$guest> can be the machine of C<$domain> itself: the domain, or C<host_of>
+it.  A guest that serves a domain in such a role is checked and not added to,
+whether it is the machine of the domain or another guest.  The message says
+which machine the recipe goes on.
+
+=cut
+
+sub needs_recipe {
+    my ( $class, $domain, $guest, $recipe, $role ) = @_;
+    return if exists $class->domain_config($guest)->{$recipe};
+
+    die "$domain is $role, but runs no $recipe.  Add $recipe to $domain.\n" if $guest eq $domain;
+    die "$domain is on $guest, which is $role, but $guest runs no $recipe.  Add $recipe to $guest.\n"
+      if $guest eq ( $class->host_of($domain) // q{} );
+    die "$domain names $guest as $role, but $guest runs no $recipe in this installation.\n";
 }
 
 # Each key that a _global can hold, and the schema of each field that declares

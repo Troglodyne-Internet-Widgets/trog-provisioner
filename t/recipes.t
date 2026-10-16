@@ -132,6 +132,10 @@ sub salvage_brings_down {
     return -f "$dir/dst/$relative" ? 1 : 0;
 }
 
+# The guest of every render holds its own zone, being under a reserved TLD, so
+# its configuration names the pdns that the registrar refuses to do without.
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "---\ntest.test.test:\n  pdns:\n" );
+
 # Global vars bin/new_config injects into every template render.  The set is
 # Provisioner::Recipe::global_args, and the subtest below keeps the two in step:
 # this was four settings short of what a run actually injects, so nothing here

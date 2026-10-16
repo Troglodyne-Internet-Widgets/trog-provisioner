@@ -44,7 +44,8 @@ One of three servers holds the zone.  C<authority_of> decides which:
 
 =item * The C<pdns> of the guest itself, where C<authority> names the guest, or
 where the guest is under a reserved TLD and names no C<authority>.  No public
-registrar holds a zone for C<.test>.  This recipe then requires C<pdns>.
+registrar holds a zone for C<.test>.  The guest must then run C<pdns>, as
+another guest must that C<authority> names.
 
 =item * The C<pdns> of another guest, which C<authority> names.  See below.
 
@@ -317,6 +318,29 @@ sub serves_itself {
     return ( defined $holder && $holder eq $server ) ? 1 : 0;
 }
 
+=head2 @recipes = $recipe->zone_server_for($domain, \@recipes, %walk)
+
+Returns pdns where a guest of C<@recipes> holds its own zone and does not list
+pdns, and an empty list otherwise.  The guest holds its own zone where its
+recipes bring the registrar and C<serves_itself> is true.  Its recipes are
+C<@recipes>, the recipes of the C<base> of C<%walk>, which every domain
+inherits, and what C<recipes_with> in L<Provisioner::Cookbook> adds to both,
+with C<%walk> as its C<%opts>.  Nothing adds pdns to such a guest, and
+C<enrich> refuses it without one, so whatever writes the configuration of a
+guest asks this.
+
+=cut
+
+sub zone_server_for {
+    my ( $self, $domain, $recipes, %walk ) = @_;
+
+    my @named = uniq( @$recipes, grep { !m/\A_/ } keys %{ $walk{base} // {} } );
+    return if List::Util::any { $_ eq 'pdns' } @named;
+    return unless List::Util::any { $_ eq $self->recipe_name } Provisioner::Cookbook->recipes_with( \@named, %walk, domain => $domain );
+    return unless $self->serves_itself($domain);
+    return 'pdns';
+}
+
 =head2 $guest = $recipe->delegated_to($domain)
 
 Returns what C<authority_of> returns, where that is another guest than the
@@ -398,9 +422,11 @@ or undef where the domain is under a reserved TLD, and C<parent>, the name
 above the domain.  An C<authority> that names the guest itself is dropped.
 
 Where the registrar of C<type> holds the zone, dies when there is no C<type>.
-With an C<authority> on another guest, dies when the domain has fewer than
-three labels, when the authority runs no pdns, or when the installation gave
-the authority no address.
+Where the guest holds its own zone, dies when it runs no pdns, as
+C<needs_recipe> in L<Provisioner::Cookbook> says.  With an C<authority> on
+another guest, dies when the domain has fewer than three labels, when the
+authority runs no pdns, or when the installation gave the authority no
+address.
 
 =cut
 
@@ -413,14 +439,18 @@ sub enrich {
     undef $guest if defined $guest && $guest eq $server;
     delete $opts{authority};
     unless ( defined $guest ) {
-        $self->configured_credentials(%opts) unless $self->serves_itself($domain);
+        if ( $self->serves_itself($domain) ) {
+            Provisioner::Cookbook->needs_recipe( $domain, $server, 'pdns', 'the authority of its registrar' );
+        }
+        else {
+            $self->configured_credentials(%opts);
+        }
         return ( %opts, $self->publication(%opts) );
     }
 
     die "$domain names $guest as the authority of its registrar, but has fewer than three labels.  Its zone is delegated with an NS record in the zone of a registered domain, and a registered domain itself needs glue at the registry, which most registrars have no API for.\n"
       if ( $domain =~ tr/.// ) < 2;
-    die "$domain names $guest as the authority of its registrar, but $guest runs no pdns in this installation.\n"
-      unless exists Provisioner::Cookbook->domain_config($guest)->{pdns};
+    Provisioner::Cookbook->needs_recipe( $domain, $guest, 'pdns', 'the authority of its registrar' );
 
     my $address = ( $opts{ipmap} // {} )->{$guest};
     die "$domain names $guest as the authority of its registrar, and the installation gave $guest no address to ask it at.  Give it an address of the pool.\n"
@@ -471,8 +501,9 @@ sub tests {
 =head2 %required = $recipe->required_recipes(%opts)
 
 Returns lexicon, which publishes the records, and which an operator edits the
-zone with.  Where the guest holds its own zone, as C<serves_itself> says, it
-also returns pdns, which holds it.
+zone with.  It does not return pdns where the guest holds its own zone.  The
+configuration of the guest names pdns there, as it does on another guest that
+holds a zone.
 
 =cut
 
@@ -481,7 +512,6 @@ sub required_recipes {
 
     return (
         lexicon => sub { return () },
-        ( $self->serves_itself( $opts{domain} ) ? ( pdns => sub { return () } ) : () ),
         $self->SUPER::required_recipes(%opts),
     );
 }
