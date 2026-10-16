@@ -65,6 +65,13 @@ subtest 'a key the store never gave up is said so, rather than handed to ssh as 
     like( $err, qr/password \s+ goes \s+ on \s+ stdin/, 'and says how to give the store one' );
 };
 
+subtest 'a guest that nothing runs at an address is said so' => sub {
+    my $nowhere = Test::MockModule->new( 'FakeHV', no_auto => 1 );
+    $nowhere->redefine( inspection_address => sub { return } );
+
+    like( exception { Trog::Skill::AskGuest::main( 'vm.test', 'true' ) }, qr/nothing[ ]to[ ]ask/, 'rather than ssh being handed no host' );
+};
+
 subtest 'the command reaches the guest whole, quotes and all' => sub {
     my $sent  = bless {}, 'FakeGuest';
     my $guest = Test::MockModule->new('Trog::Guest');

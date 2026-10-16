@@ -323,7 +323,9 @@ with its key from the store, or undef when no hypervisor runs it.  A class
 method: it loads the fleet that C<default_path> names.  Without a fleet, it
 asks the hypervisor that L<Trog::HV/new> returns.
 
-Dies when there is no key for the guest.
+Dies when there is no key for the guest.  The store holds the key, and a
+program with nobody at its terminal cannot ask for the password of the store,
+so the message says to give it on standard input.
 
 =cut
 
@@ -339,7 +341,7 @@ sub guest_of {
     my $cfg_dir = $hv->domain_dir . "/$domain";
     my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
     my $key     = Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" )
-      or die "No key for $domain, in the store or at $cfg_dir/key.rsa\n";
+      or die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n";
 
     return Trog::Guest->new( name => $domain, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', key_path => $key );
 }
