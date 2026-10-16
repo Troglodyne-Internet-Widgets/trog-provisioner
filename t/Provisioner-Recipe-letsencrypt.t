@@ -350,6 +350,36 @@ subtest 'a guest that answers its own challenge can resolve its own zone' => sub
     ok( !exists $elsewhere{nostubresolver}, 'while a registrar-served name is handed no resolver of ours' );
 };
 
+subtest 'a guest that names an authority leaves its challenge to the authority' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( domain_config => sub { return { registrar => { type => 'pdns', authority => 'ns.test.test' }, letsencrypt => {} } } );
+
+    # Measured on a scratch guest: a pdns of its own made its recursor answer
+    # for its zone, nostubresolver bypassed the route to the authority, and the
+    # name of the API of the authority did not resolve.
+    my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    ok( exists $required{acmeca},                   'the fleet CA still issues for a reserved TLD' );
+    ok( !exists $required{pdns},                    'but the guest gets no DNS server of its own' );
+    ok( !exists $required{nostubresolver},          'and keeps the resolver that routes its zone to the authority' );
+    ok( exists $required{'Provisioner::DNSRecipe'}, 'while the holder of its zone is still required' );
+    is( { $required{lexicon}->() }->{dns_preference}, 'registrar', 'and lexicon writes the challenge through the registrar' );
+
+    # Measured on the same guest: the stub of systemd-resolved answered a name
+    # with no record with the SOA of the root, so lexicon asked for the zone "."
+    # for www and the authority refused it.
+    my ( undef, undef, $slurp ) = generated();
+    my $hook      = $slurp->('domain.hook');
+    my $challenge = qr/--name="_acme-challenge[.]\$\{DOMAIN\}[.]"/;
+    like( $hook, qr/^\s*lexicon[ ].*[ ]create[ ]\Q$DOMAIN\E[ ]TXT[ ]$challenge/m, 'the hook writes each challenge into the zone of the guest' );
+    like( $hook, qr/^\s*lexicon[ ].*[ ]delete[ ]\Q$DOMAIN\E[ ]TXT[ ]/m,           'and removes it from there' );
+};
+
+subtest 'without a zone it is told, lexicon finds the zone of each name' => sub {
+    my $registrar = with_registrar();
+    my ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
+    like( $slurp->('domain.hook'), qr/[ ]create[ ]\$\{DOMAIN\}[ ]TXT[ ]/, 'so an alias in another zone of the registrar is written there' );
+};
+
 subtest 'a provider that could not answer the challenge is refused' => sub {
     my $public = sub { return ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin', @_ ); };
 

@@ -106,6 +106,12 @@ If an operator set an C<api_key>, the operator keeps it and this recipe supplies
 nothing.  A second value for a field that the operator set is the conflict that
 C<resolve_conflict> dies on.
 
+A guest whose C<registrar> names an C<authority> is different.  The authority
+holds the zone of the guest, so lexicon writes the challenge there, and step-ca
+reads it through the resolver of the guest, which sends the zone to the
+authority.  So that guest gets no pdns and no C<nostubresolver> for its
+challenge.
+
 B<The recipe asks this of the domain, not of the module list.>  The pdns on the
 guest serves a reserved TLD, and this recipe requires that server through
 acmeca.  So the server is always there when the name needs it.  Do not ask
@@ -302,7 +308,8 @@ returns the options to give that recipe:
 preset.
 
 =item * The local DNS recipe (C<pdns>), with an C<api_key>, when the CA is ours
-by default and nobody configured a key for the server.
+by default, the local server answers the challenge, and nobody configured a key
+for the server.
 
 =item * C<Provisioner::DNSRecipe>, which bin/new_config resolves to whatever
 holds the zone of this domain.
@@ -330,16 +337,21 @@ sub required_recipes {
     my $auto     = auto_ca(%opts);
     my @required = ( $auto || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
 
-    # acmeca requires pdns and gives it no api_key.  Supply one only when this
-    # recipe is why pdns is there and the operator set none.  See L</Which CA
-    # issues, and how a reserved TLD gets one at all>.
-    if ($auto) {
+    # eval, because this runs before validation.  enrich rejects a domain with
+    # no provider, and a second report here races two messages for one fault.
+    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // q{};
+    my $local    = Provisioner::DNSRecipe->local_implementation();
+
+    # acmeca requires pdns when pdns answers the challenge, and gives it no
+    # api_key.  Supply one only when this recipe is why pdns is there and the
+    # operator set none.  See L</Which CA issues, and how a reserved TLD gets
+    # one at all>.
+    if ( $auto && $provider eq $local ) {
 
         # The domain of the machine, not this one, because one pdns serves the
         # whole guest and already runs with its key.  Provisioner::Cookbook/host_of
         # finds the machine in _shared.
         my $server = Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain};
-        my $local  = Provisioner::DNSRecipe->local_implementation();
         my $class  = Provisioner::Cookbook->load($local);
 
         my $configured = Provisioner::Cookbook->domain_config($server)->{$local}{api_key};
@@ -364,7 +376,7 @@ sub required_recipes {
     # recipe name.  So the second silently replaces the first, and the minted
     # api_key is lost for some orders that `keys` returns.
     push( @required, 'Provisioner::DNSRecipe' => sub { return () } )
-      unless any { $_ eq Provisioner::DNSRecipe->local_implementation() } @required;
+      unless any { $_ eq $local } @required;
 
     # A guest that answers its own challenge must be able to read back what it
     # wrote.  lexicon walks the zone for --resolve-zone-name through the system
@@ -372,11 +384,7 @@ sub required_recipes {
     # stub, the guest cannot resolve its own name.  nostubresolver points the
     # resolver at the server on the guest.  It changes nothing on a fleet whose
     # _base already gives every domain that recipe.
-    #
-    # eval, because this runs before validation.  enrich rejects a domain with
-    # no provider, and a second report here races two messages for one fault.
-    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // q{};
-    push( @required, nostubresolver => sub { return () } ) if $provider eq Provisioner::DNSRecipe->local_implementation();
+    push( @required, nostubresolver => sub { return () } ) if $provider eq $local;
 
     # lexicon is the client that the hook writes the challenge record with.
     #

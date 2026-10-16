@@ -200,6 +200,7 @@ subtest 'what a guest that names this one as its authority gets' => sub {
     is( $credentials{type},     'powerdns',                 'the powerdns provider of lexicon' );
     is( $credentials{key_file}, "/etc/lexicon/$name.token", 'with its token in a file' );
     is( $credentials{opts},     '--resolve-zone-name',      'asking the DNS which zone holds its name' );
+    is( $credentials{zone},     $name,                      'which is its own name, also for the names under it' );
     is_deeply( $credentials{extra}, [ { key => 'PDNS_SERVER', value => "https://dnsapi.$DOMAIN" } ], 'at the proxy of the authority' );
 
     my %secret = $recipe->client_secret( $DOMAIN, $name );

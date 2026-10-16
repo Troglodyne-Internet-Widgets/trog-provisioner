@@ -100,6 +100,11 @@ C<guest_secrets> in L<Provisioner::Recipe> places.
 =item * C<opts>: flags that every lexicon command for this provider needs, as a
 string.  Usually it is empty.
 
+=item * C<zone>: optional.  The zone that the challenge of every name of this
+domain goes into.  The hook gives it to lexicon in place of the name, so that
+lexicon finds the zone without a query for a name that has no record yet.
+Without it, lexicon finds the zone of each name itself.
+
 =item * C<extra>: provider options other than the credential, as a list of
 C<{ key =E<gt> ..., value =E<gt> ... }>.  Each one becomes
 C<LEXICON_E<lt>TYPEE<gt>_E<lt>KEYE<gt>>.  Lexicon makes the name of an
