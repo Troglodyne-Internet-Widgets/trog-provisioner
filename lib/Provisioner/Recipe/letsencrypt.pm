@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::SSLRecipe};
+use parent qw{Provisioner::Recipe};
 
 use List::Util qw{any};
 
@@ -197,6 +197,12 @@ sub args {
                 type        => 'string',
                 description =>
                   "Which ACME server issues this domain's certificate: a dehydrated preset name, or the URL of a directory.  Defaults to '$DEFAULT_CA', the public one -- except under a reserved TLD, where no public CA can issue at all and this becomes the fleet's own, pulling in the acmeca recipe that serves it.  Naming anything but the default preset also pulls that recipe in.  No default is declared here because the answer depends on the domain.",
+            },
+            hostnames => {
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
             },
             dns_preference => {
                 type        => 'string',

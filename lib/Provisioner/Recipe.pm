@@ -809,9 +809,9 @@ it names the configuration key that settles a tie.  So the depsolver knows
 nothing about the capability itself.  See
 L<Provisioner::DNSRecipe/implementation_for>.
 
-The base class requires two of these for a recipe that serves a name:
-C<Provisioner::DNSRecipe> and C<Provisioner::SSLRecipe>.  Each gets the names
-in its C<hostnames> option.  See C<served_names> below.
+The base class requires C<Provisioner::DNSRecipe> for a recipe that serves a
+name, and hands it the names in its C<hostnames> option.  See C<served_names>
+below.
 
 The answer must be a recipe that this installation has and that implements the
 interface.  A configuration that names anything else is refused there, before
@@ -850,7 +850,7 @@ sub required_recipes {
         @required,
         map {
             $_ => sub { return ( hostnames => [@hostnames] ) }
-        } qw{Provisioner::DNSRecipe Provisioner::SSLRecipe}
+        } qw{Provisioner::DNSRecipe letsencrypt}
     ) if @hostnames;
 
     return @required;
@@ -1299,11 +1299,11 @@ sub subdomains {
 
 The C<subdomains> of this recipe, qualified with C<$opts{domain}>.
 
-The base class requires C<Provisioner::DNSRecipe> and C<Provisioner::SSLRecipe>
-for a recipe that serves a name, and hands each of them these names in their
-C<hostnames> option.  So the zone and the certificate of a domain name what its
-recipes serve, whichever recipes hold the zone and issue the certificate.  See
-L</Substitutable dependencies>.
+The base class requires C<Provisioner::DNSRecipe> and
+L<Provisioner::Recipe::letsencrypt> for a recipe that serves a name, and hands
+each of them these names in their C<hostnames> option.  So the zone and the
+certificate of a domain name what its recipes serve, whichever recipe holds the
+zone.  See L</Substitutable dependencies>.
 
 =cut
 

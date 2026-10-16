@@ -102,9 +102,9 @@ sub stopgap_names {
 }
 
 # The names that a generated domain hands its certificate and its zone, out of
-# domains.txt of letsencrypt and the zonefile of pdns.  Each is the
-# implementation that the domain resolved Provisioner::SSLRecipe and
-# Provisioner::DNSRecipe to, so these are what the recipes on it handed over.
+# domains.txt of letsencrypt and the zonefile of pdns, which the domain
+# resolved Provisioner::DNSRecipe to, so these are what the recipes on it
+# handed over.
 sub certificate_names {
     my ($dir) = @_;
     my $list = -f "$dir/domains.txt" ? File::Slurper::read_text("$dir/domains.txt") : q{};
