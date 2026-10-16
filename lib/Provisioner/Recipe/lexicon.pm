@@ -10,7 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use Provisioner::DNSRecipe();
+use Provisioner::Cookbook();
 
 =head1 Provisioner::Recipe::lexicon
 
@@ -32,9 +32,9 @@ dns-01 challenge through lexicon.
 
 =head2 What it takes to reach a zone is not its business
 
-L<Provisioner::DNSRecipe/credentials_for> says which provider holds the zone of a
-domain, and which credentials lexicon uses for it.  This recipe renders that
-answer.
+L<Provisioner::Recipe::registrar/credentials_for> says which server holds the
+zone of a domain, and which credentials lexicon uses for it.  This recipe
+renders that answer.
 
 =head2 The shortcut
 
@@ -48,39 +48,19 @@ zone and one provider, so the path does not name the provider.
 
 =cut
 
-=head2 %schema = $recipe->args()
-
-Returns the schema.  C<bin/recipes> shows each field and its description.
-
-=cut
-
-sub args {
-    return (
-        type       => 'object',
-        properties => {
-            dns_preference => {
-                type        => 'string',
-                enum        => [qw{pdns registrar}],
-                description =>
-                  'Which recipe holds this zone, when the guest has more than one recipe that can.  Provisioner::Recipe::letsencrypt takes the same tiebreaker.  A guest that runs letsencrypt needs nothing here, because letsencrypt resolves the provider and hands the answer down.  Set it here for a guest that does not run letsencrypt and has both its own DNS server and registrar credentials.  pdns and registrar each require this recipe without saying which of them holds the zone.  So nothing else settles the tie, and the build stops until somebody sets it.',
-            },
-        },
-    );
-}
-
 =head2 %opts = $recipe->enrich(%opts)
 
 Returns C<%opts> with C<lexicon> added: the credentials that
-L<Provisioner::DNSRecipe/credentials_for> returns for the domain.  It dies when
-C<credentials_for> dies, for example when no provider or two providers can
-answer for the zone.
+L<Provisioner::Recipe::registrar/credentials_for> returns for the domain.  It
+dies when C<credentials_for> dies, for example when no server of this
+installation holds the zone and the registrar names no provider.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{lexicon} = { Provisioner::DNSRecipe->credentials_for(%opts) };
+    $opts{lexicon} = { Provisioner::Cookbook->load('registrar')->credentials_for(%opts) };
 
     return %opts;
 }

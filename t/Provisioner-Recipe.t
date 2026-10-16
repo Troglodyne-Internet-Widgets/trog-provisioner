@@ -534,13 +534,13 @@ subtest 'a recipe that serves a name requires DNS and a certificate for it' => s
     }
 
     my %req = Provisioner::Recipe::required_recipes( 'Provisioner::Recipe::namer', domain => 'd.test' );
-    foreach my $required (qw{Provisioner::DNSRecipe letsencrypt}) {
+    foreach my $required (qw{registrar letsencrypt}) {
         ok( $req{$required}, "it requires $required" ) or next;
         is_deeply( { $req{$required}->() }, { hostnames => [qw{www.d.test webmail.d.test}] }, 'and hands it each name, qualified with the domain' );
     }
 
     my %none = Provisioner::Recipe::required_recipes( 'Provisioner::Recipe::nametest', domain => 'd.test' );
-    ok( !( grep { exists $none{$_} } qw{Provisioner::DNSRecipe letsencrypt} ), 'a recipe reached at the domain itself requires neither' ) or diag explain [ keys %none ];
+    ok( !( grep { exists $none{$_} } qw{registrar letsencrypt} ), 'a recipe reached at the domain itself requires neither' ) or diag explain [ keys %none ];
 };
 
 subtest 'domain_aliases joins the configured aliases to the names a recipe serves and is handed' => sub {

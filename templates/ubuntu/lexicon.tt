@@ -1,5 +1,5 @@
-[%# One shortcut for each domain, rendered from the recipe that holds its zone
-    (see Provisioner::DNSRecipe/credentials_for).  Only this recipe writes it,
+[%# One shortcut for each domain, rendered from the server that holds its zone
+    (see Provisioner::Recipe::registrar/credentials_for).  Only this recipe writes it,
     because the second of two recipes that write one file replaces what the
     first wrote. -%]
 mkdir -p /opt/lexicon; /bin/true

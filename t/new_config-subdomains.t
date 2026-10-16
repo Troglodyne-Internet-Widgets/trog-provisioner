@@ -102,9 +102,8 @@ sub stopgap_names {
 }
 
 # The names that a generated domain hands its certificate and its zone, out of
-# domains.txt of letsencrypt and the zonefile of pdns, which the domain
-# resolved Provisioner::DNSRecipe to, so these are what the recipes on it
-# handed over.
+# domains.txt of letsencrypt and the names that the registrar publishes, so
+# these are what the recipes on it handed over.
 sub certificate_names {
     my ($dir) = @_;
     my $list = -f "$dir/domains.txt" ? File::Slurper::read_text("$dir/domains.txt") : q{};
@@ -113,8 +112,9 @@ sub certificate_names {
 
 sub zone_names {
     my ( $dir, $domain ) = @_;
-    my $zone = -f "$dir/zonefile" ? File::Slurper::read_text("$dir/zonefile") : q{};
-    return [ sort map { "$_.$domain" } $zone =~ m/^(\S+)[.]\Q$domain\E[.]\s+IN\s+CNAME\b/mg ];
+    my $makefile = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
+    my ($names) = $makefile =~ m{publish_dns_records[ ]\Q$domain\E[ ]\S+[ ]([^\n]*)};
+    return [ sort split ' ', $names // q{} ];
 }
 
 subtest 'a recipe says which names it serves' => sub {

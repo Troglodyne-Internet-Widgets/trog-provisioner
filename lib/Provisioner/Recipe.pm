@@ -792,30 +792,9 @@ something.  An override does not need to call
 C<SUPER::required_recipes> for those, because C<bin/new_config> asks the base
 class itself.  See L<Provisioner::Cookbook/Two sources, on purpose>.
 
-=head3 Substitutable dependencies
-
-A key that names an interface, not a recipe, is a substitutable dependency.
-Such a key contains C<::>.  C<bin/new_config> resolves it to the recipe that
-implements that interface and serves this domain:
-
-    my %out = (
-        'Provisioner::DNSRecipe' => sub { return () },
-    );
-
-This is how L<Provisioner::Recipe::letsencrypt> asks for something that can
-answer a C<dns-01> challenge.  It does not name C<pdns>, which is one of the two
-recipes that can.  The interface decides which one.  The depsolver asks it, and
-it names the configuration key that settles a tie.  So the depsolver knows
-nothing about the capability itself.  See
-L<Provisioner::DNSRecipe/implementation_for>.
-
-The base class requires C<Provisioner::DNSRecipe> for a recipe that serves a
-name, and hands it the names in its C<hostnames> option.  See C<served_names>
-below.
-
-The answer must be a recipe that this installation has and that implements the
-interface.  A configuration that names anything else is refused there, before
-any target runs.
+The base class requires L<Provisioner::Recipe::registrar> and
+L<Provisioner::Recipe::letsencrypt> for a recipe that serves a name, and hands
+each the names in its C<hostnames> option.  See C<served_names> below.
 
 =cut
 
@@ -843,14 +822,14 @@ sub required_recipes {
     my %restores = $self->restores(%opts);
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
 
-    # Likewise for a name: whatever holds the zone of the domain and whatever
-    # issues its certificate get each name that a recipe serves.
+    # Likewise for a name: the registrar publishes a record of each name that
+    # a recipe serves, and letsencrypt puts it on the certificate.
     my @hostnames = $self->served_names(%opts);
     push(
         @required,
         map {
             $_ => sub { return ( hostnames => [@hostnames] ) }
-        } qw{Provisioner::DNSRecipe letsencrypt}
+        } qw{registrar letsencrypt}
     ) if @hostnames;
 
     return @required;
@@ -1299,11 +1278,11 @@ sub subdomains {
 
 The C<subdomains> of this recipe, qualified with C<$opts{domain}>.
 
-The base class requires C<Provisioner::DNSRecipe> and
+The base class requires L<Provisioner::Recipe::registrar> and
 L<Provisioner::Recipe::letsencrypt> for a recipe that serves a name, and hands
 each of them these names in their C<hostnames> option.  So the zone and the
-certificate of a domain name what its recipes serve, whichever recipe holds the
-zone.  See L</Substitutable dependencies>.
+certificate of a domain name what its recipes serve, whichever server holds the
+zone.
 
 =cut
 

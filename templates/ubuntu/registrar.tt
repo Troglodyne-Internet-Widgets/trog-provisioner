@@ -20,4 +20,4 @@ install -o root -g root -m 0700 registrar-upstream.sh /opt/lexicon/upstream/[% d
 [% END -%]
 rm -f registrar-resolved.conf registrar-upstream.sh
 [% END -%]
-[% INCLUDE "files/dnsrecipe.publish.tt" %]
+[% INCLUDE "files/registrar.publish.tt" %]

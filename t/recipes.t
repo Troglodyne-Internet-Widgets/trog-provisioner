@@ -1658,7 +1658,7 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
 
     # A fresh recipe per render: validated() memoises onto the object, so a
     # second render through the same one answers with the first one's options.
-    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns' );
+    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G );
     like( $hook, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
 };
 

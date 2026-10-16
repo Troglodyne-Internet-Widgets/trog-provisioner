@@ -17,8 +17,7 @@ authority does and does not travel to the guest
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
-use Test::MockModule();
-use File::Temp qw{tempdir};
+use File::Temp  qw{tempdir};
 use File::Slurper();
 use IO::Socket::SSL::Utils();
 use Net::SSLeay();
@@ -196,26 +195,6 @@ subtest 'the CA can name itself under its own constraint' => sub {
         my $allowed = grep { m/\A[.]/ ? ".$name" =~ m/\Q$_\E\z/ : $_ eq $name } @permitted;
         ok( $allowed, "the CA may issue itself $name, which it needs to start" ) or diag "permitted: @permitted";
     }
-};
-
-subtest 'it depends on the recipe that answers its challenges' => sub {
-    my ($recipe) = generated();
-    my %required = $recipe->required_recipes( domain => $DOMAIN );
-
-    ok( exists $required{pdns}, 'pdns is required, since the challenge is a record it serves' );
-
-    # Handing it nothing is the point: pdns requires an api_key, and one nobody
-    # chose is worse than a build that stops and says so.
-    is_deeply( [ $required{pdns}->() ], [], 'and it is handed nothing to configure it with' );
-};
-
-subtest 'a guest that names an authority needs no server of its own' => sub {
-    my ($recipe) = generated();
-    my $mock = Test::MockModule->new('Provisioner::Cookbook');
-    $mock->redefine( domain_config => sub { return { registrar => { type => 'pdns', authority => 'ns.test.test' }, acmeca => {} } } );
-
-    my %required = $recipe->required_recipes( domain => $DOMAIN );
-    ok( !exists $required{pdns}, 'pdns is not required, since the authority serves the record' );
 };
 
 subtest 'a constraint that is not a name is refused' => sub {

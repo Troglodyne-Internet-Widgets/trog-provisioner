@@ -55,4 +55,3 @@ rm -f pdns-acl.env
     fragment.  A pdns that does not start then fails its own target. -%]
 systemctl restart pdns
 systemctl restart pdns-recursor
-[% INCLUDE "files/dnsrecipe.publish.tt" %]

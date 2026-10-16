@@ -91,10 +91,6 @@ sub with_registrar {
     return $mock;
 }
 
-# The local DNS path needs nothing named at all now: a reserved TLD has only the
-# one provider that could serve it, the recipe resolves that for itself, and the
-# credential belongs to pdns rather than being handed over.
-
 subtest 'the CA defaults to the public one where a public CA could issue' => sub {
     my $registrar = with_registrar();
     my ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
@@ -115,8 +111,8 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     like( $slurp->('dehydrated.conf'), qr{^CA="https://localhost:\d+/acme/trog/directory"$}m, 'the guest-wide config asks our own' );
 
     my %required = $recipe->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( exists $required{acmeca}, 'the CA that serves it is required' );
-    ok( exists $required{pdns},   'and so is the dns server that answers its challenge' );
+    ok( exists $required{acmeca},    'the CA that serves it is required' );
+    ok( exists $required{registrar}, 'and so is the registrar, which says what answers its challenge' );
 
     # pdns authenticates lexicon with this, and the hook presents it.  Two
     # different values is a challenge that cannot be written, so they are pinned
@@ -124,10 +120,10 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # validate() ends by calling enrich, so this is the real path: calling both
     # ran enrich twice, and the second pass saw ca already set, skipped the
     # branch under test and asserted nothing about it.
-    my %handed = $required{pdns}->();
     my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( length $handed{api_key}, 'pdns is handed an api key' );
-    is( $handed{api_key}, $opts{lexicon}{key}, 'and the hook is given the same one' );
+    my %server = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu' )->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    ok( length $server{api_key}, 'pdns makes an api key' );
+    is( $server{api_key}, $opts{lexicon}{key}, 'and the hook is given the same one' );
 
     # The token reaching the file dehydrated executes, which is the thing that
     # actually failed: every other consumer had it and agreed, while the hook
@@ -140,19 +136,13 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
 subtest 'a reserved TLD is served locally whatever reached the module list' => sub {
     my ( undef, undef, $slurp ) = generated( modules => ['letsencrypt'] );
 
-    # The module list is not what decides this, and asking it is what made the
-    # two callers disagree: the depsolver adds the pdns this recipe pulls in
-    # through acmeca between required_recipes and enrich, so the same domain
-    # resolved as the registrar for the first and as the local server for the
-    # second.  A reserved TLD is served locally because this recipe requires
-    # what serves it, which is true before the depsolver has run.
+    # The module list is not what decides this.  The depsolver adds the pdns
+    # that the registrar pulls in between required_recipes and enrich, so the
+    # two would get different answers from it.
     like( $slurp->('dehydrated.conf'), qr{^CA="https://localhost:\d+/acme/trog/directory"$}m, 'the fleet CA, with pdns absent from the list' );
 
-    my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
-    ok( exists $required{pdns}, 'because the recipe is what puts that server there' );
-
     my %opts = fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
-    is( $opts{dns_preference}, 'pdns', 'and both callers resolve the one provider' );
+    is( $opts{lexicon}{type}, 'powerdns', 'and lexicon writes the challenge into the server on the guest' );
 };
 
 subtest 'a domain can name one of the fleet own instead' => sub {
@@ -312,16 +302,10 @@ YAML
     is( $tenant{lexicon}{key}, $host{lexicon}{key}, 'a domain on it presents that one' );
     isnt( $alone{lexicon}{key}, $host{lexicon}{key}, 'while a domain with a machine of its own gets its own' );
 
-    # The hook is only half of it.  required_recipes hands pdns its api_key on a
-    # separate path, and fixing the hook alone left the server configured with
-    # one key and told to expect another.
-    my %host_req    = fresh()->required_recipes( %common, domain => 'first.test' );
-    my %tenant_req  = fresh()->required_recipes( %common, domain => 'second.test' );
-    my %host_pdns   = $host_req{pdns}   ? $host_req{pdns}->()   : ();
-    my %tenant_pdns = $tenant_req{pdns} ? $tenant_req{pdns}->() : ();
-
-    ok( length( $host_pdns{api_key} // q{} ), 'pdns is handed a key for the machine' );
-    is( $tenant_pdns{api_key}, $host_pdns{api_key}, 'and a domain on it hands pdns that same key' );
+    # The hook is only half of it.  The server configures itself with its own
+    # key, and a hook that presents another gets a 401.
+    my $pdns = Provisioner::Cookbook->load('pdns');
+    is( $pdns->api_key_for('second.test'), $host{lexicon}{key}, 'and the server of the machine expects that key' );
 
     Provisioner::Cookbook->forget();
 };
@@ -334,22 +318,6 @@ sub fresh {
     );
 }
 
-subtest 'a guest that answers its own challenge can resolve its own zone' => sub {
-    my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-
-    # lexicon walks the zone through the system resolver for --resolve-zone-name,
-    # and step-ca validates dns-01 through it too.  Measured on a scratch guest
-    # with no nostubresolver: the walk fell to the root, lexicon asked pdns for
-    # zones/. and got a 404, and dig @127.0.0.1 answered for the zone the whole
-    # time.  A fleet whose _base carries the recipe never sees this.
-    ok( exists $required{nostubresolver}, 'the local provider brings a resolver that can see it' );
-
-    # Somebody else holds the zone, so the guest has no need to resolve it here.
-    my $registrar = with_registrar();
-    my %elsewhere = fresh()->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( !exists $elsewhere{nostubresolver}, 'while a registrar-served name is handed no resolver of ours' );
-};
-
 subtest 'a guest that names an authority leaves its challenge to the authority' => sub {
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
     $mock->redefine( domain_config => sub { return { registrar => { type => 'pdns', authority => 'ns.test.test' }, letsencrypt => {} } } );
@@ -358,11 +326,11 @@ subtest 'a guest that names an authority leaves its challenge to the authority' 
     # for its zone, nostubresolver bypassed the route to the authority, and the
     # name of the API of the authority did not resolve.
     my %required = fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( exists $required{acmeca},                   'the fleet CA still issues for a reserved TLD' );
-    ok( !exists $required{pdns},                    'but the guest gets no DNS server of its own' );
-    ok( !exists $required{nostubresolver},          'and keeps the resolver that routes its zone to the authority' );
-    ok( exists $required{'Provisioner::DNSRecipe'}, 'while the holder of its zone is still required' );
-    is( { $required{lexicon}->() }->{dns_preference}, 'registrar', 'and lexicon writes the challenge through the registrar' );
+    ok( exists $required{acmeca}, 'the fleet CA still issues for a reserved TLD' );
+    ok( !exists $required{pdns},  'but the guest gets no DNS server of its own from it' );
+
+    my %opts = fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    is( $opts{lexicon}{key_file}, '/etc/lexicon/' . $DOMAIN . '.token', 'and lexicon writes the challenge with the token that the authority issued' );
 
     # Measured on the same guest: the stub of systemd-resolved answered a name
     # with no record with the SOA of the root, so lexicon asked for the zone "."
@@ -372,6 +340,10 @@ subtest 'a guest that names an authority leaves its challenge to the authority' 
     my $challenge = qr/--name="_acme-challenge[.]\$\{DOMAIN\}[.]"/;
     like( $hook, qr/^\s*lexicon[ ].*[ ]create[ ]\Q$DOMAIN\E[ ]TXT[ ]$challenge/m, 'the hook writes each challenge into the zone of the guest' );
     like( $hook, qr/^\s*lexicon[ ].*[ ]delete[ ]\Q$DOMAIN\E[ ]TXT[ ]/m,           'and removes it from there' );
+
+    # lexicon reaches the authority at a URL, and a URL is never a socket, so a
+    # wait for one ran out its two minutes on every build.
+    unlike( $slurp->('get_cert'), qr/\[[ ]-S[ ]/, 'and the fetcher waits for no socket of its own' );
 };
 
 subtest 'without a zone it is told, lexicon finds the zone of each name' => sub {
@@ -383,77 +355,33 @@ subtest 'without a zone it is told, lexicon finds the zone of each name' => sub 
 subtest 'a provider that could not answer the challenge is refused' => sub {
     my $public = sub { return ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin', @_ ); };
 
-    # The rename is not silent.  An unrecognised key is dropped by the schema
-    # rather than rejected, so a configuration left unmigrated would have
-    # resolved to the registrar without saying anything -- on the one domain
-    # whose zone this fleet is itself serving.
     like(
         exception { fresh()->enrich( $public->( prefer_local_dns => 1 ) ) },
-        qr/dns_preference/,
-        'the flag this replaced names its replacement rather than being ignored'
+        qr/registrar[ ]recipe/,
+        'the flag that this replaced names what replaced it, rather than being ignored'
     );
-
-    like(
-        exception { fresh()->enrich( $public->( dns_preference => 'pdns' ) ) },
-        qr/no[ ]pdns[ ]recipe/,
-        'asking for a local server where none is configured is refused'
-    );
-
-    # No public registrar can hold a zone under a TLD reserved by RFC 2606, so
-    # the credentials could never answer for the name however good they are.
-    # Configured rather than handed over, or the refusal under test would be the
-    # one about credentials in the wrong place instead.
-    {
-        my $registrar = with_registrar();
-        like(
-            exception {
-                fresh()->enrich( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', dns_preference => 'registrar' );
-            },
-            qr/reserve/,
-            'and so is naming a registrar for a name no registrar can hold'
-        );
-    }
 
     # Configured with neither, said explicitly rather than by picking a domain
-    # the installation happens not to configure.  It did the latter until
-    # _base.registrar started being inherited by every domain on this fleet, at
-    # which point this case quietly stopped being the case it names.
-    {
-        my $nothing = Test::MockModule->new('Provisioner::Cookbook');
-        $nothing->redefine( domain_config => sub { return {} } );
-
-        like(
-            exception { fresh()->enrich( $public->() ) },
-            qr/no[ ]DNS[ ]provider/,
-            'a domain with neither is told so, rather than rendering a hook that cannot run'
-        );
-    }
-};
-
-subtest 'a guest that could answer either way is asked which' => sub {
-
-    # A public name whose zone this fleet also serves: the registrar holding it
-    # and the server on the guest can each write the record, they write it in
-    # different places, and choosing for the operator is a guess.
-    my $registrar = with_registrar( pdns => { api_key => 'a-key' } );
-
-    my %both = ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    # the installation happens not to configure.
+    my $nothing = Test::MockModule->new('Provisioner::Cookbook');
+    $nothing->redefine( domain_config => sub { return {} } );
 
     like(
-        exception { fresh()->enrich(%both) },
-        qr/dns_preference/,
-        'a tie with no tiebreaker is refused rather than resolved'
+        exception { fresh()->enrich( $public->() ) },
+        qr/no[ ]server[ ]of[ ]this[ ]installation[ ]holds[ ]its[ ]zone/,
+        'a domain with neither is told so, rather than rendering a hook that cannot run'
     );
+};
 
-    foreach my $named (qw{pdns registrar}) {
-        my %opts = fresh()->enrich( %both, dns_preference => $named );
-        is( $opts{dns_preference}, $named, "naming $named settles it" );
-    }
+subtest 'a public guest that runs pdns answers its own challenge' => sub {
 
-    # The tiebreaker decides the hook as well as the answer: the local server is
-    # reached over a unix socket lexicon has to be pointed at.
-    my %local = fresh()->enrich( %both, dns_preference => 'pdns' );
-    is( $local{lexicon}{type}, 'powerdns', 'and the local server is what lexicon is given' );
+    # A public name whose zone this fleet serves: the registrar of _base is
+    # there too, and the server on the guest holds the zone.
+    my $registrar = with_registrar( pdns => { api_key => 'a-key' } );
+
+    my %opts = fresh()->enrich( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
+    is( $opts{lexicon}{type}, 'powerdns', 'the local server is what lexicon is given' );
+    is( $opts{lexicon}{key},  'a-key',    'with the key that the operator set for it' );
 };
 
 Test::NoWarnings::had_no_warnings();
