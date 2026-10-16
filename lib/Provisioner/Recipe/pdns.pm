@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::DNSRecipe};
+use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::pdns
 
@@ -103,6 +103,7 @@ use Time::HiRes qw{time};
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use Provisioner::Utils();
 use Provisioner::Vars();
 
 # The API socket as the host sees it.  pdns binds /api.sock inside its chroot,
@@ -154,9 +155,9 @@ systemd stub resolver does not ask it.  lexicon looks up the zone through the
 system resolver for C<--resolve-zone-name>, and step-ca validates dns-01 through
 it.  So on the stub, the guest cannot resolve its own name.
 
-L<Provisioner::Recipe::letsencrypt> requires C<nostubresolver> when this server
-answers its challenge.  This recipe requires it too, for a guest that serves a
-zone without letsencrypt.
+A guest that holds its own zone lists this recipe, and
+L<Provisioner::Recipe::registrar> refuses one that does not.  See
+L<Provisioner::Recipe::registrar/authority_of>.
 
 =cut
 
@@ -171,7 +172,6 @@ sub required_recipes {
         # postrun, when Starman and the proxy are installed.
         perl  => sub { return ( cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] ) },
         nginx => sub { return ( sites     => [@served] ) },
-        $self->SUPER::required_recipes(%opts),
     );
 }
 
@@ -216,7 +216,8 @@ sub args {
 
 The credentials for the API on the unix socket of this server.  Anything on
 this guest writes a record into the zone of this server through that API.  See
-L<Provisioner::DNSRecipe> for the keys that come back.
+L<Provisioner::Recipe::registrar/lexicon_credentials> for the keys that come
+back.
 
 C<opts> is C<--resolve-zone-name>, because lexicon reduces a name to its
 registrable form with tldextract before it asks for a zone.  A reserved TLD is
@@ -228,7 +229,7 @@ gets a 404.
 sub lexicon_credentials {
     my ( $self, %opts ) = @_;
 
-    # letsencrypt calls this as a class method, on a path where enrich does not run.
+    # The registrar calls this as a class method, on a path where enrich does not run.
     my $key =
         $opts{api_key}
       ? $opts{api_key}
@@ -273,7 +274,7 @@ sub api_key_for {
 =head2 %credentials = $recipe->client_credentials($guest, $name)
 
 What lexicon needs on another guest to write C<$name> through the proxy on
-C<$guest>, as L<Provisioner::DNSRecipe/lexicon_credentials> returns it.  The
+C<$guest>, as L<Provisioner::Recipe::registrar/lexicon_credentials> returns it.  The
 token is in C<key_file>, which C<client_secret> puts there.
 
 C<opts> is C<--resolve-zone-name>, so that lexicon asks the DNS for the zone.
@@ -371,7 +372,7 @@ Each of them goes into a command that root runs on a pdns guest.
 sub checked_names {
     my ( $self, @names ) = @_;
 
-    my %private = map { $_ => 1 } $self->reserved_tlds;
+    my %private = map { $_ => 1 } Provisioner::Utils::reserved_tlds();
     foreach my $name (@names) {
         die "A command that root runs on a pdns guest takes domains, and '" . ( $name // q{} ) . "' is not one\n"
           unless defined $name && $name eq lc $name && Data::Validate::Domain::is_domain( $name, { domain_private_tld => \%private } );
@@ -405,8 +406,9 @@ sub enrich {
     # Nobody can ask a server on loopback, and the zone above names this one.
     $opts{public_address} = $opts{main_ip};
 
-    my %published = $self->publication(%opts);
-    return ( %opts, %published );
+    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
+
+    return %opts;
 }
 
 sub template_files {

@@ -10,10 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use List::Util qw{any};
-
 use Provisioner::Cookbook();
-use Provisioner::DNSRecipe();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::letsencrypt
@@ -97,14 +94,11 @@ C<.invalid> and C<.localhost>.  No public CA issues for them.  Let's Encrypt
 refuses such an order with C<rejectedIdentifier>, I<Domain name does not end
 with a valid public suffix (TLD)>.
 
-This default pulls in L<Provisioner::Recipe::acmeca>, which serves the CA.
-acmeca pulls in L<Provisioner::Recipe::pdns>, which answers the C<dns-01>
-challenge on loopback.  pdns needs an C<api_key> that nobody configured, so
-this recipe supplies one.  It makes one key for each guest and gives it to both
-pdns and lexicon, because lexicon authenticates with the value that pdns uses.
-If an operator set an C<api_key>, the operator keeps it and this recipe supplies
-nothing.  A second value for a field that the operator set is the conflict that
-C<resolve_conflict> dies on.
+This default pulls in L<Provisioner::Recipe::acmeca>, which serves the CA.  A
+guest under a reserved TLD holds its own zone unless it names an authority, so
+L<Provisioner::Recipe::registrar> pulls in L<Provisioner::Recipe::pdns>, which
+answers the C<dns-01> challenge on loopback.  pdns makes its own C<api_key>, and
+lexicon gets the same key from it.  See L<Provisioner::Recipe::pdns/api_key_for>.
 
 A guest whose C<registrar> names an C<authority> is different.  The authority
 holds the zone of the guest, so lexicon writes the challenge there, and step-ca
@@ -112,28 +106,11 @@ reads it through the resolver of the guest, which sends the zone to the
 authority.  So that guest gets no pdns and no C<nostubresolver> for its
 challenge.
 
-B<The recipe asks this of the domain, not of the module list.>  The pdns on the
-guest serves a reserved TLD, and this recipe requires that server through
-acmeca.  So the server is always there when the name needs it.  Do not ask
-C<modules>.  The depsolver adds to it between C<required_recipes> and C<enrich>,
-so the two get different answers about the same domain.
+=head2 Which server answers the challenge
 
-=head2 Which provider answers the challenge
-
-C<dns_preference> names the provider.  C<pdns> is the server that this fleet
-runs on the guest.  C<registrar> is the holder of the public zone of the domain.
-It is a tiebreaker, not a setting.  Usually nothing needs it.  A name under a
-reserved TLD always uses the local server, because no public registrar can hold
-a zone for it.  A domain configured with only one of the two uses that one.
-
-It matters when a guest has both, which is a public name whose zone this fleet
-also serves.  The registrar and the local server can each answer, and they
-answer differently.  A choice on behalf of the domain is a guess.  So the recipe
-refuses a domain that configures both and names neither.
-
-The recipe also refuses two configurations.  C<registrar> under a reserved TLD
-names a provider that can never answer for the name.  C<pdns> with no such
-server configured names a provider that is not there.
+L<Provisioner::Recipe::registrar> says which server holds the zone of the
+domain, and gives lexicon its credentials.  This recipe writes the challenge
+there.  See L<Provisioner::Recipe::registrar/authority_of>.
 
 =head2 What a guest served by our own CA can be issued for
 
@@ -173,20 +150,11 @@ sub datadirs {
 # names no CA gets this one.
 our $DEFAULT_CA = 'letsencrypt';
 
-# The TLD of $domain if only our own CA can issue for it, and nothing if not.
-# No public registrar holds a zone under a reserved TLD of Provisioner::DNSRecipe,
-# for the same reason that no public CA issues for a name under one.
-my sub reserved_tld ($domain) {
-    my $tld = Provisioner::Utils::tld_of($domain) or return;
-
-    return ( any { $_ eq $tld } Provisioner::DNSRecipe->reserved_tlds ) ? $tld : ();
-}
-
 # 1 if the CA of this domain is ours by default and not by name, and 0 if not.
 # It reads the raw options, where an absent ca is still absent, because
 # required_recipes runs before validation.
 my sub auto_ca (%opts) {
-    return ( !defined $opts{ca} && reserved_tld( $opts{domain} ) ) ? 1 : 0;
+    return ( !defined $opts{ca} && Provisioner::Utils::reserved_tld( $opts{domain} ) ) ? 1 : 0;
 }
 
 sub args {
@@ -204,12 +172,6 @@ sub args {
                 default     => [],
                 description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
             },
-            dns_preference => {
-                type        => 'string',
-                enum        => [qw{pdns registrar}],
-                description =>
-                  "Which DNS recipe answers this domain's dns-01 challenge where the guest has more than one that could: 'pdns' for the server this fleet runs on the guest, 'registrar' for whoever holds the public zone.  A tiebreaker and nothing more -- a name under a reserved TLD is always served locally, and a domain configured with only one of the two uses it -- so a guest with both and no preference is refused rather than guessed at.  Resolved by enrich to the provider actually used, which is what the hook and the fetcher are rendered from.",
-            },
         },
     );
 }
@@ -217,15 +179,13 @@ sub args {
 sub enrich {
     my ( $self, %params ) = @_;
 
-    die "prefer_local_dns is now dns_preference, which names the recipe that answers this domain's challenge rather than asserting a boolean: 'pdns' for the server on the guest, 'registrar' for whoever holds the public zone.\n"
+    die "prefer_local_dns is gone.  The registrar recipe says which server answers the challenge of this domain: the pdns of the guest where it runs one, or else the authority or the registrar that the registrar block names.\n"
       if exists $params{prefer_local_dns};
 
     # Nothing reads registrar credentials in _global.  Refuse them, because the
     # domain otherwise resolves to no provider or to the guest without a word.
     die "registrar credentials belong to the registrar recipe now, not to _global, so nothing reads the ones set for $params{domain}.  Move the registrar block out of _base._global and into _base, where it configures Provisioner::Recipe::registrar for every domain that inherits it.\n"
       if ref $params{registrar} eq 'HASH' && !exists( Provisioner::Cookbook->domain_config( $params{domain} )->{registrar} );
-
-    my $provider = Provisioner::DNSRecipe->provider_for(%params);
 
     # The default CA depends on the domain: see L</Which CA issues, and how a
     # reserved TLD gets one at all>.
@@ -242,18 +202,15 @@ sub enrich {
     }
     $params{ca} //= $DEFAULT_CA;
 
-    # The rest of the render uses the resolved provider, because a domain that
-    # names no preference still has one.
-    $params{dns_preference} = $provider;
-
     # The same name and structure that the shortcut renders from, so the two
     # exports of one credential cannot drift apart.
-    $params{lexicon} = { Provisioner::DNSRecipe->credentials_for(%params) };
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    $params{lexicon} = { $registrar->credentials_for(%params) };
 
-    # The socket lexicon talks to, where the provider is reached through one,
-    # which get_cert waits for before it asks for a challenge.
+    # The socket of the server on the guest, which get_cert waits for before it
+    # asks for a challenge.  An authority is reached at a URL, not a socket.
     my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
-    $params{lexicon_socket} = $extra{PDNS_SERVER} // q{};
+    $params{lexicon_socket} = $registrar->serves_itself( $params{domain} ) ? $extra{PDNS_SERVER} // q{} : q{};
     $params{domain_aliases} = [ $self->domain_aliases(%params) ];
 
     return %params;
@@ -286,7 +243,7 @@ sub restores {
 
     my %restores = ( "/var/lib/dehydrated/certs/$domain" => { from => "$install_dir/$domain/.letsencrypt/var-certs/$domain", owner => 'root:root' } );
 
-    return %restores if !defined $opts{ca} && reserved_tld($domain);
+    return %restores if !defined $opts{ca} && Provisioner::Utils::reserved_tld($domain);
 
     my $host = defined $opts{ca} ? ( Provisioner::Utils::host_of( $opts{ca} ) // q{} ) : q{};
     return %restores if $host eq 'localhost' || $host eq '127.0.0.1';
@@ -313,20 +270,12 @@ returns the options to give that recipe:
 =item * C<acmeca>, when this domain uses a CA of the fleet and not a public
 preset.
 
-=item * The local DNS recipe (C<pdns>), with an C<api_key>, when the CA is ours
-by default, the local server answers the challenge, and nobody configured a key
-for the server.
+=item * C<registrar>, which holds the zone of this domain, or says which server
+does.
 
-=item * C<Provisioner::DNSRecipe>, which bin/new_config resolves to whatever
-holds the zone of this domain.
-
-=item * C<nostubresolver>, when the local server answers the challenge.
-
-=item * C<lexicon>, with the resolved provider as its tiebreaker.
+=item * C<lexicon>, which writes the challenge.
 
 =back
-
-It also returns what the base class requires.
 
 The recipe gives acmeca no options, because the configuration of a CA is its own
 business.  The acmeca edge exists for the order.  bin/new_config puts a required
@@ -340,66 +289,10 @@ depend on where two recipes happen to sit in a list.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    my $auto     = auto_ca(%opts);
-    my @required = ( $auto || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
+    my @required = ( auto_ca(%opts) || ( defined $opts{ca} && $opts{ca} ne $DEFAULT_CA ) ) ? ( acmeca => sub { return () } ) : ();
+    push( @required, registrar => sub { return () }, lexicon => sub { return () } );
 
-    # eval, because this runs before validation.  enrich rejects a domain with
-    # no provider, and a second report here races two messages for one fault.
-    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // q{};
-    my $local    = Provisioner::DNSRecipe->local_implementation();
-
-    # acmeca requires pdns when pdns answers the challenge, and gives it no
-    # api_key.  Supply one only when this recipe is why pdns is there and the
-    # operator set none.  See L</Which CA issues, and how a reserved TLD gets
-    # one at all>.
-    if ( $auto && $provider eq $local ) {
-
-        # The domain of the machine, not this one, because one pdns serves the
-        # whole guest and already runs with its key.  Provisioner::Cookbook/host_of
-        # finds the machine in _shared.
-        my $server = Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain};
-        my $class  = Provisioner::Cookbook->load($local);
-
-        my $configured = Provisioner::Cookbook->domain_config($server)->{$local}{api_key};
-        unless ($configured) {
-
-            # Ask the recipe that owns the key, and ask now, because this runs
-            # before validation and enrich has not run yet.  Every call gets the
-            # same value for one server, so the server and its clients agree.
-            my $token = $class->api_key_for($server);
-            push( @required, $local => sub { return ( api_key => $token ) } );
-        }
-    }
-
-    # The holder of the zone of this domain must be on the guest.  The registrar
-    # recipe installs the shortcut for the operator, and pdns installs the
-    # server.  The name is the interface, so bin/new_config resolves it to the
-    # one that serves this domain.  See Provisioner::DNSRecipe and
-    # resolve_substitutable_dependency.
-    #
-    # Skip it when the branch above already asked for the local recipe.  Under a
-    # reserved TLD both resolve to the same recipe, and %dep_recipes is keyed by
-    # recipe name.  So the second silently replaces the first, and the minted
-    # api_key is lost for some orders that `keys` returns.
-    push( @required, 'Provisioner::DNSRecipe' => sub { return () } )
-      unless any { $_ eq $local } @required;
-
-    # A guest that answers its own challenge must be able to read back what it
-    # wrote.  lexicon walks the zone for --resolve-zone-name through the system
-    # resolver, and step-ca validates dns-01 through it too.  On the systemd
-    # stub, the guest cannot resolve its own name.  nostubresolver points the
-    # resolver at the server on the guest.  It changes nothing on a fleet whose
-    # _base already gives every domain that recipe.
-    push( @required, nostubresolver => sub { return () } ) if $provider eq $local;
-
-    # lexicon is the client that the hook writes the challenge record with.
-    #
-    # Give it the provider that this domain resolved to.  lexicon renders one
-    # shortcut, for the holder of the zone, so it has the same tie to settle.
-    # The key that settles it is in the block of this recipe, not of lexicon.
-    push( @required, lexicon => sub { return $provider ? ( Provisioner::DNSRecipe->tiebreaker_key => $provider ) : () } );
-
-    return ( @required, $self->SUPER::required_recipes(%opts) );
+    return @required;
 }
 
 sub tests {

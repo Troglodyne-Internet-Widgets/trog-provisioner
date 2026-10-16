@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use File::Find();
+use List::Util();
 use MIME::Base64 qw{encode_base64};
 
 use Data::Validate::Email();
@@ -256,7 +257,7 @@ Returns the last label of C<$domain>, or nothing if C<$domain> has no dot.
 It is here so that every caller gets the same answer, and no caller loads
 another to agree.  L<Provisioner::Recipe::letsencrypt> uses it to decide if a
 public CA can issue for a name.  L<Provisioner::Recipe::acmeca> limits its
-intermediate to it.  L<Provisioner::DNSRecipe> uses it to find a reserved TLD.
+intermediate to it.
 
 =cut
 
@@ -267,6 +268,31 @@ sub tld_of {
     my ($tld) = $domain =~ m/[.]([^.]+)\z/;
 
     return $tld;
+}
+
+=head3 @tlds = reserved_tlds()
+
+Returns the top-level domains that RFC 2606 and RFC 6761 reserve.  No public
+registrar holds a zone under one of them, and no public CA issues a certificate
+for a name under one.
+
+=cut
+
+our @RESERVED_TLDS = qw{test example invalid localhost};
+
+sub reserved_tlds { return @RESERVED_TLDS }
+
+=head3 reserved_tld($domain)
+
+Returns the TLD of C<$domain> if C<reserved_tlds> has it, and nothing if not.
+
+=cut
+
+sub reserved_tld {
+    my ($domain) = @_;
+
+    my $tld = tld_of($domain) // return;
+    return ( List::Util::any { $_ eq $tld } @RESERVED_TLDS ) ? $tld : ();
 }
 
 =head3 dns_name($name)

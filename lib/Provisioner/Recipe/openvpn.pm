@@ -333,8 +333,7 @@ Dies if a route is not an IPv4 CIDR block.
 =head2 %required = $recipe->required_recipes(%opts)
 
 Requires C<cron>, which installs F<openvpn-refresh-crl.cron> and
-F<openvpn-ca-expiry.cron> under F</etc/cron.d>.  Also returns what the base
-class requires.
+F<openvpn-ca-expiry.cron> under F</etc/cron.d>.
 
 =cut
 
@@ -342,7 +341,7 @@ sub required_recipes {
     my ( $self, %opts ) = @_;
 
     my %files = map { $_ => "$_.cron" } qw{openvpn-refresh-crl openvpn-ca-expiry};
-    return ( cron => sub { return ( files => \%files ) }, $self->SUPER::required_recipes(%opts) );
+    return ( cron => sub { return ( files => \%files ) } );
 }
 
 sub enrich {

@@ -285,29 +285,6 @@ subtest 'the shelf has the recipes on it' => sub {
     ok( !( grep { $_ eq 'Cookbook' } @names ), 'and the cookbook is not a recipe' );
 };
 
-subtest 'implementations of an interface' => sub {
-
-    # What lets bin/new_config satisfy a substitutable dependency: a
-    # recipe can say it needs something that answers a dns-01 challenge without
-    # naming the one that happens to exist.
-    my @dns = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
-    is_deeply( [@dns], [qw{pdns registrar}], 'the DNS interface has its two, sorted' );
-
-    # names() prunes the recipes that direct a build, and those implement
-    # interfaces too -- every distro recipe is one.  Asked of names alone this
-    # answered that nothing implements DistroRecipe, which is a lie that would
-    # have read as "no such capability here".
-    my @distro = Provisioner::Cookbook->implementations('Provisioner::DistroRecipe');
-    ok( ( grep { $_ eq 'ubuntu' } @distro ), 'and a director counts as an implementation' );
-
-    is_deeply( [ Provisioner::Cookbook->implementations('No::Such::Interface') ], [], 'something nothing implements is empty rather than fatal' );
-
-    # Asked once a process: which classes inherit from what is a fact about the
-    # code, not about a configuration.
-    my @again = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
-    is_deeply( [@again], [@dns], 'and the answer is stable' );
-};
-
 subtest 'has() and load()' => sub {
     ok( Provisioner::Cookbook->has('ntp'),           'a real one' );
     ok( !Provisioner::Cookbook->has('nosuchrecipe'), 'and one that is not' );
@@ -650,6 +627,31 @@ subtest 'the walk reaches a dependency of a dependency' => sub {
     ok( ( grep { $_ eq 't_deep.buried' } @todo ), 'and reported with the rest' );
 };
 
+subtest 'recipes_with names every recipe that the guest is built from' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    my @recipes = Provisioner::Cookbook->recipes_with( ['t_requirer'], domain => 'd.test' );
+    is_deeply( [ sort @recipes ], [qw{t_deep t_dep t_requirer t_satisfied}], 'the recipe named, what it requires, and what that requires' ) or diag "got: @recipes";
+};
+
+subtest 'needs_recipe holds the machine of a domain to what it holds another guest to' => sub {
+    my %configured = ( 'ns.test'     => { pdns => {} } );
+    my %host       = ( 'tenant.test' => 'web.test' );
+    my $mock       = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $configured{$domain} // {} } );
+    $mock->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
+
+    my $needs = sub {
+        my @args = @_;
+        return exception { Provisioner::Cookbook->needs_recipe( @args, 'pdns', 'the authority' ) }
+    };
+    is( $needs->( 'web.test',    'ns.test' ),    undef,                                                                                                     'a guest that runs the recipe passes' );
+    is( $needs->( 'web.test',    'other.test' ), "web.test names other.test as the authority, but other.test runs no pdns in this installation.\n",         'another guest that does not is refused' );
+    is( $needs->( 'web.test',    'web.test' ),   "web.test is the authority, but runs no pdns.  Add pdns to web.test.\n",                                   'and so is the domain itself, told what to add' );
+    is( $needs->( 'tenant.test', 'web.test' ),   "tenant.test is on web.test, which is the authority, but web.test runs no pdns.  Add pdns to web.test.\n", 'and the host of a tenant, told where to add it' );
+};
+
 subtest 'a required_recipes sub always gets the domain and install_dir' => sub {
 
     dependencies_of( ['t_reader'] );
@@ -828,31 +830,6 @@ subtest 'a dependency configured inside its requirer is lifted out of the stanza
     );
 };
 
-subtest 'an interface is resolved rather than passed along' => sub {
-
-    # Which recipe answers for one is the interface's to say -- this only holds
-    # it to being a recipe that exists and implements what was asked for.
-    my $chosen = Provisioner::Cookbook->resolve_substitutable_dependency(
-        interface      => 'Provisioner::DNSRecipe',
-        domain_conf    => {},
-        requiring_conf => {},
-        domain         => 'd.test',
-    );
-
-    my @known = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
-    ok( ( grep { $_ eq $chosen } @known ), "resolved to $chosen, which implements it" );
-
-    my $err = exception {
-        Provisioner::Cookbook->resolve_substitutable_dependency(
-            interface      => 'Provisioner::NoSuchInterface',
-            domain_conf    => {},
-            requiring_conf => {},
-            domain         => 'd.test',
-        );
-    };
-    like( $err, qr/will[ ]not[ ]load/, 'and an interface that is not one says so' );
-};
-
 subtest 'two recipes that cannot share a domain are refused, however they got there' => sub {
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
     $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
@@ -876,7 +853,8 @@ subtest 'two recipes that cannot share a domain are refused, however they got th
     is( exception { $resolve->(qw{t_loner}) },    undef, 'either alone is fine' );
     is( exception { $resolve->(qw{t_requirer}) }, undef, 'and so is the other' );
 
-    is_deeply( [ 'Provisioner::Recipe::nginxdirindex'->exclusive_with() ], [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
+    $mock->unmock('load');
+    is_deeply( [ Provisioner::Cookbook->load('nginxdirindex')->exclusive_with() ], [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
 };
 
 subtest 'a recipe the caller already named is left to the caller' => sub {

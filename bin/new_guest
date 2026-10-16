@@ -98,6 +98,13 @@ A required field gets its default.  If it has no default, it gets C<CHANGEME>.
 A field that is not required is left out.  The recipe then applies its own
 default, and a later change to that default also applies.
 
+=item *
+
+A guest that holds its own zone gets C<pdns>, which the registrar of a guest
+does not add.  Under a reserved TLD, as the default hostname is, a guest holds
+its own zone unless C<_base> names an authority.  See
+L<Provisioner::Recipe::registrar>.
+
 =back
 
 At the end, the program prints the fields that you must fill in.  If
@@ -248,6 +255,17 @@ sub build {
     my @wanted = @$recipes;
     push @wanted, 'data' unless any { $_ eq 'data' } @wanted or exists $base->{data};
 
+    # Under a reserved TLD, as the default hostname is, a guest that names no
+    # authority holds its own zone, and needs a pdns that nothing adds.  A
+    # required_recipes sub reads the globals, so give them as _global in
+    # recipes.yaml has them.
+    my %walk = (
+        base          => $base,
+        global_config => ref $base->{_global} eq 'HASH' ? $base->{_global} : {},
+        domain        => $hostname,
+    );
+    push @wanted, Provisioner::Cookbook->load('registrar')->zone_server_for( $hostname, \@wanted, %walk );
+
     my %domain = ( _global => \%global );
     my @todo;
     foreach my $recipe (@wanted) {
@@ -263,16 +281,7 @@ sub build {
     # The guest also gets every recipe that these require.  A required recipe
     # can need a field that nothing supplies.  List it now, so new_config does
     # not refuse it later.
-    #
-    # A required_recipes sub reads the globals, so give them as _global in
-    # recipes.yaml has them.
-    my ( $deps, @dep_todo ) = Provisioner::Cookbook->scaffold_dependencies(
-        \@wanted,
-        all           => $opts->{all},
-        base          => $base,
-        global_config => ref $base->{_global} eq 'HASH' ? $base->{_global} : {},
-        domain        => $hostname,
-    );
+    my ( $deps, @dep_todo ) = Provisioner::Cookbook->scaffold_dependencies( \@wanted, %walk, all => $opts->{all} );
     $domain{$_} = $deps->{$_} for sort keys %$deps;
     push @todo, @dep_todo;
 

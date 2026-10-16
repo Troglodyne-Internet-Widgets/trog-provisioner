@@ -8,8 +8,8 @@ use re '/aasx';
 
 =head1 NAME
 
-t/new_config-dns.t - what the depsolver does with a substitutable dependency,
-one named as an interface rather than as a recipe
+t/new_config-dns.t - which server holds the zone of a generated domain, as the
+registrar decides
 
 =cut
 
@@ -187,22 +187,27 @@ subtest 'a credential written as a secret reference reaches the hook resolved' =
     unlike( $text, qr/secret:/, 'and nowhere in it says where the password is instead of what it is' );
 };
 
-subtest 'a reserved name resolves the interface to the server on the guest' => sub {
-    my ( $err, $makefile ) = generate( $LOCAL, letsencrypt => undef );
+subtest 'a reserved name is held by the server on the guest' => sub {
 
-    is( $err, undef, 'the generation runs to the end' )   or diag $err;
+    # No public registrar holds a zone under a TLD RFC 2606 reserves.  Nothing
+    # adds pdns to the guest, as nothing adds it to an authority elsewhere.
+    my ($err) = generate( $LOCAL, letsencrypt => undef );
+    my $refusal = "$LOCAL is the authority of its registrar, but runs no pdns.  Add pdns to $LOCAL.";
+    like( $err // q{}, qr/\A\Q$refusal\E/, 'a guest that does not list pdns is refused, and told to add it' );
+
+    ( $err, my $makefile, my $dir ) = generate( $LOCAL, letsencrypt => undef, pdns => undef );
+    is( $err, undef, 'the generation runs to the end once it does' ) or diag $err;
     ok( defined $makefile, 'and a makefile was written' ) or return;
+    ok( builds( $makefile, 'pdns' ), 'pdns is built, because the guest answers for itself' );
 
-    # No public registrar holds a zone under a TLD RFC 2606 reserves, so there
-    # is only ever the one candidate and nothing has to say which.
-    ok( builds( $makefile,  'pdns' ),      'pdns is built, because the guest answers for itself' );
-    ok( !builds( $makefile, 'registrar' ), 'and the registrar recipe is not' );
+    my $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
+    like( $shortcut, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'and lexicon is pointed at its socket' );
 };
 
 # The generator is what carries a recipe's archive, and the pin of what the
 # recipes conflict with, into the file that the guest first boots from.
 subtest 'first boot gets the archive of pdns, and the pin of what conflicts' => sub {
-    my ( $err, undef, $dir ) = generate( $LOCAL, letsencrypt => undef, nginx => undef );
+    my ( $err, undef, $dir ) = generate( $LOCAL, letsencrypt => undef, nginx => undef, pdns => undef );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
     my $user_data = YAML::XS::Load( File::Slurper::read_binary("$dir/user-data") );
@@ -233,36 +238,20 @@ subtest 'a name somebody else holds resolves it to the registrar' => sub {
     like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'and lexicon is pointed at the registrar that holds the zone' );
 };
 
-subtest 'a guest that could answer either way is refused until it says which' => sub {
-    my ( $err, undef ) = generate(
-        $REMOTE,
-        letsencrypt => undef,
-        registrar   => { type    => 'easydns', user => 'somebody', key => 'a-token' },
-        pdns        => { api_key => 'an-api-key' },
-    );
+subtest 'a guest that runs pdns holds its own zone only where it says so' => sub {
+    my %registrar = ( type => 'easydns', user => 'somebody', key => 'a-token' );
 
-    ok( $err, 'the generation stops' ) or return;
-    like( $err, qr/dns_preference/, 'naming the key that settles it' );
-
-    # And settles when it does.  The preference is read from the configuration
-    # of whichever recipe declared the dependency, which is where an operator
-    # already writes it.
-    my ( $ok, $makefile, $dir ) = generate(
-        $REMOTE,
-        letsencrypt => { dns_preference => 'registrar' },
-        registrar   => { type           => 'easydns', user => 'somebody', key => 'a-token' },
-        pdns        => { api_key        => 'an-api-key' },
-    );
-
-    is( $ok, undef, 'naming one lets it through' ) or diag $ok;
-    ok( builds( $makefile, 'lexicon' ), 'and lexicon is built' );
-
-    # The tie has to be settled where the shortcut is rendered, not only in the
-    # recipe declaring the key: lexicon resolves the provider for itself, and on
-    # a guest configured both ways it has the same tie and nothing of its own to
-    # break it.  letsencrypt hands its answer down, and this is that arriving.
+    # The authority of other guests, while the registrar holds its own name.
+    my ( $err, $makefile, $dir ) = generate( $REMOTE, letsencrypt => undef, registrar => {%registrar}, pdns => { api_key => 'an-api-key' } );
+    is( $err, undef, 'the generation runs to the end' ) or diag $err;
+    ok( builds( $makefile, 'pdns' ), 'and pdns is built' );
     my $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
-    like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'and the one named is what lexicon is pointed at' );
+    like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'while lexicon is pointed at the registrar, which holds its name' );
+
+    ( $err, $makefile, $dir ) = generate( $REMOTE, letsencrypt => undef, registrar => { %registrar, authority => $REMOTE }, pdns => { api_key => 'an-api-key' } );
+    is( $err, undef, 'naming itself as its authority runs to the end' ) or diag $err;
+    $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
+    like( $shortcut, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$/m, 'and points lexicon at its own server, with its key' );
 };
 
 done_testing;

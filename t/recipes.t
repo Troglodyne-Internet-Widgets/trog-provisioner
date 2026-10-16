@@ -132,6 +132,10 @@ sub salvage_brings_down {
     return -f "$dir/dst/$relative" ? 1 : 0;
 }
 
+# The guest of every render holds its own zone, being under a reserved TLD, so
+# its configuration names the pdns that the registrar refuses to do without.
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "---\ntest.test.test:\n  pdns:\n" );
+
 # Global vars bin/new_config injects into every template render.  The set is
 # Provisioner::Recipe::global_args, and the subtest below keeps the two in step:
 # this was four settings short of what a run actually injects, so nothing here
@@ -1658,7 +1662,7 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
 
     # A fresh recipe per render: validated() memoises onto the object, so a
     # second render through the same one answers with the first one's options.
-    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns' );
+    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G );
     like( $hook, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
 };
 
@@ -1681,11 +1685,12 @@ subtest 'the resolver is live before anything reads a zone back through it' => s
 # recipe when this server answers its challenge; asking here too is what covers
 # a guest serving a zone without one.
 subtest 'a guest running its own DNS gets a resolver that can see the zone' => sub {
-    my %required = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->required_recipes(%G);
+    my $pdns     = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV);
+    my %required = ( Provisioner::Recipe::required_recipes( $pdns, %G ), $pdns->required_recipes(%G) );
     ok( $required{nostubresolver}, 'pdns asks for nostubresolver' );
 
-    # Chained rather than replaced: pdns declares rate_limits and restores, and
-    # the base is what turns those into ufw and data.
+    # pdns declares rate_limits and restores, and the base class, which the
+    # depsolver asks as well, turns those into ufw and data.
     ok( $required{ufw},  'without dropping the firewall its rate limits need' );
     ok( $required{data}, 'or the recipe its salvaged zone database goes back through' );
 };

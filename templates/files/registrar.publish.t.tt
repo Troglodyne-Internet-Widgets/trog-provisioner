@@ -1,5 +1,5 @@
-[%# The checks of the records that an implementation of Provisioner::DNSRecipe
-    publishes, included in its guest test.  Asked of the provider rather than of
+[%# The checks of the records that Provisioner::Recipe::registrar publishes,
+    included in its guest test.  Asked of the provider rather than of
     a resolver, because a resolver answers out of its cache. -%]
 [% IF publish_records -%]
 subtest 'the records of the domain are published to the zone that holds it' => sub {
@@ -30,7 +30,7 @@ subtest 'the records of the domain are published to the zone that holds it' => s
 [% END -%]
 };
 [% ELSE -%]
-# Another recipe holds the zone of this domain, or the hypervisor allocates the
-# address and there was none when the makefile was written.
+# The hypervisor allocates the address, and there was none when the makefile
+# was written.
 pass('this recipe publishes nothing for this domain');
 [% END -%]

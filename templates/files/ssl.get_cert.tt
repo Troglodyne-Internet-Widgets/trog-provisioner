@@ -1,6 +1,6 @@
 #!/bin/bash
 
-[% IF dns_preference == 'pdns' -%]
+[% IF lexicon_socket -%]
 # Wait for the server that answers the challenge before asking for one.
 #
 # This is a backstop.  pdns starts in its own target, and nostubresolver

@@ -102,9 +102,8 @@ sub stopgap_names {
 }
 
 # The names that a generated domain hands its certificate and its zone, out of
-# domains.txt of letsencrypt and the zonefile of pdns, which the domain
-# resolved Provisioner::DNSRecipe to, so these are what the recipes on it
-# handed over.
+# domains.txt of letsencrypt and the names that the registrar publishes, so
+# these are what the recipes on it handed over.
 sub certificate_names {
     my ($dir) = @_;
     my $list = -f "$dir/domains.txt" ? File::Slurper::read_text("$dir/domains.txt") : q{};
@@ -113,8 +112,9 @@ sub certificate_names {
 
 sub zone_names {
     my ( $dir, $domain ) = @_;
-    my $zone = -f "$dir/zonefile" ? File::Slurper::read_text("$dir/zonefile") : q{};
-    return [ sort map { "$_.$domain" } $zone =~ m/^(\S+)[.]\Q$domain\E[.]\s+IN\s+CNAME\b/mg ];
+    my $makefile = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
+    my ($names) = $makefile =~ m{publish_dns_records[ ]\Q$domain\E[ ]\S+[ ]([^\n]*)};
+    return [ sort split ' ', $names // q{} ];
 }
 
 subtest 'a recipe says which names it serves' => sub {
@@ -142,11 +142,11 @@ subtest 'the stopgap certificate names the domain and its configured aliases' =>
 };
 
 subtest 'a web server brings www with it, and nothing it does not serve' => sub {
-    my ( $err, undef, $dir ) = generate( 'web.test', nginxproxy => { proxy_uri => 'run/bogus.sock' } );
+    my ( $err, undef, $dir ) = generate( 'web.test', nginxproxy => { proxy_uri => 'run/bogus.sock' }, pdns => undef );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
-    # dnsapi, because a guest under a reserved TLD runs pdns for acmeca, and
-    # pdns serves its API there.
+    # dnsapi, because a guest under a reserved TLD holds its own zone in pdns,
+    # and pdns serves its API there.
     is_deeply( certificate_names($dir),        [qw{dnsapi.web.test web.test www.web.test}], 'the certificate names www, because nginxproxy serves it, and no mail, because nothing serves that' );
     is_deeply( zone_names( $dir, 'web.test' ), [qw{dnsapi.web.test www.web.test}],          'and so does the zone' );
 };
@@ -157,7 +157,7 @@ subtest 'a name belonging to a dependency is handed over as well' => sub {
     # autodiscover and autoconfig.  Asking what recipes.d names would find only
     # roundcube and nginxproxy: the names come from every recipe that the
     # depsolver settled on.
-    my ( $err, undef, $dir ) = generate( 'mail.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' } );
+    my ( $err, undef, $dir ) = generate( 'mail.test', roundcube => { version => '1.6.0' }, nginxproxy => { proxy_uri => 'run/bogus.sock' }, pdns => undef );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
     my @served = qw{autoconfig.mail.test autodiscover.mail.test dnsapi.mail.test mail.mail.test webmail.mail.test www.mail.test};

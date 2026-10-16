@@ -187,7 +187,6 @@ sub required_recipes {
         nginx   => sub {
             return ( sites => [ map { "$_.$opts{domain}" } qw{autodiscover autoconfig} ] );
         },
-        $self->SUPER::required_recipes(%opts),
     );
 }
 

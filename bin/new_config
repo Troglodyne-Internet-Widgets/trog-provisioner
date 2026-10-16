@@ -895,8 +895,6 @@ sub handle_domain {
         distro        => $distro_name,
         provisioner   => \%provisioner_opts,
         domain        => $domain,
-        host          => $depends_on,
-        host_conf     => defined $depends_on ? $rconf->{$depends_on} : undef,
     );
     @modules  = @$solved;
     %builders = %$built;

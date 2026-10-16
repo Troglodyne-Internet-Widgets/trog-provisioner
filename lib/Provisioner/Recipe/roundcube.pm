@@ -49,7 +49,7 @@ requires L<Provisioner::Recipe::mail> and is served from the same guest.  That
 is the only arrangement this configures: config.inc.php names mail.[domain] and
 has no way to be told to name anything else.  Pointing a webmail install at a
 mailserver somewhere else wants an IMAP provider a domain can choose, the way it
-chooses a DNS one -- see L<Provisioner::DNSRecipe>.
+chooses the server of its zone -- see L<Provisioner::Recipe::registrar>.
 
 TLS uses the certificate provided by the 'letsencrypt' recipe.  The C<webmail>
 name is declared in L<Provisioner::Recipe/subdomains>, not written into the

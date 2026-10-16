@@ -14,5 +14,5 @@ like( `/opt/lexicon/upstream/[% domain %] list NS --name=[% domain %] --output=J
 [% IF fleet_anchor -%]
 ok(-f '/usr/local/share/ca-certificates/trog-acmeca.crt', 'the authority that the API of the pdns guest chains to is a trust anchor');
 [% END -%]
-[% INCLUDE "files/dnsrecipe.publish.t.tt" %]
+[% INCLUDE "files/registrar.publish.t.tt" %]
 done_testing();

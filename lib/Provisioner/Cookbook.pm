@@ -338,35 +338,6 @@ sub cache_classes {
     return @$classes;
 }
 
-=head2 implementations($interface)
-
-Returns, sorted, the recipes whose class C<isa> C<$interface>.  For example,
-C<Provisioner::DNSRecipe> has two: C<pdns> and C<registrar>.
-
-This loads every recipe, which C<names> does not.  It asks once per process for
-each interface, because inheritance is a fact about the code.
-
-C<resolve_substitutable_dependency> uses this.  With it, a recipe can ask for
-something that answers a dns-01 challenge without naming the recipe that does
-it.
-
-=cut
-
-sub implementations {
-    my ( $class, $interface ) = @_;
-
-    # Directors too, because names() leaves them out, and every
-    # Provisioner::DistroRecipe is a director.
-    state %by_interface;
-    $by_interface{$interface} //= [
-        sort grep {
-            eval { $class->load($_)->isa($interface) }
-        } ( $class->names, $class->directors )
-    ];
-
-    return @{ $by_interface{$interface} };
-}
-
 =head2 directors
 
 Returns the recipes that direct a build and do not run in one: C<vm>, and the
@@ -682,41 +653,10 @@ sub scaffold {
     return ( $config, @todo );
 }
 
-=head2 scaffold_dependencies(\@named, %opts)
-
-Returns a hash reference of the blocks that a domain needs for recipes that
-nobody named, and the dotted paths in them that a person still has to fill in.
-
-    my ( $blocks, @todo ) = Provisioner::Cookbook->scaffold_dependencies( ['grafanasyslog'] );
-
-C<scaffold> answers for one recipe, and C<bin/new_guest> asks it about each
-recipe on its command line.  That is not the full set that the guest is built
-from.  C<bin/new_config> adds each dependency from C<required_recipes>, so a
-recipe that nobody named can arrive with required fields of its own.  The
-recipe that asked for it usually supplies them.  When it cannot, a person must
-know.  For example, C<grafana> wants an C<admin_password>, and a dependent
-recipe cannot choose a password for the operator.  Without this, the report
-says that there is nothing to fill in.  Then C<bin/new_config> refuses the
-configuration when the guest is already going up.
-
-Only dependencies that still want a value come back.  The depsolver adds the
-recipe either way, so a block here is a place to put a value, not a request for
-the recipe.
-
-C<base> is the C<_base> block and C<global_config> is the C<_global> block, as
-F<recipes.yaml> lays them out.  C<domain> is required, as in
-C<resolve_dependencies>.  C<all> and C<output_dir> go to C<scaffold>.
-
-A key that names an interface is resolved against the C<base> blocks of the
-named recipes only, because the full configuration of the domain is not
-available here.  Dies as C<resolve_dependencies> does, which includes a
-C<required_recipes> sub that cannot answer without the global configuration.
-
-=cut
-
-sub scaffold_dependencies {
-    my ( $class, $named, %opts ) = @_;
-
+# The walk of resolve_dependencies over the recipes of @$named, with the
+# provisioner options that a scaffold has.  Returns what resolve_dependencies
+# returns, and the domain_conf that it filled in.
+my sub scaffold_walk ( $class, $named, %opts ) {
     my $base   = ref $opts{base} eq 'HASH'          ? $opts{base}          : {};
     my $global = ref $opts{global_config} eq 'HASH' ? $opts{global_config} : {};
     my $distro = $global->{distro} // 'ubuntu';
@@ -745,6 +685,58 @@ sub scaffold_dependencies {
         provisioner   => \%provisioner,
         domain        => $opts{domain},
     );
+    return ( $modules, $builders, \%domain_conf );
+}
+
+=head2 @recipes = $class->recipes_with(\@named, %opts)
+
+Returns the recipes of C<@named> and every recipe that they require, as
+C<bin/new_config> adds them.  C<%opts> is as in C<scaffold_dependencies>.
+
+=cut
+
+sub recipes_with {
+    my ( $class, $named, %opts ) = @_;
+
+    my ( $modules, $builders ) = scaffold_walk( $class, $named, %opts );
+    return grep { $builders->{$_}->is_module } @$modules;
+}
+
+=head2 scaffold_dependencies(\@named, %opts)
+
+Returns a hash reference of the blocks that a domain needs for recipes that
+nobody named, and the dotted paths in them that a person still has to fill in.
+
+    my ( $blocks, @todo ) = Provisioner::Cookbook->scaffold_dependencies( ['grafanasyslog'] );
+
+C<scaffold> answers for one recipe, and C<bin/new_guest> asks it about each
+recipe on its command line.  That is not the full set that the guest is built
+from.  C<bin/new_config> adds each dependency from C<required_recipes>, so a
+recipe that nobody named can arrive with required fields of its own.  The
+recipe that asked for it usually supplies them.  When it cannot, a person must
+know.  For example, C<grafana> wants an C<admin_password>, and a dependent
+recipe cannot choose a password for the operator.  Without this, the report
+says that there is nothing to fill in.  Then C<bin/new_config> refuses the
+configuration when the guest is already going up.
+
+Only dependencies that still want a value come back.  The depsolver adds the
+recipe either way, so a block here is a place to put a value, not a request for
+the recipe.
+
+C<base> is the C<_base> block and C<global_config> is the C<_global> block, as
+F<recipes.yaml> lays them out.  C<domain> is required, as in
+C<resolve_dependencies>.  C<all> and C<output_dir> go to C<scaffold>.
+
+Dies as C<resolve_dependencies> does, which includes a C<required_recipes> sub
+that cannot answer without the global configuration.
+
+=cut
+
+sub scaffold_dependencies {
+    my ( $class, $named, %opts ) = @_;
+
+    my $base = ref $opts{base} eq 'HASH' ? $opts{base} : {};
+    my ( $modules, $builders, $domain_conf ) = scaffold_walk( $class, $named, %opts );
 
     # The caller already scaffolded the recipes it named.
     my %named = map { $_ => 1 } @$named;
@@ -758,7 +750,7 @@ sub scaffold_dependencies {
             $dep,
             all        => $opts{all},
             output_dir => $opts{output_dir},
-            provided   => { %{ $domain_conf{$dep} // {} }, %{ $base->{$dep} // {} } },
+            provided   => { %{ $domain_conf->{$dep} // {} }, %{ $base->{$dep} // {} } },
         );
         next unless @needed;
 
@@ -789,71 +781,6 @@ sub placeholders_in {
         my $value = ${ $_->[1] };
         defined $value && !ref $value && $value eq $class->PLACEHOLDER
     } Trog::Utils::slots_in( \$config, $path );
-}
-
-=head2 resolve_substitutable_dependency(%args)
-
-Returns the recipe that satisfies a substitutable dependency.  A substitutable
-dependency names an interface that several recipes can answer for, not a
-recipe.
-
-The interface decides, through its C<implementation_for>.  This method asks it
-and does not work out the answer again.  Both callers, this one and a recipe
-that renders its own templates, ask the interface.  So the rules stay in one
-place.
-
-This method adds what the interface cannot know.  The answer must be a recipe
-that this installation has, and that implements the interface.  A
-configuration that names another recipe is a typo, and this says so before
-anything loads it.
-
-C<interface> is the interface that was named.  C<domain> is the domain that
-names it, and it is required.
-
-C<domain_conf> is the configuration of the domain itself.  C<host_conf> is the
-configuration of the machine that the domain is layered onto.  C<host> names
-that machine, so a refusal can say which guest it looked at.  Both are undef
-for a domain with a guest of its own.
-
-C<requiring_conf> is the configuration of the recipe that declared the
-dependency.  The interface names the key that holds a preference, and reads it
-from there.  So a domain settles a tie in the block where it already configures
-that recipe.
-
-Dies if C<domain> is missing, if the interface does not load, if no recipe
-implements it, or if the interface chooses a recipe that does not implement it.
-
-=cut
-
-sub resolve_substitutable_dependency {
-    my ( $class, %args ) = @_;
-    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @args{qw{interface domain_conf host_conf requiring_conf domain host}};
-
-    # Every refusal below names the domain.
-    die "resolve_substitutable_dependency needs the domain asking; pass one.\n" unless $domain;
-
-    # The name comes from required_recipes as text, so nothing loaded the
-    # interface yet.
-    my $path = $interface =~ s{::}{/}gr;
-    eval { require "$path.pm"; 1 } or die "$domain depends on $interface, which will not load: $@";    ## no critic (Modules::RequireBarewordIncludes)
-
-    my @known = $class->implementations($interface);
-    die "$domain depends on $interface, which no recipe here implements.\n" unless @known;
-
-    # Pass the configuration of this run, not of the installation.  The two
-    # differ for every scratch run, and the resolver cannot tell which is meant.
-    my $chosen = $interface->implementation_for(
-        %{ $requiring_conf // {} },
-        domain          => $domain,
-        configured      => $domain_conf // {},
-        host            => $host,
-        host_configured => $host_conf,
-    );
-
-    die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
-      unless List::Util::any { $_ eq $chosen } @known;
-
-    return $chosen;
 }
 
 =head2 $bool = requires_transitively(\%required_by, $recipe, $dependency)
@@ -919,8 +846,6 @@ modules, and the caller filters them.
 C<domain> is required, and this dies without it.  Do not cover a missing domain
 with a default.  A caller with no real domain must knowingly supply a made-up
 one.
-
-C<host_conf> and C<host> go to C<resolve_substitutable_dependency>.
 
 =head3 Two sources, on purpose
 
@@ -1022,23 +947,6 @@ sub resolve_dependencies {
         # different sequence every run.  It does not touch the ordering rule:
         # each dependency is still appended after the recipe that named it.
         foreach my $required ( sort keys(%dep_recipes) ) {
-
-            # A substitutable dependency names an interface.  Resolve it to a
-            # recipe here, because has() accepts only \w+, and the code below
-            # loads the name and puts it in the module list.
-            if ( index( $required, '::' ) >= 0 ) {
-                my $chosen = $class->resolve_substitutable_dependency(
-                    interface      => $required,
-                    domain_conf    => $domain_conf,
-                    host_conf      => $args{host_conf},
-                    requiring_conf => $pconf,
-                    domain         => $domain,
-                    host           => $args{host},
-                );
-                $dep_recipes{$chosen} //= $dep_recipes{$required};
-                delete $dep_recipes{$required};
-                $required = $chosen;
-            }
 
             my $manual_args = delete $pconf->{$required} // {};
 
@@ -1283,6 +1191,28 @@ sub host_of {
     }
 
     return;
+}
+
+=head2 $class->needs_recipe($domain, $guest, $recipe, $role)
+
+Dies unless the configuration of C<$guest> names C<$recipe>, where C<$domain>
+takes C<$guest> as C<$role>, such as C<the authority of its registrar>.
+
+C<$guest> can be the machine of C<$domain> itself: the domain, or C<host_of>
+it.  A guest that serves a domain in such a role is checked and not added to,
+whether it is the machine of the domain or another guest.  The message says
+which machine the recipe goes on.
+
+=cut
+
+sub needs_recipe {
+    my ( $class, $domain, $guest, $recipe, $role ) = @_;
+    return if exists $class->domain_config($guest)->{$recipe};
+
+    die "$domain is $role, but runs no $recipe.  Add $recipe to $domain.\n" if $guest eq $domain;
+    die "$domain is on $guest, which is $role, but $guest runs no $recipe.  Add $recipe to $guest.\n"
+      if $guest eq ( $class->host_of($domain) // q{} );
+    die "$domain names $guest as $role, but $guest runs no $recipe in this installation.\n";
 }
 
 # Each key that a _global can hold, and the schema of each field that declares

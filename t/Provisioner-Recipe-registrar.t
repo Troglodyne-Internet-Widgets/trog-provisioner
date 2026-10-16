@@ -8,8 +8,8 @@ use re '/aasx';
 
 =head1 NAME
 
-t/Provisioner-DNSRecipe.t - what a recipe that can answer a dns-01 challenge has
-to say for itself
+t/Provisioner-Recipe-registrar.t - which server holds the zone of a domain, how
+lexicon reaches it, and what is published there
 
 =cut
 
@@ -24,7 +24,6 @@ use File::Slurper::Temp();
 use FindBin::libs;
 
 use Provisioner::Cookbook();
-use Provisioner::DNSRecipe();
 
 # Loaded at compile time so its API_SOCKET is a declared global rather than a
 # name this file mentions once: `warnings FATAL => 'all'` turns that `once`
@@ -45,31 +44,6 @@ sub fresh {
 
 my $DOMAIN = 'dns.test.test';
 
-subtest 'the interface refuses to guess how a provider is reached' => sub {
-
-    # A subclass that answered nothing would otherwise render a hook exporting
-    # no credential at all, which fails in the middle of an order rather than
-    # at the point somebody could still fix it.
-    like(
-        exception { Provisioner::DNSRecipe->lexicon_credentials() },
-        qr/lexicon_credentials/,
-        'naming the method it did not answer'
-    );
-    like(
-        exception { Provisioner::DNSRecipe->lexicon_credentials() },
-        qr/Provisioner::DNSRecipe/,
-        'and where the contract is written down'
-    );
-};
-
-subtest 'pdns is one of them, and is still a recipe' => sub {
-    my $class = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' );
-
-    ok( $class->isa('Provisioner::DNSRecipe'), 'the distro subclass reaches the interface' );
-    ok( $class->isa('Provisioner::Recipe'),    'and is still a recipe, which is what Cookbook->load asserts' );
-    is( Provisioner::DNSRecipe->local_implementation, 'pdns', 'and is the implementation that runs on the guest itself' );
-};
-
 subtest 'what pdns tells lexicon' => sub {
     my %creds = fresh('pdns')->lexicon_credentials( api_key => 'an-api-key' );
 
@@ -86,11 +60,12 @@ subtest 'what pdns tells lexicon' => sub {
 subtest 'the shortcut is rendered from that, and names what lexicon reads' => sub {
 
     # Through the lexicon recipe, which is what installs the shortcut: it asks
-    # the interface who holds this zone and renders whatever that answers.  The
+    # the registrar who holds this zone and renders whatever that answers.  The
     # configuration is mocked so the token is one to assert on, rather than the
     # one pdns mints for a server nobody configured a key for.
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
     $conf->redefine( domain_config => sub { return { pdns => { api_key => 'an-api-key' } } } );
+    $conf->redefine( host_of       => sub { return } );
 
     my $out = fresh('lexicon')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $DOMAIN );
 
@@ -108,14 +83,15 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
 };
 
 # Makes $conf, a mock of Provisioner::Cookbook, answer with two guests: $name
-# names $authority as the authority of its registrar, and $authority runs pdns.
+# names $authority as the authority of its registrar, and $authority runs pdns
+# and holds its own zone.
 sub authority_conf {
     my ( $conf, $name, $authority, %over ) = @_;
 
     $conf->redefine(
         domain_config => sub {
             my ( undef, $domain ) = @_;
-            return { pdns      => {}, %{ $over{authority_conf} // {} } }                                     if $domain eq $authority;
+            return { pdns => {}, registrar => { authority => $authority }, %{ $over{authority_conf} // {} } } if $domain eq $authority;
             return { registrar => { type => 'easydns', key => 'a-registrar-key', authority => $authority } } if $domain eq $name;
             return {};
         }
@@ -158,7 +134,7 @@ subtest 'a domain that names an authority reaches it with a token of its own' =>
 subtest 'what a guest that names an authority sets up' => sub {
     my $name = 'web.lab.example.net';
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
-    authority_conf( $conf, $name, 'ns.example.net', authority_conf => { lexicon => { dns_preference => 'pdns' } } );
+    authority_conf( $conf, $name, 'ns.example.net' );
     my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.example.net' => '192.0.2.53' } );
 
     my %opts = fresh('registrar')->validate( %common, authority => 'ns.example.net', type => 'easydns' );
@@ -178,6 +154,12 @@ subtest 'what a guest that names an authority sets up' => sub {
     my $resolved = fresh('registrar')->render_file( 'files/registrar.resolved.tt', %common, authority => 'ns.example.net', type => 'easydns' );
     like( $resolved, qr/^DNS=192[.]0[.]2[.]53$/m,                     'the drop-in names the authority' );
     like( $resolved, qr/^Domains=~\Q$name\E[ ]~ns[.]example[.]net$/m, 'for those zones alone' );
+
+    # An authority whose own name a public registrar holds refuses a query for
+    # it, so the guest asks a public resolver for that name instead.
+    authority_conf( $conf, $name, 'ns.example.net', authority_conf => { registrar => { type => 'easydns' } } );
+    my %public = fresh('registrar')->validate( %common, authority => 'ns.example.net', type => 'easydns' );
+    is( $public{routing_domains}, "~$name", 'and the zone of an authority that leaves its own name to a registrar is not routed to it' );
 
     like( exception { fresh('registrar')->validate( %common, domain => 'example.net', authority => 'ns.example.net', type => 'easydns' ) }, qr/fewer[ ]than[ ]three[ ]labels/, 'a registered domain cannot name an authority' );
     like( exception { fresh('registrar')->validate( %common, ipmap  => {},            authority => 'ns.example.net', type => 'easydns' ) }, qr/no[ ]address/,                  'nor can a domain whose authority has no address' );
@@ -216,193 +198,118 @@ subtest 'a domain whose authority is under a reserved TLD trusts the authority o
     unlike( fresh('registrar')->render(%common), qr{--delegate}, 'and under a reserved TLD there is no zone above to delegate from' );
 };
 
-subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => sub {
-
-    # letsencrypt resolves the provider and hands it down through
-    # required_recipes, so a guest running it needs nothing under lexicon.  pdns
-    # and registrar each require lexicon and hand it nothing, so a guest with
-    # both of them and no letsencrypt has the same tie and nobody to settle it.
-    # That is the case this key exists for, and the one the schema description
-    # used to tell an operator they would never meet.
+subtest 'which server holds the zone' => sub {
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
-    $conf->redefine( domain_config => sub { return { pdns => { api_key => 'a-key' }, registrar => { type => 'easydns', key => 'a-token' } } } );
-    $conf->redefine( host_of       => sub { return undef } );
+    my %configured;
+    my %host;
+    $conf->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $configured{$domain} // {} } );
+    $conf->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
 
-    # Public, because a reserved TLD has only ever one candidate and so no tie.
-    my %common = ( domain => 'tie.example.net', install_dir => '/opt/domains', admin_user => 'someadmin' );
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my $holder    = sub { return $registrar->authority_of(shift) // 'the registrar' };
 
-    like(
-        exception { fresh('lexicon')->validate(%common) },
-        qr/dns_preference/,
-        'with nobody to settle it, the tie is refused rather than guessed at'
-    );
+    # No public registrar holds a zone under a TLD RFC 2606 reserves.
+    is( $holder->('a.test'),        'a.test',        'a reserved name is held by the guest itself' );
+    is( $holder->('a.example.net'), 'the registrar', 'and a public one by the registrar of type' );
 
-    # A fresh recipe per case: validated() memoises onto the object.
-    my %by_local = fresh('lexicon')->validate( %common, dns_preference => 'pdns' );
-    is( $by_local{lexicon}{type}, 'powerdns', 'and naming the local server here settles it' );
+    # A pdns guest can be the authority of other guests while a registrar holds
+    # its own name.
+    $configured{'ns.example.net'} = { pdns => {}, registrar => { type => 'easydns' } };
+    is( $holder->('ns.example.net'), 'the registrar', 'a guest that runs pdns leaves its own name to the registrar' );
+    ok( !$registrar->serves_itself('ns.example.net'), 'and does not serve itself' );
 
-    my %by_registrar = fresh('lexicon')->validate( %common, dns_preference => 'registrar' );
-    is( $by_registrar{lexicon}{type}, 'easydns', 'as does naming the registrar' );
+    $configured{'b.example.net'} = { pdns => {}, registrar => { type => 'easydns', authority => 'b.example.net' } };
+    is( $holder->('b.example.net'), 'b.example.net', 'while one that names itself holds its own zone, whatever registrar it inherits' );
+
+    $configured{'web.c.test'} = { registrar => { authority => 'NS.C.test.' } };
+    is( $holder->('web.c.test'), 'ns.c.test', 'an authority holds the zone of a guest that names it, however it is spelled' );
+
+    $configured{'web.d.example.net'} = { pdns => {}, registrar => { authority => 'ns.d.example.net' } };
+    is( $holder->('web.d.example.net'), 'ns.d.example.net', 'also of a guest that runs a pdns of its own for other guests' );
+
+    $configured{'e.example.net'} = { registrar => { authority => 'e.example.net' } };
+    is( $holder->('e.example.net'), 'e.example.net', 'and a guest can name itself' );
+    ok( $registrar->serves_itself('e.example.net'), 'which then serves itself' );
+    is( $registrar->delegated_to('e.example.net'), undef, 'and is delegated to nobody' );
+
+    # A domain layered onto another is served by what that guest runs.
+    $host{'tenant.example.net'} = 'b.example.net';
+    is( $holder->('tenant.example.net'), 'b.example.net', 'a tenant is held by its host, which holds its own zone' );
+    ok( $registrar->serves_itself('tenant.example.net'), 'which counts as serving itself' );
+
+    $host{'tenant.c.test'} = 'web.c.test';
+    is( $holder->('tenant.c.test'), 'ns.c.test', 'and by the authority that its host names' );
 };
 
-subtest 'the CA depends on the capability, not on a recipe name' => sub {
-    my %common = ( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
+subtest 'a guest that serves itself must run a server, as an authority elsewhere must' => sub {
+    my %configured = ( 'web.lab.test' => { registrar => { authority => 'ns.test' } } );
+    my %host;
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $configured{$domain} // {} } );
+    $conf->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
 
-    my %required = fresh('acmeca')->required_recipes(%common);
-    my $local    = Provisioner::DNSRecipe->local_implementation;
-    ok( exists $required{$local}, "the CA requires whatever runs the DNS on the guest ($local)" );
+    my %common = ( install_dir => '/opt/domains', admin_user => 'someadmin' );
 
-    my %handed = $required{$local} ? $required{$local}->() : ( sentinel => 1 );
-    is_deeply( \%handed, {}, 'and hands it nothing, since its key is the operator to supply' );
-
-    # Following the interface rather than a literal, which is the whole of #149.
-    # Asserting the key is 'pdns' would pass just as well against the hardcoded
-    # string it replaced, so this moves the answer and checks the CA moved with
-    # it.
-    # The variable and not the method, because provider_for reads it too.
-    local $Provisioner::DNSRecipe::LOCAL_IMPLEMENTATION = 'registrar';
-
-    my %moved = fresh('acmeca')->required_recipes(%common);
-    ok( exists $moved{registrar}, 'so moving the answer moves what the CA asks for' );
-    ok( !exists $moved{pdns},     'and it stops asking for the one it used to name' );
-};
-
-subtest 'the interface says which implementation serves a domain' => sub {
-
-    # Handed the configuration rather than left to find it.  It used to ask
-    # Provisioner::Cookbook, which answers about the installation -- and the
-    # generator is routinely pointed at a different recipes file, so the
-    # resolver and the run could be looking at two different configurations.
-    # Passing it also means these cases are data rather than mocking.
-    my $nothing   = {};
-    my $registrar = { registrar => { type => 'easydns' } };
-    my $both      = { registrar => { type => 'easydns' }, pdns => { api_key => 'k' } };
-
-    # A reserved name is served by the guest, because no public registrar holds
-    # a zone under a TLD RFC 2606 reserves.
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.test', configured => $nothing ), 'pdns', 'a reserved name is served locally' );
-
-    like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $nothing ) },
-        qr/no[ ]DNS[ ]provider/,
-        'and a public one with nothing configured is refused rather than guessed at'
-    );
-
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $registrar ), 'registrar', 'the one that is configured serves it' );
-
-    like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.test', configured => $registrar, dns_preference => 'registrar' ) },
-        qr/reserve/,
-        'while naming a registrar for a reserved name is refused'
-    );
-
-    like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $both ) },
-        qr/dns_preference/,
-        'a guest that could answer either way is asked which'
-    );
-
-    foreach my $named (qw{pdns registrar}) {
-        is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $both, dns_preference => $named ), $named, "naming $named settles it" );
+    # Measured on a scratch guest: a pdns of its own made its recursor answer
+    # for its zone, nostubresolver bypassed the route to the authority, and the
+    # name of the API of the authority did not resolve.
+    foreach my $domain ( $DOMAIN, 'web.lab.test' ) {
+        my %required = fresh('registrar')->required_recipes( %common, domain => $domain );
+        ok( !exists $required{pdns},   "$domain gets no pdns from its registrar" );
+        ok( exists $required{lexicon}, 'but gets lexicon, which publishes the records' );
     }
 
-    # The base class requires the interface for every recipe that serves a
-    # name, and states no preference, so the one the domain states elsewhere
-    # settles it.
-    my $stated = { %$both, letsencrypt => { dns_preference => 'registrar' } };
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $stated ), 'registrar', 'a requirer that states none gets the one another recipe of the domain states' );
-    like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => { %$stated, lexicon => { dns_preference => 'pdns' } } ) },
-        qr/states[ ]dns_preference[ ]as[ ]each[ ]of[ ]pdns[ ]registrar/,
-        'and two recipes that state different ones are refused'
-    );
-
-    # A domain layered onto another is served by what that guest runs, so the
-    # host's configuration counts as well as its own.
+    my %enrich = ( %common, domain => $DOMAIN, ipmap => { 'ns.test' => '192.0.2.53' } );
     is(
-        Provisioner::DNSRecipe->implementation_for( domain => 'tenant.example.net', configured => $nothing, host_configured => $registrar ),
-        'registrar',
-        'and a tenant is served by what its host holds'
+        exception { fresh('registrar')->enrich(%enrich) },
+        "$DOMAIN is the authority of its registrar, but runs no pdns.  Add pdns to $DOMAIN.\n",
+        'a reserved name that runs no pdns is refused, and told to add it'
+    );
+    is(
+        exception { fresh('registrar')->enrich( %enrich, domain => 'web.lab.test' ) },
+        "web.lab.test names ns.test as the authority of its registrar, but ns.test runs no pdns in this installation.\n",
+        'as is a guest whose authority runs none'
     );
 
-    # The machine's name, so a refusal says which guest was looked at rather
-    # than naming the domain that was never going to have a server of its own.
-    like(
-        exception {
-            Provisioner::DNSRecipe->implementation_for(
-                domain         => 'tenant.example.net',
-                configured     => $nothing,
-                host           => 'host.example.net',
-                dns_preference => 'pdns',
-            );
-        },
-        qr/host\.example\.net[ ]is[ ]configured[ ]with[ ]no[ ]pdns/,
-        'and a refusal names the machine it asked about, not the domain on it'
+    $configured{$DOMAIN} = { pdns => {} };
+    is( exception { fresh('registrar')->enrich(%enrich) }, undef, 'and one that runs pdns is not' );
+
+    # A tenant holds its zone on the machine of its host.
+    $host{'tenant.test'} = $DOMAIN;
+    is( exception { fresh('registrar')->enrich( %enrich, domain => 'tenant.test' ) }, undef, 'nor is a tenant whose host runs pdns' );
+    delete $configured{$DOMAIN};
+    is(
+        exception { fresh('registrar')->enrich( %enrich, domain => 'tenant.test' ) },
+        "tenant.test is on $DOMAIN, which is the authority of its registrar, but $DOMAIN runs no pdns.  Add pdns to $DOMAIN.\n",
+        'and a tenant whose host runs none is told to add it to the host'
     );
 
+    # lexicon walks the zone through the system resolver for --resolve-zone-name,
+    # and step-ca validates dns-01 through it too.  On the stub the guest cannot
+    # resolve its own zone.
+    my %server = fresh('pdns')->required_recipes( %common, domain => $DOMAIN );
+    ok( exists $server{nostubresolver}, 'and the server brings a resolver that can see the zone' );
+};
+
+subtest 'a domain that no server holds is refused' => sub {
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return {} } );
+    $conf->redefine( host_of       => sub { return } );
+
     like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net' ) },
-        qr/was[ ]not[ ]told[ ]what/,
-        'asked without a configuration at all, it says so rather than resolving against something else'
+        exception { Provisioner::Cookbook->load('registrar')->credentials_for( domain => 'a.example.net' ) },
+        qr/no[ ]type[ ]for[ ]a[.]example[.]net/,
+        'naming the domain, rather than rendering a hook that cannot run'
+    );
+    like(
+        exception { fresh('registrar')->validate( domain => 'a.example.net', install_dir => '/bogus', admin_user => 'someadmin' ) },
+        qr/no[ ]type/,
+        'and the registrar itself refuses to build it'
     );
 };
 
-subtest 'a domain that names an authority goes to the registrar, which reaches that guest' => sub {
-    my $nothing = { registrar => { authority => 'ns.test' } };
-    my $local   = { pdns => {}, registrar => { authority => 'ns.test' } };
-
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.example.net', configured => { registrar => { authority => 'ns.example.net' } } ), 'registrar', 'with no type configured' );
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test',        configured => $nothing ),                                           'registrar', 'and under a reserved TLD, where the authority holds the zone' );
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $nothing, dns_preference => 'registrar' ), 'registrar', 'where it may also be named' );
-
-    like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'web.lab.test', configured => $local ) },
-        qr/both/,
-        'a guest that also runs a pdns of its own has a tie to settle'
-    );
-
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'ns.test', configured => $local ), 'pdns', 'a guest that names itself is not its own authority' );
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'tenant.test', configured => {}, host => 'ns.test', host_configured => $local ), 'pdns', 'nor is a domain on that guest' );
-};
-
-subtest 'the interface names the key that settles a tie' => sub {
-
-    # bin/new_config reads this out of the configuration of whichever recipe
-    # declared the dependency, so it can resolve one without knowing what DNS is.
-    is( Provisioner::DNSRecipe->tiebreaker_key, 'dns_preference', 'which is where operators already write it' );
-
-    my %schema = Provisioner::Cookbook->load('letsencrypt')->args();
-    ok( exists $schema{properties}{ Provisioner::DNSRecipe->tiebreaker_key }, 'and the recipe that takes it declares it' );
-};
-
-subtest 'credentials_for tells a missing provider from a broken one' => sub {
-    my $dns = Test::MockModule->new('Provisioner::DNSRecipe');
-    $dns->redefine( provider_for => sub { return 'nosuchprovider' } );
-
-    like(
-        exception { Provisioner::DNSRecipe->credentials_for( domain => 'a.test' ) },
-        qr/nosuchprovider[ ]is[ ]not[ ]a[ ]recipe/,
-        'a provider with no recipe is named as missing'
-    );
-
-    # A recipe that exists but does not compile has to show its own error.
-    # Reporting it as missing sends the operator to look for a file that is there.
-    $dns->redefine( provider_for => sub { return 'broken' } );
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( has  => sub { return 1 } );
-    $cookbook->redefine( load => sub { die "syntax error at broken.pm line 3\n" } );
-
-    like(
-        exception { Provisioner::DNSRecipe->credentials_for( domain => 'a.test' ) },
-        qr/syntax[ ]error[ ]at[ ]broken[.]pm/,
-        'a provider whose recipe does not load shows why it did not'
-    );
-};
-
-subtest 'each implementation takes the names it is handed without declaring them' => sub {
-    my @implementations = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
-    ok( scalar @implementations, 'Provisioner::DNSRecipe has implementations to ask' );
-    foreach my $recipe ( @implementations, 'letsencrypt' ) {
+subtest 'each recipe that is handed the names declares them' => sub {
+    foreach my $recipe (qw{registrar letsencrypt}) {
         my %schema = Provisioner::Cookbook->load($recipe)->schema;
         is( $schema{properties}{hostnames}{type}, 'array', "$recipe has the hostnames option" );
     }
@@ -413,10 +320,8 @@ subtest 'each implementation takes the names it is handed without declaring them
     ok( !exists $nginx{properties}{hostnames}, 'and a recipe that is handed none does not' );
 };
 
-# What a DNS recipe publishes.  The configuration is mocked, because whether a
-# recipe publishes depends on which recipe provider_for says holds the zone.
-# A registrar cannot hold a zone under a reserved TLD, so its cases are under
-# example.net.
+# What the registrar publishes.  The configuration is mocked, because the
+# configuration says which server holds the zone.
 sub publishing {
     my ( $name, $configured, %opts ) = @_;
 
@@ -433,25 +338,22 @@ my $PUBLIC    = 'pub.example.net';
 my $REGISTRAR = { registrar => { type => 'easydns' } };
 my %ON_PUBLIC = ( domain => $PUBLIC, main_ip => '192.0.2.50', aliases => { $PUBLIC => ["alt.$PUBLIC"] }, hostnames => ["www.$PUBLIC"] );
 
-subtest 'the recipe that holds the zone publishes the records of the domain' => sub {
+subtest 'the registrar publishes the records of the domain' => sub {
     my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC );
 
-    is( $opts->{publish_records}, 1, 'a registrar that holds the zone publishes' );
+    is( $opts->{publish_records}, 1, 'into the zone that a registrar holds' );
     my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]/;
     like( $fragment, qr/${queued}\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]/, 'in the postrun, with the address the guest was built with' );
     like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E$/m, 'and each name: the configured aliases and the names that recipes handed over, sorted' );
 
-    my ($pdns) = publishing( 'pdns', { pdns => { api_key => 'k' } }, domain => $DOMAIN, main_ip => '192.0.2.51', data_source => '/bogus' );
-    is( $pdns->{publish_records}, 1, 'and so does a pdns that serves its own zone, which corrects its records on a rebuild' );
-};
+    # Through the shortcut, which points at the pdns of the guest, and not at
+    # the registrar that the guest inherits.
+    my ($own) = publishing( 'registrar', { %$REGISTRAR, pdns => { api_key => 'k' } }, %ON_PUBLIC );
+    is( $own->{publish_records}, 1, 'and into the zone that the pdns of the guest holds' );
+    ok( !exists $own->{authority}, 'which is no authority of its own, so nothing is delegated' );
 
-subtest 'a recipe that does not hold the zone publishes nothing' => sub {
-    my ( $opts, $fragment ) = publishing( 'registrar', { %$REGISTRAR, pdns => { api_key => 'k' }, letsencrypt => { dns_preference => 'pdns' } }, %ON_PUBLIC );
-    is( $opts->{publish_records}, 0, 'a registrar on a guest whose own pdns holds the zone' );
-    unlike( $fragment, qr/\S/, 'and its fragment is empty' );
-
-    my ($reserved) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, domain => $DOMAIN, aliases => {}, hostnames => [] );
-    is( $reserved->{publish_records}, 0, 'nor one for a name under a reserved TLD, which only the guest can serve' );
+    my ($reserved) = publishing( 'registrar', { pdns => {} }, %ON_PUBLIC, domain => $DOMAIN, aliases => {}, hostnames => [] );
+    is( $reserved->{publish_records}, 1, 'and for a name under a reserved TLD, which only the guest can serve' );
 };
 
 subtest 'the address of the A record' => sub {

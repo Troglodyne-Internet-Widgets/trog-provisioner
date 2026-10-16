@@ -97,10 +97,9 @@ to that with a `users.yaml` in the data directory. Aliases become vhost aliases
 and CNAMEs if you have picked the recipes that do that.
 
 A recipe that serves a name under the domain, such as `webmail` for
-`roundcube`, needs a DNS record and a certificate for it. So it requires a DNS
-recipe and a certificate recipe, and hands each one the name. The DNS recipe is
-`pdns` or `registrar`, as `Provisioner::DNSRecipe` decides. The certificate
-recipe is `letsencrypt`. You do not add these names to `aliases`.
+`roundcube`, needs a DNS record and a certificate for it. So it requires
+`registrar` and `letsencrypt`, and hands each one the name. You do not add
+these names to `aliases`.
 
 ## admin_authorized_keys
 
@@ -166,14 +165,17 @@ tickle.test.test:
         key:  "secret:registrar/cloudflare/password"
 ```
 
-`registrar` is a recipe rather than a `_global` setting, and usually lives in
-`_base` so every domain inherits one. It says who holds a domain's public zone
-so dehydrated can write an `_acme-challenge` record into it; `pdns` says the
-guest holds its own. Both implement `Provisioner::DNSRecipe`, and a guest with
-both is ambiguous -- `letsencrypt`'s `dns_preference` names which of the two
-serves this name, and a guest with both and no preference is refused rather
-than guessed at. A name under a TLD RFC 2606 reserves is always served locally,
-because no public registrar can hold a zone for one.
+`registrar` is a recipe and not a `_global` setting. It usually lives in
+`_base`, so that every domain inherits one. It says which server holds the zone
+of a domain, so that dehydrated can write an `_acme-challenge` record into it.
+A guest under a TLD that RFC 2606 reserves holds its own zone, because no
+public registrar can hold a zone for one. So does a guest whose registrar names
+the guest itself as its `authority`. Such a guest must list `pdns`, as a guest
+that another guest names as its `authority` must. `bin/new_config` refuses it
+otherwise, and `bin/new_guest` writes `pdns` for it. Every
+other guest uses the registrar that `type`, `user` and `key` name. That
+includes a guest that runs `pdns` for other guests and leaves its own name to
+the registrar.
 
 A pdns guest can also be the registrar of other guests. A guest names it as
 the `authority` of its registrar:
@@ -736,27 +738,6 @@ Configuring a dependency explicitly replaces the default for it rather than
 adding to it. Dependencies of dependencies work, and several recipes can layer
 onto one shared dependency -- `tcms` builds on `tpsgi` and adds to the same
 vhost.
-
-A recipe can also declare a **substitutable dependency** -- depending on a
-capability rather than on a recipe by name:
-
-```yaml
-    letsencrypt:
-        dns_preference: pdns
-```
-
-`letsencrypt` needs something that can answer a dns-01 challenge, which is
-`Provisioner::DNSRecipe` -- implemented by `pdns`, which serves the zone from the
-guest, and by `registrar`, which is whoever holds it publicly. It asks for the
-interface -- a substitutable dependency -- and the depsolver resolves that to
-whichever serves this domain and builds it.
-
-Which one is the interface's to decide, not the depsolver's: a name under a
-reserved TLD is always served locally, a domain configured with one of the two
-uses it, and a guest with both is a tie. `dns_preference` settles the tie, read
-out of the configuration of whichever recipe declared the dependency -- so it
-goes under `letsencrypt`, where you already write it. A guest with both and no
-preference is refused rather than guessed at.
 
 Where two of them ask for the same field and disagree, the recipe being depended
 on decides, and **dies** if it has no rule for that field: two applications both

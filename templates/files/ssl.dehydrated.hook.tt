@@ -11,7 +11,7 @@ set -o pipefail
 export PROVIDER_UPDATE_DELAY=${PROVIDER_UPDATE_DELAY:-"30"}
 [%# The same credential, with the same name and format, as the shortcut that
     templates/files/lexicon.shortcut.sh.tt exports.  Both come from
-    Provisioner::DNSRecipe/credentials_for. -%]
+    Provisioner::Recipe::registrar/credentials_for. -%]
 [% IF lexicon.type -%]
 export PROVIDER="[% lexicon.type %]"
 [% IF lexicon.user -%]

@@ -153,7 +153,13 @@ sub run {
     # beside it.  Beside it, not in it: a recipe's configuration takes only its
     # own fields.
     my %required = Trog::Test::RecipeConfig::required_config($tmpdir);
-    my %config;
+    my %config   = (
+        _base => {
+            _global   => \%global,
+            registrar => $required{registrar},
+        }
+    );
+    my $registrar = Provisioner::Cookbook->load('registrar');
     foreach my $name (@recipes) {
         my %own     = %{ $required{$name}     // {} };
         my @modules = @{ delete $own{modules} // [] };
@@ -162,15 +168,19 @@ sub run {
         # Every domain but data answers to data.$TLD as well, which is what the
         # aliases of a real installation look like.
         $config{"$name.$TLD"}{_global} = { aliases => ["data.$TLD"] } unless $name eq 'data';
-    }
-    $config{_base} = {
-        _global   => \%global,
-        registrar => $required{registrar},
-    };
 
-    my ( $rh, $recipe_file ) = File::Temp::tempfile( DIR => $tmpdir );
-    print {$rh} YAML::XS::Dump( \%config );
-    close($rh) or die "Could not close $recipe_file: $!";
+        # A domain under the reserved TLD holds its own zone, as bin/new_guest
+        # writes it.
+        my %walk = ( base => $config{_base}, global_config => { %global, %{ $config{"$name.$TLD"}{_global} // {} } } );
+        $config{"$name.$TLD"}{$_} = $required{$_} // {} for $registrar->zone_server_for( "$name.$TLD", [ $name, @modules ], %walk );
+    }
+
+    # Where the configuration of the installation is, because a recipe that
+    # asks about another domain reads it there, whatever --recipes says.
+    # zone_server_for read it before it was written.
+    my $recipe_file = Trog::Config->path('recipes.yaml');
+    File::Slurper::Temp::write_text( $recipe_file, YAML::XS::Dump( \%config ) );
+    Provisioner::Cookbook->forget();
 
     # By module name, never by path.  A file required once by path and once by
     # name is compiled twice, and FATAL warnings make the second a death.

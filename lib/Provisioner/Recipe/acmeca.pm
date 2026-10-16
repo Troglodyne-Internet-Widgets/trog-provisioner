@@ -15,7 +15,6 @@ use IO::Socket::SSL::Utils();
 
 use Time::HiRes qw{time};
 use Provisioner::Cookbook();
-use Provisioner::DNSRecipe();
 use Provisioner::Vars();
 use Provisioner::Utils();
 
@@ -27,9 +26,7 @@ use Provisioner::Utils();
         acmeca:
         letsencrypt:
             ca: https://localhost:9000/acme/trog/directory
-            dns_preference: pdns
         pdns:
-            api_key: secret:group/entry/field
 
 =head2 DESCRIPTION
 
@@ -51,8 +48,8 @@ is different.  So the real client runs the real path, on the guest.
 The guest is already authoritative for its own name.
 L<Provisioner::Recipe::pdns> runs an authoritative server on C<127.0.0.1:2500>.
 It also runs a recursor on C<:53>, which forwards this domain to that server.
-The C<dns_preference> of letsencrypt resolves to that server, and points lexicon
-at its API socket.  So the guest writes, serves and reads the record without a
+L<Provisioner::Recipe::registrar> says that this server holds the zone, and
+points lexicon at its API socket.  So the guest writes, serves and reads the record without a
 packet that leaves the machine.  A CA on the same machine can then validate the
 record with no view of the fleet.
 
@@ -211,37 +208,6 @@ sub enrich {
       unless $opts{constrain_to};
 
     return %opts;
-}
-
-=head2 %required = $recipe->required_recipes(%opts)
-
-Requires the DNS server on this guest, which answers the challenge that this CA
-sets.  The name comes from L<Provisioner::DNSRecipe/local_implementation>.  The
-interface decides what serves a zone.  This recipe only says that a public
-registrar cannot do it, because step-ca validates through the resolver of its
-own host.
-
-It requires nothing when L<Provisioner::DNSRecipe/provider_for> names another
-provider, which is the case of a guest that names an C<authority>.
-
-It hands that recipe nothing.  The DNS recipe makes its own API key when the
-operator sets none.
-
-It does B<not> require letsencrypt.  The edge points the other way: a domain
-that points dehydrated at this CA needs the CA first.
-
-=cut
-
-sub required_recipes {
-    my ( $self, %opts ) = @_;
-
-    my $local = Provisioner::DNSRecipe->local_implementation();
-
-    # eval, because this runs before validation.  A domain with no provider
-    # keeps the local server, and letsencrypt refuses it with the reason.
-    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // $local;
-
-    return ( ( $provider eq $local ? ( $local => sub { return () } ) : () ), $self->SUPER::required_recipes(%opts) );
 }
 
 =head2 @hosts = $recipe->fetch_hosts()

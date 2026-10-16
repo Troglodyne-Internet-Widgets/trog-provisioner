@@ -165,10 +165,10 @@ subtest 'the API proxy' => sub {
     is_deeply( [ $fresh->()->served_names(%held) ], ["dnsapi.$DOMAIN"], 'it serves dnsapi' );
 
     my %required = ( Provisioner::Recipe::required_recipes( $fresh->(), %held ), $fresh->()->required_recipes(%held) );
-    is_deeply( { $required{nginx}->() },                    { sites     => ["dnsapi.$DOMAIN"] },                                              'nginx gives it the name dnsapi' );
-    is_deeply( { $required{letsencrypt}->() },              { hostnames => ["dnsapi.$DOMAIN"] },                                              'which gets a certificate' );
-    is_deeply( { $required{'Provisioner::DNSRecipe'}->() }, { hostnames => ["dnsapi.$DOMAIN"] },                                              'and a record, from this recipe itself where it holds the zone' );
-    is_deeply( { $required{perl}->() },                     { cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] }, 'and perl installs the proxy and the server that runs it' );
+    is_deeply( { $required{nginx}->() },       { sites     => ["dnsapi.$DOMAIN"] },                                              'nginx gives it the name dnsapi' );
+    is_deeply( { $required{letsencrypt}->() }, { hostnames => ["dnsapi.$DOMAIN"] },                                              'which gets a certificate' );
+    is_deeply( { $required{registrar}->() },   { hostnames => ["dnsapi.$DOMAIN"] },                                              'and a record, which the registrar publishes into the zone that this recipe holds' );
+    is_deeply( { $required{perl}->() },        { cpan_deps => [ { install => [ 'Starman', 'PowerDNS::API::ACL~>= 0.002' ] } ] }, 'and perl installs the proxy and the server that runs it' );
 
     my %opts = $fresh->()->validate( %held, transfer_ips => [qw{192.0.2.1 192.0.2.2}], ipmap => { $DOMAIN => '192.0.2.10', 'web.test.test' => '192.0.2.11', 'also.test.test' => '192.0.2.10' }, api_allow => ['198.51.100.0/24'] );
     is_deeply( $opts{api_allowed}, [qw{127.0.0.1 ::1 192.0.2.1 192.0.2.2 192.0.2.10 192.0.2.11 198.51.100.0/24}], 'the guest, this machine, every guest of the installation once, and what api_allow names' );

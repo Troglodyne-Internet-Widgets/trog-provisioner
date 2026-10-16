@@ -1,6 +1,5 @@
-[%# The records of this domain, for the implementation of
-    Provisioner::DNSRecipe that holds its zone, included in its fragment.  See
-    publication in Provisioner::DNSRecipe.
+[%# The records of this domain, included in the fragment of the registrar.
+    See publication in Provisioner::Recipe::registrar.
 
     Queued rather than run here: the provider is reached over the network, and
     the shortcut that holds the credential comes from the lexicon recipe, which

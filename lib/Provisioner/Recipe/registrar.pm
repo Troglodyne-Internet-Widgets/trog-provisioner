@@ -1,6 +1,6 @@
 package Provisioner::Recipe::registrar;
 
-#ABSTRACT: The registrar holding a domain's public zone, and how lexicon reaches it.
+#ABSTRACT: Which server holds the zone of a domain, how lexicon reaches it, and its records.
 
 use 5.041;
 
@@ -8,13 +8,12 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use parent qw{Provisioner::DNSRecipe};
+use parent qw{Provisioner::Recipe};
 
 use File::Copy();
-use List::Util qw{any uniq};
+use List::Util qw{uniq};
 
 use Provisioner::Cookbook();
-use Provisioner::DNSRecipe();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::registrar
@@ -33,15 +32,32 @@ use Provisioner::Utils();
 
 =head2 DESCRIPTION
 
-The registrar holds the public zone of a domain, so dehydrated can write an
-C<_acme-challenge> record into it.  This is one of the two implementations of
-L<Provisioner::DNSRecipe>.  The other is L<Provisioner::Recipe::pdns>, where the
-guest does the same job.
+This recipe is the DNS client of a domain.  It says which server holds the
+zone of the domain, it gives lexicon the credentials for that server, and it
+publishes the records of the domain there.  So dehydrated can write an
+C<_acme-challenge> record into the zone.  Every recipe that serves a name
+requires this recipe, and so does L<Provisioner::Recipe::letsencrypt>.
 
-You usually write it once in C<_base>, and every domain inherits it, because a
-fleet usually has one registrar.  A domain that its own C<pdns> serves needs
-none.  A domain under a TLD that RFC 2606 reserves cannot use one, because no
-public registrar holds a zone for C<.test>.
+One of three servers holds the zone.  C<authority_of> decides which:
+
+=over 4
+
+=item * The C<pdns> of the guest itself, where C<authority> names the guest, or
+where the guest is under a reserved TLD and names no C<authority>.  No public
+registrar holds a zone for C<.test>.  The guest must then run C<pdns>, as
+another guest must that C<authority> names.
+
+=item * The C<pdns> of another guest, which C<authority> names.  See below.
+
+=item * The registrar that C<type>, C<user> and C<key> name.  You usually write
+those once in C<_base>, and every domain inherits them, because a fleet usually
+has one registrar.
+
+=back
+
+A guest that runs pdns does not hold its own zone for that reason alone.  It
+can be the authority of other guests while a public registrar holds its own
+name.  A guest that does hold its own zone names itself as its C<authority>.
 
 =head2 A pdns guest can be the registrar
 
@@ -76,14 +92,13 @@ at the path where acmeca installs it.
 
 =head2 It installs nothing, and publishes the records of the domain
 
-A registrar is an external service, so this recipe configures nothing and
-starts no service.  It supplies the credentials and C<lexicon_credentials>.
-That makes it one of the two answers to L<Provisioner::DNSRecipe>.
+This recipe starts no service.  It supplies the credentials in
+C<lexicon_credentials>, and the server that holds the zone is a service of its
+own.
 
-When it holds the zone of the domain, it publishes the C<A> record of the domain
-and a C<CNAME> for each of its names, through the lexicon shortcut.  See
-C<publication> in L<Provisioner::DNSRecipe>, which also says how to publish
-another address.
+It publishes the C<A> record of the domain and a C<CNAME> for each of its
+names, through the lexicon shortcut.  See C<publication>, which also says how
+to publish another address.
 
 =cut
 
@@ -101,12 +116,24 @@ sub args {
             type => {
                 type        => 'string',
                 description =>
-                  'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required, except under a reserved TLD with an authority.  With an authority, it is the registrar that the NS record of the zone of the domain goes to.',
+                  'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required where this registrar holds the zone.  With an authority on another guest, it is the registrar that the NS record of the zone of the domain goes to.',
             },
             authority => {
                 type        => 'string',
                 format      => 'hostname',
-                description => 'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  The domain needs at least three labels.',
+                description =>
+                  'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  The domain needs at least three labels, unless this names the guest itself, whose own pdns then holds its zone.  The default is the guest itself under a reserved TLD, and otherwise the registrar of type.',
+            },
+            hostnames => {
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
+            },
+            address => {
+                type        => 'string',
+                format      => 'ipv4',
+                description => 'The address that the A record of the domain names.  The default is main_ip, the address the guest was built with.  Set it for a guest that is reached through a port forward on a gateway.',
             },
             user => {
                 type        => 'string',
@@ -125,24 +152,89 @@ sub args {
 
 =head2 %credentials = $recipe->lexicon_credentials(%opts)
 
-For a domain with an C<authority>, returns what
+Returns how lexicon gets to the server that holds the zone of
+C<$opts{domain}>, as these keys:
+
+=over 4
+
+=item * C<type>: the name of the lexicon provider.  This name also names the
+environment variables of the provider and the shortcut installed for it.
+
+=item * C<user>: the account, if the provider wants one.  Usually it is empty,
+because most providers take only a token.
+
+=item * C<key>: the token that lexicon authenticates with.
+
+=item * C<key_file>: optional.  A file on the guest that holds the token, in
+place of C<key>.
+
+=item * C<opts>: flags that every lexicon command for this provider needs, as a
+string.  Usually it is empty.
+
+=item * C<zone>: optional.  The zone that the challenge of every name of this
+domain goes into.  The hook gives it to lexicon in place of the name, so that
+lexicon finds the zone without a query for a name that has no record yet.
+Without it, lexicon finds the zone of each name itself.
+
+=item * C<extra>: provider options other than the credential, as a list of
+C<{ key =E<gt> ..., value =E<gt> ... }>.  Each one becomes
+C<LEXICON_E<lt>TYPEE<gt>_E<lt>KEYE<gt>>.
+
+=back
+
+Where the guest holds the zone, it returns what
+L<Provisioner::Recipe::pdns/lexicon_credentials> returns for the pdns of the
+guest.  Where another guest does, it returns what
 L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
-Otherwise returns C<configured_credentials>.
+Otherwise it returns C<configured_credentials>.
 
 A registrar needs only a credential.  lexicon already knows where each of its
 providers is, so there is no endpoint.  There are no flags, because the domain
 is its own zone here.  C<--resolve-zone-name> spends live queries to find a
 zone that is already known.
 
+Dies as C<configured_credentials> does.
+
 =cut
 
 sub lexicon_credentials {
     my ( $self, %opts ) = @_;
 
-    my $guest = $self->delegated_to( $opts{domain} );
-    return Provisioner::Cookbook->load('pdns')->client_credentials( $guest, $opts{domain} ) if defined $guest;
+    my $domain = $opts{domain};
+    my $pdns   = Provisioner::Cookbook->load('pdns');
+
+    if ( $self->serves_itself($domain) ) {
+        my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+        return $pdns->lexicon_credentials( %{ Provisioner::Cookbook->domain_config($server)->{pdns} // {} }, domain => $domain );
+    }
+
+    my $guest = $self->delegated_to($domain);
+    return $pdns->client_credentials( $guest, $domain ) if defined $guest;
 
     return $self->configured_credentials(%opts);
+}
+
+=head2 %credentials = $recipe->credentials_for(%opts)
+
+C<lexicon_credentials> for C<$opts{domain}>, with the configuration of this
+recipe that the domain has, or else the configuration of the guest that the
+domain is layered onto.  It reads the configuration that the environment
+names, from L<Provisioner::Cookbook>.
+
+L<Provisioner::Recipe::letsencrypt> and L<Provisioner::Recipe::lexicon> ask
+this, so that the hook and the shortcut render from one answer.
+
+=cut
+
+sub credentials_for {
+    my ( $self, %opts ) = @_;
+
+    my $domain = $opts{domain};
+    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $name   = $self->recipe_name;
+    my $conf   = Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
+
+    return $self->lexicon_credentials( %{$conf}, domain => $domain );
 }
 
 =head2 %credentials = $recipe->configured_credentials(%opts)
@@ -159,7 +251,7 @@ record of a domain with an C<authority> goes.
 sub configured_credentials {
     my ( $self, %opts ) = @_;
 
-    die "registrar has no type for $opts{domain}.  Name the provider that holds the zone, as lexicon calls it.\n"
+    die "registrar has no type for $opts{domain}, and no server of this installation holds its zone.  Name the provider that holds the zone, as lexicon calls it, or name an authority.\n"
       unless $opts{type};
 
     return (
@@ -171,10 +263,88 @@ sub configured_credentials {
     );
 }
 
+=head2 $guest = $recipe->authority_of($domain)
+
+Returns the guest whose pdns holds the zone of C<$domain>, or undef where the
+registrar of C<type> holds it.  For a domain that is layered onto another
+guest, that guest is the server of the domain.  The answer is the first of
+these:
+
+=over 4
+
+=item * The C<authority> of this recipe for C<$domain>, or else for its server.
+
+=item * The server, if C<$domain> is under a reserved TLD.
+
+=item * undef.
+
+=back
+
+It reads the configuration that the environment names, from
+L<Provisioner::Cookbook>, and not the module list.  The depsolver adds to that
+list between C<required_recipes> and C<enrich>, so the two get different
+answers from it.
+
+=cut
+
+sub authority_of {
+    my ( $self, $domain ) = @_;
+
+    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my @where  = map { Provisioner::Cookbook->domain_config($_) } uniq( $domain, $server );
+
+    foreach my $conf (@where) {
+        my $authority = ( $conf->{ $self->recipe_name } // {} )->{authority};
+        return Provisioner::Utils::dns_name($authority) if defined $authority;
+    }
+
+    return $server if Provisioner::Utils::reserved_tld($domain);
+    return;
+}
+
+=head2 $bool = $recipe->serves_itself($domain)
+
+True where the pdns of the server of C<$domain> holds its zone, as
+C<authority_of> says.
+
+=cut
+
+sub serves_itself {
+    my ( $self, $domain ) = @_;
+
+    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $holder = $self->authority_of($domain);
+
+    return ( defined $holder && $holder eq $server ) ? 1 : 0;
+}
+
+=head2 @recipes = $recipe->zone_server_for($domain, \@recipes, %walk)
+
+Returns pdns where a guest of C<@recipes> holds its own zone and does not list
+pdns, and an empty list otherwise.  The guest holds its own zone where its
+recipes bring the registrar and C<serves_itself> is true.  Its recipes are
+C<@recipes>, the recipes of the C<base> of C<%walk>, which every domain
+inherits, and what C<recipes_with> in L<Provisioner::Cookbook> adds to both,
+with C<%walk> as its C<%opts>.  Nothing adds pdns to such a guest, and
+C<enrich> refuses it without one, so whatever writes the configuration of a
+guest asks this.
+
+=cut
+
+sub zone_server_for {
+    my ( $self, $domain, $recipes, %walk ) = @_;
+
+    my @named = uniq( @$recipes, grep { !m/\A_/ } keys %{ $walk{base} // {} } );
+    return if List::Util::any { $_ eq 'pdns' } @named;
+    return unless List::Util::any { $_ eq $self->recipe_name } Provisioner::Cookbook->recipes_with( \@named, %walk, domain => $domain );
+    return unless $self->serves_itself($domain);
+    return 'pdns';
+}
+
 =head2 $guest = $recipe->delegated_to($domain)
 
-The C<authority> of the registrar of C<$domain>, or of the guest that it is
-layered onto, or undef.  A guest is never its own authority.
+Returns what C<authority_of> returns, where that is another guest than the
+server of C<$domain>, and undef otherwise.
 
 =cut
 
@@ -182,14 +352,9 @@ sub delegated_to {
     my ( $self, $domain ) = @_;
 
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-    foreach my $where ( uniq( $domain, $server ) ) {
-        my $authority = ( Provisioner::Cookbook->domain_config($where)->{ $self->recipe_name } // {} )->{authority};
-        next unless defined $authority;
-        $authority = Provisioner::Utils::dns_name($authority);
-        return $authority eq $server ? undef : $authority;
-    }
+    my $holder = $self->authority_of($domain);
 
-    return;
+    return ( defined $holder && $holder ne $server ) ? $holder : undef;
 }
 
 =head2 %files = $recipe->guest_secrets($install_dir, $domain)
@@ -204,23 +369,64 @@ sub guest_secrets {
     my ( $self, $install_dir, $domain ) = @_;
 
     my $guest = $self->delegated_to($domain);
-    return () unless defined $guest && $self->provider_for( domain => $domain ) eq $self->recipe_name;
+    return () unless defined $guest;
 
     return Provisioner::Cookbook->load('pdns')->client_secret( $guest, Provisioner::Utils::dns_name($domain) );
 }
 
+=head2 %publication = $recipe->publication(%opts)
+
+What this recipe publishes for C<$opts{domain}>, as options for its templates:
+C<address>, C<domain_aliases>, and C<publish_records>, which is true when there
+is an address to publish.
+
+The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
+each name in C<domain_aliases>: the aliases that the operator configured and
+the C<hostnames> that the recipes handed over.  F<scripts/publish_dns_records>
+writes them through the lexicon shortcut of the domain, in the postrun.  It
+never deletes a record, and changes only a record of ours that has the wrong
+content, so a rebuild from the same configuration sends nothing.
+
+The address goes up as it is, an RFC 1918 address of a fleet behind NAT
+included: a zone that holds internal addresses for internal names is ordinary,
+and it is the address that the client needs.  There is no C<ns1> among the
+records.  pdns writes one into its own zone, because a guest that serves its
+own zone is its own nameserver, and a zone that a registrar holds has
+nameservers of its own.
+
+There is nothing to publish where the hypervisor allocates the address, and
+leaves C<main_ip> empty when the makefile is written.
+
+=cut
+
+sub publication {
+    my ( $self, %opts ) = @_;
+
+    my $address = $opts{address} // $opts{main_ip};
+
+    return (
+        address         => $address,
+        domain_aliases  => [ $self->domain_aliases(%opts) ],
+        publish_records => $address ? 1 : 0,
+    );
+}
+
 =head2 %opts = $recipe->enrich(%opts)
 
-Adds what C<publication> in L<Provisioner::DNSRecipe> says this recipe
-publishes.  With an C<authority>, adds C<authority>, C<authority_address>, its
-address, C<routing_domains>, the zones that the guest asks it for, as
-systemd-resolved spells them,
-C<fleet_anchor>, which is true where the authority is under a reserved TLD,
-C<upstream>, the credentials of the registrar of the zone above, or undef where
-the domain is under a reserved TLD, and C<parent>, the name above the domain.
+Adds what C<publication> says this recipe publishes.  With an C<authority> on
+another guest, adds C<authority>, C<authority_address>, its address,
+C<routing_domains>, the zones that the guest asks it for, as systemd-resolved
+spells them, C<fleet_anchor>, which is true where the authority is under a
+reserved TLD, C<upstream>, the credentials of the registrar of the zone above,
+or undef where the domain is under a reserved TLD, and C<parent>, the name
+above the domain.  An C<authority> that names the guest itself is dropped.
 
-Dies when the domain has fewer than three labels, when the authority runs no
-pdns, or when the installation gave the authority no address.
+Where the registrar of C<type> holds the zone, dies when there is no C<type>.
+Where the guest holds its own zone, dies when it runs no pdns, as
+C<needs_recipe> in L<Provisioner::Cookbook> says.  With an C<authority> on
+another guest, dies when the domain has fewer than three labels, when the
+authority runs no pdns, or when the installation gave the authority no
+address.
 
 =cut
 
@@ -231,25 +437,30 @@ sub enrich {
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
     my $guest  = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->delegated_to($domain);
     undef $guest if defined $guest && $guest eq $server;
-    return ( %opts, $self->publication(%opts) ) unless defined $guest;
+    delete $opts{authority};
+    unless ( defined $guest ) {
+        if ( $self->serves_itself($domain) ) {
+            Provisioner::Cookbook->needs_recipe( $domain, $server, 'pdns', 'the authority of its registrar' );
+        }
+        else {
+            $self->configured_credentials(%opts);
+        }
+        return ( %opts, $self->publication(%opts) );
+    }
 
     die "$domain names $guest as the authority of its registrar, but has fewer than three labels.  Its zone is delegated with an NS record in the zone of a registered domain, and a registered domain itself needs glue at the registry, which most registrars have no API for.\n"
       if ( $domain =~ tr/.// ) < 2;
-    die "$domain names $guest as the authority of its registrar, but $guest runs no pdns in this installation.\n"
-      unless exists Provisioner::Cookbook->domain_config($guest)->{pdns};
+    Provisioner::Cookbook->needs_recipe( $domain, $guest, 'pdns', 'the authority of its registrar' );
 
     my $address = ( $opts{ipmap} // {} )->{$guest};
     die "$domain names $guest as the authority of its registrar, and the installation gave $guest no address to ask it at.  Give it an address of the pool.\n"
       unless $address;
 
-    my %reserved = map { $_ => 1 } $self->reserved_tlds;
-    my $own_zone = ( eval { $self->provider_for( domain => $guest ) } // q{} ) eq Provisioner::DNSRecipe->local_implementation;
-
     $opts{authority}         = $guest;
     $opts{authority_address} = $address;
-    $opts{routing_domains}   = join( q{ }, map { "~$_" } $domain, ( $own_zone ? $guest : () ) );
-    $opts{fleet_anchor}      = $reserved{ Provisioner::Utils::tld_of($guest)  // q{} } ? 1     : 0;
-    $opts{upstream}          = $reserved{ Provisioner::Utils::tld_of($domain) // q{} } ? undef : { $self->configured_credentials( %opts, domain => $domain ) };
+    $opts{routing_domains}   = join( q{ }, map { "~$_" } $domain, ( $self->serves_itself($guest) ? $guest : () ) );
+    $opts{fleet_anchor}      = Provisioner::Utils::reserved_tld($guest)  ? 1     : 0;
+    $opts{upstream}          = Provisioner::Utils::reserved_tld($domain) ? undef : { $self->configured_credentials( %opts, domain => $domain ) };
     $opts{parent}            = $domain =~ s/\A[^.]+[.]//r;
 
     return ( %opts, $self->publication(%opts) );
@@ -289,15 +500,19 @@ sub tests {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-Returns lexicon.  An operator still edits a zone that a registrar holds, and
-the lexicon shortcut is the tool for that.
+Returns lexicon, which publishes the records, and which an operator edits the
+zone with.  It does not return pdns where the guest holds its own zone.  The
+configuration of the guest names pdns there, as it does on another guest that
+holds a zone.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
+    return (
+        lexicon => sub { return () },
+    );
 }
 
 1;

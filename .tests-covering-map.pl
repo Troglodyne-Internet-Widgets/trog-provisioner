@@ -160,8 +160,8 @@ return sub {
             $stands_for{'templates/makefile.tt'} = ['bin/new_config'];
 
             # A template that another includes stands for what that one stands
-            # for, such as the publishing that each implementation of
-            # Provisioner::DNSRecipe includes in its fragment and its guest test.
+            # for, such as the publishing that the registrar includes in its
+            # fragment and its guest test.
             my @roots = uniq map {
                 map { File::Spec->abs2rel($_) }
                   @{ Provisioner::Cookbook->template_dirs($_) }
