@@ -150,6 +150,7 @@ subtest 'what a guest that names an authority sets up' => sub {
     like( $fragment, qr{^\Q$dropin\E$}m,                                               'the fragment routes those names to the authority' );
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'and delegates its zone to the authority first in the postrun, before the fetcher of letsencrypt' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records there' );
+    unlike( $fragment, qr/--nameserver/, 'and publishes no ns1, because the authority is its nameserver' );
 
     my $resolved = fresh('registrar')->render_file( 'files/registrar.resolved.tt', %common, authority => 'ns.example.net', type => 'easydns' );
     like( $resolved, qr/^DNS=192[.]0[.]2[.]53$/m,                     'the drop-in names the authority' );
@@ -180,8 +181,16 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     my $fragment = fresh('registrar')->render(%common);
     my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'the zone above names its ns1 first in the postrun, with the address of ns1 as glue, because ns1 is inside the zone' );
-    ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records' );
-    like( fresh('registrar')->render( %common, address => '198.51.100.6' ), qr{\Q$name\E[ ]ns1[.]\Q$name\E[ ]198[.]51[.]100[.]6$}m, 'and the glue is the address that its A record publishes' );
+    my $records = "publish_dns_records --nameserver ns1.$name $name 192.0.2.6";
+    like( $fragment, qr{\Q$records\E$}m, 'its own records include ns1, at the address of the domain' );
+    ok( index( $fragment, '--delegate' ) < index( $fragment, $records ), 'and go up after the delegation' );
+
+    # A guest behind NAT publishes another address, and every record that a
+    # resolver follows to its nameserver must give that one.
+    my $natted = fresh('registrar')->render( %common, address => '198.51.100.6' );
+    like( $natted, qr{\Q$name\E[ ]ns1[.]\Q$name\E[ ]198[.]51[.]100[.]6$}m, 'the glue is the address that its A record publishes' );
+    my $own_ns1 = "--nameserver ns1.$name $name 198.51.100.6";
+    like( $natted, qr{\Q$own_ns1\E$}m, 'and so is the record of ns1 in its own zone' );
 
     my %untyped = %common;
     delete $untyped{type};
@@ -383,6 +392,7 @@ subtest 'the registrar publishes the records of the domain' => sub {
     my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]/;
     like( $fragment, qr/${queued}\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]/, 'in the postrun, with the address the guest was built with' );
     like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E$/m, 'and each name: the configured aliases and the names that recipes handed over, sorted' );
+    unlike( $fragment, qr/--nameserver/, 'and no nameserver, because the registrar has its own' );
 
     # Through the shortcut, which points at the pdns of the guest, and not at
     # the registrar that the guest inherits.

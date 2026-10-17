@@ -6,5 +6,5 @@
     runs after this one.  The postrun runs after every target, so both are
     settled by the time this goes. -%]
 [% IF publish_records -%]
-[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% domain %] [% address %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% IF own_nameserver %]--nameserver [% own_nameserver %] [% END %][% domain %] [% address %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
 [% END -%]

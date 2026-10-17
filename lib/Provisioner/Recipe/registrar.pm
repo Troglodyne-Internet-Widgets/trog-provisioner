@@ -391,22 +391,28 @@ sub guest_secrets {
 =head2 %publication = $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
-C<address>, C<domain_aliases>, and C<publish_records>, which is true when there
-is an address to publish.
+C<address>, C<domain_aliases>, C<own_nameserver>, and C<publish_records>, which
+is true when there is an address to publish.  C<$opts{own_zone}> is true where
+the domain holds its own zone.
 
 The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
 each name in C<domain_aliases>: the aliases that the operator configured and
-the C<hostnames> that the recipes handed over.  F<scripts/publish_dns_records>
-writes them through the lexicon shortcut of the domain, in the postrun.  It
-never deletes a record, and changes only a record of ours that has the wrong
-content, so a rebuild from the same configuration sends nothing.
+the C<hostnames> that the recipes handed over.  Where the domain holds its own
+zone, they also include an C<A> record of C<own_nameserver>, which is C<ns1> of
+the domain, at the same address.  The target of an C<NS> record must not be a
+C<CNAME>.  F<scripts/publish_dns_records> writes them through the lexicon
+shortcut of the domain, in the postrun.  It never deletes a record, and changes
+only a record of ours that has the wrong content, so a rebuild from the same
+configuration sends nothing.
 
 The address goes up as it is, an RFC 1918 address of a fleet behind NAT
 included: a zone that holds internal addresses for internal names is ordinary,
-and it is the address that the client needs.  There is no C<ns1> among the
-records.  pdns writes one into its own zone, because a guest that serves its
-own zone is its own nameserver, and a zone that a registrar holds has
-nameservers of its own.
+and it is the address that the client needs.  pdns writes C<ns1> into its own
+zone at the address of the guest in the installation, and this recipe then
+moves it to C<address>, where the glue in the zone above also points.  So a
+resolver that asks the zone itself for its nameserver gets the address that
+the glue gave it.  A zone that a registrar or another guest holds has
+nameservers of its own, and gets no C<ns1>.
 
 There is nothing to publish where the hypervisor allocates the address, and
 leaves C<main_ip> empty when the makefile is written.
@@ -421,7 +427,8 @@ sub publication {
     return (
         address         => $address,
         domain_aliases  => [ $self->domain_aliases(%opts) ],
-        publish_records => $address ? 1 : 0,
+        own_nameserver  => $opts{own_zone} ? "ns1.$opts{domain}" : undef,
+        publish_records => $address        ? 1                   : 0,
     );
 }
 
@@ -482,7 +489,7 @@ sub enrich {
         $opts{routing_domains}   = join( q{ }, map { "~$_" } $domain, ( $self->serves_itself($holder) ? $holder : () ) );
         $opts{fleet_anchor}      = Provisioner::Utils::reserved_tld($holder) ? 1 : 0;
     }
-    my %publication = $self->publication(%opts);
+    my %publication = $self->publication( %opts, own_zone => $holder eq $domain );
     return ( %opts, %publication ) unless $delegated;
 
     # The guest itself answers at the address that its A record publishes.
