@@ -180,6 +180,12 @@ subtest 'the API proxy' => sub {
     my @rules = $vhost =~ m/^\s*((?:allow|deny)\s+\S+);$/mg;
     is_deeply( \@rules, [ 'allow 127.0.0.1', 'allow ::1', 'allow 192.0.2.10', 'deny all' ], 'the vhost allows those and denies the rest' );
     like( $vhost, qr{^\s*server_name[ ]dnsapi[.]\Q$DOMAIN\E;$}m, 'at the name dnsapi' );
+    unlike( $vhost, qr{location[ ]/acme/}, 'and passes no ACME to a guest that runs no CA' );
+
+    my $with_ca  = $fresh->()->render_file( 'files/pdns.acl.nginx.tt', %held, modules => [qw{pdns acmeca}] );
+    my $location = qr!location[ ]/acme/[ ][{]!;
+    my $upstream = qr!proxy_pass[ ]https://127[.]0[.]0[.]1:9000;!;
+    like( $with_ca, qr/$location\s*$upstream/, 'while it passes /acme/ to the CA of a guest that runs one, for the guests under this one' );
 
     is( $fresh->()->render_file( 'files/pdns.acl.env.tt', %held ), "PDNS_API_KEY=the-server-key\n", 'the proxy gets the key of the server in its environment file' );
     like( $fresh->()->render_file( 'files/pdns.acl.dropin.tt', %held ), qr{^UMask=0002$}m, 'and pdns makes its socket writable by its group, where the proxy runs' );

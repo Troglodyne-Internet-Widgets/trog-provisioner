@@ -62,6 +62,9 @@ its own records and nothing else.
 
 The API answers at C<dnsapi.$domain>, over TLS.  That name is a served name of
 this recipe, so it gets a record and a certificate as every served name does.
+Where the guest runs L<Provisioner::Recipe::acmeca>, the vhost also passes
+C</acme/> to that CA, for the guests that name this one as their authority.
+See L<Provisioner::Recipe::acmeca/Or on the authority, for the guests that name it>.
 The vhost answers only the addresses that this installation gives its guests,
 the addresses of this machine, the guest itself, and the networks in
 C<api_allow>.  The addresses of the guests are the C<ip_pool> of C<_global>,
@@ -98,7 +101,7 @@ use File::Slurper;
 use Crypt::PRNG();
 
 use Data::Validate::Domain();
-use List::Util  qw{uniq};
+use List::Util  qw{any uniq};
 use Time::HiRes qw{time};
 
 use Provisioner::Cookbook();
@@ -405,6 +408,8 @@ sub enrich {
 
     # Nobody can ask a server on loopback, and the zone above names this one.
     $opts{public_address} = $opts{main_ip};
+
+    $opts{acme_port} = Provisioner::Cookbook->load('acmeca')->port_for( $opts{domain} ) if any { $_ eq 'acmeca' } @{ $opts{modules} // [] };
 
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
 

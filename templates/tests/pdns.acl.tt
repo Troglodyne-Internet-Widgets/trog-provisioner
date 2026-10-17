@@ -70,5 +70,14 @@ is( $list, 403, 'and so is the list of zones' );
 call( 'PATCH', $zone, $secret, $txt->( $probe, 'DELETE' ) );
 system( @pdns_acl, qw{token remove}, "test-$$" );
 
+[% IF acme_port -%]
+# The CA of this guest, for the guests that name it as their authority.  A
+# client follows the links in the directory, so they must name the vhost and
+# not the loopback listener behind it.
+my ( $acme, $directory ) = call( 'GET', '/acme/trog/directory' );
+is( $acme, 200, 'the vhost passes the ACME directory through' ) or diag $directory;
+like( $directory, qr{"newAccount":\s*"\Qhttps://dnsapi.$domain/acme/trog/\E}, 'and its links name the vhost' ) or diag $directory;
+[% END -%]
+
 
 done_testing();

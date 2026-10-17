@@ -53,17 +53,30 @@ points lexicon at its API socket.  So the guest writes, serves and reads the rec
 packet that leaves the machine.  A CA on the same machine can then validate the
 record with no view of the fleet.
 
-A CA on another host cannot.  step-ca resolves a C<dns-01> challenge through
-the resolver of its own host, and nothing off this guest can answer for its
-zone.
+A CA on another host cannot, unless that host holds the zone.  step-ca
+resolves a C<dns-01> challenge through the resolver of its own host, and
+nothing off this guest can answer for its zone.
+
+=head2 Or on the authority, for the guests that name it
 
 A guest whose C<registrar> names an C<authority> has no zone of its own to
-serve.  The authority holds it, and lexicon writes the record there.  The
-resolver of the guest sends the zone to the authority, so step-ca reads the
-record from it.  See L<Provisioner::Recipe::registrar>.
+serve.  The authority holds it, and lexicon writes the record there.  See
+L<Provisioner::Recipe::registrar>.  The authority runs pdns, so it runs this
+CA for its own names, and its resolver answers for every zone that it holds.
+So the CA of the authority can validate the challenge of the guest.
 
-The CA listens on loopback only.  Its only client is the dehydrated of this
-guest.  So there is no port to open and no rate limit to set.
+Such a guest asks the CA of its authority, and runs none of its own, where the
+authority is under the same reserved TLD.  See C<fleet_ca_of>.  So one
+intermediate key serves every guest under an authority, in place of one key on
+each of them.  The guest already trusts the fleet authority, because its
+registrar installs it for the API of the authority.
+
+The CA listens on loopback only.  On a guest that runs pdns, the vhost of the
+API of pdns passes C</acme/> to it, behind the same allow list as the API.  See
+L<Provisioner::Recipe::pdns/The API proxy>.  So there is no port to open and no
+rate limit to set.  Anybody that the vhost lets in can open an account, and a
+certificate still needs a record in the zone, which only the token of that zone
+can write.
 
 =head2 One CA for the guest, not one for each domain
 
@@ -208,6 +221,66 @@ sub enrich {
       unless $opts{constrain_to};
 
     return %opts;
+}
+
+=head2 $port = $recipe->port_for($domain)
+
+The C<port> that C<$domain> configures for this recipe, or else the default of
+the schema.  It reads the configuration that the environment names, from
+L<Provisioner::Cookbook>, and not the options of a recipe.  So a recipe that
+asks this CA for something gets the port where the CA answers.
+
+=cut
+
+sub port_for {
+    my ( $self, $domain ) = @_;
+
+    return ( Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} )->{port} // $DEFAULT_PORT;
+}
+
+=head2 $guest = $recipe->fleet_ca_of($domain)
+
+Returns the guest whose CA issues the certificate of C<$domain>, where that is
+not the guest of C<$domain>, and undef otherwise.
+
+That guest is the authority of the registrar of C<$domain>, where both are
+under the same reserved TLD.  The constraint of the intermediate of the
+authority permits that TLD.  If the authority names an authority of its own, it
+runs no CA, and the answer is the CA of that one in turn.
+
+=cut
+
+sub fleet_ca_of {
+    my ( $self, $domain ) = @_;
+
+    my $tld       = Provisioner::Utils::reserved_tld($domain) // return;
+    my $registrar = Provisioner::Cookbook->load('registrar');
+
+    my ( $ca, %seen );
+    while ( defined( my $authority = $registrar->delegated_to($domain) ) ) {
+        last unless ( Provisioner::Utils::reserved_tld($authority) // q{} ) eq $tld;
+        last if $seen{$authority}++;
+        $ca = $domain = $authority;
+    }
+
+    return $ca;
+}
+
+=head2 $url = $recipe->directory_for($domain)
+
+The ACME directory that dehydrated asks for the certificate of C<$domain>: the
+CA of C<fleet_ca_of>, through the API of that guest, or else the CA on the
+guest, on loopback at C<port_for>.
+
+=cut
+
+sub directory_for {
+    my ( $self, $domain ) = @_;
+
+    my $guest = $self->fleet_ca_of($domain);
+    return "https://dnsapi.$guest/acme/trog/directory" if defined $guest;
+
+    return 'https://localhost:' . $self->port_for($domain) . '/acme/trog/directory';
 }
 
 =head2 @hosts = $recipe->fetch_hosts()
