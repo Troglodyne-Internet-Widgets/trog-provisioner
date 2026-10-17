@@ -165,6 +165,44 @@ subtest 'what a guest that names an authority sets up' => sub {
     like( exception { fresh('registrar')->validate( %common, ipmap  => {},            authority => 'ns.example.net', type => 'easydns' ) }, qr/no[ ]address/,                  'nor can a domain whose authority has no address' );
 };
 
+subtest 'a guest that holds its own zone is delegated as one under another guest is' => sub {
+    my $name = 'web.lab.example.net';
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $domain eq $name ? { pdns => {} } : {} } );
+    $conf->redefine( host_of       => sub { return } );
+    my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { $name => '192.0.2.6' }, authority => $name, type => 'easydns' );
+
+    my %opts = fresh('registrar')->validate(%common);
+    is( $opts{upstream}{type}, 'easydns',         'the NS record of its zone goes to its registrar' );
+    is( $opts{parent},         'lab.example.net', 'through a shortcut that names the zone above' );
+    ok( !exists $opts{authority}, 'and it routes nothing to an authority, because it is its own' );
+
+    my $fragment = fresh('registrar')->render(%common);
+    my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";
+    like( $fragment, qr{\Q$delegate\E$}m, 'the zone above names its ns1, with the address of ns1 as glue, because ns1 is inside the zone' );
+    ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records' );
+    like( fresh('registrar')->render( %common, address => '198.51.100.6' ), qr{\Q$name\E[ ]ns1[.]\Q$name\E[ ]198[.]51[.]100[.]6$}m, 'and the glue is the address that its A record publishes' );
+
+    my %untyped = %common;
+    delete $untyped{type};
+    like( exception { fresh('registrar')->validate(%untyped) }, qr/no[ ]type/, 'without the registrar of the zone above, it is refused' );
+    like(
+        exception { fresh('registrar')->validate( %common, domain => 'example.net', authority => 'example.net', ipmap => { 'example.net' => '192.0.2.6' } ) },
+        qr/fewer[ ]than[ ]three[ ]labels/,
+        'as a registered domain is, which needs glue at the registry'
+    );
+    like( exception { fresh('registrar')->validate( %common, main_ip => undef ) }, qr/inside[ ]its[ ]zone/, 'and so is one with no address for its ns1' );
+
+    # An authority whose name is inside the zone that it holds needs glue too.
+    my $inside = "ns.$name";
+    authority_conf( $conf, $name, $inside );
+    like(
+        fresh('registrar')->render( %common, authority => $inside, ipmap => { $inside => '192.0.2.53' } ),
+        qr{\Q$name\E[ ]\Q$inside\E[ ]192[.]0[.]2[.]53$}m,
+        'an authority inside the zone gets its address as glue'
+    );
+};
+
 subtest 'the authority is built first, as any guest that a setting names is' => sub {
     my %conf = ( 'ns.test.test' => { pdns => {} }, 'web.lab.test.test' => { registrar => { authority => 'ns.test.test' } } );
 

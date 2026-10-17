@@ -10,14 +10,15 @@ systemctl restart systemd-resolved
 install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt
 update-ca-certificates >/dev/null
 [% END -%]
+[% END -%]
 [% IF upstream -%]
 [%# The registrar of the zone above, where the NS record of the zone of this
-    domain goes.  In the postrun, before the records of the domain, which the
-    authority answers for once the zone above names it. -%]
+    domain goes, and the glue of a nameserver inside the zone.  In the postrun,
+    before the records of the domain, which the nameserver answers for once
+    the zone above names it. -%]
 install -d -o root -g root -m 0700 /opt/lexicon/upstream
 install -o root -g root -m 0700 registrar-upstream.sh /opt/lexicon/upstream/[% domain %]
-[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --delegate --shortcut /opt/lexicon/upstream/[% domain %] [% domain %] [% authority %]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --delegate --shortcut /opt/lexicon/upstream/[% domain %] [% domain %] [% nameserver %][% IF glue %] [% glue %][% END %]
 [% END -%]
 rm -f registrar-resolved.conf registrar-upstream.sh
-[% END -%]
 [% INCLUDE "files/registrar.publish.tt" %]

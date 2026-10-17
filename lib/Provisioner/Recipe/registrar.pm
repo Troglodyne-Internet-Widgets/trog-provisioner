@@ -70,15 +70,6 @@ guest, and C<bin/destroy> removes them.  The setting names that guest, so
 C<bin/provision> builds that guest first.  See
 L<Provisioner::Cookbook/named_guests>.
 
-The domain needs at least three labels, as C<web.example.net> does.  Its zone
-is then delegated from the zone of the registered domain, with an C<NS> record
-that names the authority.  The guest writes that record in its postrun,
-through the registrar that C<type>, C<user> and C<key> name, which is usually
-the one of C<_base>.  Under a reserved TLD there is no zone above to write to,
-and the guest writes none.  A registered domain itself is delegated at the
-registry, with glue records, which most registrars have no API for.  So the
-recipe refuses a domain of two labels.
-
 The guest asks the authority for the names in its own zone, and for the names
 of the authority itself where the authority holds its own zone.  A drop-in of
 systemd-resolved routes those names there.  So lexicon finds the API of the
@@ -89,6 +80,23 @@ A pdns guest under a reserved TLD serves the API with a certificate from its own
 CA, which the fleet authority signs.  See L<Provisioner::Recipe::acmeca>.  So a
 domain whose authority is such a guest gets that authority as a trust anchor,
 at the path where acmeca installs it.
+
+=head2 The zone above delegates the zone
+
+Where a pdns of this installation holds the zone of a domain, on the guest
+itself or on another guest, the zone of the registered domain delegates it with
+an C<NS> record.  The record names the authority, or C<ns1> of a guest that
+holds its own zone.  Where that name is inside the zone, as C<ns1> is, an C<A>
+record of it in the zone above tells a resolver where to ask.  That record is
+glue in the zone above, not at the registry.  The guest writes both in its
+postrun, through the registrar that C<type>, C<user> and C<key> name, which is
+usually the one of C<_base>.  Under a reserved TLD there is no zone above to
+write to, and the guest writes none.
+
+So the domain needs at least three labels, as C<web.example.net> does.  A
+registered domain itself is delegated at the registry, with glue records, which
+most registrars have no API for.  So the recipe refuses a domain of two labels
+outside a reserved TLD.
 
 =head2 It installs nothing, and publishes the records of the domain
 
@@ -116,13 +124,13 @@ sub args {
             type => {
                 type        => 'string',
                 description =>
-                  'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required where this registrar holds the zone.  With an authority on another guest, it is the registrar that the NS record of the zone of the domain goes to.',
+                  'The provider name dns-lexicon knows this registrar by -- easydns, route53, cloudflare.  It names the environment variables lexicon reads and the shortcut installed for it, so it has to be what lexicon calls them rather than what you do.  Required where this registrar holds the zone.  Where a pdns of this installation holds it, outside a reserved TLD, it is the registrar that the NS record of the zone of the domain goes to, so it is required there too.',
             },
             authority => {
                 type        => 'string',
                 format      => 'hostname',
                 description =>
-                  'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  The domain needs at least three labels, unless this names the guest itself, whose own pdns then holds its zone.  The default is the guest itself under a reserved TLD, and otherwise the registrar of type.',
+                  'A guest of this installation that runs pdns, and holds a zone of the name of this domain.  This domain then writes its records there, and resolves the names of that zone through it.  Where this names the guest itself, its own pdns holds its zone.  Outside a reserved TLD, the domain needs at least three labels, because the zone above delegates its zone with an NS record.  The default is the guest itself under a reserved TLD, and otherwise the registrar of type.',
             },
             hostnames => {
                 type        => 'array',
@@ -413,20 +421,31 @@ sub publication {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Adds what C<publication> says this recipe publishes.  With an C<authority> on
-another guest, adds C<authority>, C<authority_address>, its address,
-C<routing_domains>, the zones that the guest asks it for, as systemd-resolved
-spells them, C<fleet_anchor>, which is true where the authority is under a
-reserved TLD, C<upstream>, the credentials of the registrar of the zone above,
-or undef where the domain is under a reserved TLD, and C<parent>, the name
-above the domain.  An C<authority> that names the guest itself is dropped.
+Adds what C<publication> says this recipe publishes.
+
+With an C<authority> on another guest, adds C<authority>, C<authority_address>,
+its address, C<routing_domains>, the zones that the guest asks it for, as
+systemd-resolved spells them, and C<fleet_anchor>, which is true where the
+authority is under a reserved TLD.  An C<authority> that names the guest itself
+is dropped.
+
+Where a server of this installation holds the zone, the guest itself or
+another guest, and the domain is not under a reserved TLD, also adds what the
+zone above needs to delegate the zone: C<upstream>, the credentials of the
+registrar of the zone above, C<parent>, the name above the domain,
+C<nameserver>, the name that the C<NS> record names, and C<glue>, the address
+of the nameserver where its name is inside the zone, as C<ns1> of a guest that
+holds its own zone is.  The nameserver is the authority, or C<ns1> of the
+server of the domain, which is the name that F<pdns.zone.tt> gives its own
+nameserver.  The address of C<ns1> is the address of the A record of the
+domain, as C<publication> says.
 
 Where the registrar of C<type> holds the zone, dies when there is no C<type>.
-Where the guest holds its own zone, dies when it runs no pdns, as
-C<needs_recipe> in L<Provisioner::Cookbook> says.  With an C<authority> on
-another guest, dies when the domain has fewer than three labels, when the
-authority runs no pdns, or when the installation gave the authority no
-address.
+Where a server of this installation holds the zone, dies when that server runs
+no pdns, as C<needs_recipe> in L<Provisioner::Cookbook> says, and outside a
+reserved TLD, when the domain has fewer than three labels.  Dies when the
+installation gave an address to neither another guest that holds the zone, nor
+a nameserver that needs glue.
 
 =cut
 
@@ -435,35 +454,44 @@ sub enrich {
 
     my $domain = $opts{domain};
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-    my $guest  = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->delegated_to($domain);
-    undef $guest if defined $guest && $guest eq $server;
+    my $holder = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->authority_of($domain);
     delete $opts{authority};
-    unless ( defined $guest ) {
-        if ( $self->serves_itself($domain) ) {
-            Provisioner::Cookbook->needs_recipe( $domain, $server, 'pdns', 'the authority of its registrar' );
-        }
-        else {
-            $self->configured_credentials(%opts);
-        }
+    unless ( defined $holder ) {
+        $self->configured_credentials(%opts);
         return ( %opts, $self->publication(%opts) );
     }
 
-    die "$domain names $guest as the authority of its registrar, but has fewer than three labels.  Its zone is delegated with an NS record in the zone of a registered domain, and a registered domain itself needs glue at the registry, which most registrars have no API for.\n"
-      if ( $domain =~ tr/.// ) < 2;
-    Provisioner::Cookbook->needs_recipe( $domain, $guest, 'pdns', 'the authority of its registrar' );
+    my $delegated = !Provisioner::Utils::reserved_tld($domain);
+    die "$domain names $holder as the authority of its registrar, but has fewer than three labels.  Its zone is delegated with an NS record in the zone of a registered domain, and a registered domain itself needs glue at the registry, which most registrars have no API for.\n"
+      if $delegated && ( $domain =~ tr/.// ) < 2;
+    Provisioner::Cookbook->needs_recipe( $domain, $holder, 'pdns', 'the authority of its registrar' );
 
-    my $address = ( $opts{ipmap} // {} )->{$guest};
-    die "$domain names $guest as the authority of its registrar, and the installation gave $guest no address to ask it at.  Give it an address of the pool.\n"
-      unless $address;
+    my $address = ( $opts{ipmap} // {} )->{$holder};
+    if ( $holder ne $server ) {
+        die "$domain names $holder as the authority of its registrar, and the installation gave $holder no address to ask it at.  Give it an address of the pool.\n"
+          unless $address;
 
-    $opts{authority}         = $guest;
-    $opts{authority_address} = $address;
-    $opts{routing_domains}   = join( q{ }, map { "~$_" } $domain, ( $self->serves_itself($guest) ? $guest : () ) );
-    $opts{fleet_anchor}      = Provisioner::Utils::reserved_tld($guest)  ? 1     : 0;
-    $opts{upstream}          = Provisioner::Utils::reserved_tld($domain) ? undef : { $self->configured_credentials( %opts, domain => $domain ) };
-    $opts{parent}            = $domain =~ s/\A[^.]+[.]//r;
+        $opts{authority}         = $holder;
+        $opts{authority_address} = $address;
+        $opts{routing_domains}   = join( q{ }, map { "~$_" } $domain, ( $self->serves_itself($holder) ? $holder : () ) );
+        $opts{fleet_anchor}      = Provisioner::Utils::reserved_tld($holder) ? 1 : 0;
+    }
+    my %publication = $self->publication(%opts);
+    return ( %opts, %publication ) unless $delegated;
 
-    return ( %opts, $self->publication(%opts) );
+    # The guest itself answers at the address that its A record publishes.
+    my $nameserver = $holder eq $server ? "ns1.$server"         : $holder;
+    my $glue       = $holder eq $server ? $publication{address} : $address;
+    my $in_zone    = $nameserver eq $domain || $nameserver =~ m/[.]\Q$domain\E\z/;
+    die "$domain is delegated to $nameserver, which is inside its zone, and the installation gave $holder no address to publish for it.  Give it an address of the pool.\n"
+      if $in_zone && !$glue;
+
+    $opts{upstream}   = { $self->configured_credentials( %opts, domain => $domain ) };
+    $opts{parent}     = $domain =~ s/\A[^.]+[.]//r;
+    $opts{nameserver} = $nameserver;
+    $opts{glue}       = $in_zone ? $glue : undef;
+
+    return ( %opts, %publication );
 }
 
 =head2 @written = $recipe->generate_files($output_dir, %vars)
