@@ -88,10 +88,16 @@ itself or on another guest, the zone of the registered domain delegates it with
 an C<NS> record.  The record names the authority, or C<ns1> of a guest that
 holds its own zone.  Where that name is inside the zone, as C<ns1> is, an C<A>
 record of it in the zone above tells a resolver where to ask.  That record is
-glue in the zone above, not at the registry.  The guest writes both in its
-postrun, through the registrar that C<type>, C<user> and C<key> name, which is
-usually the one of C<_base>.  Under a reserved TLD there is no zone above to
-write to, and the guest writes none.
+glue in the zone above, not at the registry.  The guest writes both through
+the registrar that C<type>, C<user> and C<key> name, which is usually the one
+of C<_base>.  It writes them first in its postrun, in slot 0, which is before
+the tasks of every target.  The fetcher of L<Provisioner::Recipe::letsencrypt>
+runs in the postrun as well, and the CA looks for the challenge through the
+zone above.  letsencrypt requires this recipe, so the fetcher otherwise runs
+first, and the CA finds no zone.  The delegation needs only lexicon and the
+shortcut of the zone above, and both are on the guest before the postrun
+starts.  Under a reserved TLD there is no zone above to write to, and the
+guest writes none.
 
 So the domain needs at least three labels, as C<web.example.net> does.  A
 registered domain itself is delegated at the registry, with glue records, which

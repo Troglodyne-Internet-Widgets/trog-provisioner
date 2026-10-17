@@ -27,10 +27,11 @@ of several arguments runs as those arguments, with no shell, as the shell of
 the makefile already split and expanded them.
 
 With no arguments, it runs every task that has not run, by slot, and in the
-order they were queued within one slot.  A task queued with no slot runs after
-all of them.  Each task runs even when one before it failed, because a stop at
-the first failure leaves the deferred work of later recipes undone.  It exits 1
-when any task failed, and says which.
+order they were queued within one slot.  The slots of the targets start at 1,
+so a task queued with slot 0 runs before all of them.  A task queued with no
+slot runs after all of them.  Each task runs even when one before it failed,
+because a stop at the first failure leaves the deferred work of later recipes
+undone.  It exits 1 when any task failed, and says which.
 
 A task runs once.  It is marked as run whether it failed or not, so the next
 makefile run does not replay the work of this one on top of its own.
