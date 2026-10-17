@@ -21,6 +21,13 @@ subtest 'the records of the domain are published to the zone that holds it' => s
     ok($a_records, 'the provider answered with a list of A records') or diag $why->('A');
     ok((grep { ($_->{content} // '') eq '[% address %]' } @{ $a_records // [] }), 'holding the address of this domain')
         or diag explain $a_records;
+[% IF own_nameserver -%]
+    # The zone itself answers for its nameserver, and a resolver that asks it
+    # must get the address that the glue in the zone above gives.
+    my ($ns) = grep { lc($_->{name} // '') =~ m/\A\Q[% own_nameserver %]\E[.]?\z/ } @{ $a_records // [] };
+    is(($ns // {})->{content}, '[% address %]', '[% own_nameserver %] is at that address too')
+        or diag explain $a_records;
+[% END -%]
 
     my $cnames = $listed->('CNAME');
     ok($cnames, 'and with a list of CNAMEs') or diag $why->('CNAME');

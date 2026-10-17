@@ -188,9 +188,8 @@ subtest 'each alias becomes a CNAME at the name that holds the address' => sub {
             like( $cnames[0], qr/--name='mail[.]\Q$DOMAIN\E'/, 'sorted, so a rebuild sends them in the same order' );
             like( $cnames[0], qr/--content='\Q$DOMAIN\E'/,     'pointing at the domain itself' );
 
-            # ns1 is pdns's to publish: a guest serving its own zone is its own
-            # nameserver, and a zone a registrar holds has nameservers of theirs.
-            is( scalar grep( { index( $_, 'ns1' ) >= 0 } @{$ran} ), 0, 'and no ns1 is claimed' );
+            # A zone a registrar holds has nameservers of theirs.
+            is( scalar grep( { index( $_, 'ns1' ) >= 0 } @{$ran} ), 0, 'and no ns1 is claimed unless one is named' );
 
             # Once per type, not once per record.  Every list is a round trip to
             # whoever holds the zone, and asking again between two aliases
@@ -199,6 +198,26 @@ subtest 'each alias becomes a CNAME at the name that holds the address' => sub {
             is( scalar @lists, 2, 'the provider was asked once for A and once for CNAME, however many aliases there are' );
         }
     );
+};
+
+subtest 'a named nameserver gets the address of the domain, as an A record' => sub {
+    against(
+        holding(),
+        sub {
+            my ($ran) = @_;
+
+            my $rc;
+            capture { $rc = Trog::PublishDNSRecords::main( '--nameserver', "ns1.$DOMAIN", $DOMAIN, $ADDRESS, "www.$DOMAIN" ) };
+            is( $rc, 0, 'the run succeeds' );
+
+            my ($ns1) = grep { index( $_, "--name='ns1.$DOMAIN'" ) >= 0 } sent( $ran, 'create' );
+            ok( $ns1, 'ns1 is created' ) or diag join "\n", @{$ran};
+            like( $ns1 // q{}, qr/[ ]A[ ]/,                  'as an A record, because the target of an NS must not be a CNAME' );
+            like( $ns1 // q{}, qr/--content='\Q$ADDRESS\E'/, 'at the address of the domain' );
+        }
+    );
+
+    like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, '--nameserver', "ns1.$DOMAIN", $DOMAIN, "ns1.$DOMAIN" ) }, qr/usage/, 'a delegation names its nameserver as an argument, not with the option' );
 };
 
 subtest 'a provider that cannot be asked stops the run rather than publishing over it' => sub {

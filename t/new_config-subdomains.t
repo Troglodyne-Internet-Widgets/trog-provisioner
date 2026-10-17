@@ -112,8 +112,9 @@ sub certificate_names {
 
 sub zone_names {
     my ( $dir, $domain ) = @_;
-    my $makefile = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
-    my ($names) = $makefile =~ m{publish_dns_records[ ]\Q$domain\E[ ]\S+[ ]([^\n]*)};
+    my $makefile   = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
+    my $nameserver = qr{(?:--nameserver[ ]\S+[ ])?};
+    my ($names)    = $makefile =~ m{publish_dns_records[ ]$nameserver\Q$domain\E[ ]\S+[ ]([^\n]*)};
     return [ sort split ' ', $names // q{} ];
 }
 

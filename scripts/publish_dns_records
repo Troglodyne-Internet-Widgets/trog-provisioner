@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use JSON::PP     ();
 use Getopt::Long qw{GetOptionsFromArray};
 
-my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
+my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--nameserver NAME] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
 
 # The shortcut Provisioner::Recipe::lexicon installs for this domain, which
 # already carries the provider holding the zone and the credential for it.
@@ -123,16 +123,16 @@ sub publish {
 }
 
 # The records of a domain, by type and name: the address, and one alias for
-# each name, pointing at the name that holds the address.  No ns1: the pdns
-# recipe publishes one because a guest serving its own zone is its own
-# nameserver, and a zone somebody else holds has nameservers of theirs that
-# this is in no position to contradict.
+# each name, pointing at the name that holds the address.  A nameserver, only
+# where the caller names one, because a zone somebody else holds has
+# nameservers of theirs that this is in no position to contradict.  It is an
+# address and not an alias, because the target of an NS must not be a CNAME.
 sub records {
-    my ( $domain, $address, @aliases ) = @_;
+    my ( $nameserver, $domain, $address, @aliases ) = @_;
     die $USAGE unless $domain && $address;
 
     return (
-        A     => { $domain => $address },
+        A     => { $domain => $address, ( $nameserver ? ( $nameserver => $address ) : () ) },
         CNAME => { map { $_ => $domain } @aliases },
     );
 }
@@ -155,11 +155,11 @@ sub delegation {
 sub main {
     my @args = @_;
 
-    my ( $dryrun, $shortcut, $delegate );
-    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate ) or die $USAGE;
-    die $USAGE if $delegate && !$shortcut;
+    my ( $dryrun, $shortcut, $delegate, $nameserver );
+    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'nameserver=s' => \$nameserver ) or die $USAGE;
+    die $USAGE if $delegate && ( !$shortcut || $nameserver );
 
-    my %wanted = $delegate ? delegation(@args) : records(@args);
+    my %wanted = $delegate ? delegation(@args) : records( $nameserver, @args );
     $shortcut //= shortcut_for( $args[0] );
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether the shortcut is there to run is the thing being decided, and saying so beats a shell error
