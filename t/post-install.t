@@ -94,8 +94,8 @@ subtest 'a task that reads stdin has nothing to read' => sub {
 };
 
 subtest 'the queue runs by slot, and in queued order within one' => sub {
-    my $r = run_queue( [ 30, 'echo c >> %RAN%' ], [ 10, 'echo a >> %RAN%' ], [ 30, 'echo d >> %RAN%' ], 'echo e >> %RAN%', [ 20, 'echo b >> %RAN%' ] );
-    is_deeply( $r->{ran}, [qw{a b c d e}], 'by slot, ties in the order queued, and a task with no slot last' );
+    my $r = run_queue( [ 30, 'echo c >> %RAN%' ], [ 10, 'echo a >> %RAN%' ], [ 30, 'echo d >> %RAN%' ], 'echo e >> %RAN%', [ 20, 'echo b >> %RAN%' ], [ 0, 'echo first >> %RAN%' ] );
+    is_deeply( $r->{ran}, [qw{first a b c d e}], 'by slot, slot 0 before any target, ties in the order queued, and a task with no slot last' );
 };
 
 # The shell of the makefile has already split and expanded the words of a task
