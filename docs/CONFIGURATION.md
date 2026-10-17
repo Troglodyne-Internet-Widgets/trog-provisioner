@@ -187,10 +187,16 @@ web.lab.example.net:
 ```
 
 The pdns guest then holds a zone of the name of the guest, and the guest
-writes its records there through the API of the pdns guest. The guest writes
-the NS record of its zone through the registrar of `_base`, and asks the pdns
-guest for the names in its zone. The domain needs at least three labels,
-because a registered domain needs glue records at the registry.
+writes its records there through the API of the pdns guest. The guest asks the
+pdns guest for the names in its zone.
+
+Outside a reserved TLD, a zone that a pdns of this installation holds is
+delegated from the zone above. That is true on another guest and on the guest
+itself. The guest writes the NS record of its zone through the registrar of
+`_base`. The NS record names the authority, or `ns1` of a guest that holds its
+own zone. Where that name is inside the zone, as `ns1` is, the guest also
+writes its address in the zone above as glue. The domain needs at least three
+labels, because a registered domain needs glue records at the registry.
 
 The setting names the pdns guest, so `bin/provision` builds that guest first.
 When it builds the other guest, it makes the zone and a token on the pdns

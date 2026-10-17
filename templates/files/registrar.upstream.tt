@@ -1,6 +1,6 @@
-[%# The registrar of the zone above, for a domain whose registrar names an
-    authority.  Nothing where there is none, which the fragment then does not
-    install. -%]
+[%# The registrar of the zone above, for a domain whose zone a pdns of this
+    installation holds.  Nothing where there is none, which the fragment then
+    does not install. -%]
 [% IF upstream -%]
 [% INCLUDE "files/lexicon.shortcut.sh.tt" WITH lexicon = upstream, domain = parent %]
 [% END -%]
