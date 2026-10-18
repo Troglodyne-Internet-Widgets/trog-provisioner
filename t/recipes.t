@@ -674,10 +674,10 @@ subtest 'openvpn gives the clients of a bin that names it their own addresses, a
     like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.2' } ) ), qr{^\Qifconfig-pool 10.8.0.3 10.8.0.254 \E}m, 'one address just above the server leaves the rest' );
 
     my %tiny = ( netmask => '255.255.255.252', $pool->( { addresses => '10.8.0.2' } ) );
-    like( exception { $vpn->()->render( %G, %tiny ) }, qr/No[ ]available[ ]address/, 'and a bin that takes the one address the server has to give is refused' );
+    like( exception { $vpn->()->render( %G, %tiny ) }, qr/No[ ]available[ ]address[ ]\N*[ ]subnet[ ][(]10[.]8[.]0[.]0/, 'and a bin that takes the one address the server has to give is refused' );
     my %two = ( netmask => '255.255.255.248', $pool->( { cidr => '10.8.0.4/30', addresses => '10.8.0.2 10.8.0.3' } ) );
-    like( exception { $vpn->()->render( %G, %two ) },                                                            qr/No[ ]available[ ]address/,                 'and so are blocks that take it between them' );
-    like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.254' } ) ), qr{^\Qifconfig-pool 10.8.0.2 10.8.0.253 \E}m, 'one address at the top end leaves the rest' );
+    like( exception { $vpn->()->render( %G, %two ) },                                                            qr/No[ ]available[ ]address[ ]\N*[ ]subnet[ ][(]10[.]8[.]0[.]0/, 'and so are blocks that take it between them' );
+    like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.254' } ) ), qr{^\Qifconfig-pool 10.8.0.2 10.8.0.253 \E}m,                    'one address at the top end leaves the rest' );
 };
 
 # ----------------------------------------------------------------

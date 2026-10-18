@@ -405,7 +405,7 @@ sub dynamic_pool ( $subnet, $cidr, @blocks ) {
     }
     push @free, [ $from, $last - 1 ] if $from < $last;
 
-    die "No available address to assign in the configured bin ($net)!\n" unless @free;
+    die "No available address to assign in the configured subnet ($net)!\n" unless @free;
     die "The bins that route through this openvpn server split $net in two, and openvpn hands out one range: put them at its top end\n"
       if @free > 1;
 
