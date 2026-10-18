@@ -1,29 +1,45 @@
 #!/bin/bash
 # Print an OpenVPN client configuration for NAME, with its keys inline:
 #
-#     openvpn-client-config NAME [REMOTE] > NAME.ovpn
+#     openvpn-client-config [--address ADDRESS] NAME [REMOTE] > NAME.ovpn
 #
 # If NAME has no certificate yet, this issues one from the CA of this server.
 # REMOTE is the name that the client connects to, and defaults to
 # [% domain %].  The port, the protocol and the cipher are the ones that this
 # server listens with.
 #
+# --address gives NAME that address in the VPN at each connect, through a file
+# in the client-config-dir.  It refuses an address that another client has.
+# Provisioner::Recipe::openvpn says where the address comes from.
+#
 # The output holds a private key.  Send it to its client the way that you send
 # a password.
 #
 # OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to issue from
-# instead.  The guest test uses it, so that a provision issues no certificate
-# from the real CA.
+# instead, and OPENVPN_CCD_DIR a directory to write the address into.  The guest
+# test uses them, so that a provision issues no certificate from the real CA.
 
 set -euo pipefail
+
+ADDRESS=
+if [ "${1:-}" = --address ]; then
+    ADDRESS="${2:-}"
+    shift 2 || true
+fi
 
 NAME="${1:-}"
 REMOTE="${2:-[% domain %]}"
 EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+CCD="${OPENVPN_CCD_DIR:-/etc/openvpn/server/ccd}"
 PKI="$EASYRSA_DIR/pki"
 
 if [ -z "$NAME" ] || [ $# -gt 2 ]; then
-    echo "usage: $0 NAME [REMOTE] > NAME.ovpn" >&2
+    echo "usage: $0 [--address ADDRESS] NAME [REMOTE] > NAME.ovpn" >&2
+    exit 2
+fi
+
+if [ -n "$ADDRESS" ] && ! [[ "$ADDRESS" =~ ^[0-9]{1,3}([.][0-9]{1,3}){3}$ ]]; then
+    echo "$0: '$ADDRESS' is not an IPv4 address" >&2
     exit 2
 fi
 
@@ -40,6 +56,24 @@ if [ "$NAME" = server ] || [ "$NAME" = ca ]; then
     exit 2
 fi
 
+CHANGED=
+if [ -n "$ADDRESS" ]; then
+    # Two clients with one address cut each other off at every connect.
+    PUSH="ifconfig-push $ADDRESS [% netmask %]"
+    mkdir -p "$CCD"
+    for other in "$CCD"/*; do
+        [ -f "$other" ] && [ "$(basename "$other")" != "$NAME" ] || continue
+        if grep -qxF "$PUSH" "$other"; then
+            echo "$0: $(basename "$other") already has $ADDRESS: revoke it with openvpn-revoke-client first" >&2
+            exit 1
+        fi
+    done
+    if [ "$(cat "$CCD/$NAME" 2>/dev/null)" != "$PUSH" ]; then
+        printf '%s\n' "$PUSH" > "$CCD/$NAME"
+        CHANGED=1
+    fi
+fi
+
 if [ ! -f "$PKI/issued/$NAME.crt" ]; then
     # stdout is the configuration, so easyrsa reports on stderr.
     (
@@ -47,11 +81,12 @@ if [ ! -f "$PKI/issued/$NAME.crt" ]; then
         EASYRSA_PKI="$PKI" ./easyrsa --batch gen-req "$NAME" nopass
         EASYRSA_PKI="$PKI" ./easyrsa --batch sign-req client "$NAME"
     ) >&2
+    CHANGED=1
+fi
 
-    # A certificate that is only on this guest goes with it.
-    if [ "$EASYRSA_DIR" = /etc/openvpn/easy-rsa ]; then
-        /usr/local/sbin/openvpn-stage-pki
-    fi
+# What is only on this guest goes with it.
+if [ -n "$CHANGED" ] && [ "$EASYRSA_DIR" = /etc/openvpn/easy-rsa ]; then
+    /usr/local/sbin/openvpn-stage-pki
 fi
 
 cat <<EOF

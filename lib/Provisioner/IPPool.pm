@@ -57,6 +57,21 @@ which is where a guest gets its address.  C<bins> names the others:
 A domain holds at most one address in each bin.  Only the C<guests> bin goes
 into C<assignments>, so only a guest gets an A record from it.
 
+A bin that names a guest in C<via> holds addresses that only that guest can
+reach, such as the static addresses of the clients of a VPN:
+
+    ip_pool:
+        cidr: 192.0.2.0/24
+        bins:
+            vpnclients:
+                cidr: 10.8.0.128/25
+                via: vpn.test.test
+
+Every other guest gets a route to the networks of the bin through the address of
+C<via>.  L<Provisioner::Recipe::openvpn> gives each client in the bin its
+address, and L<Provisioner::Recipe::openvpnclient> takes one with
+C<issue_from>.
+
 =head1 WHY A DATABASE
 
 Two runs cannot safely share a file of assignments.  Both read it, both find the
@@ -304,6 +319,34 @@ sub bins {
     }
 
     return %bins;
+}
+
+=head2 %bins = bins_via($pool, $guest)
+
+Returns each bin of C<$pool> whose C<via> is C<$guest>, by name, as C<bins>
+does.  Such a bin holds addresses that C<$guest> routes to, such as the static
+addresses of the clients of an openvpn server, and every other guest reaches
+them through C<$guest>.  Empty when no bin names C<$guest>.
+
+=cut
+
+sub bins_via {
+    my ( $pool, $guest ) = @_;
+
+    my %bins = bins($pool);
+    return map { $_ => $bins{$_} } grep { defined $bins{$_}{via} && $bins{$_}{via} eq $guest } keys %bins;
+}
+
+=head2 @blocks = blocks($bin)
+
+Returns the networks of C<$bin>, a block that C<pool_ips> takes, as CIDR
+blocks: each C<cidr> as it is, then each of its C<addresses> as a C</32>.
+
+=cut
+
+sub blocks {
+    my ($bin) = @_;
+    return ( pool_items( $bin->{cidr} ), map { "$_/32" } pool_items( $bin->{addresses} ) );
 }
 
 =head2 assign($domain, $pool, $bin)

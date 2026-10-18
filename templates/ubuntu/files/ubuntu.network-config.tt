@@ -43,6 +43,17 @@ network:
         - type: static
           address: [% ip | yaml %]
           gateway: [% gateway | yaml %]
+[% IF loop.first && bin_routes.size() -%]
+[%# The bins of ip_pool that another guest routes to, such as the static
+    addresses of VPN clients.  See Provisioner::IPPool.  Under the first
+    address only, because netplan refuses the same route twice. -%]
+          routes:
+[% FOR r IN bin_routes -%]
+            - network: [% r.network | yaml %]
+              netmask: [% r.netmask | yaml %]
+              gateway: [% r.gateway | yaml %]
+[% END -%]
+[% END -%]
           dns_search:
             - [% domain | yaml %]
           dns_nameservers:

@@ -646,6 +646,31 @@ subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' =
     ok( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0'] ) }, 'and so is an address without a prefix' );
 };
 
+subtest 'openvpn gives the clients of a bin that names it their own addresses, and hands out only the rest' => sub {
+    my $vpn  = sub { 'Provisioner::Recipe::openvpn'->new(%PROV) };
+    my $pool = sub ($clients) { return ( ip_pool => { cidr => '192.0.2.0/24', bins => { vpnclients => { %$clients, via => $G{domain} } } } ) };
+
+    my $conf = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { cidr => '10.8.0.128/25' } ) );
+    like( $conf, qr{^\Qserver 10.8.0.0 255.255.255.0 nopool\E$}m,            'the server makes no pool of its own' ) or diag $conf;
+    like( $conf, qr{^\Qifconfig-pool 10.8.0.2 10.8.0.127 255.255.255.0\E$}m, 'and hands out what the bin leaves, after the address of the server' );
+    like( $conf, qr{^\Qclient-config-dir /etc/openvpn/server/ccd\E$}m,       'and reads the address of each client from where openvpn-client-config writes it' );
+
+    my $fragment = $vpn->()->render( %G, $pool->( { cidr => '10.8.0.128/25' } ) );
+    cmp_ok(
+        index( $fragment, q{setup-masquerade --keep '10.8.0.128/25' --to '192.0.2.0/25' --to '192.0.2.128/25' '10.8.0.0/24'} ), '>=', 0,
+        'and the bin keeps its own addresses towards the routes'
+    ) or diag $fragment;
+
+    my $plain = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => { cidr => '192.0.2.0/24', bins => { vpnclients => { cidr => '10.8.0.128/25' } } } );
+    like( $plain, qr{^\Qserver 10.8.0.0 255.255.255.0\E$}m, 'a bin that does not name this server leaves its pool alone' );
+    unlike( $vpn->()->render( %G, ip_pool => { cidr => '192.0.2.0/24' } ), qr/--keep/, 'and its clients are masqueraded as before' );
+
+    like( exception { $vpn->()->render( %G, $pool->( { cidr => '10.9.0.0/25' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/, 'a bin outside the subnet is refused' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr => '10.8.0.64/26' } ) ) }, qr/split/,                             'and so is one in the middle of it, which leaves two ranges' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr => '10.8.0.0/24' } ) ) },  qr/leave[ ]no[ ]address/,              'and one that takes all of it' );
+    like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.254' } ) ), qr{^\Qifconfig-pool 10.8.0.2 10.8.0.253 \E}m, 'one address at the top end leaves the rest' );
+};
+
 # ----------------------------------------------------------------
 # ufw: validate enforces port_forward structure
 # ----------------------------------------------------------------

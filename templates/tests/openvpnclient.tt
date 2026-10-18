@@ -20,6 +20,21 @@ is((stat('/etc/openvpn/client/[% domain %]/client.key'))[2] & 07777, 0600, 'and 
 my $link = `ip link show [% device %] 2>&1`;
 like($link, qr/\Q[% device %]\E/, 'the tunnel interface is up under the name this domain was given') or diag $link;
 
+[% IF issue_from -%]
+# The address comes from the bin of ip_pool that [% issue_from %] routes, and
+# the server gives it at each connect.
+my @blocks = qw{[% address_blocks.join(' ') %]};
+my ($address) = `ip -4 -o addr show dev [% device %] 2>&1` =~ m{\binet\s+(\d+(?:\.\d+){3})/};
+my $in = sub {
+    my ($block) = @_;
+    my ($net, $prefix) = split m{/}, $block;
+    my $mask = $prefix ? (0xFFFFFFFF << (32 - $prefix)) & 0xFFFFFFFF : 0;
+    return (unpack('N', pack('C4', split /\./, $address)) & $mask) == unpack('N', pack('C4', split /\./, $net));
+};
+ok($address && grep({ $in->($_) } @blocks), 'the tunnel has the static address that [% issue_from %] gave this domain')
+    or diag 'address: ' . ($address // 'none') . ", bin: @blocks";
+
+[% END -%]
 # Nothing is salvaged off this guest.  Provisioner::Recipe::openvpnclient says why.
 
 done_testing();

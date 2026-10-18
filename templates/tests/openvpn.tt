@@ -129,6 +129,12 @@ ok($masq_iface && -d "/sys/class/net/$masq_iface", 'and out of an interface this
 my $copies = () = $nat =~ m{^-A \S+ -s \Q[% subnet %]/[% cidr %]\E -o \S+ -j MASQUERADE$}mg;
 is($copies, 1, 'and masqueraded exactly once') or diag $nat;
 
+# ufw loads before.rules without flushing POSTROUTING, so without the block in
+# before.init each reload adds another jump.  scripts/setup-masquerade has the
+# whole account.
+my $jumps = () = $nat =~ m{^-A POSTROUTING -j trog-nat$}mg;
+is($jumps, 1, 'and POSTROUTING jumps into it once, after the reloads of the build') or diag $nat;
+
 # In the file as well as in the kernel.  The kernel copy goes at the next
 # reboot, and /etc/ufw/before.rules puts it back.
 my $before = slurp('/etc/ufw/before.rules');
@@ -139,6 +145,21 @@ like($before, qr{^-A ufw-before-forward -s \Q[% subnet %]/[% cidr %]\E -j ACCEPT
 my $server_conf = slurp('/etc/openvpn/server/server.conf');
 like($server_conf, qr{^topology subnet$}m,
     'the server names its topology rather than taking the deprecated net30 default');
+like($server_conf, qr{^client-config-dir /etc/openvpn/server/ccd$}m, 'it reads the static address of a client from its client-config-dir');
+ok(-d '/etc/openvpn/server/ccd', 'which is there');
+ok(-d '/etc/openvpn/ccd-salvage', 'and staged for the fetch, so a rebuild keeps the address of each client');
+[% IF ifconfig_pool -%]
+like($server_conf, qr{^ifconfig-pool \Q[% ifconfig_pool.start %] [% ifconfig_pool.end %]\E }m,
+    'and hands out only the part of the subnet that the static bin leaves');
+
+# The static addresses keep their own address towards the routes.
+[% FOR b IN static_blocks -%]
+[% FOR r IN routes -%]
+like($nat, qr{^-A trog-nat -s \Q[% b %]\E -d \Q[% r %]\E -j RETURN$}m, '[% b %] is not masqueraded towards [% r %]') or diag $nat;
+like($filter, qr{^-A ufw-before-forward -s \Q[% r %]\E -d \Q[% b %]\E -j ACCEPT$}m, 'and [% r %] can reach it');
+[% END -%]
+[% END -%]
+[% END -%]
 [% FOR r IN pushes -%]
 like($server_conf, qr{^push "route \Q[% r.network %] [% r.netmask %]\E"$}m,
     'and routes clients to [% r.network %] [% r.netmask %] through the tunnel');
@@ -197,6 +218,20 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
     my $refused = system("OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-client-config server >/dev/null 2>&1");
     isnt($refused, 0, 'the script refuses to hand out the certificate of the server');
 
+    # A static address, in a copy of the client-config-dir.
+    my $ccd  = "$copy/ccd";
+    my $env  = "OPENVPN_EASYRSA_DIR='$copy' OPENVPN_CCD_DIR='$ccd'";
+    my $said = `$env /usr/local/sbin/openvpn-client-config --address 192.0.2.250 $client 2>&1 >/dev/null`;
+    is($?, 0, 'openvpn-client-config --address gives the client an address') or diag $said;
+    is(slurp("$ccd/$client"), "ifconfig-push 192.0.2.250 [% netmask %]\n", 'which the server pushes from the client-config-dir at each connect');
+    my ($same) = `$env /usr/local/sbin/openvpn-client-config --address 192.0.2.250 $client 2>/dev/null` =~ m{^<cert>\n(.*?)^</cert>$}ms;
+    is($same, $inline{cert}, 'and with the same address again, the same certificate');
+    $refused = system("$env /usr/local/sbin/openvpn-client-config --address 192.0.2.250 provisioner-other >/dev/null 2>&1");
+    isnt($refused, 0, 'an address that another client has is refused');
+    ok(!-e "$copy/pki/issued/provisioner-other.crt", 'before it issues anything for the second client');
+    $refused = system("$env /usr/local/sbin/openvpn-client-config --address bogus $client >/dev/null 2>&1");
+    isnt($refused, 0, 'and so is an address that is not one');
+
     my $listed = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-list-clients 2>&1`;
     like($listed, qr/^\Q$client\E\s+valid\s+\d{4}-\d\d-\d\d /m, 'openvpn-list-clients lists the new client as valid, with its expiry') or diag $listed;
     unlike($listed, qr/^server\s/m, 'and leaves out the certificate of the server');
@@ -216,8 +251,9 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
 
     # And take the client away again, in the copy.
     my $live_crl = slurp('/etc/openvpn/server/crl.pem');
-    my $revoked  = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-revoke-client $client 2>&1`;
+    my $revoked  = `$env /usr/local/sbin/openvpn-revoke-client $client 2>&1`;
     is($?, 0, 'openvpn-revoke-client revokes the client') or diag $revoked;
+    ok(!-e "$ccd/$client", 'and takes its address away, so that another client can have it');
 
     my $check = `openssl verify -crl_check -CRLfile '$copy/pki/crl.pem' -CAfile '$copy/pki/ca.crt' '$copy/client.crt' 2>&1`;
     like($check, qr/certificate revoked/, 'and the new revocation list names its certificate') or diag $check;

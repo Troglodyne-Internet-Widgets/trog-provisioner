@@ -418,6 +418,34 @@ subtest 'a MAC with no hex letters in it survives the trip to PyYAML' => sub {
     is( $yaml->( [qw{a b}] ), "- a\n- b", 'a list is dumped as it always was' );
 };
 
+subtest 'a bin that another guest routes to gets a route through that guest, once' => sub {
+    my %pool = (
+        ip_pool => {
+            cidr => '192.0.2.0/24',
+            bins => { vpnclients => { cidr => '10.8.0.128/25', addresses => '10.9.0.7', via => 'vpn.test.test' } },
+        },
+        ipmap => { 'vpn.test.test' => '192.0.2.20' },
+    );
+
+    my ( $dir, undef ) = generated( %pool, ips => [ '192.0.2.10', '192.0.2.11' ] );
+    my $subnets = loaded( $dir, 'network-config' )->{network}{config}[0]{subnets};
+    cmp_deeply(
+        $subnets->[0]{routes},
+        [
+            { network => '10.8.0.128', netmask => '255.255.255.128', gateway => '192.0.2.20' },
+            { network => '10.9.0.7',   netmask => '255.255.255.255', gateway => '192.0.2.20' },
+        ],
+        'each network of the bin goes through the address of its via'
+    ) or diag explain $subnets;
+    ok( !exists $subnets->[1]{routes}, 'under the first address only, because netplan refuses a route twice' );
+
+    ( $dir, undef ) = generated( %pool, domain => 'vpn.test.test' );
+    ok( !exists loaded( $dir, 'network-config' )->{network}{config}[0]{subnets}[0]{routes}, 'and the guest that it names routes to the bin itself' );
+
+    ( $dir, undef ) = generated( %pool, ipmap => {} );
+    ok( !exists loaded( $dir, 'network-config' )->{network}{config}[0]{subnets}[0]{routes}, 'as does a guest that cannot know where its via is' );
+};
+
 subtest 'a guest with no addresses falls back to DHCP on both interfaces' => sub {
     my ( $dir, undef ) = generated( ips => [], gateway => undef );
 

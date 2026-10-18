@@ -175,6 +175,23 @@ subtest 'bins: refused when they cannot be told apart' => sub {
     );
 };
 
+subtest 'bins_via and blocks: the bins that a guest routes to, as networks' => sub {
+    my $pool = {
+        cidr => '10.9.9.0/30',
+        bins => {
+            vpnclients => { cidr => '10.8.0.128/25', addresses => [qw{10.8.1.7 10.8.1.8}], via => 'vpn.test.test' },
+            other      => { cidr => '10.7.0.0/30',   via => 'elsewhere.test.test' },
+            plain      => { cidr => '10.6.0.0/30' },
+        },
+    };
+
+    my %via = Provisioner::IPPool::bins_via( $pool, 'vpn.test.test' );
+    is_deeply( [ keys %via ],                                                  ['vpnclients'],                              'only the bin that names the guest' );
+    is_deeply( [ Provisioner::IPPool::blocks( $via{vpnclients} ) ],            [qw{10.8.0.128/25 10.8.1.7/32 10.8.1.8/32}], 'its cidr as it is, and each address as a /32' );
+    is_deeply( { Provisioner::IPPool::bins_via( $pool, 'nobody.test.test' ) }, {},                                          'a guest that no bin names routes to none' );
+    is_deeply( { Provisioner::IPPool::bins_via( $pool, q{} ) },                {},                                          'and a bin without via is not one that the empty name routes to' );
+};
+
 subtest 'assign: each bin hands out only its own addresses' => sub {
     fresh_db();
     my $pool = { addresses => '10.9.9.10', bins => { vpnclients => { addresses => '10.8.0.130 10.8.0.131' } } };

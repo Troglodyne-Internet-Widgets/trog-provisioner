@@ -170,6 +170,39 @@ subtest 'the zone and the token of a domain come off the guest that its registra
     is( Trog::Bin::Destroy::release_authority( 'other.test.test', 0 ), 0, 'a domain that names no authority has nothing to remove' );
 };
 
+# --- revoke_vpn_client ---
+subtest 'a VPN client is revoked on the server that issued it, which frees its address there' => sub {
+    my $domain   = 'edge.test.test';
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? { openvpnclient => { issue_from => 'vpn.test.test' } } : {} } );
+
+    my ( @ran, $rc, @asked );
+    no warnings 'once';
+    local *VpnProbe::run_cmd = sub { my ( undef, $cmd ) = @_; push( @ran, $cmd ); return $rc };
+    use warnings;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => sub { push( @asked, $_[1] ); return bless {}, 'VpnProbe' } );
+
+    $rc = 0;
+    my ( $out, $revoked );
+    ($out) = capture { $revoked = Trog::Bin::Destroy::revoke_vpn_client( $domain, 0 ) };
+    is( $revoked, 1, 'it is revoked' );
+    is_deeply( \@asked, ['vpn.test.test'], 'on the server of its issue_from' );
+    is( $ran[0], "sudo -n sh -c '/usr/local/sbin/openvpn-revoke-client $domain'", 'as root, by the script that also takes away its address' );
+    like( $out, qr/\QRevoked the VPN certificate of $domain on vpn.test.test\E/, 'and says so' );
+
+    @ran = ();
+    capture { Trog::Bin::Destroy::revoke_vpn_client( $domain, 1 ) };
+    is( scalar @ran, 0, 'a dry run sends nothing' );
+
+    $fleet->redefine( guest_of => sub { return } );
+    my ( undef, $warned ) = capture { $revoked = Trog::Bin::Destroy::revoke_vpn_client( $domain, 0 ) };
+    is( $revoked, 0, 'a server that is not up revokes nothing' );
+    like( $warned, qr/\Qvpn.test.test is not up\E .* \Qopenvpn-revoke-client $domain\E/, 'and the warning says what to run there' );
+
+    is( Trog::Bin::Destroy::revoke_vpn_client( 'other.test.test', 0 ), 0, 'a domain with no issue_from has nothing to revoke' );
+};
+
 # --- remove_runner_key ---
 #
 # The counterpart of authorize_runner_key in bin/provision.  It reads the public
@@ -729,20 +762,22 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
     $fleet->redefine( find => sub { return undef } );    # every hypervisor answered no
 
-    my @asked;
+    my ( @asked, @order );
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_ => sub { 1 } )                        for qw{remove_authorized_key remove_runner_key};
+    $bin->redefine( $_ => sub { 1 } ) for qw{remove_authorized_key remove_runner_key};
     $bin->redefine( $_ => sub { push( @asked, $_[0] ); 1 } ) for qw{destroy_vm destroy_disks};
+    $bin->redefine( revoke_vpn_client => sub { push( @order, 'revoke' ); 1 } );
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( holdings => sub { { guests => '203.0.113.9' } } );
-    $pool->redefine( release  => sub { $released = $_[0]; 1 } );
+    $pool->redefine( release  => sub { $released = $_[0]; push( @order, 'release' ); 1 } );
 
     Trog::HV->forget();
     my ( $out, $rc ) = capture_stdout { Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };
 
     is( $rc, 0, 'the run finishes rather than stopping on the lookup' );
+    is_deeply( \@order, [qw{revoke release}], 'a VPN client is revoked on its server before its address goes back, so no other client gets it while it still has it' );
 
     # Nothing hosts it, so there is no VM and no disk to ask about -- and the
     # machine this falls back to is not a hypervisor on a fleet that keeps them

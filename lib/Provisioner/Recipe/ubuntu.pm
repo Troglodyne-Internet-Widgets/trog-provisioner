@@ -16,6 +16,8 @@ my $RSA_BITS = 3072;
 use File::Slurper();
 use HTTP::Tiny();
 use List::Util qw{any uniq};
+use Net::IP();
+use Provisioner::IPPool();
 use Provisioner::Packager();
 use Provisioner::Utils();
 use Text::Xslate();
@@ -321,6 +323,11 @@ That key is how this machine gets back in to run the makefile again.  It goes
 on the account that can sudo, not on root.  The makefile limits the root login
 to keys.
 
+C<bin_routes> are the routes to each bin of C<ip_pool> that names another guest
+in C<via>, through the address of that guest in C<ipmap>.  A bin that names this
+guest, or a guest with no address, gets none.  See
+L<Provisioner::IPPool/BINS>.
+
 C<packages> are the packages that cloud-init installs before the makefile runs,
 plus what the makefile needs.  atd starts the makefile, make runs it, and bash
 is the shell for recipe lines.  Something must also accept mail, so it adds
@@ -373,6 +380,20 @@ sub enrich {
 
     die "MUST SET gateway in provision.conf when ips are set\n"
       if @{ $opts{ips} } && !$opts{gateway};
+
+    # Each bin that another guest routes to, through the address of that guest.
+    my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
+    $opts{bin_routes} = [];
+    foreach my $name ( sort keys %bins ) {
+        my $via = $bins{$name}{via};
+        next if !defined $via || $via eq ( $opts{domain} // q{} );
+        my $gateway = ( $opts{ipmap} // {} )->{$via} or next;
+
+        foreach my $block ( Provisioner::IPPool::blocks( $bins{$name} ) ) {
+            my $net = Net::IP->new($block) or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
+            push( @{ $opts{bin_routes} }, { network => $net->ip, netmask => $net->mask, gateway => $gateway } );
+        }
+    }
 
     die "MUST SET contact_email in provision.conf for $opts{domain}\n"
       unless $opts{contact_email};

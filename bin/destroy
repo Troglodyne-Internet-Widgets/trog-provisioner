@@ -233,6 +233,10 @@ sub main {
         # 3a. Remove its zone and its token on the guest that holds them
         release_authority( $domain, $dryrun );
 
+        # 3b. Revoke its certificate on the VPN server that issued it, which
+        # frees its static address there before release_ip frees it here
+        revoke_vpn_client( $domain, $dryrun );
+
         # 4. Optionally purge the domain directory, and the data directory
         if ($purge) {
             purge_domain_dir( $domain, $dryrun );
@@ -453,9 +457,9 @@ registrar names as its C<authority>.  See L<Provisioner::Recipe::registrar>.
 Does nothing for a domain that names none.  Returns 1 when it removed them.
 
 This is the counterpart of C<issue_secret> in F<bin/provision>.  It warns and
-returns 0 when that guest is not up, or did not answer.  The guest of the domain
-is gone either way, so the zone and the token answer for nothing, and
-C<bin/provision> replaces both when the domain is built again.
+returns 0 when that guest is not up, or did not answer, as C<as_root_on> does.
+The zone and the token then answer for nothing, and C<bin/provision> replaces
+both when the domain is built again.
 
 =cut
 
@@ -466,26 +470,83 @@ sub release_authority {
     my $authority = eval { $registrar->delegated_to($domain) };
     return 0 unless defined $authority;
 
-    my $command = Provisioner::Cookbook->load('pdns')->release_command( $authority, lc $domain );
-    if ($dryrun) {
-        print "Would remove the zone and the token of $domain on $authority\n";
+    return as_root_on(
+        $authority,
+        Provisioner::Cookbook->load('pdns')->release_command( $authority, lc $domain ),
+        dryrun => $dryrun,
+        doing  => "remove the zone and the token of $domain",
+        done   => "Removed the zone and the token of $domain",
+        stays  => "the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again",
+    );
+}
+
+=head2 revoke_vpn_client($domain, $dryrun)
+
+Revokes the certificate of C<$domain> on the openvpn server that issued it,
+which also frees the static address that the server gave it.  That server is
+the C<issue_from> of the C<openvpnclient> of C<$domain>.  See
+L<Provisioner::Recipe::openvpnclient>.  Does nothing for a domain that names
+none.  Returns 1 when it revoked it.
+
+C<release_ip> gives the address back to the pool afterwards, so another client
+can get it.  If the server is not up, this warns and returns 0.  Revoke the
+client there by hand before another one gets the address, because two clients
+with one address cut each other off.
+
+=cut
+
+sub revoke_vpn_client {
+    my ( $domain, $dryrun ) = @_;
+
+    my $client = Provisioner::Cookbook->load('openvpnclient');
+    my $issuer = $client->issuer_of($domain);
+    return 0 unless defined $issuer;
+
+    return as_root_on(
+        $issuer,
+        $client->revoke_command($domain),
+        dryrun => $dryrun,
+        doing  => "revoke the VPN certificate of $domain",
+        done   => "Revoked the VPN certificate of $domain",
+        stays  => "the certificate and the address of $domain stay on it.  Run openvpn-revoke-client $domain there before another client gets the address",
+    );
+}
+
+=head2 as_root_on($guest, $command, %how)
+
+Runs the shell command C<$command> as root on the guest C<$guest>, for a
+teardown step that changes another guest.  C<%how> says what to report:
+C<doing> and C<done> describe the step, and C<stays> what is left on C<$guest>
+when it is not up.  With C<dryrun>, it only says what it would do.
+
+Returns 1 when the command succeeded.  Warns and returns 0 when C<$guest> is not
+up or the command failed, because the guest of the domain is gone either way and
+the rest of the teardown must go on.
+
+=cut
+
+sub as_root_on {
+    my ( $name, $command, %how ) = @_;
+
+    if ( $how{dryrun} ) {
+        print "Would $how{doing} on $name\n";
         return 0;
     }
 
-    my $guest = eval { Trog::Hypervisors->guest_of($authority) };
+    my $guest = eval { Trog::Hypervisors->guest_of($name) };
     unless ($guest) {
-        warn "$authority is not up, so the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again.\n";
+        warn "$name is not up, so $how{stays}.\n";
         return 0;
     }
 
     ( my $quoted = $command ) =~ s/'/'\\''/g;
     my $rc = eval { $guest->run_cmd("sudo -n sh -c '$quoted'") } // $@;
     if ($rc) {
-        warn "Could not remove the zone and the token of $domain on $authority: $rc\n";
+        warn "Could not $how{doing} on $name: $rc\n";
         return 0;
     }
 
-    print "Removed the zone and the token of $domain on $authority\n";
+    print "$how{done} on $name\n";
     return 1;
 }
 

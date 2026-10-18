@@ -64,6 +64,10 @@
 	# The firewall profile for this port and protocol.  ufw does not get them,
 	# so this recipe renders it.
 	install -m 0644 -o root -g root openvpn_ufw.conf /etc/ufw/applications.d/openvpn-server
+	# The static address of each client.  The data target put back the ones
+	# of the last guest.
+	mkdir -p /etc/openvpn/server/ccd
+	chmod 0700 /etc/openvpn/server/ccd
 	cp server.conf /etc/openvpn/server/server.conf
 	chown root:root /etc/openvpn/server/server.conf
 	chmod 0640 /etc/openvpn/server/server.conf
@@ -85,7 +89,11 @@
 	# `ufw reset`.  That reset puts back the packaged before.rules and removes
 	# these rules.  The ufw target queues its `systemctl restart ufw` after this
 	# task, so ufw reads the file with the rules in it.
-	[% script_dir %]/queue_postrun_task [% script_dir %]/setup-masquerade '[% subnet %]/[% cidr %][% IF interface %]=[% interface %][% END %]'
+	#
+	# A static address keeps its own address towards the routes, so that a
+	# guest sees which client it is.  Provisioner::Recipe::openvpn has the
+	# whole account.
+	[% script_dir %]/queue_postrun_task [% script_dir %]/setup-masquerade[% FOR b IN static_blocks %] --keep '[% b %]'[% END %][% IF static_blocks %][% FOR r IN routes %] --to '[% r %]'[% END %][% END %] '[% subnet %]/[% cidr %][% IF interface %]=[% interface %][% END %]'
 	# Enable and start the service
 	systemctl daemon-reload
 	systemctl enable openvpn-server@server
