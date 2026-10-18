@@ -119,17 +119,17 @@ subtest 'release: gives it back, and only for a guest' => sub {
     my $pool = { addresses => '10.9.9.10 10.9.9.11' };
 
     my $had = Provisioner::IPPool::assign( 'a.test', $pool );
-    is( Provisioner::IPPool::release('a.test'),         $had,  'says what it released' );
+    is_deeply( Provisioner::IPPool::release('a.test'), { guests => $had }, 'says what it released' );
     is( Provisioner::IPPool::held_by('a.test'),         undef, 'which it no longer holds' );
     is( Provisioner::IPPool::assign( 'b.test', $pool ), $had,  'and the address is available again' );
 
-    is( Provisioner::IPPool::release('never.test'), undef, 'releasing what was never held is not an error' );
+    is_deeply( Provisioner::IPPool::release('never.test'), {}, 'releasing what was never held is not an error' );
 
     # A reservation is not a guest, and bin/destroy must not be able to hand the
     # gateway out by being pointed at it.
     Provisioner::IPPool::reserve( '10.9.9.11', 'gateway:10.9.9.11' );
-    is( Provisioner::IPPool::release('gateway:10.9.9.11'), undef,               'and a reservation is not released' );
-    is( Provisioner::IPPool::taken()->{'10.9.9.11'},       'gateway:10.9.9.11', 'it is still spoken for' );
+    is_deeply( Provisioner::IPPool::release('gateway:10.9.9.11'), {}, 'and a reservation is not released' );
+    is( Provisioner::IPPool::taken()->{'10.9.9.11'}, 'gateway:10.9.9.11', 'it is still spoken for' );
 };
 
 subtest 'assignments: guests only, which is what the zone renders' => sub {
@@ -145,6 +145,68 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
         { '10.9.9.10' => 'a.test', '10.9.9.11' => 'hv:somewhere' },
         'though it is certainly taken'
     );
+};
+
+# --- Bins ----------------------------------------------------------------------
+#
+# A bin is a named part of the pool that hands out only its own addresses, so
+# that the VPN clients cannot take the last address a guest needs, or the other
+# way about.
+
+subtest 'bins: the top of the pool is the bin of the guests' => sub {
+    my %bins = Provisioner::IPPool::bins( { addresses => '10.9.9.10', bins => { vpnclients => { cidr => '10.8.0.128/30' } } } );
+    is_deeply( [ sort keys %bins ],                                    [qw{guests vpnclients}],     'both bins' );
+    is_deeply( [ Provisioner::IPPool::pool_ips( $bins{guests} ) ],     ['10.9.9.10'],               'the guests have the addresses at the top' );
+    is_deeply( [ Provisioner::IPPool::pool_ips( $bins{vpnclients} ) ], [qw{10.8.0.129 10.8.0.130}], 'and the clients have their own block' );
+
+    is_deeply( { Provisioner::IPPool::bins( {} ) }, {}, 'an empty pool has no bins' );
+};
+
+subtest 'bins: refused when they cannot be told apart' => sub {
+    like(
+        exception { Provisioner::IPPool::bins( { addresses => '10.9.9.10', bins => { guests => { addresses => '10.9.9.11' } } } ) },
+        qr/top[ ]of[ ]ip_pool .* bin[ ]named[ ]guests/,
+        'addresses at the top and a guests bin are two answers to one question'
+    );
+    like(
+        exception { Provisioner::IPPool::bins( { cidr => '10.9.9.0/30', bins => { vpnclients => { addresses => '10.9.9.2' } } } ) },
+        qr/10[.]9[.]9[.]2 .* guests .* vpnclients/,
+        'and an address in two bins names both of them'
+    );
+};
+
+subtest 'assign: each bin hands out only its own addresses' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10', bins => { vpnclients => { addresses => '10.8.0.130 10.8.0.131' } } };
+
+    is( Provisioner::IPPool::assign( 'a.test', $pool ),               '10.9.9.10',  'a guest gets a guest address' );
+    is( Provisioner::IPPool::assign( 'a.test', $pool, 'vpnclients' ), '10.8.0.130', 'and the same domain gets a client address beside it' );
+    is( Provisioner::IPPool::assign( 'a.test', $pool, 'vpnclients' ), '10.8.0.130', 'which it keeps' );
+    is( Provisioner::IPPool::held_by( 'a.test', 'vpnclients' ),       '10.8.0.130', 'and which held_by reports for that bin' );
+    is( Provisioner::IPPool::held_by('a.test'),                       '10.9.9.10',  'while the guests bin is the default' );
+    like( exception { Provisioner::IPPool::assign( 'b.test', $pool ) }, qr/pool[ ]exhausted/, 'a full guests bin does not borrow from the clients' );
+    is( Provisioner::IPPool::assign( 'b.test', $pool, 'vpnclients' ), '10.8.0.131', 'and the clients bin still has room' );
+    like( exception { Provisioner::IPPool::assign( 'c.test', $pool, 'nosuch' ) }, qr/nosuch/, 'and a bin nobody configured is named in the refusal' );
+
+    is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '10.9.9.10' }, 'only the guests get a record in the zone' );
+
+    is_deeply( Provisioner::IPPool::release('a.test'), { guests => '10.9.9.10', vpnclients => '10.8.0.130' }, 'release gives back the address in each bin' );
+    is( Provisioner::IPPool::held_by( 'a.test', 'vpnclients' ), undef, 'and a destroyed domain keeps no client address either' );
+};
+
+subtest 'a database from before bins keeps every row, in the guests bin' => sub {
+    fresh_db();
+
+    # The table as it was, with no bin column and one name to one address.
+    my $old = Trog::SQLite::dbh( undef, Provisioner::IPPool::db_path() );
+    $old->do(q{CREATE TABLE ips (ip TEXT PRIMARY KEY NOT NULL, domain TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'domain', noted TEXT NOT NULL DEFAULT (datetime('now')))});
+    $old->do(q{INSERT INTO ips (ip, domain, kind) VALUES ('10.9.9.10', 'a.test', 'domain'), ('10.9.9.11', 'hv:somewhere', 'reserved')});
+    Trog::SQLite::forget();
+
+    my $pool = { addresses => '10.9.9.10 10.9.9.11 10.9.9.12', bins => { vpnclients => { addresses => '10.8.0.130' } } };
+    is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '10.9.9.10' }, 'the guest is still there' );
+    is( Provisioner::IPPool::taken()->{'10.9.9.11'},                  'hv:somewhere', 'and so is the reservation' );
+    is( Provisioner::IPPool::assign( 'a.test', $pool, 'vpnclients' ), '10.8.0.130',   'and the domain can hold a second address now' );
 };
 
 {
@@ -235,6 +297,23 @@ SAID
 
     is( $recorded, scalar keys %$taken, 'and it counts each row it wrote' );
     is_deeply( Provisioner::IPPool::dbh()->selectall_arrayref('SELECT source FROM seeded'), [ ['hv:hv1'] ], 'the hypervisor is marked as seeded' );
+};
+
+subtest 'seed: only the guests bin is on the wire of the hypervisor' => sub {
+    fresh_db();
+
+    # The clients of a VPN are behind the tunnel, so a sweep from the bridge
+    # says nothing about them, and a guest cannot hold one of their addresses.
+    seed_from(
+        { cidr => '192.0.2.32/30', bins => { vpnclients => { addresses => '10.8.0.130' } } },
+        undef,
+        bridge => 'br0',
+        names  => ['guest.test'],
+        guests => "guest.test\t10.8.0.130\n",
+        sweep  => "LIVE 192.0.2.34\nLIVE 10.8.0.130\n",
+    );
+
+    is_deeply( Provisioner::IPPool::taken(), { '192.0.2.34' => 'insitu:unknown' }, 'nothing in the clients bin is recorded or reserved' );
 };
 
 subtest 'seed: a hypervisor with no bridge is not swept' => sub {

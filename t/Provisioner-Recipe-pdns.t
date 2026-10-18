@@ -176,6 +176,9 @@ subtest 'the API proxy' => sub {
     my %pooled = $fresh->()->validate( %held, ip_pool => { cidr => '192.0.2.64/26', addresses => '192.0.2.200 192.0.2.10' }, ipmap => { $DOMAIN => '192.0.2.10' } );
     is_deeply( $pooled{api_allowed}, [qw{127.0.0.1 ::1 192.0.2.64/26 192.0.2.200 192.0.2.10}], 'and the whole pool, so that a guest built after this one gets in' );
 
+    my %binned = $fresh->()->validate( %held, ip_pool => { cidr => '192.0.2.64/26', bins => { vpnclients => { cidr => '10.8.0.128/25' } } }, ipmap => { $DOMAIN => '192.0.2.10' } );
+    is_deeply( $binned{api_allowed}, [qw{127.0.0.1 ::1 192.0.2.64/26 192.0.2.10}], 'but only the bin of the guests, because a VPN client publishes no records' );
+
     my $vhost = $fresh->()->render_file( 'files/pdns.acl.nginx.tt', %held, ipmap => { $DOMAIN => '192.0.2.10' } );
     my @rules = $vhost =~ m/^\s*((?:allow|deny)\s+\S+);$/mg;
     is_deeply( \@rules, [ 'allow 127.0.0.1', 'allow ::1', 'allow 192.0.2.10', 'deny all' ], 'the vhost allows those and denies the rest' );

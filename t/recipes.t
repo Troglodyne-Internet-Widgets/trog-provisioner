@@ -630,6 +630,15 @@ subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' =
     my $told = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => { cidr => '192.0.2.0/24' }, routes => [ '192.0.2.5/32', '172.16.9.9/12' ] );
     is_deeply( $routes->($told), [ '192.0.2.5 255.255.255.255', '172.16.0.0 255.240.0.0' ], 'routes that the domain names replace the pool, with the host bits cleared' );
 
+    my $bins = $vpn->()->render_file(
+        'files/openvpn.server.conf.tt', %G,
+        ip_pool => { cidr => '192.0.2.0/24', bins => { infra => { addresses => '198.51.100.9' }, vpnclients => { cidr => '10.8.0.128/25' } } }
+    );
+    is_deeply(
+        $routes->($bins), [ '192.0.2.0 255.255.255.128', '192.0.2.128 255.255.255.128', '198.51.100.9 255.255.255.255' ],
+        'every bin is routed, except the one inside the subnet of the server, which holds its clients'
+    );
+
     my $none = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => {} );
     is_deeply( $routes->($none), [], 'and with no pool and no routes, the server pushes none' );
 

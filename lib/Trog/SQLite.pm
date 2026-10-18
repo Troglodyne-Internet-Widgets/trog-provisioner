@@ -56,14 +56,7 @@ sub dbh {
     # No touch first, because DBD::SQLite creates the file on connect.
     my $db = DBI->connect( "dbi:SQLite:dbname=$dbname", q{}, q{}, { RaiseError => 1, PrintError => 0 } );
 
-    if ($schema) {
-
-        # No test first, because read_text dies with the path and the errno.
-        my $qq = File::Slurper::read_text($schema);
-        $db->{sqlite_allow_multiple_statements} = 1;
-        $db->do($qq) or die "Could not ensure database consistency: " . $db->errstr;
-        $db->{sqlite_allow_multiple_statements} = 0;
-    }
+    apply( $db, $schema ) if $schema;
 
     $dbh->{$dbname} = $db;
 
@@ -73,6 +66,28 @@ sub dbh {
     $db->do("PRAGMA busy_timeout = 5000")  or die "Could not set busy_timeout";
 
     return $db;
+}
+
+=head2 apply($db, $schema)
+
+Runs the DDL in the file C<$schema> on the handle C<$db>, and returns 1.  C<dbh>
+calls this for a new handle.  Call it yourself after a migration that renamed a
+table away, so that the schema makes the table again.
+
+Dies if the file cannot be read, or if a statement in it fails.
+
+=cut
+
+sub apply {
+    my ( $db, $schema ) = @_;
+
+    # No test first, because read_text dies with the path and the errno.
+    my $qq = File::Slurper::read_text($schema);
+    $db->{sqlite_allow_multiple_statements} = 1;
+    $db->do($qq) or die "Could not ensure database consistency: " . $db->errstr;
+    $db->{sqlite_allow_multiple_statements} = 0;
+
+    return 1;
 }
 
 =head2 forget()

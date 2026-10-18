@@ -458,10 +458,20 @@ sub global_args {
             ipmap   => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
             ip_pool => {
                 type        => 'object',
-                description => 'The addresses this installation hands out, and the networks they are on.',
+                description => 'The addresses this installation hands out, and the networks they are on.  The addresses and cidr at the top are the bin named guests.  See Provisioner::IPPool.',
                 properties  => {
                     addresses => { type => [qw{array string}], items => { type => 'string' } },
                     cidr      => { type => [qw{array string}], items => { type => 'string' } },
+                    bins      => {
+                        type                 => 'object',
+                        additionalProperties => {
+                            type       => 'object',
+                            properties => {
+                                addresses => { type => [qw{array string}], items => { type => 'string' } },
+                                cidr      => { type => [qw{array string}], items => { type => 'string' } },
+                            },
+                        },
+                    },
                 },
             },
             nameservers => { type => 'object', additionalProperties => { type => 'string' },                               description => 'The public nameservers for the zones this fleet serves.' },

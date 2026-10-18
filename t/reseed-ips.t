@@ -117,13 +117,14 @@ subtest 'prune releases only what no hypervisor is running' => sub {
     my $fleet = with_fleet( hv1 => ['running.test'], hv2 => ['cloudy.test'] );
 
     my ( $err, $released ) = released_by_prune(
-        '10.0.0.1' => 'running.test',
-        '10.0.0.2' => 'cloudy.test',
-        '10.0.0.3' => 'gone.test',
-        '10.0.0.4' => 'gateway:10.0.0.4',
+        '10.0.0.1'   => 'running.test',
+        '10.0.0.2'   => 'cloudy.test',
+        '10.0.0.3'   => 'gone.test',
+        '10.0.0.4'   => 'gateway:10.0.0.4',
+        '10.8.0.130' => 'gone.test',
     );
     is( $err, undef, 'it runs' );
-    is_deeply( $released, ['gone.test'], 'a guest on either hypervisor keeps its address, a gateway is never released, and the rest go' );
+    is_deeply( $released, ['gone.test'], 'a guest on either hypervisor keeps its address, a gateway is never released, and the rest go, once each however many bins they hold' );
 };
 
 subtest 'prune refuses when there is no fleet to ask' => sub {

@@ -35,7 +35,9 @@ In the `_global` of `_base` in `recipes.yaml`:
 
 - `ip_pool` lists the static addresses that guests can get.  They must be on
   the subnet of the primary bridge.  Keep them out of any range that a DHCP
-  server on that network hands out.
+  server on that network hands out.  Its `bins` name other parts of the pool,
+  such as the addresses of VPN clients.  Each bin hands out only its own
+  addresses: see `BINS` in `perldoc Provisioner::IPPool`.
 - `gateway` is the gateway of that subnet.
 - `transfer_ip` is the address of this machine that a guest fetches its payload
   from.  Set it only when this machine has more than one route to the guest, or

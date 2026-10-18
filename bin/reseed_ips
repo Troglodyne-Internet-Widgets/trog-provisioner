@@ -16,6 +16,8 @@ use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
+use List::Util qw{uniq};
+
 use Trog::Config();
 use Provisioner::IPPool();
 
@@ -127,8 +129,8 @@ sub main {
 
 Releases the address of each domain in C<$before> that no hypervisor runs.
 C<$before> is the hashref that C<Provisioner::IPPool::taken> returns.  It skips
-the C<hv:>, C<gateway:> and C<insitu:> reservations.  Returns how many it
-released.
+the C<hv:>, C<gateway:> and C<insitu:> reservations.  A domain loses its
+address in every bin.  Returns how many domains it released.
 
 Dies when no hypervisors are configured, because then nothing can say which
 guests run, and every assignment would go.
@@ -149,7 +151,9 @@ sub prune_absent {
     }
 
     my $gone = 0;
-    foreach my $domain ( sort values %$before ) {
+
+    # A domain with an address in two bins is one domain.
+    foreach my $domain ( uniq sort values %$before ) {
         next if $domain =~ m/\A(?:hv|gateway|insitu):/;
         next if $running{$domain};
 
