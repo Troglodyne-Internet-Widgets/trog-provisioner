@@ -644,6 +644,7 @@ subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' =
 
     like( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0/33'] ) }, qr/not[ ]an[ ]IPv4[ ]CIDR[ ]block/, 'a prefix longer than 32 is refused' );
     ok( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0'] ) }, 'and so is an address without a prefix' );
+    like( exception { $vpn->()->render( %G, netmask => '255.0.255.0' ) }, qr/not[ ]a[ ]run[ ]of[ ]ones/, 'and so is a netmask with a hole in it, which has no prefix length' );
 };
 
 subtest 'openvpn gives the clients of a bin that names it their own addresses, and hands out only the rest' => sub {

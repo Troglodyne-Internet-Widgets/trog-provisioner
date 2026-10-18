@@ -168,11 +168,18 @@ subtest 'bins: refused when they cannot be told apart' => sub {
         qr/top[ ]of[ ]ip_pool .* bin[ ]named[ ]guests/,
         'addresses at the top and a guests bin are two answers to one question'
     );
-    like(
+    is(
         exception { Provisioner::IPPool::bins( { cidr => '10.9.9.0/30', bins => { vpnclients => { addresses => '10.9.9.2' } } } ) },
-        qr/10[.]9[.]9[.]2 .* guests .* vpnclients/,
-        'and an address in two bins names both of them'
+        "ip_pool has 10.9.9.2/32 in the bin vpnclients and 10.9.9.0/30 in the bin guests, which overlap, and an address can belong to one bin only\n",
+        'and an address in two bins names both blocks and both bins'
     );
+    like(
+        exception { Provisioner::IPPool::bins( { cidr => '10.9.0.0/16', bins => { vpnclients => { cidr => '10.9.200.0/24' } } } ) },
+        qr/which[ ]overlap/,
+        'and so is a block inside the block of another bin, without a look at each address'
+    );
+    is( exception { Provisioner::IPPool::bins( { cidr => '10.9.9.0/30', bins => { vpnclients => { cidr => '10.9.9.4/30' } } } ) }, undef, 'two blocks side by side do not overlap' );
+    like( exception { Provisioner::IPPool::bins( { bins => { vpnclients => { addresses => 'bogus' } } } ) }, qr/Invalid[ ]CIDR[ ]'bogus\/32'[ ]in[ ]the[ ]bin[ ]vpnclients/, 'and an address that is not one is refused, with the bin that holds it' );
 };
 
 subtest 'bins_via and blocks: the bins that a guest routes to, as networks' => sub {
@@ -444,6 +451,12 @@ subtest 'pool_ips leaves the network and broadcast addresses alone' => sub {
     # meant it.
     is_deeply [ Provisioner::IPPool::pool_ips( { addresses => '192.0.2.0 192.0.2.5' } ) ],
       [ '192.0.2.0', '192.0.2.5' ], 'addresses given by hand are not second-guessed';
+
+    like( exception { Provisioner::IPPool::pool_ips( { cidr => '2001:db8::/126' } ) }, qr/not[ ]IPv4/, 'an IPv6 block is refused rather than counted as integers' );
+
+    my @wide = Provisioner::IPPool::pool_ips( { cidr => '10.16.0.0/20' } );
+    is_deeply [ @wide[ 0, 1, -1 ] ], [qw{10.16.0.1 10.16.0.2 10.16.15.254}], 'a block wider than a /24 carries across the octets';
+    is( scalar @wide, 4094, 'and holds each of its hosts once' );
 };
 
 done_testing;

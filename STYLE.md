@@ -28,6 +28,29 @@ If you must convert from chars to octets or vice versa, use the facilities in th
 - `use feature 'state'` when you need to memoize variables for performance.
 - Otherwise avoid features.
 
+## IP addresses and CIDR blocks
+
+Two modules do this work here, and each one has its own job.
+
+Use `Net::IP` for one block at a time.  `Net::IP->new` refuses a block that
+is not valid, and `Net::IP::Error` says why.  The object gives `ip`, `mask`,
+`prefix`, `last_ip` and `reverse_ip`.  `overlaps` tells a block inside
+another apart from a partial overlap, which `Net::CIDR` cannot do.
+
+Use `Net::CIDR` for lists of blocks.  `cidradd` merges blocks, `range2cidr`
+and `cidr2range` convert between ranges and blocks, and `cidrlookup` finds an
+address in a list.  `addrandmask2cidr` turns an address and a netmask into a
+block, and it refuses a netmask that is not a run of ones and then zeros.
+
+Do not step through the addresses of a block with `++` on a `Net::IP` object.
+It takes about a millisecond for each address, so a /16 takes most of a
+minute.  Get the first and the last address, and count integers between them.
+
+Use `Socket` for the address of a socket, and `inet_pton` with `inet_ntop` for
+one spelling of an address.  A test under `templates/tests/` runs under the
+perl of the guest, and nothing installs either module there.  So it does its own
+arithmetic.
+
 ## Naming Conventions
 - Package names: `Provisioner::Recipe::recipename` (lowercase recipe names)
 - Subroutines: lowercase, snake\_case (e.g., `remote_files`, `template_files`)

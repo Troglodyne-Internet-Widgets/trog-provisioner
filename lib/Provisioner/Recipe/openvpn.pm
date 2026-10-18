@@ -8,9 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use List::Util qw{all};
 use Net::CIDR();
-use Socket qw{inet_aton inet_ntoa};
+use Net::IP qw{$IP_A_IN_B_OVERLAP $IP_IDENTICAL $IP_NO_OVERLAP};
+use Socket  qw{inet_aton inet_ntoa};
 
 use Provisioner::IPPool();
 
@@ -353,19 +353,16 @@ my sub network ($block) {
     return ( inet_ntoa( pack( 'N', unpack( 'N', $packed ) & mask($prefix) ) ), $prefix );
 }
 
-# The first and the last address of a CIDR block.
-my sub ends ($block) {
-    return split /-/, ( Net::CIDR::cidr2range($block) )[0];
-}
-
-# The same, as integers.
+# The first and the last address of a CIDR block, as integers.
 my sub range ($block) {
-    return map { unpack( 'N', inet_aton($_) ) } ends($block);
+    return map { unpack( 'N', inet_aton($_) ) } split /-/, ( Net::CIDR::cidr2range($block) )[0];
 }
 
 # Whether every address of the CIDR block $block is in the CIDR block $net.
 my sub within ( $block, $net ) {
-    return all { Net::CIDR::cidrlookup( $_, $net ) } ends($block);
+    my ( $inner, $outer ) = map { Net::IP->new($_) // die "'$_' is not an IPv4 CIDR block: " . Net::IP::Error() . "\n" } $block, $net;
+    my $overlap = $inner->overlaps($outer) // $IP_NO_OVERLAP;
+    return $overlap == $IP_A_IN_B_OVERLAP || $overlap == $IP_IDENTICAL;
 }
 
 =head2 $range = dynamic_pool($subnet, $cidr, @blocks)
@@ -415,7 +412,7 @@ sub dynamic_pool ( $subnet, $cidr, @blocks ) {
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
-VPN subnet.
+VPN subnet.  Dies if C<netmask> is not a netmask.
 
 Fills in C<routes> from every bin of C<ip_pool>: the two halves of each C<cidr>
 block, then a C</32> for each of its C<addresses>, each route once.  A C</32>
@@ -452,8 +449,8 @@ sub required_recipes {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # The schema makes netmask an IPv4 address, so inet_aton resolves no name.
-    $opts{cidr} = unpack( '%32b*', inet_aton( $opts{netmask} ) );
+    my $vpn = eval { Net::CIDR::addrandmask2cidr( $opts{subnet}, $opts{netmask} ) } // die "The netmask $opts{netmask} of the VPN subnet is not a run of ones and then zeros\n";
+    ( undef, $opts{cidr} ) = split m{/}, $vpn;
 
     unless ( $opts{routes} ) {
         my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
@@ -473,7 +470,6 @@ sub enrich {
 
         # A bin inside the VPN subnet holds the clients themselves, which the
         # tunnel already reaches.
-        my $vpn = join( '/', network("$opts{subnet}/$opts{cidr}") );
         my %seen;
         $opts{routes} = [ grep { !$seen{$_}++ && !within( $_, $vpn ) } @routes ];
     }

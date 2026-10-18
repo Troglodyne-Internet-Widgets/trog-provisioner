@@ -11,6 +11,7 @@ use re '/aasx';
 use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
+use Net::CIDR();
 use Socket();
 use Time::HiRes qw{sleep time};
 use Provisioner::Vars();
@@ -540,16 +541,13 @@ sub guest_network_of {
     my ( $self, $address ) = @_;
 
     # inet_pton rather than inet_aton, which would resolve a name.
-    my $wanted = Socket::inet_pton( Socket::AF_INET(), $address // q{} ) or return;
+    Socket::inet_pton( Socket::AF_INET(), $address // q{} ) or return;
 
     foreach my $issued ( map { @{ $_->{ip_addresses}{ipv4} // [] } } $self->servers ) {
-        my $ip   = Socket::inet_pton( Socket::AF_INET(), $issued->{ip}      // q{} ) or next;
-        my $mask = Socket::inet_pton( Socket::AF_INET(), $issued->{netmask} // q{} ) or next;
+        my $network = eval { Net::CIDR::addrandmask2cidr( $issued->{ip}, $issued->{netmask} ) } or next;
+        next if $network =~ m{/0\z};
 
-        my $prefix = unpack( '%32B*', $mask );
-        next unless $prefix && ( $ip &. $mask ) eq ( $wanted &. $mask );
-
-        return Socket::inet_ntoa( $ip &. $mask ) . "/$prefix";
+        return $network if Net::CIDR::cidrlookup( $address, $network );
     }
 
     return;

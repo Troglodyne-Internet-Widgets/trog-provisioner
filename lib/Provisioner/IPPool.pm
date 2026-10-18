@@ -102,7 +102,7 @@ Either may be written as a YAML list or as one string with whitespace between
 the items.
 
 Returns each address in the pool once, in order.  Dies if a CIDR block is not
-valid.
+valid, or is not IPv4.
 
 =cut
 
@@ -117,11 +117,13 @@ sub pool_ips {
     foreach my $cidr ( pool_items( $pool->{cidr} ) ) {
         my $net = Net::IP->new($cidr)
           or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
+        die "The CIDR block '$cidr' is not IPv4, and the pool holds IPv4 addresses only\n"
+          unless $net->version == 4;
 
-        my @block;
-        do {
-            push @block, $net->ip();
-        } while ( ++$net );
+        # Integers rather than ++ on the Net::IP object, which costs about a
+        # millisecond for each address.
+        my ( $first, $last ) = map { unpack( 'N', Socket::inet_aton($_) ) } $net->ip, $net->last_ip;
+        my @block = map { Socket::inet_ntoa( pack( 'N', $_ ) ) } $first .. $last;
 
         # The first address of an IPv4 block is the network and the last is
         # the broadcast.  A guest on either one cannot talk to anything.
@@ -293,8 +295,8 @@ sub pool_items {
 Returns each bin of C<$pool> by name, as a block that C<pool_ips> takes.  The
 C<addresses> and C<cidr> at the top of C<$pool> are the bin named C<guests>.
 
-Dies if C<$pool> has addresses at its top and also a bin named C<guests>, or if
-an address is in two bins.
+Dies if C<$pool> has addresses at its top and also a bin named C<guests>, if a
+block of a bin is not valid, or if blocks of two bins overlap.
 
 =cut
 
@@ -309,12 +311,17 @@ sub bins {
         $bins{$GUESTS} = \%top;
     }
 
-    my %bin_of;
+    my @seen;
     foreach my $name ( sort keys %bins ) {
-        foreach my $ip ( pool_ips( $bins{$name} ) ) {
-            die "ip_pool has $ip in the bins $bin_of{$ip} and $name, and an address can belong to one bin only\n"
-              if $bin_of{$ip} && $bin_of{$ip} ne $name;
-            $bin_of{$ip} = $name;
+        foreach my $block ( blocks( $bins{$name} ) ) {
+            my $net = Net::IP->new($block)
+              or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
+            foreach my $other ( grep { $_->{bin} ne $name } @seen ) {
+                my $overlap = $net->overlaps( $other->{net} ) // $IP_NO_OVERLAP;
+                die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
+                  if $overlap != $IP_NO_OVERLAP;
+            }
+            push @seen, { bin => $name, block => $block, net => $net };
         }
     }
 
