@@ -62,7 +62,8 @@ subtest 'a script stands for the tests that name it, and the one that packs it' 
 };
 
 subtest 'a file that the code reads at run time stands for what reads it' => sub {
-    is_deeply( [ $map->('schema/ips.sql') ], ['lib/Provisioner/IPPool.pm'], 'the schema of ips.db, for the pool' );
+    is_deeply( [ $map->('schema/ips.sql') ],           ['lib/Provisioner/IPPool.pm'], 'the schema of ips.db, for the pool' );
+    is_deeply( [ $map->('schema/ips.v1.update.sql') ], ['lib/Provisioner/IPPool.pm'], 'and so is each update of it' );
 
     my @virtiofs = $map->('virtiofs-better');
     ok( ( grep { $_ eq 'lib/Trog/HV/Libvirt.pm' } @virtiofs ), 'the wrapper of virtiofsd, for the libvirt backend that runs it' ) or diag "got: @virtiofs";

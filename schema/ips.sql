@@ -2,21 +2,15 @@
 -- section of ipmap.cfg: two provisions running at once both read the file, both
 -- pick the same free address, and the second write wins.  A primary key and a
 -- transaction make that impossible instead of unlikely.
---
--- Provisioner::IPPool adds the bin column to a database made before it existed.
 CREATE TABLE IF NOT EXISTS ips (
     ip     TEXT PRIMARY KEY NOT NULL,
-    domain TEXT NOT NULL,
+    -- One address per name.  A domain that already has one is answered with it
+    -- rather than given a second, which is what makes assigning idempotent.
+    domain TEXT NOT NULL UNIQUE,
     -- What put it here: 'domain' for a guest, 'reserved' for the hypervisor and
     -- the gateway, which are nobody's to hand out.
     kind   TEXT NOT NULL DEFAULT 'domain',
-    -- The bin of the ip_pool that the address came out of.
-    bin    TEXT NOT NULL DEFAULT 'guests',
-    noted  TEXT NOT NULL DEFAULT (datetime('now')),
-    -- One address per name in each bin.  A domain that already has one is
-    -- answered with it rather than given a second, which is what makes
-    -- assigning idempotent.
-    UNIQUE (domain, bin)
+    noted  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Which sources have been interrogated, so that a seed which failed partway is

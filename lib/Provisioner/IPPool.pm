@@ -10,7 +10,7 @@ use re '/aasx';
 
 use Cwd();
 use File::Basename();
-use List::Util qw{any first};
+use List::Util qw{first};
 use Net::IP;
 use Socket();
 
@@ -147,52 +147,13 @@ sub schema_path {
 
 =head2 dbh()
 
-Returns a handle on the database at C<db_path>, with the schema applied.
-
-A database made before bins existed gets the C<bin> column the first time.
-Every row that it holds goes into the C<guests> bin.
+Returns a handle on the database at C<db_path>, with the schema and its updates
+applied.  F<schema/ips.v1.update.sql> adds bins, and puts every row of a
+database from before them in the C<guests> bin.
 
 =cut
 
-# The databases that have the bin column, so each is checked once a process.
-my %binned;
-
-sub dbh {
-    my $path = db_path();
-    my $db   = Trog::SQLite::dbh( schema_path(), $path );
-    return $db if $binned{$path};
-
-    # SQLite cannot drop the UNIQUE on domain in place, so the table is renamed
-    # away, made again from the schema, and filled from the old one.  A run
-    # that stopped between those steps leaves the old table, and the next run
-    # finishes.
-    $db->do('BEGIN IMMEDIATE');
-    my $done = eval {
-        my $columns = $db->selectall_arrayref( 'PRAGMA table_info(ips)', { Slice => {} } );
-        unless ( any { $_->{name} eq 'bin' } @$columns ) {
-            $db->do('ALTER TABLE ips RENAME TO ips_before_bins');
-            Trog::SQLite::apply( $db, schema_path() );
-        }
-
-        my ($left) = $db->selectrow_array(q{SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'ips_before_bins'});
-        if ($left) {
-            $db->do('INSERT OR IGNORE INTO ips (ip, domain, kind, noted) SELECT ip, domain, kind, noted FROM ips_before_bins');
-            $db->do('DROP TABLE ips_before_bins');
-        }
-
-        $db->do('COMMIT');
-        return 1;
-    };
-
-    unless ($done) {
-        my $err = $@ || "Could not add bins to $path\n";
-        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
-        die $err;
-    }
-
-    $binned{$path} = 1;
-    return $db;
-}
+sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 
 =head2 assignments()
 

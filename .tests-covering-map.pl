@@ -44,8 +44,8 @@ the payload of a guest.
 
 =item Files that the code reads at run time
 
-F<schema/ips.sql> stands for L<Provisioner::IPPool>, which builds F<ips.db>
-from it.  F<virtiofs-better> stands for L<Trog::HV::Libvirt>, which runs it on
+F<schema/ips.sql> and each of its updates stand for L<Provisioner::IPPool>,
+which builds F<ips.db> from them.  F<virtiofs-better> stands for L<Trog::HV::Libvirt>, which runs it on
 the hypervisor, and for each test that names it.
 F<hypervisors.conf.example> stands for each test that names it.
 
@@ -188,7 +188,7 @@ return sub {
 
     return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example';
     return ( 'lib/Trog/HV/Libvirt.pm', tests_naming($path) ) if $path eq 'virtiofs-better';
-    return 'lib/Provisioner/IPPool.pm'                       if $path eq 'schema/ips.sql';
+    return 'lib/Provisioner/IPPool.pm'                       if $path =~ m{\Aschema/ips(?:[.]v\d+[.]update)?[.]sql\z};
 
     # bin/new_config copies it into the configuration of every domain.
     return 'bin/new_config' if $path eq 'openssl.conf';
