@@ -665,9 +665,18 @@ subtest 'openvpn gives the clients of a bin that names it their own addresses, a
     like( $plain, qr{^\Qserver 10.8.0.0 255.255.255.0\E$}m, 'a bin that does not name this server leaves its pool alone' );
     unlike( $vpn->()->render( %G, ip_pool => { cidr => '192.0.2.0/24' } ), qr/--keep/, 'and its clients are masqueraded as before' );
 
-    like( exception { $vpn->()->render( %G, $pool->( { cidr => '10.9.0.0/25' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/, 'a bin outside the subnet is refused' );
-    like( exception { $vpn->()->render( %G, $pool->( { cidr => '10.8.0.64/26' } ) ) }, qr/split/,                             'and so is one in the middle of it, which leaves two ranges' );
-    like( exception { $vpn->()->render( %G, $pool->( { cidr => '10.8.0.0/24' } ) ) },  qr/leave[ ]no[ ]address/,              'and one that takes all of it' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.9.0.0/25' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/,                'a bin outside the subnet is refused' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.8.0.0/23' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/,                'and so is one that holds the subnet and more' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.8.0.64/26' } ) ) }, qr/split/,                                            'and so is one in the middle of it, which leaves two ranges' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.8.0.0/25' } ) ) },  qr/cannot[ ]hold[ ]10[.]8[.]0[.]0[ ]10[.]8[.]0[.]1,/, 'and so is one at the bottom, which holds the address of the server' );
+    like( exception { $vpn->()->render( %G, $pool->( { addresses => '10.8.0.0' } ) ) },     qr/cannot[ ]hold/,                                    'and one that holds only the network address' );
+    like( exception { $vpn->()->render( %G, $pool->( { addresses => '10.8.0.1' } ) ) },     qr/cannot[ ]hold/,                                    'and one that holds only the address of the server' );
+    like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.2' } ) ), qr{^\Qifconfig-pool 10.8.0.3 10.8.0.254 \E}m, 'one address just above the server leaves the rest' );
+
+    my %tiny = ( netmask => '255.255.255.252', $pool->( { addresses => '10.8.0.2' } ) );
+    like( exception { $vpn->()->render( %G, %tiny ) }, qr/No[ ]available[ ]address/, 'and a bin that takes the one address the server has to give is refused' );
+    my %two = ( netmask => '255.255.255.248', $pool->( { cidr => '10.8.0.4/30', addresses => '10.8.0.2 10.8.0.3' } ) );
+    like( exception { $vpn->()->render( %G, %two ) },                                                            qr/No[ ]available[ ]address/,                 'and so are blocks that take it between them' );
     like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.254' } ) ), qr{^\Qifconfig-pool 10.8.0.2 10.8.0.253 \E}m, 'one address at the top end leaves the rest' );
 };
 

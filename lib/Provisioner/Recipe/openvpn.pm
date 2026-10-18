@@ -8,8 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use List::Util qw{none};
-use Socket     qw{inet_aton inet_ntoa};
+use List::Util qw{all};
+use Net::CIDR();
+use Socket qw{inet_aton inet_ntoa};
 
 use Provisioner::IPPool();
 
@@ -164,7 +165,8 @@ C<ip_pool> that names this domain in C<via>.  See L<Provisioner::IPPool/BINS>.
                 cidr: 10.8.0.128/25
                 via: vpn.test.test
 
-The bin must be inside C<subnet>, at one end of it.  The server hands out the
+The bin must be inside C<subnet>, at its top end, because the first two addresses
+of C<subnet> are the network and the server.  The server hands out the
 rest of C<subnet> to the clients without an address of their own.
 
     openvpn-client-config --address 10.8.0.129 NAME [REMOTE] > NAME.ovpn
@@ -351,6 +353,21 @@ my sub network ($block) {
     return ( inet_ntoa( pack( 'N', unpack( 'N', $packed ) & mask($prefix) ) ), $prefix );
 }
 
+# The first and the last address of a CIDR block.
+my sub ends ($block) {
+    return split /-/, ( Net::CIDR::cidr2range($block) )[0];
+}
+
+# The same, as integers.
+my sub range ($block) {
+    return map { unpack( 'N', inet_aton($_) ) } ends($block);
+}
+
+# Whether every address of the CIDR block $block is in the CIDR block $net.
+my sub within ( $block, $net ) {
+    return all { Net::CIDR::cidrlookup( $_, $net ) } ends($block);
+}
+
 =head2 $range = dynamic_pool($subnet, $cidr, @blocks)
 
 The part of the VPN subnet C<$subnet/$cidr> that the server hands out to a
@@ -358,33 +375,41 @@ client without an address of its own, as C<< { start => $ip, end => $ip } >>.
 That is every host address of the subnet outside the CIDR blocks C<@blocks>,
 except the first, which is the server.
 
-Dies if a block is not inside the subnet, or if the blocks leave no address, or
-leave two ranges, because C<ifconfig-pool> takes one.
+Dies if a block is not inside the subnet, or holds the network address or the
+address of the server, or if the blocks leave no address, or leave two ranges,
+because C<ifconfig-pool> takes one.
 
 =cut
 
 sub dynamic_pool ( $subnet, $cidr, @blocks ) {
-    my $base  = unpack( 'N', inet_aton($subnet) ) & mask($cidr);
-    my $last  = $base + 2**( 32 - $cidr ) - 1;
-    my @spans = map {
-        my ( $address, $prefix ) = network($_);
-        my $start = unpack( 'N', inet_aton($address) );
-        die "The bin with $_ routes through this openvpn server, so it must be inside its subnet $subnet/$cidr\n"
-          if $prefix < $cidr || ( $start & mask($cidr) ) != $base;
-        [ $start, $start + 2**( 32 - $prefix ) - 1 ]
-    } @blocks;
+    my $net = join( '/', network("$subnet/$cidr") );
+    my ( $first, $last ) = range($net);
+    my @reserved = map { inet_ntoa( pack( 'N', $_ ) ) } $first, $first + 1;
 
-    # The server itself is the first host, and the broadcast is the last address.
-    my @free = grep {
-        my $ip = $_;
-        none { $ip >= $_->[0] && $ip <= $_->[1] } @spans
-    } ( $base + 2 ) .. ( $last - 1 );
-    die "The bins that route through this openvpn server leave no address in $subnet/$cidr for a client without one of its own\n"
-      unless @free;
-    die "The bins that route through this openvpn server split $subnet/$cidr in two, and openvpn hands out one range: put them at one end of it\n"
-      unless $free[-1] - $free[0] == $#free;
+    my @taken;
+    foreach my $block (@blocks) {
+        die "The bin with $block routes through this openvpn server, so it must be inside its subnet $net\n"
+          unless within( $block, $net );
+        die "The bin with $block routes through this openvpn server, so it cannot hold @reserved, which are the network and the server\n"
+          if Net::CIDR::cidrlookup( $block, map { "$_/32" } @reserved );
+        @taken = Net::CIDR::cidradd( $block, @taken );
+    }
 
-    return { start => inet_ntoa( pack( 'N', $free[0] ) ), end => inet_ntoa( pack( 'N', $free[-1] ) ) };
+    # The gaps between what the bins take, from the first address after the
+    # server to the last before the broadcast.
+    my @free;
+    my $from = $first + 2;
+    foreach my $span ( sort { $a->[0] <=> $b->[0] } map { [ range($_) ] } @taken ) {
+        push @free, [ $from, $span->[0] - 1 ] if $span->[0] > $from;
+        $from = $span->[1] + 1;
+    }
+    push @free, [ $from, $last - 1 ] if $from < $last;
+
+    die "No available address to assign in the configured bin ($net)!\n" unless @free;
+    die "The bins that route through this openvpn server split $net in two, and openvpn hands out one range: put them at its top end\n"
+      if @free > 1;
+
+    return { start => inet_ntoa( pack( 'N', $free[0][0] ) ), end => inet_ntoa( pack( 'N', $free[0][1] ) ) };
 }
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -448,14 +473,9 @@ sub enrich {
 
         # A bin inside the VPN subnet holds the clients themselves, which the
         # tunnel already reaches.
-        my $vpn    = unpack( 'N', inet_aton( $opts{subnet} ) ) & mask( $opts{cidr} );
-        my $inside = sub ($route) {
-            my ( $address, $prefix ) = network($route);
-            return $prefix >= $opts{cidr} && ( unpack( 'N', inet_aton($address) ) & mask( $opts{cidr} ) ) == $vpn;
-        };
-
+        my $vpn = join( '/', network("$opts{subnet}/$opts{cidr}") );
         my %seen;
-        $opts{routes} = [ grep { !$seen{$_}++ && !$inside->($_) } @routes ];
+        $opts{routes} = [ grep { !$seen{$_}++ && !within( $_, $vpn ) } @routes ];
     }
 
     my %static = Provisioner::IPPool::bins_via( $opts{ip_pool} // {}, $opts{domain} // q{} );
