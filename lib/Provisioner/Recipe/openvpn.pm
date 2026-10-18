@@ -86,8 +86,9 @@ a name that resolves anywhere is reachable through the tunnel.
 
 Without C<routes>, the recipe routes the C<ip_pool> in the C<_global> of the
 installation, the pool that F<ips.db> hands addresses out of.  Each C<cidr>
-block goes as its two halves, and each item of C<addresses> goes as a C</32>.
-Without either, the server pushes no route.
+block of each bin goes as its two halves, and each item of C<addresses> goes as
+a C</32>.  A bin inside C<subnet> is not routed, because its addresses are the
+clients of this server.  Without any, the server pushes no route.
 
 The halves are for a client on a home network with the same numbers, such as
 C<192.168.1.0/24>, the default of many home routers.  The client then has two
@@ -320,9 +321,11 @@ my sub network ($block) {
 Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
 VPN subnet.
 
-Fills in C<routes> from C<ip_pool>: the two halves of each C<cidr> block, then a
-C</32> for each of its C<addresses>, each route once.  A C</32> block has no
-halves, so it goes as it is.  See L</The networks that a client reaches>.
+Fills in C<routes> from every bin of C<ip_pool>: the two halves of each C<cidr>
+block, then a C</32> for each of its C<addresses>, each route once.  A C</32>
+block has no halves, so it goes as it is.  A route inside C<subnet> is left
+out, because a bin there holds VPN clients.  See L</The networks that a client
+reaches>.
 
 Adds C<pushes>, each route as the C<network> and the C<netmask> that the
 C<route> directive of OpenVPN takes, with the host bits of the network cleared.
@@ -351,9 +354,9 @@ sub enrich {
     $opts{cidr} = unpack( '%32b*', inet_aton( $opts{netmask} ) );
 
     unless ( $opts{routes} ) {
-        my $pool = $opts{ip_pool} // {};
+        my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
         my @routes;
-        foreach my $block ( Provisioner::IPPool::pool_items( $pool->{cidr} ) ) {
+        foreach my $block ( map { Provisioner::IPPool::pool_items( $_->{cidr} ) } @bins{ sort keys %bins } ) {
             my ( $address, $prefix ) = network($block);
             if ( $prefix == 32 ) {
                 push @routes, "$address/32";
@@ -364,10 +367,18 @@ sub enrich {
             my $base = unpack( 'N', inet_aton($address) );
             push @routes, map { inet_ntoa( pack( 'N', $base + $_ * $half ) ) . '/' . ( $prefix + 1 ) } 0, 1;
         }
-        push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $pool->{addresses} );
+        push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $_->{addresses} ) for @bins{ sort keys %bins };
+
+        # A bin inside the VPN subnet holds the clients themselves, which the
+        # tunnel already reaches.
+        my $vpn    = unpack( 'N', inet_aton( $opts{subnet} ) ) & mask( $opts{cidr} );
+        my $inside = sub ($route) {
+            my ( $address, $prefix ) = network($route);
+            return $prefix >= $opts{cidr} && ( unpack( 'N', inet_aton($address) ) & mask( $opts{cidr} ) ) == $vpn;
+        };
 
         my %seen;
-        $opts{routes} = [ grep { !$seen{$_}++ } @routes ];
+        $opts{routes} = [ grep { !$seen{$_}++ && !$inside->($_) } @routes ];
     }
 
     $opts{pushes} = [

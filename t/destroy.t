@@ -672,8 +672,8 @@ subtest 'a guest that will not stop still gives its address back' => sub {
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( held_by => sub { '203.0.113.9' } );
-    $pool->redefine( release => sub { $released = $_[0]; 1 } );
+    $pool->redefine( holdings => sub { { guests => '203.0.113.9' } } );
+    $pool->redefine( release  => sub { $released = $_[0]; 1 } );
 
     # Caught rather than left to escape: unguarded, main() dies in destroy_vm,
     # the die goes straight through capture, and the file ends on "No plan
@@ -736,8 +736,8 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( held_by => sub { '203.0.113.9' } );
-    $pool->redefine( release => sub { $released = $_[0]; 1 } );
+    $pool->redefine( holdings => sub { { guests => '203.0.113.9' } } );
+    $pool->redefine( release  => sub { $released = $_[0]; 1 } );
 
     Trog::HV->forget();
     my ( $out, $rc ) = capture_stdout { Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };

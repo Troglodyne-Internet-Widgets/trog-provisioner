@@ -175,6 +175,10 @@ add an C<ip_pool> to the C<_global> of C<_base>:
           # addresses are merged.
           cidr: 192.0.2.0/24
 
+The two keys are the bin named C<guests>.  C<bins> can name other bins beside
+it, and a guest never gets an address out of those.  See
+L<Provisioner::IPPool/BINS>.
+
 new_config gives each domain an address from the pool, and records it in the
 address database of L<Provisioner::IPPool>.  A domain keeps its address when you
 provision it again.  If the hypervisor gives its guests their addresses,

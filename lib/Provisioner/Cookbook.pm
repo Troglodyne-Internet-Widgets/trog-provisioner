@@ -1600,10 +1600,22 @@ sub global_schema {
 
             ip_pool => {
                 type        => 'object',
-                description => 'The addresses this installation hands out, and the network they are on.  bin/assign_ip takes one from here and records it in ips.db.',
+                description => 'The addresses this installation hands out, and the network they are on.  bin/assign_ip takes one from here and records it in ips.db.  The addresses and cidr at the top are the bin named guests.',
                 properties  => {
                     addresses => { type => [qw{array string}], items => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
                     cidr      => { type => 'string', description => 'The network the addresses are on, as a prefix.' },
+                    bins      => {
+                        type                 => 'object',
+                        description          => 'Other parts of the pool, by name, such as vpnclients.  Each hands out only its own addresses, so one cannot use up another.  Only a guest, out of the bin named guests, gets an A record.',
+                        propertyNames        => { pattern => '^[a-z][a-z0-9_-]*$' },
+                        additionalProperties => {
+                            type       => 'object',
+                            properties => {
+                                addresses => { type => [qw{array string}], items => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
+                                cidr      => { type => [qw{array string}], items => { type => 'string' }, description => 'The networks of the bin, as prefixes.' },
+                            },
+                        },
+                    },
                 },
             },
 

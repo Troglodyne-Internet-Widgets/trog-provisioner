@@ -67,8 +67,9 @@ C</acme/> to that CA, for the guests that name this one as their authority.
 See L<Provisioner::Recipe::acmeca/Or on the authority, for the guests that name it>.
 The vhost answers only the addresses that this installation gives its guests,
 the addresses of this machine, the guest itself, and the networks in
-C<api_allow>.  The addresses of the guests are the C<ip_pool> of C<_global>,
-whole, so that a guest that is built after this one gets in, and each address
+C<api_allow>.  The addresses of the guests are the C<guests> bin of the
+C<ip_pool> of C<_global>, whole, so that a guest that is built after this one
+gets in, and each address
 that the installation already gave out.
 
 Starman runs the proxy as the C<pdns> user.  pdns creates its API socket with
@@ -403,7 +404,8 @@ sub enrich {
 
     my @ours = @{ $opts{transfer_ips} // [] };
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
-    my @pool = map { Provisioner::IPPool::pool_items( $opts{ip_pool}{$_} ) } qw{cidr addresses};
+    my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
+    my @pool = map { Provisioner::IPPool::pool_items( ( $bins{$Provisioner::IPPool::GUESTS} // {} )->{$_} ) } qw{cidr addresses};
     $opts{api_allowed} = [ uniq( qw{127.0.0.1 ::1}, @ours, @pool, sort( values %{ $opts{ipmap} // {} } ), @{ $opts{api_allow} } ) ];
 
     # Nobody can ask a server on loopback, and the zone above names this one.

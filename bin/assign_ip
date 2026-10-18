@@ -21,10 +21,13 @@ use Provisioner::IPPool();
 
 =head1 USAGE
 
-    assign_ip [--recipes=file] DOMAIN
+    assign_ip [--recipes=file] [--bin=NAME] DOMAIN
 
 Print the static address that C<DOMAIN> holds.  If it holds none, assign it
 the first free address in the pool and print that.
+
+C<--bin> names the bin of the pool, which is C<guests> unless you say
+otherwise.  L<Provisioner::IPPool/BINS> says what a bin is.
 
 A static address is on the subnet of the primary bridge of the hypervisor, the
 network that it shares with other machines.  It is not an address on the NAT
@@ -55,8 +58,8 @@ sub main {
     my @args = @_;
 
     my $rfile = Trog::Config->path('recipes.yaml');
-    my $help;
-    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'help' => \$help )
+    my ( $bin, $help );
+    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'bin=s' => \$bin, 'help' => \$help )
       or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
@@ -72,7 +75,7 @@ sub main {
     # address that a guest already uses.
     Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
 
-    print Provisioner::IPPool::assign( $domain, $pool ) . "\n";
+    print Provisioner::IPPool::assign( $domain, $pool, $bin ) . "\n";
     return 0;
 }
 

@@ -34,8 +34,28 @@ Provisioner::IPPool - assign static IP addresses from a pool, and record which a
     my @ips = Provisioner::IPPool::pool_ips($pool_block);
     my $ip  = Provisioner::IPPool::assign( 'test.test', $pool_block );
 
-The addresses in the pool are on the subnet of the primary bridge of the
+    # A pool with a second bin, for the clients of a VPN.
+    my $pool = { cidr => '192.0.2.0/24', bins => { vpnclients => { cidr => '10.8.0.128/25' } } };
+    my $vpn  = Provisioner::IPPool::assign( 'test.test', $pool, 'vpnclients' );
+
+The addresses of the C<guests> bin are on the subnet of the primary bridge of the
 hypervisor.  F<docs/NETWORK.md> says what that means.
+
+=head1 BINS
+
+A bin is a named part of the pool.  Each bin hands out only its own addresses,
+so one kind of client cannot use up the addresses of another.  The
+C<addresses> and C<cidr> at the top of C<ip_pool> are the bin named C<guests>,
+which is where a guest gets its address.  C<bins> names the others:
+
+    ip_pool:
+        cidr: 192.0.2.0/24
+        bins:
+            vpnclients:
+                cidr: 10.8.0.128/25
+
+A domain holds at most one address in each bin.  Only the C<guests> bin goes
+into C<assignments>, so only a guest gets an A record from it.
 
 =head1 WHY A DATABASE
 
@@ -49,6 +69,14 @@ row goes in, or the address is already taken and C<assign> tries the next one.
 The C<ip_pool> of the C<_global> of C<_base> still gives the range of the pool.
 
 =head1 SUBROUTINES
+
+=head2 $GUESTS
+
+The name of the bin that a guest gets its address from: C<guests>.
+
+=cut
+
+our $GUESTS = 'guests';
 
 =head2 pool_ips($pool)
 
@@ -119,7 +147,9 @@ sub schema_path {
 
 =head2 dbh()
 
-Returns a handle on the database at C<db_path>, with the schema applied.
+Returns a handle on the database at C<db_path>, with the schema and its updates
+applied.  F<schema/ips.v1.update.sql> adds bins, and puts every row of a
+database from before them in the C<guests> bin.
 
 =cut
 
@@ -127,15 +157,15 @@ sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 
 =head2 assignments()
 
-Returns a hash reference of each guest domain to its address.  Reservations
-are not in it.  C<bin/new_config> gives this to the templates as the C<ipmap>
-variable, which is the address of each domain rather than a file, and
-the pdns zone makes its records from it.
+Returns a hash reference of each guest domain to its address in the C<guests>
+bin.  Reservations and the other bins are not in it.  C<bin/new_config> gives
+this to the templates as the C<ipmap> variable, which is the address of each
+domain rather than a file, and the pdns zone makes its records from it.
 
 =cut
 
 sub assignments {
-    my $rows = dbh()->selectall_arrayref( "SELECT domain, ip FROM ips WHERE kind = 'domain'", { Slice => {} } );
+    my $rows = dbh()->selectall_arrayref( "SELECT domain, ip FROM ips WHERE kind = 'domain' AND bin = ?", { Slice => {} }, $GUESTS );
     return { map { $_->{domain} => $_->{ip} } @$rows };
 }
 
@@ -151,9 +181,10 @@ sub taken {
     return { map { $_->{ip} => $_->{domain} } @$rows };
 }
 
-=head2 held_by($domain)
+=head2 held_by($domain, $bin)
 
-Returns the address that C<$domain> has, or undef.
+Returns the address that C<$domain> has in C<$bin>, or undef.  C<$bin> defaults
+to C<guests>.
 
 It looks at guests only.  A reservation is not a domain, and C<release> must
 never report that it gave back the gateway.
@@ -161,9 +192,23 @@ never report that it gave back the gateway.
 =cut
 
 sub held_by {
-    my ($domain) = @_;
-    my $row = dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain'", undef, $domain );
+    my ( $domain, $bin ) = @_;
+    my $row = dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin // $GUESTS );
     return $row ? $row->[0] : undef;
+}
+
+=head2 holdings($domain)
+
+Returns a hash reference of each bin in which C<$domain> has an address, to
+that address.  It is empty when the domain has none.  Like C<held_by>, it looks
+at domains only, not at reservations.
+
+=cut
+
+sub holdings {
+    my ($domain) = @_;
+    my $rows = dbh()->selectall_arrayref( "SELECT bin, ip FROM ips WHERE domain = ? AND kind = 'domain'", { Slice => {} }, $domain );
+    return { map { $_->{bin} => $_->{ip} } @$rows };
 }
 
 =head2 reserve($ip, $name)
@@ -198,8 +243,8 @@ sub record {
 
 =head2 release($domain)
 
-Gives back the address of C<$domain>.  Returns that address, or undef if the
-domain held no address.
+Gives back every address of C<$domain>, in every bin.  Returns what it gave
+back, as C<holdings> does: a hash reference of each bin to its address.
 
 C<bin/destroy> calls this, and C<bin/reseed_ips> calls it for a domain that no
 hypervisor runs.  A domain that you provision again keeps its address.
@@ -209,11 +254,11 @@ hypervisor runs.  A domain that you provision again keeps its address.
 sub release {
     my ($domain) = @_;
 
-    my $db = dbh();
-    my $ip = held_by($domain) or return undef;
+    my $db   = dbh();
+    my $held = holdings($domain);
     $db->do( "DELETE FROM ips WHERE domain = ? AND kind = 'domain'", undef, $domain );
 
-    return $ip;
+    return $held;
 }
 
 =head2 @items = pool_items($said)
@@ -228,13 +273,47 @@ sub pool_items {
     return grep { m/\S/ } map { split /\s+/ } @{ Provisioner::Utils::coerce_arrayref( $said // [] ) };
 }
 
-=head2 assign($domain, $pool)
+=head2 %bins = bins($pool)
 
-Returns the address of C<$domain>.  If the domain has no address, this gives it
-the first free address in C<$pool>.  If it has one, this returns that address
-and writes nothing.
+Returns each bin of C<$pool> by name, as a block that C<pool_ips> takes.  The
+C<addresses> and C<cidr> at the top of C<$pool> are the bin named C<guests>.
 
-Dies if the pool has no addresses, or if no address in it is free.
+Dies if C<$pool> has addresses at its top and also a bin named C<guests>, or if
+an address is in two bins.
+
+=cut
+
+sub bins {
+    my ($pool) = @_;
+
+    my %bins = %{ $pool->{bins} // {} };
+    my %top  = map { $_ => $pool->{$_} } grep { defined $pool->{$_} } qw{addresses cidr};
+    if (%top) {
+        die "The addresses at the top of ip_pool are the bin named $GUESTS, so ip_pool cannot also have a bin named $GUESTS\n"
+          if $bins{$GUESTS};
+        $bins{$GUESTS} = \%top;
+    }
+
+    my %bin_of;
+    foreach my $name ( sort keys %bins ) {
+        foreach my $ip ( pool_ips( $bins{$name} ) ) {
+            die "ip_pool has $ip in the bins $bin_of{$ip} and $name, and an address can belong to one bin only\n"
+              if $bin_of{$ip} && $bin_of{$ip} ne $name;
+            $bin_of{$ip} = $name;
+        }
+    }
+
+    return %bins;
+}
+
+=head2 assign($domain, $pool, $bin)
+
+Returns the address of C<$domain> in C<$bin> of C<$pool>.  C<$bin> defaults to
+C<guests>.  If the domain has no address there, this gives it the first free
+address of that bin.  If it has one, this returns that address and writes
+nothing.
+
+Dies if the bin has no addresses, or if no address in it is free.
 
 Choosing the address and writing it are one transaction.  C<BEGIN IMMEDIATE>
 takes the write lock before the search for a free address.  So if two
@@ -244,10 +323,12 @@ the address taken.
 =cut
 
 sub assign {
-    my ( $domain, $pool ) = @_;
+    my ( $domain, $pool, $bin ) = @_;
+    $bin //= $GUESTS;
 
-    my @pool_ips = pool_ips($pool);
-    die "No [ip_pool] section or no IPs found in pool: cannot auto-assign IP for $domain\n"
+    my %bins     = bins($pool);
+    my @pool_ips = pool_ips( $bins{$bin} // {} );
+    die "No [ip_pool] section or no IPs found in the $bin bin of the pool: cannot auto-assign IP for $domain\n"
       unless @pool_ips;
 
     my $db = dbh();
@@ -257,7 +338,7 @@ sub assign {
     $db->do('BEGIN IMMEDIATE');
 
     my $chosen = eval {
-        my $held = held_by($domain);
+        my $held = held_by( $domain, $bin );
         if ($held) {
             $db->do('COMMIT');
             return $held;
@@ -267,7 +348,7 @@ sub assign {
         my $free  = first { !$taken->{$_} } @pool_ips;
         die "IP pool exhausted: no IPs available for $domain\n" unless $free;
 
-        $db->do( "INSERT INTO ips (ip, domain, kind) VALUES (?, ?, 'domain')", undef, $free, $domain );
+        $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'domain', ?)", undef, $free, $domain, $bin );
         $db->do('COMMIT');
 
         return $free;
@@ -347,7 +428,7 @@ hypervisor reports what it runs, but somebody can edit a file.  The address
 of each guest comes from its own F<provision.conf>, which is what it was built
 with.
 
-It records an address only when it is in the pool.  C<assign> cannot give out
+It records an address only when it is in the C<guests> bin of the pool.  C<assign> cannot give out
 an address outside the pool, so a row for one is noise.
 
 Another machine that answers is an address in the pool that answers a ping from
@@ -364,7 +445,8 @@ sub seed {
     my ( $pool, $gateway ) = @_;
 
     my $recorded = 0;
-    my %in_pool  = map { $_ => 1 } pool_ips($pool);
+    my %bins     = bins($pool);
+    my %in_pool  = map { $_ => 1 } pool_ips( $bins{$GUESTS} // {} );
 
     # The gateway goes first, so that its row names it as the gateway and not
     # as one more machine that answered.

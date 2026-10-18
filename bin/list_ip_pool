@@ -17,6 +17,7 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Trog::Config();
 use Cpanel::JSON::XS;
+use List::Util qw{any};
 
 use Provisioner::IPPool;
 
@@ -24,8 +25,10 @@ use Provisioner::IPPool;
 
     list_ip_pool [--recipes=file] [--available] [--assigned] [--json]
 
-Shows the status of the static IP pool.  It lists the IPs that are assigned to
-guests and the IPs that are available.
+Shows the status of the static IP pool, one bin at a time.  It lists the IPs
+of each bin that are assigned and the IPs that are available.  With C<--json>,
+it prints one object, with a key for each bin.  L<Provisioner::IPPool/BINS> says
+what a bin is.
 
 =head2 Where the pool is written
 
@@ -40,8 +43,13 @@ Add an C<ip_pool> to the C<_global> of C<_base> in F<recipes.yaml>:
           # Or one or more CIDR blocks, separated by spaces.
           cidr: 192.0.2.0/24 10.0.0.0/28
 
-You can use both keys.  The pool is the addresses list and the addresses of
-each CIDR block together.
+          # Other bins, each with the same two keys.
+          bins:
+            vpnclients:
+              cidr: 10.8.0.128/25
+
+You can use both keys.  A bin is the addresses list and the addresses of each
+CIDR block together.  The two keys at the top are the bin named C<guests>.
 
 The assigned IPs come from the address database of L<Provisioner::IPPool>.  An
 IP in the pool that is not in the database is available for a new guest.
@@ -96,9 +104,10 @@ GUIDANCE
         return 1;
     }
 
-    my @pool_ips = Provisioner::IPPool::pool_ips($pool);
+    my %bins = Provisioner::IPPool::bins($pool);
+    my %ips  = map { $_ => [ Provisioner::IPPool::pool_ips( $bins{$_} ) ] } keys %bins;
 
-    unless (@pool_ips) {
+    unless ( any { @$_ } values %ips ) {
         print {*STDERR} "ip_pool section found but no IPs could be parsed.\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }
@@ -107,34 +116,36 @@ GUIDANCE
     # call fills it from the hypervisors, so an empty database does not show
     # every IP as available.
     Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
-    my %assigned = %{ Provisioner::IPPool::taken() };
+    my %taken = %{ Provisioner::IPPool::taken() };
 
-    my @available = grep { !$assigned{$_} } @pool_ips;
-    my @used      = grep { $assigned{$_} } @pool_ips;
+    my %out;
+    foreach my $bin ( sort keys %ips ) {
+        my @pool_ips  = @{ $ips{$bin} };
+        my @available = grep { !$taken{$_} } @pool_ips;
+        my %assigned  = map  { $_ => $taken{$_} } grep { $taken{$_} } @pool_ips;
 
-    if ($json) {
-        my $out = {};
-        $out->{available} = \@available if $available;
-        $out->{assigned}  = \%assigned  if $assigned;
-        print Cpanel::JSON::XS::encode_json($out);
-        return 0;
-    }
+        if ($json) {
+            $out{$bin}{available} = \@available if $available;
+            $out{$bin}{assigned}  = \%assigned  if $assigned;
+            next;
+        }
 
-    printf "IP Pool:  %d total, %d assigned, %d available\n\n",
-      scalar(@pool_ips), scalar(@used), scalar(@available);
+        printf "Bin %s:  %d total, %d assigned, %d available\n\n",
+          $bin, scalar(@pool_ips), scalar( keys %assigned ), scalar(@available);
 
-    if ( @used && $assigned ) {
-        print "Assigned:\n" . join( q{}, map { sprintf "  %-20s %s\n", $_, $assigned{$_} } @used ) . "\n";
-    }
+        if ( %assigned && $assigned ) {
+            print "Assigned:\n" . join( q{}, map { sprintf "  %-20s %s\n", $_, $assigned{$_} } grep { $assigned{$_} } @pool_ips ) . "\n";
+        }
 
-    if (@available) {
-        if ($available) {
-            print "Available:\n" . join( q{}, map { sprintf "  %s\n", $_ } @available );
+        if (@available) {
+            print "Available:\n" . join( q{}, map { sprintf "  %s\n", $_ } @available ) . "\n" if $available;
+        }
+        else {
+            print "Bin exhausted:  no IPs available.\n\n";
         }
     }
-    else {
-        print "Pool exhausted:  no IPs available.\n";
-    }
+
+    print Cpanel::JSON::XS::encode_json( \%out ) if $json;
 
     # This is the exit status of the process, so it must be explicit.
     return 0;
