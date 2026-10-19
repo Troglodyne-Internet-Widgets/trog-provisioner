@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util qw{uniq};
+
 use Provisioner::Cookbook();
 use Provisioner::Utils();
 
@@ -83,6 +85,15 @@ and C<restore_state> does not write over an account that is already there.
 
 This is how it works for the public CA.  An account that a CA on this guest
 issued does not go back at all.  See C<restores>.
+
+=head2 Which services learn of a new certificate
+
+A service reads the certificate when it starts or reloads, and not when the file
+changes.  So each recipe on the guest names the units that read it, in
+C<certificate_readers>, and this recipe reloads them twice: in C<get_cert>,
+after it links the certificate into F</etc/ssl>, and in the C<deploy_cert> hook,
+after the nightly renewal writes a new one.  A unit that is not running stays
+as it is.
 
 =head2 Which CA issues, and how a reserved TLD gets one at all
 
@@ -209,6 +220,10 @@ sub enrich {
     my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
     $params{lexicon_socket} = $registrar->serves_itself( $params{domain} ) ? $extra{PDNS_SERVER} // q{} : q{};
     $params{domain_aliases} = [ $self->domain_aliases(%params) ];
+
+    # Each recipe on the guest names the units that read the certificate.  See
+    # certificate_readers in Provisioner::Recipe.
+    $params{certificate_readers} = [ uniq map { Provisioner::Cookbook->load($_)->certificate_readers(%params) } grep { Provisioner::Cookbook->has($_) } @{ $params{modules} // [] } ];
 
     return %params;
 }

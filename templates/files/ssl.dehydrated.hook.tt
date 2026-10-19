@@ -111,6 +111,12 @@ function deploy_cert {
     #   The path of the file containing the full certificate chain.
     # - CHAINFILE
     #   The path of the file containing the intermediate certificate(s).
+[% IF certificate_readers.size() %]
+
+    # The nightly renewal ends here, and a service reads the certificate only
+    # when it starts or reloads.
+    systemctl try-reload-or-restart [% certificate_readers.join(' ') %]
+[% END -%]
 }
 
 function unchanged_cert {

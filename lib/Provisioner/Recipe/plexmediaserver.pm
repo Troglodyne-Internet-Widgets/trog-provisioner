@@ -132,6 +132,16 @@ sub args {
     );
 }
 
+=head2 @units = $recipe->certificate_readers()
+
+C<plexmediaserver>, whose preferences name the certificate of the domain.
+
+=cut
+
+sub certificate_readers {
+    return ('plexmediaserver');
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

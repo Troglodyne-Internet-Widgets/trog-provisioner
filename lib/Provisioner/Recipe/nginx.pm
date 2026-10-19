@@ -291,6 +291,16 @@ sub enrich {
     return %opts;
 }
 
+=head2 @units = $recipe->certificate_readers()
+
+C<nginx>, whose vhosts serve the certificate of the domain.
+
+=cut
+
+sub certificate_readers {
+    return ('nginx');
+}
+
 sub template_files {
     my ($self) = @_;
 

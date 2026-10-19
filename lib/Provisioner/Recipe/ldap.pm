@@ -286,6 +286,16 @@ sub remote_prepare {
     return ('/usr/local/sbin/ldap-export.sh');
 }
 
+=head2 @units = $recipe->certificate_readers()
+
+C<slapd>, which serves the certificate of the domain for TLS.
+
+=cut
+
+sub certificate_readers {
+    return ('slapd');
+}
+
 sub restores {
     my ( $self, %opts ) = @_;
     my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};

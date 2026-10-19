@@ -133,6 +133,12 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     like( $hook, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="[\da-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
 };
 
+subtest 'the services that read the certificate are those that the recipes on the guest name' => sub {
+    my ($recipe) = generated();
+    my %opts = $recipe->validate( domain => $DOMAIN, modules => [qw{nginxproxy nginx mail ntp ldap letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
+    is_deeply( $opts{certificate_readers}, [qw{nginx postfix dovecot slapd}], 'each unit once, in the order of the recipes' );
+};
+
 subtest 'a reserved TLD is served locally whatever reached the module list' => sub {
     my ( undef, undef, $slurp ) = generated( modules => ['letsencrypt'] );
 
