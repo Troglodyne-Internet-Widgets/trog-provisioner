@@ -24,8 +24,15 @@ use File::Path  qw{make_path};
 use File::Slurper::Temp();
 use Path::Tiny();
 use IPC::Run3();
+use Trog::Local();
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
+
+# The fetches below run in the sandbox, as a guest's do, and there is no other
+# way to ask rsync what the guest gets.
+if ( my $why = Trog::Local->new()->sandbox_error ) {
+    plan skip_all => "No sandbox here, so no fetch either: $why";
+}
 
 my $root = tempdir( CLEANUP => 1 );
 my $host = "$root/domains/host.test";
@@ -52,10 +59,11 @@ Trog::Provisioner::Config::Generator::write_rsyncd_conf( $host, 'tenant.test', p
 
 # What sshd runs for the key, whatever the client asked for: the forced
 # command of bin/provision.  rsync hands its remote shell the host and the
-# command, and this ignores both, as sshd does.
-my $rsh = "$root/forced";
-File::Slurper::Temp::write_text( $rsh, "#!/bin/sh\nexec rsync --server --daemon --config=$host/rsyncd.conf .\n" );
-chmod 0755, $rsh;
+# command, and the sandbox ignores both, as sshd does.
+my $rsh = "$host/rsyncd_sandbox";
+## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
+is( Path::Tiny::path($rsh)->stat->mode & 0111, 0111, 'the sandbox is beside the configuration, ready for anyone to run' );
+## use critic
 
 # Fetches $what into a new directory, as the guest does.  Returns the exit
 # status of rsync, what it said, and what arrived, by path to content, with a
@@ -122,6 +130,48 @@ subtest 'and nothing else of this machine' => sub {
     IPC::Run3::run3( [ qw{rsync -r}, "--rsh=$rsh", "$root/skel/", 'transfer@host.test::data.host.test/' ], \undef, \$out, \$list_err );
     isnt( $? >> 8, 0, 'a guest cannot write into a module' );
     ok( !-e "$root/data/host.test/.bashrc", 'and nothing it sent arrived' );
+};
+
+# What a bug in rsync would reach: the same sandbox, running a shell where the
+# daemon would be.
+subtest 'code in the daemon reaches what the guest may fetch, and nothing else' => sub {
+    my $sandbox = Path::Tiny::path($rsh)->slurp_utf8;
+    my $daemon  = 'rsync --server --daemon --config="$dir/rsyncd.conf" .';
+    is( scalar( () = $sandbox =~ m/\Q$daemon\E/g ), 1, 'the daemon is the one command that the sandbox runs' );
+
+    # In the script, because the sandbox clears the environment.  Beside the
+    # configuration, because the sandbox finds it beside itself.
+    my $ask = sub ($command) {
+        File::Slurper::Temp::write_text( "$host/probe", $sandbox =~ s/\Q$daemon\E/sh -c '$command'/r );
+        chmod 0755, "$host/probe";
+        my ( $out, $err );
+        IPC::Run3::run3( [ "$host/probe", 'host.test', 'rsync --server' ], \undef, \$out, \$err );
+        return ( $? >> 8, $out, $err );
+    };
+
+    my ( $status, $out ) = $ask->('echo asked');
+    is( $out, "asked\n", 'the probe runs what it is asked' ) or diag( ( $ask->('echo asked') )[2] );
+
+    ( $status, $out ) = $ask->("cat $host/data.tar.gz $root/data/host.test/served $root/domains/tenant.test/data.tar.gz");
+    is( $status, 0,                                                                         'it reads the payload, the data, and the payload of a tenant' );
+    is( $out,    'the payload of host.testthe data of host.testthe payload of tenant.test', 'which are what it reads' );
+
+    foreach my $secret ( "$host/key.rsa", "$host/guest-secrets.yaml", "$root/data/other.test/secret" ) {
+        ($status) = $ask->("cat $secret");
+        isnt( $status, 0, "not $secret" );
+    }
+    ($status) = $ask->("ls $ENV{HOME}");
+    isnt( $status, 0, 'nor the home of the account that the daemon runs as' );
+
+    ( $status, $out ) = $ask->("cat $root/data/host.test/escape");
+    isnt( $status, 0, 'and a symlink out of a module points at nothing' );
+
+    ($status) = $ask->("touch $root/data/host.test/planted");
+    isnt( $status, 0, 'it cannot write into a module' );
+    ok( !-e "$root/data/host.test/planted", 'and nothing arrived' );
+
+    ( $status, $out ) = $ask->('cat /proc/net/dev');
+    is( scalar( () = $out =~ m/:/g ), 1, 'and it has no network but loopback' ) or diag $out;
 };
 
 subtest 'a module that rsyncd.conf cannot say is refused' => sub {

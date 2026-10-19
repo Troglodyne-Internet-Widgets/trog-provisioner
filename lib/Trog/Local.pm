@@ -10,6 +10,8 @@ use parent 'Trog::Machine';
 
 use Socket();
 use Time::HiRes qw{alarm};
+use File::Which();
+use IPC::Run3();
 
 =head1 NAME
 
@@ -34,9 +36,9 @@ See L<Provisioner::Recipe::data/What the key of the guest reaches>.
 
 L<Trog::Machine> supplies the transfer user, its C<authorized_keys> and the sshd
 port.  Here, C<is_local> is true, so each of those is a local filesystem call or
-an C<IPC::Run3> call, and no SSH connection opens.  This class adds one question
+an C<IPC::Run3> call, and no SSH connection opens.  This class adds two questions
 that only this machine can answer: at which of our addresses can a guest reach
-us?
+us, and can bubblewrap make the sandbox that its fetches run in?
 
 =head1 CLASS METHODS
 
@@ -243,6 +245,37 @@ sub answers_on {
     close($socket) or undef;
 
     return $answered;
+}
+
+=head1 THE SANDBOX OF A FETCH
+
+=head2 sandbox_error
+
+Returns undef if bubblewrap can make the sandbox of F<rsyncd_sandbox> here,
+and otherwise the reason that it cannot.  The forced command of the key of
+every guest runs in that sandbox, so a guest cannot fetch anything while the
+reason holds.  See C<write_rsyncd_conf> in F<bin/new_config>.
+
+It runs C<bwrap> with the same namespaces as F<rsyncd_sandbox>, because the
+program can be there and still be refused.  Ubuntu 24.04 lets a program make a
+user namespace only if AppArmor gives it a profile that allows that.  The
+object keeps the answer.
+
+=cut
+
+sub sandbox_error {
+    my ($self) = @_;
+    return $self->{sandbox_error} if exists $self->{sandbox_error};
+
+    my $bwrap = File::Which::which('bwrap');
+    return $self->{sandbox_error} = 'bwrap is not installed' unless $bwrap;
+
+    my $said;
+    IPC::Run3::run3( [ $bwrap, qw{--unshare-all --die-with-parent --ro-bind / / true} ], \undef, \$said, \$said );
+    return $self->{sandbox_error} = undef if $? == 0;
+
+    chomp $said;
+    return $self->{sandbox_error} = "bwrap could not make a sandbox: $said";
 }
 
 =head1 SEE ALSO

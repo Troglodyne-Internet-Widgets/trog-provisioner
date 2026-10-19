@@ -371,18 +371,20 @@ sub remove_authorized_key {
 
 =head2 remove_rsync_modules($domain, $dryrun)
 
-Removes F<rsyncd.d/$domain.conf> from each directory under the domain
-directory of this machine.  That file holds the rsync modules that a guest can
-fetch the files of C<$domain> from.  It is in the directory of the host when
-C<$domain> is a tenant, so the key of the host stops reaching them.  See
-C<write_rsyncd_conf> in F<bin/new_config>.  Returns nothing.
+Removes F<rsyncd.d/$domain.conf> and F<rsyncd.d/$domain.binds> from each
+directory under the domain directory of this machine.  The first holds the
+rsync modules that a guest can fetch the files of C<$domain> from, and the
+second the paths that the sandbox of the fetch holds for them.  They are in the
+directory of the host when C<$domain> is a tenant, so the key of the host stops
+reaching them.  See C<write_rsyncd_conf> in F<bin/new_config>.  Returns
+nothing.
 
 =cut
 
 sub remove_rsync_modules {
     my ( $domain, $dryrun ) = @_;
 
-    foreach my $part ( File::Glob::bsd_glob( Trog::HV->new()->domain_dir . "/*/rsyncd.d/$domain.conf" ) ) {
+    foreach my $part ( map { File::Glob::bsd_glob( Trog::HV->new()->domain_dir . "/*/rsyncd.d/$domain.$_" ) } qw{conf binds} ) {
         print( ( $dryrun ? "Would remove" : "Removing" ) . " the rsync modules of $domain in $part\n" );
         unlink $part or die "Could not remove $part: $!\n" unless $dryrun;
     }

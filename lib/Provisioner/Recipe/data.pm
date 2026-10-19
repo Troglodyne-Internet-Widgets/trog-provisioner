@@ -54,8 +54,10 @@ L<Provisioner::Recipe>.
 The guest fetches from this machine with its own key, as C<transfer_user>.
 C<bin/provision> authorizes that key for one forced command, C<rsync --daemon>
 with the F<rsyncd.conf> that C<bin/new_config> writes into the domain directory.
-The key gets no shell, and no forwarding.  It reaches these rsync modules, each
-named for the domain, and nothing else of this machine:
+The daemon runs in a bubblewrap sandbox that holds only what the modules serve,
+so a bug in rsync reaches no more than the modules do.  The key gets no shell,
+and no forwarding.  It reaches these rsync modules, each named for the domain,
+and nothing else of this machine:
 
 =over 4
 

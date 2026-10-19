@@ -276,7 +276,7 @@ There was, and every one of these is a thing it did:
 
 The machinery holding all that at bay got larger than the thing it stood in for.  `bin/provision` now renders libvirt XML from `domain.xml.tmpl` and hands it to `Sys::Virt`: define the pool if it's absent, fetch the base image if it's absent, make the guest's disk as an overlay on it, build the cloud-init seed with `xorriso`, define the domain and start it.  There's no state file, because libvirt is the state.
 
-The hypervisor needs `xorriso` (or `genisoimage`/`mkisofs`) for the seed ISO, and `curl` to fetch the base image.  Nothing else.
+The hypervisor needs `xorriso` (or `genisoimage`/`mkisofs`) for the seed ISO, and `curl` to fetch the base image.  Nothing else.  The machine that runs `bin/provision` needs `bubblewrap`, because each guest fetches its payload from there through an rsync daemon in a sandbox.
 
 
 ### Checking a hypervisor before you build on it

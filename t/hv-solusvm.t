@@ -429,7 +429,7 @@ subtest 'preflight' => sub {
     my $hv = node();
 
     is_deeply [ $hv->preflight_checks ],
-      [qw{check_client check_reachable check_solusvm_resources check_solusvm_quota check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_config}],
+      [qw{check_client check_reachable check_solusvm_resources check_solusvm_quota check_rsync check_sandbox check_transfer_ip check_transfer_route check_fetch_sources check_config}],
       'the checks are asked in an order where the client and the credential come first';
 
     my $reachable = $hv->check_reachable;

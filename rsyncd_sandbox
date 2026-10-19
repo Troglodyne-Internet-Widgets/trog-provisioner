@@ -1,0 +1,34 @@
+#!/bin/sh
+# The forced command of the key of a guest, on the machine that the guest
+# fetches from.  bin/new_config copies it beside rsyncd.conf, and bin/provision
+# names the copy in authorized_keys.
+#
+# It runs the rsync daemon in a bubblewrap sandbox, as the same user, with no
+# network and no way to gain privileges.  The sandbox holds the programs in /usr,
+# the configuration, and the paths that rsyncd.d/*.binds name, one to a line,
+# all read only.  So a bug in rsync reaches what the guest may fetch, and
+# nothing else of this machine.  write_rsyncd_conf in bin/new_config has the
+# whole account.
+set -eu
+
+dir=${0%/*}
+
+set --
+for binds in "$dir"/rsyncd.d/*.binds; do
+    [ -f "$binds" ] || continue
+    while IFS= read -r path; do
+        set -- "$@" --ro-bind-try "$path" "$path"
+    done <"$binds"
+done
+
+# The configuration after the modules, so that no module can cover it.
+exec bwrap --unshare-all --die-with-parent --new-session \
+    --clearenv --setenv PATH /usr/bin:/bin \
+    --ro-bind /usr /usr \
+    --ro-bind-try /bin /bin --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+    --ro-bind-try /etc/ld.so.cache /etc/ld.so.cache \
+    --proc /proc --dev /dev \
+    "$@" \
+    --ro-bind "$dir/rsyncd.conf" "$dir/rsyncd.conf" \
+    --ro-bind "$dir/rsyncd.d" "$dir/rsyncd.d" \
+    rsync --server --daemon --config="$dir/rsyncd.conf" .

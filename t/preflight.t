@@ -262,6 +262,21 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     ok( $result->{ok}, 'and a local hypervisor is answered for by this machine' );
 };
 
+subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest can fetch from' => sub {
+    my $local = Test::MockModule->new('Trog::Local');
+
+    $local->redefine( sandbox_error => sub { undef } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
+    ok( $result->{ok}, 'a sandbox that bwrap makes passes' );
+
+    $local->redefine( sandbox_error => sub { 'bwrap could not make a sandbox: setting up uid map: Permission denied' } );
+    ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
+    ok( !$result->{ok}, 'one that it cannot fails' );
+    like( $result->{what}, qr/uid[ ]map:[ ]Permission[ ]denied/, 'with what bwrap said' );
+    like( $result->{fix},  qr/apt[ ]install[ ]bubblewrap/,       'and how to install it' );
+    like( $result->{fix},  qr/AppArmor/,                         'and what refuses it when it is installed' );
+};
+
 # Every other check can pass while this one cannot, and then the run dies
 # minutes in on a curl, naming the image URL rather than the permissions that
 # refused it.  That is how a hypervisor whose pool had just been moved onto a
