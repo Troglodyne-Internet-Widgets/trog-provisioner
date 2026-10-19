@@ -4,6 +4,10 @@ server {
 [% END -%]
 
     server_name autodiscover.[% domain %] autoconfig.[% domain %];
+[%# The listener for a proxy, when a public name names this vhost.  See
+    Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/autodiscover.[% domain %].80.conf*;
+    include /etc/nginx/proxied/autoconfig.[% domain %].80.conf*;
 
     location / {
         root [% install_dir %]/autodiscover.[% domain %]/;

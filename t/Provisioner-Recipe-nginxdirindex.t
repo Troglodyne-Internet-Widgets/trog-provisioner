@@ -44,8 +44,8 @@ my $conf = do { local ( @ARGV, $/ ) = "$dir/nginxdirindex.domain.conf"; <> }
 my @includes = $conf =~ m{^ \s* include \s+ (\S+) ; }xmg;
 is_deeply(
     \@includes,
-    [ map { ( '/etc/nginx/names/index.test.test.conf', "/etc/nginx/proxied/index.test.test.$_.conf" ) } 443, 80 ],
-    'each server block includes the names of the vhost of the domain, and the listener for a proxy on its port'
+    [ map { ( '/etc/nginx/names/index.test.test.conf', "/etc/nginx/proxied/index.test.test.$_.conf*" ) } 443, 80 ],
+    'each server block includes the names of the vhost of the domain, and the listener for a proxy on its port when there is one'
 );
 my @own = $conf =~ m{^ \s* server_name \s+ ([^;]+) ; }xmg;
 is_deeply( \@own, [ ('www.index.test.test') x 2 ], 'and names www, which this recipe serves, itself' );

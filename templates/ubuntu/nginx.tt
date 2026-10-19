@@ -6,17 +6,17 @@ rm -f /etc/nginx/names/[% domain %].conf
 mkdir -p /etc/nginx/names
 printf 'server_name %s;\n' '[% domain_names.join(' ') %]' > /etc/nginx/names/[% domain %].conf
 [% END -%]
-[%# What the vhost of the domain adds to its server blocks on 443 and 80 for a
-    proxy: a listener with the PROXY protocol, and the networks whose header it
-    believes.  Empty without public_names, because the vhost includes it either
-    way.  Provisioner::Recipe::nginx has the whole account. -%]
+[%# What each vhost that a public name names adds to its server blocks on 443
+    and 80 for a proxy: a listener with the PROXY protocol, and the names that it
+    answers for there.  A vhost includes the file of its name if there is one.
+    Provisioner::Recipe::nginx has the whole account. -%]
+rm -rf /etc/nginx/proxied
 mkdir -p /etc/nginx/proxied
-[% IF public_names.size() -%]
+[% IF proxied -%]
 install -o root -g root -m 0644 nginx_proxy_ufw.conf /etc/ufw/applications.d/nginx-proxy
-printf '%s\n' 'listen 8443 ssl proxy_protocol;'[% FOR net IN proxy_from %] 'set_real_ip_from [% net %];'[% END %] 'real_ip_header proxy_protocol;' > /etc/nginx/proxied/[% domain %].443.conf
-printf '%s\n' 'listen 8080 proxy_protocol;'[% FOR net IN proxy_from %] 'set_real_ip_from [% net %];'[% END %] 'real_ip_header proxy_protocol;' > /etc/nginx/proxied/[% domain %].80.conf
-[% ELSE -%]
-: > /etc/nginx/proxied/[% domain %].443.conf
-: > /etc/nginx/proxied/[% domain %].80.conf
+[% FOR vhost IN proxied.keys().sort() -%]
+printf '%s\n' 'listen 8443 ssl proxy_protocol;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].443.conf
+printf '%s\n' 'listen 8080 proxy_protocol;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].80.conf
+[% END -%]
 [% END -%]
 [% script_dir %]/queue_postrun_task systemctl reload nginx

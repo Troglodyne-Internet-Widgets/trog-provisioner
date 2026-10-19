@@ -5,8 +5,9 @@ server {
 
     server_name www.[% domain %];
     include /etc/nginx/names/[% domain %].conf;
-[%# The listener for a proxy.  See Provisioner::Recipe::nginx. -%]
-    include /etc/nginx/proxied/[% domain %].443.conf;
+[%# The listener for a proxy, when a public name names this vhost.  See
+    Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/[% domain %].443.conf*;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
@@ -30,7 +31,7 @@ server {
 
     server_name www.[% domain %];
     include /etc/nginx/names/[% domain %].conf;
-    include /etc/nginx/proxied/[% domain %].80.conf;
+    include /etc/nginx/proxied/[% domain %].80.conf*;
 
     root [% install_dir %]/[% domain %];
 

@@ -3,6 +3,9 @@ server {
 [% IF api_ipv6 %]    listen [::]:443 ssl;
 [% END -%]
     server_name dnsapi.[% domain %];
+[%# The listener for a proxy, when a public name names this vhost.  See
+    Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/dnsapi.[% domain %].443.conf*;
     server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
@@ -44,5 +47,6 @@ server {
 [% IF api_ipv6 %]    listen [::]:80;
 [% END -%]
     server_name dnsapi.[% domain %];
+    include /etc/nginx/proxied/dnsapi.[% domain %].80.conf*;
     return 301 https://$host$request_uri;
 }

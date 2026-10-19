@@ -8,8 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use List::Util qw{uniq};
-
 use Provisioner::IPPool();
 
 use parent qw{Provisioner::Recipe};
@@ -65,34 +63,38 @@ guest.
 
 =head2 Names that reach the guest through a proxy
 
-C<public_names> lists the names under which the internet reaches this guest
-through a proxy elsewhere, such as an edge guest on the VPN.  The proxy passes
-TLS through by its SNI name, so the guest keeps its own certificate.  It speaks
-the PROXY protocol, so the guest learns the address of the real client.
+C<public_names> maps each name under which the internet reaches this guest,
+through a proxy elsewhere such as an edge guest on the VPN, to the vhost that
+answers for it.  The proxy passes TLS through by its SNI name, so the guest
+keeps its own certificate.  It speaks the PROXY protocol, so the guest learns
+the address of the real client.
 
-    somedomain:
+    internal.somedomain:
         nginx:
             public_names:
-                - somedomain
-                - shop.somedomain
-                - www.customer.example
+                shop.internal.somedomain: internal.somedomain
+                webmail.customer.example: webmail.internal.somedomain
 
-The vhost of the domain answers for every public name, beside its other names.
-So a public name cannot be one that another vhost lists in C<sites>, and a
-guest with public names needs a vhost that serves the domain.
+The vhost is named by a name that a recipe lists in C<sites>.  A name that the
+vhost of the domain answers for, such as C<www> or an alias, names that vhost.
+The build stops when a vhost is in no C<sites>, when a public name is one that
+another vhost lists, and when a vhost is outside the zone of the domain, which
+is the domain or a name below it.
 
-A public name inside the zone of the domain, which is the domain or a name below
-it, joins the names that this recipe serves.  So the registrar publishes it,
-and letsencrypt puts it on the certificate, as for any other served name.  A
-public name outside that zone gets neither, because no DNS-01 challenge can
-answer for it.  Then C<public.$domain> joins the served names in its place.  It
-is published, certified and proxied, so the path through the proxy works before
-the owner of the outside name changes anything.
+Each vhost that a public name names also listens on 8443 with TLS and on 8080
+without, each with the PROXY protocol, where the proxy connects.  Its listeners
+on 443 and 80 stay as they are for the LAN.  A vhost that no public name names
+does not listen for the proxy at all, and a name that no vhost claims on those
+ports gets no answer.  The ufw application profile C<nginx-proxy> opens the two
+ports.
 
-The vhost of the domain also listens on 8443 with TLS and on 8080 without, each
-with the PROXY protocol, where the proxy connects.  The ufw application profile
-C<nginx-proxy> opens the two ports.  The listeners on 443 and 80 stay as they
-are for the LAN.
+A public name inside the zone of the domain joins the names that this recipe
+serves.  So the registrar publishes it, and letsencrypt puts it on the
+certificate, as for any other served name.  A public name outside that zone
+gets neither, because no DNS-01 challenge can answer for it.  Then
+C<public.VHOST> joins the served names in its place, and its vhost answers for
+it.  It is published, certified and proxied, so the path through the proxy
+works before the owner of the outside name changes anything.
 
 nginx believes the address in a PROXY header only from C<proxy_from>.  A client
 anywhere else that sends one keeps its own address in the logs.  The default of
@@ -111,7 +113,7 @@ sub rate_limits {
 
     # The proxy carries every client of the public names, so its listeners get
     # the limit of the ports it fronts.
-    %limits = ( %limits, 8080 => 1024, 8443 => 1024 ) if @{ $opts{public_names} // [] };
+    %limits = ( %limits, 8080 => 1024, 8443 => 1024 ) if %{ $opts{public_names} // {} };
     return %limits;
 }
 
@@ -146,16 +148,18 @@ sub args {
             },
 
             public_names => {
-                type        => 'array',
-                items       => { type => 'string', format => 'hostname' },
-                default     => [],
-                description => 'The names under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest.  The vhost of the domain answers for each.  A name in the zone of the domain is also published and certified.  For a name outside it, public.DOMAIN is published and certified instead.  See "Names that reach the guest through a proxy".',
+                type                 => 'object',
+                propertyNames        => { format => 'hostname' },
+                additionalProperties => { type   => 'string', format => 'hostname' },
+                default              => {},
+                description          =>
+                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain is also published and certified.  For a name outside it, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
             proxy_from => {
                 type        => 'array',
                 items       => { type => 'string' },
-                description => 'The networks, as CIDR blocks, whose PROXY header nginx believes.  The default is each network of ip_pool that a bin routes through an openvpn server.  Read only when public_names lists a name.',
+                description => 'The networks, as CIDR blocks, whose PROXY header nginx believes.  The default is each network of ip_pool that a bin routes through an openvpn server.  Read only when public_names has a name.',
             },
 
             sites => {
@@ -168,39 +172,76 @@ sub args {
     );
 }
 
-# The public names inside the zone of the domain, and those outside it, as two
-# arrayrefs.  The domain itself is inside.
-my sub public_names_by_zone (%opts) {
-    my $zone  = qr/(?:\A|[.])\Q$opts{domain}\E\z/i;
-    my @names = @{ $opts{public_names} // [] };
-    return ( [ grep { m/$zone/ } @names ], [ grep { !m/$zone/ } @names ] );
+# The vhost that answers for $name: the domain for a name of the vhost of the
+# domain, www or an alias, because that vhost includes the files of the domain
+# only, and otherwise $name.
+my sub vhost_of ( $name, %opts ) {
+    my %of_domain = map { $_ => 1 } "www.$opts{domain}", @{ $opts{aliases}{ $opts{domain} } // [] };
+    return $of_domain{$name} ? $opts{domain} : $name;
+}
+
+# The public names of each vhost, as a map of the vhost to the names.
+my sub public_names_by_vhost (%opts) {
+    my %by_vhost;
+    my $public = $opts{public_names} // {};
+    foreach my $name ( sort keys %$public ) {
+        push( @{ $by_vhost{ vhost_of( $public->{$name}, %opts ) } }, $name );
+    }
+    return %by_vhost;
+}
+
+my sub in_zone ( $name, $domain ) {
+    return $name =~ m/(?:\A|[.])\Q$domain\E\z/i;
+}
+
+# Each vhost that a public name names, mapped to every name that it answers
+# for on the ports of the proxy: the public names inside the zone of the
+# domain, then public.VHOST when a public name is outside it, then those
+# outside.
+my sub proxied_names (%opts) {
+    my %by_vhost = public_names_by_vhost(%opts);
+    my %names;
+    foreach my $vhost ( keys %by_vhost ) {
+        my @inside  = grep { in_zone( $_,  $opts{domain} ) } @{ $by_vhost{$vhost} };
+        my @outside = grep { !in_zone( $_, $opts{domain} ) } @{ $by_vhost{$vhost} };
+        $names{$vhost} = [ @inside, ( @outside ? "public.$vhost" : () ), @outside ];
+    }
+    return %names;
 }
 
 =head2 @names = $recipe->served_names(%opts)
 
-The names of the base class, then each of C<public_names> in the zone of the
-domain, then C<public.$domain> when a public name is outside that zone.  See
-L</Names that reach the guest through a proxy>.
+The names of the base class, then each public name in the zone of the domain,
+then C<public.VHOST> for each vhost that answers for a public name outside
+that zone.  See L</Names that reach the guest through a proxy>.
 
 =cut
 
 sub served_names {
     my ( $self, %opts ) = @_;
 
-    my ( $inside, $outside ) = public_names_by_zone(%opts);
-    return ( $self->SUPER::served_names(%opts), @$inside, ( @$outside ? "public.$opts{domain}" : () ) );
+    my %proxied = proxied_names(%opts);
+    return (
+        $self->SUPER::served_names(%opts),
+        map {
+            grep { in_zone( $_, $opts{domain} ) }
+              @{ $proxied{$_} }
+        } sort keys %proxied
+    );
 }
 
 =head2 %opts = $recipe->enrich(%opts)
 
-When a vhost serves the domain, adds C<domain_names>: the domain, each alias of
-it that no vhost lists, and each public name outside its zone.  When
-C<public_names> lists a name, fills in C<proxy_from> from C<ip_pool> if it is
-not set.
+When a vhost serves the domain, adds C<domain_names>: the domain, and each alias
+of it that no vhost lists and that is not a public name.  When C<public_names>
+has a name, adds C<proxied>, a map of each vhost that answers for a public name
+to the names that it answers for on the ports of the proxy, less the names that
+the vhost has already.  Then it fills in C<proxy_from> from C<ip_pool> if it is not set.
 
-Dies when two recipes list one name, when another vhost lists a public name,
-when there are public names and no vhost serves the domain, and when there are
-public names and no network to believe a PROXY header from.
+Dies when two recipes list one name, when a public name names a vhost that no
+recipe lists or one outside the zone of the domain, when another vhost lists a
+public name, and when there are public names and no network to believe a PROXY
+header from.
 
 =cut
 
@@ -213,13 +254,25 @@ sub enrich {
         die "nginx: invalid configuration: multiple recipes configured to serve $name\n" if $listed{$name} > 1;
     }
 
-    my @public = @{ $opts{public_names} };
-    if (@public) {
-        die "nginx: $opts{domain} has public_names, but no vhost on it serves $opts{domain}, and that vhost is the one that answers for them.\n"
-          unless $listed{ $opts{domain} };
-        my ($taken) = grep { $_ ne $opts{domain} && $listed{$_} } @public;
-        die "nginx: $taken is in public_names, but another vhost lists it in sites.  Only the vhost of $opts{domain} listens for the proxy.\n"
-          if defined $taken;
+    my %proxied = proxied_names(%opts);
+    if (%proxied) {
+        my %by_vhost = public_names_by_vhost(%opts);
+        foreach my $vhost ( sort keys %by_vhost ) {
+            my $name = $by_vhost{$vhost}[0];
+            die "nginx: $name is in public_names for $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n"
+              unless $listed{$vhost};
+            die "nginx: $name is in public_names for $vhost, which is outside the zone of $opts{domain}, so public.$vhost cannot be certified.\n"
+              unless in_zone( $vhost, $opts{domain} );
+            my ($taken) = grep { $listed{$_} && vhost_of( $_, %opts ) ne $vhost } @{ $by_vhost{$vhost} };
+            die "nginx: $taken is in public_names for $vhost, but another vhost lists it in sites.\n"
+              if defined $taken;
+        }
+        $opts{proxied} = {
+            map {
+                my $vhost = $_;
+                ( $vhost => [ grep { vhost_of( $_, %opts ) ne $vhost } @{ $proxied{$vhost} } ] )
+            } keys %proxied
+        };
 
         my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
         $opts{proxy_from} //= [ map { Provisioner::IPPool::blocks( $bins{$_} ) } grep { defined $bins{$_}{via} } sort keys %bins ];
@@ -228,8 +281,9 @@ sub enrich {
     }
 
     if ( $listed{ $opts{domain} } ) {
-        my ( undef, $outside ) = public_names_by_zone(%opts);
-        $opts{domain_names} = [ uniq( $opts{domain}, grep( { !$listed{$_} } $self->domain_aliases(%opts) ), @$outside ) ];
+        my %public;
+        $public{$_} = 1 foreach map { @$_ } values %{ $opts{proxied} // {} };
+        $opts{domain_names} = [ $opts{domain}, grep { !$listed{$_} && !$public{$_} } $self->domain_aliases(%opts) ];
     }
 
     return %opts;

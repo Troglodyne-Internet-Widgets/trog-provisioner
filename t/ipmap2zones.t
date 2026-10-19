@@ -57,7 +57,7 @@ File::Slurper::Temp::write_text(
     YAML::XS::Dump(
         {
             _base        => { _global    => \%GLOBAL },
-            'web.test'   => { nginxproxy => undef, nginx => { public_names => [qw{shop.web.test www.customer.test}] } },
+            'web.test'   => { nginxproxy => undef, nginx => { public_names => { 'shop.web.test' => 'web.test', 'www.customer.test' => 'web.test' } } },
             'post.test'  => { mail       => undef },
             'plain.test' => { ntp        => undef },
         }
@@ -102,7 +102,7 @@ subtest 'the zone carries the names that domain serves' => sub {
 
     like( $zone, qr/^www[.]web[.]test\.\s+IN\s+CNAME\s+\@/m,    'www, because nginxproxy serves it' )                                   or diag $zone;
     like( $zone, qr/^shop[.]web[.]test\.\s+IN\s+CNAME\s+\@/m,   'a public name of nginx in the zone, from the configuration of nginx' ) or diag $zone;
-    like( $zone, qr/^public[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'and public.DOMAIN, for its public name outside the zone' )             or diag $zone;
+    like( $zone, qr/^public[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'and public.VHOST, for its public name outside the zone' )              or diag $zone;
 
     # And absolute, which is the other thing this template gets wrong when
     # nobody is looking: $ORIGIN is the domain, so a relative name has it put
