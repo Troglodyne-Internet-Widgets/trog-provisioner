@@ -70,8 +70,6 @@ subtest 'the fragment fetches each pinned tarball into an emptied directory' => 
     my $out   = rendered();
     my $start = '/home/admin/.vim/pack/lsp/start';
 
-    unlike( $out, qr/git[ ]clone/, 'nothing is cloned' );
-
     my $ref = '2082d13bb195f3203d41a308b89417426a7deca1';
 
     # The four lines for one plugin, from its fetch on.

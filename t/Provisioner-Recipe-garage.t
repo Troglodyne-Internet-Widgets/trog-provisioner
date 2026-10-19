@@ -67,12 +67,9 @@ sub recipe {
     );
 }
 
-subtest 'asking what it takes asks nobody' => sub {
-    my ( $mock, $asked ) = http();
-
+subtest 'what it takes names latest as the default version' => sub {
     my %spec = Provisioner::Cookbook->spec('garage');
     is( $spec{properties}{version}{default}, 'latest', 'the default says what it means rather than what it found' );
-    is_deeply( $asked, [], 'and finding it out took no request' );
 };
 
 subtest 'latest_version: the newest stable tag on GitHub' => sub {

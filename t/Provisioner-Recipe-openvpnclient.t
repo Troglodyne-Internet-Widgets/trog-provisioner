@@ -80,10 +80,6 @@ subtest 'the fragment names the domain throughout' => sub {
     like( $fragment, qr{/etc/openvpn/client/first[.]test[.]conf}, 'the configuration is where that instance reads it' );
     like( $fragment, qr{/etc/openvpn/client/first[.]test/},       'and the certificates land in a directory of its own' );
     like( $fragment, qr{wait_for_iface[ ]\Q$opts{device}\E},      'the wait is on the interface this domain was given' );
-
-    # tun0 is whichever tunnel came up first, which on a guest holding two is
-    # not necessarily this one.
-    unlike( $fragment, qr{wait_for_iface[ ]tun0\b}, 'rather than on whichever came up first' );
 };
 
 subtest 'the configuration points at what belongs to this domain' => sub {

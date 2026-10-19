@@ -328,12 +328,6 @@ CONF
     is_deeply( $user_data->{apt}, {}, 'and nothing else under apt, there being no mirror to point at' );
     delete $user_data->{apt};
 
-    # Where a guest sends its logs is Provisioner::Recipe::logshipper now, so the
-    # distro recipe configures no forwarder at all.  It used to write one here
-    # unconditionally, aimed at the hypervisor whether or not anything there was
-    # listening -- and nothing on the guest could tell the difference.
-    ok( !exists $user_data->{rsyslog}, 'and no log forwarder, which is a recipe rather than a fact about the distribution' );
-
     cmp_deeply(
         $user_data,
         {

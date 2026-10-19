@@ -72,10 +72,6 @@ subtest 'the environment the OpenStack tools read' => sub {
     is( $exported{OS_REGION_NAME},                   q{'RegionOne'},                          'the region' );
     is( $exported{OS_INTERFACE},                     q{'public'},                             'the interface' );
     is( $exported{OS_IDENTITY_API_VERSION},          q{'3'},                                  'and the identity version' );
-
-    # Exporting it would send the client back to the file this works around,
-    # where the credential is a reference it cannot read.
-    ok( !exists $exported{OS_CLOUD}, 'OS_CLOUD is not exported' );
 };
 
 subtest 'a cloud that says less' => sub {

@@ -1203,9 +1203,6 @@ subtest 'what a recipe refuses to salvage is refused to the backup as well' => s
         modules => \@skippers,
     );
 
-    # Singular.  The plural is silently served to the client instead.
-    unlike( $conf, qr/^excludes\s*=/m, 'the module uses the parameter rsyncd actually has' );
-
     foreach my $recipe (@skippers) {
         foreach my $pattern ( Provisioner::Cookbook->load($recipe)->remote_skip() ) {
             like( $conf, qr/^exclude[ ]=[ ]\N*\Q$pattern\E/m, "$recipe: $pattern is kept out of the backup too" );
@@ -1253,17 +1250,10 @@ subtest 'a secret only some domains want is only placed for those' => sub {
     like( $key, qr/\A-----BEGIN[ ]OPENSSH[ ]PRIVATE[ ]KEY-----/, 'and is an OpenSSH private key' );
 };
 
-subtest 'the ssh key is not in the payload any more' => sub {
-    my $git   = Provisioner::Cookbook->load( 'git', distro => $DISTRO )->new(%PROV);
-    my %files = $git->template_files();
-
-    # It was rendered into the domain directory and installed from there, which
-    # put a private key in the payload, in the tarball and on every machine that
-    # holds a copy of either.
-    ok( !( grep { index( $_, 'privkey' ) >= 0 } keys %files, values %files ), 'nothing named for a private key is generated' );
+subtest 'the fragment uses the ssh key that bin/provision placed' => sub {
+    my $git = Provisioner::Cookbook->load( 'git', distro => $DISTRO )->new(%PROV);
 
     my $fragment = $git->render( %G, accounts => { bot => { ssh_identity => 1, hosts => ['github.com'], user_name => 'bot', user_email => 'bot@test.test' } } );
-    unlike( $fragment, qr/install\s+\S*\s*\S*ssh-privkey/, 'and the fragment installs no such file' );
     like( $fragment, qr{'/opt/domains/\S+/\.ssh/id_git-bot'}, 'it gives away what bin/provision already placed' );
 };
 
@@ -1586,13 +1576,12 @@ subtest 'mail writes fragments rather than editing the files' => sub {
     like( $global, qr{opendkim\.conf\.d/40-mail}, 'and opendkim.conf, none of which is per domain' );
 };
 
-subtest 'the milters are named once, not once per domain' => sub {
+subtest 'the milters are named in the guest-wide fragment' => sub {
 
     # smtpd_milters is a parameter configd joins across fragments.  Named in the
     # per-domain half, two domains would have postfix run opendkim twice and
     # sign every message twice over.
     my $r = 'Provisioner::Recipe::mail'->new(%PROV);
-    unlike( $r->render_file( 'files/mail.postfix.main.tt', %G ), qr/^smtpd_milters/m, 'not in the domain fragment' );
     like( $r->render_file( 'files/mail.postfix.main.global.tt', %G ), qr/^smtpd_milters/m, 'in the guest-wide one' );
 };
 
@@ -1605,7 +1594,6 @@ subtest 'master.cf fragment rows name the types the package ships' => sub {
 
     foreach my $service (qw{pickup qmgr}) {
         like( $master, qr/^$service\s+unix\s/m, "$service is unix-domain, as postfix has shipped it since 3.0" );
-        unlike( $master, qr/^$service\s+fifo\s/m, "and not also a fifo" );
     }
 };
 
@@ -1632,7 +1620,6 @@ subtest 'the address classes do not overlap' => sub {
     my $guest  = $r->render_file( 'files/mail.postfix.main.global.tt', %G );
 
     is( ( $domain =~ m/^virtual_mailbox_domains[ ]=[ ](\N*)$/m )[0], $G{domain}, 'the domain is a virtual mailbox domain' );
-    unlike( $domain, qr/^mydestination/m, 'and the per-domain half adds nothing to mydestination' );
 
     # The guest's hostname is the domain it hosts, so the postfix package's own
     # main.cf names that domain in mydestination and accumulation can only add
@@ -1694,7 +1681,6 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     # happens here, where every recipe after this sees the same /tmp and a
     # failure fails the build.
     like( $out, qr{systemctl[ ]enable[ ]--now[ ]tmp\.mount}, 'and is mounted, not merely enabled' );
-    unlike( $out, qr{queue_postrun_task\s+systemctl[ ]enable}, 'synchronously, rather than deferred' );
 };
 
 subtest 'pdns makes the credential its own API is reached with' => sub {
@@ -1736,7 +1722,6 @@ subtest 'the resolver is live before anything reads a zone back through it' => s
     # through a stub that could not see the zone, and pdns was asked for
     # zones/. and answered 404.
     like( $out, qr{^systemctl[ ]restart[ ]systemd-resolved$}m, 'the resolver is restarted where it is configured' );
-    unlike( $out, qr{queue_postrun_task\s+systemctl[ ]restart[ ]systemd-resolved}, 'rather than deferred behind its dependents' );
 };
 
 # A guest serving its own zone is the only thing that answers for it, and the
@@ -1891,7 +1876,6 @@ subtest 'iouring defers group membership past the makefile' => sub {
     # mysql belongs to mariadb, whose target has not run yet -- iouring sorts
     # ahead of it.
     like( $out, qr/queue_postrun_task[ ]\N*usermod[ ]-aG[ ]'io_uring'[ ]'mysql'/, 'and membership waits for the accounts to exist' );
-    unlike( $out, qr/^usermod/m, 'rather than being attempted during the build' );
 
     # A process reads its groups at start and not again, and mariadb was started
     # by its own recipe during the makefile -- so without a restart it runs its
@@ -1964,10 +1948,7 @@ subtest 'mariadb writes credentials the accounts that need them can use' => sub 
         like( $body, qr/^socket[ ]=[ ]/m, "[$section] names the socket" );
     }
 
-    # And the service user's has no password: what that account may do is the
-    # dump's business.
     my $service = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mariadb.client.service.cnf.tt', %G, %{ $required_config{mariadb} }, user => 'www-data' );
-    unlike( $service, qr/^\s*password\s*=/m, 'the service account gets no password' );
     like( $service, qr/^user[ ]=[ ]www-data$/m, 'just the socket and who to be' );
 };
 

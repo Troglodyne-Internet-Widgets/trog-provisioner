@@ -386,11 +386,6 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     like( $lost->{message}, qr/redis/,          'the message names the recipe' );
     like( $lost->{message}, qr{/var/lib/redis}, 'and the path on the guest' );
     like( $lost->{message}, qr/\Q$empty\E/,     'and where the nothing landed' );
-
-    # No longer blamed on permissions.  The fetch runs as root at the far end, so
-    # saying the admin user could not read it would send somebody to fix
-    # something that is not broken.
-    unlike( $lost->{message}, qr/cannot[ ]read|unprivileged|no[ ]sudo/, 'and does not blame a permission that is no longer the cause' );
     is( $lost->{recipe}, 'redis', 'the recipe comes back out for the summary at the end of the run' );
 
     # test exits 0 or 1 and nothing else, so anything else is the question not

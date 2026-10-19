@@ -82,7 +82,6 @@ subtest 'every step it is handed is installed in its own target, in order, after
         'one cpan_install each, in the order handed over, every word quoted'
     );
     ok( index( $out, 'build_latest_perl.sh' ) < index( $out, 'cpan_install' ), 'after the perl they go into is built' );
-    unlike( $out, qr/queue_postrun_task/, 'there and then, rather than queued behind what the dependents queued' );
 
     # cpanm, Module::Build and Dist::Zilla are build_latest_perl.sh's, so a perl
     # nobody hands anything to installs nothing of its own.

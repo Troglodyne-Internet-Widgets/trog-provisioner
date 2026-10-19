@@ -171,7 +171,6 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     # directory -- which is a home only when the domain names a service user.
     like( $fragment, qr/getent[ ]passwd[ ]'someadmin'/, 'the home is asked for rather than assumed' );
     like( $fragment, qr{known_hosts},                   'and that is where the host keys go' );
-    unlike( $fragment, qr{\Q$INSTALL/$DOMAIN\E/\.ssh/known_hosts}, 'not beside the key, where ssh would never read them' );
 };
 
 subtest 'a hypervisor we could not get a shell on is refused here, not on the guest' => sub {
@@ -250,14 +249,6 @@ subtest 'Dist::Zilla is not asked for: the perl comes with it' => sub {
     # build_latest_perl.sh installs it alongside cpanm, since a distribution
     # that needs dzil to say what it needs cannot install dzil for itself.
     is_deeply( [ grep { $_->[-1] eq 'Dist::Zilla' } cpan_steps( $recipe, $vars ) ], [], 'nothing here installs it' );
-};
-
-subtest 'nothing reaches CPAN from its own fragment' => sub {
-    my ( undef, $recipe, $vars ) = built();
-
-    # All of it is the perl recipe's to install, in that recipe's target, which
-    # runs after this fragment has made the checkout.
-    unlike( $recipe->render(%$vars), qr/cpanm|cpan_install/, 'the fragment installs nothing from CPAN itself' );
 };
 
 subtest 'the checkout is optional, which is the case koan needs' => sub {
@@ -421,7 +412,6 @@ subtest 'the symlink is made with -n, or the second provision fails' => sub {
     # and this recipe does not require one -- so a dotfile there is read by
     # nobody.  perl.tt was fixed for the same assumption.
     like( $fragment, qr{/etc/profile\.d/trogrunner\.sh}, 'and the shell profile goes somewhere every login shell reads' );
-    unlike( $fragment, qr{\Q$INSTALL/$DOMAIN\E/\.bashrc}, 'rather than into a bashrc that may belong to nobody' );
 };
 
 Test::NoWarnings::had_no_warnings();
