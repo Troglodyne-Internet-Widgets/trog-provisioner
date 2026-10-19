@@ -47,7 +47,10 @@ chmod 0600 /root/.ssh/config
 # over /tmp while this script runs, and the mount hides the tarball and the
 # build tree.  make continues in the directory it holds open, but the rm below
 # then removes nothing.
-scp -P [% transfer_port %] -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null [% transfer_user %]\@[% transfer_ip %]:[% payload_dir %]/[% domain %]/data.tar.gz /var/tmp
+#
+# rsync from a module, not scp, because the key of the guest reaches only the
+# modules that bin/new_config wrote for it.  See Provisioner::Recipe::data.
+rsync -e 'ssh -p [% transfer_port %] -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' [% transfer_user %]\@[% transfer_ip %]::payload.[% domain %]/data.tar.gz /var/tmp
 
 cd /var/tmp
 mkdir domainsetup_[% domain %]

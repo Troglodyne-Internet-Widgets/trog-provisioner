@@ -8,7 +8,7 @@ mkdir -p /etc/openvpn/client/[% domain %]
 umask 077 && base64 -d /etc/openvpn/client/[% domain %]/issued.ovpn.b64 | awk -v dir=/etc/openvpn/client/[% domain %] 'BEGIN { name["ca"] = "ca.crt"; name["cert"] = "client.crt"; name["key"] = "client.key"; name["tls-auth"] = "ta.key" } /^<[a-z-]+>$$/ { file = dir "/" name[substr($$0, 2, length($$0) - 2)]; next } /^<\// { file = ""; next } file != "" { print > file }'
 [% ELSE -%]
 # Fetch the client certificates with rsync
-rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]:[% cert_dir %]/ /etc/openvpn/client/[% domain %]/
+rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]::cert_dir.[% domain %]/ /etc/openvpn/client/[% domain %]/
 [% END -%]
 chmod 0600 /etc/openvpn/client/[% domain %]/client.key /etc/openvpn/client/[% domain %]/ta.key
 chown root:root /etc/openvpn/client/[% domain %]/client.key /etc/openvpn/client/[% domain %]/ta.key

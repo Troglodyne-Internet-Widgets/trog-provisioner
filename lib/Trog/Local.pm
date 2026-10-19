@@ -21,7 +21,7 @@ Trog::Local - this machine, the one that a guest fetches its payload from
 
     my $this_machine = Trog::Local->new();
 
-    $this_machine->append_line( $this_machine->authorized_keys, $pubkey );
+    $this_machine->replace_line( $this_machine->authorized_keys, $pubkey, $line );
     my @reachable = $this_machine->transfer_ips( $guest_ip, $hv->virbr_ip );
 
 =head1 DESCRIPTION
@@ -29,7 +29,8 @@ Trog::Local - this machine, the one that a guest fetches its payload from
 This is the machine that runs this tool.  L<Trog::HV> is the hypervisor, and
 L<Trog::Guest> is the virtual machine.  This machine is the third one.  It holds
 the payload of a guest: the domain directory and the data directory.  The guest
-copies both from here.
+copies both from here, through the rsync modules that its key is restricted to.
+See L<Provisioner::Recipe::data/What the key of the guest reaches>.
 
 L<Trog::Machine> supplies the transfer user, its C<authorized_keys> and the sshd
 port.  Here, C<is_local> is true, so each of those is a local filesystem call or

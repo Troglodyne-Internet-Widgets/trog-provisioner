@@ -891,6 +891,10 @@ sub handle_domain {
 
     my %builders;
 
+    # Each directory of this machine that the guest fetches, by the rsync
+    # module that serves it.  See write_rsyncd_conf.
+    my %fetched;
+
     # In Provisioner::Cookbook, so that bin/new_guest gets the same answer.
     my ( $solved, $built, $required_by ) = Provisioner::Cookbook->resolve_dependencies(
         modules       => \@modules,
@@ -985,6 +989,13 @@ sub handle_domain {
         # Collected for one lookup below, so that a run asks for the password of
         # the store one time.  They go through the store, not the payload.
         %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ) );
+
+        my %sources = $builder->fetch_sources(%$pconf);
+        foreach my $name ( sort keys %sources ) {
+            die "$module serves $sources{$name} to $fqdn as the rsync module $name, which " . ( $fetched{$name} ? "already serves $fetched{$name}" : 'is the name of what every guest fetches' ) . "\n"
+              if $fetched{$name} || $name eq 'data' || $name eq 'payload';
+            $fetched{$name} = $sources{$name};
+        }
 
         foreach my $d ( $builder->datadirs() ) {
             make_path("$data_dir/$d") unless -d "$data_dir/$d";
@@ -1166,7 +1177,6 @@ sub handle_domain {
         ips           => [ grep { defined } $static_ip ],
         gateway       => $gateway,
         contact_email => $admin_email,
-        payload_dir   => $basedir,
         ( defined $dryrun ? ( dryrun         => $dryrun )                            : () ),
         ( %guest_secrets  ? ( secrets_marker => Trog::Guest->secrets_marker($fqdn) ) : () ),
         modules => \@modules,
@@ -1203,7 +1213,6 @@ sub handle_domain {
         transfer_ip=$transfer_ip
         transfer_user=$transfer_user
         transfer_port=$transfer_port
-        payload_dir=$basedir
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
     $pconf .= placement_lines( $hv, $global_config );
@@ -1251,6 +1260,7 @@ sub handle_domain {
     # Also when it is empty, because the rsync of the data target fails on a
     # source that is not there, and stops the Makefile.
     make_path($data_dir) unless -d $data_dir;
+    write_rsyncd_conf( "$basedir/$machine", $fqdn, payload => $cfg_dir, data => $data_dir, %fetched );
 
     # Again at the end, where the operator looks.  A warning, not a stop: see
     # salvage_gaps.
@@ -1384,6 +1394,49 @@ sub write_guest_secrets {
     print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- " . ( $manifest{$_}{ref} // "issued by $manifest{$_}{issue}{guest}" ) . "\n" } sort keys %manifest );
 
     return \%held;
+}
+
+=head2 write_rsyncd_conf($machine_dir, $fqdn, %modules)
+
+Writes what the guest of C<$fqdn> can fetch from this machine.
+C<$machine_dir> is the domain directory of the domain whose guest runs it,
+which is a host for a tenant, and C<$fqdn> itself otherwise.  C<bin/provision>
+authorizes the key of that guest only for C<rsync --daemon> with
+F<rsyncd.conf> in C<$machine_dir>.  So the guest can fetch these directories and
+nothing else of this machine.
+
+F<rsyncd.conf> holds the defaults and includes each file of F<rsyncd.d>, the
+part of each domain on the guest.  This writes F<rsyncd.d/$fqdn.conf> with one
+read-only module for each name in C<%modules>, called C<NAME.$fqdn>, which
+serves the directory of this machine that the name maps to.  The domain is in
+the name because the domains of one guest share the modules of one key.
+
+The module C<payload> serves only F<data.tar.gz>, because the same directory
+holds files that the guest must not get.  The daemon runs as the account that
+the guest connects to, so there is no chroot.  It refuses the options that make
+the sender follow a symlink, because a symlink can point out of the module.
+
+Dies if a name is not a word, or if a path holds a line break, which ends a
+line of the file.
+
+=cut
+
+sub write_rsyncd_conf {
+    my ( $machine_dir, $fqdn, %modules ) = @_;
+
+    my $part = q{};
+    foreach my $name ( sort keys %modules ) {
+        die "'$name' is not a name for an rsync module\n" unless $name =~ m/\A\w+\z/;
+        die "The path of the rsync module $name has a line break in it\n" if $modules{$name} =~ m/\n/;
+
+        $part .= "[$name.$fqdn]\npath = $modules{$name}\n";
+        $part .= "include = /data.tar.gz\nexclude = *\n" if $name eq 'payload';
+    }
+
+    make_path("$machine_dir/rsyncd.d");
+    File::Slurper::Temp::write_text( "$machine_dir/rsyncd.d/$fqdn.conf", $part );
+    File::Slurper::Temp::write_text( "$machine_dir/rsyncd.conf",         "use chroot = no\nread only = yes\nlist = no\nrefuse options = copy-links copy-dirlinks copy-unsafe-links keep-dirlinks\n&include $machine_dir/rsyncd.d\n" );
+    return;
 }
 
 =head2 restore_sealed_key($fqdn, $cfg_dir)

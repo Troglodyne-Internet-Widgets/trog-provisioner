@@ -64,7 +64,7 @@ sub deps {
 
 sub fetch_sources {
     my ( $self, %opts ) = @_;
-    return defined $opts{skel} ? ( $opts{skel} ) : ();
+    return defined $opts{skel} ? ( skel => $opts{skel} ) : ();
 }
 
 sub tests {

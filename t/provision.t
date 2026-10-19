@@ -232,12 +232,13 @@ subtest 'a dry run of a guest that is not there yet' => sub {
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/rsyncd.conf", "list = no\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     $hv->redefine( domain_dir    => sub { $dir } );
     $hv->redefine( domain_exists => sub { 0 } );
     $hv->redefine( describe      => sub { 'the cloud' } );
-    $loc->redefine( append_line => sub { 1 } );
+    $loc->redefine( replace_line => sub { 0 } );
 
     # If anything asks, that is the bug: there is no guest to ask about.
     my $asked = 0;
@@ -281,7 +282,7 @@ subtest 'a dry run applies nothing' => sub {
     $hv->redefine( write_text        => sub { push( @applied, 'write_text' );        1 } );
     $hv->redefine( put_file          => sub { push( @applied, 'put_file' );          1 } );
     $hv->redefine( run_sudo          => sub { push( @applied, 'run_sudo' );          0 } );
-    $loc->redefine( append_line => sub { push( @applied, 'append_line' ); 1 } );
+    $loc->redefine( replace_line => sub { push( @applied, 'replace_line' ); 0 } );
 
     # The parts a dry run is supposed to do, faked out so the run reaches the end.
     $hv->redefine( virbr_device => sub { 'virbr0' } );
@@ -300,6 +301,7 @@ subtest 'a dry run applies nothing' => sub {
     # that is up has its public half.
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/rsyncd.conf", "list = no\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     my $config = Config::Simple->new( syntax => 'simple' );
@@ -364,7 +366,8 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     $hv->redefine( run_sudo             => sub { push( @applied, 'run_sudo' ); 0 } );
     $hv->redefine( define_domain        => sub { push( @applied, 'define_domain' ); 1 } );
     $hv->redefine( cloudinit_iso        => sub { my ( undef, undef, %f ) = @_; %seeded = %f; return '/bogus/pool/seed.iso' } );
-    $loc->redefine( append_line => sub { push( @applied, 'append_line' ); 1 } );
+    my @authorized;
+    $loc->redefine( replace_line => sub { push( @applied, 'replace_line' ); push( @authorized, [ @_[ 2, 3 ] ] ); 0 } );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
@@ -378,6 +381,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
         'meta-data'      => "instance-id: vm.test\n",
         'network-config' => "network:\n  version: 1\n",
         'key.rsa.pub'    => "ssh-rsa AAAA nobody\n",
+        'rsyncd.conf'    => "list = no\n",
     );
     File::Slurper::Temp::write_text( "$dir/vm.test/$_", $wrote{$_} ) for keys %wrote;
 
@@ -403,7 +407,11 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     unlike( $xml, qr/\[%/, 'with nothing of the template left in it' );
 
     ok( ( grep { $_ eq 'define_domain' } @applied ), 'and the domain was defined from it' );
-    ok( ( grep { $_ eq 'append_line' } @applied ),   "the guest's key was authorized on the machine holding the payload" );
+    is_deeply(
+        \@authorized,
+        [ [ 'ssh-rsa AAAA nobody', qq{command="rsync --server --daemon --config=$dir/vm.test/rsyncd.conf .",restrict ssh-rsa AAAA nobody} ] ],
+        "the guest's key was authorized on the machine holding the payload, for the rsync modules of the domain and nothing else"
+    );
 
     # Provisioning used to write a per-domain rsyslog drop-in onto the hypervisor
     # and restart rsyslog there, on every build, for a listener that on this
@@ -455,13 +463,13 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     $hv->redefine( put_file               => sub { 1 } );
     $hv->redefine( run_sudo               => sub { 0 } );
     $hv->redefine( cloudinit_iso          => sub { '/bogus/pool/seed.iso' } );
-    $loc->redefine( append_line => sub { 1 } );
+    $loc->redefine( replace_line => sub { 0 } );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
-      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ];
+      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ];
 
     my $config = Config::Simple->new(
         conf(
@@ -542,13 +550,13 @@ sub rebuild_answering {
     $hv->redefine( write_text           => sub { 1 } );
     $hv->redefine( put_file             => sub { 1 } );
     $hv->redefine( run_sudo             => sub { 0 } );
-    $loc->redefine( append_line => sub { 1 } );
+    $loc->redefine( replace_line => sub { 0 } );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
-      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ];
+      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ];
 
     my $config = Config::Simple->new(
         conf(
@@ -747,7 +755,7 @@ my sub layered (%params) {
     # The guest-side work has subtests of its own; this is about which machine
     # that work is aimed at.
     $bin->redefine( read_seed             => sub { () } );
-    $bin->redefine( authorize_guest_key   => sub { 1 } );
+    $bin->redefine( authorize_guest_key   => sub { $seen{authorized} = $_[0]; 1 } );
     $bin->redefine( refresh_cloud_init    => sub { 1 } );
     $bin->redefine( merge_guest_addresses => sub { 1 } );
     $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
@@ -773,6 +781,7 @@ subtest 'a domain layered onto the guest built for another' => sub {
     # that name, which does not either.
     is( $seen{host}, '192.168.122.50', 'is reached where provisioning that one left it' );
     like( $seen{key}, qr{/foo[.]test/key[.]rsa\z}, "and opened with that guest's own key" );
+    is( $seen{authorized}, 'foo.test', 'whose key is the one let in to fetch the payload of this domain, because the guest of foo.test fetches it' );
 
     is_deeply( $seen{cleared}, ['bar.test'], "any VM still standing under this domain's own name is taken away" );
     ok( $seen{finished}, 'and the reprovision runs to the end' );
@@ -784,6 +793,7 @@ subtest 'a domain reprovisioned onto a guest of its own' => sub {
 
     is( $seen{host}, '192.168.122.50', 'is reached at the address --existing named' );
     is_deeply( $seen{cleared}, [], 'and nothing is annihilated, that name being the machine itself' );
+    is( $seen{authorized}, 'vm.test', 'and its own key is let in again, so that a guest from before the restriction gets it' );
     ok( $seen{finished}, 'while the reprovision still runs to the end' );
 };
 

@@ -49,6 +49,39 @@ of its own.  A configuration that gives C<data> a C<to> or a C<from> is refused.
 The recipes say what it puts back, and where.  See C<restores> in
 L<Provisioner::Recipe>.
 
+=head2 What the key of the guest reaches
+
+The guest fetches from this machine with its own key, as C<transfer_user>.
+C<bin/provision> authorizes that key for one forced command, C<rsync --daemon>
+with the F<rsyncd.conf> that C<bin/new_config> writes into the domain directory.
+The key gets no shell, and no forwarding.  It reaches these rsync modules, each
+named for the domain, and nothing else of this machine:
+
+=over 4
+
+=item C<payload.DOMAIN>
+
+F<data.tar.gz> in the domain directory, which F<setup.sh> fetches.  Nothing
+else in that directory, which also holds the key and the manifest of secrets.
+
+=item C<data.DOMAIN>
+
+The data directory of the domain, which this recipe fetches.
+
+=item C<NAME.DOMAIN>
+
+Each directory that a recipe names in C<fetch_sources>, for example the C<skel>
+of L<Provisioner::Recipe::adminconfig>.
+
+=back
+
+A tenant is built on the guest of its host, with the key of the host.  So
+F<rsyncd.conf> is in the directory of the host, and it includes the modules of
+each domain on that guest.  See C<write_rsyncd_conf> in F<bin/new_config>.
+
+A guest built before this restriction has a line in F<authorized_keys> without
+it.  The next build of the guest replaces that line.
+
 =cut
 
 sub args {

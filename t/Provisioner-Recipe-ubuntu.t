@@ -81,7 +81,6 @@ sub settings (%overrides) {
         transfer_ip   => '192.168.122.251',
         transfer_port => 22,
         transfer_user => 'transfer',
-        payload_dir   => '/bogus/domains',
 
         # What bin/new_config hands over as the ip pool's assignments, which is
         # how a mirror named by bare domain gets resolved to an address.
@@ -187,11 +186,10 @@ subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     unlike( $setup, qr/\[%/, 'the setup script has nothing of the template left in it' );
     like( $setup, qr/\Q$DOMAIN\E/, 'and knows which domain it is fetching for' );
 
-    # It fetches from whoever wrote the payload, which is this machine, at the
-    # basedir of the installation.  It used to be told the hypervisor's domain_dir,
-    # which has been the wrong machine since the guest stopped fetching from
-    # there -- the same path only by both of them defaulting to /opt/domains.
-    like( $setup, qr{transfer\N\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    # It fetches from whoever wrote the payload, which is this machine, through
+    # the module that bin/new_config writes for the domain.
+    # t/new_config-rsyncd.t has what that module serves.
+    cmp_ok( index( $setup, "transfer\\\@192.168.122.251::payload.$DOMAIN/data.tar.gz" ), '>=', 0, 'from the machine holding the payload, through the module of the domain' ) or diag $setup;
 };
 
 # bin/provision places the secrets over ssh while cloud-init runs, so setup.sh

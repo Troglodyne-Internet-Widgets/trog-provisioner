@@ -1023,7 +1023,7 @@ sub provision_domain (%args) {
 
     my $hv = Trog::HV->new();
 
-    # read_seed and authorize_guest_key read the domain from $config.
+    # read_seed reads the domain from $config.
     $config->param( 'domain', $domain );
 
     # A dry run stops here.  It has no ISO for the seed and no machine to tell
@@ -1041,7 +1041,7 @@ sub provision_domain (%args) {
 
     # The guest fetches its payload from this machine, so let its key in.
     my %seed = read_seed($config);
-    authorize_guest_key($config);
+    authorize_guest_key($domain);
 
     # All that provision.conf says, as a plain hash for a recipe, without the
     # "default." that Config::Simple puts in front of each key.  Not
@@ -1135,6 +1135,11 @@ sub reprovision_guest (%args) {
 
     refresh_cloud_init( $guest, $domain_dir, $domain, $config->param('distro') );
     merge_guest_addresses( guest => $guest, hv => $hv, config => $config, domain_dir => $domain_dir, domain => $domain, built_for => $built_for );
+
+    # Again on a rebuild, because new_config wrote the modules of this domain,
+    # and a guest built before the key was restricted still has a line that is
+    # not.
+    authorize_guest_key($built_for);
 
     print "Syncing setup script\n";
     $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
@@ -1284,11 +1289,21 @@ sub read_seed {
     return map { $_ => scalar File::Slurper::read_text("$dir/$_") } @files;
 }
 
-=head2 authorize_guest_key($config)
+=head2 authorize_guest_key($machine)
 
-Adds the public key of the guest to the F<authorized_keys> of this machine,
-which holds the payload of the guest.  It returns 1.  It dies if it cannot read
-F<key.rsa.pub> in the domain directory, or if it cannot add the line.
+Lets the key of the guest of the domain C<$machine> into the F<authorized_keys>
+of this machine, which holds the payload of the guest.  For a tenant,
+C<$machine> is its host, because the guest of the host fetches the payload of
+the tenant.  The line forces C<rsync --daemon> with the F<rsyncd.conf> that
+C<bin/new_config> wrote into the directory of C<$machine>, and
+C<restrict> takes away the terminal and every kind of forwarding.  So the key can
+fetch the modules of that file and do nothing else here.  The line replaces any
+other line with the key, such as the unrestricted line of an older build,
+because sshd uses the first line that matches.  It returns 1.
+
+It dies if it cannot read F<key.rsa.pub> or F<rsyncd.conf> in the domain
+directory, or if it cannot write the line.  See C<replace_line> in
+L<Trog::Machine>.
 
 The change is to this machine and not to the domain directory.  That is why it
 is here and not in the recipe that makes the key.  F<bin/destroy> removes the
@@ -1300,15 +1315,17 @@ A dry run never gets here, for the same reason as C<authorize_runner_key>.
 =cut
 
 sub authorize_guest_key {
-    my ($config) = @_;
+    my ($machine) = @_;
 
-    my $domain = $config->param('domain');
-    my $pubkey = File::Slurper::read_text( Trog::HV->new()->domain_dir . "/$domain/key.rsa.pub" );
+    my $dir    = Trog::HV->new()->domain_dir . "/$machine";
+    my $pubkey = File::Slurper::read_text("$dir/key.rsa.pub");
     chomp $pubkey;
 
+    die "$dir/rsyncd.conf is not there, so the key of $machine would reach nothing.  Run bin/new_config $machine again.\n"
+      unless -f "$dir/rsyncd.conf";    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- a directory of that name is no configuration
+
     my $this_machine = Trog::Local->new();
-    $this_machine->append_line( $this_machine->authorized_keys, $pubkey )
-      or die "Could not authorize the key for $domain on " . $this_machine->describe . "\n";
+    $this_machine->replace_line( $this_machine->authorized_keys, $pubkey, qq{command="rsync --server --daemon --config=$dir/rsyncd.conf .",restrict $pubkey} );
     return 1;
 }
 

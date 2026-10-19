@@ -1163,7 +1163,8 @@ sub check_fetch_sources {
             my $opts = $recipes->{$name} // {};
             next unless ref $opts eq 'HASH';
 
-            foreach my $path ( eval { $class->fetch_sources(%$opts) } ) {
+            my %paths = eval { $class->fetch_sources(%$opts) };
+            foreach my $path ( values %paths ) {
                 next unless $path;
                 $wanted{$path}{$name} = 1;
             }

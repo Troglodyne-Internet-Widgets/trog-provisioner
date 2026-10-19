@@ -1159,10 +1159,15 @@ sub enrich {
     return %opts;
 }
 
-=head3 @paths = $recipe->fetch_sources(%opts)
+=head3 %paths = $recipe->fetch_sources(%opts)
 
-Directories on I<this machine> that the guest rsyncs from.  C<bin/preflight>
-calls this to make sure that they exist before a run starts.
+Directories on I<this machine> that the guest rsyncs from, each by the name of
+the rsync module that serves it.  C<bin/new_config> serves each one to the guest
+as that module, and nothing else of this machine.  The fragment fetches it as
+C<transfer_user@transfer_ip::NAME.DOMAIN/>.  So a name must be unique among the
+recipes of a domain, and C<data> and C<payload> are taken.  See
+C<write_rsyncd_conf> in F<bin/new_config>.  C<bin/preflight> calls this
+to make sure that the directories exist before a run starts.
 
 A recipe that ships files of the operator, such as the C<skel> of
 C<adminconfig> or the C<cert_dir> of C<openvpnclient>, names a path that nothing
