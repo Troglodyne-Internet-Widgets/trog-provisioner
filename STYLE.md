@@ -45,6 +45,8 @@ block, and it refuses a netmask that is not a run of ones and then zeros.
 Do not step through the addresses of a block with `++` on a `Net::IP` object.
 It takes about a millisecond for each address, so a /16 takes most of a
 minute.  Get the first and the last address, and count integers between them.
+`Provisioner::IPPool::address_to_int` and `int_to_address` convert in each
+direction.
 
 Use `Socket` for the address of a socket, and `inet_pton` with `inet_ntop` for
 one spelling of an address.  A test under `templates/tests/` runs under the

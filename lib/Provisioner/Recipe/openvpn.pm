@@ -10,7 +10,6 @@ use re '/aasx';
 
 use Net::CIDR();
 use Net::IP qw{$IP_A_IN_B_OVERLAP $IP_IDENTICAL $IP_NO_OVERLAP};
-use Socket  qw{inet_aton inet_ntoa};
 
 use Provisioner::IPPool();
 
@@ -347,15 +346,14 @@ my sub mask ($prefix) {
 # length, so that 192.0.2.5/24 gives 192.0.2.0 and 24.
 my sub network ($block) {
     my ( $address, $prefix ) = $block =~ m{\A(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})\z};
-    my $packed = defined $prefix && $prefix <= 32 && inet_aton($address);
-    die "'$block' is not an IPv4 CIDR block\n" unless $packed;
+    die "'$block' is not an IPv4 CIDR block\n" if !defined $prefix || $prefix > 32;
 
-    return ( inet_ntoa( pack( 'N', unpack( 'N', $packed ) & mask($prefix) ) ), $prefix );
+    return ( Provisioner::IPPool::int_to_address( Provisioner::IPPool::address_to_int($address) & mask($prefix) ), $prefix );
 }
 
 # The first and the last address of a CIDR block, as integers.
 my sub range ($block) {
-    return map { unpack( 'N', inet_aton($_) ) } split /-/, ( Net::CIDR::cidr2range($block) )[0];
+    return map { Provisioner::IPPool::address_to_int($_) } split /-/, ( Net::CIDR::cidr2range($block) )[0];
 }
 
 # Whether every address of the CIDR block $block is in the CIDR block $net.
@@ -381,7 +379,7 @@ because C<ifconfig-pool> takes one.
 sub dynamic_pool ( $subnet, $cidr, @blocks ) {
     my $net = join( '/', network("$subnet/$cidr") );
     my ( $first, $last ) = range($net);
-    my @reserved = map { inet_ntoa( pack( 'N', $_ ) ) } $first, $first + 1;
+    my @reserved = map { Provisioner::IPPool::int_to_address($_) } $first, $first + 1;
 
     my @taken;
     foreach my $block (@blocks) {
@@ -406,7 +404,7 @@ sub dynamic_pool ( $subnet, $cidr, @blocks ) {
     die "The bins that route through this openvpn server split $net in two, and openvpn hands out one range: put them at its top end\n"
       if @free > 1;
 
-    return { start => inet_ntoa( pack( 'N', $free[0][0] ) ), end => inet_ntoa( pack( 'N', $free[0][1] ) ) };
+    return { start => Provisioner::IPPool::int_to_address( $free[0][0] ), end => Provisioner::IPPool::int_to_address( $free[0][1] ) };
 }
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -463,8 +461,8 @@ sub enrich {
             }
 
             my $half = 2**( 31 - $prefix );
-            my $base = unpack( 'N', inet_aton($address) );
-            push @routes, map { inet_ntoa( pack( 'N', $base + $_ * $half ) ) . '/' . ( $prefix + 1 ) } 0, 1;
+            my $base = Provisioner::IPPool::address_to_int($address);
+            push @routes, map { Provisioner::IPPool::int_to_address( $base + $_ * $half ) . '/' . ( $prefix + 1 ) } 0, 1;
         }
         push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $_->{addresses} ) for @bins{ sort keys %bins };
 
@@ -484,7 +482,7 @@ sub enrich {
     $opts{pushes} = [
         map {
             my ( $address, $prefix ) = network($_);
-            +{ network => $address, netmask => inet_ntoa( pack( 'N', mask($prefix) ) ) }
+            +{ network => $address, netmask => Provisioner::IPPool::int_to_address( mask($prefix) ) }
         } @{ $opts{routes} }
     ];
 

@@ -60,6 +60,10 @@ ip_pool:
             via: vpn.$domain
 ```
 
+Here `192.0.2.0/24` is the subnet of the primary bridge, which the guests get
+their static addresses from.  `10.8.0.0/24` is the tunnel subnet of the openvpn
+server, its default `subnet` and `netmask`, and the bin is its top half.
+
 A domain whose `openvpnclient` names `issue_from: vpn.$domain` gets an address
 from that bin when it is built, and the server gives that address to it at
 each connect.  Each guest gets a route to the bin through `vpn.$domain` at

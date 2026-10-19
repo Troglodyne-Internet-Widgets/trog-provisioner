@@ -459,4 +459,23 @@ subtest 'pool_ips leaves the network and broadcast addresses alone' => sub {
     is( scalar @wide, 4094, 'and holds each of its hosts once' );
 };
 
+subtest 'address_to_int and int_to_address: an address and its integer' => sub {
+    my %pairs = ( '0.0.0.0' => 0, '0.0.1.0' => 256, '10.8.0.129' => 168296577, '255.255.255.255' => 4294967295 );
+    foreach my $address ( sort keys %pairs ) {
+        is( Provisioner::IPPool::address_to_int($address),           $pairs{$address}, "$address is $pairs{$address}" );
+        is( Provisioner::IPPool::int_to_address( $pairs{$address} ), $address,         "and $pairs{$address} is $address" );
+    }
+
+    foreach my $bad ( qw{256.0.0.1 10.8.0 localhost}, q{}, undef ) {
+        my $shown = $bad // 'undef';
+        like( exception { Provisioner::IPPool::address_to_int($bad) }, qr/is[ ]not[ ]an[ ]IPv4[ ]address\n\z/, "'$shown' is not an address, and no name is resolved" );
+    }
+
+    # pack N wraps a number outside the range, so 2**32 would be 0.0.0.0.
+    foreach my $bad ( -1, 4294967296, 1.5, 'ten', undef ) {
+        my $shown = $bad // 'undef';
+        like( exception { Provisioner::IPPool::int_to_address($bad) }, qr/is[ ]not[ ]an[ ]IPv4[ ]address[ ]as[ ]an[ ]integer/, "$shown is refused" );
+    }
+};
+
 done_testing;

@@ -122,8 +122,8 @@ sub pool_ips {
 
         # Integers rather than ++ on the Net::IP object, which costs about a
         # millisecond for each address.
-        my ( $first, $last ) = map { unpack( 'N', Socket::inet_aton($_) ) } $net->ip, $net->last_ip;
-        my @block = map { Socket::inet_ntoa( pack( 'N', $_ ) ) } $first .. $last;
+        my ( $first, $last ) = map { address_to_int($_) } $net->ip, $net->last_ip;
+        my @block = map { int_to_address($_) } $first .. $last;
 
         # The first address of an IPv4 block is the network and the last is
         # the broadcast.  A guest on either one cannot talk to anything.
@@ -140,6 +140,33 @@ sub pool_ips {
     }
 
     return @ips;
+}
+
+=head2 address_to_int($address)
+
+Returns the IPv4 address C<$address> as an integer, so that a range of
+addresses is a range of integers.  Dies if C<$address> is not an IPv4 address.
+It does not resolve a name.
+
+=cut
+
+sub address_to_int {
+    my ($address) = @_;
+    my $packed = Socket::inet_pton( Socket::AF_INET(), $address // q{} ) // die "'" . ( $address // 'undef' ) . "' is not an IPv4 address\n";
+    return unpack( 'N', $packed );
+}
+
+=head2 int_to_address($int)
+
+Returns the integer C<$int> as an IPv4 address.  Dies if C<$int> is not an
+integer from 0 to 4294967295.
+
+=cut
+
+sub int_to_address {
+    my ($int) = @_;
+    return Socket::inet_ntoa( pack( 'N', $int ) ) if defined $int && $int =~ m{\A\d+\z} && $int <= 0xFFFFFFFF;
+    die "'" . ( $int // 'undef' ) . "' is not an IPv4 address as an integer\n";
 }
 
 =head2 db_path()
