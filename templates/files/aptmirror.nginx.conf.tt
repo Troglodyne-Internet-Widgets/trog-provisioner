@@ -16,6 +16,8 @@ server {
 [% END -%]
     server_name [% main_ip %];
     include /etc/nginx/names/[% domain %].conf;
+[%# The listener for a proxy.  See Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/[% domain %].80.conf;
 
     access_log off;
 

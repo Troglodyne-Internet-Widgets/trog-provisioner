@@ -65,5 +65,41 @@ subtest 'nginx sends its access log to syslog too' => sub {
     like( $journal, qr/\Q$marker\E/, 'the request is in the journal, tagged nginx_access' ) or diag $journal;
 };
 [% END -%]
+[% IF public_names.size() -%]
+
+subtest 'the vhost of the domain listens for a proxy, and believes only proxy_from' => sub {
+    require IO::Socket::INET;
+
+    # Sends $header, then a request for $path, to 127.0.0.1:8080, and returns
+    # the reply.
+    my $ask = sub {
+        my ( $header, $path ) = @_;
+        my $sock = IO::Socket::INET->new( PeerAddr => '127.0.0.1', PeerPort => 8080, Proto => 'tcp', Timeout => 10 ) or return '';
+        print $sock $header, "GET $path HTTP/1.0\r\nHost: [% public_names[0] %]\r\n\r\n";
+        my $reply = do { local $/; <$sock> } // '';
+        close($sock);
+        return $reply;
+    };
+
+    # 127.0.0.1 is not in proxy_from, so this header is a client that lies.
+    my $marker = "proxy-check-$$-" . time;
+    my $reply  = $ask->( "PROXY TCP4 203.0.113.7 127.0.0.1 40000 8080\r\n", "/?$marker" );
+    like( $reply, qr{\AHTTP/1[.][01] [23]\d\d}, 'the vhost of the domain answers a request behind a PROXY header on 8080' ) or diag $reply;
+    like( $ask->( '', "/?$marker-bare" ), qr{\A(?:HTTP/1[.][01] 400|\z)}, 'and refuses one without the header, so the port speaks the PROXY protocol' );
+
+    my $log = '';
+    for ( 1 .. 5 ) {
+        $log = `grep -h -- '?$marker ' /var/log/nginx/access.log 2>&1`;
+        last if $log;
+        sleep 1;
+    }
+    like( $log, qr/\A127[.]0[.]0[.]1 /m, 'the log names the address that connected' ) or diag $log;
+    unlike( $log, qr/203[.]0[.]113[.]7/, 'not the one that a source outside proxy_from claimed' );
+
+    # The loopback above passes no firewall, and the proxy is on another host.
+    my $ufw = `ufw status 2>&1`;
+    like( $ufw, qr/^nginx-proxy\s+ALLOW\s/m, 'and ufw lets the proxy reach the two ports' ) or diag $ufw;
+};
+[% END -%]
 
 done_testing();

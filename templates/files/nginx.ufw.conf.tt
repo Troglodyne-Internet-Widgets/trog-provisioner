@@ -1,0 +1,8 @@
+[%# The listeners that the vhost of the domain adds for a proxy, which no
+    profile of the nginx package names.  The fragment installs this only for a
+    domain with public_names.  ntp.ufw.conf.tt says why a recipe opens a port
+    with a profile and not with a rule. -%]
+[nginx-proxy]
+title=nginx behind a proxy
+description=The listeners of the vhost of the domain for a proxy that speaks the PROXY protocol
+ports=8080,8443/tcp

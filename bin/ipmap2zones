@@ -122,11 +122,14 @@ sub main {
         die "No address for '$domain' in " . Provisioner::IPPool::db_path() . "\n"
           unless $ip_conf->{$domain};
 
-        my @recipes = recipes_for($domain);
+        my @recipes    = recipes_for($domain);
+        my $configured = Provisioner::Cookbook->domain_config($domain);
 
         # The names that the recipes hand whatever holds the zone: see
-        # served_names in Provisioner::Recipe.
-        my @hostnames = map { Provisioner::Cookbook->load($_)->served_names( domain => $domain ) } @recipes;
+        # served_names in Provisioner::Recipe.  Each recipe gets its own
+        # configuration, because some names come from it, such as the
+        # public_names of nginx.
+        my @hostnames = map { Provisioner::Cookbook->load($_)->served_names( %{ ref $configured->{$_} eq 'HASH' ? $configured->{$_} : {} }, domain => $domain ) } @recipes;
 
         my %vars = (
             domain         => $domain,
