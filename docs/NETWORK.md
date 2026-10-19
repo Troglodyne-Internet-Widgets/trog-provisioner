@@ -70,6 +70,13 @@ each connect.  Each guest gets a route to the bin through `vpn.$domain` at
 first boot.  So the guests reach the client at its address, and see that
 address when the client connects to them.
 
+The server can also give an address from the bin to a client by hand, for
+example to a laptop.  So the provisioner asks `vpn.$domain` which addresses its
+clients have.  It asks before it gives a domain a new address from the bin.  It
+reserves each address that `ips.db` does not know.  If `vpn.$domain` is not up,
+the build of that domain stops.  `bin/list_ip_pool` also asks.  If it cannot
+ask, it warns.
+
 These must be true:
 
 - The bin is inside the `subnet` of the openvpn server, at its top end.  The

@@ -218,6 +218,96 @@ subtest 'assign: each bin hands out only its own addresses' => sub {
     is( Provisioner::IPPool::held_by( 'a.test', 'vpnclients' ), undef, 'and a destroyed domain keeps no client address either' );
 };
 
+# A bin with via: the server can give an address out by hand, so it is asked
+# before the bin hands out a new one.
+my $VIA_POOL = { addresses => '10.9.9.10', bins => { vpnclients => { cidr => '10.8.0.128/29', via => 'vpn.test.test' } } };
+
+# A guest_of that finds the server while $$said is defined, and notes each
+# question in @$ran.
+sub via_server {
+    my ( $said, $ran ) = @_;
+    return sub { push( @$ran, "guest_of $_[1]" ); return defined $$said ? bless( {}, 'ViaProbe' ) : undef };
+}
+
+subtest 'via_clients: what the server says its clients have' => sub {
+    my $said = "laptop.test\t10.8.0.130\nphone\t-\nEND\n";
+    my @ran;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => via_server( \$said, \@ran ) );
+    local *ViaProbe::capture_cmd = sub { push( @ran, $_[1] ); return $said };
+
+    is_deeply( { Provisioner::IPPool::via_clients('vpn.test.test') }, { 'laptop.test' => '10.8.0.130' }, 'each client with an address, and not the one whose file has none' );
+    like( $ran[-1], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]/, 'asked as root' );
+    cmp_ok( index( $ran[-1], 'openvpn-list-clients --static && echo END' ), '>=', 0, 'with a line that says the command finished' );
+
+    $said = "END\n";
+    is_deeply( { Provisioner::IPPool::via_clients('vpn.test.test') }, {}, 'a server with no static client lists none' );
+
+    $said = "laptop.test\t10.8.0.130\n";
+    like( exception { Provisioner::IPPool::via_clients('vpn.test.test') }, qr/did[ ]not[ ]say/, 'a list with no END is a command that did not finish' );
+
+    $said = "laptop.test 10.8.0.130\nEND\n";
+    like( exception { Provisioner::IPPool::via_clients('vpn.test.test') }, qr/not[ ]a[ ]name,[ ]a[ ]tab[ ]and[ ]an[ ]address/, 'and a line it cannot read is refused' );
+
+    $said = undef;
+    like( exception { Provisioner::IPPool::via_clients('vpn.test.test') }, qr/vpn[.]test[.]test[ ]is[ ]not[ ]up/, 'a server that is not up is named' );
+};
+
+subtest 'assign: a bin with via does not hand out what its server gave out by hand' => sub {
+    fresh_db();
+    my $said = "laptop.test\t10.8.0.129\nfar.test\t10.8.1.5\nEND\n";
+    my @ran;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => via_server( \$said, \@ran ) );
+    local *ViaProbe::capture_cmd = sub { push( @ran, $_[1] ); return $said };
+
+    is( Provisioner::IPPool::assign( 'a.test', $VIA_POOL, 'vpnclients' ), '10.8.0.130',            'the address of the laptop is skipped' );
+    is( Provisioner::IPPool::taken()->{'10.8.0.129'},                     'vpnclient:laptop.test', 'and reserved in its name' );
+    ok( !Provisioner::IPPool::taken()->{'10.8.1.5'}, 'while an address outside the bin is not the business of the pool' );
+    is( Provisioner::IPPool::assign( 'b.test', $VIA_POOL ), '10.9.9.10', 'and a bin without via asks nobody' );
+    is( scalar( grep { m/\Aguest_of/ } @ran ),              1,           'which is one question in all' );
+
+    @ran  = ();
+    $said = undef;
+    is( Provisioner::IPPool::assign( 'a.test', $VIA_POOL, 'vpnclients' ), '10.8.0.130', 'a domain with an address keeps it while the server is down' );
+    is_deeply( \@ran, [], 'without asking the server' );
+    like( exception { Provisioner::IPPool::assign( 'c.test', $VIA_POOL, 'vpnclients' ) }, qr/is[ ]not[ ]up/, 'but a new address waits for the server' );
+    is( Provisioner::IPPool::held_by( 'c.test', 'vpnclients' ), undef, 'and nothing is written' );
+
+    $said = "c.test\t10.8.0.133\nEND\n";
+    is( Provisioner::IPPool::assign( 'c.test', $VIA_POOL, 'vpnclients' ), '10.8.0.133', 'a domain that the server already lists gets that address' );
+    ok( !Provisioner::IPPool::taken()->{'10.8.0.129'}, 'and the laptop, which the server no longer lists, gives its address back' );
+
+    $said = "laptop.test\t10.8.0.130\nEND\n";
+    my $both = ( exception { Provisioner::IPPool::assign( 'd.test', $VIA_POOL, 'vpnclients' ) } ) // q{};
+    cmp_ok( index( $both, 'gives 10.8.0.130 to its VPN client laptop.test, but ips.db gives 10.8.0.130 to a.test' ), '>=', 0, 'two holders of one address stop the assignment, and both are named' ) or diag $both;
+
+    $said = "a.test\t10.8.0.134\nEND\n";
+    my $split = ( exception { Provisioner::IPPool::assign( 'd.test', $VIA_POOL, 'vpnclients' ) } ) // q{};
+    cmp_ok( index( $split, 'ips.db gives a.test the address 10.8.0.130' ), '>=', 0, 'and so does a domain with one address here and another there' ) or diag $split;
+    is( Provisioner::IPPool::held_by( 'd.test', 'vpnclients' ), undef, 'and neither writes anything' );
+};
+
+subtest 'refresh_via: the reservations match the server' => sub {
+    fresh_db();
+    my $said = "laptop.test\t10.8.0.129\nphone.test\t10.8.0.131\nEND\n";
+    my @ran;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => via_server( \$said, \@ran ) );
+    local *ViaProbe::capture_cmd = sub { push( @ran, $_[1] ); return $said };
+
+    is( Provisioner::IPPool::refresh_via( $VIA_POOL, 'vpnclients' ), 2, 'both clients are counted' );
+    is_deeply( [ @{ Provisioner::IPPool::taken() }{qw{10.8.0.129 10.8.0.131}} ], [qw{vpnclient:laptop.test vpnclient:phone.test}], 'and reserved' );
+
+    $said = "phone.test\t10.8.0.131\nEND\n";
+    Provisioner::IPPool::refresh_via( $VIA_POOL, 'vpnclients' );
+    ok( !Provisioner::IPPool::taken()->{'10.8.0.129'}, 'a client revoked by hand frees its address' );
+
+    @ran = ();
+    is( Provisioner::IPPool::refresh_via( $VIA_POOL, 'guests' ), 0, 'and a bin without via has nothing to ask' );
+    is_deeply( \@ran, [], 'so nobody is asked' );
+};
+
 subtest 'a database from before bins keeps every row, in the guests bin' => sub {
     fresh_db();
 

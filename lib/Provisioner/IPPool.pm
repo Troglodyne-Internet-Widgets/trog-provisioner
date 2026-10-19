@@ -14,6 +14,7 @@ use List::Util qw{first};
 use Net::IP;
 use Socket();
 
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 use Trog::Config();
@@ -71,6 +72,14 @@ Every other guest gets a route to the networks of the bin through the address of
 C<via>.  L<Provisioner::Recipe::openvpn> gives each client in the bin its
 address, and L<Provisioner::Recipe::openvpnclient> takes one with
 C<issue_from>.
+
+The server of such a bin can also give an address to a client by hand, and
+then only the server knows it.  So before C<assign> hands out a new address
+from the bin, it asks C<via> which addresses its clients have, with
+C<via_clients>.  It reserves each address that the database does not know, as
+C<vpnclient:> and the name of the client, and it deletes the reservation of an
+address that the server no longer gives out.  When C<via> cannot be asked,
+C<assign> dies rather than guess.
 
 =head1 WHY A DATABASE
 
@@ -383,6 +392,109 @@ sub blocks {
     return ( pool_items( $bin->{cidr} ), map { "$_/32" } pool_items( $bin->{addresses} ) );
 }
 
+=head2 %clients = via_clients($via)
+
+Asks the guest C<$via>, the openvpn server of a bin, which static address each
+of its clients has.  Returns each name of a client to its address.  It runs the
+C<static_clients_command> of L<Provisioner::Recipe::openvpn> there as root.
+
+Dies if C<$via> is not up, or if the command does not finish, or if it prints
+a line that is not a name and an address.
+
+=cut
+
+sub via_clients {
+    my ($via) = @_;
+
+    my $command = Provisioner::Cookbook->load('openvpn')->static_clients_command();
+    my $guest   = Trog::Hypervisors->guest_of($via)
+      or die "$via is not up, so it cannot say which addresses its VPN clients have, and an address from its bin could be one that it already gave out.  Start $via, and try again.\n";
+
+    # capture_cmd gives no exit status, so the last line says that the
+    # command finished.  The stderr goes, because sudo runs the command in a
+    # pty that carries it along with stdout.
+    ( my $quoted = "exec 2>/dev/null; $command && echo END" ) =~ s/'/'\\''/g;
+    my $said = $guest->capture_cmd("sudo -n sh -c '$quoted'") // q{};
+    die "$via did not say which addresses its VPN clients have.  Run $command there to see why.\n"
+      unless $said =~ s/^END\n?\z//m;
+
+    my %clients;
+    foreach my $line ( split /\n/, $said ) {
+        my ( $name, $address ) = $line =~ m/\A(\S+)\t(\S+)\z/
+          or die "$via listed '$line' as a VPN client, which is not a name, a tab and an address\n";
+
+        # A ccd file with no ifconfig-push gives the client no address.
+        $clients{$name} = $address unless $address eq '-';
+    }
+    return %clients;
+}
+
+# Makes the reservations of the clients that the via of the bin $bin, as $conf,
+# lists match what it said, in the transaction of the caller.  $for is a domain
+# that is about to get its address, which the server may already list.
+my sub note_clients {
+    my ( $db, $bin, $conf, $clients, $for ) = @_;
+    my $via    = $conf->{via};
+    my %in_bin = map { $_ => 1 } pool_ips($conf);
+
+    $db->do( "DELETE FROM ips WHERE kind = 'reserved' AND bin = ? AND domain LIKE 'vpnclient:%'", undef, $bin );
+    my %holder = map { $_->[0] => $_->[1] } @{ $db->selectall_arrayref( 'SELECT ip, domain FROM ips WHERE bin = ?', undef, $bin ) };
+    my %has    = reverse %holder;
+
+    foreach my $name ( sort keys %$clients ) {
+        my $address = $clients->{$name};
+        next unless $in_bin{$address};
+
+        my $holder = $holder{$address};
+        next if defined $holder && $holder eq $name;
+        die "$via gives $address to its VPN client $name, but ips.db gives $address to $holder.  Revoke one of them on $via, or release it.\n"
+          if defined $holder;
+        die "$via gives $address to its VPN client $name, but ips.db gives $name the address $has{$name}.  Revoke $name on $via, and build it again.\n"
+          if defined $has{$name};
+        next if defined $for && $name eq $for;
+
+        $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'reserved', ?)", undef, $address, "vpnclient:$name", $bin );
+    }
+    return;
+}
+
+=head2 refresh_via($pool, $bin)
+
+Asks the C<via> of C<$bin> which addresses its clients have, with
+C<via_clients>, and makes the C<vpnclient:> reservations of the bin match what
+it said.  C<bin/list_ip_pool> runs it, so that the list shows the addresses
+that were given out by hand.  Returns the number of clients that the server
+listed, or 0 when the bin has no C<via>.
+
+Dies as C<via_clients> does, or if what the server says disagrees with the
+database: an address of a domain that the server gives to another client, or a
+domain that has one address in the database and another on the server.
+
+=cut
+
+sub refresh_via {
+    my ( $pool, $bin ) = @_;
+
+    my %bins    = bins($pool);
+    my $via     = ( $bins{$bin} // {} )->{via} // return 0;
+    my %clients = via_clients($via);
+
+    my $db = dbh();
+    $db->do('BEGIN IMMEDIATE');
+    my $ok = eval {
+        note_clients( $db, $bin, $bins{$bin}, \%clients );
+        $db->do('COMMIT');
+        1;
+    };
+    if ( !$ok ) {
+        my $err = $@ || "Could not note the VPN clients of $via\n";
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
+        die $err;
+    }
+
+    return scalar keys %clients;
+}
+
 =head2 assign($domain, $pool, $bin)
 
 Returns the address of C<$domain> in C<$bin> of C<$pool>.  C<$bin> defaults to
@@ -390,7 +502,14 @@ C<guests>.  If the domain has no address there, this gives it the first free
 address of that bin.  If it has one, this returns that address and writes
 nothing.
 
-Dies if the bin has no addresses, or if no address in it is free.
+For a bin with C<via>, a domain with no address there gets one only after the
+server is asked, as L</BINS> says.  If the server already gives the domain an
+address in the bin, the domain gets that one.  A domain that has an address
+gets it without the question, so the rebuild of a client does not need the
+server.
+
+Dies if the bin has no addresses, or if no address in it is free.  For a bin
+with C<via>, it also dies as C<refresh_via> does.
 
 Choosing the address and writing it are one transaction.  C<BEGIN IMMEDIATE>
 takes the write lock before the search for a free address.  So if two
@@ -408,6 +527,13 @@ sub assign {
     die "No [ip_pool] section or no IPs found in the $bin bin of the pool: cannot auto-assign IP for $domain\n"
       unless @pool_ips;
 
+    # The server is asked before the lock, because ssh can take seconds and
+    # every other provision waits on the lock.
+    my $via     = $bins{$bin}{via};
+    my $ask     = defined $via && !held_by( $domain, $bin );
+    my %clients = $ask ? via_clients($via) : ();
+    my %in_bin  = map { $_ => 1 } @pool_ips;
+
     my $db = dbh();
 
     # Not DEFERRED: a deferred transaction takes no lock until its first write,
@@ -421,8 +547,11 @@ sub assign {
             return $held;
         }
 
+        note_clients( $db, $bin, $bins{$bin}, \%clients, $domain ) if $ask;
+
         my $taken = taken();
-        my $free  = first { !$taken->{$_} } @pool_ips;
+        my $own   = $clients{$domain};
+        my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @pool_ips;
         die "IP pool exhausted: no IPs available for $domain\n" unless $free;
 
         $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'domain', ?)", undef, $free, $domain, $bin );

@@ -1,7 +1,7 @@
 #!/bin/bash
 # List the clients that the CA of this server signed:
 #
-#     openvpn-list-clients [--all]
+#     openvpn-list-clients [--all | --static]
 #
 # Each line is a name, whether its certificate is valid, when it expires, and
 # the tunnel address of the client if it is connected now.  Without --all, the
@@ -9,8 +9,14 @@
 # revoked and expired certificates.  The certificate of the server is not a
 # client, so it is never listed.
 #
+# With --static, each line is the name of a client with a static address, a
+# tab, and that address, from the client-config-dir.  The provisioner reads
+# this before it hands out an address from the bin of this server, so that an
+# address given out by hand is not given out again.
+#
 # OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to read instead,
-# and OPENVPN_STATUS_FILE a status file other than the one of the server.
+# OPENVPN_CCD_DIR a copy of the client-config-dir, and OPENVPN_STATUS_FILE a
+# status file other than the one of the server.
 
 set -euo pipefail
 
@@ -18,8 +24,15 @@ ALL=0
 case "${1:-}" in
     '') ;;
     --all) ALL=1 ;;
+    --static)
+        CCD="${OPENVPN_CCD_DIR:-/etc/openvpn/server/ccd}"
+        # A server with no client of a static address has no directory yet.
+        [ -d "$CCD" ] || exit 0
+        find "$CCD" -maxdepth 1 -type f -printf '%f\t' -exec awk '$1 == "ifconfig-push" { print $2; found = 1; exit } END { if (!found) print "-" }' {} \;
+        exit 0
+        ;;
     *)
-        echo "usage: $0 [--all]" >&2
+        echo "usage: $0 [--all | --static]" >&2
         exit 2
         ;;
 esac

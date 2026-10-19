@@ -187,6 +187,14 @@ to the bin.
 The salvage keeps F</etc/openvpn/server/ccd> with the PKI, so a rebuild of the
 server keeps the address of each client.
 
+An operator can also give an address to a client that is not a guest of this
+installation, such as a laptop, with C<--address>.  Before
+L<Provisioner::IPPool> hands out an address from the bin, it asks this server
+for C<openvpn-list-clients --static>.  It reserves each address that the
+server gives to a client that the database does not know, so that no guest
+gets that address too.  A build that needs a new address from the bin dies
+when this server cannot be asked.
+
 =head3 Taking a client away
 
     openvpn-revoke-client NAME
@@ -216,12 +224,13 @@ C<admin_email>.  Until then it prints nothing, and cron sends nothing.
 
 =head3 Which clients there are
 
-    openvpn-list-clients [--all]
+    openvpn-list-clients [--all | --static]
 
 This lists each name that can connect, when its certificate expires, and its
 tunnel address if it is connected now.  C<--all> also lists the revoked and the
 expired certificates.  The script reads the index of the CA and the status file
-of the server, which the server rewrites each minute.
+of the server, which the server rewrites each minute.  C<--static> lists each
+client with a static address instead, as its name, a tab, and the address.
 
 =cut
 
@@ -508,6 +517,19 @@ sub template_files {
         # gets only rate_limits and not the port or the protocol.
         'openvpn.ufw.conf.tt' => 'openvpn_ufw.conf',
     );
+}
+
+=head2 $command = $recipe->static_clients_command()
+
+The shell command that root runs on this server to list each client with a
+static address.  It prints the name of the client, a tab, and the address, one
+client to a line.  L<Provisioner::IPPool> runs it before it hands out an address
+from a bin whose C<via> is this server.
+
+=cut
+
+sub static_clients_command {
+    return '/usr/local/sbin/openvpn-list-clients --static';
 }
 
 sub restores {
