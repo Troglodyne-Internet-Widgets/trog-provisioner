@@ -17,6 +17,7 @@ use Test::Fatal   qw{exception};
 use File::Temp    qw{tempdir};
 use File::Slurper qw{read_text};
 use File::Slurper::Temp();
+use Fcntl();
 
 use FindBin;
 use FindBin::libs;
@@ -50,6 +51,21 @@ my $SHIPPED = <<'RULES';
 # don't delete the 'COMMIT' line or these rules won't be processed
 COMMIT
 RULES
+
+# The before.init that ufw ships, trimmed to its case statement.
+my $SHIPPED_INIT = <<'INIT';
+#!/bin/sh
+set -e
+
+case "$1" in
+start)
+    # typically required
+    ;;
+stop)
+    # typically required
+    ;;
+esac
+INIT
 
 # Every run in here is against a file in a temporary directory, and neither the
 # firewall nor the routing table of whatever is running this is asked anything.
@@ -91,8 +107,18 @@ sub run_on {
     # warnings are fatal in this file.
     no warnings 'once';
     local $Trog::Script::SetupMasquerade::FILE = $path;
+    local $Trog::Script::SetupMasquerade::INIT = init_file($path);
     my ( $said, $rc ) = capture_stdout { Trog::Script::SetupMasquerade::main(@args) };
     return ( $rc, read_text($path), $said );
+}
+
+# The before.init beside $path, as ufw ships it, made the first time it is asked
+# for, so that a second run finds what the first one wrote.
+sub init_file {
+    my ($path) = @_;
+    ( my $init = $path ) =~ s{before[.]rules\z}{before.init};
+    File::Slurper::Temp::write_text( $init, $SHIPPED_INIT ) unless -e $init;
+    return $init;
 }
 
 subtest 'a VPN subnet gets forwarded and masqueraded, in one nat table' => sub {
@@ -144,7 +170,7 @@ subtest 'running it again changes nothing, and reloads nothing' => sub {
     my $path   = rules_file();
     my $before = reloads();
     my ( undef, $first, $said ) = run_on( $path, '10.8.0.0/24=eth0' );
-    like( $said, qr/^Wrote[ ]1[ ]masquerade[ ]and[ ]2[ ]forwarding[ ]rule/, 'the first run says what it wrote' );
+    like( $said, qr/^Wrote[ ]1[ ]nat[ ]and[ ]2[ ]forwarding[ ]rule/, 'the first run says what it wrote' );
     is( reloads(), $before + 1, 'and reloads the firewall it changed' );
 
     my ( $rc, $second, $quiet ) = run_on( $path, '10.8.0.0/24=eth0' );
@@ -228,6 +254,48 @@ subtest 'a rules file that cannot be read is named, and nothing else' => sub {
     my $error = exception { Trog::Script::SetupMasquerade::main('10.8.0.0/24') };
     like( $error, qr/\ACannot[ ]read[ ]\S+\/bogus\/before\.rules:[ ]/, 'the message names the file' );
     unlike( $error, qr/[ ]line[ ]\d+/, 'and not the line of the script that noticed, the way no other failure here does' );
+};
+
+subtest 'before.init deletes the jumps of the last load, so that a reload leaves one' => sub {
+    my $path = rules_file();
+    run_on( $path, '10.8.0.0/24=eth0' );
+    my $init = init_file($path);
+    my $text = read_text($init);
+
+    like( $text, qr{^start\)\n[#][ ]BEGIN[ ]\N+\n[ ]+while[ ]iptables[ ]-t[ ]nat[ ]-D[ ]POSTROUTING[ ]-j[ ]trog-nat[ ]2>/dev/null;[ ]do[ ]:;[ ]done\n}m, 'start deletes every jump into the chain, before ufw loads the one in before.rules' ) or diag $text;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    is( sprintf( '%04o', Fcntl::S_IMODE( ( stat $init )[2] ) ), '0750', 'and is executable, which is when ufw runs it' );
+
+    my ( undef, undef, $said ) = run_on( $path, '10.8.0.0/24=eth0' );
+    is( read_text($init), $text, 'a second run leaves it as it was' );
+    is( $said,            q{},   'and says nothing' );
+
+    my $copies = () = read_text($init) =~ m/BEGIN[ ]trog-provisioner[ ]masquerade[ ]jump/g;
+    is( $copies, 1, 'with the block in it once' );
+
+    is( system( 'sh', '-n', $init ), 0, 'and it is still a script that sh can read' );
+};
+
+subtest 'a source that is kept keeps its address towards each destination, and can be reached from it' => sub {
+    my $path = rules_file();
+    my ( $rc, $after ) = run_on( $path, qw{--keep 10.8.0.128/25 --to 192.0.2.0/25 --to 192.0.2.128/25 10.8.0.0/24=eth0} );
+    is( $rc, 0, 'it succeeds' );
+
+    my @chain = $after =~ m{^(-A[ ]trog-nat[ ]\N+)$}mg;
+    is_deeply(
+        \@chain,
+        [
+            '-A trog-nat -s 10.8.0.128/25 -d 192.0.2.0/25 -j RETURN',
+            '-A trog-nat -s 10.8.0.128/25 -d 192.0.2.128/25 -j RETURN',
+            '-A trog-nat -s 10.8.0.0/24 -o eth0 -j MASQUERADE',
+        ],
+        'a RETURN for each destination, ahead of the MASQUERADE that would otherwise match first'
+    ) or diag $after;
+
+    like( $after, qr{^-A[ ]ufw-before-forward[ ]-s[ ]192[.]0[.]2[.]0/25[ ]-d[ ]10[.]8[.]0[.]128/25[ ]-j[ ]ACCEPT$}m,   'the first destination may open a connection to it' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $after, qr{^-A[ ]ufw-before-forward[ ]-s[ ]192[.]0[.]2[.]128/25[ ]-d[ ]10[.]8[.]0[.]128/25[ ]-j[ ]ACCEPT$}m, 'and so may the second' );                                ## no critic (RegularExpressions::ProhibitComplexRegexes)
+
+    my ( undef, $again ) = run_on( $path, '10.8.0.0/24=eth0' );
+    unlike( $again, qr/RETURN|10[.]8[.]0[.]128/, 'and a run without it takes them all away again' );
 };
 
 subtest 'no subnets is a no-op rather than an empty block' => sub {

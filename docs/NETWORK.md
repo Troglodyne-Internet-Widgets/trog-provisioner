@@ -46,6 +46,54 @@ In the `_global` of `_base` in `recipes.yaml`:
 `bin/assign_ip` prints or assigns the static address of a domain.  Assignments
 are kept in `ips.db`: see `perldoc Provisioner::IPPool`.
 
+## Static addresses for VPN clients
+
+A bin can name a guest in `via`.  Its addresses are then reachable only
+through that guest, for example the clients of the openvpn server on it:
+
+```yaml
+ip_pool:
+    cidr: 192.0.2.0/24
+    bins:
+        vpnclients:
+            cidr: 10.8.0.128/25
+            via: vpn.$domain
+```
+
+Here `192.0.2.0/24` is the subnet of the primary bridge, which the guests get
+their static addresses from.  `10.8.0.0/24` is the tunnel subnet of the openvpn
+server, its default `subnet` and `netmask`, and the bin is its top half.
+
+A domain whose `openvpnclient` names `issue_from: vpn.$domain` gets an address
+from that bin when it is built, and the server gives that address to it at
+each connect.  Each guest gets a route to the bin through `vpn.$domain` at
+first boot.  So the guests reach the client at its address, and see that
+address when the client connects to them.
+
+The server can also give an address from the bin to a client by hand, for
+example to a laptop.  So the provisioner asks `vpn.$domain` which addresses its
+clients have.  It asks before it gives a domain a new address from the bin.  It
+reserves each address that `ips.db` does not know.  If `vpn.$domain` is not up,
+the build of that domain stops.  `bin/list_ip_pool` also asks.  If it cannot
+ask, it warns.
+
+These must be true:
+
+- The bin is inside the `subnet` of the openvpn server, at its top end.  The
+  first two addresses of the subnet are the network and the server, so the bin
+  cannot hold them.
+- No other bin has an address in that `subnet`.  So two openvpn servers with
+  bins need two different values of `subnet`, because both have the same
+  default.
+- Each host that is not a guest of this installation, and that talks to a
+  client, needs the same route.  Add it on the router of the network, or on the
+  host itself.  This machine needs it before a client can reach it by ssh.
+- A guest that was built before the bin had `via` gets the route when you
+  build it again.
+
+`perldoc Provisioner::Recipe::openvpn` has the details, under "Static
+addresses".
+
 ## A remote hypervisor
 
 When the hypervisor is not this machine, the NAT lease of a guest is reachable

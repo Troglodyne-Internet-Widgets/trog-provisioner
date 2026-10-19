@@ -30,6 +30,11 @@ of each bin that are assigned and the IPs that are available.  With C<--json>,
 it prints one object, with a key for each bin.  L<Provisioner::IPPool/BINS> says
 what a bin is.
 
+For a bin with C<via>, it first asks that server which addresses it gave to its
+clients, because a client can get one by hand.  That needs the key of the
+server, so it can ask for the password of the store.  If the server cannot be
+asked, it warns and shows that bin as the database has it.
+
 =head2 Where the pool is written
 
 Add an C<ip_pool> to the C<_global> of C<_base> in F<recipes.yaml>:
@@ -116,6 +121,10 @@ GUIDANCE
     # call fills it from the hypervisors, so an empty database does not show
     # every IP as available.
     Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
+    foreach my $bin ( grep { defined $bins{$_}{via} } sort keys %bins ) {
+        eval { Provisioner::IPPool::refresh_via( $pool, $bin ); 1 }
+          or warn "The bin $bin shows only what ips.db knows, which misses any address that its server gave out by hand: $@";
+    }
     my %taken = %{ Provisioner::IPPool::taken() };
 
     my %out;

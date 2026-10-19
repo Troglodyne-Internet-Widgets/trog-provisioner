@@ -1,6 +1,7 @@
 #!/bin/bash
-# Copy the PKI to /etc/openvpn/pki-salvage, which remote_files names, so that a
-# rebuild keeps the CA and every certificate issued so far.
+# Copy the PKI to /etc/openvpn/pki-salvage, and the static addresses to
+# /etc/openvpn/ccd-salvage, which remote_files names, so that a rebuild keeps
+# the CA, every certificate issued so far and the address of each client.
 #
 # The provision runs this, bin/new_config runs it before each fetch, and so does
 # openvpn-client-config after it issues.  Provisioner::Recipe::openvpn says why
@@ -8,15 +9,22 @@
 
 set -euo pipefail
 
-PKI=/etc/openvpn/easy-rsa/pki
-STAGE=/etc/openvpn/pki-salvage
 OWNER='[% admin_user %]'
 
 # Made again each time, so that a certificate revoked since the last run does
-# not stay here and look current.
-rm -rf "$STAGE"
-mkdir -p "$STAGE"
-cp -a "$PKI/." "$STAGE/"
-chown -R "$OWNER:$OWNER" "$STAGE"
-find "$STAGE" -type d -exec chmod 0700 {} +
-find "$STAGE" -type f -exec chmod 0600 {} +
+# not stay here and look current.  The static address of each client goes with
+# its certificate.
+stage() {
+    local from="$1" to="$2"
+    rm -rf "$to"
+    mkdir -p "$to"
+    if [ -d "$from" ]; then
+        cp -a "$from/." "$to/"
+    fi
+    chown -R "$OWNER:$OWNER" "$to"
+    find "$to" -type d -exec chmod 0700 {} +
+    find "$to" -type f -exec chmod 0600 {} +
+}
+
+stage /etc/openvpn/easy-rsa/pki /etc/openvpn/pki-salvage
+stage /etc/openvpn/server/ccd /etc/openvpn/ccd-salvage

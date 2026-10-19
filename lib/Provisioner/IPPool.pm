@@ -14,6 +14,7 @@ use List::Util qw{first};
 use Net::IP;
 use Socket();
 
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 use Trog::Config();
@@ -57,6 +58,29 @@ which is where a guest gets its address.  C<bins> names the others:
 A domain holds at most one address in each bin.  Only the C<guests> bin goes
 into C<assignments>, so only a guest gets an A record from it.
 
+A bin that names a guest in C<via> holds addresses that only that guest can
+reach, such as the static addresses of the clients of a VPN:
+
+    ip_pool:
+        cidr: 192.0.2.0/24
+        bins:
+            vpnclients:
+                cidr: 10.8.0.128/25
+                via: vpn.test.test
+
+Every other guest gets a route to the networks of the bin through the address of
+C<via>.  L<Provisioner::Recipe::openvpn> gives each client in the bin its
+address, and L<Provisioner::Recipe::openvpnclient> takes one with
+C<issue_from>.
+
+The server of such a bin can also give an address to a client by hand, and
+then only the server knows it.  So before C<assign> hands out a new address
+from the bin, it asks C<via> which addresses its clients have, with
+C<via_clients>.  It reserves each address that the database does not know, as
+C<vpnclient:> and the name of the client, and it deletes the reservation of an
+address that the server no longer gives out.  When C<via> cannot be asked,
+C<assign> dies rather than guess.
+
 =head1 WHY A DATABASE
 
 Two runs cannot safely share a file of assignments.  Both read it, both find the
@@ -87,7 +111,7 @@ Either may be written as a YAML list or as one string with whitespace between
 the items.
 
 Returns each address in the pool once, in order.  Dies if a CIDR block is not
-valid.
+valid, or is not IPv4.
 
 =cut
 
@@ -102,11 +126,13 @@ sub pool_ips {
     foreach my $cidr ( pool_items( $pool->{cidr} ) ) {
         my $net = Net::IP->new($cidr)
           or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
+        die "The CIDR block '$cidr' is not IPv4, and the pool holds IPv4 addresses only\n"
+          unless $net->version == 4;
 
-        my @block;
-        do {
-            push @block, $net->ip();
-        } while ( ++$net );
+        # Integers rather than ++ on the Net::IP object, which costs about a
+        # millisecond for each address.
+        my ( $first, $last ) = map { address_to_int($_) } $net->ip, $net->last_ip;
+        my @block = map { int_to_address($_) } $first .. $last;
 
         # The first address of an IPv4 block is the network and the last is
         # the broadcast.  A guest on either one cannot talk to anything.
@@ -123,6 +149,33 @@ sub pool_ips {
     }
 
     return @ips;
+}
+
+=head2 address_to_int($address)
+
+Returns the IPv4 address C<$address> as an integer, so that a range of
+addresses is a range of integers.  Dies if C<$address> is not an IPv4 address.
+It does not resolve a name.
+
+=cut
+
+sub address_to_int {
+    my ($address) = @_;
+    my $packed = Socket::inet_pton( Socket::AF_INET(), $address // q{} ) // die "'" . ( $address // 'undef' ) . "' is not an IPv4 address\n";
+    return unpack( 'N', $packed );
+}
+
+=head2 int_to_address($int)
+
+Returns the integer C<$int> as an IPv4 address.  Dies if C<$int> is not an
+integer from 0 to 4294967295.
+
+=cut
+
+sub int_to_address {
+    my ($int) = @_;
+    return Socket::inet_ntoa( pack( 'N', $int ) ) if defined $int && $int =~ m{\A\d+\z} && $int <= 0xFFFFFFFF;
+    die "'" . ( $int // 'undef' ) . "' is not an IPv4 address as an integer\n";
 }
 
 =head2 db_path()
@@ -278,8 +331,8 @@ sub pool_items {
 Returns each bin of C<$pool> by name, as a block that C<pool_ips> takes.  The
 C<addresses> and C<cidr> at the top of C<$pool> are the bin named C<guests>.
 
-Dies if C<$pool> has addresses at its top and also a bin named C<guests>, or if
-an address is in two bins.
+Dies if C<$pool> has addresses at its top and also a bin named C<guests>, if a
+block of a bin is not valid, or if blocks of two bins overlap.
 
 =cut
 
@@ -294,16 +347,152 @@ sub bins {
         $bins{$GUESTS} = \%top;
     }
 
-    my %bin_of;
+    my @seen;
     foreach my $name ( sort keys %bins ) {
-        foreach my $ip ( pool_ips( $bins{$name} ) ) {
-            die "ip_pool has $ip in the bins $bin_of{$ip} and $name, and an address can belong to one bin only\n"
-              if $bin_of{$ip} && $bin_of{$ip} ne $name;
-            $bin_of{$ip} = $name;
+        foreach my $block ( blocks( $bins{$name} ) ) {
+            my $net = Net::IP->new($block)
+              or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
+            foreach my $other ( grep { $_->{bin} ne $name } @seen ) {
+                my $overlap = $net->overlaps( $other->{net} ) // $IP_NO_OVERLAP;
+                die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
+                  if $overlap != $IP_NO_OVERLAP;
+            }
+            push @seen, { bin => $name, block => $block, net => $net };
         }
     }
 
     return %bins;
+}
+
+=head2 %bins = bins_via($pool, $guest)
+
+Returns each bin of C<$pool> whose C<via> is C<$guest>, by name, as C<bins>
+does.  Such a bin holds addresses that C<$guest> routes to, such as the static
+addresses of the clients of an openvpn server, and every other guest reaches
+them through C<$guest>.  Empty when no bin names C<$guest>.
+
+=cut
+
+sub bins_via {
+    my ( $pool, $guest ) = @_;
+
+    my %bins = bins($pool);
+    return map { $_ => $bins{$_} } grep { defined $bins{$_}{via} && $bins{$_}{via} eq $guest } keys %bins;
+}
+
+=head2 @blocks = blocks($bin)
+
+Returns the networks of C<$bin>, a block that C<pool_ips> takes, as CIDR
+blocks: each C<cidr> as it is, then each of its C<addresses> as a C</32>.
+
+=cut
+
+sub blocks {
+    my ($bin) = @_;
+    return ( pool_items( $bin->{cidr} ), map { "$_/32" } pool_items( $bin->{addresses} ) );
+}
+
+=head2 %clients = via_clients($via)
+
+Asks the guest C<$via>, the openvpn server of a bin, which static address each
+of its clients has.  Returns each name of a client to its address.  It runs the
+C<static_clients_command> of L<Provisioner::Recipe::openvpn> there as root.
+
+Dies if C<$via> is not up, or if the command does not finish, or if it prints
+a line that is not a name and an address.
+
+=cut
+
+sub via_clients {
+    my ($via) = @_;
+
+    my $command = Provisioner::Cookbook->load('openvpn')->static_clients_command();
+    my $guest   = Trog::Hypervisors->guest_of($via)
+      or die "$via is not up, so it cannot say which addresses its VPN clients have, and an address from its bin could be one that it already gave out.  Start $via, and try again.\n";
+
+    # capture_cmd gives no exit status, so the last line says that the
+    # command finished.  The stderr goes, because sudo runs the command in a
+    # pty that carries it along with stdout.
+    ( my $quoted = "exec 2>/dev/null; $command && echo END" ) =~ s/'/'\\''/g;
+    my $said = $guest->capture_cmd("sudo -n sh -c '$quoted'") // q{};
+    die "$via did not say which addresses its VPN clients have.  Run $command there to see why.\n"
+      unless $said =~ s/^END\n?\z//m;
+
+    my %clients;
+    foreach my $line ( split /\n/, $said ) {
+        my ( $name, $address ) = $line =~ m/\A(\S+)\t(\S+)\z/
+          or die "$via listed '$line' as a VPN client, which is not a name, a tab and an address\n";
+
+        # A ccd file with no ifconfig-push gives the client no address.
+        $clients{$name} = $address unless $address eq '-';
+    }
+    return %clients;
+}
+
+# Makes the reservations of the clients that the via of the bin $bin, as $conf,
+# lists match what it said, in the transaction of the caller.  $for is a domain
+# that is about to get its address, which the server may already list.
+my sub note_clients {
+    my ( $db, $bin, $conf, $clients, $for ) = @_;
+    my $via    = $conf->{via};
+    my %in_bin = map { $_ => 1 } pool_ips($conf);
+
+    $db->do( "DELETE FROM ips WHERE kind = 'reserved' AND bin = ? AND domain LIKE 'vpnclient:%'", undef, $bin );
+    my %holder = map { $_->[0] => $_->[1] } @{ $db->selectall_arrayref( 'SELECT ip, domain FROM ips WHERE bin = ?', undef, $bin ) };
+    my %has    = reverse %holder;
+
+    foreach my $name ( sort keys %$clients ) {
+        my $address = $clients->{$name};
+        next unless $in_bin{$address};
+
+        my $holder = $holder{$address};
+        next if defined $holder && $holder eq $name;
+        die "$via gives $address to its VPN client $name, but ips.db gives $address to $holder.  Revoke one of them on $via, or release it.\n"
+          if defined $holder;
+        die "$via gives $address to its VPN client $name, but ips.db gives $name the address $has{$name}.  Revoke $name on $via, and build it again.\n"
+          if defined $has{$name};
+        next if defined $for && $name eq $for;
+
+        $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'reserved', ?)", undef, $address, "vpnclient:$name", $bin );
+    }
+    return;
+}
+
+=head2 refresh_via($pool, $bin)
+
+Asks the C<via> of C<$bin> which addresses its clients have, with
+C<via_clients>, and makes the C<vpnclient:> reservations of the bin match what
+it said.  C<bin/list_ip_pool> runs it, so that the list shows the addresses
+that were given out by hand.  Returns the number of clients that the server
+listed, or 0 when the bin has no C<via>.
+
+Dies as C<via_clients> does, or if what the server says disagrees with the
+database: an address of a domain that the server gives to another client, or a
+domain that has one address in the database and another on the server.
+
+=cut
+
+sub refresh_via {
+    my ( $pool, $bin ) = @_;
+
+    my %bins    = bins($pool);
+    my $via     = ( $bins{$bin} // {} )->{via} // return 0;
+    my %clients = via_clients($via);
+
+    my $db = dbh();
+    $db->do('BEGIN IMMEDIATE');
+    my $ok = eval {
+        note_clients( $db, $bin, $bins{$bin}, \%clients );
+        $db->do('COMMIT');
+        1;
+    };
+    if ( !$ok ) {
+        my $err = $@ || "Could not note the VPN clients of $via\n";
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
+        die $err;
+    }
+
+    return scalar keys %clients;
 }
 
 =head2 assign($domain, $pool, $bin)
@@ -313,7 +502,14 @@ C<guests>.  If the domain has no address there, this gives it the first free
 address of that bin.  If it has one, this returns that address and writes
 nothing.
 
-Dies if the bin has no addresses, or if no address in it is free.
+For a bin with C<via>, a domain with no address there gets one only after the
+server is asked, as L</BINS> says.  If the server already gives the domain an
+address in the bin, the domain gets that one.  A domain that has an address
+gets it without the question, so the rebuild of a client does not need the
+server.
+
+Dies if the bin has no addresses, or if no address in it is free.  For a bin
+with C<via>, it also dies as C<refresh_via> does.
 
 Choosing the address and writing it are one transaction.  C<BEGIN IMMEDIATE>
 takes the write lock before the search for a free address.  So if two
@@ -331,6 +527,13 @@ sub assign {
     die "No [ip_pool] section or no IPs found in the $bin bin of the pool: cannot auto-assign IP for $domain\n"
       unless @pool_ips;
 
+    # The server is asked before the lock, because ssh can take seconds and
+    # every other provision waits on the lock.
+    my $via     = $bins{$bin}{via};
+    my $ask     = defined $via && !held_by( $domain, $bin );
+    my %clients = $ask ? via_clients($via) : ();
+    my %in_bin  = map { $_ => 1 } @pool_ips;
+
     my $db = dbh();
 
     # Not DEFERRED: a deferred transaction takes no lock until its first write,
@@ -344,8 +547,11 @@ sub assign {
             return $held;
         }
 
+        note_clients( $db, $bin, $bins{$bin}, \%clients, $domain ) if $ask;
+
         my $taken = taken();
-        my $free  = first { !$taken->{$_} } @pool_ips;
+        my $own   = $clients{$domain};
+        my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @pool_ips;
         die "IP pool exhausted: no IPs available for $domain\n" unless $free;
 
         $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'domain', ?)", undef, $free, $domain, $bin );

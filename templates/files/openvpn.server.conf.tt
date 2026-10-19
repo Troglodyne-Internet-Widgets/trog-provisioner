@@ -16,8 +16,19 @@ tls-version-min 1.2
 cipher [% cipher %]
 auth SHA256
 
+[% IF ifconfig_pool -%]
+[%# A bin of ip_pool holds the static addresses of some clients, and the
+    server hands out only the rest.  Provisioner::Recipe::openvpn has the whole
+    account. -%]
+server [% subnet %] [% netmask %] nopool
+ifconfig-pool [% ifconfig_pool.start %] [% ifconfig_pool.end %] [% netmask %]
+[% ELSE -%]
 server [% subnet %] [% netmask %]
+[% END -%]
 ifconfig-pool-persist /var/log/openvpn/ipp.txt
+[%# openvpn-client-config --address writes a file here for each client with a
+    static address. -%]
+client-config-dir /etc/openvpn/server/ccd
 
 [%# Set explicitly, because without it OpenVPN uses net30.  net30 uses a /30
     for each client, and upstream deprecates it. -%]

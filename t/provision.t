@@ -1118,8 +1118,8 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
     $fleet->redefine( guest_of => sub { push( @issuers, $_[1] ); return bless {}, 'IssuerProbe' } );
 
     is( quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( bless( {}, 'SecretsProbe' ), $domain ) } ), 1, 'the secrets are placed, without the password of the store' );
-    is_deeply( \@issuers, ['ns.test.test'],                             'by the guest that the manifest names' );
-    is_deeply( \@asked,   [q{sudo -n sh -c 'print '\''the token'\'''}], 'which runs the command as root, quoted for its shell' );
+    is_deeply( \@issuers, ['ns.test.test'],                                               'by the guest that the manifest names' );
+    is_deeply( \@asked,   [q{sudo -n sh -c 'exec 2>/dev/null; print '\''the token'\'''}], 'which runs the command as root, quoted for its shell, with what it says on stderr kept out of the secret' );
     is( $wrote{'/bogus/web.token'}, "a-token\n", 'and the guest gets what it printed' );
 
     $answer = q{};

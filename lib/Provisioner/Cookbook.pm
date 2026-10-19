@@ -1613,6 +1613,7 @@ sub global_schema {
                             properties => {
                                 addresses => { type => [qw{array string}], items => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
                                 cidr      => { type => [qw{array string}], items => { type => 'string' }, description => 'The networks of the bin, as prefixes.' },
+                                via       => { type => 'string', description => 'The guest that routes to the bin, such as the openvpn server whose clients have its addresses.  Every other guest gets a route to the bin through that guest.' },
                             },
                         },
                     },

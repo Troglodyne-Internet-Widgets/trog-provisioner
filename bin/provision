@@ -339,7 +339,8 @@ sub place_guest_secrets {
 Asks another guest for a secret that C<$domain> needs at C<$path>.  C<$issue>
 is the C<issue> of a C<guest_secrets> entry: C<guest> is the guest that issues
 it, and C<command> is a shell command that root runs there.  The command prints
-the secret, and prints nothing when it fails.  Returns the secret.
+the secret, and prints nothing when it fails.  What it writes to standard
+error is discarded.  Returns the secret.
 
 Dies when no hypervisor runs that guest, or the command prints nothing, or
 more than one line.  The guest that issues it must be up first.
@@ -353,8 +354,11 @@ sub issue_secret {
     my $guest = Trog::Hypervisors->guest_of($issuer)
       or die "$domain needs a secret at $path from $issuer, and $issuer is not up.  Build $issuer first.\n";
 
+    # The stderr of the command is dropped, because sudo runs it in a pty that
+    # carries stderr along with stdout, and anything said there would become
+    # part of the secret.
     ( my $quoted = $issue->{command} ) =~ s/'/'\\''/g;
-    my $secret = $guest->capture_cmd("sudo -n sh -c '$quoted'") // q{};
+    my $secret = $guest->capture_cmd("sudo -n sh -c 'exec 2>/dev/null; $quoted'") // q{};
     chomp $secret;
     die "$issuer did not issue the secret that $domain needs at $path.  Ask it why: the command is in the guest-secrets.yaml of $domain.\n"
       unless $secret =~ m/\A\S+\z/;

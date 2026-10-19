@@ -14,8 +14,13 @@ t/Provisioner-Recipe-openvpnclient.t - one tunnel for each domain, and what name
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use MIME::Base64();
+use Fcntl();
 
 use FindBin::libs;
 
@@ -94,6 +99,84 @@ subtest 'the configuration points at what belongs to this domain' => sub {
     like( $conf, qr{^ca\s+/etc/openvpn/client/first[.]test/ca[.]crt$}m,      'the authority is this domain copy' );
     like( $conf, qr{^key\s+/etc/openvpn/client/first[.]test/client[.]key$}m, 'and so is the key' );
     like( $conf, qr{openvpn-client-first[.]test[.]log},                      'and the log cannot collide with another tunnel' );
+};
+
+my %POOL   = ( ip_pool                                                                      => { cidr => '192.0.2.0/24', bins => { vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } } } );
+my %ISSUED = ( ( map { $_ => $BASE{$_} } grep { $_ ne 'cert_dir' } keys %BASE ), issue_from => 'vpn.test.test', %POOL );
+
+subtest 'issue_from or cert_dir, and not both' => sub {
+    is( exception { fresh()->validate( %ISSUED, domain => 'first.test' ) }, undef, 'issue_from alone is enough' );
+    ok( exception { fresh()->validate( %ISSUED, cert_dir => '/bogus', domain => 'first.test' ) }, 'and both is refused' );
+    my %neither = %ISSUED;
+    delete $neither{issue_from};
+    ok( exception { fresh()->validate( %neither, domain => 'first.test' ) }, 'and so is neither' );
+    ok( exception { fresh()->validate( %ISSUED, server => 'vpn.test.test; reboot', domain => 'first.test' ) }, 'a server that is not a name is refused, because it goes into a command on the server' );
+};
+
+subtest 'an issued configuration comes from the bin that the server routes' => sub {
+    my %opts = fresh()->validate( %ISSUED, domain => 'first.test' );
+    is_deeply( $opts{address_blocks}, ['10.8.0.128/25'], 'the guest test knows which networks the address must be in' );
+
+    my %other = ( ip_pool => { cidr => '192.0.2.0/24', bins => { vpnclients => { cidr => '10.8.0.128/25', via => 'other.test.test' } } } );
+    like( exception { fresh()->validate( %ISSUED, %other, domain => 'first.test' ) }, qr/via[ ]is[ ]vpn[.]test[.]test, .* none/, 'and with no bin for the server, the build stops here' );
+
+    my $fragment = fresh()->render( %ISSUED, domain => 'first.test' );
+    cmp_ok( index( $fragment, 'base64 -d /etc/openvpn/client/first.test/issued.ovpn.b64' ), '>=', 0, 'the fragment decodes what the server issued' );
+    like( $fragment, qr{umask[ ]077}, 'into files that nobody else can read' );
+    unlike( $fragment, qr/rsync/, 'and fetches nothing from this machine' );
+};
+
+subtest 'the fragment splits the issued configuration into the four files' => sub {
+    my $fragment = fresh()->render( %ISSUED, domain => 'first.test' );
+    my ($line) = $fragment =~ m{^(\s*umask[ ]077[ ]\N+)$}m or return fail('no line that decodes the configuration');
+
+    # The line as make runs it: $$ is one dollar, and the guest path is this one.
+    my $dir = tempdir( CLEANUP => 1 );
+    ( my $shell = $line ) =~ s/\$\$/\$/g;
+    $shell =~ s{/etc/openvpn/client/first[.]test}{$dir}g;
+
+    my $ovpn = join( "\n", 'client', 'dev tun', '<ca>', 'THE CA', '</ca>', '<cert>', 'THE CERT', '</cert>', '<key>', 'THE KEY', 'TWO LINES', '</key>', '<tls-auth>', 'THE TA', '</tls-auth>', q{} );
+    File::Slurper::Temp::write_text( "$dir/issued.ovpn.b64", MIME::Base64::encode_base64( $ovpn, q{} ) );
+
+    is( system( 'bash', '-c', $shell ),                                     0,                      'the line runs' ) or diag $shell;
+    is( File::Slurper::read_text("$dir/ca.crt"),                            "THE CA\n",             'the CA lands in ca.crt' );
+    is( File::Slurper::read_text("$dir/client.crt"),                        "THE CERT\n",           'the certificate in client.crt' );
+    is( File::Slurper::read_text("$dir/client.key"),                        "THE KEY\nTWO LINES\n", 'the whole key in client.key' );
+    is( File::Slurper::read_text("$dir/ta.key"),                            "THE TA\n",             'and the tls-auth key in ta.key' );
+    is( sprintf( '%04o', Fcntl::S_IMODE( ( stat "$dir/client.key" )[2] ) ), '0600',                 'which nobody else can read from the start' );
+};
+
+subtest 'guest_secrets asks the server for the configuration, with an address from the bin' => sub {
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    my $cook = Test::MockModule->new('Provisioner::Cookbook');
+    my @asked;
+    $pool->redefine( assign        => sub { push @asked, [@_]; return '10.8.0.129' } );
+    $cook->redefine( global_config => sub { return {%POOL} } );
+
+    my %secrets = fresh()->guest_secrets( '/opt/domains', 'first.test', %ISSUED );
+    is_deeply( \@asked, [ [ 'first.test', $POOL{ip_pool}, 'vpnclients' ] ], 'the address comes from the bin that names the server' );
+    is_deeply(
+        \%secrets,
+        {
+            '/etc/openvpn/client/first.test/issued.ovpn.b64' => {
+                issue => { guest => 'vpn.test.test', command => '/usr/local/sbin/openvpn-client-config --address 10.8.0.129 first.test vpn.test.test | base64 -w0' },
+                owner => 'root:root',
+                mode  => '0600',
+            }
+        },
+        'and the server issues the configuration with that address, on one line'
+    );
+
+    is_deeply( { fresh()->guest_secrets( '/opt/domains', 'first.test', %BASE ) }, {}, 'a domain with a cert_dir asks for nothing' );
+};
+
+subtest 'bin/destroy knows where to revoke' => sub {
+    my $cook = Test::MockModule->new('Provisioner::Cookbook');
+    $cook->redefine( domain_config => sub { return $_[1] eq 'first.test' ? { openvpnclient => { issue_from => 'vpn.test.test' } } : { openvpnclient => { cert_dir => '/bogus' } } } );
+
+    is( fresh()->issuer_of('first.test'),      'vpn.test.test',                                    'a domain with issue_from is revoked on that server' );
+    is( fresh()->issuer_of('second.test'),     undef,                                              'and one with a cert_dir nowhere' );
+    is( fresh()->revoke_command('first.test'), '/usr/local/sbin/openvpn-revoke-client first.test', 'by the script that also frees the address' );
 };
 
 Test::NoWarnings::had_no_warnings();

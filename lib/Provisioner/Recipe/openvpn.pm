@@ -8,7 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use Socket qw{inet_aton inet_ntoa};
+use Net::CIDR();
+use Net::IP qw{$IP_A_IN_B_OVERLAP $IP_IDENTICAL $IP_NO_OVERLAP};
 
 use Provisioner::IPPool();
 
@@ -151,6 +152,51 @@ and runs C<openvpn-stage-pki>.  If it has one, the script prints the same
 certificate again.  The output holds the private key of the client, so treat it
 like a password.
 
+=head3 Static addresses
+
+A client can have an address that does not change, so that the guests can
+reach it, and know it, by that address.  The address comes from a bin of the
+C<ip_pool> that names this domain in C<via>.  See L<Provisioner::IPPool/BINS>.
+
+    ip_pool:
+        bins:
+            vpnclients:
+                cidr: 10.8.0.128/25
+                via: vpn.test.test
+
+The bin must be inside C<subnet>, at its top end, because the first two addresses
+of C<subnet> are the network and the server.  The server hands out the
+rest of C<subnet> to the clients without an address of their own.  No other bin
+can have an address in C<subnet>.  So two openvpn servers with bins need two
+different values of C<subnet>, because the default is the same for both.
+
+    openvpn-client-config --address 10.8.0.129 NAME [REMOTE] > NAME.ovpn
+
+This writes F</etc/openvpn/server/ccd/NAME>, which gives C<NAME> that address
+at each connect.  It refuses an address that another client already has.  A
+guest that runs L<Provisioner::Recipe::openvpnclient> with C<issue_from> gets
+its address and its configuration this way when it is built.  C<bin/destroy>
+revokes it, which removes the file.
+
+Traffic from a static address to C<routes> is not masqueraded, so a guest sees
+the address of the client.  Each guest has a route to the bin through this
+domain, which F<ubuntu.network-config.tt> writes from C<via>.  Any other host
+on those networks needs that route as well, for example on the router of the
+network.  A guest built before the bin had C<via> gets the route when it is
+built again.  The firewall of this guest also lets C<routes> open a connection
+to the bin.
+
+The salvage keeps F</etc/openvpn/server/ccd> with the PKI, so a rebuild of the
+server keeps the address of each client.
+
+An operator can also give an address to a client that is not a guest of this
+installation, such as a laptop, with C<--address>.  Before
+L<Provisioner::IPPool> hands out an address from the bin, it asks this server
+for C<openvpn-list-clients --static>.  It reserves each address that the
+server gives to a client that the database does not know, so that no guest
+gets that address too.  A build that needs a new address from the bin dies
+when this server cannot be asked.
+
 =head3 Taking a client away
 
     openvpn-revoke-client NAME
@@ -180,12 +226,13 @@ C<admin_email>.  Until then it prints nothing, and cron sends nothing.
 
 =head3 Which clients there are
 
-    openvpn-list-clients [--all]
+    openvpn-list-clients [--all | --static]
 
 This lists each name that can connect, when its certificate expires, and its
 tunnel address if it is connected now.  C<--all> also lists the revoked and the
 expired certificates.  The script reads the index of the CA and the status file
-of the server, which the server rewrites each minute.
+of the server, which the server rewrites each minute.  C<--static> lists each
+client with a static address instead, as its name, a tab, and the address.
 
 =cut
 
@@ -310,16 +357,77 @@ my sub mask ($prefix) {
 # length, so that 192.0.2.5/24 gives 192.0.2.0 and 24.
 my sub network ($block) {
     my ( $address, $prefix ) = $block =~ m{\A(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})\z};
-    my $packed = defined $prefix && $prefix <= 32 && inet_aton($address);
-    die "'$block' is not an IPv4 CIDR block\n" unless $packed;
+    die "'$block' is not an IPv4 CIDR block\n" if !defined $prefix || $prefix > 32;
 
-    return ( inet_ntoa( pack( 'N', unpack( 'N', $packed ) & mask($prefix) ) ), $prefix );
+    return ( Provisioner::IPPool::int_to_address( Provisioner::IPPool::address_to_int($address) & mask($prefix) ), $prefix );
+}
+
+# The first and the last address of a CIDR block, as integers.
+my sub range ($block) {
+    return map { Provisioner::IPPool::address_to_int($_) } split /-/, ( Net::CIDR::cidr2range($block) )[0];
+}
+
+# How the CIDR block $block lies against the CIDR block $net, as one of the
+# overlap constants of Net::IP.
+my sub overlap ( $block, $net ) {
+    my ( $inner, $outer ) = map { Net::IP->new($_) // die "'$_' is not an IPv4 CIDR block: " . Net::IP::Error() . "\n" } $block, $net;
+    return $inner->overlaps($outer) // $IP_NO_OVERLAP;
+}
+
+# Whether every address of the CIDR block $block is in the CIDR block $net.
+my sub within ( $block, $net ) {
+    my $overlap = overlap( $block, $net );
+    return $overlap == $IP_A_IN_B_OVERLAP || $overlap == $IP_IDENTICAL;
+}
+
+=head2 $range = dynamic_pool($subnet, $cidr, @blocks)
+
+The part of the VPN subnet C<$subnet/$cidr> that the server hands out to a
+client without an address of its own, as C<< { start => $ip, end => $ip } >>.
+That is every host address of the subnet outside the CIDR blocks C<@blocks>,
+except the first, which is the server.
+
+Dies if a block is not inside the subnet, or holds the network address or the
+address of the server, or if the blocks leave no address, or leave two ranges,
+because C<ifconfig-pool> takes one.
+
+=cut
+
+sub dynamic_pool ( $subnet, $cidr, @blocks ) {
+    my $net = join( '/', network("$subnet/$cidr") );
+    my ( $first, $last ) = range($net);
+    my @reserved = map { Provisioner::IPPool::int_to_address($_) } $first, $first + 1;
+
+    my @taken;
+    foreach my $block (@blocks) {
+        die "The bin with $block routes through this openvpn server, so it must be inside its subnet $net\n"
+          unless within( $block, $net );
+        die "The bin with $block routes through this openvpn server, so it cannot hold @reserved, which are the network and the server\n"
+          if Net::CIDR::cidrlookup( $block, map { "$_/32" } @reserved );
+        @taken = Net::CIDR::cidradd( $block, @taken );
+    }
+
+    # The gaps between what the bins take, from the first address after the
+    # server to the last before the broadcast.
+    my @free;
+    my $from = $first + 2;
+    foreach my $span ( sort { $a->[0] <=> $b->[0] } map { [ range($_) ] } @taken ) {
+        push @free, [ $from, $span->[0] - 1 ] if $span->[0] > $from;
+        $from = $span->[1] + 1;
+    }
+    push @free, [ $from, $last - 1 ] if $from < $last;
+
+    die "No available address to assign in the configured subnet ($net)!\n" unless @free;
+    die "The bins that route through this openvpn server split $net in two, and openvpn hands out one range: put them at its top end\n"
+      if @free > 1;
+
+    return { start => Provisioner::IPPool::int_to_address( $free[0][0] ), end => Provisioner::IPPool::int_to_address( $free[0][1] ) };
 }
 
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
-VPN subnet.
+VPN subnet.  Dies if C<netmask> is not a netmask.
 
 Fills in C<routes> from every bin of C<ip_pool>: the two halves of each C<cidr>
 block, then a C</32> for each of its C<addresses>, each route once.  A C</32>
@@ -330,6 +438,16 @@ reaches>.
 Adds C<pushes>, each route as the C<network> and the C<netmask> that the
 C<route> directive of OpenVPN takes, with the host bits of the network cleared.
 Dies if a route is not an IPv4 CIDR block.
+
+For the bins of C<ip_pool> whose C<via> is this domain, adds C<static_blocks>,
+their networks, and C<ifconfig_pool>, the C<start> and C<end> of what is left of
+C<subnet> for a client without an address of its own.  Dies if such a bin is
+not inside C<subnet>, or leaves nothing of it, or leaves two ranges.  See
+L</Static addresses>.
+
+Dies if any other bin has an address in C<subnet>.  A bin with another C<via>
+there means that two servers share the subnet.  A bin without C<via> there
+holds addresses that this server also hands out.
 
 =cut
 
@@ -350,11 +468,24 @@ sub required_recipes {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # The schema makes netmask an IPv4 address, so inet_aton resolves no name.
-    $opts{cidr} = unpack( '%32b*', inet_aton( $opts{netmask} ) );
+    my $vpn = eval { Net::CIDR::addrandmask2cidr( $opts{subnet}, $opts{netmask} ) } // die "The netmask $opts{netmask} of the VPN subnet is not a run of ones and then zeros\n";
+    ( undef, $opts{cidr} ) = split m{/}, $vpn;
+
+    my %bins   = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
+    my $domain = $opts{domain} // q{};
+    foreach my $name ( sort keys %bins ) {
+        my $via = $bins{$name}{via};
+        next if defined $via && $via eq $domain;
+
+        foreach my $block ( Provisioner::IPPool::blocks( $bins{$name} ) ) {
+            next if overlap( $block, $vpn ) == $IP_NO_OVERLAP;
+            die "ip_pool has $block in the bin $name, which routes through $via, but $block is in $vpn, the VPN subnet of $domain.  " . "Give the two openvpn servers different subnets.\n"
+              if defined $via;
+            die "ip_pool has $block in the bin $name, but $block is in $vpn, the VPN subnet of $domain, which hands out those addresses to its own clients.  " . "Move the bin out of $vpn.  If the bin holds the clients of $domain, give it via: $domain.\n";
+        }
+    }
 
     unless ( $opts{routes} ) {
-        my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
         my @routes;
         foreach my $block ( map { Provisioner::IPPool::pool_items( $_->{cidr} ) } @bins{ sort keys %bins } ) {
             my ( $address, $prefix ) = network($block);
@@ -364,27 +495,28 @@ sub enrich {
             }
 
             my $half = 2**( 31 - $prefix );
-            my $base = unpack( 'N', inet_aton($address) );
-            push @routes, map { inet_ntoa( pack( 'N', $base + $_ * $half ) ) . '/' . ( $prefix + 1 ) } 0, 1;
+            my $base = Provisioner::IPPool::address_to_int($address);
+            push @routes, map { Provisioner::IPPool::int_to_address( $base + $_ * $half ) . '/' . ( $prefix + 1 ) } 0, 1;
         }
         push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $_->{addresses} ) for @bins{ sort keys %bins };
 
         # A bin inside the VPN subnet holds the clients themselves, which the
         # tunnel already reaches.
-        my $vpn    = unpack( 'N', inet_aton( $opts{subnet} ) ) & mask( $opts{cidr} );
-        my $inside = sub ($route) {
-            my ( $address, $prefix ) = network($route);
-            return $prefix >= $opts{cidr} && ( unpack( 'N', inet_aton($address) ) & mask( $opts{cidr} ) ) == $vpn;
-        };
-
         my %seen;
-        $opts{routes} = [ grep { !$seen{$_}++ && !$inside->($_) } @routes ];
+        $opts{routes} = [ grep { !$seen{$_}++ && !within( $_, $vpn ) } @routes ];
+    }
+
+    my %static = Provisioner::IPPool::bins_via( $opts{ip_pool} // {}, $opts{domain} // q{} );
+    if (%static) {
+        my @blocks = map { Provisioner::IPPool::blocks($_) } @static{ sort keys %static };
+        $opts{static_blocks} = \@blocks;
+        $opts{ifconfig_pool} = dynamic_pool( $opts{subnet}, $opts{cidr}, @blocks );
     }
 
     $opts{pushes} = [
         map {
             my ( $address, $prefix ) = network($_);
-            +{ network => $address, netmask => inet_ntoa( pack( 'N', mask($prefix) ) ) }
+            +{ network => $address, netmask => Provisioner::IPPool::int_to_address( mask($prefix) ) }
         } @{ $opts{routes} }
     ];
 
@@ -412,13 +544,31 @@ sub template_files {
     );
 }
 
+=head2 $command = $recipe->static_clients_command()
+
+The shell command that root runs on this server to list each client with a
+static address.  It prints the name of the client, a tab, and the address, one
+client to a line.  L<Provisioner::IPPool> runs it before it hands out an address
+from a bin whose C<via> is this server.
+
+=cut
+
+sub static_clients_command {
+    return '/usr/local/sbin/openvpn-list-clients --static';
+}
+
 sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
     # The PKI with its CA.  It must arrive before the fragment asks easyrsa for
     # a CA, because a new CA is one that no existing client trusts.
-    return ( '/etc/openvpn/easy-rsa/pki' => { from => "$install_dir/$domain/openvpn/pki", owner => 'root:root' } );
+    return (
+        '/etc/openvpn/easy-rsa/pki' => { from => "$install_dir/$domain/openvpn/pki", owner => 'root:root' },
+
+        # The static address of each client.  See DESCRIPTION.
+        '/etc/openvpn/server/ccd' => { from => "$install_dir/$domain/openvpn/ccd", owner => 'root:root' },
+    );
 }
 
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)
@@ -437,6 +587,7 @@ sub remote_files {
     return (
         # The staged copy of the PKI.  See DESCRIPTION for why it is a copy.
         '/etc/openvpn/pki-salvage/' => 'openvpn/pki/',
+        '/etc/openvpn/ccd-salvage/' => 'openvpn/ccd/',
     );
 }
 

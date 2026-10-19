@@ -469,6 +469,7 @@ sub global_args {
                             properties => {
                                 addresses => { type => [qw{array string}], items => { type => 'string' } },
                                 cidr      => { type => [qw{array string}], items => { type => 'string' } },
+                                via       => { type => 'string' },
                             },
                         },
                     },

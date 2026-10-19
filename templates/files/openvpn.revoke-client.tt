@@ -9,13 +9,18 @@
 #
 # openvpn-client-config NAME issues a new certificate for the name afterwards.
 #
+# It also takes away the static address of NAME, if it has one, so that the
+# address can go to another client.
+#
 # OPENVPN_EASYRSA_DIR names a copy of /etc/openvpn/easy-rsa to revoke in
-# instead.  The guest test uses it, so that a provision revokes nothing real.
+# instead, and OPENVPN_CCD_DIR a copy of the client-config-dir.  The guest test
+# uses them, so that a provision revokes nothing real.
 
 set -euo pipefail
 
 NAME="${1:-}"
 EASYRSA_DIR="${OPENVPN_EASYRSA_DIR:-/etc/openvpn/easy-rsa}"
+CCD="${OPENVPN_CCD_DIR:-/etc/openvpn/server/ccd}"
 PKI="$EASYRSA_DIR/pki"
 
 if [ -z "$NAME" ] || [ $# -gt 1 ]; then
@@ -38,5 +43,7 @@ fi
     cd "$EASYRSA_DIR"
     EASYRSA_PKI="$PKI" ./easyrsa --batch revoke "$NAME"
 ) >&2
+rm -f "$CCD/$NAME"
 
+# This also stages the PKI and the static addresses.
 /usr/local/sbin/openvpn-refresh-crl

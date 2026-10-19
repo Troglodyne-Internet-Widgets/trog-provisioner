@@ -7,11 +7,14 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
+use Getopt::Long();
+
 =head1 setup-masquerade
 
 =head2 SYNOPSIS
 
     setup-masquerade 10.8.0.0/24=eth0 [10.9.0.0/24 ...]
+    setup-masquerade --keep 10.8.0.128/25 --to 192.0.2.0/25 --to 192.0.2.128/25 10.8.0.0/24
 
 =head2 DESCRIPTION
 
@@ -54,6 +57,20 @@ also removes a MASQUERADE rule for a named subnet that is B<not> between the
 markers, so the file does not hold two.  It leaves masquerades for other
 subnets alone.
 
+C<--keep SOURCE> and C<--to DESTINATION> each take a CIDR block and repeat.
+Traffic from each C<SOURCE> to each C<DESTINATION> keeps its own address: a nat
+C<RETURN> for that pair comes before the MASQUERADE rules.  A C<DESTINATION>
+can also open a connection to a C<SOURCE>, through one more forward ACCEPT.
+These are for the static addresses of the clients of a VPN, which the hosts at
+C<DESTINATION> route back to through this guest.  See
+L<Provisioner::Recipe::openvpn>.
+
+ufw loads C<before.rules> without flushing POSTROUTING, so each reload would
+add the jump into the chain of the MASQUERADE rules once more.  So the script
+also puts a marked block in C</etc/ufw/before.init>, which ufw runs before each
+load, that deletes the jumps of the last load.  It makes that file executable,
+because ufw runs it only then.
+
 If the C<ufw> service is active, the script applies the rules with
 C<ufw reload>.
 
@@ -63,6 +80,10 @@ C<ufw reload>.
 # a file that is not the firewall of the test machine.
 our $FILE = '/etc/ufw/before.rules';
 
+# The script that ufw-init runs with start before it loads $FILE.  It is our,
+# for the same reason.
+our $INIT = '/etc/ufw/before.init';
+
 # The MASQUERADE rules go in a chain of our own and not straight into
 # POSTROUTING.  ufw reloads with `iptables-restore --noflush`, which flushes a
 # user chain that the input declares but never a built-in chain.  So each reload
@@ -70,12 +91,13 @@ our $FILE = '/etc/ufw/before.rules';
 our $NAT_CHAIN = 'trog-nat';
 
 my %MARKS = (
-    nat    => [ '# BEGIN trog-provisioner masquerade',     '# END trog-provisioner masquerade' ],
-    filter => [ '# BEGIN trog-provisioner vpn forwarding', '# END trog-provisioner vpn forwarding' ],
+    nat    => [ '# BEGIN trog-provisioner masquerade',      '# END trog-provisioner masquerade' ],
+    filter => [ '# BEGIN trog-provisioner vpn forwarding',  '# END trog-provisioner vpn forwarding' ],
+    init   => [ '# BEGIN trog-provisioner masquerade jump', '# END trog-provisioner masquerade jump' ],
 );
 
 # $text without the block that the last run wrote between the markers for
-# $which (nat or filter), wherever it is in the file.
+# $which (nat, filter or init), wherever it is in the file.
 my $drop_block = sub {
     my ( $text,  $which ) = @_;
     my ( $begin, $end )   = @{ $MARKS{$which} };
@@ -110,6 +132,10 @@ exit main(@ARGV) unless caller;
 
 sub main {
     my (@args) = @_;
+
+    my ( @keep, @to );
+    Getopt::Long::GetOptionsFromArray( \@args, 'keep=s' => \@keep, 'to=s' => \@to )
+      or die "usage: setup-masquerade [--keep SOURCE ... --to DESTINATION ...] SUBNET[=INTERFACE] ...\n";
     return 0 unless @args;
 
     open( my $fh, '<', $FILE ) or die "Cannot read $FILE: $!\n";
@@ -147,6 +173,15 @@ sub main {
         # It keeps the pair complete if ufw stops shipping that line.
         push( @filter, "-A ufw-before-forward -d $subnet -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" );
     }
+
+    # Ahead of the MASQUERADE rules, because the first rule that matches in
+    # the chain decides.
+    my @returns;
+    foreach my $source (@keep) {
+        push( @returns, map { "-A $NAT_CHAIN -s $source -d $_ -j RETURN" } @to );
+        push( @filter,  map { "-A ufw-before-forward -s $_ -d $source -j ACCEPT" } @to );
+    }
+    @nat = ( @returns, @nat );
 
     my $original = $content;
 
@@ -194,13 +229,40 @@ sub main {
         }
     }
 
-    return 0 if $content eq $original;
+    # The block in $INIT that keeps one jump into $NAT_CHAIN, when there is a
+    # jump.  The POD says why.
+    open( my $in, '<', $INIT ) or die "Cannot read $INIT: $!\n";
+    my $init = do { local $/; <$in> };
+    close($in) or die "Cannot close $INIT: $!\n";
 
-    open( my $out, '>', $FILE ) or die "Cannot write $FILE: $!\n";
-    print {$out} $content;
-    close($out) or die "Cannot write $FILE: $!\n";
+    my $init_before = $init;
+    $init = $drop_block->( $init, 'init' );
+    if (@nat) {
+        my ( $begin, $end ) = @{ $MARKS{init} };
+        my $block = "$begin\n    while iptables -t nat -D POSTROUTING -j $NAT_CHAIN 2>/dev/null; do :; done\n$end\n";
+        $init =~ s/^(start\)[ \t]*\n)/$1$block/m
+          or die "Found no start) in $INIT to delete the old jumps into $NAT_CHAIN from\n";
 
-    print 'Wrote ' . scalar(@nat) . ' masquerade and ' . scalar(@filter) . " forwarding rule(s) to $FILE\n";
+        # ufw-init runs it only when it is executable, which it is not as shipped.
+        chmod( 0750, $INIT ) or die "Cannot make $INIT executable: $!\n";
+    }
+
+    my $guarded = $init ne $init_before;
+    if ($guarded) {
+        open( my $out, '>', $INIT ) or die "Cannot write $INIT: $!\n";
+        print {$out} $init;
+        close($out) or die "Cannot write $INIT: $!\n";
+    }
+    return 0 if $content eq $original && !$guarded;
+
+    if ( $content ne $original ) {
+        open( my $out, '>', $FILE ) or die "Cannot write $FILE: $!\n";
+        print {$out} $content;
+        close($out) or die "Cannot write $FILE: $!\n";
+
+        print 'Wrote ' . scalar(@nat) . ' nat and ' . scalar(@filter) . " forwarding rule(s) to $FILE\n";
+    }
+    print "Made $INIT keep one jump into $NAT_CHAIN\n" if $guarded;
 
     # A reload only if ufw is active, and a failed one is a warning, not the
     # end of the run.

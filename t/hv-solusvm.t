@@ -335,6 +335,9 @@ subtest 'which network of the guests an address is on' => sub {
     $STATE{servers} = [ { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.99.32.98', netmask => '0.0.0.0' } ] } } ];
     is $hv->guest_network_of('10.99.32.49'), undef, 'a netmask of nothing puts every address on it, so it is no evidence of a shared network';
 
+    $STATE{servers} = [ { id => 1, name => 'one.test', ip_addresses => { ipv4 => [ { ip => '10.99.32.98', netmask => '255.0.255.0' } ] } } ];
+    is $hv->guest_network_of('10.99.32.49'), undef, 'and a netmask with a hole in it names no network';
+
     $STATE{servers} = [];
     is $hv->guest_network_of('10.99.32.49'), undef, 'with no guests, there is no network to be on';
 };

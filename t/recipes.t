@@ -632,7 +632,7 @@ subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' =
 
     my $bins = $vpn->()->render_file(
         'files/openvpn.server.conf.tt', %G,
-        ip_pool => { cidr => '192.0.2.0/24', bins => { infra => { addresses => '198.51.100.9' }, vpnclients => { cidr => '10.8.0.128/25' } } }
+        ip_pool => { cidr => '192.0.2.0/24', bins => { infra => { addresses => '198.51.100.9' }, vpnclients => { cidr => '10.8.0.128/25', via => $G{domain} } } }
     );
     is_deeply(
         $routes->($bins), [ '192.0.2.0 255.255.255.128', '192.0.2.128 255.255.255.128', '198.51.100.9 255.255.255.255' ],
@@ -644,6 +644,57 @@ subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' =
 
     like( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0/33'] ) }, qr/not[ ]an[ ]IPv4[ ]CIDR[ ]block/, 'a prefix longer than 32 is refused' );
     ok( exception { $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, routes => ['192.0.2.0'] ) }, 'and so is an address without a prefix' );
+    like( exception { $vpn->()->render( %G, netmask => '255.0.255.0' ) }, qr/not[ ]a[ ]run[ ]of[ ]ones/, 'and so is a netmask with a hole in it, which has no prefix length' );
+};
+
+subtest 'openvpn gives the clients of a bin that names it their own addresses, and hands out only the rest' => sub {
+    my $vpn  = sub { 'Provisioner::Recipe::openvpn'->new(%PROV) };
+    my $pool = sub ($clients) { return ( ip_pool => { cidr => '192.0.2.0/24', bins => { vpnclients => { %$clients, via => $G{domain} } } } ) };
+
+    my $conf = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { cidr => '10.8.0.128/25' } ) );
+    like( $conf, qr{^\Qserver 10.8.0.0 255.255.255.0 nopool\E$}m,            'the server makes no pool of its own' ) or diag $conf;
+    like( $conf, qr{^\Qifconfig-pool 10.8.0.2 10.8.0.127 255.255.255.0\E$}m, 'and hands out what the bin leaves, after the address of the server' );
+    like( $conf, qr{^\Qclient-config-dir /etc/openvpn/server/ccd\E$}m,       'and reads the address of each client from where openvpn-client-config writes it' );
+
+    my $fragment = $vpn->()->render( %G, $pool->( { cidr => '10.8.0.128/25' } ) );
+    cmp_ok(
+        index( $fragment, q{setup-masquerade --keep '10.8.0.128/25' --to '192.0.2.0/25' --to '192.0.2.128/25' '10.8.0.0/24'} ), '>=', 0,
+        'and the bin keeps its own addresses towards the routes'
+    ) or diag $fragment;
+
+    my $other = sub (%bins) { return ( ip_pool => { cidr => '192.0.2.0/24', bins => \%bins } ) };
+    my $plain = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $other->( theirs => { cidr => '10.8.1.0/25', via => 'other.test.test' } ) );
+    like( $plain, qr{^\Qserver 10.8.0.0 255.255.255.0\E$}m, 'a bin of another server on the next subnet up leaves its pool alone' );
+    my $shared = ( exception { $vpn->()->render( %G, $other->( ours => { cidr => '10.8.0.128/26', via => $G{domain} }, theirs => { cidr => '10.8.0.192/26', via => 'other.test.test' } ) ) } ) // q{};
+    cmp_ok( index( $shared, '10.8.0.192/26 in the bin theirs, which routes through other.test.test' ), '>=', 0, 'a bin of another server inside this subnet is refused, because the two servers would hand out the same addresses' ) or diag $shared;
+    like( $shared, qr/different[ ]subnets/, 'and the message says what to change' );
+    like(
+        exception { $vpn->()->render( %G, $other->( theirs => { addresses => '10.8.0.200', via => 'other.test.test' } ) ) },
+        qr/10[.]8[.]0[.]200\/32[ ]in[ ]the[ ]bin[ ]theirs/, 'and so is one address of it'
+    );
+    like(
+        exception { $vpn->()->render( %G, $other->( loose => { cidr => '10.8.0.0/23' } ) ) },
+        qr/bin[ ]loose,[ ]but\N*give[ ]it[ ]via:[ ]\Q$G{domain}\E/, 'and so is a bin without via that overlaps the subnet, because this server hands out its addresses too'
+    );
+    like(
+        exception { $vpn->()->render( %G, ip_pool => { cidr => '10.8.0.0/28' } ) },
+        qr/bin[ ]guests,/, 'and so are guests on the VPN subnet'
+    );
+    unlike( $vpn->()->render( %G, ip_pool => { cidr => '192.0.2.0/24' } ), qr/--keep/, 'and its clients are masqueraded as before' );
+
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.9.0.0/25' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/,                'a bin outside the subnet is refused' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.8.0.0/23' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/,                'and so is one that holds the subnet and more' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.8.0.64/26' } ) ) }, qr/split/,                                            'and so is one in the middle of it, which leaves two ranges' );
+    like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.8.0.0/25' } ) ) },  qr/cannot[ ]hold[ ]10[.]8[.]0[.]0[ ]10[.]8[.]0[.]1,/, 'and so is one at the bottom, which holds the address of the server' );
+    like( exception { $vpn->()->render( %G, $pool->( { addresses => '10.8.0.0' } ) ) },     qr/cannot[ ]hold/,                                    'and one that holds only the network address' );
+    like( exception { $vpn->()->render( %G, $pool->( { addresses => '10.8.0.1' } ) ) },     qr/cannot[ ]hold/,                                    'and one that holds only the address of the server' );
+    like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.2' } ) ), qr{^\Qifconfig-pool 10.8.0.3 10.8.0.254 \E}m, 'one address just above the server leaves the rest' );
+
+    my %tiny = ( netmask => '255.255.255.252', $pool->( { addresses => '10.8.0.2' } ) );
+    like( exception { $vpn->()->render( %G, %tiny ) }, qr/No[ ]available[ ]address[ ]\N*[ ]subnet[ ][(]10[.]8[.]0[.]0/, 'and a bin that takes the one address the server has to give is refused' );
+    my %two = ( netmask => '255.255.255.248', $pool->( { cidr => '10.8.0.4/30', addresses => '10.8.0.2 10.8.0.3' } ) );
+    like( exception { $vpn->()->render( %G, %two ) },                                                            qr/No[ ]available[ ]address[ ]\N*[ ]subnet[ ][(]10[.]8[.]0[.]0/, 'and so are blocks that take it between them' );
+    like( $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $pool->( { addresses => '10.8.0.254' } ) ), qr{^\Qifconfig-pool 10.8.0.2 10.8.0.253 \E}m,                    'one address at the top end leaves the rest' );
 };
 
 # ----------------------------------------------------------------
