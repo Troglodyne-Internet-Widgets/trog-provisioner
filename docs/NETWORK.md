@@ -82,6 +82,9 @@ These must be true:
 - The bin is inside the `subnet` of the openvpn server, at its top end.  The
   first two addresses of the subnet are the network and the server, so the bin
   cannot hold them.
+- No other bin has an address in that `subnet`.  So two openvpn servers with
+  bins need two different values of `subnet`, because both have the same
+  default.
 - Each host that is not a guest of this installation, and that talks to a
   client, needs the same route.  Add it on the router of the network, or on the
   host itself.  This machine needs it before a client can reach it by ssh.

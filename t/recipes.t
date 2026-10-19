@@ -632,7 +632,7 @@ subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' =
 
     my $bins = $vpn->()->render_file(
         'files/openvpn.server.conf.tt', %G,
-        ip_pool => { cidr => '192.0.2.0/24', bins => { infra => { addresses => '198.51.100.9' }, vpnclients => { cidr => '10.8.0.128/25' } } }
+        ip_pool => { cidr => '192.0.2.0/24', bins => { infra => { addresses => '198.51.100.9' }, vpnclients => { cidr => '10.8.0.128/25', via => $G{domain} } } }
     );
     is_deeply(
         $routes->($bins), [ '192.0.2.0 255.255.255.128', '192.0.2.128 255.255.255.128', '198.51.100.9 255.255.255.255' ],
@@ -662,8 +662,24 @@ subtest 'openvpn gives the clients of a bin that names it their own addresses, a
         'and the bin keeps its own addresses towards the routes'
     ) or diag $fragment;
 
-    my $plain = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, ip_pool => { cidr => '192.0.2.0/24', bins => { vpnclients => { cidr => '10.8.0.128/25' } } } );
-    like( $plain, qr{^\Qserver 10.8.0.0 255.255.255.0\E$}m, 'a bin that does not name this server leaves its pool alone' );
+    my $other = sub (%bins) { return ( ip_pool => { cidr => '192.0.2.0/24', bins => \%bins } ) };
+    my $plain = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, $other->( theirs => { cidr => '10.8.1.0/25', via => 'other.test.test' } ) );
+    like( $plain, qr{^\Qserver 10.8.0.0 255.255.255.0\E$}m, 'a bin of another server on the next subnet up leaves its pool alone' );
+    my $shared = ( exception { $vpn->()->render( %G, $other->( ours => { cidr => '10.8.0.128/26', via => $G{domain} }, theirs => { cidr => '10.8.0.192/26', via => 'other.test.test' } ) ) } ) // q{};
+    cmp_ok( index( $shared, '10.8.0.192/26 in the bin theirs, which routes through other.test.test' ), '>=', 0, 'a bin of another server inside this subnet is refused, because the two servers would hand out the same addresses' ) or diag $shared;
+    like( $shared, qr/different[ ]subnets/, 'and the message says what to change' );
+    like(
+        exception { $vpn->()->render( %G, $other->( theirs => { addresses => '10.8.0.200', via => 'other.test.test' } ) ) },
+        qr/10[.]8[.]0[.]200\/32[ ]in[ ]the[ ]bin[ ]theirs/, 'and so is one address of it'
+    );
+    like(
+        exception { $vpn->()->render( %G, $other->( loose => { cidr => '10.8.0.0/23' } ) ) },
+        qr/bin[ ]loose,[ ]but\N*give[ ]it[ ]via:[ ]\Q$G{domain}\E/, 'and so is a bin without via that overlaps the subnet, because this server hands out its addresses too'
+    );
+    like(
+        exception { $vpn->()->render( %G, ip_pool => { cidr => '10.8.0.0/28' } ) },
+        qr/bin[ ]guests,/, 'and so are guests on the VPN subnet'
+    );
     unlike( $vpn->()->render( %G, ip_pool => { cidr => '192.0.2.0/24' } ), qr/--keep/, 'and its clients are masqueraded as before' );
 
     like( exception { $vpn->()->render( %G, $pool->( { cidr      => '10.9.0.0/25' } ) ) },  qr/must[ ]be[ ]inside[ ]its[ ]subnet/,                'a bin outside the subnet is refused' );

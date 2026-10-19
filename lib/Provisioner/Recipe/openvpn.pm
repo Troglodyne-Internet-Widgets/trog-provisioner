@@ -166,7 +166,9 @@ C<ip_pool> that names this domain in C<via>.  See L<Provisioner::IPPool/BINS>.
 
 The bin must be inside C<subnet>, at its top end, because the first two addresses
 of C<subnet> are the network and the server.  The server hands out the
-rest of C<subnet> to the clients without an address of their own.
+rest of C<subnet> to the clients without an address of their own.  No other bin
+can have an address in C<subnet>.  So two openvpn servers with bins need two
+different values of C<subnet>, because the default is the same for both.
 
     openvpn-client-config --address 10.8.0.129 NAME [REMOTE] > NAME.ovpn
 
@@ -365,10 +367,16 @@ my sub range ($block) {
     return map { Provisioner::IPPool::address_to_int($_) } split /-/, ( Net::CIDR::cidr2range($block) )[0];
 }
 
+# How the CIDR block $block lies against the CIDR block $net, as one of the
+# overlap constants of Net::IP.
+my sub overlap ( $block, $net ) {
+    my ( $inner, $outer ) = map { Net::IP->new($_) // die "'$_' is not an IPv4 CIDR block: " . Net::IP::Error() . "\n" } $block, $net;
+    return $inner->overlaps($outer) // $IP_NO_OVERLAP;
+}
+
 # Whether every address of the CIDR block $block is in the CIDR block $net.
 my sub within ( $block, $net ) {
-    my ( $inner, $outer ) = map { Net::IP->new($_) // die "'$_' is not an IPv4 CIDR block: " . Net::IP::Error() . "\n" } $block, $net;
-    my $overlap = $inner->overlaps($outer) // $IP_NO_OVERLAP;
+    my $overlap = overlap( $block, $net );
     return $overlap == $IP_A_IN_B_OVERLAP || $overlap == $IP_IDENTICAL;
 }
 
@@ -437,6 +445,10 @@ C<subnet> for a client without an address of its own.  Dies if such a bin is
 not inside C<subnet>, or leaves nothing of it, or leaves two ranges.  See
 L</Static addresses>.
 
+Dies if any other bin has an address in C<subnet>.  A bin with another C<via>
+there means that two servers share the subnet.  A bin without C<via> there
+holds addresses that this server also hands out.
+
 =cut
 
 =head2 %required = $recipe->required_recipes(%opts)
@@ -459,8 +471,21 @@ sub enrich {
     my $vpn = eval { Net::CIDR::addrandmask2cidr( $opts{subnet}, $opts{netmask} ) } // die "The netmask $opts{netmask} of the VPN subnet is not a run of ones and then zeros\n";
     ( undef, $opts{cidr} ) = split m{/}, $vpn;
 
+    my %bins   = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
+    my $domain = $opts{domain} // q{};
+    foreach my $name ( sort keys %bins ) {
+        my $via = $bins{$name}{via};
+        next if defined $via && $via eq $domain;
+
+        foreach my $block ( Provisioner::IPPool::blocks( $bins{$name} ) ) {
+            next if overlap( $block, $vpn ) == $IP_NO_OVERLAP;
+            die "ip_pool has $block in the bin $name, which routes through $via, but $block is in $vpn, the VPN subnet of $domain.  " . "Give the two openvpn servers different subnets.\n"
+              if defined $via;
+            die "ip_pool has $block in the bin $name, but $block is in $vpn, the VPN subnet of $domain, which hands out those addresses to its own clients.  " . "Move the bin out of $vpn.  If the bin holds the clients of $domain, give it via: $domain.\n";
+        }
+    }
+
     unless ( $opts{routes} ) {
-        my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
         my @routes;
         foreach my $block ( map { Provisioner::IPPool::pool_items( $_->{cidr} ) } @bins{ sort keys %bins } ) {
             my ( $address, $prefix ) = network($block);
