@@ -126,7 +126,8 @@ subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
 
     local $ENV{HOME} = $fake_home;
 
-    Trog::Bin::Destroy::remove_authorized_key( $domain, 1 );
+    my $said = Capture::Tiny::capture_merged { Trog::Bin::Destroy::remove_authorized_key( $domain, 1 ) };
+    is( $said, q{}, 'dryrun: says nothing' );
 
     my $after = File::Slurper::read_text($ak);
     like( $after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed' );

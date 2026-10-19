@@ -339,7 +339,8 @@ sub destroy_disks {
 
 Take the line with the public key of the domain out of the authorized_keys file
 of this machine.  The key is the F<key.rsa.pub> in the domain directory.  Does
-nothing when that file is not there, or when no line has the key.
+nothing when that file is not there, or when no line has the key.  With
+C<$dryrun>, does nothing and prints nothing.
 
 Dies, and changes nothing, when the authorized_keys file cannot be read, or when
 the key is on more than one line of it.  See C<replace_line> in
@@ -349,6 +350,7 @@ L<Trog::Machine>.
 
 sub remove_authorized_key {
     my ( $domain, $dryrun ) = @_;
+    return if $dryrun;
 
     # This machine, because the guest fetches its payload from here, so
     # bin/provision authorized the key here.
@@ -359,10 +361,6 @@ sub remove_authorized_key {
     chomp $pubkey;
 
     my $ak = $this_machine->authorized_keys;
-    if ($dryrun) {
-        print "Would remove the SSH key of the domain from $ak\n";
-        return;
-    }
 
     my $had = $this_machine->replace_line( $ak, $pubkey, undef );
     print $had ? "Removed the SSH key of the domain from $ak\n" : "Domain SSH key not found in $ak, skipping.\n";

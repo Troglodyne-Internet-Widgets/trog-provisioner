@@ -535,18 +535,6 @@ success and 0 on failure.  Locally, without C<sudo>, dies on failure.
 
 Appends a line, but only if the file does not already contain it.
 
-=item C<replace_line($path, $needle, $line)>
-
-Puts C<$line> in place of the line of C<$path> that contains the string
-C<$needle>.  With C<$line> undef, it removes that line.  If no line contains
-C<$needle>, it appends C<$line> as C<append_line> does, or does nothing when
-C<$line> is undef.  Returns the number of lines that contained C<$needle>
-before the call, 0 or 1.
-
-This is for a file such as F<authorized_keys>, where a mistake locks the owner
-out.  So it dies, and writes nothing, when the file exists and cannot be read,
-or when C<$needle> is on more than one line.
-
 =item C<put_file($local, $remote, %opts)>
 
 Copies one file from here to there.  Takes C<sudo> and C<mode>.  Returns 1 on
@@ -845,6 +833,20 @@ sub append_line {
 
     return pour( $self, { stdin_data => "$line\n" }, $path, append => 1 );
 }
+
+=head2 replace_line($path, $needle, $line)
+
+Puts C<$line> in place of the line of C<$path> that contains the string
+C<$needle>.  With C<$line> undef, it removes that line.  If no line contains
+C<$needle>, it appends C<$line> as C<append_line> does, or does nothing when
+C<$line> is undef.  Returns the number of lines that contained C<$needle>
+before the call, 0 or 1.
+
+This is for a file such as F<authorized_keys>, where a mistake locks the owner
+out.  So it dies, and writes nothing, when the file exists and cannot be read,
+or when C<$needle> is on more than one line.
+
+=cut
 
 sub replace_line {
     my ( $self, $path, $needle, $line ) = @_;
