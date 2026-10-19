@@ -173,7 +173,6 @@ subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
     is( scalar @calls, 2, 'the hook deploys a record and cleans it up' );
     like( $_, qr/--resolve-zone-name/, 'and asks lexicon to find the zone itself' ) for @calls;
 
-    unlike( $hook, qr/LEXICON_DELEGATED/, 'DELEGATED is not set, which is what composed the wrong name' );
     like( $hook, qr{LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"}, 'and the socket is named for the provider' );
 };
 

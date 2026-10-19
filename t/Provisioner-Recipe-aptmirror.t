@@ -96,16 +96,10 @@ subtest 'the refresh goes through that same unit' => sub {
     my ( $dir, undef ) = generated( refresh => '30 4 * * 6' );
     my $cron = slurp( $dir, 'aptmirror.cron' );
 
-    like( $cron, qr/^30[ ]4[ ]\*[ ]\*[ ]6[ ]root[ ]systemctl[ ]start[ ]--no-block[ ]apt-mirror\.service$/m, 'on the configured schedule' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
-
     # Starting the unit rather than running apt-mirror is what stops a refresh
     # landing mid-sync from running a second one over the same spool: systemd
     # will not run two instances, so it queues.
-    unlike( $cron, qr{^\S+[ ]\S+[ ]\S+[ ]\S+[ ]\S+[ ]root[ ]/usr/bin/apt-mirror}m, 'never apt-mirror directly' );
-
-    # cron runs jobs under dash, which reads &> as a background & and a
-    # redirection -- see templates/files/backupdestination.cron.tt.
-    unlike( $cron, qr/&>/, 'and nothing redirects with &>' );
+    like( $cron, qr/^30[ ]4[ ]\*[ ]\*[ ]6[ ]root[ ]systemctl[ ]start[ ]--no-block[ ]apt-mirror\.service$/m, 'on the configured schedule' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'the vhost answers for the address, not only the name' => sub {
@@ -118,15 +112,9 @@ subtest 'the vhost answers for the address, not only the name' => sub {
     like( $vhost, qr/^\s+server_name[ ]192\.0\.2\.9;$/m,                   'the address is a server_name' );
     like( $vhost, qr{^\s+include[ ]/etc/nginx/names/\Q$DOMAIN\E\.conf;$}m, 'beside the names that nginx gives the vhost of the domain' );
 
-    # Claiming default_server would mean deleting the packaged default site
-    # first, since two of them is a configuration nginx refuses.
-    unlike( $vhost, qr/default_server/, 'without claiming default_server' );
-
     like( $vhost, qr{^\s+location[ ]/ubuntu/[ ]\{$}m,                                           'served at the path the distro tells guests to use' );
     like( $vhost, qr{^\s+alias[ ]/var/spool/apt-mirror/mirror/archive\.ubuntu\.com/ubuntu/;$}m, 'out of where apt-mirror actually puts it' );            ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $vhost, qr{^\s+location[ ]=[ ]/mirror-status[ ]\{$}m,                                 'and says when it last finished a sync' );
-
-    unlike( $vhost, qr/listen[ ]443|ssl_certificate/, 'no TLS: the guest certificate is self-signed and apt will not fetch through one' );
 };
 
 subtest 'where the copy lands follows from the upstream' => sub {

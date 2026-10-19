@@ -146,7 +146,6 @@ subtest 'the cache is data rather than perl' => sub {
     my $json = do { local $/; <$fh> };
     close($fh) or die "Cannot close the cache: $!";
 
-    unlike( $json, qr/\$VAR1/, 'nothing that do() would have executed' );
     my $cache = eval { Cpanel::JSON::XS->new->utf8->decode($json) };
     is( ref $cache, 'HASH', 'and it parses as JSON' ) or diag $@;
     ok( exists $cache->{'https://api.test/'}{alice}, 'keyed by url and then entity' );

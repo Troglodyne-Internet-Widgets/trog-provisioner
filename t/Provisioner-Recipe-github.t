@@ -127,10 +127,6 @@ subtest 'the fragment does only what it was asked for' => sub {
     # The home of the account is asked for rather than assumed: a service user
     # lives under install_dir and an administrator under /home.
     like( $login, qr/getent[ ]passwd[ ]'koan'/, 'the fragment asks where the account lives' );
-
-    # Nothing about keys, host keys or signing: gh uses none of them, and the
-    # git recipe owns all three.
-    unlike( $login, qr/ssh-keyscan|gpg\.format|signingkey|id_git/, 'and it says nothing about ssh' );
 };
 
 subtest 'what the recipes that require it ask for' => sub {

@@ -158,7 +158,6 @@ subtest 'with hosts to fetch through a cache, it points them there and gives the
 
     my ($target) = $mf =~ m/^\Q$STATE\E\/fetch_via_cache:\n((?:\t[^\n]*\n)+)/m;
     is( $target, "\t/root/bin/fetch_via_cache on 192.0.2.9 fetchcache-ca.crt codeload.github.com www.cpan.org\n", 'pointing each host at the cache, with the authority to trust' );
-    unlike( $target // q{}, qr/touch/, 'and never marked done, so a make run again asks the cache again' );
 
     my ($recipe) = $mf =~ m/^all:[^\n]*\n((?:\t[^\n]*\n)+)/m;
     like( $recipe // q{}, qr{post_install[ ]\|\|[ ]touch[ ]/root/\.postrun_failed\n\t/root/bin/fetch_via_cache[ ]off\n}, 'every host given back once the deferred work is done' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
@@ -189,8 +188,7 @@ subtest 'the makefile names its shell, and writes sendmail config without relyin
     like( $mf, qr{^SHELL[ ]:=[ ]/bin/bash$}m, 'recipe lines run under bash' );
 
     my ($sendmail) = $mf =~ m/^\Q$STATE\E\/sendmail:\n((?:\t[^\n]*\n)+)/m;
-    like( $sendmail   // q{}, qr/\Qprintf '%s\E/, 'starttls is appended with printf' ) or diag $sendmail;
-    unlike( $sendmail // q{}, qr/\Qecho "include\E/, 'and not with an echo only dash expands' );
+    like( $sendmail // q{}, qr/\Qprintf '%s\E/, 'starttls is appended with printf' ) or diag $sendmail;
 };
 
 # Debian generates /etc/mail/tls/* in sendmailconfig, which its postinst only

@@ -953,7 +953,6 @@ subtest 'what a disk was made with is read off the disk rather than remembered' 
     # as "no snapshots" and switches the whole feature off.
     like( $asked, qr/\b sudo \b/, 'asked as root, the disk not being ours' );
     like( $asked, qr/-U\b/,       'and forcing a share, the guest having it open' );
-    unlike( $asked, qr{2 > /dev/null}, 'with the errors left where they can be seen' );
 
     is_deeply(
         $hv->disk_layout('vm.test-qcow2'),

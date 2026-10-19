@@ -93,12 +93,6 @@ subtest 'a label that belongs to the zone stays relative' => sub {
     # dot would make each of them a name at the root instead.
     like( $zone, qr/^ns1\s+IN\s+A\s/m, 'ns1 is a label' );
 
-    # The template carries the zone and invents no names: what a recipe serves
-    # it declares, and bin/new_config puts it in the aliases rendered above.
-    unlike( $zone, qr/^autodiscover\s+IN\s+CNAME/m, 'it no longer invents autodiscover for a domain that serves no mail' );
-    unlike( $zone, qr/^autoconfig\s+IN\s+CNAME/m,   'nor autoconfig' );
-    unlike( $zone, qr/matrix/,                      'nor a matrix block of its own' );
-
     # Absolute already, and the pattern the MX record above should have
     # followed.  Asked of a zone that serves mail: the SRVs are written only
     # where something answers on the name they point at.

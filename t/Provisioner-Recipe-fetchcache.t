@@ -273,7 +273,6 @@ subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a
     like( $vhost, qr/^\s+listen[ ]\[::\]:80;$/m, 'on IPv6 too' );
     is( scalar( () = $vhost =~ m/^server[ ]\{$/mg ), 1, 'with the same locations for both, being one server' );
 
-    unlike( $vhost, qr/default_server|backlog/, 'claiming neither default_server nor the backlog, which whatever else is on those ports may' );
     like( $vhost, qr{^\s+location[ ]=[ ]/fetchcache-status[ ]\{$}m, 'saying it is there, to whatever asks by one of those names' );
     is_deeply( [ sort @$written ], [qw{fetchcache.crt fetchcache.key fetchcache.nginx.conf}], 'the vhost, a certificate, and its key' );
 

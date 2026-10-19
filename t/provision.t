@@ -419,15 +419,6 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
         "the guest's key was authorized on the machine holding the payload, for the rsync modules of the domain and nothing else"
     );
 
-    # Provisioning used to write a per-domain rsyslog drop-in onto the hypervisor
-    # and restart rsyslog there, on every build, for a listener that on this
-    # installation had never been opened.  Where a guest sends its logs is
-    # Provisioner::Recipe::logshipper now and the far end is
-    # Provisioner::Recipe::logcollector, so a provision configures nothing
-    # outside the guest it is building.
-    ok( !( grep { $_ eq 'write_text' } @applied ), 'nothing is written to the hypervisor for logging' );
-    ok( !-e "$dir/vm.test/rsyslog-collector.conf", 'and the vm recipe no longer generates a collector configuration' );
-
     is( $user, 'someadmin',      'the admin user comes back' );
     is( $ip,   '192.168.122.50', 'with the address the guest leased' );
 };

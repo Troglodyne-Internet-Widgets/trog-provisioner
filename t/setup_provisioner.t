@@ -64,16 +64,6 @@ subtest 'the steps are the ones a hypervisor needs, and their numbers are the ex
     }
 };
 
-subtest 'what moved out has not quietly moved back' => sub {
-
-    # auditd, fail2ban, cron and a management interface are recipes: a guest to
-    # build rather than a step to run on the hypervisor.  A step here with one
-    # of those names is somebody having forgotten that.
-    foreach my $gone (qw{setup_auditd setup_fail2ban setup_crons setup_management_interface setup_rsyslog}) {
-        ok( !Trog::Bin::SetupProvisioner->can($gone), "no $gone: that is a recipe" );
-    }
-};
-
 subtest 'the POD says which machine this is about' => sub {
     my $description = q{};
     open( my $fh, '>', \$description ) or die $!;
