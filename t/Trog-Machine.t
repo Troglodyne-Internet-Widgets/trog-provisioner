@@ -20,6 +20,7 @@ use Test::More;
 use Capture::Tiny qw{capture_stdout capture_stderr};
 use Test::NoWarnings;
 use Test::MockModule qw{strict};
+use Test::Fatal      qw{exception};
 use File::Temp       qw{tempdir};
 use File::Path();
 use File::Slurper();
@@ -353,6 +354,53 @@ subtest 'what sudo says when the password it was given is wrong' => sub {
 
     is( sudo_reads("sudo: a password is required\n"),     'asked',      'wanting a password is not having been given a wrong one' );
     is( sudo_reads("sudo: incorrect password attempt\n"), 'given back', 'nor is a count that is not there' );
+};
+
+# The file is usually authorized_keys, where one wrong write locks its owner
+# out, so each way out is checked for what it leaves on disk.
+subtest 'replace_line changes the line with the key and nothing else' => sub {
+    my ( $machine, $mock ) = here( host => 'localhost' );
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $file = "$dir/authorized_keys";
+    my $key  = 'ssh-rsa AAAA guest';
+    my $read = sub { scalar File::Slurper::read_text($file) };
+
+    is( $machine->replace_line( $file, $key, undef ), 0, 'with no file and nothing to put there, it finds nothing' );
+    ok( !-e $file, 'and makes no file' );
+
+    is( $machine->replace_line( $file, $key, "restrict $key" ), 0,                 'a key that is not there yet' );
+    is( $read->(),                                              "restrict $key\n", 'is added' );
+
+    File::Slurper::Temp::write_text( $file, "ssh-rsa BBBB other\n$key\nssh-rsa CCCC another\n" );
+    is( $machine->replace_line( $file, $key, "restrict $key" ), 1,                                                           'a line that has the key, such as the unrestricted line of an older build' );
+    is( $read->(),                                              "ssh-rsa BBBB other\nrestrict $key\nssh-rsa CCCC another\n", 'is replaced where it is, and the other lines stay' );
+
+    my $mtime = ( stat $file )[9];
+    utime( 0, 0, $file );
+    is( $machine->replace_line( $file, $key, "restrict $key" ), 1, 'the same line again' );
+    is( ( stat $file )[9],                                      0, 'is not written again' );
+    utime( $mtime, $mtime, $file );
+
+    is( $machine->replace_line( $file, $key, undef ), 1,                                            'with nothing to put there' );
+    is( $read->(),                                    "ssh-rsa BBBB other\nssh-rsa CCCC another\n", 'the line goes, and only that line' );
+
+    File::Slurper::Temp::write_text( $file, "$key one\nrestrict $key two\n" );
+    like( ( ( exception { $machine->replace_line( $file, $key, undef ) } ) // q{} ), qr/2[ ]lines[ ]with[ ]the[ ]same[ ]key/, 'a key on two lines is refused' );
+    is( $read->(), "$key one\nrestrict $key two\n", 'and the file is as it was' );
+
+    File::Slurper::Temp::write_text( $file, q{} );
+    is( $machine->replace_line( $file, $key, undef ), 0,   'an empty file has nothing to remove' );
+    is( $read->(),                                    q{}, 'and stays empty' );
+
+    $mock->redefine( is_local    => sub { 0 } );
+    $mock->redefine( read_text   => sub { undef } );
+    $mock->redefine( file_exists => sub { 1 } );
+    $mock->redefine( describe    => sub { 'the far side' } );
+    my $wrote = 0;
+    $mock->redefine( write_text  => sub { $wrote++; 1 } );
+    $mock->redefine( append_line => sub { $wrote++; 1 } );
+    like( ( ( exception { $machine->replace_line( $file, $key, "restrict $key" ) } ) // q{} ), qr/Could[ ]not[ ]read\N*refusing[ ]to[ ]rewrite[ ]it[ ]blind/, 'a file that is there and cannot be read is refused' );
+    is( $wrote, 0, 'and nothing is written to it' );
 };
 
 Test::NoWarnings::had_no_warnings();

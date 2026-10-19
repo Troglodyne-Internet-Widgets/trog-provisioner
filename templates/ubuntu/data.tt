@@ -1,7 +1,7 @@
 mkdir -p [% install_dir %]/[% domain %]
-# bin/provision adds the key of the guest to the authorized_keys of
-# transfer_user.  See Trog::Local.
-rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]:[% data_source %]/[% domain %]/ [% install_dir %]/[% domain %]/
+# The key of the guest reaches only the rsync modules that bin/new_config
+# wrote for it.  See Provisioner::Recipe::data.
+rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]::data.[% domain %]/ [% install_dir %]/[% domain %]/
 chown -R [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
 chmod -R 0750 [% install_dir %]/[% domain %]
 [%# Put back the state that the recipes salvaged.  This is one loop, not a call

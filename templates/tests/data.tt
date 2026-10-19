@@ -12,4 +12,18 @@ my @st = stat '[% install_dir %]/[% domain %]';
 is(scalar getpwuid($st[4] // -1), '[% user %]',       'the data directory is owned by [% user %]');
 is(scalar getgrgid($st[5] // -1), '[% admin_user %]', 'and group [% admin_user %]');
 
+# The key of this guest into the machine that holds its payload, which
+# bin/provision restricts to the rsync modules that bin/new_config wrote.
+my $ssh  = q{ssh -p [% transfer_port %] -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null};
+my $from = q{[% transfer_user %]@[% transfer_ip %]};
+
+my $listed = `rsync --list-only -e '$ssh' ${from}::data.[% domain %]/ 2>&1`;
+is($? >> 8, 0, 'the key fetches the data of [% domain %]') or diag $listed;
+
+my $shell = `$ssh $from echo reached-a-shell </dev/null 2>&1`;
+unlike($shell, qr/reached-a-shell/, 'and runs no command but rsync there');
+
+my $path = `rsync --list-only -e '$ssh' ${from}:/etc/passwd 2>&1`;
+isnt($? >> 8, 0, 'and no path of that machine outside its modules') or diag $path;
+
 done_testing();

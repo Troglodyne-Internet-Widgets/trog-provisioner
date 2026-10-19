@@ -132,6 +132,29 @@ subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
     like( $after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed' );
 };
 
+# --- remove_rsync_modules ---
+# A tenant's part is in the directory of its host, whose key would otherwise
+# go on reaching the files of a domain that is gone.
+subtest 'remove_rsync_modules takes the part of the domain out of every guest that served it' => sub {
+    my $domain = 'tenant-gone.test';
+    my %part   = map {
+        my $host = $_;
+        map { ( "$host $_" => "$tmpdir/$host/rsyncd.d/$domain.$_" ) } qw{conf binds}
+    } qw{host-a.test host-b.test};
+    my @kept = map { "$tmpdir/host-a.test/rsyncd.d/host-a.test.$_" } qw{conf binds};
+    foreach my $file ( values %part, @kept ) {
+        make_path( $file =~ s{/[^/]+\z}{}r );
+        File::Slurper::Temp::write_text( $file, "[payload]\n" );
+    }
+
+    Trog::Bin::Destroy::remove_rsync_modules( $domain, 1 );
+    ok( -e $part{$_}, "a dry run removes nothing: $_" ) for sort keys %part;
+
+    Trog::Bin::Destroy::remove_rsync_modules( $domain, 0 );
+    ok( !-e $part{$_}, "the part in $_ is gone" )                for sort keys %part;
+    ok( -e $_,         'and the part of the host itself stays' ) for @kept;
+};
+
 # --- release_authority ---
 subtest 'the zone and the token of a domain come off the guest that its registrar names' => sub {
     my $domain   = 'web.lab.test.test';

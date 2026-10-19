@@ -48,6 +48,10 @@ subtest 'a template stands for the recipe that renders it' => sub {
         'a template that another includes, for the recipe whose templates include it'
     );
     is_deeply( [ $map->('openssl.conf') ], ['bin/new_config'], 'and the openssl.conf of its ssl target, for what copies it' );
+
+    my @sandbox = $map->('rsyncd_sandbox');
+    ok( ( grep { $_ eq 'bin/new_config' } @sandbox ),        'the sandbox of a fetch, for what copies it' ) or diag "got: @sandbox";
+    ok( ( grep { $_ eq 't/new_config-rsyncd.t' } @sandbox ), 'and for the test that fetches through it' )   or diag "got: @sandbox";
 };
 
 subtest 'a script stands for the tests that name it, and the one that packs it' => sub {

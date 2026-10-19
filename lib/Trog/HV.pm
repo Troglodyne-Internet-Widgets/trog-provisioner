@@ -1130,6 +1130,36 @@ on $where.
 FIX
 }
 
+=head2 $result = $hv->check_sandbox()
+
+Checks that bubblewrap can make the sandbox on this machine that the fetches of
+a guest run in.  Without it, C<bin/provision> refuses to authorize the key of a
+guest, because the key would fetch nothing.  See C<sandbox_error> in
+L<Trog::Local>.  It asks only this machine, because the guest fetches from here
+and not from the hypervisor.
+
+=cut
+
+sub check_sandbox {
+    my ($self) = @_;
+
+    my $why = Trog::Local->new()->sandbox_error;
+    return $self->verdict( 1, 'bubblewrap can confine the fetches of a guest', q{} ) unless $why;
+
+    return $self->verdict( 0, "No sandbox for the fetches of a guest on this machine: $why", <<'FIX' );
+Each guest fetches its payload from this machine over ssh, and its key runs
+only rsync, inside a bubblewrap sandbox that holds what the guest may fetch.
+Install bubblewrap:
+
+    sudo apt install bubblewrap
+
+If it is installed and still refused, the system does not let it make a user
+namespace.  On Ubuntu 24.04 and later, AppArmor allows that only to a program
+with a profile, which the bubblewrap package supplies in /etc/apparmor.d/bwrap.
+Elsewhere, see the user.max_user_namespaces sysctl.
+FIX
+}
+
 =head2 $result = $hv->check_fetch_sources()
 
 Checks that every directory that a recipe fetches from this machine exists here.
@@ -1163,7 +1193,8 @@ sub check_fetch_sources {
             my $opts = $recipes->{$name} // {};
             next unless ref $opts eq 'HASH';
 
-            foreach my $path ( eval { $class->fetch_sources(%$opts) } ) {
+            my %paths = eval { $class->fetch_sources(%$opts) };
+            foreach my $path ( values %paths ) {
                 next unless $path;
                 $wanted{$path}{$name} = 1;
             }

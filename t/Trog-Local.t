@@ -13,7 +13,10 @@ t/Trog-Local.t - Trog::Local: this machine, and which of its addresses a guest c
 
 use Test::More;
 use Test::NoWarnings;
-use Test::Fatal qw{exception};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw{tempdir};
+use File::Slurper::Temp();
 
 use FindBin::libs;
 
@@ -95,6 +98,36 @@ subtest 'which of our addresses a guest would reach us at' => sub {
     );
 
     is( $this_machine->transfer_ip('not an address'), undef, 'and nothing that routes is no answer' );
+};
+
+subtest 'whether bubblewrap can make the sandbox of a fetch here' => sub {
+    my $which = Test::MockModule->new('File::Which');
+    my $dir   = tempdir( CLEANUP => 1 );
+
+    # A bwrap that answers as the real one does, from a file this test writes.
+    my $bwrap = sub ($script) {
+        File::Slurper::Temp::write_text( "$dir/bwrap", "#!/bin/sh\n$script\n" );
+        chmod 0755, "$dir/bwrap";
+        Trog::Local->forget();
+        return Trog::Local->new();
+    };
+
+    $which->redefine( which => sub { undef } );
+    Trog::Local->forget();
+    is( Trog::Local->new()->sandbox_error, 'bwrap is not installed', 'no bwrap at all' );
+
+    $which->redefine( which => sub { "$dir/bwrap" } );
+    my $this_machine = $bwrap->('echo "bwrap: setting up uid map: Permission denied" >&2; exit 1');
+    is( $this_machine->sandbox_error, 'bwrap could not make a sandbox: bwrap: setting up uid map: Permission denied', 'a bwrap that the system refuses, with what it said' );
+
+    $bwrap->('exit 0');
+    is( $this_machine->sandbox_error,      'bwrap could not make a sandbox: bwrap: setting up uid map: Permission denied', 'the object keeps the answer' );
+    is( Trog::Local->new()->sandbox_error, undef,                                                                          'and a new one asks again, and a bwrap that works is no error' );
+
+    $bwrap->('[ "$*" = "--unshare-all --die-with-parent --ro-bind / / true" ] || exit 1');
+    is( Trog::Local->new()->sandbox_error, undef, 'it asks for the namespaces of rsyncd_sandbox, and runs nothing in them' );
+
+    Trog::Local->forget();
 };
 
 Test::NoWarnings::had_no_warnings();

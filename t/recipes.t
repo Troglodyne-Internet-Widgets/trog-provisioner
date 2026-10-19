@@ -1421,14 +1421,14 @@ subtest 'a recipe names the directories it fetches, and copes with not being tol
     my $openvpnclient = Provisioner::Cookbook->load('openvpnclient');
 
     is_deeply(
-        [ $adminconfig->fetch_sources( skel => '/bogus/dotfiles/somebody' ) ],
-        ['/bogus/dotfiles/somebody'],
-        'adminconfig fetches the skel it was given'
+        { $adminconfig->fetch_sources( skel => '/bogus/dotfiles/somebody' ) },
+        { skel => '/bogus/dotfiles/somebody' },
+        'adminconfig fetches the skel it was given, as the module that its fragment names'
     );
     is_deeply(
-        [ $openvpnclient->fetch_sources( cert_dir => '/bogus/vpn-certs/one' ) ],
-        ['/bogus/vpn-certs/one'],
-        'openvpnclient fetches its certificate directory'
+        { $openvpnclient->fetch_sources( cert_dir => '/bogus/vpn-certs/one' ) },
+        { cert_dir => '/bogus/vpn-certs/one' },
+        'openvpnclient fetches its certificate directory, as the module that its fragment names'
     );
 };
 
@@ -1776,7 +1776,6 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
             transfer_ip   => '192.168.122.251',
             transfer_port => 22,
             transfer_user => 'transfer',
-            payload_dir   => '/opt/domains',
         }
     );
 

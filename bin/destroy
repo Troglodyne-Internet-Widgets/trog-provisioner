@@ -17,6 +17,7 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
 use File::Basename();
+use File::Glob();
 use File::Path();
 use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
@@ -228,6 +229,7 @@ sub main {
 
         # 3. Remove its keys from authorized_keys, here and on the hypervisors
         remove_authorized_key( $domain, $dryrun );
+        remove_rsync_modules( $domain, $dryrun );
         remove_runner_key( $domain, $dryrun );
 
         # 3a. Remove its zone and its token on the guest that holds them
@@ -335,17 +337,20 @@ sub destroy_disks {
 
 =head2 remove_authorized_key($domain, $dryrun)
 
-Take the public key of the domain out of the authorized_keys file of this
-machine.  The key is the F<key.rsa.pub> in the domain directory.  Does nothing
-when that file or the authorized_keys file is not there.
+Take the line with the public key of the domain out of the authorized_keys file
+of this machine.  The key is the F<key.rsa.pub> in the domain directory.  Does
+nothing when that file is not there, or when no line has the key.  With
+C<$dryrun>, does nothing and prints nothing.
 
 Dies, and changes nothing, when the authorized_keys file cannot be read, or when
-the key is on more than one line of it.
+the key is on more than one line of it.  See C<replace_line> in
+L<Trog::Machine>.
 
 =cut
 
 sub remove_authorized_key {
     my ( $domain, $dryrun ) = @_;
+    return if $dryrun;
 
     # This machine, because the guest fetches its payload from here, so
     # bin/provision authorized the key here.
@@ -356,28 +361,31 @@ sub remove_authorized_key {
     chomp $pubkey;
 
     my $ak = $this_machine->authorized_keys;
-    return unless $this_machine->file_exists($ak);
 
-    # A mistake when the file is written again can lock the owner out of this
-    # machine.  Refuse anything unexpected.
-    my $contents = $this_machine->read_text($ak);
-    die "Could not read $ak on " . $this_machine->describe . "; refusing to rewrite it blind\n"
-      unless $contents;
+    my $had = $this_machine->replace_line( $ak, $pubkey, undef );
+    print $had ? "Removed the SSH key of the domain from $ak\n" : "Domain SSH key not found in $ak, skipping.\n";
+    return;
+}
 
-    unless ( $contents =~ m/\Q$pubkey\E/ ) {
-        print "Domain SSH key not found in $ak, skipping.\n";
-        return;
+=head2 remove_rsync_modules($domain, $dryrun)
+
+Removes F<rsyncd.d/$domain.conf> and F<rsyncd.d/$domain.binds> from each
+directory under the domain directory of this machine.  The first holds the
+rsync modules that a guest can fetch the files of C<$domain> from, and the
+second the paths that the sandbox of the fetch holds for them.  They are in the
+directory of the host when C<$domain> is a tenant, so the key of the host stops
+reaching them.  See C<write_rsyncd_conf> in F<bin/new_config>.  Returns
+nothing.
+
+=cut
+
+sub remove_rsync_modules {
+    my ( $domain, $dryrun ) = @_;
+
+    foreach my $part ( map { File::Glob::bsd_glob( Trog::HV->new()->domain_dir . "/*/rsyncd.d/$domain.$_" ) } qw{conf binds} ) {
+        print( ( $dryrun ? "Would remove" : "Removing" ) . " the rsync modules of $domain in $part\n" );
+        unlink $part or die "Could not remove $part: $!\n" unless $dryrun;
     }
-
-    print "Removing domain SSH key from $ak\n";
-    return if $dryrun;
-
-    my @before = split( m/\n/, $contents );
-    my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
-    die "Removing the key for $domain from $ak would drop " . ( scalar(@before) - scalar(@after) ) . " lines, not 1; refusing\n"
-      unless scalar(@after) == scalar(@before) - 1;
-
-    $this_machine->write_text( $ak, join( "\n", @after ) . "\n" );
     return;
 }
 

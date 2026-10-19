@@ -237,7 +237,7 @@ sub template_files {
 
 sub fetch_sources {
     my ( $self, %opts ) = @_;
-    return defined $opts{cert_dir} ? ( $opts{cert_dir} ) : ();
+    return defined $opts{cert_dir} ? ( cert_dir => $opts{cert_dir} ) : ();
 }
 
 sub tests {

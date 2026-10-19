@@ -150,6 +150,34 @@ subtest 'two domains on one guest generate when the recipe can be shared' => sub
     );
 };
 
+# The guest of the host fetches the payload of the tenant with the key of the
+# host, so the modules of both are in the one file that the key reaches.
+subtest 'the key of the host reaches the modules of its tenant, and the tenant has no file of its own' => sub {
+    my ( $err, $domains ) = generate();
+    is( $err, undef, 'the generation runs to the end' ) or diag $err;
+
+    my $has = sub ( $file, $text, $name ) { cmp_ok( index( File::Slurper::read_text($file), $text ), '>=', 0, $name ) or diag File::Slurper::read_text($file) };
+    $has->( "$domains/$HOST/rsyncd.conf",           "\n&include $domains/$HOST/rsyncd.d\n",         'the file of the host includes the part of each domain on its guest' );
+    $has->( "$domains/$HOST/rsyncd.d/$HOST.conf",   "[payload.$HOST]\npath = $domains/$HOST\n",     'its own part serves its payload' );
+    $has->( "$domains/$HOST/rsyncd.d/$TENANT.conf", "[payload.$TENANT]\npath = $domains/$TENANT\n", 'and the part of the tenant, beside it, serves the payload of the tenant' );
+    ok( !-e "$domains/$TENANT/rsyncd.conf", 'the tenant gets no file of its own, because no key of its own fetches anything' );
+};
+
+# The fragment of a recipe fetches its module by name, so two modules of one
+# name would serve one of the two directories to both.
+subtest 'a recipe that serves a directory under a name that is taken is refused' => sub {
+    my $nosnap = Test::MockModule->new('Provisioner::Recipe::nosnap');
+
+    $nosnap->redefine( fetch_sources => sub { return ( data => '/bogus/elsewhere' ) } );
+    my ($err) = generate();
+    like( $err // q{}, qr{nosnap[ ]serves[ ]/bogus/elsewhere},       'the name of the data of every guest' );
+    like( $err // q{}, qr{module[ ]data,[ ]which[ ]is[ ]the[ ]name}, 'which the message names' );
+
+    $nosnap->redefine( fetch_sources => sub { return ( skel => '/bogus/elsewhere' ) } );
+    ($err) = generate( host => { nosnap => undef, adminconfig => { skel => '/bogus/dotfiles' } } );
+    like( $err // q{}, qr{already[ ]serves[ ]/bogus/}, 'and a name that another recipe of the domain serves' );
+};
+
 # A tenant runs on the guest of its host, so the release of the tenant is the
 # release of that guest.
 subtest 'a tenant on another release than its host is refused' => sub {
