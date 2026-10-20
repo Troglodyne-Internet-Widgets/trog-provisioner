@@ -413,7 +413,9 @@ sub enrich {
 
     $opts{acme_port} = Provisioner::Cookbook->load('acmeca')->port_for( $opts{domain} ) if any { $_ eq 'acmeca' } @{ $opts{modules} // [] };
 
-    # A name in a zone of a registrar account is published in that zone, not here.
+    # Not every served name: pdns refuses a record outside its zone, and a name
+    # in a zone of a registrar account is published there.  See zone_aliases
+    # in Provisioner::Recipe::registrar.
     $opts{domain_aliases} = [ Provisioner::Cookbook->load('registrar')->zone_aliases(%opts) ];
 
     return %opts;

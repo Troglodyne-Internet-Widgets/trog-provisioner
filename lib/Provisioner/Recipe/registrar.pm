@@ -341,11 +341,21 @@ sub configured_credentials {
 
 =head2 $zone = $recipe->zone_of($name, $domain, \%zones)
 
-The zone of C<%zones> that holds C<$name>, or undef.  C<%zones> is what
-C<account_zones> returns, and undef reads it for C<$domain> from
-L<Provisioner::Cookbook>, as C<configured_zones> does.  A name in the zone of
-C<$domain> has none, because it is the business of the domain.  Where two zones
-hold the name, the longer one does.
+The zone of an account that holds C<$name>, or undef where the zone of
+C<$domain> holds it, or where no account lists a zone that does.  So it
+answers whether a name that the guest serves goes through the zone of the
+domain, or through the zone of an account and its credentials.  See
+L</Accounts, and the zones that they hold>.
+
+L<Provisioner::Recipe::nginx> asks it whether it can certify a public name.
+L<Provisioner::Recipe::letsencrypt> asks it which shortcut the hook uses for
+each name of the certificate.  C<zone_aliases> asks it which names the zone of
+the domain leaves out.
+
+A name in the zone of C<$domain> has none, because it is the business of the
+domain.  Where two zones hold the name, the longer one does.  C<%zones> is what
+C<account_zones> returns.  Where it is undef, this reads it for C<$domain> from
+L<Provisioner::Cookbook>, as C<configured_zones> does.
 
 =cut
 
@@ -405,10 +415,25 @@ sub configured_zones ( $self, $domain ) {
 
 =head2 @aliases = $recipe->zone_aliases(%opts)
 
-C<domain_aliases> of C<%opts>, less each name that C<zone_of> places in a zone
-of an account.  These are the names that the zone of the domain holds, as
-C<CNAME> records.  C<$opts{zones}> is what C<account_zones> returns, where the
-caller has it, and otherwise it is read for the domain.
+The names that the zone of C<$opts{domain}> holds as C<CNAME> records of the
+domain.
+
+C<domain_aliases> gives every name that the guest serves besides the domain:
+the aliases of C<_global>, and the C<hostnames> that the recipes on it hand
+over.  Most of them are under the domain.  A public name of
+L<Provisioner::Recipe::nginx> in a zone that an account lists is not.  It
+belongs to that zone, and C<publication> gives it an C<A> record there,
+through the shortcut of that zone.  So this returns C<domain_aliases> less
+each name that C<zone_of> places in a zone of an account.
+
+Each writer of the zone of the domain asks this, so that none of them writes
+such a name there: C<publication>, the zone file of
+L<Provisioner::Recipe::pdns>, and F<bin/ipmap2zones>.  pdns refuses a zone file
+with a record outside its zone as invalid, so one such name breaks the whole
+zone.
+
+C<$opts{zones}> is what C<account_zones> returns, where the caller has it.
+Otherwise this reads it for the domain from L<Provisioner::Cookbook>.
 
 =cut
 
