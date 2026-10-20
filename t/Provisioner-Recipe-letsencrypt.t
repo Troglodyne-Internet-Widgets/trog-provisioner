@@ -430,9 +430,9 @@ subtest 'the hook writes the challenge of a name in a zone of the registrar thro
             return {
                 letsencrypt => {},
                 registrar   => {
-                    type  => 'easydns',
-                    key   => 'a-token',
-                    zones => { 'customer.test' => { type => 'route53' }, 'deep.customer.test' => { type => 'easydns' }, 'example.net' => { type => 'easydns' } },
+                    type     => 'easydns',
+                    key      => 'a-token',
+                    accounts => { customer => { type => 'route53', zones => ['customer.test'] }, ours => { type => 'easydns', zones => [qw{deep.customer.test example.net}] } },
                 },
             };
         }

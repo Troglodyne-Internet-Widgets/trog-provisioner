@@ -202,7 +202,7 @@ subtest 'a public name that no vhost of the guest can answer for stops the build
 
 subtest 'a public name in a zone of the registrar is served as it is, without a stand-in' => sub {
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
-    $mock->redefine( domain_config => sub { return { registrar => { zones => { 'customer.test' => { type => 'route53' } } } } } );
+    $mock->redefine( domain_config => sub { return { registrar => { accounts => { customer => { type => 'route53', zones => ['customer.test'] } } } } } );
     $mock->redefine( host_of       => sub { return } );
 
     my $nginx = 'Provisioner::Recipe::nginx';

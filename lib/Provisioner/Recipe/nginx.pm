@@ -93,9 +93,9 @@ off.
 
 A public name inside the zone of the domain joins the names that this recipe
 serves.  So the registrar publishes it, and letsencrypt puts it on the
-certificate, as for any other served name.  So does a public name in a zone of
-the C<zones> of L<Provisioner::Recipe::registrar>, which publishes it in that
-zone.  Any other public name gets neither, because no DNS-01 challenge can
+certificate, as for any other served name.  So does a public name in a zone
+that an account of L<Provisioner::Recipe::registrar> lists, which publishes it
+in that zone.  Any other public name gets neither, because no DNS-01 challenge can
 answer for it.  Then
 C<public.VHOST> joins the served names in its place, and its vhost answers for
 it.  It is published, certified and proxied, so the path through the proxy
@@ -169,7 +169,7 @@ sub args {
                 additionalProperties => { type   => 'string', format => 'hostname' },
                 default              => {},
                 description          =>
-                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone of registrar.zones, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
+                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
             proxy_from => {
@@ -211,7 +211,7 @@ my sub in_zone ( $name, $domain ) {
 }
 
 # Whether a DNS-01 challenge can answer for $name: it is in the zone of the
-# domain, or in a zone of the zones of the registrar.
+# domain, or in a zone that an account of the registrar lists.
 my sub certifiable ( $name, $domain ) {
     return in_zone( $name, $domain ) || defined Provisioner::Cookbook->load('registrar')->zone_of( $name, $domain );
 }
@@ -233,8 +233,8 @@ my sub proxied_names (%opts) {
 =head2 @names = $recipe->served_names(%opts)
 
 The names of the base class, then each public name in the zone of the domain
-or in a zone of C<registrar.zones>, then C<public.VHOST> for each vhost that
-answers for a public name in neither.  See L</Names that reach the guest through a proxy>.
+or in a zone that an account of the registrar lists, then C<public.VHOST> for
+each vhost that answers for a public name in neither.  See L</Names that reach the guest through a proxy>.
 
 =cut
 

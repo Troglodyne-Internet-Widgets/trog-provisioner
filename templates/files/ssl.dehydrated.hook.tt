@@ -26,7 +26,7 @@ export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
 export LEXICON_[% lexicon.type.upper() %]_[% lv.key %]="[% lv.value %]"
 [% END -%]
 [% END -%]
-[%# The shortcut of the zone of registrar.zones that holds a name, or nothing
+[%# The shortcut of the zone of a registrar account that holds a name, or nothing
     for a name that the lexicon above answers for.  The zone of the domain
     first, and then the longer zones first, as zone_of in
     Provisioner::Recipe::registrar decides. -%]

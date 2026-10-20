@@ -224,7 +224,7 @@ subtest 'what a guest that names this one as its authority gets' => sub {
 
 subtest 'an alias in a zone of the registrar is published there, and not in this zone' => sub {
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
-    $mock->redefine( domain_config => sub { return { registrar => { zones => { 'partner.test' => { type => 'route53' } } } } } );
+    $mock->redefine( domain_config => sub { return { registrar => { accounts => { partner => { type => 'route53', zones => ['partner.test'] } } } } } );
 
     my $zone = zone( aliases => { $DOMAIN => [ "www.$DOMAIN", 'old.partner.test' ] } );
     like( $zone, qr/^\Qwww.$DOMAIN\E\.\s+IN\s+CNAME\s+\@/m, 'an alias of the zone stays' ) or diag $zone;

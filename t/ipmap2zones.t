@@ -60,7 +60,7 @@ File::Slurper::Temp::write_text(
             'web.test' => {
                 nginxproxy => undef,
                 nginx      => { public_names => { 'shop.web.test' => 'web.test', 'www.customer.test' => 'web.test', 'shop.partner.test' => 'web.test' } },
-                registrar  => { zones        => { 'partner.test'  => { type => 'route53' } } },
+                registrar  => { accounts     => { partner         => { type => 'route53', zones => ['partner.test'] } } },
             },
             'post.test'  => { mail => undef },
             'plain.test' => { ntp  => undef },

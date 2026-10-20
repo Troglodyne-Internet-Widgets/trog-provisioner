@@ -1,6 +1,6 @@
 #!/bin/bash
-[%# The shortcut of each zone of registrar.zones that a name of this guest is
-    in, and of no other.  See "Zones of other names that the registrar holds"
+[%# The shortcut of each zone of a registrar account that a name of this
+    guest is in, and of no other.  See "Accounts, and the zones that they hold"
     in Provisioner::Recipe::registrar.  A script and not lines of the
     fragment, because make runs each line in a shell of its own, and a shortcut
     is a file of several lines. -%]
