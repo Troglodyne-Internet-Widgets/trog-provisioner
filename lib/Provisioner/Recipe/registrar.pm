@@ -104,6 +104,32 @@ registered domain itself is delegated at the registry, with glue records, which
 most registrars have no API for.  So the recipe refuses a domain of two labels
 outside a reserved TLD.
 
+=head2 Zones of other names that the registrar holds
+
+C<zones> names other zones that a registrar holds for this installation, each
+with the C<type>, C<user> and C<key> of its registrar:
+
+    _base:
+        registrar:
+            zones:
+                customer.example:
+                    type: easydns
+                    user: "secret:registrar/customer/username"
+                    key:  "secret:registrar/customer/password"
+
+A served name in one of these zones, such as a public name of
+L<Provisioner::Recipe::nginx>, is published and certified like a name of the
+domain.  The guest publishes an C<A> record of the name in its zone, at the
+address of the domain, and the hook of L<Provisioner::Recipe::letsencrypt>
+writes its challenge there.  It is an C<A> record and not a C<CNAME>, because
+the name can be the apex of its zone.  The guest gets a lexicon shortcut,
+F</opt/lexicon/zones/ZONE>, only for each zone that one of its names is in.  So
+a guest holds no credential of a zone that it does not use.
+
+A name in the zone of the domain is the business of the domain, even where a
+zone of C<zones> holds it as well.  Where two zones hold a name, the longer one
+does.
+
 =head2 It installs nothing, and publishes the records of the domain
 
 This recipe starts no service.  It supplies the credentials in
@@ -153,6 +179,22 @@ sub args {
                 type        => 'string',
                 default     => q{},
                 description => 'The account, where the provider wants one alongside the token.  Empty is normal: most of them authenticate with a token alone.',
+            },
+            zones => {
+                type                 => 'object',
+                default              => {},
+                propertyNames        => { format => 'hostname' },
+                additionalProperties => {
+                    type                 => 'object',
+                    required             => ['type'],
+                    additionalProperties => 0,
+                    properties           => {
+                        type => { type => 'string', description => 'The provider of this zone, as lexicon calls it.' },
+                        user => { type => 'string', default     => q{}, description => 'The account, where the provider wants one.' },
+                        key  => { type => 'string', default     => q{}, 'x-secret'  => 1, description => 'The token of this zone, as a secret: reference.' },
+                    },
+                },
+                description => 'Other zones that a registrar holds for this installation, each with the type, user and key of its registrar.  A served name in one of them is published there and certified.  See "Zones of other names that the registrar holds".',
             },
             key => {
                 type        => 'string',
@@ -243,12 +285,20 @@ this, so that the hook and the shortcut render from one answer.
 sub credentials_for {
     my ( $self, %opts ) = @_;
 
-    my $domain = $opts{domain};
+    return $self->lexicon_credentials( %{ $self->configuration_of( $opts{domain} ) }, domain => $opts{domain} );
+}
+
+=head2 \%conf = $recipe->configuration_of($domain)
+
+The configuration of this recipe that C<$domain> has, or else the configuration
+of the guest that C<$domain> is layered onto, from L<Provisioner::Cookbook>.
+
+=cut
+
+sub configuration_of ( $self, $domain ) {
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
     my $name   = $self->recipe_name;
-    my $conf   = Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
-
-    return $self->lexicon_credentials( %{$conf}, domain => $domain );
+    return Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
 }
 
 =head2 %credentials = $recipe->configured_credentials(%opts)
@@ -275,6 +325,61 @@ sub configured_credentials {
         opts  => q{},
         extra => [],
     );
+}
+
+=head2 $zone = $recipe->zone_of($name, $domain, \%zones)
+
+The zone of C<%zones> that holds C<$name>, or undef.  C<%zones> is C<zones> as
+configured, and undef reads it for C<$domain> from L<Provisioner::Cookbook>, as
+C<configured_zones> does.  A name in the zone of C<$domain> has none, because
+it is the business of the domain.  Where two zones hold the name, the longer
+one does.
+
+=cut
+
+sub zone_of ( $self, $name, $domain, $zones = undef ) {
+    my $in = sub ($zone) { return lc $name eq lc $zone || $name =~ m/[.]\Q$zone\E\z/i };
+    return if $in->($domain);
+
+    $zones //= { $self->configured_zones($domain) };
+    my ($zone) = $self->longest_first( grep { $in->($_) } keys %$zones );
+    return $zone;
+}
+
+=head2 @zones = $recipe->longest_first(@zones)
+
+C<@zones>, the longer first, and in order of the name where two are as long.
+A zone inside another is longer, so it comes first, as C<zone_of> decides.
+
+=cut
+
+sub longest_first ( $, @zones ) {
+    my @sorted = sort { -( length $a <=> length $b ) || $a cmp $b } @zones;
+    return @sorted;
+}
+
+=head2 %zones = $recipe->configured_zones($domain)
+
+C<zones> as C<configuration_of> reads it for C<$domain>.
+
+=cut
+
+sub configured_zones ( $self, $domain ) {
+    return %{ $self->configuration_of($domain)->{zones} // {} };
+}
+
+=head2 @aliases = $recipe->zone_aliases(%opts)
+
+C<domain_aliases> of C<%opts>, less each name that C<zone_of> places in a zone
+of C<zones>.  These are the names that the zone of the domain holds, as
+C<CNAME> records.  C<$opts{zones}> is C<zones> where the caller has it, and
+otherwise it is read for the domain.
+
+=cut
+
+sub zone_aliases ( $self, %opts ) {
+    my $zones = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
+    return grep { !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
 }
 
 =head2 $guest = $recipe->authority_of($domain)
@@ -391,8 +496,14 @@ sub guest_secrets {
 =head2 %publication = $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
-C<address>, C<domain_aliases>, C<own_nameserver>, and C<publish_records>, which
-is true when there is an address to publish.  C<$opts{own_zone}> is true where
+C<address>, C<domain_aliases>, C<own_nameserver>, C<zone_names>, C<zone_access>,
+and C<publish_records>, which is true when there is an address to publish.
+
+C<zone_names> maps each zone of C<zones> that a served name is in to those
+names, and C<zone_access> maps the same zones to the credentials of their
+registrar, as C<configured_credentials> returns them.  Each of those names gets
+an C<A> record at C<address> in its zone.  See L</Zones of other names that the
+registrar holds>.  C<$opts{own_zone}> is true where
 the domain holds its own zone.
 
 The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
@@ -423,10 +534,20 @@ sub publication {
     my ( $self, %opts ) = @_;
 
     my $address = $opts{address} // $opts{main_ip};
+    my $zones   = $opts{zones}   // {};
+
+    my %zone_names;
+    foreach my $name ( $self->domain_aliases(%opts) ) {
+        my $zone = $self->zone_of( $name, $opts{domain}, $zones ) // next;
+        push( @{ $zone_names{$zone} }, $name );
+    }
+    my %zone_access = map { $_ => { $self->configured_credentials( %{ $zones->{$_} }, domain => $_ ) } } keys %zone_names;
 
     return (
         address         => $address,
-        domain_aliases  => [ $self->domain_aliases(%opts) ],
+        domain_aliases  => [ $self->zone_aliases( %opts, zones => $zones ) ],
+        zone_names      => \%zone_names,
+        zone_access     => \%zone_access,
         own_nameserver  => $opts{own_zone} ? "ns1.$opts{domain}" : undef,
         publish_records => $address        ? 1                   : 0,
     );
@@ -532,6 +653,7 @@ sub template_files {
     return (
         'registrar.resolved.tt' => 'registrar-resolved.conf',
         'registrar.upstream.tt' => 'registrar-upstream.sh',
+        'registrar.zones.tt'    => 'registrar-zones.sh',
     );
 }
 

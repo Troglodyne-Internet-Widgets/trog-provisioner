@@ -413,7 +413,8 @@ sub enrich {
 
     $opts{acme_port} = Provisioner::Cookbook->load('acmeca')->port_for( $opts{domain} ) if any { $_ eq 'acmeca' } @{ $opts{modules} // [] };
 
-    $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
+    # A name in a zone of registrar.zones is published in that zone, not here.
+    $opts{domain_aliases} = [ Provisioner::Cookbook->load('registrar')->zone_aliases(%opts) ];
 
     return %opts;
 }

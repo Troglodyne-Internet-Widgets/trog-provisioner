@@ -36,6 +36,22 @@ subtest 'the records of the domain are published to the zone that holds it' => s
     ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
 };
+[% FOREACH zone IN zone_names.keys().sort() -%]
+
+subtest 'the names in [% zone %] are published there, through its own shortcut' => sub {
+    my $shortcut = '/opt/lexicon/zones/[% zone %]';
+    ok(-x $shortcut, 'the shortcut of the zone is installed') or return;
+    is((stat $shortcut)[2] & 07777, 0700, 'and nobody but root can read the credential in it');
+
+    my $out  = `$shortcut list A --output=JSON 2>&1`;
+    my $list = eval { JSON::PP->new->utf8->decode($out) };
+    ok(ref $list eq 'ARRAY', 'the provider of the zone answered with a list of A records') or diag $out;
+    my %at = map { lc(($_->{name} // '') =~ s/[.]\z//r) => ($_->{content} // '') } @{ ref $list eq 'ARRAY' ? $list : [] };
+[% FOREACH name IN zone_names[zone].sort() -%]
+    is($at{'[% name %]'}, '[% address %]', '[% name %] is at the address of this domain') or diag explain $list;
+[% END -%]
+};
+[% END -%]
 [% ELSE -%]
 # The hypervisor allocates the address, and there was none when the makefile
 # was written.

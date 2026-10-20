@@ -124,6 +124,12 @@ L<Provisioner::Recipe::registrar> says which server holds the zone of the
 domain, and gives lexicon its credentials.  This recipe writes the challenge
 there.  See L<Provisioner::Recipe::registrar/authority_of>.
 
+A name of the certificate in a zone of the C<zones> of the registrar is the
+exception.  The hook writes its challenge through the shortcut of that zone,
+F</opt/lexicon/zones/ZONE>, which the registrar installs.  See
+L<Provisioner::Recipe::registrar/Zones of other names that the registrar
+holds>.
+
 =head2 What a guest served by our own CA can be issued for
 
 It can get certificates for names inside its own zone, and for nothing else.
@@ -229,6 +235,11 @@ sub enrich {
 
     # Two recipes can name one unit, and the merge keeps both.
     $params{certificate_readers} = [ uniq @{ $params{certificate_readers} } ];
+
+    # The zones of registrar.zones that hold a name of the certificate, longer
+    # first, for the hook to choose a shortcut by.
+    my %zones = map { $_ => 1 } grep { defined } map { $registrar->zone_of( $_, $params{domain} ) } @{ $params{domain_aliases} };
+    $params{challenge_zones} = [ $registrar->longest_first( keys %zones ) ];
 
     return %params;
 }

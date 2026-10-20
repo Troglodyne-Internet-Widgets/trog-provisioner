@@ -418,6 +418,45 @@ subtest 'the address of the A record' => sub {
     ok( exception { publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, address => "gateway.$PUBLIC" ) }, 'an address that is not IPv4 is refused' );
 };
 
+my %ZONES = (
+    'customer.test'      => { type => 'route53', user => 'zone-user', key => 'zone-key' },
+    'deep.customer.test' => { type => 'easydns', key  => 'deep-key' },
+    'unused.test'        => { type => 'easydns', key  => 'unused-key' },
+);
+
+subtest 'the zone of a name, among the zones of the registrar' => sub {
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my %zones     = ( %ZONES, 'example.net' => { type => 'easydns' } );
+    my %of        = (
+        'customer.test'        => 'customer.test',
+        'shop.CUSTOMER.test'   => 'customer.test',
+        'a.deep.customer.test' => 'deep.customer.test',
+        'xcustomer.test'       => undef,
+        'other.example.net'    => 'example.net',
+        "www.$PUBLIC"          => undef,
+        $PUBLIC                => undef,
+    );
+    is( $registrar->zone_of( $_, $PUBLIC, \%zones ), $of{$_}, "$_: " . ( $of{$_} // 'none' ) ) foreach sort keys %of;
+};
+
+subtest 'a name in a zone of zones is published there, and not as an alias of the domain' => sub {
+    my $hostnames = [ "www.$PUBLIC", qw{shop.customer.test customer.test a.deep.customer.test xcustomer.test} ];
+    my ( $opts, $fragment ) = publishing( 'registrar', { registrar => { type => 'easydns', zones => \%ZONES } }, %ON_PUBLIC, hostnames => $hostnames );
+
+    is_deeply( $opts->{zone_names},                     { 'customer.test' => [qw{customer.test shop.customer.test}], 'deep.customer.test' => ['a.deep.customer.test'] }, 'each name goes to the longest zone that holds it' );
+    is_deeply( $opts->{domain_aliases},                 [ "alt.$PUBLIC", "www.$PUBLIC", 'xcustomer.test' ],                                                              'and the zone of the domain keeps the other names' );
+    is_deeply( [ sort keys %{ $opts->{zone_access} } ], [qw{customer.test deep.customer.test}],                                                                          'the guest gets the credentials of the zones that it uses, and of no other' );
+    is( $opts->{zone_access}{'customer.test'}{key}, 'zone-key', 'each with the credential of its own zone' );
+
+    my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]--shortcut[ ]/;
+    my $zone   = sub ($name) { return qr{${queued}/opt/lexicon/zones/\Q$name\E[ ]} };
+    foreach my $name (qw{customer.test shop.customer.test}) {
+        like( $fragment, qr{${\ $zone->('customer.test')}\Q$name\E[ ]192[.]0[.]2[.]50$}m, "$name gets an A record through the shortcut of its zone" );
+    }
+    like( $fragment, qr{${\ $zone->('deep.customer.test')}a[.]deep}m,                   'and so does a name of the deeper zone' );
+    like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E[ ]xcustomer[.]test$/m, 'and the domain publishes the rest as its aliases' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
