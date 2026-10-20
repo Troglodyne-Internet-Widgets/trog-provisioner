@@ -90,7 +90,7 @@ too.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( letsencrypt => sub { () } );
+    return ( letsencrypt => sub { return ( certificate_readers => ['plexmediaserver'] ) } );
 }
 
 sub rate_limits {
@@ -130,16 +130,6 @@ sub args {
             claim_token => { type => 'string', 'x-secret' => 1, pattern => '^claim-[A-Za-z0-9_-]+$', description => 'A token from https://plex.tv/claim that links a new server to the Plex account on its first start.  Only a server that has never been linked needs one.' },
         },
     );
-}
-
-=head2 @units = $recipe->certificate_readers()
-
-C<plexmediaserver>, whose preferences name the certificate of the domain.
-
-=cut
-
-sub certificate_readers {
-    return ('plexmediaserver');
 }
 
 sub remote_files {

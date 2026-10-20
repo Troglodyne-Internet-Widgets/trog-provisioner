@@ -17,6 +17,13 @@ ok(-f '/etc/ldap/slapd.d/cn=config.ldif', 'slapd OLC config exists');
 my $ldaps = `ss -tlnp 2>/dev/null | grep ':[% port %] '`;
 ok($ldaps, 'LDAPS is listening on port [% port %]') or diag `ss -tlnp 2>/dev/null | grep slapd`;
 
+# letsencrypt replaces the self-signed pair, and slapd reads a pair only when
+# it starts.
+my $fingerprint = sub { my ($cmd) = @_; return scalar `$cmd 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null` };
+my $linked      = $fingerprint->('cat /etc/ssl/certs/[% domain %].pem');
+isnt($linked, '', 'there is a certificate to compare');
+is($fingerprint->('echo | openssl s_client -connect 127.0.0.1:[% port %] -servername [% domain %]'), $linked, 'slapd serves it on port [% port %]');
+
 my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;
 like($search, qr/dn:\s*[% base_dn %]/i, 'base DN is searchable');
 

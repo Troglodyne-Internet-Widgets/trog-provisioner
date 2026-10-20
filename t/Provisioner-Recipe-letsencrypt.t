@@ -134,9 +134,20 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
 };
 
 subtest 'the services that read the certificate are those that the recipes on the guest name' => sub {
+    my %domain_conf = ( ldap => {}, plexmediaserver => {}, nginx => {}, mail => {} );
+    Provisioner::Cookbook->resolve_dependencies(
+        modules       => [qw{ldap plexmediaserver nginx mail}],
+        domain_conf   => \%domain_conf,
+        global_config => { domain => $DOMAIN, install_dir => '/opt/domains', script_dir => '/root/bin', admin_user => 'someadmin' },
+        distro        => 'ubuntu',
+        provisioner   => { template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu', target_packager => 'deb' },
+        domain        => $DOMAIN,
+    );
+    is_deeply( [ sort @{ $domain_conf{letsencrypt}{certificate_readers} // [] } ], [qw{dovecot nginx plexmediaserver postfix slapd}], 'each recipe that serves the certificate hands its units to letsencrypt' );
+
     my ($recipe) = generated();
-    my %opts = $recipe->validate( domain => $DOMAIN, modules => [qw{nginxproxy nginx mail ntp ldap letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
-    is_deeply( $opts{certificate_readers}, [qw{nginx postfix dovecot slapd}], 'each unit once, in the order of the recipes' );
+    my %opts = $recipe->validate( domain => $DOMAIN, modules => ['letsencrypt'], install_dir => '/opt/domains', admin_user => 'someadmin', certificate_readers => [qw{nginx postfix nginx}] );
+    is_deeply( $opts{certificate_readers}, [qw{nginx postfix}], 'and letsencrypt reloads each unit once' );
 };
 
 subtest 'a reserved TLD is served locally whatever reached the module list' => sub {

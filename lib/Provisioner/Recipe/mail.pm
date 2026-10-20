@@ -187,6 +187,7 @@ sub required_recipes {
         nginx   => sub {
             return ( sites => [ map { "$_.$opts{domain}" } qw{autodiscover autoconfig} ] );
         },
+        letsencrypt => sub { return ( certificate_readers => [qw{postfix dovecot}] ) },
     );
 }
 
@@ -363,16 +364,6 @@ sub formatters {
             }
         ),
     );
-}
-
-=head2 @units = $recipe->certificate_readers()
-
-C<postfix> and C<dovecot>, which both serve the certificate of the domain.
-
-=cut
-
-sub certificate_readers {
-    return (qw{postfix dovecot});
 }
 
 sub datadirs {

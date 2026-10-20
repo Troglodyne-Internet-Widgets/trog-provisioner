@@ -1098,21 +1098,6 @@ sub jails {
     return ();
 }
 
-=head3 @units = $recipe->certificate_readers(%opts)
-
-The systemd units of this recipe that read the certificate of the domain, which
-L<Provisioner::Recipe::letsencrypt> links into F</etc/ssl>.  A unit reads it
-when it starts or reloads, so letsencrypt reloads each one after it links a
-certificate, and after the nightly renewal deploys a new one.
-
-Empty by default.
-
-=cut
-
-sub certificate_readers {
-    return ();
-}
-
 =head3 forget_undefs($opts, $schema)
 
 Deletes each field of C<$opts> that is present but undef, where C<$schema>
