@@ -16,6 +16,7 @@ t/skills-teardown.t - the provisioning-recipes teardown: what a throwaway run le
 use Test::More;
 use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
+use Test::Fatal      qw{exception};
 use File::Path       qw{make_path remove_tree};
 use File::Temp       qw{tempdir};
 use File::Slurper::Temp();
@@ -157,6 +158,23 @@ subtest 'data kept with --keep-data keeps the configuration that it is in' => su
     make_path("$elsewhere/one.test");
     is_deeply( [ Trog::Skill::Teardown::kept_data( $scratch, $elsewhere ) ], [], 'a data source outside the configuration keeps nothing, because removing it loses nothing' );
     is_deeply( [ Trog::Skill::Teardown::kept_data( $scratch, undef ) ],      [], 'and neither does none' );
+};
+
+subtest 'a run with no configuration named refuses, and does not fall back to the real one' => sub {
+    is( Trog::Skill::Teardown::require_config(), $ENV{TROG_PROVISIONER_CONFIG}, 'the directory that the variable names' );
+
+    local $ENV{TROG_PROVISIONER_CONFIG};
+    like( exception { Trog::Skill::Teardown::require_config() }, qr/TROG_PROVISIONER_CONFIG[ ]is[ ]not[ ]set/, 'unset' );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = q{};
+    like( exception { Trog::Skill::Teardown::require_config() }, qr/TROG_PROVISIONER_CONFIG[ ]is[ ]not[ ]set/, 'and empty' );
+
+    my @asked;
+    my $script = Test::MockModule->new( 'Trog::Skill::Teardown', no_auto => 1 );
+    $script->redefine( destroy_guest => sub { push @asked, [@_]; return 0 } );
+    local $ENV{TROG_PROVISIONER_CONFIG};
+    like( exception { Trog::Skill::Teardown::main('vm.test') }, qr/is[ ]not[ ]set/, 'teardown refuses' );
+    is_deeply( \@asked, [], 'before it asks bin/destroy for anything' );
 };
 
 subtest 'the POD documents the interface' => sub {

@@ -12,7 +12,13 @@ use re '/aasx';
 
 use FindBin::libs;
 
+use Cwd();
+use File::Basename();
+
 use Trog::Hypervisors();
+
+# For the check of the configuration in play, which teardown owns.
+BEGIN { require( Cwd::abs_path( File::Basename::dirname(__FILE__) ) . q{/teardown} ) }
 
 =head1 NAME
 
@@ -39,6 +45,7 @@ exit main(@ARGV) unless caller;
 sub main {
     my ( $domain, @command ) = @_;
     die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
+    Trog::Skill::Teardown::require_config();
 
     my $guest = Trog::Hypervisors->guest_of($domain)
       or die "No hypervisor in the fleet runs $domain at an address, so there is nothing to ask.\n";
