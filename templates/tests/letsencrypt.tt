@@ -77,4 +77,22 @@ SKIP: {
         or diag join("\n", @shared);
 }
 
+[% IF certificate_readers.grep('^nginx$').size() -%]
+subtest 'nginx serves the certificate that letsencrypt linked, and learns of a renewal' => sub {
+    my $fingerprint = sub { my ($cmd) = @_; my $out = `$cmd 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null`; return $out };
+    my $linked = $fingerprint->('cat /etc/ssl/certs/[% domain %].pem');
+    my $served = $fingerprint->('echo | openssl s_client -connect 127.0.0.1:443 -servername [% domain %]');
+    isnt( $linked, '', 'there is a certificate to compare' ) or return;
+    is( $served, $linked, 'nginx serves it on 443' );
+
+    # What dehydrated runs after the nightly renewal writes a new certificate.
+    my $since = `date '+%Y-%m-%d %H:%M:%S'`;
+    chomp $since;
+    sleep 1;
+    is( system( '/etc/dehydrated/hooks/[% domain %].sh', 'deploy_cert', '[% domain %]', '/bogus/privkey.pem', '/bogus/cert.pem', '/bogus/fullchain.pem', '/bogus/chain.pem' ), 0, 'the deploy hook runs' );
+    my $journal = `journalctl -u nginx --no-pager --since '$since' 2>&1`;
+    like( $journal, qr/Reload/, 'and reloads nginx' ) or diag $journal;
+};
+[% END -%]
+
 done_testing();

@@ -13,15 +13,6 @@ chmod 0700 /etc/dehydrated/hooks/[% domain %].sh
 mv get_cert /etc/letsencrypt/fetchers/[% domain %]
 chown root:root /etc/letsencrypt/fetchers/[% domain %]
 chmod +x /etc/letsencrypt/fetchers/[% domain %]
+[%# The script reloads the services that read the certificate.  See
+    Provisioner::Recipe::letsencrypt. -%]
 [% script_dir %]/queue_postrun_task /etc/letsencrypt/fetchers/[% domain %]
-# Restart the services that read the certificate.
-[% IF modules.grep('nginxproxy').size() %]
-[% script_dir %]/queue_postrun_task systemctl restart nginx
-[% END -%]
-[% IF modules.grep('^ldap$').size() %]
-[% script_dir %]/queue_postrun_task systemctl restart slapd
-[% END -%]
-[% IF modules.grep('mail').size() %]
-[% script_dir %]/queue_postrun_task systemctl restart postfix
-[% script_dir %]/queue_postrun_task systemctl restart dovecot
-[% END -%]

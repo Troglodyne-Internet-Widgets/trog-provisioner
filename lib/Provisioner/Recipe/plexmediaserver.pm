@@ -90,7 +90,7 @@ too.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( letsencrypt => sub { () } );
+    return ( letsencrypt => sub { return ( certificate_readers => ['plexmediaserver'] ) } );
 }
 
 sub rate_limits {

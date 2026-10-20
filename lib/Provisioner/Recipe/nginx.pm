@@ -134,6 +134,17 @@ sub jails {
     );
 }
 
+=head2 %required = $recipe->required_recipes()
+
+C<letsencrypt>, which reloads C<nginx> when it links or renews the certificate
+that the vhosts serve.
+
+=cut
+
+sub required_recipes {
+    return ( letsencrypt => sub { return ( certificate_readers => ['nginx'] ) } );
+}
+
 sub args {
     return (
         properties => {

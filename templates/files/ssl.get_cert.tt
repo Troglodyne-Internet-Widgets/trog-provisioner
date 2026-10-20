@@ -38,6 +38,10 @@ if [ -s "$live/fullchain.pem" ] && [ -s "$live/privkey.pem" ]; then
     echo "Fixing Symlinks to certs for [% domain %]..."
     ln -sf "$live/fullchain.pem" /etc/ssl/certs/[% domain %].pem
     ln -sf "$live/privkey.pem"   /etc/ssl/private/[% domain %].pem
+[% IF certificate_readers.size() -%]
+    # A service reads the certificate only when it starts or reloads.
+    systemctl try-reload-or-restart [% certificate_readers.join(' ') %]
+[% END -%]
 else
     echo "dehydrated left no certificate for [% domain %]; keeping the one already in place." >&2
 fi

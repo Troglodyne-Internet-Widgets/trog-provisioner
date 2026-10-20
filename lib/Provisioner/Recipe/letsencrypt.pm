@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util qw{uniq};
+
 use Provisioner::Cookbook();
 use Provisioner::Utils();
 
@@ -83,6 +85,15 @@ and C<restore_state> does not write over an account that is already there.
 
 This is how it works for the public CA.  An account that a CA on this guest
 issued does not go back at all.  See C<restores>.
+
+=head2 Which services learn of a new certificate
+
+A service reads the certificate when it starts or reloads, and not when the file
+changes.  So each recipe that serves the certificate gives this recipe its units
+in C<certificate_readers>, through its C<required_recipes>.  This recipe reloads
+them twice: in C<get_cert>, after it links the certificate into F</etc/ssl>, and
+in the C<deploy_cert> hook, after the nightly renewal writes a new one.  A unit
+that is not running stays as it is.
 
 =head2 Which CA issues, and how a reserved TLD gets one at all
 
@@ -173,6 +184,12 @@ sub args {
                 default     => [],
                 description => 'The names under the domain that the recipes on it serve.  Each recipe hands its own over: see served_names in Provisioner::Recipe.  Not for an operator to write; configure an alias in the aliases of _global.',
             },
+            certificate_readers => {
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'The systemd units that read the certificate of the domain, which this recipe reloads after it links a certificate and after a renewal.  Each recipe that serves the certificate hands its own over in its required_recipes.  Add a unit here for a service of your own that reads it.',
+            },
         },
     );
 }
@@ -209,6 +226,9 @@ sub enrich {
     my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
     $params{lexicon_socket} = $registrar->serves_itself( $params{domain} ) ? $extra{PDNS_SERVER} // q{} : q{};
     $params{domain_aliases} = [ $self->domain_aliases(%params) ];
+
+    # Two recipes can name one unit, and the merge keeps both.
+    $params{certificate_readers} = [ uniq @{ $params{certificate_readers} } ];
 
     return %params;
 }

@@ -187,6 +187,7 @@ sub required_recipes {
         nginx   => sub {
             return ( sites => [ map { "$_.$opts{domain}" } qw{autodiscover autoconfig} ] );
         },
+        letsencrypt => sub { return ( certificate_readers => [qw{postfix dovecot}] ) },
     );
 }
 

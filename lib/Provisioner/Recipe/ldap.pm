@@ -45,8 +45,9 @@ The seed adds each user in C<users> as a POSIX account.  Each account has the
 C<inetOrgPerson>, C<posixAccount> and C<shadowAccount> object classes.
 
 LDAPS uses C</etc/ssl/certs/E<lt>domainE<gt>.pem> and its key.  The ssl target
-makes a self-signed pair there on every guest.  The C<letsencrypt> fetcher
-replaces it with a real certificate when it has one.
+makes a self-signed pair there on every guest.  This recipe requires
+C<letsencrypt>, which replaces the pair with a real certificate and reloads
+slapd.
 
 slapd listens for LDAPS on C<port>, which is 636 by default.  Remote clients,
 for example SSSD, use this port.  The firewall profile opens the same value, so
@@ -232,12 +233,18 @@ C<cron>, which installs F<ldap-export.cron> as F</etc/cron.d/ldap-export>.
 With C<github>, it also installs F<ldap-github-sync.cron> as
 F</etc/cron.d/ldap-github-sync>.
 
+C<letsencrypt>, which reloads C<slapd> when it links or renews the certificate
+that LDAPS serves.
+
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
     my %files = ( 'ldap-export' => 'ldap-export.cron', ( $opts{github} ? ( 'ldap-github-sync' => 'ldap-github-sync.cron' ) : () ) );
-    return ( cron => sub { return ( files => {%files} ) } );
+    return (
+        cron        => sub { return ( files               => {%files} ) },
+        letsencrypt => sub { return ( certificate_readers => ['slapd'] ) },
+    );
 }
 
 =head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
