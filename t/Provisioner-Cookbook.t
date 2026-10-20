@@ -603,8 +603,15 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
         return ('www.d.test');
     }
 
+    sub rate_limits {
+        return ( 8443 => 64 );
+    }
+
     sub required_recipes {
-        return ( letsencrypt => sub { ( certificate_readers => ['t_both'] ) } );
+        return (
+            letsencrypt => sub { ( certificate_readers => ['t_both'] ) },
+            ufw         => sub { ( rate_limits         => { 8443 => 128 } ) },
+        );
     }
 }
 
@@ -794,6 +801,7 @@ subtest 'a dependency that the base class and the recipe both name gets what eac
 
     is_deeply( $conf{letsencrypt}{hostnames},           ['www.d.test'], 'what the base class asks' );
     is_deeply( $conf{letsencrypt}{certificate_readers}, ['t_both'],     'and what the recipe asks' );
+    is( $conf{ufw}{rate_limits}{8443}, 128, 'where both set one value, the recipe wins' );
 };
 
 subtest 'the same configuration comes back in the same order every run' => sub {

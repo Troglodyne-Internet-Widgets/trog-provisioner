@@ -862,9 +862,10 @@ owes: C<ufw> its rate limits, and C<data> its restores.  An override that does
 not call C<SUPER> must not drop those, and many overrides do not call it.
 
 Where both name one dependency, both subs run, and what they ask merges.  A
-list gets the items of both, and where both set one scalar, the base class
-wins.  So nginx can pass its unit to C<letsencrypt>,
-and C<letsencrypt> still gets the names that the base class passes for nginx.
+list gets the items of both.  Where both set one scalar, the recipe wins, as
+the configuration nearer the guest wins everywhere else.  So nginx can pass
+its unit to C<letsencrypt>, and C<letsencrypt> still gets the names that the
+base class passes for nginx.
 
 =head3 Recipes that require each other
 
@@ -955,7 +956,7 @@ sub resolve_dependencies {
         );
         while ( my ( $required, $asks ) = splice( @pairs, 0, 2 ) ) {
             my $earlier = $dep_recipes{$required};
-            $dep_recipes{$required} = exists $dep_recipes{$required} ? sub { return %{ $dep_merger->merge( { asked_of( $earlier, @_ ) }, { asked_of( $asks, @_ ) } ) } } : $asks;
+            $dep_recipes{$required} = exists $dep_recipes{$required} ? sub { return %{ $dep_merger->merge( { asked_of( $asks, @_ ) }, { asked_of( $earlier, @_ ) } ) } } : $asks;
         }
 
         # Sorted, so that two identical provisions produce the same makefile.
