@@ -107,13 +107,11 @@ outside a reserved TLD.
 =head2 Accounts, and the zones that they hold
 
 C<accounts> names each registrar account of this installation once, with the
-C<type>, C<user> and C<key> of its registrar, and lists the zones that it
-holds.  C<account> names one of them for the zone of the domain, in place of
-C<type>, C<user> and C<key>:
+C<type>, C<user> and C<key> of its registrar, and lists the other zones that it
+holds:
 
     _base:
         registrar:
-            account: ours
             accounts:
                 ours:
                     type: easydns
@@ -208,11 +206,7 @@ sub args {
                         },
                     },
                 },
-                description => 'The registrar accounts of this installation, each under a name of your choice, with its type, user and key, and the zones that it holds.  account names one of them for the zone of the domain.  See "Accounts, and the zones that they hold".',
-            },
-            account => {
-                type        => 'string',
-                description => 'The name of an account in accounts that holds the zone of the domain, in place of type, user and key here.',
+                description => 'The registrar accounts of this installation, each under a name of your choice, with its type, user and key, and the zones other than the zone of the domain that it holds.  See "Accounts, and the zones that they hold".',
             },
             key => {
                 type        => 'string',
@@ -322,10 +316,8 @@ sub configuration_of ( $self, $domain ) {
 =head2 %credentials = $recipe->configured_credentials(%opts)
 
 Returns C<type>, C<user> and C<key> as the operator configured them, with an
-empty string for an unset C<user> or C<key>.  Where C<account> names an account
-of C<accounts>, they are the fields of that account.  C<opts> is empty and
-C<extra> is an empty list.  Dies when there is no C<type>, when C<account> names
-no account, and when both C<account> and C<type> are set.
+empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
+an empty list.  Dies when there is no C<type>.
 
 C<enrich> asks this for the registrar of the zone above, where the C<NS>
 record of a domain with an C<authority> goes.
@@ -334,13 +326,6 @@ record of a domain with an C<authority> goes.
 
 sub configured_credentials {
     my ( $self, %opts ) = @_;
-
-    if ( defined $opts{account} ) {
-        die "registrar of $opts{domain} names both the account $opts{account} and the type $opts{type}.  Name one of them.\n"
-          if $opts{type};
-        my $account = ( $opts{accounts} // {} )->{ $opts{account} } // die "registrar of $opts{domain} names the account $opts{account}, and accounts has no account of that name.\n";
-        %opts = ( %opts, %$account{qw{type user key}} );
-    }
 
     die "registrar has no type for $opts{domain}, and no server of this installation holds its zone.  Name the provider that holds the zone, as lexicon calls it, or name an authority.\n"
       unless $opts{type};

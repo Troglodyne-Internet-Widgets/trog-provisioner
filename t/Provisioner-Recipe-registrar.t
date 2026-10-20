@@ -436,17 +436,6 @@ subtest 'each zone that an account lists gets the credentials of that account' =
     like( $twice, qr/the[ ]zone[ ]customer[.]test/,         'and the name of the zone' );
 };
 
-subtest 'account names the account that holds the zone of the domain' => sub {
-    my $registrar = Provisioner::Cookbook->load('registrar');
-    my %got       = $registrar->configured_credentials( account => 'deep', accounts => \%ACCOUNTS, domain => $PUBLIC );
-    is_deeply( [ @got{qw{type user key}} ], [ 'easydns', q{}, 'deep-key' ], 'the type, user and key of that account' );
-
-    like( exception { $registrar->configured_credentials( account => 'none', accounts => \%ACCOUNTS, domain => $PUBLIC ) }, qr/no[ ]account[ ]of[ ]that[ ]name/, 'an account that accounts does not have is refused' );
-    like( exception { $registrar->configured_credentials( account => 'deep', type => 'route53', accounts => \%ACCOUNTS, domain => $PUBLIC ) }, qr/both[ ]the[ ]account[ ]deep[ ]and[ ]the[ ]type[ ]route53/, 'and so is an account beside a type' );
-
-    is( exception { publishing( 'registrar', { registrar => { account => 'deep', accounts => \%ACCOUNTS } }, %ON_PUBLIC ) }, undef, 'a domain with an account and no type builds' );
-};
-
 subtest 'the zone of a name, among the zones of the registrar' => sub {
     my $registrar = Provisioner::Cookbook->load('registrar');
     my %zones     = $registrar->account_zones( accounts => { %ACCOUNTS, ours => { type => 'easydns', zones => ['example.net'] } } );
