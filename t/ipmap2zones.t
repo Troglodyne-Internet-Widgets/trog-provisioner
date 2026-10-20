@@ -50,14 +50,14 @@ my %GLOBAL = (
 my $script = "$FindBin::Bin/../bin/ipmap2zones";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-# Three domains: one that serves the web, one that serves mail, and one that
-# serves neither.
+# Three domains: one that serves the web, and through a proxy, one that serves
+# mail, and one that serves neither.
 File::Slurper::Temp::write_text(
     "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
     YAML::XS::Dump(
         {
             _base        => { _global    => \%GLOBAL },
-            'web.test'   => { nginxproxy => undef },
+            'web.test'   => { nginxproxy => undef, nginx => { public_names => { 'shop.web.test' => 'web.test', 'www.customer.test' => 'web.test' } } },
             'post.test'  => { mail       => undef },
             'plain.test' => { ntp        => undef },
         }
@@ -100,7 +100,9 @@ subtest 'the zone carries the names that domain serves' => sub {
 
     my $zone = File::Slurper::read_text("$out/web.test.zone");
 
-    like( $zone, qr/^www[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'www, because nginxproxy serves it' ) or diag $zone;
+    like( $zone, qr/^www[.]web[.]test\.\s+IN\s+CNAME\s+\@/m,    'www, because nginxproxy serves it' )                                   or diag $zone;
+    like( $zone, qr/^shop[.]web[.]test\.\s+IN\s+CNAME\s+\@/m,   'a public name of nginx in the zone, from the configuration of nginx' ) or diag $zone;
+    like( $zone, qr/^public[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'and public.VHOST, for its public name outside the zone' )              or diag $zone;
 
     # And absolute, which is the other thing this template gets wrong when
     # nobody is looking: $ORIGIN is the domain, so a relative name has it put

@@ -3,6 +3,9 @@ server {
 [% IF ipv6 %]    listen [::]:443 ssl;
 [% END -%]
     server_name admin.matrix.[% domain %];
+[%# The listener for a proxy, when a public name names this vhost.  See
+    Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/admin.matrix.[% domain %].443.conf*;
     server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
@@ -27,5 +30,6 @@ server {
 [% IF ipv6 %]    listen [::]:80;
 [% END -%]
     server_name admin.matrix.[% domain %];
+    include /etc/nginx/proxied/admin.matrix.[% domain %].80.conf*;
     return 301 https://$host$request_uri;
 }

@@ -65,5 +65,52 @@ subtest 'nginx sends its access log to syslog too' => sub {
     like( $journal, qr/\Q$marker\E/, 'the request is in the journal, tagged nginx_access' ) or diag $journal;
 };
 [% END -%]
+[% IF proxied -%]
+
+subtest 'each vhost that a public name names answers for it behind the proxy' => sub {
+
+    # The status of a request for $name on $port with a PROXY header, or 000
+    # when nothing answers.  curl sends the header from 127.0.0.1.
+    my $status = sub {
+        my ( $name, $port ) = @_;
+        my $scheme = $port == 8443 ? 'https' : 'http';
+        my $code   = `curl -sk --max-time 10 --haproxy-protocol -o /dev/null -w '%{http_code}' --resolve '$name:$port:127.0.0.1' '$scheme://$name:$port/' 2>/dev/null`;
+        return $code || '000';
+    };
+
+[% FOR vhost IN proxied.keys().sort() -%]
+[% FOR name IN proxied.$vhost -%]
+    isnt( $status->( '[% name %]', 8443 ), '000', '[% name %] reaches [% vhost %] on 8443' );
+    isnt( $status->( '[% name %]', 8080 ), '000', 'and on 8080' );
+[% END -%]
+[% END -%]
+    is( $status->( 'nosuch.test.test', 8443 ), '000', 'a name that no vhost answers for gets no TLS handshake on 8443' );
+    is( $status->( 'nosuch.test.test', 8080 ), '000', 'and no reply on 8080' );
+};
+
+subtest 'nginx believes a PROXY header only from proxy_from' => sub {
+    require IO::Socket::INET;
+
+    # 127.0.0.1 is not in proxy_from, so this header is a client that lies.
+    my $marker = "proxy-check-$$-" . time;
+    my $sock   = IO::Socket::INET->new( PeerAddr => '127.0.0.1', PeerPort => 8080, Proto => 'tcp', Timeout => 10 );
+    ok( $sock, 'nginx listens on 8080' ) or return;
+    print $sock "PROXY TCP4 203.0.113.7 127.0.0.1 40000 8080\r\nGET /$marker HTTP/1.0\r\nHost: nosuch.test.test\r\n\r\n";
+    1 while <$sock>;
+    close($sock);
+
+    my $log = '';
+    for ( 1 .. 5 ) {
+        $log = `grep -h -- '/$marker ' /var/log/nginx/access.log 2>&1`;
+        last if $log;
+        sleep 1;
+    }
+    like( $log, qr/\A127[.]0[.]0[.]1 /m, 'the log names the address that connected, not the one in the header' ) or diag $log;
+
+    # The requests above pass no firewall, and the proxy is on another host.
+    my $ufw = `ufw status 2>&1`;
+    like( $ufw, qr/^nginx-proxy\s+ALLOW\s/m, 'ufw lets the proxy reach the two ports' ) or diag $ufw;
+};
+[% END -%]
 
 done_testing();

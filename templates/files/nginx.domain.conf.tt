@@ -22,6 +22,8 @@ server {
 [%# www, which this recipe serves, and the names that Provisioner::Recipe::nginx decides for the vhost of the domain. -%]
     server_name www.[% domain %];
     include /etc/nginx/names/[% domain %].conf;
+[% IF vhost == 80 %]    include /etc/nginx/proxied/[% domain %].80.conf*;
+[% END -%]
     return 301 https://$host$request_uri;
 }
 [% ELSE -%]
@@ -41,7 +43,11 @@ server {
 
     server_name www.[% domain %];
     include /etc/nginx/names/[% domain %].conf;
-
+[%# The listener for a proxy, when a public name names this vhost, on the two
+    ports that it fronts.  See Provisioner::Recipe::nginx. -%]
+[% IF vhost == 443 AND ssl %]    include /etc/nginx/proxied/[% domain %].443.conf*;
+[% ELSIF vhost == 80 AND NOT ssl %]    include /etc/nginx/proxied/[% domain %].80.conf*;
+[% END %]
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
 
