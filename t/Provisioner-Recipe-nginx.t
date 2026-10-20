@@ -171,13 +171,31 @@ subtest 'each vhost that a public name names answers for it on the ports of the 
 
 subtest 'a public name that no vhost of the guest can answer for stops the build' => sub {
     my %webmail = ( %VPN, sites => ['webmail.web.test.test'] );
-    like( exception { enriched( %webmail, public_names => { 'web.test.test' => 'web.test.test' } ) }, qr/no[ ]recipe[ ]on[ ]\S+[ ]lists/, 'no vhost serves the vhost that it names' );
+
+    # The start of a refusal that names each of @names, in that order.
+    my $naming = sub (@names) { my $list = join( ', ', @names ); return qr/points[ ]\Q$list\E[ ]at[ ]\S+,[ ]but[ ]/ };
+    like(
+        exception { enriched( %webmail, public_names => { 'web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' } ) },
+        qr/${\ $naming->(qw{shop.web.test.test web.test.test})}no[ ]recipe/,
+        'no vhost serves the vhost that they name, and the message names each of them'
+    );
     is( exception { enriched( %webmail, public_names => { 'webmail.customer.test' => 'webmail.web.test.test' } ) }, undef, 'but a vhost that serves another name can answer for it' );
     like(
-        exception { enriched( %VPN, sites => [qw{web.test.test mail.web.test.test}], public_names => { 'mail.web.test.test' => 'web.test.test' } ) },
-        qr/mail[.]web[.]test[.]test[ ]is[ ]in[ ]public_names.+another/, 'another vhost lists the name'
+        exception {
+            enriched(
+                %VPN,
+                sites        => [qw{web.test.test mail.web.test.test pop.web.test.test}],
+                public_names => { 'mail.web.test.test' => 'web.test.test', 'pop.web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' }
+            )
+        },
+        qr/${\ $naming->(qw{mail.web.test.test pop.web.test.test})}each[ ]is[ ]a[ ]name[ ]that[ ]another/,
+        'another vhost lists the names, and the message names each of them and not the free one'
     );
-    like( exception { enriched( %VPN, sites => ['other.test'], public_names => { 'shop.other.test' => 'other.test' } ) }, qr/outside[ ]the[ ]zone/, 'the vhost is outside the zone of the domain' );
+    like(
+        exception { enriched( %VPN, sites => ['other.test'], public_names => { 'shop.other.test' => 'other.test', 'www.other.test' => 'other.test' } ) },
+        qr/${\ $naming->(qw{shop.other.test www.other.test})}\S+[ ]is[ ]outside/,
+        'the vhost is outside the zone of the domain, and the message names each of them'
+    );
     like( exception { enriched( ip_pool => { cidr => '10.0.0.0/24' }, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } ) }, qr/where[ ]the[ ]proxy[ ]connects/, 'no network to believe the header from' );
 };
 

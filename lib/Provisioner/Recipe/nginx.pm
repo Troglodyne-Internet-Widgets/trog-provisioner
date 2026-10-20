@@ -86,7 +86,9 @@ without, each with the PROXY protocol, where the proxy connects.  Its listeners
 on 443 and 80 stay as they are for the LAN.  A vhost that no public name names
 does not listen for the proxy at all, and a name that no vhost claims on those
 ports gets no answer.  The ufw application profile C<nginx-proxy> opens the two
-ports.
+ports.  They listen on IPv4 only, because the proxy reaches the guest through
+the IPv4 tunnel of openvpn, so they need nothing from a guest that turns IPv6
+off.
 
 A public name inside the zone of the domain joins the names that this recipe
 serves.  So the registrar publishes it, and letsencrypt puts it on the
@@ -258,14 +260,14 @@ sub enrich {
     if (%proxied) {
         my %by_vhost = public_names_by_vhost(%opts);
         foreach my $vhost ( sort keys %by_vhost ) {
-            my $name = $by_vhost{$vhost}[0];
-            die "nginx: $name is in public_names for $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n"
+            my $names = join( ', ', @{ $by_vhost{$vhost} } );
+            die "nginx: public_names points $names at $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n"
               unless $listed{$vhost};
-            die "nginx: $name is in public_names for $vhost, which is outside the zone of $opts{domain}, so public.$vhost cannot be certified.\n"
+            die "nginx: public_names points $names at $vhost, but $vhost is outside the zone of $opts{domain}, so public.$vhost cannot be certified.\n"
               unless in_zone( $vhost, $opts{domain} );
-            my ($taken) = grep { $listed{$_} && vhost_of( $_, %opts ) ne $vhost } @{ $by_vhost{$vhost} };
-            die "nginx: $taken is in public_names for $vhost, but another vhost lists it in sites.\n"
-              if defined $taken;
+            my @taken = grep { $listed{$_} && vhost_of( $_, %opts ) ne $vhost } @{ $by_vhost{$vhost} };
+            die "nginx: public_names points " . join( ', ', @taken ) . " at $vhost, but each is a name that another vhost lists in sites.\n"
+              if @taken;
         }
         $opts{proxied} = {
             map {
