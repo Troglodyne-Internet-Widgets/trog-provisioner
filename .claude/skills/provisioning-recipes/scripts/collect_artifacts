@@ -26,8 +26,9 @@ use Trog::Guest();
 use Trog::HV();
 use Trog::Hypervisors();
 
-# For the marker of a scratch configuration, which teardown owns.  At compile
-# time, so that the name of the marker is known where it is read.
+# For the marker of a scratch configuration and the check of the configuration
+# in play, which teardown owns.  At compile time, so that the name of the
+# marker is known where it is read.
 BEGIN { require( Cwd::abs_path( File::Basename::dirname(__FILE__) ) . q{/teardown} ) }
 
 =head1 NAME
@@ -112,7 +113,7 @@ finding.  A guest with no setup.log never got as far as the Makefile.
 =item B<--into> DIR
 
 Where to put them.  The default is a new directory, whose path is printed.
-See L</artifacts_dir>.
+See L</"$dir = artifacts_dir($domain)">.
 
 =item B<--user> NAME, B<--key> FILE, B<--host> ADDRESS
 
@@ -148,6 +149,7 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
+    Trog::Skill::Teardown::require_config();
     my $guest = connect_to( $domain, user => $user, key => $key, host => $host, hypervisor => $hv_name, hvconf => $hvconf );
 
     $into //= artifacts_dir($domain);

@@ -1,0 +1,60 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::RunBin;
+
+#ABSTRACT: Run a tool of bin/ only when the configuration it is to use is named.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use Cwd();
+use File::Basename();
+use IPC::Run3();
+
+# For the check of the configuration in play, which teardown owns.
+BEGIN { require( Cwd::abs_path( File::Basename::dirname(__FILE__) ) . q{/teardown} ) }
+
+=head1 NAME
+
+run_bin - run a tool of bin/ only when the configuration it is to use is named
+
+=head1 SYNOPSIS
+
+    .claude/skills/provisioning-recipes/scripts/new_guest --user scratch nginx
+    .claude/skills/provisioning-recipes/scripts/new_config --credentials --dryrun vm.test
+    .claude/skills/provisioning-recipes/scripts/provision --credentials vm.test
+    .claude/skills/provisioning-recipes/scripts/destroy --orphans --dryrun
+
+=head1 DESCRIPTION
+
+Each of C<new_guest>, C<new_config>, C<provision> and C<destroy> in this
+directory is a link to this script.  It dies unless C<TROG_PROVISIONER_CONFIG>
+is set, and then it runs the tool of the same name in F<bin/>, with the same
+arguments and standard input, and exits with its status.
+
+See C<require_config> in F<teardown> for why.
+
+=cut
+
+our %TOOLS = map { $_ => 1 } qw{new_guest new_config provision destroy};
+
+sub main {
+    my @args = @_;
+
+    my $tool = File::Basename::basename($0);
+    die "run_bin runs a tool by the name of its link: one of " . join( ', ', sort keys %TOOLS ) . ".\n"
+      unless $TOOLS{$tool};
+
+    Trog::Skill::Teardown::require_config();
+
+    my $bin = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../../../bin' ) . "/$tool";
+    IPC::Run3::run3( [ $^X, $bin, @args ], undef, undef, undef );
+    return $? >> 8;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

@@ -118,6 +118,7 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
+    require_config();
     my $purge_data = !$keep_data && is_scratch();
     my $rc         = destroy_guest( $domain, $hv_name, $hvconf, $dryrun, $purge_data );
 
@@ -163,6 +164,26 @@ sub destroy_guest {
 }
 
 =head1 SUBROUTINES
+
+=head2 require_config()
+
+Returns the directory that C<TROG_PROVISIONER_CONFIG> names, and dies when it
+names none.  Every script of the skill that reads the configuration, and each
+wrapper of a tool in F<bin/>, calls this first.
+
+Without the variable, L<Trog::Config> falls back to the real configuration,
+and it says nothing.  So a scratch setup that failed would send the next
+command there.  A run against the real configuration names it explicitly.
+
+=cut
+
+sub require_config {
+    my $dir = $ENV{TROG_PROVISIONER_CONFIG};
+    return $dir if defined $dir && length $dir;
+
+    die "TROG_PROVISIONER_CONFIG is not set, so this would use $Trog::Config::DIR.\n"
+      . "Set it to the directory that scratch_config made.  For a run against $Trog::Config::DIR, set it to that path.\n";
+}
 
 =head2 is_scratch()
 

@@ -87,8 +87,15 @@ use it when you test the `fetchcache` recipe itself: see *Through a fetch
 cache*.
 
 The `eval` sets `TROG_PROVISIONER_CONFIG` and `TROG_SCRATCH_PASS` for the shell. Every
-command after it must run with that variable set — if you run each `Bash` call
-separately, re-export it or the tools will read `/etc/trog-provisioner` instead.
+command after it must run with that variable set.  Each `Bash` call starts a
+new shell, so export the two again in each call.
+
+Without the variable, every tool falls back to `/etc/trog-provisioner`, and it
+says nothing.  So run `new_guest`, `new_config`, `provision` and `destroy`
+through the links of the same names in `scripts/`, never from `bin/`.  Each
+link dies unless the variable is set, and then runs the tool in `bin/`.
+`teardown`, `collect_artifacts` and `ask_guest` make the same check.  A run
+against the real configuration sets the variable to that path explicitly.
 
 It takes the settings of the installation out of the `_global` of `_base` in
 its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
@@ -150,13 +157,13 @@ Three things about it worth understanding:
 The password is printed because `new_config` prompts for it. Feed it on stdin:
 
 ```
-echo "$TROG_SCRATCH_PASS" | bin/provision "$DOMAIN"
+echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/provision "$DOMAIN"
 ```
 
 ## Build the guest
 
 ```
-bin/new_guest --user scratch <recipe> [<recipe> ...]
+.claude/skills/provisioning-recipes/scripts/new_guest --user scratch <recipe> [<recipe> ...]
 ```
 
 With no `--hostname` you get a UUID under `.test`. Take the name out of its
@@ -199,7 +206,7 @@ configuration step `provision` starts with, it takes a second or two, and it is
 where a refusal like that one comes from -- so it costs nothing to find out now
 rather than ten minutes into a build that was never going to finish:
 
-    printf 'keepass: %s\n\n' "$TROG_SCRATCH_PASS" | bin/new_config --credentials --dryrun "$DOMAIN"
+    printf 'keepass: %s\n\n' "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/new_config --credentials --dryrun "$DOMAIN"
 
 **The `--dryrun` is not optional, and neither is doing it only once.**
 `bin/provision` runs the generator itself, in process, before it waits for ssh.
@@ -213,7 +220,7 @@ replaced.
 Then, and note the credentials block rather than a bare password:
 
 ```
-printf 'keepass: %s\n\n' "$TROG_SCRATCH_PASS" | bin/provision --credentials "$DOMAIN"
+printf 'keepass: %s\n\n' "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/provision --credentials "$DOMAIN"
 ```
 
 **A bare password is not a slower `--credentials`.** Piping one answers
@@ -248,7 +255,7 @@ recipe that installs a lot from CPAN -- `trogrunner`, with Dist::Zilla and
 everything under it -- does not fit `bin/provision`'s default ninety minutes
 with its suites on, so give it more:
 
-    echo "$TROG_SCRATCH_PASS" | TROG_SETUP_TIMEOUT=3h bin/provision "$DOMAIN"
+    echo "$TROG_SCRATCH_PASS" | TROG_SETUP_TIMEOUT=3h .claude/skills/provisioning-recipes/scripts/provision "$DOMAIN"
 
 A failing suite stops the makefile in the `perl` recipe's target, and shows in
 `setup.log` as the `cpan_install` line it stopped on. cpm prints the build log of
@@ -262,8 +269,8 @@ is how to check the `fetchcache` recipe, or a recipe's `fetch_hosts`. Build the
 cache from the same scratch configuration, first, and name it there:
 
     eval "$(.claude/skills/provisioning-recipes/scripts/scratch_config --cache fetchcache.test)"
-    bin/new_guest --hostname fetchcache.test --user scratch fetchcache
-    echo "$TROG_SCRATCH_PASS" | bin/provision fetchcache.test
+    .claude/skills/provisioning-recipes/scripts/new_guest --hostname fetchcache.test --user scratch fetchcache
+    echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/provision fetchcache.test
 
 and then build the guest under test as usual. The same configuration because a
 scratch configuration has an authority of its own, made the first time the
@@ -771,7 +778,7 @@ one file that recipe goes out of its way to delete from the guest itself.
 for what it left:**
 
 ```
-bin/destroy --orphans --dryrun
+TROG_PROVISIONER_CONFIG=/etc/trog-provisioner .claude/skills/provisioning-recipes/scripts/destroy --orphans --dryrun
 ```
 
 Every `.test` directory that no hypervisor has a guest for and no recipe
