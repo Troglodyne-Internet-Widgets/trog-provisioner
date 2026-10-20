@@ -594,6 +594,20 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
     }
 }
 
+{
+
+    package Provisioner::Recipe::t_both;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub served_names {
+        return ('www.d.test');
+    }
+
+    sub required_recipes {
+        return ( letsencrypt => sub { ( certificate_readers => ['t_both'] ) } );
+    }
+}
+
 sub dependencies_of {
     my ( $named, %opts ) = @_;
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
@@ -765,6 +779,21 @@ subtest 'recipes that require each other are resolved, in the order they were fo
 
     is_deeply( $modules,             ['t_self'],  'a recipe that requires itself is there once' );
     is_deeply( $conf{t_self}{names}, ['its own'], 'and configures itself' );
+};
+
+subtest 'a dependency that the base class and the recipe both name gets what each asks' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return $name eq 't_both' ? "Provisioner::Recipe::$name" : $mock->original('load')->(@_) } );
+    my %provisioner = (
+        distro        => 'ubuntu',
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+    );
+    my %conf = ( t_both => {} );
+    Provisioner::Cookbook->resolve_dependencies( modules => ['t_both'], domain_conf => \%conf, distro => 'ubuntu', provisioner => \%provisioner, domain => 'd.test' );
+
+    is_deeply( $conf{letsencrypt}{hostnames},           ['www.d.test'], 'what the base class asks' );
+    is_deeply( $conf{letsencrypt}{certificate_readers}, ['t_both'],     'and what the recipe asks' );
 };
 
 subtest 'the same configuration comes back in the same order every run' => sub {

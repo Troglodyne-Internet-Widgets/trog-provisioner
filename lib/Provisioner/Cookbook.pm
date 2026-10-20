@@ -805,6 +805,12 @@ sub requires_transitively {
     return 0;
 }
 
+# What one required_recipes entry asks of its dependency.  An entry that is not
+# a sub asks for nothing.
+my sub asked_of ( $asks, @given ) {
+    return ref $asks eq 'CODE' ? $asks->(@given) : ();
+}
+
 =head2 resolve_dependencies(%args)
 
 Adds to the module list of a domain everything that its recipes require, and
@@ -854,6 +860,11 @@ the C<required_recipes> of the recipe.  This calls the base class version
 directly, not through the recipe.  The base class decides what every recipe
 owes: C<ufw> its rate limits, and C<data> its restores.  An override that does
 not call C<SUPER> must not drop those, and many overrides do not call it.
+
+Where both name one dependency, both subs run, and what they ask merges.  A
+list gets the items of both, and where both set one scalar, the base class
+wins.  So nginx can pass its unit to C<letsencrypt>,
+and C<letsencrypt> still gets the names that the base class passes for nginx.
 
 =head3 Recipes that require each other
 
@@ -937,10 +948,15 @@ sub resolve_dependencies {
         my $pconf = $domain_conf->{$module} // {};
 
         # The base class first, then the recipe.  See L</Two sources, on purpose>.
-        my %dep_recipes = (
+        my %dep_recipes;
+        my @pairs = (
             Provisioner::Recipe::required_recipes( $builder, %given, %$pconf ),
             $builder->required_recipes( %given, %$pconf ),
         );
+        while ( my ( $required, $asks ) = splice( @pairs, 0, 2 ) ) {
+            my $earlier = $dep_recipes{$required};
+            $dep_recipes{$required} = exists $dep_recipes{$required} ? sub { return %{ $dep_merger->merge( { asked_of( $earlier, @_ ) }, { asked_of( $asks, @_ ) } ) } } : $asks;
+        }
 
         # Sorted, so that two identical provisions produce the same makefile.
         # Hash order is per process, so without this the targets come out in a
