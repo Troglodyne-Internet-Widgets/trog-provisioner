@@ -7,4 +7,13 @@
     settled by the time this goes. -%]
 [% IF publish_records -%]
 [% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% IF own_nameserver %]--nameserver [% own_nameserver %] [% END %][% domain %] [% address %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
+[%# A name in a zone of a registrar account is a CNAME of the domain, but the
+    apex of that zone holds an A record.  See publication in
+    Provisioner::Recipe::registrar. -%]
+[% FOREACH zone IN zone_apexes -%]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --shortcut /opt/lexicon/zones/[% zone %] [% zone %] [% address %]
+[% END -%]
+[% FOREACH zone IN zone_cnames.keys().sort() -%]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --shortcut /opt/lexicon/zones/[% zone %] --alias-of [% domain %][% FOREACH name IN zone_cnames[zone].sort() %] [% name %][% END %]
+[% END -%]
 [% END -%]

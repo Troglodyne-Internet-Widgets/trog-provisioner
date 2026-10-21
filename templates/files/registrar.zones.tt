@@ -1,0 +1,15 @@
+#!/bin/bash
+[%# The shortcut of each zone of a registrar account that a name of this
+    guest is in, and of no other.  See "Accounts, and the zones that they hold"
+    in Provisioner::Recipe::registrar.  A script and not lines of the
+    fragment, because make runs each line in a shell of its own, and a shortcut
+    is a file of several lines. -%]
+set -e
+rm -rf /opt/lexicon/zones
+install -d -o root -g root -m 0700 /opt/lexicon/zones
+[% FOREACH zone IN zone_access.keys().sort() -%]
+cat > /opt/lexicon/zones/[% zone %] <<'SHORTCUT'
+[% INCLUDE "files/lexicon.shortcut.sh.tt" WITH lexicon = zone_access[zone], domain = zone -%]
+SHORTCUT
+chmod 0700 /opt/lexicon/zones/[% zone %]
+[% END -%]

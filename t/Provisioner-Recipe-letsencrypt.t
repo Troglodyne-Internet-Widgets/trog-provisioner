@@ -20,6 +20,7 @@ use Test::MockModule();
 use File::Temp qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -420,6 +421,44 @@ subtest 'a public guest that holds its own zone answers its own challenge' => su
     my %opts = fresh()->enrich( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
     is( $opts{lexicon}{type}, 'powerdns', 'the local server is what lexicon is given' );
     is( $opts{lexicon}{key},  'a-key',    'with the key that the operator set for it' );
+};
+
+subtest 'the hook writes the challenge of a name in a zone of the registrar through the shortcut of that zone' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine(
+        domain_config => sub {
+            return {
+                letsencrypt => {},
+                registrar   => {
+                    type     => 'easydns',
+                    key      => 'a-token',
+                    accounts => { customer => { type => 'route53', zones => ['customer.test'] }, ours => { type => 'easydns', zones => [qw{deep.customer.test example.net}] } },
+                },
+            };
+        }
+    );
+
+    my $names = [ "www.$PUBLIC", qw{shop.customer.test a.deep.customer.test other.example.net} ];
+    my ( $recipe, $dir ) = generated( domain => $PUBLIC, hostnames => $names );
+    is_deeply(
+        { $recipe->validated( domain => $PUBLIC, install_dir => '/opt/domains', script_dir => '/root/bin', admin_user => 'someadmin', hostnames => $names ) }->{challenge_zones},
+        [qw{deep.customer.test customer.test example.net}], 'the zones of the names on the certificate, longer first'
+    );
+
+    # The hook itself, asked by bash, because which branch of a case matches
+    # is a question for the shell.
+    my %shortcut = (
+        'shop.customer.test'   => '/opt/lexicon/zones/customer.test',
+        'a.deep.customer.test' => '/opt/lexicon/zones/deep.customer.test',
+        'other.example.net'    => '/opt/lexicon/zones/example.net',
+        "www.$PUBLIC"          => q{},
+        'xcustomer.test'       => q{},
+    );
+    foreach my $name ( sort keys %shortcut ) {
+        IPC::Run3::run3( [ 'bash', "$dir/domain.hook", 'shortcut_of', $name ], \undef, \my $said );
+        chomp $said;
+        is( $said, $shortcut{$name}, "$name: " . ( $shortcut{$name} || 'the lexicon of the domain' ) );
+    }
 };
 
 Test::NoWarnings::had_no_warnings();

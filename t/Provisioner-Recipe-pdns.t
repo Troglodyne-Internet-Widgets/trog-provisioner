@@ -16,6 +16,7 @@ absolute, and which are deliberately not
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal();
+use Test::MockModule();
 use File::Temp qw{tempdir};
 
 use FindBin::libs;
@@ -219,6 +220,15 @@ subtest 'what a guest that names this one as its authority gets' => sub {
     like( Test::Fatal::exception { $recipe->client_secret( $DOMAIN, 'Web.Example.Net' ) }, qr/not[ ]one/, 'nor one in capitals, which the zone and the token would not match' );
     like( Test::Fatal::exception { $recipe->release_command( 'ns.nosuchtld', $name ) }, qr/not[ ]one/, 'nor a domain under a TLD that does not exist' );
     is( $recipe->checked_names( 'web.lab.zone.test', 'ns.example.net' ), 1, 'and a reserved TLD is a TLD here' );
+};
+
+subtest 'an alias in a zone of the registrar is published there, and not in this zone' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( domain_config => sub { return { registrar => { accounts => { partner => { type => 'route53', zones => ['partner.test'] } } } } } );
+
+    my $zone = zone( aliases => { $DOMAIN => [ "www.$DOMAIN", 'old.partner.test' ] } );
+    like( $zone, qr/^\Qwww.$DOMAIN\E\.\s+IN\s+CNAME\s+\@/m, 'an alias of the zone stays' ) or diag $zone;
+    unlike( $zone, qr/partner/, 'and the alias of the other zone is not written here' )    or diag $zone;
 };
 
 Test::NoWarnings::had_no_warnings();

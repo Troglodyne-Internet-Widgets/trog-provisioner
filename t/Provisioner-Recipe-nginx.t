@@ -16,7 +16,8 @@ files, unless told not to
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use Test::MockModule();
+use File::Temp qw{tempdir};
 use File::Slurper();
 
 use FindBin::libs;
@@ -197,6 +198,24 @@ subtest 'a public name that no vhost of the guest can answer for stops the build
         'the vhost is outside the zone of the domain, and the message names each of them'
     );
     like( exception { enriched( ip_pool => { cidr => '10.0.0.0/24' }, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } ) }, qr/where[ ]the[ ]proxy[ ]connects/, 'no network to believe the header from' );
+};
+
+subtest 'a public name in a zone of the registrar is served as it is, without a stand-in' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( domain_config => sub { return { registrar => { accounts => { customer => { type => 'route53', zones => ['customer.test'] } } } } } );
+    $mock->redefine( host_of       => sub { return } );
+
+    my $nginx = 'Provisioner::Recipe::nginx';
+    is_deeply(
+        [ $nginx->served_names( domain => 'web.test.test', public_names => { 'shop.customer.test' => 'webmail.web.test.test', 'customer.test' => 'webmail.web.test.test' } ) ],
+        [qw{customer.test shop.customer.test}],
+        'each name of that zone is published and certified, and no public.VHOST joins them'
+    );
+    is_deeply(
+        [ $nginx->served_names( domain => 'web.test.test', public_names => { 'shop.customer.test' => 'webmail.web.test.test', 'other.example.test' => 'webmail.web.test.test' } ) ],
+        [qw{shop.customer.test public.webmail.web.test.test}],
+        'and a name of no zone that the guest can answer for still gets one'
+    );
 };
 
 subtest 'the ports of the proxy get the limits of the ports that it fronts' => sub {

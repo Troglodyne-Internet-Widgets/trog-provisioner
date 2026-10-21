@@ -104,6 +104,41 @@ registered domain itself is delegated at the registry, with glue records, which
 most registrars have no API for.  So the recipe refuses a domain of two labels
 outside a reserved TLD.
 
+=head2 Accounts, and the zones that they hold
+
+C<accounts> names each registrar account of this installation once, with the
+C<type>, C<user> and C<key> of its registrar, and lists the other zones that it
+holds:
+
+    _base:
+        registrar:
+            accounts:
+                ours:
+                    type: easydns
+                    user: "secret:registrar/ours/username"
+                    key:  "secret:registrar/ours/password"
+                    zones: [ ours.example, other.example ]
+                customer:
+                    type: route53
+                    key:  "secret:registrar/customer/token"
+                    zones: [ customer.example ]
+
+A served name in one of these zones, such as a public name of
+L<Provisioner::Recipe::nginx>, is published and certified like a name of the
+domain.  The guest publishes it in its zone as a C<CNAME> of the domain, as it
+publishes the aliases of the domain.  The apex of the zone is the exception,
+because the apex holds the C<SOA> and C<NS> records, and a C<CNAME> cannot
+stand beside them.  The apex gets an C<A> record at the address of the domain.  The
+hook of L<Provisioner::Recipe::letsencrypt> writes the challenge of each such
+name in its zone too.  The guest gets a lexicon shortcut,
+F</opt/lexicon/zones/ZONE>, only for each zone that one of its names is in.  So
+a guest holds no credential of a zone that it does not use.
+
+A name in the zone of the domain is the business of the domain, even where an
+account lists a zone that holds it as well.  Where two zones hold a name, the
+longer one does.  A zone is at one registrar, so the recipe refuses a zone that
+two accounts list.
+
 =head2 It installs nothing, and publishes the records of the domain
 
 This recipe starts no service.  It supplies the credentials in
@@ -153,6 +188,27 @@ sub args {
                 type        => 'string',
                 default     => q{},
                 description => 'The account, where the provider wants one alongside the token.  Empty is normal: most of them authenticate with a token alone.',
+            },
+            accounts => {
+                type                 => 'object',
+                default              => {},
+                additionalProperties => {
+                    type                 => 'object',
+                    required             => ['type'],
+                    additionalProperties => 0,
+                    properties           => {
+                        type  => { type => 'string', description => 'The provider of this account, as lexicon calls it.' },
+                        user  => { type => 'string', default     => q{}, description => 'The account, where the provider wants one.' },
+                        key   => { type => 'string', default     => q{}, 'x-secret'  => 1, description => 'The token of this account, as a secret: reference.' },
+                        zones => {
+                            type        => 'array',
+                            items       => { type => 'string', format => 'hostname' },
+                            default     => [],
+                            description => 'The zones that this account holds, other than the zone of the domain.  A served name in one of them is published there and certified.',
+                        },
+                    },
+                },
+                description => 'The registrar accounts of this installation, each under a name of your choice, with its type, user and key, and the zones other than the zone of the domain that it holds.  See "Accounts, and the zones that they hold".',
             },
             key => {
                 type        => 'string',
@@ -243,12 +299,20 @@ this, so that the hook and the shortcut render from one answer.
 sub credentials_for {
     my ( $self, %opts ) = @_;
 
-    my $domain = $opts{domain};
+    return $self->lexicon_credentials( %{ $self->configuration_of( $opts{domain} ) }, domain => $opts{domain} );
+}
+
+=head2 \%conf = $recipe->configuration_of($domain)
+
+The configuration of this recipe that C<$domain> has, or else the configuration
+of the guest that C<$domain> is layered onto, from L<Provisioner::Cookbook>.
+
+=cut
+
+sub configuration_of ( $self, $domain ) {
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
     my $name   = $self->recipe_name;
-    my $conf   = Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
-
-    return $self->lexicon_credentials( %{$conf}, domain => $domain );
+    return Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
 }
 
 =head2 %credentials = $recipe->configured_credentials(%opts)
@@ -275,6 +339,109 @@ sub configured_credentials {
         opts  => q{},
         extra => [],
     );
+}
+
+=head2 $zone = $recipe->zone_of($name, $domain, \%zones)
+
+The zone of an account that holds C<$name>, or undef where the zone of
+C<$domain> holds it, or where no account lists a zone that does.  So it
+answers whether a name that the guest serves goes through the zone of the
+domain, or through the zone of an account and its credentials.  See
+L</Accounts, and the zones that they hold>.
+
+L<Provisioner::Recipe::nginx> asks it whether it can certify a public name.
+L<Provisioner::Recipe::letsencrypt> asks it which shortcut the hook uses for
+each name of the certificate.  C<zone_aliases> asks it which names the zone of
+the domain leaves out.
+
+A name in the zone of C<$domain> has none, because it is the business of the
+domain.  Where two zones hold the name, the longer one does.  C<%zones> is what
+C<account_zones> returns.  Where it is undef, this reads it for C<$domain> from
+L<Provisioner::Cookbook>, as C<configured_zones> does.
+
+=cut
+
+sub zone_of ( $self, $name, $domain, $zones = undef ) {
+    my $in = sub ($zone) { return lc $name eq lc $zone || $name =~ m/[.]\Q$zone\E\z/i };
+    return if $in->($domain);
+
+    $zones //= { $self->configured_zones($domain) };
+    my ($zone) = $self->longest_first( grep { $in->($_) } keys %$zones );
+    return $zone;
+}
+
+=head2 @zones = $recipe->longest_first(@zones)
+
+C<@zones>, the longer first, and in order of the name where two are as long.
+A zone inside another is longer, so it comes first, as C<zone_of> decides.
+
+=cut
+
+sub longest_first ( $, @zones ) {
+    my @sorted = sort { -( length $a <=> length $b ) || $a cmp $b } @zones;
+    return @sorted;
+}
+
+=head2 %zones = $recipe->account_zones(%conf)
+
+Maps each zone that an account of C<$conf{accounts}> lists to the C<type>,
+C<user> and C<key> of that account.  Dies on a zone that two accounts list.
+
+=cut
+
+sub account_zones ( $, %conf ) {
+    my %accounts = %{ $conf{accounts} // {} };
+
+    my ( %zones, %listed_by );
+    foreach my $name ( sort keys %accounts ) {
+        foreach my $zone ( @{ $accounts{$name}{zones} // [] } ) {
+            die "registrar: the accounts $listed_by{$zone} and $name both list the zone $zone.  A zone is at one registrar, so list it under one account.\n"
+              if exists $listed_by{$zone};
+            $listed_by{$zone} = $name;
+            $zones{$zone}     = { map { $_ => $accounts{$name}{$_} } grep { exists $accounts{$name}{$_} } qw{type user key} };
+        }
+    }
+    return %zones;
+}
+
+=head2 %zones = $recipe->configured_zones($domain)
+
+C<account_zones> of the configuration that C<configuration_of> reads for
+C<$domain>.
+
+=cut
+
+sub configured_zones ( $self, $domain ) {
+    return $self->account_zones( %{ $self->configuration_of($domain) } );
+}
+
+=head2 @aliases = $recipe->zone_aliases(%opts)
+
+The names that the zone of C<$opts{domain}> holds as C<CNAME> records of the
+domain.
+
+C<domain_aliases> gives every name that the guest serves besides the domain:
+the aliases of C<_global>, and the C<hostnames> that the recipes on it hand
+over.  Most of them are under the domain.  A public name of
+L<Provisioner::Recipe::nginx> in a zone that an account lists is not.  It
+belongs to that zone, and C<publication> gives it an C<A> record there,
+through the shortcut of that zone.  So this returns C<domain_aliases> less
+each name that C<zone_of> places in a zone of an account.
+
+Each writer of the zone of the domain asks this, so that none of them writes
+such a name there: C<publication>, the zone file of
+L<Provisioner::Recipe::pdns>, and F<bin/ipmap2zones>.  pdns refuses a zone file
+with a record outside its zone as invalid, so one such name breaks the whole
+zone.
+
+C<$opts{zones}> is what C<account_zones> returns, where the caller has it.
+Otherwise this reads it for the domain from L<Provisioner::Cookbook>.
+
+=cut
+
+sub zone_aliases ( $self, %opts ) {
+    my $zones = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
+    return grep { !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
 }
 
 =head2 $guest = $recipe->authority_of($domain)
@@ -391,8 +558,17 @@ sub guest_secrets {
 =head2 %publication = $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
-C<address>, C<domain_aliases>, C<own_nameserver>, and C<publish_records>, which
-is true when there is an address to publish.  C<$opts{own_zone}> is true where
+C<address>, C<domain_aliases>, C<own_nameserver>, C<zone_cnames>,
+C<zone_apexes>, C<zone_access>, and C<publish_records>, which is true when
+there is an address to publish.
+
+These three are for the served names in a zone of an account.  C<zone_cnames>
+maps each such zone to its names other than its apex, and each gets a C<CNAME>
+of the domain in that zone.  C<zone_apexes> lists each such zone whose apex is a
+served name, and the apex gets an C<A> record at C<address>.  C<zone_access>
+maps every such zone to the credentials of its account, as
+C<configured_credentials> returns them.  See L</Accounts, and the zones that
+they hold>.  C<$opts{own_zone}> is true where
 the domain holds its own zone.
 
 The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
@@ -423,10 +599,22 @@ sub publication {
     my ( $self, %opts ) = @_;
 
     my $address = $opts{address} // $opts{main_ip};
+    my $zones   = { $self->account_zones(%opts) };
+
+    my ( %zone_cnames, %zone_apexes );
+    foreach my $name ( $self->domain_aliases(%opts) ) {
+        my $zone = $self->zone_of( $name, $opts{domain}, $zones ) // next;
+        if ( lc $name eq lc $zone ) { $zone_apexes{$zone} = 1 }
+        else                        { push( @{ $zone_cnames{$zone} }, $name ) }
+    }
+    my %zone_access = map { $_ => { $self->configured_credentials( %{ $zones->{$_} }, domain => $_ ) } } keys %zone_cnames, keys %zone_apexes;
 
     return (
         address         => $address,
-        domain_aliases  => [ $self->domain_aliases(%opts) ],
+        domain_aliases  => [ $self->zone_aliases( %opts, zones => $zones ) ],
+        zone_cnames     => \%zone_cnames,
+        zone_apexes     => [ sort keys %zone_apexes ],
+        zone_access     => \%zone_access,
         own_nameserver  => $opts{own_zone} ? "ns1.$opts{domain}" : undef,
         publish_records => $address        ? 1                   : 0,
     );
@@ -532,6 +720,7 @@ sub template_files {
     return (
         'registrar.resolved.tt' => 'registrar-resolved.conf',
         'registrar.upstream.tt' => 'registrar-upstream.sh',
+        'registrar.zones.tt'    => 'registrar-zones.sh',
     );
 }
 

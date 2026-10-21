@@ -36,6 +36,30 @@ subtest 'the records of the domain are published to the zone that holds it' => s
     ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
 };
+[% FOREACH zone IN zone_access.keys().sort() -%]
+
+subtest 'the names in [% zone %] are published there, through its own shortcut' => sub {
+    my $shortcut = '/opt/lexicon/zones/[% zone %]';
+    ok(-x $shortcut, 'the shortcut of the zone is installed') or return;
+    is((stat $shortcut)[2] & 07777, 0700, 'and nobody but root can read the credential in it');
+
+    my %held;
+    foreach my $type (qw{A CNAME}) {
+        my $out  = `$shortcut list $type --output=JSON 2>&1`;
+        my $list = eval { JSON::PP->new->utf8->decode($out) };
+        ok(ref $list eq 'ARRAY', "the provider of the zone answered with a list of $type records") or diag $out;
+        $held{$type} = { map { lc(($_->{name} // '') =~ s/[.]\z//r) => lc(($_->{content} // '') =~ s/[.]\z//r) } @{ ref $list eq 'ARRAY' ? $list : [] } };
+    }
+[% FOREACH apex IN zone_apexes -%]
+[% IF apex == zone -%]
+    is($held{A}{'[% zone %]'}, '[% address %]', 'the apex of [% zone %] is at the address of this domain') or diag explain \%held;
+[% END -%]
+[% END -%]
+[% FOREACH name IN zone_cnames[zone].sort() -%]
+    is($held{CNAME}{'[% name %]'}, '[% domain %]', '[% name %] is a CNAME of this domain') or diag explain \%held;
+[% END -%]
+};
+[% END -%]
 [% ELSE -%]
 # The hypervisor allocates the address, and there was none when the makefile
 # was written.

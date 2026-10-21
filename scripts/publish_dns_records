@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use JSON::PP     ();
 use Getopt::Long qw{GetOptionsFromArray};
 
-my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--nameserver NAME] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
+my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--nameserver NAME] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
 
 # The shortcut Provisioner::Recipe::lexicon installs for this domain, which
 # already carries the provider holding the zone and the credential for it.
@@ -137,6 +137,14 @@ sub records {
     );
 }
 
+# Names of another zone, each as an alias of a target outside it, by type and
+# name.  No address, because the target holds that in its own zone.
+sub aliases_of {
+    my ( $target, @names ) = @_;
+    die $USAGE unless $target && @names;
+    return ( CNAME => { map { $_ => $target } @names } );
+}
+
 # The delegation of a zone, by type and name, for the zone above it: the
 # nameserver that holds it, and the address of the nameserver where it is
 # inside the zone, because a resolver cannot find it otherwise.  The nameserver
@@ -152,33 +160,54 @@ sub delegation {
     );
 }
 
+# The record of the other type that a name holds, where publishing $type there
+# would put a CNAME beside another record.  Only A and CNAME are asked about,
+# because those are the two types that this writes at a name it does not own.
+sub clash {
+    my ( $held, $type, $name ) = @_;
+    my %other = ( A => 'CNAME', CNAME => 'A' );
+    my $other = $other{$type}                      // return;
+    my $row   = held_for( $held->($other), $name ) // return;
+    return { type => $other, content => $row->{content} // q{} };
+}
+
 sub main {
     my @args = @_;
 
-    my ( $dryrun, $shortcut, $delegate, $nameserver );
-    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'nameserver=s' => \$nameserver ) or die $USAGE;
-    die $USAGE if $delegate && ( !$shortcut || $nameserver );
+    my ( $dryrun, $shortcut, $delegate, $nameserver, $alias_of );
+    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'nameserver=s' => \$nameserver, 'alias-of=s' => \$alias_of ) or die $USAGE;
+    die $USAGE if ( $delegate || defined $alias_of ) && ( !$shortcut || $nameserver );
+    die $USAGE if $delegate                          && defined $alias_of;
 
-    my %wanted = $delegate ? delegation(@args) : records( $nameserver, @args );
+    my %wanted = $delegate ? delegation(@args) : defined $alias_of ? aliases_of( $alias_of, @args ) : records( $nameserver, @args );
     $shortcut //= shortcut_for( $args[0] );
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether the shortcut is there to run is the thing being decided, and saying so beats a shell error
     die "No lexicon shortcut at $shortcut.\n" . "Provisioner::Recipe::lexicon installs it, and this needs the credential in it.\n"
       unless -x $shortcut;
 
+    # Once per type rather than once per record.  Every list is a round trip
+    # to whoever holds the zone, and asking again between two aliases would
+    # decide about them against two different answers.
+    my %held;
+    my $held = sub {
+        my ($type) = @_;
+        return $held{$type} //= [ existing( $shortcut, $type ) ];
+    };
+
     my $failures = 0;
     foreach my $type ( sort keys %wanted ) {
         next unless %{ $wanted{$type} };
 
-        # Once per type rather than once per record.  Every list is a round trip
-        # to whoever holds the zone, and asking again between two aliases would
-        # decide about them against two different answers.
-        my @held = existing( $shortcut, $type );
-
         foreach my $name ( sort keys %{ $wanted{$type} } ) {
+            if ( my $clash = clash( $held, $type, $name ) ) {
+                warn "Refusing to publish $type $name: the provider holds $name as $clash->{type} $clash->{content}, and a name with a CNAME holds no other record.\n";
+                $failures++;
+                next;
+            }
             $failures += publish(
                 shortcut => $shortcut,
-                held     => held_for( \@held, $name ),
+                held     => held_for( $held->($type), $name ),
                 type     => $type,
                 name     => $name,
                 content  => $wanted{$type}{$name},

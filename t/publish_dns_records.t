@@ -78,13 +78,15 @@ sub against {
 }
 
 # A provider holding exactly these rows, and accepting whatever is sent to it.
+# A list names a type, and gets the rows of that type.
 sub holding {
     my (@rows) = @_;
 
     return sub {
         my ($command) = @_;
-        return ( as_json(@rows), 1 ) if index( $command, ' list ' ) >= 0;
-        return ( q{},            1 );
+        my ($type)    = $command =~ m/[ ]list[ ](\S+)[ ]/;
+        return ( as_json( grep { $_->{type} eq $type } @rows ), 1 ) if defined $type;
+        return ( q{},                                           1 );
     };
 }
 
@@ -126,11 +128,10 @@ subtest 'a record the provider does not hold is created' => sub {
 
             is( scalar sent( $ran, 'delete' ), 0, 'nothing is deleted, the zone being somebody else to keep' );
 
-            # A type with nothing wanted of it is not asked about at all: a
-            # domain with no aliases has no CNAME to publish, and the list that
-            # would have found that out is a round trip for an empty answer.
+            # The CNAMEs are asked about with no alias to publish, because a
+            # CNAME at the domain would leave no room for its A record.
             my @lists = grep { index( $_, ' list ' ) >= 0 } @{$ran};
-            is( scalar @lists, 1, 'and with no aliases the provider is asked for A alone' );
+            is( scalar @lists, 2, 'and the provider is asked once for A and once for CNAME' );
         }
     );
 };
@@ -329,6 +330,49 @@ subtest 'a delegation goes to the zone above, through the shortcut it is given' 
     like( exception { Trog::PublishDNSRecords::main( '--delegate', $zone, $ns ) },                                qr/usage/, 'a delegation names its shortcut, because the zone above is not the zone of a domain here' );
     like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, $zone ) },            qr/usage/, 'and its nameserver' );
     like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, $zone, $ns, 1, 2 ) }, qr/usage/, 'and one address at most' );
+};
+
+subtest 'names of another zone become CNAMEs of a target outside it, and nothing else' => sub {
+    against(
+        holding(),
+        sub {
+            my ($ran) = @_;
+
+            my $rc;
+            capture { $rc = Trog::PublishDNSRecords::main( '--shortcut', $shortcut, '--alias-of', $DOMAIN, 'www.partner.test', 'shop.partner.test' ) };
+            is( $rc, 0, 'the run succeeds' );
+
+            my @creates = sent( $ran, 'create' );
+            is( scalar @creates, 2, 'one record per name' );
+            my $cname = qr/[ ]create[ ]CNAME[ ]/;
+            like( $creates[0], qr/$cname--name='shop[.]partner[.]test'[ ]/, 'each a CNAME' );
+            like( $creates[0], qr/--content='\Q$DOMAIN\E'/,                 'of the target' );
+            is( scalar grep( { index( $_, ' create A ' ) >= 0 } @creates ), 0, 'and no A record, because the target holds its address in its own zone' );
+        }
+    );
+
+    like( exception { Trog::PublishDNSRecords::main( '--alias-of', $DOMAIN, 'www.partner.test' ) },                           qr/usage/, 'the names are of another zone, so they need its shortcut' );
+    like( exception { Trog::PublishDNSRecords::main( '--shortcut', $shortcut, '--alias-of', $DOMAIN ) },                      qr/usage/, 'and at least one name' );
+    like( exception { Trog::PublishDNSRecords::main( '--shortcut', $shortcut, '--alias-of', $DOMAIN, qw{--delegate z ns} ) }, qr/usage/, 'and not a delegation as well' );
+};
+
+subtest 'a name that holds a CNAME gets no other record, and one that holds an A record gets no CNAME' => sub {
+    against(
+        holding( { name => $DOMAIN, type => 'CNAME', content => 'elsewhere.test', id => 'c' }, { name => "www.$DOMAIN", type => 'A', content => '10.0.0.9', id => 'a' } ),
+        sub {
+            my ($ran) = @_;
+
+            my ( $rc, $said );
+            ( undef, $said ) = capture { $rc = Trog::PublishDNSRecords::main( $DOMAIN, $ADDRESS, "www.$DOMAIN", "mail.$DOMAIN" ) };
+            is( $rc, 1, 'the run fails, so the build stops' );
+            my $refused = qr/Refusing[ ]to[ ]publish[ ]/;
+            like( $said, qr/${refused}A[ ]\Q$DOMAIN\E:[ ].*CNAME[ ]elsewhere/,   'an A record beside a CNAME is refused, naming the CNAME' );
+            like( $said, qr/${refused}CNAME[ ]www[.]\Q$DOMAIN\E:[ ].*A[ ]10[.]/, 'and a CNAME beside an A record, naming the A record' );
+
+            is( scalar grep( { index( $_, $ADDRESS ) >= 0 || index( $_, "--name='www." ) >= 0 } sent( $ran, 'create' ), sent( $ran, 'update' ) ), 0, 'neither is sent' );
+            ok( ( grep { index( $_, "--name='mail.$DOMAIN'" ) >= 0 } sent( $ran, 'create' ) ), 'and a name with no clash is still published' );
+        }
+    );
 };
 
 subtest 'without the shortcut there is no credential, and it says so' => sub {

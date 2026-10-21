@@ -26,6 +26,19 @@ export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
 export LEXICON_[% lexicon.type.upper() %]_[% lv.key %]="[% lv.value %]"
 [% END -%]
 [% END -%]
+[%# The shortcut of the zone of a registrar account that holds a name, or nothing
+    for a name that the lexicon above answers for.  The zone of the domain
+    first, and then the longer zones first, as zone_of in
+    Provisioner::Recipe::registrar decides. -%]
+function shortcut_of {
+    case "${1}" in
+        [% domain %]|*.[% domain %]) ;;
+[% FOREACH zone IN challenge_zones -%]
+        [% zone %]|*.[% zone %]) echo /opt/lexicon/zones/[% zone %] ;;
+[% END -%]
+    esac
+}
+
 function deploy_challenge {
     local chain=($@)
     for ((i=0; i < $#; i+=3)); do
@@ -33,8 +46,14 @@ function deploy_challenge {
 
         echo "deploy_challenge called: ${DOMAIN}, ${TOKEN_FILENAME}, ${TOKEN_VALUE}"
 
-        lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %]$PROVIDER create [% lexicon.zone || '${DOMAIN}' %] TXT --name="_acme-challenge.${DOMAIN}." \
-        --content="${TOKEN_VALUE}"
+        local shortcut
+        shortcut="$(shortcut_of "${DOMAIN}")"
+        if [ -n "${shortcut}" ]; then
+            "${shortcut}" create TXT --name="_acme-challenge.${DOMAIN}." --content="${TOKEN_VALUE}"
+        else
+            lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %]$PROVIDER create [% lexicon.zone || '${DOMAIN}' %] TXT --name="_acme-challenge.${DOMAIN}." \
+            --content="${TOKEN_VALUE}"
+        fi
     done
 
     local DELAY_COUNTDOWN=$PROVIDER_UPDATE_DELAY
@@ -66,8 +85,14 @@ function clean_challenge {
 
         echo "clean_challenge called: ${DOMAIN}, ${TOKEN_FILENAME}, ${TOKEN_VALUE}"
 
-        lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %]$PROVIDER delete [% lexicon.zone || '${DOMAIN}' %] TXT --name="_acme-challenge.${DOMAIN}." \
-        --content="${TOKEN_VALUE}"
+        local shortcut
+        shortcut="$(shortcut_of "${DOMAIN}")"
+        if [ -n "${shortcut}" ]; then
+            "${shortcut}" delete TXT --name="_acme-challenge.${DOMAIN}." --content="${TOKEN_VALUE}"
+        else
+            lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %]$PROVIDER delete [% lexicon.zone || '${DOMAIN}' %] TXT --name="_acme-challenge.${DOMAIN}." \
+            --content="${TOKEN_VALUE}"
+        fi
     done
 
     # dehydrated calls this hook after it tries to validate each domain

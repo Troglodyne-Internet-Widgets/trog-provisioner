@@ -418,6 +418,58 @@ subtest 'the address of the A record' => sub {
     ok( exception { publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, address => "gateway.$PUBLIC" ) }, 'an address that is not IPv4 is refused' );
 };
 
+my %ACCOUNTS = (
+    customer => { type => 'route53', user => 'zone-user',  key   => 'zone-key', zones => ['customer.test'] },
+    deep     => { type => 'easydns', key  => 'deep-key',   zones => ['deep.customer.test'] },
+    unused   => { type => 'easydns', key  => 'unused-key', zones => ['unused.test'] },
+);
+
+subtest 'each zone that an account lists gets the credentials of that account' => sub {
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my %zones     = $registrar->account_zones( accounts => \%ACCOUNTS );
+
+    is_deeply( [ sort keys %zones ],    [qw{customer.test deep.customer.test unused.test}],            'every zone of every account' );
+    is_deeply( $zones{'customer.test'}, { type => 'route53', user => 'zone-user', key => 'zone-key' }, 'with the type, user and key of its account' );
+
+    my $twice = exception { $registrar->account_zones( accounts => { %ACCOUNTS, again => { type => 'easydns', zones => ['customer.test'] } } ) };
+    like( $twice, qr/accounts[ ]again[ ]and[ ]customer[ ]/, 'a zone that two accounts list is refused, by both names' );
+    like( $twice, qr/the[ ]zone[ ]customer[.]test/,         'and the name of the zone' );
+};
+
+subtest 'the zone of a name, among the zones of the registrar' => sub {
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my %zones     = $registrar->account_zones( accounts => { %ACCOUNTS, ours => { type => 'easydns', zones => ['example.net'] } } );
+    my %of        = (
+        'customer.test'        => 'customer.test',
+        'shop.CUSTOMER.test'   => 'customer.test',
+        'a.deep.customer.test' => 'deep.customer.test',
+        'xcustomer.test'       => undef,
+        'other.example.net'    => 'example.net',
+        "www.$PUBLIC"          => undef,
+        $PUBLIC                => undef,
+    );
+    is( $registrar->zone_of( $_, $PUBLIC, \%zones ), $of{$_}, "$_: " . ( $of{$_} // 'none' ) ) foreach sort keys %of;
+};
+
+subtest 'a name in a zone of an account is published there, and not as an alias of the domain' => sub {
+    my $hostnames = [ "www.$PUBLIC", qw{shop.customer.test customer.test a.deep.customer.test xcustomer.test} ];
+    my ( $opts, $fragment ) = publishing( 'registrar', { registrar => { type => 'easydns', accounts => \%ACCOUNTS } }, %ON_PUBLIC, hostnames => $hostnames );
+
+    is_deeply( $opts->{zone_cnames},                    { 'customer.test' => ['shop.customer.test'], 'deep.customer.test' => ['a.deep.customer.test'] }, 'each name goes to the longest zone that holds it' );
+    is_deeply( $opts->{zone_apexes},                    ['customer.test'],                                                                               'and an apex is kept apart' );
+    is_deeply( $opts->{domain_aliases},                 [ "alt.$PUBLIC", "www.$PUBLIC", 'xcustomer.test' ],                                              'and the zone of the domain keeps the other names' );
+    is_deeply( [ sort keys %{ $opts->{zone_access} } ], [qw{customer.test deep.customer.test}],                                                          'the guest gets the credentials of the zones that it uses, and of no other' );
+    is( $opts->{zone_access}{'customer.test'}{key}, 'zone-key', 'each with the credential of its own zone' );
+
+    my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]--shortcut[ ]/;
+    my $zone   = sub ($name) { return qr{${queued}/opt/lexicon/zones/\Q$name\E[ ]} };
+    like( $fragment, qr{${\ $zone->('customer.test')}customer[.]test[ ]192[.]0[.]2[.]50$}m,                         'the apex of a zone gets an A record through the shortcut of its zone' );
+    like( $fragment, qr{${\ $zone->('customer.test')}--alias-of[ ]\Q$PUBLIC\E[ ]shop[.]customer[.]test$}m,          'and its other names a CNAME of the domain' );
+    like( $fragment, qr{${\ $zone->('deep.customer.test')}--alias-of[ ]\Q$PUBLIC\E[ ]a[.]deep[.]customer[.]test$}m, 'and so does a name of the deeper zone' );
+    unlike( $fragment, qr{(?:${\ $zone->('deep.customer.test')})[^-]}m, 'which gets no A record, its apex not being served' );
+    like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E[ ]xcustomer[.]test$/m, 'and the domain publishes the rest as its aliases' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

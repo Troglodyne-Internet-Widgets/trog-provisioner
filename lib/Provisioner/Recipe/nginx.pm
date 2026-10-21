@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Provisioner::Cookbook();
 use Provisioner::IPPool();
 
 use parent qw{Provisioner::Recipe};
@@ -92,8 +93,10 @@ off.
 
 A public name inside the zone of the domain joins the names that this recipe
 serves.  So the registrar publishes it, and letsencrypt puts it on the
-certificate, as for any other served name.  A public name outside that zone
-gets neither, because no DNS-01 challenge can answer for it.  Then
+certificate, as for any other served name.  So does a public name in a zone
+that an account of L<Provisioner::Recipe::registrar> lists, which publishes it
+in that zone.  Any other public name gets neither, because no DNS-01 challenge can
+answer for it.  Then
 C<public.VHOST> joins the served names in its place, and its vhost answers for
 it.  It is published, certified and proxied, so the path through the proxy
 works before the owner of the outside name changes anything.
@@ -166,7 +169,7 @@ sub args {
                 additionalProperties => { type   => 'string', format => 'hostname' },
                 default              => {},
                 description          =>
-                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain is also published and certified.  For a name outside it, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
+                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
             proxy_from => {
@@ -207,16 +210,21 @@ my sub in_zone ( $name, $domain ) {
     return $name =~ m/(?:\A|[.])\Q$domain\E\z/i;
 }
 
+# Whether a DNS-01 challenge can answer for $name: it is in the zone of the
+# domain, or in a zone that an account of the registrar lists.
+my sub certifiable ( $name, $domain ) {
+    return in_zone( $name, $domain ) || defined Provisioner::Cookbook->load('registrar')->zone_of( $name, $domain );
+}
+
 # Each vhost that a public name names, mapped to every name that it answers
-# for on the ports of the proxy: the public names inside the zone of the
-# domain, then public.VHOST when a public name is outside it, then those
-# outside.
+# for on the ports of the proxy: the public names that it can certify, then
+# public.VHOST when a public name is not one, then the others.
 my sub proxied_names (%opts) {
     my %by_vhost = public_names_by_vhost(%opts);
     my %names;
     foreach my $vhost ( keys %by_vhost ) {
-        my @inside  = grep { in_zone( $_,  $opts{domain} ) } @{ $by_vhost{$vhost} };
-        my @outside = grep { !in_zone( $_, $opts{domain} ) } @{ $by_vhost{$vhost} };
+        my @inside  = grep { certifiable( $_,  $opts{domain} ) } @{ $by_vhost{$vhost} };
+        my @outside = grep { !certifiable( $_, $opts{domain} ) } @{ $by_vhost{$vhost} };
         $names{$vhost} = [ @inside, ( @outside ? "public.$vhost" : () ), @outside ];
     }
     return %names;
@@ -224,9 +232,9 @@ my sub proxied_names (%opts) {
 
 =head2 @names = $recipe->served_names(%opts)
 
-The names of the base class, then each public name in the zone of the domain,
-then C<public.VHOST> for each vhost that answers for a public name outside
-that zone.  See L</Names that reach the guest through a proxy>.
+The names of the base class, then each public name in the zone of the domain
+or in a zone that an account of the registrar lists, then C<public.VHOST> for
+each vhost that answers for a public name in neither.  See L</Names that reach the guest through a proxy>.
 
 =cut
 
@@ -237,7 +245,7 @@ sub served_names {
     return (
         $self->SUPER::served_names(%opts),
         map {
-            grep { in_zone( $_, $opts{domain} ) }
+            grep { certifiable( $_, $opts{domain} ) }
               @{ $proxied{$_} }
         } sort keys %proxied
     );

@@ -56,10 +56,14 @@ File::Slurper::Temp::write_text(
     "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
     YAML::XS::Dump(
         {
-            _base        => { _global    => \%GLOBAL },
-            'web.test'   => { nginxproxy => undef, nginx => { public_names => { 'shop.web.test' => 'web.test', 'www.customer.test' => 'web.test' } } },
-            'post.test'  => { mail       => undef },
-            'plain.test' => { ntp        => undef },
+            _base      => { _global => \%GLOBAL },
+            'web.test' => {
+                nginxproxy => undef,
+                nginx      => { public_names => { 'shop.web.test' => 'web.test', 'www.customer.test' => 'web.test', 'shop.partner.test' => 'web.test' } },
+                registrar  => { accounts     => { partner         => { type => 'route53', zones => ['partner.test'] } } },
+            },
+            'post.test'  => { mail => undef },
+            'plain.test' => { ntp  => undef },
         }
     )
 );
@@ -103,6 +107,7 @@ subtest 'the zone carries the names that domain serves' => sub {
     like( $zone, qr/^www[.]web[.]test\.\s+IN\s+CNAME\s+\@/m,    'www, because nginxproxy serves it' )                                   or diag $zone;
     like( $zone, qr/^shop[.]web[.]test\.\s+IN\s+CNAME\s+\@/m,   'a public name of nginx in the zone, from the configuration of nginx' ) or diag $zone;
     like( $zone, qr/^public[.]web[.]test\.\s+IN\s+CNAME\s+\@/m, 'and public.VHOST, for its public name outside the zone' )              or diag $zone;
+    unlike( $zone, qr/partner/, 'and not a public name in a zone of the registrar, which is published in that zone' ) or diag $zone;
 
     # And absolute, which is the other thing this template gets wrong when
     # nobody is looking: $ORIGIN is the domain, so a relative name has it put
