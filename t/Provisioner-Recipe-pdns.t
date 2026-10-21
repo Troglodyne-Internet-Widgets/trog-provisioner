@@ -17,6 +17,7 @@ use Test::More;
 use Test::NoWarnings;
 use Test::Fatal();
 use Test::MockModule();
+use IPC::Run3();
 use File::Temp qw{tempdir};
 
 use FindBin::libs;
@@ -229,6 +230,43 @@ subtest 'an alias in a zone of the registrar is published there, and not in this
     my $zone = zone( aliases => { $DOMAIN => [ "www.$DOMAIN", 'old.partner.test' ] } );
     like( $zone, qr/^\Qwww.$DOMAIN\E\.\s+IN\s+CNAME\s+\@/m, 'an alias of the zone stays' ) or diag $zone;
     unlike( $zone, qr/partner/, 'and the alias of the other zone is not written here' )    or diag $zone;
+};
+
+subtest 'a zone that an account names this guest the authority of is built here, with its SOA and NS records' => sub {
+    my $mock     = Test::MockModule->new('Provisioner::Cookbook');
+    my $accounts = {
+        ours   => { authority => "\U$DOMAIN.",        zones => [qw{Customer.test other.test}] },
+        theirs => { authority => 'ns.elsewhere.test', zones => ['not-ours.test'] },
+        hosted => { type      => 'easydns',           zones => ['hosted.test'] },
+    };
+    $mock->redefine( domain_config => sub { return { registrar => { accounts => $accounts } } } );
+
+    my $recipe = sub {
+        return Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new(
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => tempdir( CLEANUP => 1 ),
+            distro        => 'ubuntu',
+        );
+    };
+    my %opts = ( %VARS, nameservers => { ns2 => 'ns2.zone.test' }, api_key => 'a-key' );
+
+    is_deeply( { $recipe->()->validate(%opts) }->{held_zones}, [qw{customer.test other.test}], 'the zones of the accounts that name it, and of no other' );
+
+    my $script = $recipe->()->render_file( 'files/pdns.held_zones.tt', %opts );
+    like( $script, qr{^\$ORIGIN[ ]customer[.]test[.]$}m,             'each zone gets a zone file' );
+    like( $script, qr{^\@\s+IN\s+SOA\s+ns1[.]\Q$DOMAIN\E[.][ ]}m,    'whose SOA names this guest' );
+    like( $script, qr{^\@[ ]300[ ]IN[ ]NS[ ]ns1[.]\Q$DOMAIN\E[.]$}m, 'and so does an NS record' );
+    like( $script, qr{^\@[ ]300[ ]IN[ ]NS[ ]ns2[.]zone[.]test[.]$}m, 'beside the other nameservers of the installation' );
+    my $asks = qr{sqlite3[ ]\S+zones[.]db[ ]"SELECT[ ].*};
+    $asks = qr{${asks}name='customer[.]test'"};
+    like( $script, qr{^$asks[ ][|][ ]grep[ ]-q[ ][.][ ][|][|][ ]}m,           'loaded only where the database does not hold it yet' );
+
+    my $err;
+    IPC::Run3::run3( [ qw{bash -n -c}, $script ], \undef, \undef, \$err );
+    is( $? >> 8, 0, 'and bash reads the script' ) or diag $err;
+
+    $mock->redefine( host_of => sub { return $DOMAIN } );
+    is_deeply( { $recipe->()->validate( %opts, domain => "web.$DOMAIN", ipmap => { "web.$DOMAIN" => '192.0.2.50' } ) }->{held_zones}, [], 'and a domain layered onto this guest builds none of them again' );
 };
 
 Test::NoWarnings::had_no_warnings();

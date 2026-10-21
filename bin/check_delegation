@@ -1,0 +1,170 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::check_delegation;
+
+#ABSTRACT: Say whether a zone is delegated to the nameservers that hold it here.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use List::Util   qw{any uniq};
+use Net::DNS();
+use Pod::Usage qw{pod2usage};
+
+use Provisioner::Cookbook();
+use Provisioner::Utils();
+use Trog::Config();
+
+=head1 USAGE
+
+    check_delegation [--recipes=file] [--resolver ADDRESS] ZONE
+
+Says whether the owner of ZONE delegated it to the nameservers that hold it in
+this installation.  It exits 0 when the delegation is in place, and 1 when it
+is not, after it prints what it expected and what it found.
+
+ZONE is in the C<zones> of an account of the registrar in C<_base> that names
+an C<authority>.  See L<Provisioner::Recipe::registrar/Zones that a pdns guest
+holds>, and F<docs/PUBLIC_NAMES.md> for the whole procedure.
+
+=head2 What it asks
+
+The expected nameservers are C<ns1> of the authority, and each of the
+C<nameservers> of C<_global>, as the authority writes them into the zone.
+
+It asks a public resolver for the C<NS> records of ZONE, because a resolver
+here can answer from the zone that the authority holds, delegated or not.  The
+records it finds must be exactly the expected ones.  A nameserver more is one
+that the CA can ask for a challenge, and that knows nothing of it.
+
+Then it asks each expected nameserver for the C<SOA> of ZONE, without
+recursion.  Each must answer with authority.  That is the authority holding
+the zone, and its port 53 reachable at the address that its name has.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--resolver> ADDRESS
+
+The public resolver to ask.  The default is C<1.1.1.1>.
+
+=item B<--recipes> FILE
+
+The F<recipes.yaml> to read.  The default is the one of the installation.
+
+=back
+
+=cut
+
+our $DEFAULT_RESOLVER = '1.1.1.1';
+
+sub main {
+    my @args = @_;
+
+    my $rfile    = Trog::Config->path('recipes.yaml');
+    my $resolver = $DEFAULT_RESOLVER;
+    my $help;
+    GetOptionsFromArray(
+        \@args,
+        'recipes=s'  => \$rfile,
+        'resolver=s' => \$resolver,
+        'help'       => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Name one zone' ) unless @args == 1;
+
+    my $zone = Provisioner::Utils::dns_name( $args[0] );
+    my $conf = Provisioner::Cookbook->configuration($rfile);
+    my @want = expected( $zone, $conf );
+
+    my $public = Net::DNS::Resolver->new( nameservers => [$resolver], recurse => 1 );
+    my @found  = ns_of( $public, $zone );
+
+    my @report = ( "The nameservers of $zone that this installation expects:", map( { "    $_" } @want ), "What $resolver says:", @found ? map( { "    $_" } @found ) : '    no NS records' );
+
+    my $failed = 0;
+    unless ( join( q{ }, @found ) eq join( q{ }, @want ) ) {
+        push( @report, "So $zone is not delegated to exactly these nameservers.  Set them as its NS records at the registrar of $zone." );
+        $failed = 1;
+    }
+
+    foreach my $ns (@want) {
+        my $said = answers_for( $public, $ns, $zone );
+        push( @report, $said ? "$ns: $said" : "$ns answers for $zone with authority." );
+        $failed = 1 if $said;
+    }
+
+    push( @report, "$zone is delegated here." ) unless $failed;
+    print join( "\n", @report ) . "\n";
+    return $failed;
+}
+
+=head1 SUBROUTINES
+
+=head2 @nameservers = expected($zone, $conf)
+
+The nameservers that ZONE is delegated to, sorted, in lower case: C<ns1> of
+the authority of the account that lists it, and the C<nameservers> of
+C<_global>.  Dies when no account of C<_base> with an C<authority> lists it.
+
+=cut
+
+sub expected {
+    my ( $zone, $conf ) = @_;
+
+    my %zones     = Provisioner::Cookbook->load('registrar')->account_zones( %{ $conf->{_base}{registrar} // {} } );
+    my $authority = ( $zones{$zone} // {} )->{authority} // die "No account of the registrar in _base names an authority for $zone, so no guest of this installation holds it.\n";
+
+    my $global   = Provisioner::Cookbook->global_config( undef, $conf );
+    my @expected = sort( uniq( map { Provisioner::Utils::dns_name($_) } 'ns1.' . Provisioner::Utils::dns_name($authority), values %{ $global->{nameservers} // {} } ) );
+    return @expected;
+}
+
+=head2 @nameservers = ns_of($resolver, $zone)
+
+The C<NS> records of C<$zone> that C<$resolver> answers with, sorted, in lower
+case, and none where it has none.
+
+=cut
+
+sub ns_of {
+    my ( $resolver, $zone ) = @_;
+
+    my $reply = $resolver->send( $zone, 'NS' ) // return;
+    my @found = sort( uniq( map { Provisioner::Utils::dns_name( $_->nsdname ) } grep { $_->type eq 'NS' } $reply->answer ) );
+    return @found;
+}
+
+=head2 $why = answers_for($resolver, $ns, $zone)
+
+Asks the nameserver C<$ns>, at the address that C<$resolver> gives its name,
+for the C<SOA> of C<$zone>, without recursion.  Returns undef when it answers
+with authority, and otherwise what went wrong.
+
+=cut
+
+sub answers_for {
+    my ( $resolver, $ns, $zone ) = @_;
+
+    my $reply = $resolver->send( $ns, 'A' );
+    my ($address) = map { $_->address } grep { $_->type eq 'A' } ( $reply ? $reply->answer : () );
+    return "$ns has no address, so nobody can ask it" unless defined $address;
+
+    my $asked = Net::DNS::Resolver->new( nameservers => [$address], recurse => 0 );
+    $reply = $asked->send( $zone, 'SOA' );
+    return "$ns at $address did not answer: " . ( $asked->errorstring || 'no reply' )          unless $reply;
+    return "$ns at $address answered " . $reply->header->rcode . ", not with the SOA of $zone" unless any { $_->type eq 'SOA' } $reply->answer;
+    return "$ns at $address answered, but without authority, so it does not hold $zone"        unless $reply->header->aa;
+    return;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

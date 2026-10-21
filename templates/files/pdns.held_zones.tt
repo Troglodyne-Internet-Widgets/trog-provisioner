@@ -1,0 +1,24 @@
+#!/bin/bash
+[%# Each zone that an account of the registrar names this guest the authority
+    of, built as the zone of the domain is: a zone file, loaded only into a
+    database that does not hold the zone yet.  pdns_client forwards then has
+    the recursor forward it, as every zone in the database.  It starts with its SOA and NS records.  The
+    guests that serve names in it write the rest, through tokens of their own.
+    See "Zones that a pdns guest holds" in Provisioner::Recipe::registrar.  A
+    script and not lines of the fragment, because a zone file is several lines,
+    and make runs each line in a shell of its own. -%]
+set -e
+[% FOREACH zone IN held_zones -%]
+mkdir -p /var/spool/powerdns/[% zone %]
+cat > /var/spool/powerdns/[% zone %]/bind.zone <<'ZONE'
+$ORIGIN [% zone %].
+$TTL    300
+@       IN      SOA     [% held_nameserver %]. [% admin_email | email_for_dns %]. ( [% serial %] 300 300 1209600 10800 )
+@ 300 IN NS [% held_nameserver %].
+[% FOREACH ns IN nameservers.values().sort() -%]
+@ 300 IN NS [% ns %].
+[% END -%]
+ZONE
+zone2sql --gsqlite --zone=/var/spool/powerdns/[% zone %]/bind.zone --zone-name=[% zone %] > /var/spool/powerdns/[% zone %]/zone.sql
+sqlite3 /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% zone %]'" | grep -q . || sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% zone %]/zone.sql
+[% END -%]

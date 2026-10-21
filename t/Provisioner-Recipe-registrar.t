@@ -470,6 +470,38 @@ subtest 'a name in a zone of an account is published there, and not as an alias 
     like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E[ ]xcustomer[.]test$/m, 'and the domain publishes the rest as its aliases' );
 };
 
+subtest 'a zone of an account with an authority is written through that pdns guest, and only for the names that the guest serves' => sub {
+    my %accounts = (
+        ours   => { authority => 'NS.example.net', zones => ['Customer.test'] },
+        hosted => { type      => 'easydns',        zones => ['other.test'] },
+    );
+    my $configured = { registrar => { type => 'easydns', accounts => \%accounts } };
+    my $hostnames  = [ "www.$PUBLIC", qw{customer.test shop.customer.test x.other.test} ];
+    my ($opts)     = publishing( 'registrar', $configured, %ON_PUBLIC, hostnames => $hostnames );
+
+    my $access = $opts->{zone_access}{'customer.test'};
+    is( $access->{type},     'powerdns',                         'the zone of the authority is written as pdns' );
+    is( $access->{key_file}, '/etc/lexicon/customer.test.token', 'with the token of the zone in a file' );
+    is_deeply( $access->{extra}, [ { key => 'PDNS_SERVER', value => 'https://dnsapi.ns.example.net' } ], 'through the API proxy of the authority' );
+    is( $opts->{zone_access}{'other.test'}{type}, 'easydns', 'and a zone of a registrar keeps its registrar' );
+    is_deeply( $opts->{zone_apexes}, ['customer.test'], 'an apex of the zone of the authority is published as any apex is' );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { return $configured } );
+    $cookbook->redefine( host_of       => sub { return } );
+    my %secrets = fresh('registrar')->guest_secrets( '/bogus', $PUBLIC, %ON_PUBLIC, hostnames => $hostnames );
+    is_deeply( [ keys %secrets ], ['/etc/lexicon/customer.test.token'], 'the guest gets a token for the zone of the authority, and for no other' );
+    is( $secrets{'/etc/lexicon/customer.test.token'}{issue}{guest}, 'ns.example.net', 'from the authority, which issues it' );
+    like(
+        $secrets{'/etc/lexicon/customer.test.token'}{issue}{command},
+        qr{[ ]\Q$PUBLIC\E[ ]customer[.]test[ ]shop[.]customer[.]test\z},
+        'which grants the names of this guest in the zone, and no others'
+    );
+
+    my %none = fresh('registrar')->guest_secrets( '/bogus', $PUBLIC, %ON_PUBLIC, hostnames => ["www.$PUBLIC"] );
+    is_deeply( \%none, {}, 'and a guest with no name in the zone gets no token for it' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
