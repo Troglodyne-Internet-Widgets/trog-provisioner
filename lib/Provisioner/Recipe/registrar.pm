@@ -125,10 +125,12 @@ holds:
 
 A served name in one of these zones, such as a public name of
 L<Provisioner::Recipe::nginx>, is published and certified like a name of the
-domain.  The guest publishes an C<A> record of the name in its zone, at the
-address of the domain, and the hook of L<Provisioner::Recipe::letsencrypt>
-writes its challenge there.  It is an C<A> record and not a C<CNAME>, because
-the name can be the apex of its zone.  The guest gets a lexicon shortcut,
+domain.  The guest publishes it in its zone as a C<CNAME> of the domain, as it
+publishes the aliases of the domain.  The apex of the zone is the exception,
+because the apex holds the C<SOA> and C<NS> records, and a C<CNAME> cannot
+stand beside them.  The apex gets an C<A> record at the address of the domain.  The
+hook of L<Provisioner::Recipe::letsencrypt> writes the challenge of each such
+name in its zone too.  The guest gets a lexicon shortcut,
 F</opt/lexicon/zones/ZONE>, only for each zone that one of its names is in.  So
 a guest holds no credential of a zone that it does not use.
 
@@ -556,13 +558,16 @@ sub guest_secrets {
 =head2 %publication = $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
-C<address>, C<domain_aliases>, C<own_nameserver>, C<zone_names>, C<zone_access>,
-and C<publish_records>, which is true when there is an address to publish.
+C<address>, C<domain_aliases>, C<own_nameserver>, C<zone_cnames>,
+C<zone_apexes>, C<zone_access>, and C<publish_records>, which is true when
+there is an address to publish.
 
-C<zone_names> maps each zone of an account that a served name is in to those
-names, and C<zone_access> maps the same zones to the credentials of their
-account, as C<configured_credentials> returns them.  Each of those names gets
-an C<A> record at C<address> in its zone.  See L</Accounts, and the zones that
+These three are for the served names in a zone of an account.  C<zone_cnames>
+maps each such zone to its names other than its apex, and each gets a C<CNAME>
+of the domain in that zone.  C<zone_apexes> lists each such zone whose apex is a
+served name, and the apex gets an C<A> record at C<address>.  C<zone_access>
+maps every such zone to the credentials of its account, as
+C<configured_credentials> returns them.  See L</Accounts, and the zones that
 they hold>.  C<$opts{own_zone}> is true where
 the domain holds its own zone.
 
@@ -596,17 +601,19 @@ sub publication {
     my $address = $opts{address} // $opts{main_ip};
     my $zones   = { $self->account_zones(%opts) };
 
-    my %zone_names;
+    my ( %zone_cnames, %zone_apexes );
     foreach my $name ( $self->domain_aliases(%opts) ) {
         my $zone = $self->zone_of( $name, $opts{domain}, $zones ) // next;
-        push( @{ $zone_names{$zone} }, $name );
+        if ( lc $name eq lc $zone ) { $zone_apexes{$zone} = 1 }
+        else                        { push( @{ $zone_cnames{$zone} }, $name ) }
     }
-    my %zone_access = map { $_ => { $self->configured_credentials( %{ $zones->{$_} }, domain => $_ ) } } keys %zone_names;
+    my %zone_access = map { $_ => { $self->configured_credentials( %{ $zones->{$_} }, domain => $_ ) } } keys %zone_cnames, keys %zone_apexes;
 
     return (
         address         => $address,
         domain_aliases  => [ $self->zone_aliases( %opts, zones => $zones ) ],
-        zone_names      => \%zone_names,
+        zone_cnames     => \%zone_cnames,
+        zone_apexes     => [ sort keys %zone_apexes ],
         zone_access     => \%zone_access,
         own_nameserver  => $opts{own_zone} ? "ns1.$opts{domain}" : undef,
         publish_records => $address        ? 1                   : 0,
