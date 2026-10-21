@@ -126,17 +126,22 @@ sub lines_of {
 }
 
 # Replaces $file with @lines, through a file beside it, so that the recursor
-# never reads half of it.
+# never reads half of it.  The file is 644, and keeps its owner and group.
 sub write_lines {
     my ( $file, @lines ) = @_;
 
-    my ( $mode, $uid, $gid ) = ( stat $file )[ 2, 4, 5 ];
-    open( my $fh, '>', "$file.new" ) or die "Cannot write $file.new: $!\n";
+    my ( $uid, $gid ) = ( stat $file )[ 4, 5 ];
+
+    # open keeps the mode of a file that exists, such as one a failed run left.
+    unlink "$file.new";
+    my $umask  = umask oct 22;
+    my $opened = open( my $fh, '>', "$file.new" );
+    umask $umask;
+    $opened or die "Cannot write $file.new: $!\n";
     print {$fh} map { "$_\n" } @lines;
-    close $fh                                             or die "Cannot write $file.new: $!\n";
-    chmod( ( $mode // oct 644 ) & oct 7777, "$file.new" ) or die "Cannot set the mode of $file.new: $!\n";
-    chown( $uid, $gid, "$file.new" )                      or die "Cannot set the owner of $file.new: $!\n" if defined $uid;
-    rename( "$file.new", $file )                          or die "Cannot replace $file: $!\n";
+    close $fh                        or die "Cannot write $file.new: $!\n";
+    chown( $uid, $gid, "$file.new" ) or die "Cannot set the owner of $file.new: $!\n" if defined $uid;
+    rename( "$file.new", $file )     or die "Cannot replace $file: $!\n";
     return;
 }
 

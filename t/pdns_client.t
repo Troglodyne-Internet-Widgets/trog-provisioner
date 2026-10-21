@@ -177,6 +177,21 @@ subtest 'forwards forwards each zone in the database, once, and asks the recurso
     like( $err, qr/Could[ ]not[ ]read[ ]the[ ]zones/, 'a database that cannot be read stops it' );
 };
 
+subtest 'the files it writes are 644, whatever the umask and whatever was there' => sub {
+    my $file = "$recursor/forward-zones";
+    write_file( $file,       'own.test=127.0.0.1:2500' );
+    write_file( "$file.new", 'left by a run that failed' );
+    chmod oct 600, $file, "$file.new";
+
+    my $umask = umask oct 77;
+    Trog::PdnsClient::set_forwarded( $NAME, 1 );
+    my $after = umask $umask;
+
+    is( sprintf( '%o', ( stat $file )[2] & oct 7777 ), '644', 'the recursor can read the file, which it does not own' );
+    is( sprintf( '%o', $after ),                       '77',  'and the umask of the process is as it was' );
+    is_deeply( [ lines_in($file) ], [ 'own.test=127.0.0.1:2500', "$NAME=127.0.0.1:2500" ], 'and the file holds what it held and the forward' );
+};
+
 subtest 'run keeps what a command says to itself' => sub {
 
     # bin/provision reads the output of the script over ssh on a pty, which
