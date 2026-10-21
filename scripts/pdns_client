@@ -16,6 +16,7 @@ use List::Util qw{any};
 
     pdns_client issue NAME NAMESERVER
     pdns_client release NAME
+    pdns_client forwards
 
 =head2 DESCRIPTION
 
@@ -25,21 +26,39 @@ C<authority> of its registrar.  See L<Provisioner::Recipe::registrar>.
 C<issue> deletes the zone NAME and the token labeled NAME, if a build before
 this one made them.  Then it makes the zone through the API on its socket, with
 NAMESERVER as its nameserver, and a token that can write NAME and every name
-below it.  It prints the token, and only after all of that worked.  So each
+below it.  It has the recursor of this guest forward NAME to the
+authoritative server, with a negative trust anchor, as it does the zone of the
+domain.  It prints the token, and only after all of that worked.  So each
 build of the other guest starts from an empty zone, and its old token stops
 working.
 
-C<release> deletes the zone and the token.  Either of them can be gone already.
+The recursor needs the forward for a NAME outside the zone of this guest.
+Without it, the recursor asks the internet for NAME, and under a reserved TLD
+the internet has no such name.  The CA of this guest checks a challenge through
+the recursor, so it never finds the challenge of the other guest, and the
+order of the certificate never ends.
+
+C<release> deletes the zone and the token, and the forward.  Any of them can be
+gone already.
+
+C<forwards> writes the forward and the trust anchor of each zone in the
+database.  Each zone keeps one of each, however often it runs.  The build of this guest
+runs it before it starts the recursor, because the database comes back from the
+salvage of the guest before it, and the recursor configuration does not.
 
 It exits 0 when it did that, and 1 when a step failed, after it says which.
 
 =cut
 
-my $USAGE = "usage: pdns_client issue NAME NAMESERVER\n" . "       pdns_client release NAME\n";
+my $USAGE = "usage: pdns_client issue NAME NAMESERVER\n" . "       pdns_client release NAME\n" . "       pdns_client forwards\n";
 
 our $API_SOCKET = '/var/spool/powerdns/api.sock';
 our $API_CONF   = '/etc/powerdns/pdns.d/api.conf';
 our @ACL        = qw{runuser -u pdns -- /opt/perl5/current/bin/perl /opt/perl5/current/bin/pdns-acl};
+our $ZONES_DB   = '/var/spool/powerdns/zones.db';
+our $FORWARDS   = '/etc/powerdns/forward-zones';
+our $ANCHORS    = '/etc/powerdns/recursor.lua';
+our $AUTH       = '127.0.0.1:2500';
 
 # A name of the DNS, in lower case.  Each one goes into the path of a request
 # and into the arguments of pdns-acl.
@@ -95,19 +114,93 @@ sub acl {
     return run( [ @ACL, @args ] );
 }
 
-sub release {
+# The lines of $file, or none where there is no file.
+sub lines_of {
+    my ($file) = @_;
+
+    open( my $fh, '<', $file ) or return ();
+    my @lines = <$fh>;
+    close $fh or die "Cannot read $file: $!\n";
+    chomp @lines;
+    return @lines;
+}
+
+# Replaces $file with @lines, through a file beside it, so that the recursor
+# never reads half of it.
+sub write_lines {
+    my ( $file, @lines ) = @_;
+
+    my ( $mode, $uid, $gid ) = ( stat $file )[ 2, 4, 5 ];
+    open( my $fh, '>', "$file.new" ) or die "Cannot write $file.new: $!\n";
+    print {$fh} map { "$_\n" } @lines;
+    close $fh                                             or die "Cannot write $file.new: $!\n";
+    chmod( ( $mode // oct 644 ) & oct 7777, "$file.new" ) or die "Cannot set the mode of $file.new: $!\n";
+    chown( $uid, $gid, "$file.new" )                      or die "Cannot set the owner of $file.new: $!\n" if defined $uid;
+    rename( "$file.new", $file )                          or die "Cannot replace $file: $!\n";
+    return;
+}
+
+# Has the recursor forward $name to the authoritative server, with a negative
+# trust anchor, or not.  One of each, in the form of the lines of the zone of
+# the domain.  A forward of $name elsewhere, which forward_zones writes, stays.
+sub set_forwarded {
+    my ( $name, $on ) = @_;
+
+    my $forward  = "$name=$AUTH";
+    my @forwards = grep { $_ ne $forward } lines_of($FORWARDS);
+    write_lines( $FORWARDS, @forwards, $on ? $forward : () );
+
+    my @anchors = grep { index( $_, qq{addNTA("$name"} ) != 0 } lines_of($ANCHORS);
+    write_lines( $ANCHORS, @anchors, $on ? qq{addNTA("$name", "unsigned zone, served by the authoritative half on $AUTH")} : () );
+    return;
+}
+
+# The running recursor reads both files again.
+sub reload_recursor {
+    foreach my $what (qw{reload-zones reload-lua-config}) {
+        my ( $said, $ok ) = run( [ 'rec_control', $what ] );
+        die "The recursor did not $what: $said\n" unless $ok;
+    }
+    return;
+}
+
+sub forwards {
+    my ( $names, $ok ) = run( [ 'sqlite3', '-batch', $ZONES_DB, 'SELECT name FROM domains' ] );
+    die "Could not read the zones of $ZONES_DB: $names\n" unless $ok;
+
+    my %held = map { $_ => 1 } grep { dns_name($_) } map { lc s/[.]\z//r } split m/\n/, $names;
+    set_forwarded( $_, 1 ) foreach sort keys %held;
+    return 0;
+}
+
+# The zone and the token, which either can be gone already.
+sub drop {
     my ($name) = @_;
 
     acl( qw{token remove}, $name );
     api( 'DELETE', "zones/$name." );
+    return;
+}
 
+sub release {
+    my ($name) = @_;
+
+    drop($name);
+    set_forwarded( $name, 0 );
+
+    # A recursor that is not up reads the files when it starts.
+    my $err = do {
+        local $@;
+        eval { reload_recursor(); 1 } ? undef : $@;
+    };
+    warn $err if defined $err;
     return 0;
 }
 
 sub issue {
     my ( $name, $nameserver ) = @_;
 
-    release($name);
+    drop($name);
 
     my ( $said, $ok ) = api( 'POST', 'zones', qq[{"name": "$name.", "kind": "Native", "nameservers": ["$nameserver."]}] );
     die "Could not make the zone $name: $said\n" unless $ok;
@@ -119,6 +212,9 @@ sub issue {
     ( $said, $ok ) = acl( qw{grant add}, $name, '--zone', "$name.", '--name', "*.$name.", '--write' );
     die "Could not let the token of $name write the names below it: $said\n" unless $ok;
 
+    set_forwarded( $name, 1 );
+    reload_recursor();
+
     print $token;
     return 0;
 }
@@ -129,8 +225,9 @@ sub main {
     die $USAGE unless defined $command;
     die $USAGE if any { !dns_name($_) } @args;
 
-    return issue(@args)   if $command eq 'issue'   && @args == 2;
-    return release(@args) if $command eq 'release' && @args == 1;
+    return issue(@args)   if $command eq 'issue'    && @args == 2;
+    return release(@args) if $command eq 'release'  && @args == 1;
+    return forwards()     if $command eq 'forwards' && !@args;
     die $USAGE;
 }
 

@@ -42,7 +42,10 @@ L<Provisioner::Recipe::registrar>.  Then this guest holds a zone of the name of
 that guest, and that guest writes its records here, through the API proxy
 below.  C<bin/provision> makes the zone when it builds that guest, with this
 domain as its nameserver, and deletes the zone that a build before it made.
-See C<client_secret>.
+See C<client_secret>.  The recursor of this guest forwards the zone to the
+authoritative server, so that the CA of this guest finds the challenges of that
+guest, wherever its name is.  A build of this guest forwards each zone that
+its database holds again.
 
 The server answers on port 53 of the address of the guest, as well as on
 loopback, because the zone above names this domain as the nameserver of each
