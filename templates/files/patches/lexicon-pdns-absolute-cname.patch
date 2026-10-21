@@ -1,0 +1,30 @@
+Subject: [PATCH] Let a PowerDNS CNAME name a target outside its zone
+
+lexicon qualified every CNAME target into the zone that it wrote, even one
+with a trailing dot, and qualified every target that it read back.  So a
+CNAME in one zone could not name a target in another.  A target with its
+trailing dot now stays absolute, and a target read back loses only its dot.
+
+---
+--- a/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
++++ b/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
+@@ -163,7 +163,8 @@
+                 content = '"' + content
+             if content[-1] != '"':
+                 content += '"'
+-        elif rtype == "CNAME":
++        elif rtype == "CNAME" and not content.endswith("."):
++            # A target with its trailing dot is absolute, and can be outside the zone.
+             content = self._fqdn_name(content)
+         return content
+ 
+@@ -171,7 +172,8 @@
+         if rtype in ("TXT", "LOC"):
+             content = content.strip('"')
+         elif rtype == "CNAME":
+-            content = self._full_name(content)
++            # PowerDNS answers with the absolute name, which can be outside the zone.
++            content = content.rstrip(".")
+         return content
+ 
+     def create_record(self, rtype, name, content):

@@ -346,7 +346,7 @@ subtest 'names of another zone become CNAMEs of a target outside it, and nothing
             is( scalar @creates, 2, 'one record per name' );
             my $cname = qr/[ ]create[ ]CNAME[ ]/;
             like( $creates[0], qr/$cname--name='shop[.]partner[.]test'[ ]/, 'each a CNAME' );
-            like( $creates[0], qr/--content='\Q$DOMAIN\E'/,                 'of the target' );
+            like( $creates[0], qr/--content='\Q$DOMAIN\E[.]'/,              'of the target, absolute, so that lexicon does not qualify it into the zone' );
             is( scalar grep( { index( $_, ' create A ' ) >= 0 } @creates ), 0, 'and no A record, because the target holds its address in its own zone' );
         }
     );
