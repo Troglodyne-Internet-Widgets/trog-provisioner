@@ -23,8 +23,8 @@ use Provisioner::Cookbook();
 
 This recipe installs lexicon, the client that every recipe here uses to write a
 DNS record.  It also applies three patches to lexicon and installs a shortcut
-for the domain.  One of them lets a C<CNAME> in a pdns zone name a target outside
-that zone, as the names in a zone of a registrar account need.
+for the domain.  One of the patches lets a C<CNAME> in a pdns zone name a
+target outside that zone, as the names in a zone of a registrar account need.
 
 You do not usually configure it yourself.  Each recipe that runs lexicon requires
 it.  L<Provisioner::Recipe::pdns> and L<Provisioner::Recipe::registrar> hold

@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+use IO::Socket::INET;
+use IO::Select;
+
+my $client = '[% script_dir %]/edge_client';
+my $domain = 'edge-selftest.test.test';
+# Long, because nginx refuses a map with a name longer than its bucket.
+my $name = 'selftest-' . ( 'x' x 50 ) . '.edge.test.test';
+
+my $check = `nginx -t 2>&1`;
+like( $check, qr/test is successful/, 'nginx accepts the configuration' ) or diag $check;
+
+# A listener that stands in for a guest, and the first lines that a connection
+# to it sends, or nothing when none comes within ten seconds.
+sub listener {
+    my $listener = IO::Socket::INET->new( Listen => 1, LocalAddr => '127.0.0.1', LocalPort => 0, ReuseAddr => 1 );
+    die "Cannot listen: $!\n" unless $listener;
+    return $listener;
+}
+
+sub first_lines {
+    my ($listener) = @_;
+    return q{} unless IO::Select->new($listener)->can_read(10);
+    my $conn = $listener->accept() or return q{};
+    my $said = q{};
+    while ( IO::Select->new($conn)->can_read(2) ) {
+        my $got = sysread( $conn, my $buf, 4096 ) or last;
+        $said .= $buf;
+        last if $said =~ m/\r\n\r\n/ || $said =~ m/\APROXY [^\n]*\n/;
+    }
+    return $said;
+}
+
+# The status that curl gets for $name on $port of this guest, or 000 for none.
+# The stream proxy is on [% tls_port %], because ufw forwards only a
+# connection from outside from 443.
+sub status {
+    my ( $name, $port ) = @_;
+    my $scheme = $port == [% tls_port %] ? 'https' : 'http';
+    return `curl -sk --max-time 5 -o /dev/null -w '%{http_code}' --resolve '$name:$port:127.0.0.1' '$scheme://$name:$port/' 2>/dev/null` || '000';
+}
+
+# A reload starts new workers, which take a moment to answer.
+sub settle { sleep 2; return }
+
+my ( $tls, $http ) = ( listener(), listener() );
+my $key = `$client register $domain 127.0.0.1:@{[ $tls->sockport ]} 127.0.0.1:@{[ $http->sockport ]} $name 2>&1`;
+is( $?, 0, 'a guest registers a name' ) or diag $key;
+like( $key, qr/\A[A-Za-z0-9+\/=]+\z/, 'and gets its key in base64 on one line' );
+settle();
+
+subtest 'a TLS connection goes by its SNI name, with the PROXY protocol' => sub {
+    system("curl -sk --max-time 5 --resolve '$name:[% tls_port %]:127.0.0.1' 'https://$name:[% tls_port %]/' >/dev/null 2>&1 &");
+    like( first_lines($tls), qr/\APROXY TCP4 127[.]0[.]0[.]1 /, 'the guest learns the address of the client' );
+};
+
+subtest 'a plain request goes by its Host header, with X-Forwarded-For' => sub {
+    system("curl -s --max-time 5 --resolve '$name:80:127.0.0.1' 'http://$name/' -H 'X-Forwarded-For: 203.0.113.7' >/dev/null 2>&1 &");
+    my $said = first_lines($http);
+    like( $said, qr/^Host: \Q$name\E\r$/m,                'the guest gets the name' );
+    like( $said, qr/^X-Forwarded-For: 127[.]0[.]0[.]1\r$/m, 'and the address that connected, not one that the client claims' );
+};
+
+is( status( 'nosuch.test.test', [% tls_port %] ), '000', 'a name that nobody registered gets no TLS handshake' );
+is( status( 'nosuch.test.test', 80 ),  '000', 'and no reply on 80' );
+
+my $other = `$client register other-$domain 127.0.0.1:1 127.0.0.1:2 $name 2>&1`;
+isnt( $?, 0, 'another domain cannot register the same name' );
+like( $other, qr/\Q$name is registered to $domain\E/, 'and the refusal names the domain that holds it' );
+
+my $released = `$client release $domain 2>&1`;
+is( $?, 0, 'a guest releases its names' ) or diag $released;
+settle();
+is( status( $name, 80 ), '000', 'and the name gets no reply after that' );
+ok( !-e "/etc/nginx/edge.d/$domain.ban.pub", 'and its key is gone' );
+
+done_testing();

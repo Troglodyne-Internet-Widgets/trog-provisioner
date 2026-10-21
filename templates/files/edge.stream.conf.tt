@@ -1,0 +1,19 @@
+[%# In the main context, because a stream block cannot be inside http.  The
+    file goes into modules-enabled, the one directory that nginx.conf includes
+    there, after the module that it needs.  Provisioner::Recipe::edge has the
+    whole account. -%]
+stream {
+    # 64 is too small for a long name.  See edge.http.conf.
+    map_hash_bucket_size 256;
+
+    map $ssl_preread_server_name $edge_tls {
+        include /etc/nginx/edge.d/*.tls.map;
+    }
+
+    server {
+        listen [% tls_port %];
+        ssl_preread on;
+        proxy_protocol on;
+        proxy_pass $edge_tls;
+    }
+}

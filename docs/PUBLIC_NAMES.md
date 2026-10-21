@@ -30,6 +30,33 @@ domain.  A name that holds a `CNAME` gets no `A` record, and a name that holds
 an `A` record gets no `CNAME`.  The build fails there instead.  Remove the old
 record at the provider first.
 
+## The edge guest
+
+An edge guest runs the `edge` recipe.  It sends a TLS connection to the guest
+that registered its SNI name, and a plain HTTP request to the guest that
+registered its `Host` header.  `perldoc Provisioner::Recipe::edge` has the
+details.
+
+```yaml
+edge.ours.example:
+    edge:
+
+staging.ours.example:
+    nginx:
+        edge: edge.ours.example
+        public_names:
+            www.ours.example: staging.ours.example
+```
+
+Build the edge first.  When `bin/provision` builds a guest whose `nginx` names
+an `edge`, it registers the public names of the guest there before the makefile
+starts.  The build of the guest fails if the edge is not up, or if another
+domain registered one of the names.  `bin/destroy` releases the names.  If the
+edge is not up then, it says what to run there.
+
+The DNS record of a public name points at the address of the edge, so set
+`registrar.address` to that address for each domain behind the edge.
+
 ## A zone at a registrar that we have an account with
 
 List the zone under the account in `_base`, and rebuild the guest:
@@ -98,5 +125,5 @@ vhost answers for both names.  You can then test the path through the proxy at
 
 To serve the name itself, the owner can delegate its zone to us, as in the
 section above.  The other way is a claim by an HTTP-01 challenge, after the
-owner points the `A` record of the name at the edge.  That claim comes with the
-edge guest, in step 5 of issue #414.
+owner points the `A` record of the name at the edge.  That claim needs the
+edge guest to answer the CA, and it comes after the edge, in issue #414.

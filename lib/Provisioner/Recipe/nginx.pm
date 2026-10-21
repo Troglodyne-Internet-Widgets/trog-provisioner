@@ -10,6 +10,8 @@ use re '/aasx';
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use Provisioner::Vars();
+use List::Util();
 
 use parent qw{Provisioner::Recipe};
 
@@ -82,8 +84,11 @@ The build stops when a vhost is in no C<sites>, when a public name is one that
 another vhost lists, and when a vhost is outside the zone of the domain, which
 is the domain or a name below it.
 
-Each vhost that a public name names also listens on 8443 with TLS and on 8080
-without, each with the PROXY protocol, where the proxy connects.  Its listeners
+Each vhost that a public name names also listens on 8443 with TLS and the PROXY
+protocol, and on 8080 without TLS, where the proxy connects.  The proxy routes
+plain HTTP by its C<Host> header, and nginx can send a PROXY header only from a
+proxy that does not read it.  So on 8080 the address of the client comes in
+C<X-Forwarded-For>.  Its listeners
 on 443 and 80 stay as they are for the LAN.  A vhost that no public name names
 does not listen for the proxy at all, and a name that no vhost claims on those
 ports gets no answer.  The ufw application profile C<nginx-proxy> opens the two
@@ -101,11 +106,34 @@ C<public.VHOST> joins the served names in its place, and its vhost answers for
 it.  It is published, certified and proxied, so the path through the proxy
 works before the owner of the outside name changes anything.
 
-nginx believes the address in a PROXY header only from C<proxy_from>.  A client
-anywhere else that sends one keeps its own address in the logs.  The default of
+nginx believes the address in a PROXY header or in C<X-Forwarded-For> only
+from C<proxy_from>.  A client anywhere else that sends one keeps its own
+address in the logs.  The default of
 C<proxy_from> is each network of C<ip_pool> that a bin routes through an
 openvpn server, which is where the edge gets its address.  See
 L<Provisioner::IPPool/BINS>.
+
+=head2 Registration with an edge guest
+
+    internal.somedomain:
+        nginx:
+            edge: edge.somedomain
+            public_names:
+                shop.internal.somedomain: internal.somedomain
+
+C<edge> names the guest that runs L<Provisioner::Recipe::edge>.  When this
+domain has public names, C<bin/provision> registers them there before the
+makefile starts, so the edge must be up first.  The edge sends each name in
+C<proxied_names> to the address of this guest in the address pool, on the
+ports of C<proxy_ports>.  A domain built onto another guest registers the
+address of that guest.
+
+The edge refuses a name that another domain registered.  It issues a key for
+this domain, which lands at F</etc/fail2ban/edge/DOMAIN.key.b64>.
+
+C<bin/destroy> releases the names on the edge.  If the edge is not up then, it
+warns and says what to run there.  Until then, the edge sends those names to an
+address that the pool can give to the next guest.
 
 =cut
 
@@ -118,8 +146,21 @@ sub rate_limits {
 
     # The proxy carries every client of the public names, so its listeners get
     # the limit of the ports it fronts.
-    %limits = ( %limits, 8080 => 1024, 8443 => 1024 ) if %{ $opts{public_names} // {} };
+    my %proxy = $self->proxy_ports();
+    %limits = ( %limits, map { $proxy{$_} => $limits{$_} } keys %proxy ) if %{ $opts{public_names} // {} };
     return %limits;
+}
+
+=head2 %ports = $recipe->proxy_ports()
+
+Each port that the proxy fronts, mapped to the port of the guest that the proxy
+connects to for it, with the PROXY protocol.  The templates of this recipe
+write the same numbers.  See L</Names that reach the guest through a proxy>.
+
+=cut
+
+sub proxy_ports {
+    return ( 443 => 8443, 80 => 8080 );
 }
 
 =head2 %jails = $recipe->jails()
@@ -172,6 +213,12 @@ sub args {
                   'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
+            edge => {
+                type        => 'string',
+                format      => 'hostname',
+                description => 'The guest that runs the edge recipe, where the public names of this domain are registered when it is built.  Read only when public_names has a name.  See "Registration with an edge guest".',
+            },
+
             proxy_from => {
                 type        => 'array',
                 items       => { type => 'string' },
@@ -219,7 +266,7 @@ my sub certifiable ( $name, $domain ) {
 # Each vhost that a public name names, mapped to every name that it answers
 # for on the ports of the proxy: the public names that it can certify, then
 # public.VHOST when a public name is not one, then the others.
-my sub proxied_names (%opts) {
+my sub proxied_by_vhost (%opts) {
     my %by_vhost = public_names_by_vhost(%opts);
     my %names;
     foreach my $vhost ( keys %by_vhost ) {
@@ -241,7 +288,7 @@ each vhost that answers for a public name in neither.  See L</Names that reach t
 sub served_names {
     my ( $self, %opts ) = @_;
 
-    my %proxied = proxied_names(%opts);
+    my %proxied = proxied_by_vhost(%opts);
     return (
         $self->SUPER::served_names(%opts),
         map {
@@ -249,6 +296,83 @@ sub served_names {
               @{ $proxied{$_} }
         } sort keys %proxied
     );
+}
+
+=head2 @names = $recipe->proxied_names(%opts)
+
+Every name that the guest answers for on the ports of the proxy, sorted: each
+public name, and C<public.VHOST> for each vhost that answers for a public name
+that it cannot certify.  A proxy routes these names to the guest.  It needs
+C<public_names>, C<domain>, and the C<aliases> of the domain.
+
+=cut
+
+sub proxied_names {
+    my ( $self, %opts ) = @_;
+
+    my %proxied = proxied_by_vhost(%opts);
+    my @names   = sort { $a cmp $b } List::Util::uniq( map { @$_ } values %proxied );
+    return @names;
+}
+
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+
+With C<edge> and a public name, the key that the edge issues when it registers
+the names of C<$domain>.  Otherwise nothing.  See
+L</Registration with an edge guest>.
+
+Dies when the guest of C<$domain> has no address in the address pool, because
+the edge reaches the guest by that address.
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain, %opts ) = @_;
+    my $edge = $opts{edge};
+    return () unless defined $edge && %{ $opts{public_names} // {} };
+
+    my $guest   = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $address = Provisioner::IPPool::assignments()->{$guest};
+    die "nginx: $domain registers its public names on $edge, which reaches them at the address of $guest.  $guest has no address in " . Provisioner::IPPool::db_path() . ".\n"
+      unless defined $address;
+
+    my %port  = $self->proxy_ports();
+    my @names = $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() );
+    return (
+        "/etc/fail2ban/edge/$domain.key.b64" => {
+            issue => {
+                guest   => $edge,
+                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $domain, "$address:$port{443}", "$address:$port{80}", @names ),
+            },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
+=head2 $edge = $recipe->edge_of($domain)
+
+The C<edge> of the C<nginx> of C<$domain>, or undef when it has none or no
+public name.  C<bin/destroy> releases the names of C<$domain> there.
+
+=cut
+
+sub edge_of {
+    my ( $self, $domain ) = @_;
+    my $config = Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {};
+    return %{ $config->{public_names} // {} } ? $config->{edge} : undef;
+}
+
+=head2 $command = $recipe->release_command($domain)
+
+The shell command that root runs on the edge to release the names of
+C<$domain>.
+
+=cut
+
+sub release_command {
+    my ( $self, $domain ) = @_;
+    return "$Provisioner::Vars::SCRIPT_DIR/edge_client release $domain";
 }
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -275,7 +399,7 @@ sub enrich {
         die "nginx: invalid configuration: multiple recipes configured to serve $name\n" if $listed{$name} > 1;
     }
 
-    my %proxied = proxied_names(%opts);
+    my %proxied = proxied_by_vhost(%opts);
     if (%proxied) {
         my %by_vhost = public_names_by_vhost(%opts);
         foreach my $vhost ( sort keys %by_vhost ) {

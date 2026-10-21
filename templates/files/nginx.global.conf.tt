@@ -22,7 +22,8 @@ error_log  syslog:server=unix:/dev/log,nohostname,tag=nginx_error warn;
 [% END -%]
 [% IF proxied -%]
 
-[%# The address in a PROXY header, believed only from proxy_from.  A
+[%# The address in a PROXY header, or in X-Forwarded-For where a server on
+    8080 says so, believed only from proxy_from.  A
     connection without the header keeps its own address.  A name that no vhost
     answers for on the ports of the proxy gets no certificate and no page.  See
     Provisioner::Recipe::nginx. -%]
@@ -37,7 +38,7 @@ server {
 }
 
 server {
-    listen 8080 proxy_protocol default_server;
+    listen 8080 default_server;
     return 444;
 }
 [% END -%]

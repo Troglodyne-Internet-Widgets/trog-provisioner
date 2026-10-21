@@ -7,8 +7,9 @@ mkdir -p /etc/nginx/names
 printf 'server_name %s;\n' '[% domain_names.join(' ') %]' > /etc/nginx/names/[% domain %].conf
 [% END -%]
 [%# What each vhost that a public name names adds to its server blocks on 443
-    and 80 for a proxy: a listener with the PROXY protocol, and the names that it
-    answers for there.  A vhost includes the file of its name if there is one.
+    and 80 for a proxy: a listener, and the names that it answers for there.
+    The proxy says who the client is in a PROXY header on 8443, and in
+    X-Forwarded-For on 8080.  A vhost includes the file of its name if there is one.
     Provisioner::Recipe::nginx has the whole account. -%]
 rm -rf /etc/nginx/proxied
 mkdir -p /etc/nginx/proxied
@@ -16,7 +17,7 @@ mkdir -p /etc/nginx/proxied
 install -o root -g root -m 0644 nginx_proxy_ufw.conf /etc/ufw/applications.d/nginx-proxy
 [% FOR vhost IN proxied.keys().sort() -%]
 printf '%s\n' 'listen 8443 ssl proxy_protocol;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].443.conf
-printf '%s\n' 'listen 8080 proxy_protocol;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].80.conf
+printf '%s\n' 'listen 8080;' 'real_ip_header X-Forwarded-For;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].80.conf
 [% END -%]
 [% END -%]
 [% script_dir %]/queue_postrun_task systemctl reload nginx

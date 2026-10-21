@@ -4,5 +4,5 @@
     profile and not with a rule. -%]
 [nginx-proxy]
 title=nginx behind a proxy
-description=The listeners of the vhosts for a proxy that speaks the PROXY protocol
+description=The listeners of the vhosts for a proxy
 ports=8080,8443/tcp

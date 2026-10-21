@@ -241,6 +241,10 @@ sub main {
         # frees its static address there before release_ip frees it here
         revoke_vpn_client( $domain, $dryrun );
 
+        # 3c. Release its public names on the edge, which would otherwise send
+        # them to the address that release_ip frees
+        release_edge( $domain, $dryrun );
+
         # 4. Optionally purge the domain directory, and the data directory
         if ($purge) {
             purge_domain_dir( $domain, $dryrun );
@@ -560,6 +564,37 @@ sub revoke_vpn_client {
         doing  => "revoke the VPN certificate of $domain",
         done   => "Revoked the VPN certificate of $domain",
         stays  => "the certificate and the address of $domain stay on it.  Run openvpn-revoke-client $domain there before another client gets the address",
+    );
+}
+
+=head2 release_edge($domain, $dryrun)
+
+Releases the public names of C<$domain> on the edge guest where it registered
+them, which is the C<edge> of its C<nginx>.  See
+L<Provisioner::Recipe::nginx/Registration with an edge guest>.  Does nothing
+for a domain that names none.  Returns 1 when it released them.
+
+If the edge is not up, this warns and returns 0.  Release the names there by
+hand before another guest gets the address, because the edge sends them to
+whatever answers there.
+
+=cut
+
+sub release_edge {
+    my ( $domain, $dryrun ) = @_;
+
+    my $nginx = Provisioner::Cookbook->load('nginx');
+    my $edge  = $nginx->edge_of($domain);
+    return 0 unless defined $edge;
+
+    my $command = $nginx->release_command($domain);
+    return as_root_on(
+        $edge,
+        $command,
+        dryrun => $dryrun,
+        doing  => "release the public names of $domain",
+        done   => "Released the public names of $domain",
+        stays  => "it still sends the public names of $domain to its old address.  Run $command there before another guest gets the address",
     );
 }
 

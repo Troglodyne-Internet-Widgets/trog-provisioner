@@ -1107,6 +1107,7 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         vhosts      => {},             upstreams   => {},
         tcms_dir    => 'tCMS',         basedir     => 'code',
         port        => 636,            users       => [],
+        tls_port    => 4443,
     );
 
     my $dir = tempdir( CLEANUP => 1 );
