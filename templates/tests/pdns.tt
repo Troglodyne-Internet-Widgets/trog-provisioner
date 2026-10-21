@@ -120,6 +120,16 @@ ok(-f $zones_file, 'and that file exists');
 like($zones, qr/^\Q[% domain %]\E=127\.0\.0\.1:2500$/m,
     'this domain forwards to the authoritative server on 2500') or diag $zones;
 
+# Every zone that the authoritative server holds, the zones of other guests
+# among them, is one that the recursor answers for.  Otherwise the CA of this
+# guest, which asks the recursor, cannot see the challenge of such a zone.
+my @held = grep { m/\S/ } split m/\n/, `sqlite3 -batch /var/spool/powerdns/zones.db 'SELECT name FROM domains' 2>&1`;
+ok(scalar @held, 'the authoritative server holds zones') or diag "@held";
+foreach my $zone (@held) {
+    my $soa = `dig +short +time=3 +tries=1 \@127.0.0.1 '$zone' SOA 2>&1`;
+    like($soa, qr/\S/, "the recursor answers for $zone") or diag $soa;
+}
+
 # One line per zone, however many times the guest was provisioned.
 my %seen;
 my @dupes = grep { $seen{$_}++ } grep { m/\S/ } split m/\n/, $zones;

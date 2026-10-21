@@ -21,12 +21,38 @@ use Test::Fatal      qw{exception};
 use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
 use List::Util();
+use File::Temp();
 
 use FindBin;
 use FindBin::libs;
 
 my $script = "$FindBin::Bin/../scripts/pdns_client";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
+
+# The files of the recursor, here and not in /etc/powerdns.
+my $recursor = File::Temp::tempdir( CLEANUP => 1 );
+{
+    no warnings 'once';
+    $Trog::PdnsClient::FORWARDS = "$recursor/forward-zones";
+    $Trog::PdnsClient::ANCHORS  = "$recursor/recursor.lua";
+}
+
+sub lines_in {
+    my ($file) = @_;
+    open( my $fh, '<', $file ) or return ();
+    my @lines = <$fh>;
+    close $fh or die "Cannot read $file: $!\n";
+    chomp @lines;
+    return @lines;
+}
+
+sub write_file {
+    my ( $file, @lines ) = @_;
+    open( my $fh, '>', $file ) or die "Cannot write $file: $!\n";
+    print {$fh} map { "$_\n" } @lines;
+    close $fh or die "Cannot write $file: $!\n";
+    return;
+}
 
 my $NAME = 'web.lab.test.test';
 my $NS   = 'ns.test.test';
@@ -73,8 +99,14 @@ subtest 'issue replaces the zone and the token, and prints the new token' => sub
     is( $rc,  0,             'and exits 0' );
     is( $out, 'a-new-token', 'and prints the token, and nothing else' );
 
-    my @steps = map { is_acl($_) ? join( q{ }, @{ $_->{command} }[ 6 .. 7 ] ) : $_->{command}[7] } @{$ran};
-    is_deeply( \@steps, [ 'token remove', 'DELETE', 'POST', 'token add', 'grant add' ], 'the old token and zone go first, then the zone, the token and its second grant' );
+    my @steps = map { is_acl($_) ? join( q{ }, @{ $_->{command} }[ 6 .. 7 ] ) : is_api($_) ? $_->{command}[7] : join( q{ }, @{ $_->{command} } ) } @{$ran};
+    is_deeply(
+        \@steps,
+        [ 'token remove', 'DELETE', 'POST', 'token add', 'grant add', 'rec_control reload-zones', 'rec_control reload-lua-config' ],
+        'the old token and zone go first, then the zone, the token and its second grant, and the recursor reads its files again'
+    );
+    ok( ( grep { $_ eq "$NAME=127.0.0.1:2500" } lines_in("$recursor/forward-zones") ),        'the recursor forwards the zone here' );
+    ok( ( grep { index( $_, qq{addNTA("$NAME"} ) == 0 } lines_in("$recursor/recursor.lua") ), 'with a negative trust anchor' );
 
     my ($post) = grep { is_api($_) && $_->{command}[7] eq 'POST' } @{$ran};
     like( join( q{ }, @{ $post->{command} } ), qr{"name":[ ]"\Q$NAME\E[.]".*"nameservers":[ ]\["\Q$NS\E[.]"\]}, 'the zone is the name, with the nameserver it was given' );
@@ -102,10 +134,62 @@ subtest 'a step that fails stops it before it prints a token' => sub {
 };
 
 subtest 'release deletes both, and minds neither being gone' => sub {
+    write_file( "$recursor/forward-zones", "$NAME=127.0.0.1:2500",          "other.test=192.0.2.9" );
+    write_file( "$recursor/recursor.lua",  qq{addNTA("$NAME", "a reason")}, qq{addNTA("other.test", "forwarded")} );
+
     my ( $ran, $rc, $err ) = against( sub { return ( 'not there', 0 ) }, 'release', $NAME );
     is( $err,           undef, 'it succeeds where the token and the zone are gone already' );
-    is( $rc,            0,     'and exits 0' );
-    is( scalar @{$ran}, 2,     'after it asked for both to go' );
+    is( $rc,            0,     'and exits 0, where the recursor does not answer either' );
+    is( scalar @{$ran}, 3,     'after it asked for both to go, and asked the recursor to read its files' );
+    is_deeply( [ lines_in("$recursor/forward-zones") ], ['other.test=192.0.2.9'],                'the forward of the zone goes, and another stays' );
+    is_deeply( [ lines_in("$recursor/recursor.lua") ],  [qq{addNTA("other.test", "forwarded")}], 'and so does its trust anchor' );
+};
+
+subtest 'a forward that the recursor does not take stops issue before it prints a token' => sub {
+    my ( undef, undef, $err, $out ) = against(
+        sub {
+            my ($command) = @_;
+            return ( 'no recursor', $command->[0] eq 'rec_control' ? 0 : 1 );
+        },
+        'issue', $NAME,
+        $NS
+    );
+    like( $err, qr/The[ ]recursor[ ]did[ ]not[ ]reload-zones:[ ]no[ ]recursor/, 'it says what the recursor said' );
+    is( $out, q{}, 'and prints no token' );
+};
+
+subtest 'forwards forwards each zone in the database, once, and asks the recursor nothing' => sub {
+    write_file( "$recursor/forward-zones", "own.test=127.0.0.1:2500", 'elsewhere.test=192.0.2.9' );
+    write_file( "$recursor/recursor.lua", q{addNTA("own.test", "the zone of the domain")} );
+
+    my ( $ran, $rc, $err ) = against( sub { return ( "own.test\nClient.other.test.\nnot a name\n", 1 ) }, 'forwards' );
+    is( $err, undef, 'it succeeds' );
+    is( $rc,  0,     'and exits 0' );
+    is_deeply( [ map { $_->{command}[0] } @{$ran} ], ['sqlite3'], 'it reads the database, and reloads nothing, because the build starts the recursor after it' );
+
+    my @forwards = lines_in("$recursor/forward-zones");
+    is_deeply( [ sort @forwards ], [ sort qw{client.other.test=127.0.0.1:2500 elsewhere.test=192.0.2.9 own.test=127.0.0.1:2500} ], 'each zone once, in the form that DNS compares, and a forward elsewhere stays' );
+    my @anchors = lines_in("$recursor/recursor.lua");
+    is( scalar( grep { index( $_, 'addNTA("own.test"' ) == 0 } @anchors ),          1, 'a zone with a trust anchor has one still' );
+    is( scalar( grep { index( $_, 'addNTA("client.other.test"' ) == 0 } @anchors ), 1, 'and a zone without one gets one' );
+
+    ( undef, undef, $err ) = against( sub { return ( 'no such file', 0 ) }, 'forwards' );
+    like( $err, qr/Could[ ]not[ ]read[ ]the[ ]zones/, 'a database that cannot be read stops it' );
+};
+
+subtest 'the files it writes are 644, whatever the umask and whatever was there' => sub {
+    my $file = "$recursor/forward-zones";
+    write_file( $file,       'own.test=127.0.0.1:2500' );
+    write_file( "$file.new", 'left by a run that failed' );
+    chmod oct 600, $file, "$file.new";
+
+    my $umask = umask oct 77;
+    Trog::PdnsClient::set_forwarded( $NAME, 1 );
+    my $after = umask $umask;
+
+    is( sprintf( '%o', ( stat $file )[2] & oct 7777 ), '644', 'the recursor can read the file, which it does not own' );
+    is( sprintf( '%o', $after ),                       '77',  'and the umask of the process is as it was' );
+    is_deeply( [ lines_in($file) ], [ 'own.test=127.0.0.1:2500', "$NAME=127.0.0.1:2500" ], 'and the file holds what it held and the forward' );
 };
 
 subtest 'run keeps what a command says to itself' => sub {
