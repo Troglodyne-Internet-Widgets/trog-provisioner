@@ -52,6 +52,22 @@ loopback, because the zone above names this domain as the nameserver of each
 of those zones.  It answers only for the zones that it holds, and refuses
 everything else.  The recursor stays on loopback.
 
+=head2 Zones that it holds for accounts
+
+An account of L<Provisioner::Recipe::registrar> can name this guest as the
+C<authority> of its zones.  See
+L<Provisioner::Recipe::registrar/Zones that a pdns guest holds>.  This guest
+builds each of those zones, as it builds its own: a zone file with an C<SOA>
+and C<NS> records, loaded only into a database that does not hold the zone yet.
+So a rebuild keeps the records that the guests of the zone wrote.  The
+recursor forwards each zone here, with a negative trust anchor, as it does the
+zone of the domain.  A domain layered onto this guest does not build them
+again.
+
+Unlike a zone of another guest, no build of a guest replaces such a zone,
+because several guests can serve names in it.  Each of them gets a token of
+its own from C<zone_secret>.
+
 =head2 The API proxy
 
 This guest opens its API to other guests through L<PowerDNS::API::ACL>.  The API itself listens only on a unix socket on
@@ -352,6 +368,53 @@ sub client_secret {
     );
 }
 
+=head2 %files = $recipe->zone_secret($guest, $zone, $client, @names)
+
+The token that lets C<$client> write C<@names> in C<$zone>, a zone that
+C<$guest> builds because an account of L<Provisioner::Recipe::registrar> names
+it as the authority.  It is a file for the C<guest_secrets> of the registrar of
+C<$client>, at C<token_path> of C<$zone>, as C<client_secret> is.
+
+The command is F<scripts/pdns_client> C<grant>.  It leaves the zone alone,
+because other guests serve names in it, and gives the token only the records
+of C<@names> and of their challenges.
+
+Dies as C<checked_names> does.
+
+=cut
+
+sub zone_secret {
+    my ( $self, $guest, $zone, $client, @names ) = @_;
+
+    $self->checked_names( $guest, $zone, $client, @names );
+    return (
+        $self->token_path($zone) => {
+            issue => {
+                guest   => $guest,
+                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/pdns_client grant", $zone, $client, sort @names ),
+            },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
+=head2 $command = $recipe->revoke_command($guest, $zone, $client)
+
+The shell command that root runs on C<$guest> to delete the token of C<$client>
+in C<$zone>: F<scripts/pdns_client> C<revoke>.  C<bin/destroy> runs it for each
+zone that an account names C<$guest> the authority of.  Dies as
+C<checked_names> does.
+
+=cut
+
+sub revoke_command {
+    my ( $self, $guest, $zone, $client ) = @_;
+
+    $self->checked_names( $guest, $zone, $client );
+    return "$Provisioner::Vars::SCRIPT_DIR/pdns_client revoke $zone $client";
+}
+
 =head2 $command = $recipe->release_command($guest, $name)
 
 The shell command that root runs on C<$guest> to delete the zone C<$name> and
@@ -421,6 +484,16 @@ sub enrich {
     # in Provisioner::Recipe::registrar.
     $opts{domain_aliases} = [ Provisioner::Cookbook->load('registrar')->zone_aliases(%opts) ];
 
+    # The zones that an account of the registrar names this guest the authority
+    # of, once for the guest and not again for a domain layered onto it.
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my $server    = Provisioner::Utils::dns_name( Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain} );
+    my %zones     = $registrar->configured_zones( $opts{domain} );
+    my @held      = $server eq Provisioner::Utils::dns_name( $opts{domain} ) ? sort grep { Provisioner::Utils::dns_name( $zones{$_}{authority} // q{} ) eq $server } keys %zones : ();
+    $self->checked_names(@held) if @held;
+    $opts{held_zones}      = \@held;
+    $opts{held_nameserver} = "ns1.$server";
+
     return %opts;
 }
 
@@ -429,6 +502,7 @@ sub template_files {
 
     return (
         'pdns.zone.tt'         => 'zonefile',
+        'pdns.held_zones.tt'   => 'pdns-held-zones.sh',
         'pdns.domain.tt'       => 'pdns-domain.conf',
         'pdns.global.tt'       => 'pdns-global.conf',
         'pdns.recursor.tt'     => 'pdns-recursor-domain.conf',

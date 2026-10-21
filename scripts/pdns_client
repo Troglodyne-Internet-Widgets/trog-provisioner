@@ -17,6 +17,8 @@ use List::Util qw{any};
     pdns_client issue NAME NAMESERVER
     pdns_client release NAME
     pdns_client forwards
+    pdns_client grant ZONE CLIENT NAME [NAME ...]
+    pdns_client revoke ZONE CLIENT
 
 =head2 DESCRIPTION
 
@@ -46,11 +48,26 @@ database.  Each zone keeps one of each, however often it runs.  The build of thi
 runs it before it starts the recursor, because the database comes back from the
 salvage of the guest before it, and the recursor configuration does not.
 
+C<grant> is for a zone that this guest builds itself, because an account of
+the registrar names it as the C<authority> of that zone.  Several guests can
+serve names in one such zone, so it leaves the zone alone.  It replaces the
+token of CLIENT in ZONE with one that can write the C<A> and C<CNAME> records
+of each NAME, and the C<TXT> record of its C<_acme-challenge>, and nothing
+else.  It prints the token.  It refuses a NAME outside ZONE, and a ZONE that
+this guest does not hold.
+
+C<revoke> deletes the token of CLIENT in ZONE.  It can be gone already.
+
 It exits 0 when it did that, and 1 when a step failed, after it says which.
 
 =cut
 
-my $USAGE = "usage: pdns_client issue NAME NAMESERVER\n" . "       pdns_client release NAME\n" . "       pdns_client forwards\n";
+my $USAGE = "usage: pdns_client issue NAME NAMESERVER
+" . "       pdns_client release NAME
+" . "       pdns_client forwards
+" . "       pdns_client grant ZONE CLIENT NAME [NAME ...]
+" . "       pdns_client revoke ZONE CLIENT
+";
 
 our $API_SOCKET = '/var/spool/powerdns/api.sock';
 our $API_CONF   = '/etc/powerdns/pdns.d/api.conf';
@@ -224,6 +241,48 @@ sub issue {
     return 0;
 }
 
+# The label of the token of $client in $zone.  One per pair, so that two
+# clients of one zone do not replace the token of each other.
+sub label_of {
+    my ( $zone, $client ) = @_;
+    return "$zone for $client";
+}
+
+sub revoke {
+    my ( $zone, $client ) = @_;
+
+    acl( qw{token remove}, label_of( $zone, $client ) );
+    return 0;
+}
+
+sub grant {
+    my ( $zone, $client, @names ) = @_;
+
+    my @outside = grep { $_ ne $zone && !m/[.]\Q$zone\E\z/ } @names;
+    die "Not in the zone $zone: @outside\n" if @outside;
+
+    my ( $said, $ok ) = api( 'GET', "zones/$zone." );
+    die "This guest holds no zone $zone.  It builds each zone that an account of the registrar names it the authority of: $said\n" unless $ok;
+
+    revoke( $zone, $client );
+    my $label = label_of( $zone, $client );
+
+    my @grants = map { ( [ "$_.", qw{--type A --type CNAME} ], [ "_acme-challenge.$_.", qw{--type TXT} ] ) } @names;
+    my ( $first, @rest ) = @grants;
+
+    my $token;
+    ( $token, $ok ) = acl( qw{token add}, $label, '--zone', "$zone.", '--name', @{$first}, '--write' );
+    die "Could not make the token of $client in $zone: $token\n" unless $ok;
+
+    foreach my $grant (@rest) {
+        ( $said, $ok ) = acl( qw{grant add}, $label, '--zone', "$zone.", '--name', @{$grant}, '--write' );
+        die "Could not let the token of $client write $grant->[0] in $zone: $said\n" unless $ok;
+    }
+
+    print $token;
+    return 0;
+}
+
 sub main {
     my ( $command, @args ) = @_;
 
@@ -233,6 +292,8 @@ sub main {
     return issue(@args)   if $command eq 'issue'    && @args == 2;
     return release(@args) if $command eq 'release'  && @args == 1;
     return forwards()     if $command eq 'forwards' && !@args;
+    return grant(@args)   if $command eq 'grant'    && @args >= 3;
+    return revoke(@args)  if $command eq 'revoke'   && @args == 2;
     die $USAGE;
 }
 

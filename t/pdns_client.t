@@ -192,6 +192,59 @@ subtest 'the files it writes are 644, whatever the umask and whatever was there'
     is_deeply( [ lines_in($file) ], [ 'own.test=127.0.0.1:2500', "$NAME=127.0.0.1:2500" ], 'and the file holds what it held and the forward' );
 };
 
+my $ZONE   = 'customer.test';
+my $CLIENT = 'web.lab.test.test';
+
+# A guest that holds $ZONE, and makes any token that it is asked for.
+my $holds_zone = sub {
+    my ($command) = @_;
+    my $adds_token = ( List::Util::any { $_ eq 'token' } @{$command} ) && ( List::Util::any { $_ eq 'add' } @{$command} );
+    return ( $adds_token ? 'a-zone-token' : q{} ), 1;
+};
+
+subtest 'grant gives a client a token for its own names in a zone, and leaves the zone alone' => sub {
+    my ( $ran, undef, $err, $out ) = against( $holds_zone, 'grant', $ZONE, $CLIENT, $ZONE, "www.$ZONE" );
+
+    is( $err, undef,          'it succeeds' ) or diag $err;
+    is( $out, 'a-zone-token', 'and prints the token, and nothing else' );
+
+    my @api = grep { is_api($_) } @{$ran};
+    is( scalar @api,                                    1, 'the API is asked one thing' );
+    is( ( grep { $_ eq 'GET' } @{ $api[0]{command} } ), 1, 'whether the zone is there, and nothing is made or deleted' );
+
+    my @acl   = map { join( q{ }, @{ $_->{command} } ) } grep { is_acl($_) } @{$ran};
+    my $label = qr/\Q$ZONE\E[ ]for[ ]\Q$CLIENT\E/;
+    like( $acl[0], qr/token[ ]remove[ ]$label/, 'the old token of the client goes first' );
+    my $in_zone = qr/--zone[ ]\Q$ZONE\E[.][ ]/;
+    like( $acl[1], qr/token[ ]add[ ]$label[ ]$in_zone/,                        'then a token in the zone' );
+    like( $acl[1], qr/--name[ ]\Q$ZONE\E[.][ ]--type[ ]A[ ]--type[ ]CNAME[ ]/, 'for the A and CNAME of the first name' );
+    like( $acl[1], qr/[ ]--write\z/,                                           'to write' );
+    my @grants = grep { m/grant[ ]add/ } @acl;
+    is( scalar @grants, 3, 'and a grant for each of the rest' );
+    my $challenge = qr/--name[ ]_acme-challenge[.]\Q$ZONE\E[.][ ]/;
+    like( $grants[0], qr/$challenge--type[ ]TXT[ ]--write\z/,                        'the challenge of each name gets TXT alone' );
+    like( $grants[1], qr/--name[ ]www[.]\Q$ZONE\E[.][ ]--type[ ]A[ ]--type[ ]CNAME/, 'and so on for the next name' );
+    is( scalar grep( { m/[*]/ } @acl ), 0, 'and no grant reaches a name that the client did not ask for' );
+};
+
+subtest 'grant refuses a name outside the zone, and a zone that this guest does not hold' => sub {
+    my ( $ran, $rc, $err ) = against( $holds_zone, 'grant', $ZONE, $CLIENT, 'www.other.test' );
+    like( $err, qr/Not[ ]in[ ]the[ ]zone[ ]\Q$ZONE\E:[ ]www[.]other[.]test/, 'a name outside it is refused' );
+    is( scalar @{$ran}, 0, 'before anything is asked' );
+
+    ( $ran, $rc, $err ) = against( sub { return ( 'not found', 0 ) }, 'grant', $ZONE, $CLIENT, "www.$ZONE" );
+    like( $err, qr/holds[ ]no[ ]zone[ ]\Q$ZONE\E/, 'and so is a zone that the API does not have' );
+    is( scalar grep( { is_acl($_) } @{$ran} ), 0, 'before any token is touched' );
+};
+
+subtest 'revoke deletes the token of the client in the zone, and minds it being gone' => sub {
+    my ( $ran, $rc, $err ) = against( sub { return ( 'no such token', 0 ) }, 'revoke', $ZONE, $CLIENT );
+    is( $err, undef, 'it succeeds' );
+    is( $rc,  0,     'and exits 0' );
+    like( join( q{ }, @{ $ran->[0]{command} } ), qr/token[ ]remove[ ]\Q$ZONE\E[ ]for[ ]\Q$CLIENT\E/, 'with the label of the pair' );
+    is( scalar grep( { is_api($_) } @{$ran} ), 0, 'and the zone stays' );
+};
+
 subtest 'run keeps what a command says to itself' => sub {
 
     # bin/provision reads the output of the script over ssh on a pty, which
@@ -208,8 +261,9 @@ subtest 'run keeps what a command says to itself' => sub {
 
 subtest 'it takes nothing but names of the DNS' => sub {
     like( ( against( sub { return ( q{}, 1 ) }, 'issue', 'web;reboot', $NS ) )[2], qr/usage/, 'a name that is not one is refused' );
-    like( ( against( sub { return ( q{}, 1 ) }, 'issue',  $NAME ) )[2], qr/usage/, 'and issue needs the nameserver' );
-    like( ( against( sub { return ( q{}, 1 ) }, 'remove', $NAME ) )[2], qr/usage/, 'and there is no other command' );
+    like( ( against( sub { return ( q{}, 1 ) }, 'issue', $NAME ) )[2],             qr/usage/, 'and issue needs the nameserver' );
+    like( ( against( sub { return ( q{}, 1 ) }, 'remove', $NAME ) )[2],            qr/usage/, 'and there is no other command' );
+    like( ( against( sub { return ( q{}, 1 ) }, 'grant', $ZONE, $CLIENT ) )[2],    qr/usage/, 'and grant needs a name' );
 };
 
 done_testing();

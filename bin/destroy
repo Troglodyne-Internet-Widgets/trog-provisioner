@@ -11,6 +11,7 @@ use re '/aasx';
 use FindBin::libs;
 use Provisioner::IPPool();
 use Provisioner::Cookbook();
+use Provisioner::Utils();
 use Trog::Config();
 use Trog::Credentials();
 use Trog::HV();
@@ -234,6 +235,7 @@ sub main {
 
         # 3a. Remove its zone and its token on the guest that holds them
         release_authority( $domain, $dryrun );
+        revoke_zone_tokens( $domain, $dryrun );
 
         # 3b. Revoke its certificate on the VPN server that issued it, which
         # frees its static address there before release_ip frees it here
@@ -486,6 +488,47 @@ sub release_authority {
         done   => "Removed the zone and the token of $domain",
         stays  => "the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again",
     );
+}
+
+=head2 revoke_zone_tokens($domain, $dryrun)
+
+Removes the tokens of C<$domain> from each pdns guest that an account of its
+registrar names as the C<authority> of a zone, one command for each such guest.
+See "Zones that a pdns guest holds" in L<Provisioner::Recipe::registrar>.  The
+zones stay, because other guests serve names in them.  It asks about every such
+zone, because a token that is gone already is no error.  Returns the number of
+guests on which the command succeeded.
+
+This is the counterpart of the C<grant> that C<bin/provision> issues.  It warns
+for a guest that is not up or did not answer, as C<as_root_on> does.  The token
+then stays, and C<bin/provision> replaces it when the domain is built again.
+
+=cut
+
+sub revoke_zone_tokens {
+    my ( $domain, $dryrun ) = @_;
+
+    my $pdns  = Provisioner::Cookbook->load('pdns');
+    my %zones = eval { Provisioner::Cookbook->load('registrar')->configured_zones($domain) };
+
+    my %of;
+    foreach my $zone ( sort keys %zones ) {
+        my $guest = Provisioner::Utils::dns_name( $zones{$zone}{authority} // next );
+        push( @{ $of{$guest} }, $pdns->revoke_command( $guest, $zone, lc $domain ) );
+    }
+
+    my $revoked = 0;
+    foreach my $guest ( sort keys %of ) {
+        $revoked += as_root_on(
+            $guest,
+            join( ' ; ', @{ $of{$guest} } ),
+            dryrun => $dryrun,
+            doing  => "remove the zone tokens of $domain",
+            done   => "Removed the zone tokens of $domain",
+            stays  => "the zone tokens of $domain stay on it.  bin/provision replaces them when $domain is built again",
+        );
+    }
+    return $revoked;
 }
 
 =head2 revoke_vpn_client($domain, $dryrun)

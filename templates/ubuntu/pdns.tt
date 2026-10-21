@@ -20,9 +20,12 @@ zone2sql --gsqlite --zone=zonefile --zone-name=[% domain %] > /var/spool/powerdn
     which the unique index on name refuses, so the target fails.  Use lexicon
     to change a zone that is already there. -%]
 sqlite3 /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% domain %]'" | grep -q . || sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
-[%# The recursor forwards every zone in the database, and the database can hold
-    the zones of other guests that a build before this one made.  Before the
-    restart of the recursor below.  See pdns_client. -%]
+[%# And the zones that it holds for accounts of the registrar, the same way. -%]
+bash pdns-held-zones.sh
+rm -f pdns-held-zones.sh
+[%# The recursor forwards every zone in the database: the zone of the domain,
+    the zones above, and the zones of other guests that a build before this one
+    made.  Before the restart of the recursor below.  See pdns_client. -%]
 [% script_dir %]/pdns_client forwards
 chown -R pdns:pdns /var/spool/powerdns
 chmod -R 0775 /var/spool/powerdns

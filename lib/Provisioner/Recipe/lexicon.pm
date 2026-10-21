@@ -22,8 +22,9 @@ use Provisioner::Cookbook();
 =head2 DESCRIPTION
 
 This recipe installs lexicon, the client that every recipe here uses to write a
-DNS record.  It also applies two patches to lexicon and installs a shortcut for
-the domain.
+DNS record.  It also applies three patches to lexicon and installs a shortcut
+for the domain.  One of them lets a C<CNAME> in a pdns zone name a target outside
+that zone, as the names in a zone of a registrar account need.
 
 You do not usually configure it yourself.  Each recipe that runs lexicon requires
 it.  L<Provisioner::Recipe::pdns> and L<Provisioner::Recipe::registrar> hold
@@ -67,8 +68,8 @@ sub enrich {
 
 =head2 %files = $recipe->template_files()
 
-Returns the shortcut template and the two patches, each mapped to the name of
-the file that it becomes.
+Returns the shortcut template and the three patches, each mapped to the name
+of the file that it becomes.
 
 =cut
 
@@ -77,6 +78,7 @@ sub template_files {
         'lexicon.shortcut.sh.tt'                       => 'lexicon.sh',
         'patches/lexicon-pdns-af-unix.patch'           => 'lexicon-pdns-af-unix.patch',
         'patches/lexicon-arbitrary-record-types.patch' => 'lexicon-arbitrary-record-types.patch',
+        'patches/lexicon-pdns-absolute-cname.patch'    => 'lexicon-pdns-absolute-cname.patch',
     );
 }
 

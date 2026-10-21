@@ -193,6 +193,45 @@ subtest 'the zone and the token of a domain come off the guest that its registra
     is( Trog::Bin::Destroy::release_authority( 'other.test.test', 0 ), 0, 'a domain that names no authority has nothing to remove' );
 };
 
+# --- revoke_zone_tokens ---
+subtest 'the zone tokens of a domain come off each pdns guest that an account names, and the zones stay' => sub {
+    my $domain   = 'web.lab.test.test';
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( host_of => sub { return } );
+    $cookbook->redefine(
+        domain_config => sub {
+            return {
+                registrar => {
+                    accounts => {
+                        ours   => { authority => 'NS.test.test.', zones => [qw{one.test two.test}] },
+                        hosted => { type      => 'easydns',       zones => ['three.test'] },
+                    },
+                },
+            };
+        }
+    );
+
+    my ( @ran, @asked );
+    no warnings 'once';
+    local *AuthorityProbe::run_cmd = sub { my ( undef, $cmd ) = @_; push( @ran, $cmd ); return 0 };
+    use warnings;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => sub { push( @asked, $_[1] ); return bless {}, 'AuthorityProbe' } );
+
+    my $revoked;
+    capture { $revoked = Trog::Bin::Destroy::revoke_zone_tokens( $domain, 0 ) };
+    is( $revoked, 1, 'one guest is asked once' );
+    is_deeply( \@asked, ['ns.test.test'], 'the authority of the account, in the form that DNS compares' );
+    my $one = qr{pdns_client[ ]revoke[ ]one[.]test[ ]\Q$domain\E};
+    my $two = qr{pdns_client[ ]revoke[ ]two[.]test[ ]\Q$domain\E};
+    like( $ran[0], qr{$one[ ];[ ]\S+$two'\z}, 'for each zone of the account, with the domain as the client' );
+    unlike( $ran[0], qr/three[.]test|release/, 'and neither a zone of a registrar nor a zone itself is touched' );
+
+    @ran = ();
+    capture { Trog::Bin::Destroy::revoke_zone_tokens( $domain, 1 ) };
+    is( scalar @ran, 0, 'a dry run sends nothing' );
+};
+
 # --- revoke_vpn_client ---
 subtest 'a VPN client is revoked on the server that issued it, which frees its address there' => sub {
     my $domain   = 'edge.test.test';

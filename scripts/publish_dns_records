@@ -138,11 +138,13 @@ sub records {
 }
 
 # Names of another zone, each as an alias of a target outside it, by type and
-# name.  No address, because the target holds that in its own zone.
+# name.  No address, because the target holds that in its own zone.  The target
+# with its trailing dot, because lexicon qualifies a CNAME target without one
+# into the zone that it writes.
 sub aliases_of {
     my ( $target, @names ) = @_;
     die $USAGE unless $target && @names;
-    return ( CNAME => { map { $_ => $target } @names } );
+    return ( CNAME => { map { $_ => ( $target =~ s/[.]*\z/./r ) } @names } );
 }
 
 # The delegation of a zone, by type and name, for the zone above it: the

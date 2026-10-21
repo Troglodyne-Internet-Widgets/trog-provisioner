@@ -139,6 +139,42 @@ account lists a zone that holds it as well.  Where two zones hold a name, the
 longer one does.  A zone is at one registrar, so the recipe refuses a zone that
 two accounts list.
 
+=head2 Zones that a pdns guest holds
+
+An account can name an C<authority> in place of C<type>, C<user> and C<key>:
+a guest of this installation that runs pdns.  Its zones are zones that the
+owner delegated to our nameservers at their own registrar, so that pdns
+answers for them:
+
+    _base:
+        registrar:
+            accounts:
+                ours:
+                    authority: ns.ours.example
+                    zones: [ customer.example ]
+
+The authority builds each of these zones, with an C<SOA> record and an C<NS>
+record that name its C<ns1>, and an C<NS> record for each of the
+C<nameservers> of C<_global>.  A rebuild keeps a zone that its database holds
+already.  See L<Provisioner::Recipe::pdns/Zones that it holds for accounts>.
+
+A guest that serves a name in such a zone writes it as it writes a name of any
+account, through F</opt/lexicon/zones/ZONE>.  The shortcut reaches the API
+proxy of the authority with a token that C<guest_secrets> asks the authority
+for.  The token can write the C<A> and C<CNAME> records of the names of that
+guest in the zone, and the challenges of those names, and nothing else.  So
+several guests can serve names in one zone, and none of them can change the
+names of another.  F<bin/destroy> removes the tokens of a guest, and leaves
+the zones.
+
+The owner delegates the zone before its names are built, because the CA asks
+the delegated nameservers for each challenge.  F<bin/check_delegation> says
+whether the delegation is in place.  F<docs/PUBLIC_NAMES.md> has the whole
+procedure.
+
+Write these accounts in C<_base>.  The authority reads them from its own
+configuration, and a domain sees them in its own.
+
 =head2 It installs nothing, and publishes the records of the domain
 
 This recipe starts no service.  It supplies the credentials in
@@ -194,9 +230,14 @@ sub args {
                 default              => {},
                 additionalProperties => {
                     type                 => 'object',
-                    required             => ['type'],
+                    oneOf                => [ { required => ['type'] }, { required => ['authority'] } ],
                     additionalProperties => 0,
                     properties           => {
+                        authority => {
+                            type        => 'string',
+                            format      => 'hostname',
+                            description => 'A guest of this installation that runs pdns, in place of type, user and key.  It holds the zones of this account, and builds each of them.  See "Zones that a pdns guest holds".',
+                        },
                         type  => { type => 'string', description => 'The provider of this account, as lexicon calls it.' },
                         user  => { type => 'string', default     => q{}, description => 'The account, where the provider wants one.' },
                         key   => { type => 'string', default     => q{}, 'x-secret'  => 1, description => 'The token of this account, as a secret: reference.' },
@@ -208,7 +249,7 @@ sub args {
                         },
                     },
                 },
-                description => 'The registrar accounts of this installation, each under a name of your choice, with its type, user and key, and the zones other than the zone of the domain that it holds.  See "Accounts, and the zones that they hold".',
+                description => 'The registrar accounts of this installation, each under a name of your choice, with its type, user and key or its authority, and the zones other than the zone of the domain that it holds.  See "Accounts, and the zones that they hold".',
             },
             key => {
                 type        => 'string',
@@ -385,7 +426,8 @@ sub longest_first ( $, @zones ) {
 =head2 %zones = $recipe->account_zones(%conf)
 
 Maps each zone that an account of C<$conf{accounts}> lists to the C<type>,
-C<user> and C<key> of that account.  Dies on a zone that two accounts list.
+C<user> and C<key> of that account, or to its C<authority>.  Dies on a zone
+that two accounts list.  Each zone is in lower case, with no trailing dot.
 
 =cut
 
@@ -394,11 +436,11 @@ sub account_zones ( $, %conf ) {
 
     my ( %zones, %listed_by );
     foreach my $name ( sort keys %accounts ) {
-        foreach my $zone ( @{ $accounts{$name}{zones} // [] } ) {
+        foreach my $zone ( map { Provisioner::Utils::dns_name($_) } @{ $accounts{$name}{zones} // [] } ) {
             die "registrar: the accounts $listed_by{$zone} and $name both list the zone $zone.  A zone is at one registrar, so list it under one account.\n"
               if exists $listed_by{$zone};
             $listed_by{$zone} = $name;
-            $zones{$zone}     = { map { $_ => $accounts{$name}{$_} } grep { exists $accounts{$name}{$_} } qw{type user key} };
+            $zones{$zone}     = { map { $_ => $accounts{$name}{$_} } grep { exists $accounts{$name}{$_} } qw{type user key authority} };
         }
     }
     return %zones;
@@ -413,6 +455,20 @@ C<$domain>.
 
 sub configured_zones ( $self, $domain ) {
     return $self->account_zones( %{ $self->configuration_of($domain) } );
+}
+
+=head2 %credentials = $recipe->zone_credentials($zone, \%account)
+
+How lexicon writes C<$zone>, for C<%account>, which is what C<account_zones>
+maps C<$zone> to.  For an account with an C<authority>, it is what
+L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
+Otherwise it is C<configured_credentials>.
+
+=cut
+
+sub zone_credentials ( $self, $zone, $account ) {
+    return Provisioner::Cookbook->load('pdns')->client_credentials( Provisioner::Utils::dns_name( $account->{authority} ), $zone ) if defined $account->{authority};
+    return $self->configured_credentials( %$account, domain => $zone );
 }
 
 =head2 @aliases = $recipe->zone_aliases(%opts)
@@ -538,21 +594,38 @@ sub delegated_to {
     return ( defined $holder && $holder ne $server ) ? $holder : undef;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
 For a domain with an C<authority>, where this recipe holds the zone, the token
 of the domain, which the authority issues.  See
 L<Provisioner::Recipe::pdns/client_secret>.
 
+And for each zone of an account with an C<authority> that holds a served name of
+the domain, a token from that authority that writes only those names.  The
+served names are C<domain_aliases> of C<%opts>, where C<hostnames> is what the
+recipes on the domain handed over.  See
+L<Provisioner::Recipe::pdns/zone_secret>.
+
 =cut
 
 sub guest_secrets {
-    my ( $self, $install_dir, $domain ) = @_;
+    my ( $self, $install_dir, $domain, %opts ) = @_;
 
-    my $guest = $self->delegated_to($domain);
-    return () unless defined $guest;
+    my $pdns  = Provisioner::Cookbook->load('pdns');
+    my $own   = $self->delegated_to($domain);
+    my %files = defined $own ? $pdns->client_secret( $own, Provisioner::Utils::dns_name($domain) ) : ();
 
-    return Provisioner::Cookbook->load('pdns')->client_secret( $guest, Provisioner::Utils::dns_name($domain) );
+    my %zones = $self->configured_zones($domain);
+    my %names;
+    foreach my $name ( $self->domain_aliases( %opts, domain => $domain ) ) {
+        my $zone = $self->zone_of( $name, $domain, \%zones ) // next;
+        push( @{ $names{$zone} }, lc $name ) if defined $zones{$zone}{authority};
+    }
+    foreach my $zone ( sort keys %names ) {
+        my $guest = Provisioner::Utils::dns_name( $zones{$zone}{authority} );
+        %files = ( %files, $pdns->zone_secret( $guest, $zone, Provisioner::Utils::dns_name($domain), @{ $names{$zone} } ) );
+    }
+    return %files;
 }
 
 =head2 %publication = $recipe->publication(%opts)
@@ -567,9 +640,8 @@ maps each such zone to its names other than its apex, and each gets a C<CNAME>
 of the domain in that zone.  C<zone_apexes> lists each such zone whose apex is a
 served name, and the apex gets an C<A> record at C<address>.  C<zone_access>
 maps every such zone to the credentials of its account, as
-C<configured_credentials> returns them.  See L</Accounts, and the zones that
-they hold>.  C<$opts{own_zone}> is true where
-the domain holds its own zone.
+C<zone_credentials> returns them.  See L</Accounts, and the zones that they
+hold>.  C<$opts{own_zone}> is true where the domain holds its own zone.
 
 The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
 each name in C<domain_aliases>: the aliases that the operator configured and
@@ -607,7 +679,7 @@ sub publication {
         if ( lc $name eq lc $zone ) { $zone_apexes{$zone} = 1 }
         else                        { push( @{ $zone_cnames{$zone} }, $name ) }
     }
-    my %zone_access = map { $_ => { $self->configured_credentials( %{ $zones->{$_} }, domain => $_ ) } } keys %zone_cnames, keys %zone_apexes;
+    my %zone_access = map { $_ => { $self->zone_credentials( $_, $zones->{$_} ) } } keys %zone_cnames, keys %zone_apexes;
 
     return (
         address         => $address,
