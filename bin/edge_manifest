@@ -1,0 +1,147 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::edge_manifest;
+
+#ABSTRACT: Print, as JSON, what a proxy needs to reach each guest that has public names.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+use Cpanel::JSON::XS();
+use File::Slurper();
+use List::Util();
+
+use Provisioner::Cookbook();
+use Provisioner::IPPool();
+use Trog::Config();
+use Trog::HV();
+
+=head1 USAGE
+
+    edge_manifest [--recipes=file]
+
+Prints one JSON object, with a key for each guest that has a public name in
+C<nginx.public_names>.  A proxy, such as an edge guest, reads it to know which
+names to send to which guest.
+
+    {
+      "web.somedomain.test": {
+        "address":      "192.0.2.10",
+        "names":        ["public.web.somedomain.test", "shop.customer.test"],
+        "ports":        { "443": 8443, "80": 8080 },
+        "mail_domains": ["web.somedomain.test"],
+        "key":          "ssh-rsa AAAA... web.somedomain.test"
+      }
+    }
+
+=over 4
+
+=item C<address>
+
+The address that the guest holds in the address database.  A guest with no
+address is left out, with a warning, because the proxy cannot reach it.
+
+=item C<names>
+
+Every name that the guest answers for on the ports of the proxy, for each
+domain on the guest.  See L<Provisioner::Recipe::nginx/proxied_names>.
+
+=item C<ports>
+
+Each port that the proxy fronts, mapped to the port of the guest that it
+connects to, with the PROXY protocol.
+
+=item C<mail_domains>
+
+Each domain on the guest that configures the C<mail> recipe.
+
+=item C<key>
+
+The public half of the key of the guest, from F<key.rsa.pub> in its domain
+directory, or null when that file is not there yet.  C<bin/new_config> writes
+it.
+
+=back
+
+A domain layered onto another guest counts for that guest.  It reads the
+configuration and the address database, and never the store.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my $rfile = Trog::Config->path('recipes.yaml');
+    my $help;
+    GetOptionsFromArray(
+        \@args,
+        'recipes=s' => \$rfile,
+        'help'      => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    my %guests = guests( Provisioner::Cookbook->configuration($rfile) );
+    my $json   = Cpanel::JSON::XS->new();
+    $json->canonical();
+    $json->pretty();
+    print $json->encode( \%guests );
+
+    # This is the exit status of the process, so it must be explicit.
+    return 0;
+}
+
+=head2 %guests = guests($conf)
+
+The manifest, as a hash of each guest to what L</USAGE> says, for the
+configuration C<$conf>.
+
+=cut
+
+sub guests {
+    my ($conf) = @_;
+
+    my $nginx   = Provisioner::Cookbook->load('nginx');
+    my $aliases = Provisioner::Cookbook->alias_map($conf);
+
+    my %on;
+    foreach my $domain ( sort grep { !m/\A_/ } keys %$conf ) {
+        my $config = Provisioner::Cookbook->domain_config( $domain, $conf );
+        my $guest  = Provisioner::Cookbook->host_of( $domain, $conf ) // $domain;
+        push( @{ $on{$guest}{names} },        $nginx->proxied_names( %{ $config->{nginx} // {} }, domain => $domain, aliases => $aliases ) );
+        push( @{ $on{$guest}{mail_domains} }, $domain ) if exists $config->{mail};
+    }
+
+    my $addresses  = Provisioner::IPPool::assignments();
+    my $domain_dir = Trog::HV->new()->domain_dir;
+    my %ports      = $nginx->proxy_ports();
+
+    my %guests;
+    foreach my $guest ( sort grep { @{ $on{$_}{names} } } keys %on ) {
+        my $address = $addresses->{$guest};
+        if ( !defined $address ) {
+            warn "$guest has public names and no address in " . Provisioner::IPPool::db_path() . ", so it is left out.\n";
+            next;
+        }
+        my $file = "$domain_dir/$guest/key.rsa.pub";
+        my $key  = -e $file ? File::Slurper::read_text($file) =~ s/\s+\z//r : undef;
+        $guests{$guest} = {
+            address      => $address,
+            names        => [ sort { $a cmp $b } List::Util::uniq( @{ $on{$guest}{names} } ) ],
+            ports        => {%ports},
+            mail_domains => $on{$guest}{mail_domains} // [],
+            key          => $key,
+        };
+    }
+    return %guests;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

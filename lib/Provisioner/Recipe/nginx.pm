@@ -10,6 +10,7 @@ use re '/aasx';
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use List::Util();
 
 use parent qw{Provisioner::Recipe};
 
@@ -118,8 +119,21 @@ sub rate_limits {
 
     # The proxy carries every client of the public names, so its listeners get
     # the limit of the ports it fronts.
-    %limits = ( %limits, 8080 => 1024, 8443 => 1024 ) if %{ $opts{public_names} // {} };
+    my %proxy = $self->proxy_ports();
+    %limits = ( %limits, map { $proxy{$_} => $limits{$_} } keys %proxy ) if %{ $opts{public_names} // {} };
     return %limits;
+}
+
+=head2 %ports = $recipe->proxy_ports()
+
+Each port that the proxy fronts, mapped to the port of the guest that the proxy
+connects to for it, with the PROXY protocol.  The templates of this recipe
+write the same numbers.  See L</Names that reach the guest through a proxy>.
+
+=cut
+
+sub proxy_ports {
+    return ( 443 => 8443, 80 => 8080 );
 }
 
 =head2 %jails = $recipe->jails()
@@ -219,7 +233,7 @@ my sub certifiable ( $name, $domain ) {
 # Each vhost that a public name names, mapped to every name that it answers
 # for on the ports of the proxy: the public names that it can certify, then
 # public.VHOST when a public name is not one, then the others.
-my sub proxied_names (%opts) {
+my sub proxied_by_vhost (%opts) {
     my %by_vhost = public_names_by_vhost(%opts);
     my %names;
     foreach my $vhost ( keys %by_vhost ) {
@@ -241,7 +255,7 @@ each vhost that answers for a public name in neither.  See L</Names that reach t
 sub served_names {
     my ( $self, %opts ) = @_;
 
-    my %proxied = proxied_names(%opts);
+    my %proxied = proxied_by_vhost(%opts);
     return (
         $self->SUPER::served_names(%opts),
         map {
@@ -249,6 +263,23 @@ sub served_names {
               @{ $proxied{$_} }
         } sort keys %proxied
     );
+}
+
+=head2 @names = $recipe->proxied_names(%opts)
+
+Every name that the guest answers for on the ports of the proxy, sorted: each
+public name, and C<public.VHOST> for each vhost that answers for a public name
+that it cannot certify.  A proxy routes these names to the guest.  It needs
+C<public_names>, C<domain>, and the C<aliases> of the domain.
+
+=cut
+
+sub proxied_names {
+    my ( $self, %opts ) = @_;
+
+    my %proxied = proxied_by_vhost(%opts);
+    my @names   = sort { $a cmp $b } List::Util::uniq( map { @$_ } values %proxied );
+    return @names;
 }
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -275,7 +306,7 @@ sub enrich {
         die "nginx: invalid configuration: multiple recipes configured to serve $name\n" if $listed{$name} > 1;
     }
 
-    my %proxied = proxied_names(%opts);
+    my %proxied = proxied_by_vhost(%opts);
     if (%proxied) {
         my %by_vhost = public_names_by_vhost(%opts);
         foreach my $vhost ( sort keys %by_vhost ) {

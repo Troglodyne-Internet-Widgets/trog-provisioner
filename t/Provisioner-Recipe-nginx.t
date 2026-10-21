@@ -218,6 +218,16 @@ subtest 'a public name in a zone of the registrar is served as it is, without a 
     );
 };
 
+subtest 'a proxy routes every public name, and public.VHOST beside a name outside every zone' => sub {
+    my $nginx = 'Provisioner::Recipe::nginx';
+    is_deeply(
+        [ $nginx->proxied_names( domain => 'web.test.test', public_names => { 'shop.web.test.test' => 'web.test.test', 'www.customer.test' => 'www.web.test.test', 'mail.customer.test' => 'webmail.web.test.test' } ) ],
+        [qw{mail.customer.test public.web.test.test public.webmail.web.test.test shop.web.test.test www.customer.test}],
+        'each name once, sorted, with the name that DNS-01 cannot certify as well as its stand-in'
+    );
+    is_deeply( [ $nginx->proxied_names( domain => 'web.test.test' ) ], [], 'and without public names, no name' );
+};
+
 subtest 'the ports of the proxy get the limits of the ports that it fronts' => sub {
     my %limits = 'Provisioner::Recipe::nginx'->rate_limits( public_names => { 'web.test.test' => 'web.test.test' } );
     is_deeply( [ sort { $a <=> $b } keys %limits ], [ 80, 443, 8080, 8443 ], 'with public names' );
