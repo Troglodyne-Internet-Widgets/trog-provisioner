@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Provisioner::Vars();
+
 use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::edge
@@ -132,6 +134,58 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
     return ( '/etc/nginx/edge.d' => { from => "$install_dir/$domain/edge.d", owner => 'root:root' } );
+}
+
+=head2 $path = $recipe->key_path($domain)
+
+Where the key that this guest issues for C<$domain> is, on the guest of
+C<$domain>.
+
+=cut
+
+sub key_path {
+    my ( $self, $domain ) = @_;
+    return "/etc/fail2ban/edge/$domain.key.b64";
+}
+
+=head2 %files = $recipe->client_secret($edge, $domain, \%upstreams, @names)
+
+The key that C<$edge> issues when it registers C<@names> for C<$domain>, at
+C<key_path> of C<$domain>.  It is a file for the C<guest_secrets> of a recipe
+on the guest of C<$domain>, with C<issue> in place of C<ref>: see
+C<guest_secrets> in L<Provisioner::Recipe>.
+
+The command is F<scripts/edge_client> C<register>, which root runs on
+C<$edge>.  C<%upstreams> has C<tls> and C<http>, each an IPv4 address and a
+port, where C<$edge> sends TLS and plain HTTP for those names.  See
+L</Registration>.
+
+=cut
+
+sub client_secret {
+    my ( $self, $edge, $domain, $upstreams, @names ) = @_;
+    return (
+        $self->key_path($domain) => {
+            issue => {
+                guest   => $edge,
+                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $domain, @{$upstreams}{qw{tls http}}, @names ),
+            },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
+=head2 $command = $recipe->release_command($domain)
+
+The shell command that root runs on the edge to release the names of
+C<$domain>: F<scripts/edge_client> C<release>.  C<bin/destroy> runs it.
+
+=cut
+
+sub release_command {
+    my ( $self, $domain ) = @_;
+    return "$Provisioner::Vars::SCRIPT_DIR/edge_client release $domain";
 }
 
 sub template_files {

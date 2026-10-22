@@ -10,7 +10,6 @@ use re '/aasx';
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
-use Provisioner::Vars();
 use List::Util();
 
 use parent qw{Provisioner::Recipe};
@@ -318,8 +317,8 @@ sub proxied_names {
 =head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
 With C<edge> and a public name, the key that the edge issues when it registers
-the names of C<$domain>.  Otherwise nothing.  See
-L</Registration with an edge guest>.
+the names of C<$domain>, from L<Provisioner::Recipe::edge/client_secret>.
+Otherwise nothing.  See L</Registration with an edge guest>.
 
 Dies when the guest of C<$domain> has no address in the address pool, because
 the edge reaches the guest by that address.
@@ -338,16 +337,7 @@ sub guest_secrets {
 
     my %port  = $self->proxy_ports();
     my @names = $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() );
-    return (
-        "/etc/fail2ban/edge/$domain.key.b64" => {
-            issue => {
-                guest   => $edge,
-                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $domain, "$address:$port{443}", "$address:$port{80}", @names ),
-            },
-            owner => 'root:root',
-            mode  => '0600',
-        },
-    );
+    return Provisioner::Cookbook->load('edge')->client_secret( $edge, $domain, { tls => "$address:$port{443}", http => "$address:$port{80}" }, @names );
 }
 
 =head2 $edge = $recipe->edge_of($domain)
@@ -361,18 +351,6 @@ sub edge_of {
     my ( $self, $domain ) = @_;
     my $config = Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {};
     return %{ $config->{public_names} // {} } ? $config->{edge} : undef;
-}
-
-=head2 $command = $recipe->release_command($domain)
-
-The shell command that root runs on the edge to release the names of
-C<$domain>.
-
-=cut
-
-sub release_command {
-    my ( $self, $domain ) = @_;
-    return "$Provisioner::Vars::SCRIPT_DIR/edge_client release $domain";
 }
 
 =head2 %opts = $recipe->enrich(%opts)

@@ -583,11 +583,10 @@ whatever answers there.
 sub release_edge {
     my ( $domain, $dryrun ) = @_;
 
-    my $nginx = Provisioner::Cookbook->load('nginx');
-    my $edge  = $nginx->edge_of($domain);
+    my $edge = Provisioner::Cookbook->load('nginx')->edge_of($domain);
     return 0 unless defined $edge;
 
-    my $command = $nginx->release_command($domain);
+    my $command = Provisioner::Cookbook->load('edge')->release_command($domain);
     return as_root_on(
         $edge,
         $command,
