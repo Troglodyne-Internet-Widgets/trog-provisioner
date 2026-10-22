@@ -11,7 +11,6 @@ use re '/aasx';
 use FindBin::libs;
 use Provisioner::IPPool();
 use Provisioner::Cookbook();
-use Provisioner::Utils();
 use Trog::Config();
 use Trog::Credentials();
 use Trog::HV();
@@ -233,17 +232,10 @@ sub main {
         remove_rsync_modules( $domain, $dryrun );
         remove_runner_key( $domain, $dryrun );
 
-        # 3a. Remove its zone and its token on the guest that holds them
-        release_authority( $domain, $dryrun );
-        revoke_zone_tokens( $domain, $dryrun );
-
-        # 3b. Revoke its certificate on the VPN server that issued it, which
-        # frees its static address there before release_ip frees it here
-        revoke_vpn_client( $domain, $dryrun );
-
-        # 3c. Release its public names on the edge, which would otherwise send
-        # them to the address that release_ip frees
-        release_edge( $domain, $dryrun );
+        # 3a. Take back what other guests issued it: a zone and its tokens, a
+        # VPN certificate, public names on an edge.  Before release_ip, because
+        # some of those name the address that release_ip frees.
+        release_issued( $domain, $dryrun );
 
         # 4. Optionally purge the domain directory, and the data directory
         if ($purge) {
@@ -464,137 +456,30 @@ sub remove_runner_key {
     return;
 }
 
-=head2 release_authority($domain, $dryrun)
+=head2 release_issued($domain, $dryrun)
 
-Removes the zone of C<$domain> and its token from the pdns guest that its
-registrar names as its C<authority>.  See L<Provisioner::Recipe::registrar>.
-Does nothing for a domain that names none.  Returns 1 when it removed them.
+Takes back from other guests what they issued to C<$domain>: each release that a
+recipe returns from C<releases>.  See
+L<Provisioner::Recipe/@releases = $recipe-E<gt>releases($domain)>.  It asks
+every recipe, because each one reads the configuration of C<$domain> itself,
+and a recipe that took nothing answers nothing.  Returns the number of releases
+that succeeded.
 
-This is the counterpart of C<issue_secret> in F<bin/provision>.  It warns and
-returns 0 when that guest is not up, or did not answer, as C<as_root_on> does.
-The zone and the token then answer for nothing, and C<bin/provision> replaces
-both when the domain is built again.
-
-=cut
-
-sub release_authority {
-    my ( $domain, $dryrun ) = @_;
-
-    my $registrar = Provisioner::Cookbook->load('registrar');
-    my $authority = eval { $registrar->delegated_to($domain) };
-    return 0 unless defined $authority;
-
-    return as_root_on(
-        $authority,
-        Provisioner::Cookbook->load('pdns')->release_command( $authority, lc $domain ),
-        dryrun => $dryrun,
-        doing  => "remove the zone and the token of $domain",
-        done   => "Removed the zone and the token of $domain",
-        stays  => "the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again",
-    );
-}
-
-=head2 revoke_zone_tokens($domain, $dryrun)
-
-Removes the tokens of C<$domain> from each pdns guest that an account of its
-registrar names as the C<authority> of a zone, one command for each such guest.
-See "Zones that a pdns guest holds" in L<Provisioner::Recipe::registrar>.  The
-zones stay, because other guests serve names in them.  It asks about every such
-zone, because a token that is gone already is no error.  Returns the number of
-guests on which the command succeeded.
-
-This is the counterpart of the C<grant> that C<bin/provision> issues.  It warns
-for a guest that is not up or did not answer, as C<as_root_on> does.  The token
-then stays, and C<bin/provision> replaces it when the domain is built again.
+This is the counterpart of the C<issue> that F<bin/provision> runs.  It warns
+and goes on when a guest is not up, or did not answer, as C<as_root_on> does.
 
 =cut
 
-sub revoke_zone_tokens {
+sub release_issued {
     my ( $domain, $dryrun ) = @_;
 
-    my $pdns  = Provisioner::Cookbook->load('pdns');
-    my %zones = eval { Provisioner::Cookbook->load('registrar')->configured_zones($domain) };
-
-    my %of;
-    foreach my $zone ( sort keys %zones ) {
-        my $guest = Provisioner::Utils::dns_name( $zones{$zone}{authority} // next );
-        push( @{ $of{$guest} }, $pdns->revoke_command( $guest, $zone, lc $domain ) );
+    my $released = 0;
+    foreach my $name ( Provisioner::Cookbook->names() ) {
+        foreach my $release ( Provisioner::Cookbook->load($name)->releases($domain) ) {
+            $released += as_root_on( $release->{guest}, $release->{command}, dryrun => $dryrun, map { $_ => $release->{$_} } qw{doing done stays} );
+        }
     }
-
-    my $revoked = 0;
-    foreach my $guest ( sort keys %of ) {
-        $revoked += as_root_on(
-            $guest,
-            join( ' ; ', @{ $of{$guest} } ),
-            dryrun => $dryrun,
-            doing  => "remove the zone tokens of $domain",
-            done   => "Removed the zone tokens of $domain",
-            stays  => "the zone tokens of $domain stay on it.  bin/provision replaces them when $domain is built again",
-        );
-    }
-    return $revoked;
-}
-
-=head2 revoke_vpn_client($domain, $dryrun)
-
-Revokes the certificate of C<$domain> on the openvpn server that issued it,
-which also frees the static address that the server gave it.  That server is
-the C<issue_from> of the C<openvpnclient> of C<$domain>.  See
-L<Provisioner::Recipe::openvpnclient>.  Does nothing for a domain that names
-none.  Returns 1 when it revoked it.
-
-C<release_ip> gives the address back to the pool afterwards, so another client
-can get it.  If the server is not up, this warns and returns 0.  Revoke the
-client there by hand before another one gets the address, because two clients
-with one address cut each other off.
-
-=cut
-
-sub revoke_vpn_client {
-    my ( $domain, $dryrun ) = @_;
-
-    my $client = Provisioner::Cookbook->load('openvpnclient');
-    my $issuer = $client->issuer_of($domain);
-    return 0 unless defined $issuer;
-
-    return as_root_on(
-        $issuer,
-        $client->revoke_command($domain),
-        dryrun => $dryrun,
-        doing  => "revoke the VPN certificate of $domain",
-        done   => "Revoked the VPN certificate of $domain",
-        stays  => "the certificate and the address of $domain stay on it.  Run openvpn-revoke-client $domain there before another client gets the address",
-    );
-}
-
-=head2 release_edge($domain, $dryrun)
-
-Releases the public names of C<$domain> on the edge guest where it registered
-them, which is the C<edge> of its C<nginx>.  See
-L<Provisioner::Recipe::nginx/Registration with an edge guest>.  Does nothing
-for a domain that names none.  Returns 1 when it released them.
-
-If the edge is not up, this warns and returns 0.  Release the names there by
-hand before another guest gets the address, because the edge sends them to
-whatever answers there.
-
-=cut
-
-sub release_edge {
-    my ( $domain, $dryrun ) = @_;
-
-    my $edge = Provisioner::Cookbook->load('nginx')->edge_of($domain);
-    return 0 unless defined $edge;
-
-    my $command = Provisioner::Cookbook->load('edge')->release_command($domain);
-    return as_root_on(
-        $edge,
-        $command,
-        dryrun => $dryrun,
-        doing  => "release the public names of $domain",
-        done   => "Released the public names of $domain",
-        stays  => "it still sends the public names of $domain to its old address.  Run $command there before another guest gets the address",
-    );
+    return $released;
 }
 
 =head2 as_root_on($guest, $command, %how)

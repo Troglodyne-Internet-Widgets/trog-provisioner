@@ -191,40 +191,32 @@ sub guest_secrets {
     my ($bin)   = bin_of( $pool, $issuer );
     my $address = Provisioner::IPPool::assign( $domain, $pool, $bin );
 
-    return (
-        "/etc/openvpn/client/$domain/issued.ovpn.b64" => {
-            issue => {
-                guest   => $issuer,
-                command => "/usr/local/sbin/openvpn-client-config --address $address $domain $opts{server} | base64 -w0",
-            },
-            owner => 'root:root',
-            mode  => '0600',
-        },
-    );
+    return Provisioner::Cookbook->load('openvpn')->client_secret( $issuer, $domain, address => $address, server => $opts{server} );
 }
 
-=head2 $issuer = $recipe->issuer_of($domain)
+=head2 @releases = $recipe->releases($domain)
 
-The C<issue_from> of the C<openvpnclient> of C<$domain>, or undef when it has
-none.  C<bin/destroy> revokes the certificate of C<$domain> there.
+With C<issue_from>, the revoke of the certificate of C<$domain> on that server,
+which also frees the static address that the server gave it, as C<releases> in
+L<Provisioner::Recipe> says.  If the server is not up, the release says to
+revoke the client there by hand before another one gets the address, because
+two clients with one address cut each other off.
 
 =cut
 
-sub issuer_of {
+sub releases {
     my ( $self, $domain ) = @_;
-    return ( Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} )->{issue_from};
-}
 
-=head2 $command = $recipe->revoke_command($domain)
+    my $issuer = ( Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} )->{issue_from};
+    return if !defined $issuer;
 
-The shell command that root runs on the server of C<issue_from> to revoke the
-certificate of C<$domain>, which also frees its static address there.
-
-=cut
-
-sub revoke_command {
-    my ( $self, $domain ) = @_;
-    return "/usr/local/sbin/openvpn-revoke-client $domain";
+    return {
+        guest   => $issuer,
+        command => Provisioner::Cookbook->load('openvpn')->release_command( $issuer, $domain ),
+        doing   => "revoke the VPN certificate of $domain",
+        done    => "Revoked the VPN certificate of $domain",
+        stays   => "the certificate and the address of $domain stay on it.  Run openvpn-revoke-client $domain there before another client gets the address",
+    };
 }
 
 sub template_files {

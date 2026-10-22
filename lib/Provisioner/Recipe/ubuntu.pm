@@ -336,28 +336,6 @@ sub formatters {
     );
 }
 
-=head2 $hv = $recipe->hv()
-
-Returns the hypervisor that this guest is built for, as given to the
-constructor.
-
-The recipe does not call C<Trog::HV-E<gt>new()> itself.  That puts the recipe
-layer before the machine layer in the load order, and an ordinary recipe then
-loads L<Sys::Virt>.  Nothing here loads L<Trog::HV>.  It only uses its
-interface.
-
-C<bin/new_config> gives one to every builder it makes.  C<bin/provision> gives
-one to the builder that it makes itself.  Dies if there is none, because a
-hypervisor chosen here is a second answer to a question that placement settled.
-
-=cut
-
-sub hv {
-    my ($self) = @_;
-
-    return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
-}
-
 =head2 %opts = $recipe->enrich(%opts)
 
 Returns C<%opts> with the values added that the four templates read and that

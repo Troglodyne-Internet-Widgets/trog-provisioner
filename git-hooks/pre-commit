@@ -61,8 +61,9 @@
 # Both passes run from the top of the working tree, which is where git puts a
 # hook and is the only place they work at all: the profile names .pod_stopwords
 # and the two preferred_*.ini by relative path, and ProhibitUnusedDefinitions
-# answers "is this sub called anywhere" by reading bin/ and lib/ out of the
-# current directory rather than out of the files it was handed.
+# and ProhibitMisplacedMethods answer "is this sub called anywhere" and "where
+# is it used" by reading bin/ and lib/ out of the current directory rather than
+# out of the files they were handed.
 
 # Redirect output to stderr.
 # The tree says use 5.041, which a distribution's perl may be older than, so a
