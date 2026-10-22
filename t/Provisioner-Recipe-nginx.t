@@ -218,10 +218,50 @@ subtest 'a public name in a zone of the registrar is served as it is, without a 
     );
 };
 
+subtest 'a proxy routes every public name, and public.VHOST beside a name outside every zone' => sub {
+    my $nginx = 'Provisioner::Recipe::nginx';
+    is_deeply(
+        [ $nginx->proxied_names( domain => 'web.test.test', public_names => { 'shop.web.test.test' => 'web.test.test', 'www.customer.test' => 'www.web.test.test', 'mail.customer.test' => 'webmail.web.test.test' } ) ],
+        [qw{mail.customer.test public.web.test.test public.webmail.web.test.test shop.web.test.test www.customer.test}],
+        'each name once, sorted, with the name that DNS-01 cannot certify as well as its stand-in'
+    );
+    is_deeply( [ $nginx->proxied_names( domain => 'web.test.test' ) ], [], 'and without public names, no name' );
+};
+
 subtest 'the ports of the proxy get the limits of the ports that it fronts' => sub {
     my %limits = 'Provisioner::Recipe::nginx'->rate_limits( public_names => { 'web.test.test' => 'web.test.test' } );
     is_deeply( [ sort { $a <=> $b } keys %limits ], [ 80, 443, 8080, 8443 ], 'with public names' );
     is( $limits{8443}, $limits{443}, 'at the same limit' );
+};
+
+subtest 'a domain with an edge registers there the names that the proxy routes, at the address of its guest' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $domain eq 'shop.test.test' ? 'web.test.test' : undef } );
+    $mock->redefine( alias_map     => sub { return {} } );
+    $mock->redefine( domain_config => sub { return {} } );
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( assignments => sub { return { 'web.test.test' => '192.0.2.10', 'shop.test.test' => '192.0.2.99' } } );
+
+    my $nginx  = 'Provisioner::Recipe::nginx';
+    my %public = ( public_names => { 'www.customer.test' => 'shop.test.test' } );
+    my %files  = $nginx->guest_secrets( '/bogus', 'shop.test.test', %public, edge => 'edge.test.test' );
+    is_deeply(
+        \%files,
+        {
+            '/etc/fail2ban/edge/shop.test.test.key.b64' => {
+                issue => { guest => 'edge.test.test', command => '/root/bin/edge_client register shop.test.test 192.0.2.10:8443 192.0.2.10:8080 public.shop.test.test www.customer.test' },
+                owner => 'root:root',
+                mode  => '0600',
+            },
+        },
+        'the edge issues the key of the domain, and a domain built onto another guest sends its names to that guest'
+    );
+
+    is_deeply( { $nginx->guest_secrets( '/bogus', 'shop.test.test', %public ) },                                      {}, 'a domain with no edge registers nothing' );
+    is_deeply( { $nginx->guest_secrets( '/bogus', 'shop.test.test', public_names => {}, edge => 'edge.test.test' ) }, {}, 'and nor does one with no public name' );
+
+    $pool->redefine( assignments => sub { return {} } );
+    like( exception { $nginx->guest_secrets( '/bogus', 'shop.test.test', %public, edge => 'edge.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the edge cannot reach stops the build' );
 };
 
 Test::NoWarnings::had_no_warnings();

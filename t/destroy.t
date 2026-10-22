@@ -265,6 +265,45 @@ subtest 'a VPN client is revoked on the server that issued it, which frees its a
     is( Trog::Bin::Destroy::revoke_vpn_client( 'other.test.test', 0 ), 0, 'a domain with no issue_from has nothing to revoke' );
 };
 
+# --- release_edge ---
+subtest 'the public names of a domain are released on its edge, which would send them to a freed address' => sub {
+    my $domain   = 'web.test.test';
+    my %config   = ( nginx => { edge => 'edge.test.test', public_names => { 'shop.test.test' => $domain } } );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? {%config} : {} } );
+
+    my ( @ran, $rc, @asked );
+    no warnings 'once';
+    local *EdgeProbe::run_cmd = sub { my ( undef, $cmd ) = @_; push( @ran, $cmd ); return $rc };
+    use warnings;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => sub { push( @asked, $_[1] ); return bless {}, 'EdgeProbe' } );
+
+    $rc = 0;
+    my ( $out, $released );
+    ($out) = capture { $released = Trog::Bin::Destroy::release_edge( $domain, 0 ) };
+    is( $released, 1, 'they are released' );
+    is_deeply( \@asked, ['edge.test.test'], 'on the edge of its nginx' );
+    is( $ran[0], "sudo -n sh -c '/root/bin/edge_client release $domain'", 'as root, by the script that registered them' );
+    like( $out, qr/\QReleased the public names of $domain on edge.test.test\E/, 'and says so' );
+
+    @ran = ();
+    capture { Trog::Bin::Destroy::release_edge( $domain, 1 ) };
+    is( scalar @ran, 0, 'a dry run sends nothing' );
+
+    is( Trog::Bin::Destroy::release_edge( 'other.test.test', 0 ), 0, 'a domain with no edge has nothing to release' );
+    my %public = %{ $config{nginx}{public_names} };
+    $config{nginx}{public_names} = {};
+    is( Trog::Bin::Destroy::release_edge( $domain, 0 ), 0, 'and a domain with an edge and no public name registered nothing' );
+    is( scalar @ran,                                    0, 'so neither sends anything' );
+    $config{nginx}{public_names} = \%public;
+
+    $fleet->redefine( guest_of => sub { return } );
+    my ( undef, $warned ) = capture { $released = Trog::Bin::Destroy::release_edge( $domain, 0 ) };
+    is( $released, 0, 'an edge that is not up releases nothing' );
+    like( $warned, qr/\Qedge.test.test is not up\E .* \Qedge_client release $domain\E/, 'and the warning says what to run there' );
+};
+
 # --- remove_runner_key ---
 #
 # The counterpart of authorize_runner_key in bin/provision.  It reads the public

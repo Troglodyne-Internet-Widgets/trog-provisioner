@@ -1421,11 +1421,9 @@ that archive, and some of its contents must stay on the machine that made them.
 
 What C<remote_files> names comes down and goes back up.  It lands under
 C<install_dir/domain> with everything else in the data directory.  If the
-service reads it from another place, the fragment must put it there:
-
-    [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns
-
-C<restore_state> does nothing in three cases:
+service reads it from another place, C<restores> must say where it goes.  The
+C<data> target then puts it there with C<restore_state>, which does nothing in
+three cases:
 
 =over 4
 
@@ -1438,8 +1436,6 @@ the directory.
 live guest from writing a partial copy over the real state.
 
 =back
-
-Call it before the service starts.
 
 A recipe whose state already lives under C<install_dir/domain> needs none of
 this.  The data target puts the state back where it came from.  So keep state

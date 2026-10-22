@@ -1,0 +1,8 @@
+[%# The data target puts back the registrations of the guests behind this
+    one.  Provisioner::Recipe::edge says why. -%]
+install -d -o root -g root -m 0755 /etc/nginx/edge.d
+rm -f /etc/nginx/sites-enabled/default
+install -o root -g root -m 0644 edge.stream.conf /etc/nginx/modules-enabled/99-edge-stream.conf
+install -o root -g root -m 0644 edge.http.conf /etc/nginx/conf.d/edge.conf
+install -o root -g root -m 0644 edge_ufw.conf /etc/ufw/applications.d/edge
+[% script_dir %]/queue_postrun_task systemctl reload nginx
