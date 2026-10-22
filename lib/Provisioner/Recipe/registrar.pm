@@ -294,7 +294,7 @@ C<LEXICON_E<lt>TYPEE<gt>_E<lt>KEYE<gt>>.
 =back
 
 Where the guest holds the zone, it returns what
-L<Provisioner::Recipe::pdns/lexicon_credentials> returns for the pdns of the
+L<Provisioner::Recipe::pdns/socket_credentials> returns for the pdns of the
 guest.  Where another guest does, it returns what
 L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
 Otherwise it returns C<configured_credentials>.
@@ -316,7 +316,7 @@ sub lexicon_credentials {
 
     if ( $self->serves_itself($domain) ) {
         my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-        return $pdns->lexicon_credentials( %{ Provisioner::Cookbook->domain_config($server)->{pdns} // {} }, domain => $domain );
+        return $pdns->socket_credentials( %{ Provisioner::Cookbook->domain_config($server)->{pdns} // {} }, domain => $domain );
     }
 
     my $guest = $self->delegated_to($domain);

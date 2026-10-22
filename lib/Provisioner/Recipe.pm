@@ -1323,19 +1323,6 @@ sub releases {
     return ();
 }
 
-=head3 %credentials = $recipe->lexicon_credentials(%opts)
-
-The credentials with which lexicon writes the records of C<$opts{domain}>.
-L<Provisioner::Recipe::registrar/lexicon_credentials> lists the keys.
-Nothing here, because a recipe has no DNS API unless it is a registrar or a
-DNS server.
-
-=cut
-
-sub lexicon_credentials {
-    return ();
-}
-
 =head3 $hv = $recipe->hv()
 
 Returns the hypervisor that this guest is built for, as given to the

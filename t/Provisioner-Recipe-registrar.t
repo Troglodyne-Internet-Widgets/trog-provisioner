@@ -45,7 +45,7 @@ sub fresh {
 my $DOMAIN = 'dns.test.test';
 
 subtest 'what pdns tells lexicon' => sub {
-    my %creds = fresh('pdns')->lexicon_credentials( api_key => 'an-api-key' );
+    my %creds = fresh('pdns')->socket_credentials( api_key => 'an-api-key' );
 
     is( $creds{type}, 'powerdns',            'the provider lexicon knows it by' );
     is( $creds{key},  'an-api-key',          'authenticating with the key the server runs with' );

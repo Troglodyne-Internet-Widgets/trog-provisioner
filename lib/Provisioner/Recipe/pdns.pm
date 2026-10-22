@@ -235,7 +235,7 @@ sub args {
     );
 }
 
-=head2 %credentials = $recipe->lexicon_credentials(%opts)
+=head2 %credentials = $recipe->socket_credentials(%opts)
 
 The credentials for the API on the unix socket of this server.  Anything on
 this guest writes a record into the zone of this server through that API.  See
@@ -249,7 +249,7 @@ gets a 404.
 
 =cut
 
-sub lexicon_credentials {
+sub socket_credentials {
     my ( $self, %opts ) = @_;
 
     # The registrar calls this as a class method, on a path where enrich does not run.
