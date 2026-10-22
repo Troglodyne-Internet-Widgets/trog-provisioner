@@ -49,24 +49,17 @@ the same object, because there is only one machine that we run on.
 
 =cut
 
-my $INSTANCE;
-
 sub new {
     my ($class) = @_;
-    return $INSTANCE //= $class->SUPER::new();
+    return Trog::Local->kept() // Trog::Local->keep( $class->SUPER::new() );
 }
 
 =head2 forget
 
-Discards the object, so the next call to C<new> makes a new one.  Tests use it.
-Returns 1.
+Discards the object, as L<Trog::Machine/keep($object), kept, forget> says, so
+the next call to C<new> makes a new one.  Tests use it.  Returns 1.
 
 =cut
-
-sub forget {
-    undef $INSTANCE;
-    return 1;
-}
 
 =head1 IDENTITY
 

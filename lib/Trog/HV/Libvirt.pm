@@ -164,7 +164,7 @@ The libvirt connection URI.  The default is C<qemu:///system>.
 
 True when the caller gave a URI, false when the URI is the default.  When it is
 false, libvirt selects its own default connection, as C<virsh> does with no
-C<-c>.  L<Trog::HV/explicit> says what callers do with it.
+C<-c>.
 
 =head2 is_local
 
@@ -172,7 +172,8 @@ True when the hypervisor is the machine that runs this code.
 
 =cut
 
-sub uri ($self) { return $self->setting('uri') }
+sub explicit ($self) { return $self->{explicit} }
+sub uri      ($self) { return $self->setting('uri') }
 
 sub is_local {
     my ($self) = @_;

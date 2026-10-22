@@ -170,9 +170,11 @@ subtest 'bin/destroy knows where to revoke' => sub {
     my $cook = Test::MockModule->new('Provisioner::Cookbook');
     $cook->redefine( domain_config => sub { return $_[1] eq 'first.test' ? { openvpnclient => { issue_from => 'vpn.test.test' } } : { openvpnclient => { cert_dir => '/bogus' } } } );
 
-    is( fresh()->issuer_of('first.test'),      'vpn.test.test',                                    'a domain with issue_from is revoked on that server' );
-    is( fresh()->issuer_of('second.test'),     undef,                                              'and one with a cert_dir nowhere' );
-    is( fresh()->revoke_command('first.test'), '/usr/local/sbin/openvpn-revoke-client first.test', 'by the script that also frees the address' );
+    my ($release) = fresh()->releases('first.test');
+    is( $release->{guest},   'vpn.test.test',                                    'a domain with issue_from is revoked on that server' );
+    is( $release->{command}, '/usr/local/sbin/openvpn-revoke-client first.test', 'by the script that also frees the address' );
+    like( $release->{stays}, qr/openvpn-revoke-client[ ]first[.]test/, 'and says what to run there when the server is not up' );
+    is_deeply( [ fresh()->releases('second.test') ], [], 'and one with a cert_dir nowhere' );
 };
 
 Test::NoWarnings::had_no_warnings();

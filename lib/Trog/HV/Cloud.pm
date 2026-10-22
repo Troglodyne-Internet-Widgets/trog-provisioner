@@ -23,8 +23,8 @@ common
     package Trog::HV::Example;
     use parent 'Trog::HV::Cloud';
 
-    # Then the backend's own: build, config_keys, describe, capacity,
-    # domain_exists, guest_names, guest_ssh_ip, create_guest, rebuild_guest,
+    # Then the backend's own: build, config_keys, describe, capacity, api,
+    # server, guest_names, guest_ssh_ip, create_guest, rebuild_guest,
     # annihilate_domain, the snapshots, preflight_checks, preflight_notes and
     # check_reachable.
 
@@ -56,6 +56,13 @@ returns once it runs again.
 =item * C<guest_ssh_ip($config)>, the address at which we reach the guest.
 
 =back
+
+It also provides C<api>, the client of its service, kept for later calls, and
+C<server($name)>, the guest called C<$name> as the service describes it, or
+nothing.  This class declares those four calls, so a backend that leaves one
+out gets an error that names it.
+
+=for Pod::Coverage api server
 
 =head1 IDENTITY
 
@@ -359,6 +366,21 @@ sub guest_mac          ( $self, @ ) { return refuse( $self, 'guest_mac' ) }
 sub nic_slots          ( $self, @ ) { return refuse( $self, 'nic_slots' ) }
 sub nic_names          ( $self, @ ) { return refuse( $self, 'nic_names' ) }
 sub has_tpm            ( $self, @ ) { return refuse( $self, 'has_tpm' ) }
+
+sub api           ( $self, @ ) { return $self->abstract('api') }
+sub server        ( $self, @ ) { return $self->abstract('server') }
+sub create_guest  ( $self, @ ) { return $self->abstract('create_guest') }
+sub rebuild_guest ( $self, @ ) { return $self->abstract('rebuild_guest') }
+
+=head2 domain_exists($name)
+
+Returns 1 if the service has a guest called C<$name>, in any state, and 0 if
+it has not.  Not only ours: an orphan sweep asks whether anything still uses a
+name, and one that somebody else created does.
+
+=cut
+
+sub domain_exists ( $self, $name ) { return defined $self->server($name) ? 1 : 0 }
 
 =head1 SEE ALSO
 

@@ -294,7 +294,7 @@ C<LEXICON_E<lt>TYPEE<gt>_E<lt>KEYE<gt>>.
 =back
 
 Where the guest holds the zone, it returns what
-L<Provisioner::Recipe::pdns/lexicon_credentials> returns for the pdns of the
+L<Provisioner::Recipe::pdns/socket_credentials> returns for the pdns of the
 guest.  Where another guest does, it returns what
 L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
 Otherwise it returns C<configured_credentials>.
@@ -316,7 +316,7 @@ sub lexicon_credentials {
 
     if ( $self->serves_itself($domain) ) {
         my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-        return $pdns->lexicon_credentials( %{ Provisioner::Cookbook->domain_config($server)->{pdns} // {} }, domain => $domain );
+        return $pdns->socket_credentials( %{ Provisioner::Cookbook->domain_config($server)->{pdns} // {} }, domain => $domain );
     }
 
     my $guest = $self->delegated_to($domain);
@@ -815,6 +815,54 @@ sub required_recipes {
     return (
         lexicon => sub { return () },
     );
+}
+
+=head2 @releases = $recipe->releases($domain)
+
+What the pdns guests that serve C<$domain> issued it, as C<releases> in
+L<Provisioner::Recipe> says.  That is the zone of C<$domain> and its token, on
+the guest that C<delegated_to> names, and the tokens of C<$domain> in each zone
+that an account names a guest the C<authority> of, one command for each such
+guest.  See L</Zones that a pdns guest holds>.  Those zones stay, because other
+guests serve names in them.  It asks about every such zone, because a token
+that is gone already is no error.  If a guest is not up, what it holds stays,
+and C<bin/provision> replaces it when C<$domain> is built again.
+
+=cut
+
+sub releases {
+    my ( $self, $domain ) = @_;
+
+    my $pdns = Provisioner::Cookbook->load('pdns');
+    my @releases;
+
+    my $authority = eval { $self->delegated_to($domain) };
+    if ( defined $authority ) {
+        push @releases, {
+            guest   => $authority,
+            command => $pdns->release_command( $authority, lc $domain ),
+            doing   => "remove the zone and the token of $domain",
+            done    => "Removed the zone and the token of $domain",
+            stays   => "the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again",
+        };
+    }
+
+    my %zones = eval { $self->configured_zones($domain) };
+    my %of;
+    foreach my $zone ( sort keys %zones ) {
+        my $guest = Provisioner::Utils::dns_name( $zones{$zone}{authority} // next );
+        push( @{ $of{$guest} }, $pdns->revoke_command( $guest, $zone, lc $domain ) );
+    }
+    foreach my $guest ( sort keys %of ) {
+        push @releases, {
+            guest   => $guest,
+            command => join( ' ; ', @{ $of{$guest} } ),
+            doing   => "remove the zone tokens of $domain",
+            done    => "Removed the zone tokens of $domain",
+            stays   => "the zone tokens of $domain stay on it.  bin/provision replaces them when $domain is built again",
+        };
+    }
+    return @releases;
 }
 
 1;

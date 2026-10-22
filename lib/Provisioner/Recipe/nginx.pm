@@ -337,20 +337,34 @@ sub guest_secrets {
 
     my %port  = $self->proxy_ports();
     my @names = $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() );
-    return Provisioner::Cookbook->load('edge')->client_secret( $edge, $domain, { tls => "$address:$port{443}", http => "$address:$port{80}" }, @names );
+    return Provisioner::Cookbook->load('edge')->client_secret( $edge, $domain, upstreams => { tls => "$address:$port{443}", http => "$address:$port{80}" }, names => \@names );
 }
 
-=head2 $edge = $recipe->edge_of($domain)
+=head2 @releases = $recipe->releases($domain)
 
-The C<edge> of the C<nginx> of C<$domain>, or undef when it has none or no
-public name.  C<bin/destroy> releases the names of C<$domain> there.
+The release of the public names of C<$domain> on its C<edge>, when it has an
+edge and a public name, as C<releases> in L<Provisioner::Recipe> says.  If the
+edge is not up, the release says to run the command there by hand before
+another guest gets the address, because the edge sends the names to whatever
+answers at it.
 
 =cut
 
-sub edge_of {
+sub releases {
     my ( $self, $domain ) = @_;
+
     my $config = Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {};
-    return %{ $config->{public_names} // {} } ? $config->{edge} : undef;
+    my $edge   = $config->{edge};
+    return if !defined $edge || !%{ $config->{public_names} // {} };
+
+    my $command = Provisioner::Cookbook->load('edge')->release_command( $edge, $domain );
+    return {
+        guest   => $edge,
+        command => $command,
+        doing   => "release the public names of $domain",
+        done    => "Released the public names of $domain",
+        stays   => "it still sends the public names of $domain to its old address.  Run $command there before another guest gets the address",
+    };
 }
 
 =head2 %opts = $recipe->enrich(%opts)

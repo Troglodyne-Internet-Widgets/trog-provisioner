@@ -523,6 +523,44 @@ sub enrich {
     return %opts;
 }
 
+=head2 %files = $recipe->client_secret($server, $client, address => $address, server => $name)
+
+The configuration that C<$server> issues for the client C<$client>, at the
+static C<$address>, as C<client_secret> in L<Provisioner::Recipe> says.
+C<$name> is the server block that the client connects to, as
+C<openvpn-client-config> takes it.  The file lands at
+F</etc/openvpn/client/CLIENT/issued.ovpn.b64>, in base64, because an issued
+secret is one line.
+
+=cut
+
+sub client_secret {
+    my ( $self, $server, $client, %opts ) = @_;
+    return (
+        "/etc/openvpn/client/$client/issued.ovpn.b64" => {
+            issue => {
+                guest   => $server,
+                command => "/usr/local/sbin/openvpn-client-config --address $opts{address} $client $opts{server} | base64 -w0",
+            },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
+=head2 $command = $recipe->release_command($server, $client)
+
+The shell command that root runs on C<$server> to revoke the certificate of
+C<$client>, which also frees its static address there:
+C<openvpn-revoke-client>.
+
+=cut
+
+sub release_command {
+    my ( $self, $server, $client ) = @_;
+    return "/usr/local/sbin/openvpn-revoke-client $client";
+}
+
 sub template_files {
     my ($self) = @_;
 

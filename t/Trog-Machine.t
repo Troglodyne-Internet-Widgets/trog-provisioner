@@ -65,6 +65,32 @@ sub rsync_for ( $machine, @get_dir ) {
     return \%got;
 }
 
+subtest 'a class keeps one object for the process, and forgets it' => sub {
+    {
+
+        package Trog::Machine::KeepsOne;
+        use parent -norequire, 'Trog::Machine';
+
+        package Trog::Machine::KeepsAnother;
+        use parent -norequire, 'Trog::Machine';
+    }
+    my $one     = Trog::Machine::KeepsOne->new( name => 'one' );
+    my $another = Trog::Machine::KeepsAnother->new( name => 'another' );
+
+    is( Trog::Machine::KeepsOne->keep($one), $one, 'keep returns what it keeps' );
+    Trog::Machine::KeepsAnother->keep($another);
+    is( Trog::Machine::KeepsOne->kept(),     $one,     'and kept returns it' );
+    is( Trog::Machine::KeepsAnother->kept(), $another, 'one for each class that keeps one' );
+
+    is( Trog::Machine::KeepsOne->forget(),   1,        'forget returns 1' );
+    is( Trog::Machine::KeepsOne->kept(),     undef,    'and the class keeps nothing then' );
+    is( Trog::Machine::KeepsAnother->kept(), $another, 'while another class keeps its own' );
+    Trog::Machine::KeepsAnother->forget();
+
+    is( $one->name,               'one', 'a machine has the name that it was given' );
+    is( Trog::Machine->new->name, undef, 'or none' );
+};
+
 subtest 'the ssh rsync is told to use' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     my $rsh = rsync_for( remote(), '/bogus/lib/deluged', "$dir/deluged" )->{built}{rsh};

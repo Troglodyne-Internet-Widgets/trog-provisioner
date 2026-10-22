@@ -425,16 +425,16 @@ sub shortfalls {
 A guest is a Linode whose label is the domain name.  Linode keeps a label unique
 within an account.
 
-=head2 linode($name)
+=head2 server($name)
 
 Returns the Linode labeled C<$name>, or nothing.  Dies when C<$name> is empty.
 
 =cut
 
-sub linode {
+sub server {
     my ( $self, $name ) = @_;
 
-    die "linode() needs a name\n" unless $name;
+    die "server() needs a name\n" unless $name;
 
     my @found = grep { $_->{label} eq $name } every_page( $self, 'get-linode-instances', { 'X-Filter' => Cpanel::JSON::XS::encode_json( { label => $name } ) } );
     return $found[0];
@@ -446,18 +446,11 @@ Returns the label of every Linode on the account, whatever built it.  An orphan
 sweep asks whether anything still uses a name, and one that somebody else
 built still does.
 
-=head2 domain_exists($name)
-
-Returns 1 if there is a Linode labeled C<$name>, in any state, and 0 if there
-is not.
-
 =cut
 
 sub guest_names ($self) {
     return map { $_->{label} } linodes($self);
 }
-
-sub domain_exists ( $self, $name ) { return defined $self->linode($name) ? 1 : 0 }
 
 =head2 guest_ssh_ip($config, $lease)
 
@@ -474,7 +467,7 @@ sub guest_ssh_ip {
 
     my $name = ref $config ? $config->param('domain') : $config;
 
-    my $linode = $self->linode($name)
+    my $linode = $self->server($name)
       or die "There is no guest called '$name' on " . $self->describe . "\n";
 
     # A private address routes only inside Linode's own network, and Linode
@@ -583,7 +576,7 @@ does not come back in C<$BUILD_TIMEOUT> seconds.
 sub rebuild_guest {
     my ( $self, $name, %spec ) = @_;
 
-    my $linode = $self->linode($name)
+    my $linode = $self->server($name)
       or die "There is no guest called '$name' to rebuild\n";
 
     my $image = $spec{image};
@@ -623,7 +616,7 @@ still does after C<$DELETE_TIMEOUT> seconds.
 sub annihilate_domain {
     my ( $self, $name ) = @_;
 
-    my $linode = $self->linode($name);
+    my $linode = $self->server($name);
     return 0 unless $linode;
 
     my @volumes = every_page( $self, 'get-linode-volumes', { linodeId => $linode->{id} } );
@@ -633,8 +626,8 @@ sub annihilate_domain {
     # Linode lists a deleted Linode for a while yet, and a caller that asks
     # again in that while is told it exists.
     my $deadline = time + $DELETE_TIMEOUT;
-    sleep $POLL while $self->linode($name) && time < $deadline;
-    die "The guest '$name' was still listed ${DELETE_TIMEOUT}s after being deleted\n" if $self->linode($name);
+    sleep $POLL while $self->server($name) && time < $deadline;
+    die "The guest '$name' was still listed ${DELETE_TIMEOUT}s after being deleted\n" if $self->server($name);
 
     warn "Kept the volume $_->{label} ($_->{id}) that was attached to $name; delete it yourself if nothing needs it\n" for @volumes;
 
@@ -683,7 +676,7 @@ again unless C<leave_down>.  Dies when there is no such guest.
 sub create_snapshot {
     my ( $self, $domain, $name, %opts ) = @_;
 
-    my $linode = $self->linode($domain)
+    my $linode = $self->server($domain)
       or die "There is no guest called '$domain' to snapshot\n";
 
     my $ok = eval {
@@ -834,9 +827,9 @@ FIX
     };
     return $self->verdict( 0, 'Could not ask ' . $self->describe . ' what it has', "$@" ) unless $asked;
 
-    my @types = $self->globals_in_use( $self->size_key );
+    my @types = Provisioner::Cookbook->globals_in_use( $self->size_key );
 
-    my @images = map { $self->image_for_distro(@$_) } $self->distros_in_use;
+    my @images = map { $self->image_for_distro(@$_) } Provisioner::Cookbook->distros_in_use;
 
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };
@@ -881,7 +874,7 @@ sub check_linode_budget {
     # and the configuration names as many as its guests do.
     my @each = map { "$_ at " . sprintf( '%.2f', $self->monthly_cost( $self->size_key => $_ ) ) } grep {
         eval { $self->monthly_cost( $self->size_key => $_ ); 1 }
-    } $self->globals_in_use( $self->size_key );
+    } Provisioner::Cookbook->globals_in_use( $self->size_key );
     my $now = sprintf( 'The account costs %.2f a month', $spend ) . ( @each ? ', and a guest more: ' . join( ', ', @each ) : q{} );
 
     return $self->verdict( 1, "$now; no monthly_budget caps it",                                             q{} ) unless $self->monthly_budget;

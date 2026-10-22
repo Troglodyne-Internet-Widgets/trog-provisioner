@@ -359,6 +359,59 @@ sub directors {
     return ( 'vm', $class->distros() );
 }
 
+=head2 @pairs = Provisioner::Cookbook->distros_in_use()
+
+The distributions and releases that the configuration builds guests of, as
+pairs of a loaded distro recipe and a release: the C<distro> of each domain's
+C<_global>, C<ubuntu> where it names none, and the C<release> there, or the one
+that recipe pins.  For a configuration with no domains yet, the
+pinned release of C<ubuntu> alone.  A preflight check that asks whether a
+hypervisor has an image asks it for each pair.
+
+=cut
+
+sub distros_in_use {
+    my ($class) = @_;
+
+    my $conf = eval { $class->configuration() } // {};
+
+    my %named;
+    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+        my $global = eval { $class->global_config( $domain, $conf ) } // {};
+        my $name   = $global->{distro}                                // 'ubuntu';
+        $named{$name}{ $global->{release} // $class->load($name)->release } = 1;
+    }
+    $named{ubuntu} = { $class->load('ubuntu')->release => 1 } unless %named;
+
+    return map {
+        my $name = $_;
+        map { [ $class->load($name), $_ ] } sort keys %{ $named{$name} }
+    } sort keys %named;
+}
+
+=head2 @values = Provisioner::Cookbook->globals_in_use($key)
+
+Every value that C<$key> takes in the C<_global> of a domain, sorted, without
+repeats.  A preflight check that asks whether a hypervisor can build what the
+guests ask for asks it for C<size_key>: the types the configuration names, and
+nothing about a type nobody uses.
+
+=cut
+
+sub globals_in_use {
+    my ( $class, $key ) = @_;
+
+    my $conf = eval { $class->configuration() } // {};
+    my %named;
+    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+        my $value = ( eval { $class->global_config( $domain, $conf ) } // {} )->{$key};
+        $named{$value} = 1 if defined $value && length $value;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- what somebody wrote, whatever it is
+    }
+
+    my @named = sort keys %named;
+    return @named;
+}
+
 =head2 distros
 
 Returns, sorted and in lower case, the distributions that have recipes.  These

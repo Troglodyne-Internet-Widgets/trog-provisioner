@@ -1270,6 +1270,82 @@ sub guest_secrets {
     return ();
 }
 
+=head3 %files = $recipe->client_secret($guest, $client, %opts)
+
+For a recipe whose guest issues something to other guests, such as a token or
+a certificate: the file that C<$guest> issues for the domain C<$client>, as an
+entry of C<guest_secrets> with C<issue>.  A recipe on the guest of C<$client>
+returns it from its own C<guest_secrets>.  C<%opts> is what the issue needs
+besides the two names, and each recipe that answers says what.  Nothing here,
+because most recipes issue nothing.
+
+=cut
+
+sub client_secret {
+    return ();
+}
+
+=head3 $command = $recipe->release_command($guest, $client)
+
+The shell command that root runs on C<$guest> to take back what
+C<client_secret> issued there for C<$client>.  Undef here, because most
+recipes issue nothing.
+
+=cut
+
+sub release_command {
+    return undef;
+}
+
+=head3 @releases = $recipe->releases($domain)
+
+What C<bin/destroy> takes back from other guests when C<$domain> goes away,
+because this recipe of C<$domain> was issued it there.  Each one is a hash:
+
+    {
+        guest   => 'vpn.example.test',
+        command => '/usr/local/sbin/openvpn-revoke-client web.example.test',
+        doing   => 'revoke the VPN certificate of web.example.test',
+        done    => 'Revoked the VPN certificate of web.example.test',
+        stays   => 'the certificate and the address of web.example.test stay on it.  Run ...',
+    }
+
+C<bin/destroy> runs C<command> as root on C<guest>.  It prints C<done> and the
+guest when the command succeeds, and C<doing> on a dry run.  When the guest is
+not up, it warns that C<stays>, so C<stays> says what is left and how to take it
+back by hand.  A recipe reads what it needs from the configuration of
+C<$domain>, so this is asked of every recipe, and one that took nothing
+returns nothing, which is the default.
+
+=cut
+
+sub releases {
+    return ();
+}
+
+=head3 $hv = $recipe->hv()
+
+Returns the hypervisor that this guest is built for, as given to the
+constructor.  Dies if the constructor got none.
+
+A recipe does not call C<Trog::HV-E<gt>new()> itself.  That puts the recipe
+layer before the machine layer in the load order, and an ordinary recipe then
+loads L<Sys::Virt>.  Nothing here loads L<Trog::HV>.  It only uses its
+interface.
+
+C<bin/new_config> gives one to every builder it makes.  C<bin/provision> and
+C<Trog::HV::Libvirt::provision_guest> give one to the builder that each makes
+itself.  There is no default, because a hypervisor chosen here is a second
+answer to a question that placement settled.
+
+=cut
+
+sub hv {
+    my ($self) = @_;
+
+    return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
+}
+
 =head3 @dirs = $recipe->datadirs()
 
 Directories under the C<install_dir> of the domain that this recipe needs.

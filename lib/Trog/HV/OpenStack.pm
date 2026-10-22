@@ -602,15 +602,6 @@ sub guest_names {
     return map { $_->{name} } grep { ref $_ } $self->api->servers();
 }
 
-=head2 domain_exists($name)
-
-Returns 1 if there is a guest called C<$name>, in any Nova state, and 0 if there
-is not.
-
-=cut
-
-sub domain_exists ( $self, $name ) { return defined $self->server($name) ? 1 : 0 }
-
 =head2 guest_ssh_ip($config, $lease)
 
 Returns the IPv4 address to reach a guest at.  C<$config> is the configuration
@@ -1059,13 +1050,13 @@ Ask the cloud what it has:
 FIX
 
     my ( @images, @no_image );
-    foreach my $pair ( $self->distros_in_use ) {
+    foreach my $pair ( Provisioner::Cookbook->distros_in_use ) {
         my $image = eval { $self->image_for_distro(@$pair) };
         $image ? push( @images, $image ) : push( @no_image, $@ );
     }
     return $self->verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
 
-    my @flavors = $self->globals_in_use( $self->size_key );
+    my @flavors = Provisioner::Cookbook->globals_in_use( $self->size_key );
     my @missing = grep {
         !eval { scalar $self->api->look_by_id_or_name( flavors => $_ ) }
     } @flavors;

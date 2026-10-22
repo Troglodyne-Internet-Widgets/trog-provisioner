@@ -484,18 +484,15 @@ sub server {
 
 =head2 guest_names
 
-=head2 domain_exists($name)
-
-Return every server in the project, whatever built it, and whether one of them
-is this guest.  Not only ours: an orphan sweep asks whether anything is still
-using a name, and one somebody else created is.
+Returns every server in the project, whatever built it.  Not only ours: an
+orphan sweep asks whether anything is still using a name, and one somebody
+else created is.
 
 =cut
 
 sub guest_names ($self) {
     return map { $_->{name} // () } $self->servers;
 }
-sub domain_exists ( $self, $name ) { return defined $self->server($name) ? 1 : 0 }
 
 # One server as the node records it, asked for by id.
 my sub detail ( $self, $name ) {

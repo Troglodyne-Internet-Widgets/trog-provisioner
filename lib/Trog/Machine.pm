@@ -106,6 +106,25 @@ sub new {
     return bless {%opts}, $class;
 }
 
+=head2 keep($object), kept, forget
+
+A class that keeps one object for the rest of the process keeps it here.
+C<keep> keeps C<$object> as the one of the class it is called on, and returns
+it.  C<kept> returns that object, or undef.  C<forget> drops it, so that the
+next C<new> makes another, and returns 1.  Call each as the class that keeps
+the object: L<Trog::HV> keeps the hypervisor that the process talks to, and
+L<Trog::Local> keeps the one object for this machine.  A class that keeps
+nothing has nothing to forget.
+
+=cut
+
+# The one object of each class that keeps one, by that class.
+my %KEPT;
+
+sub keep   ( $class, $object ) { return $KEPT{$class} = $object }
+sub kept   ($class)            { return $KEPT{$class} }
+sub forget ($class)            { delete $KEPT{$class}; return 1 }
+
 =head1 IDENTITY
 
 =head2 ssh_host, ssh_user, ssh_port, ssh_key, ssh_target
@@ -113,6 +132,11 @@ sub new {
 Where to connect, and as which user.  C<ssh_port> returns 22 when no port is
 set, as any other ssh client does.  C<ssh_target> returns C<user@host>, or only
 the host when no user is set, or undef when no host is set.
+
+=head2 name
+
+The name of this machine in the configuration that it came from, or undef
+when it has none.
 
 =head2 is_local
 
@@ -131,6 +155,7 @@ sub ssh_host ($self) { return $self->{host} }
 sub ssh_user ($self) { return $self->{user} }
 sub ssh_port ($self) { return $self->{port} // 22 }
 sub ssh_key  ($self) { return $self->{key_path} }
+sub name     ($self) { return $self->{name} }
 sub is_local { return 0 }
 
 sub ssh_target {

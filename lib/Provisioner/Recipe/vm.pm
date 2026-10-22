@@ -305,27 +305,6 @@ sub create_storage {
     );
 }
 
-=head2 $hv = $recipe->hv()
-
-Returns the hypervisor that this guest is built for, as given to the
-constructor.  Dies if the constructor got none.
-
-The caller passes it in, and the recipe does not create one.  Nothing here
-loads L<Trog::HV>, so loading a recipe does not load L<Sys::Virt>.
-
-C<bin/new_config> gives one to every builder it makes.
-C<Trog::HV::Libvirt::provision_guest> gives itself to the recipe it builds.
-There is no default, because a hypervisor chosen here is a second answer to a
-question that placement already settled.
-
-=cut
-
-sub hv {
-    my ($self) = @_;
-
-    return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
-}
-
 # The value of the option named by the key, or undef when the option is absent
 # or empty.  Config::Simple tells those two apart, and nothing here needs to.
 my sub asked ( $opts, $key ) {

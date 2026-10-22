@@ -84,6 +84,9 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 # inspection_address and secret_blocks are called by the provisioning skill's scripts, under
 # .claude/skills/, which the policy does not read.
 allow_subs = inspection_address secret_blocks check_client check_transfer_route check_reachable check_transfer_ip check_rsync check_sandbox check_fetch_sources check_config check_passwordless_sudo check_iso_builder check_libvirt check_sys_virt_in_step check_pool_writable check_cloud_resources check_cloud_quota check_linode_resources check_linode_budget check_solusvm_resources check_solusvm_quota note_stale_image note_apt_mirror note_libguestfs note_swtpm note_pool_quota note_log_destination note_plaintext_secrets Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region Trog::OpenStack::Auth::interface forget forget_sudo_passwords
+# A sub that only one subclass uses, or that two subclasses define and the class
+# above them does not.  It reads bin/ and lib/ as ProhibitUnusedDefinitions does.
+[ProhibitMisplacedMethods]
 [ProhibitPrintSTDERR]
 [InputOutput::ProhibitRepeatedPrints]
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]

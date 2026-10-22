@@ -1383,4 +1383,29 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
     is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
 };
 
+subtest 'distros_in_use: each distribution with each release a domain builds on' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $ubuntu   = Provisioner::Cookbook->load('ubuntu');
+    my $pinned   = $ubuntu->release;
+
+    $cookbook->redefine(
+        configuration => sub {
+            return {
+                _base        => { _global => { distro => 'ubuntu' } },
+                'old.test'   => {},
+                'moved.test' => { _global => { release => 'resolute' } },
+                'also.test'  => { _global => { release => 'resolute' } },
+            };
+        }
+    );
+    is_deeply(
+        [ map { [ $_->[0], $_->[1] ] } Provisioner::Cookbook->distros_in_use ],
+        [ [ $ubuntu, $pinned ], [ $ubuntu, 'resolute' ] ],
+        'the pinned release for a domain that names none, and each release that one names, once'
+    );
+
+    $cookbook->redefine( configuration => sub { return { _base => {} } } );
+    is_deeply( [ map { [ $_->[0], $_->[1] ] } Provisioner::Cookbook->distros_in_use ], [ [ $ubuntu, $pinned ] ], 'and the pinned release of ubuntu for a configuration with no domains' );
+};
+
 done_testing();

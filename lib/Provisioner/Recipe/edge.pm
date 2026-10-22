@@ -148,27 +148,27 @@ sub key_path {
     return "/etc/fail2ban/edge/$domain.key.b64";
 }
 
-=head2 %files = $recipe->client_secret($edge, $domain, \%upstreams, @names)
+=head2 %files = $recipe->client_secret($edge, $client, %opts)
 
-The key that C<$edge> issues when it registers C<@names> for C<$domain>, at
-C<key_path> of C<$domain>.  It is a file for the C<guest_secrets> of a recipe
-on the guest of C<$domain>, with C<issue> in place of C<ref>: see
-C<guest_secrets> in L<Provisioner::Recipe>.
+The key that C<$edge> issues when it registers the names of the domain
+C<$client>, at C<key_path> of C<$client>, as C<client_secret> in
+L<Provisioner::Recipe> says.  C<%opts> has
+C<< upstreams => { tls => $tls, http => $http } >> and
+C<< names => \@names >>.
 
 The command is F<scripts/edge_client> C<register>, which root runs on
-C<$edge>.  C<%upstreams> has C<tls> and C<http>, each an IPv4 address and a
-port, where C<$edge> sends TLS and plain HTTP for those names.  See
-L</Registration>.
+C<$edge>.  C<$tls> and C<$http> are each an IPv4 address and a port, where
+C<$edge> sends TLS and plain HTTP for C<@names>.  See L</Registration>.
 
 =cut
 
 sub client_secret {
-    my ( $self, $edge, $domain, $upstreams, @names ) = @_;
+    my ( $self, $edge, $client, %opts ) = @_;
     return (
-        $self->key_path($domain) => {
+        $self->key_path($client) => {
             issue => {
                 guest   => $edge,
-                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $domain, @{$upstreams}{qw{tls http}}, @names ),
+                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $client, @{ $opts{upstreams} }{qw{tls http}}, @{ $opts{names} } ),
             },
             owner => 'root:root',
             mode  => '0600',
@@ -176,16 +176,16 @@ sub client_secret {
     );
 }
 
-=head2 $command = $recipe->release_command($domain)
+=head2 $command = $recipe->release_command($edge, $client)
 
-The shell command that root runs on the edge to release the names of
-C<$domain>: F<scripts/edge_client> C<release>.  C<bin/destroy> runs it.
+The shell command that root runs on C<$edge> to release the names of
+C<$client>: F<scripts/edge_client> C<release>.
 
 =cut
 
 sub release_command {
-    my ( $self, $domain ) = @_;
-    return "$Provisioner::Vars::SCRIPT_DIR/edge_client release $domain";
+    my ( $self, $edge, $client ) = @_;
+    return "$Provisioner::Vars::SCRIPT_DIR/edge_client release $client";
 }
 
 sub template_files {
