@@ -134,7 +134,9 @@ subtest 'a backend that leaves something out is told what' => sub {
       build config_keys capacity client_module
       domain_exists annihilate_domain guest_names guest_ssh_ip
       snapshot_names snapshot_current_name create_snapshot revert_snapshot
-      prepare_host release_seed guest_volumes
+      prepare_host release_seed guest_volumes uri
+      define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image
+      create_disk lease_ip release_dhcp_lease guest_mac nic_slots nic_names has_tpm
     };
 
     {
@@ -149,12 +151,31 @@ subtest 'a backend that leaves something out is told what' => sub {
     foreach my $method (@owed) {
         my $err = exception { $half->$method('vm.test') };
         ok( $err, "$method dies" );
-        like( $err, qr/\ATrog::HV::HalfDone[ ]does[ ]not[ ]implement[ ]\Q$method\E,[ ]which[ ]every[ ]backend[ ]has[ ]to$/, 'naming the backend and what it owes' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        like( $err, qr/\ATrog::HV::HalfDone[ ]does[ ]not[ ]implement[ ]\Q$method\E,[ ]which[ ]every[ ]backend[ ]of[ ]Trog::HV[ ]has[ ]to$/, 'naming the backend and what it owes' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     }
 
     # And the two there are owe nothing.
     foreach my $backend ( Trog::HV->backends ) {
         my @missing = grep { $backend->can($_) == Trog::HV->can($_) } @owed;
+        is_deeply( \@missing, [], "$backend implements every one of them" );
+    }
+};
+
+subtest 'a cloud backend that leaves a call to its service out is told what' => sub {
+    my @owed = qw{api server create_guest rebuild_guest};
+
+    {
+
+        package Trog::HV::Cloud::HalfDone;
+        use parent -norequire, 'Trog::HV::Cloud';
+    }
+    my $half = bless {}, 'Trog::HV::Cloud::HalfDone';
+    foreach my $method (@owed) {
+        like( exception { $half->$method('vm.test') }, qr/\ATrog::HV::Cloud::HalfDone[ ]does[ ]not[ ]implement[ ]\Q$method\E,[ ]which[ ]every[ ]backend[ ]of[ ]Trog::HV::Cloud[ ]has[ ]to$/, "$method names the class that declares it" );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    }
+
+    foreach my $backend ( grep { $_->isa('Trog::HV::Cloud') } Trog::HV->backends ) {
+        my @missing = grep { $backend->can($_) == Trog::HV::Cloud->can($_) } @owed;
         is_deeply( \@missing, [], "$backend implements every one of them" );
     }
 };
@@ -1581,31 +1602,6 @@ subtest 'image_for_distro: and the image of the release a domain names' => sub {
 
 # A preflight check asks each hypervisor for an image of each pair, so a domain
 # that names a release has to be among them.
-subtest 'distros_in_use: each distribution with each release a domain builds on' => sub {
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    my $ubuntu   = Provisioner::Cookbook->load('ubuntu');
-    my $pinned   = $ubuntu->release;
-
-    $cookbook->redefine(
-        configuration => sub {
-            return {
-                _base        => { _global => { distro => 'ubuntu' } },
-                'old.test'   => {},
-                'moved.test' => { _global => { release => 'resolute' } },
-                'also.test'  => { _global => { release => 'resolute' } },
-            };
-        }
-    );
-    is_deeply(
-        [ map { [ $_->[0], $_->[1] ] } Trog::HV->distros_in_use ],
-        [ [ $ubuntu, $pinned ], [ $ubuntu, 'resolute' ] ],
-        'the pinned release for a domain that names none, and each release that one names, once'
-    );
-
-    $cookbook->redefine( configuration => sub { return { _base => {} } } );
-    is_deeply( [ map { [ $_->[0], $_->[1] ] } Trog::HV->distros_in_use ], [ [ $ubuntu, $pinned ] ], 'and the pinned release of ubuntu for a configuration with no domains' );
-};
-
 subtest 'leases are looked up by MAC, not by name' => sub {
     my $hv = fresh( uri => 'qemu+ssh://hv/system' );
 

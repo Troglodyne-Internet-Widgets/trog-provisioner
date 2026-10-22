@@ -407,7 +407,7 @@ subtest 'guests' => sub {
     add_linode( label => 'vm.test.test.other' );
     my $hv = linode_hv();
 
-    is( $hv->linode('vm.test.test')->{label}, 'vm.test.test', 'a Linode is found by its label' );
+    is( $hv->server('vm.test.test')->{label}, 'vm.test.test', 'a Linode is found by its label' );
     ok( $hv->domain_exists('vm.test.test'),    'and exists' );
     ok( !$hv->domain_exists('nope.test.test'), 'and one that is not there, does not' );
     is_deeply( [ sort $hv->guest_names ], [qw{vm.test.test vm.test.test.other}], 'every label on the account is a name in use' );
@@ -568,7 +568,7 @@ subtest 'image_for_distro' => sub {
 subtest 'check_linode_resources' => sub {
     reset_linode();
     my @distros = ( [ Test::Distro->new( ubuntu => '24.04' ), undef ] );
-    my $in_use  = Test::MockModule->new('Trog::HV');
+    my $in_use  = Test::MockModule->new('Provisioner::Cookbook');
     $in_use->redefine( distros_in_use => sub { return @distros } );
 
     my $result = linode_hv()->check_linode_resources;
@@ -585,7 +585,7 @@ subtest 'check_linode_resources' => sub {
     like( linode_hv()->check_linode_resources->{what}, qr/no[ ]image[ ]'linode\/debian99'/, 'and a release Linode has no image of' );
 
     @distros = ( [ Test::Distro->new( ubuntu => '24.04' ), undef ] );
-    my $in_config = Test::MockModule->new('Trog::HV');
+    my $in_config = Test::MockModule->new('Provisioner::Cookbook');
     $in_config->redefine( globals_in_use => sub { return ('g1-bogus') } );
     $result = linode_hv( region => 'mars-1' )->check_linode_resources;
     like( $result->{what}, qr/no[ ]region[ ]'mars-1'/, 'as is a region Linode does not have' );
@@ -603,7 +603,7 @@ subtest 'check_linode_budget' => sub {
 
     # What a guest costs is the type it names, so the check says what each type
     # the configuration names would add.
-    my $in_config = Test::MockModule->new('Trog::HV');
+    my $in_config = Test::MockModule->new('Provisioner::Cookbook');
     $in_config->redefine( globals_in_use => sub { return qw{g6-standard-2 g6-nanode-1} } );
 
     my $what = linode_hv()->check_linode_budget->{what};

@@ -113,7 +113,7 @@ subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
 
     # Getting one of these wrong otherwise fails a provision minutes in, with an
     # error from the API rather than from us.
-    my $in_config = Test::MockModule->new('Trog::HV');
+    my $in_config = Test::MockModule->new('Provisioner::Cookbook');
     $in_config->redefine( globals_in_use => sub { return ('m1.nope') } );
     my ($failed) = quietly( sub { $hv->check_cloud_resources } );
     ok !$failed->{ok}, 'and it notices a flavor a guest names that the cloud has not got';

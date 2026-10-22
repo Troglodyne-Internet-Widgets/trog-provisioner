@@ -124,6 +124,58 @@ sub packager_invocation {
     return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-overwrite --autoremove';
 }
 
+=head2 $path = $recipe->mirror_path()
+
+C</ubuntu>, the path of the archive on a mirror.  C<mirror_uri> appends it to
+a mirror named as a bare domain, which makes C<aptmirror.example.test> into a
+URL that a guest can fetch from.
+
+=head2 $uri = $recipe->mirror_uri(%opts)
+
+Takes C<mirror>, C<domain> and C<ipmap> (domain name to address).  Returns the
+mirror that this guest uses first, as a URL, or empty for none.
+
+The value of C<mirror> has two forms.  If it has a scheme, it is a URL and is
+used as written.  Use a URL for a mirror outside this installation.  Any other
+value is a domain name.  This method resolves it to the address of that domain
+from the ip pool.  A guest runs cloud-init before it has DNS, so a name is of no
+use to it.
+
+Dies on a name that has no address in the pool.  Without the error, the apt
+configuration of the guest gets C<http:///...> and fails at first boot.
+
+Returns empty when C<domain> is the mirror itself.  The usual configuration is
+one line in the C<_global> of C<_base>, which includes the mirror host.  When
+that host is built, it has nothing to fetch from yet.
+
+=cut
+
+sub mirror_uri {
+    my ( $self, %opts ) = @_;
+
+    my $domain = $opts{domain} // q{};
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $opts{mirror}, domain => $domain, ipmap => $opts{ipmap} );
+
+    return q{}                                  if $kind eq 'none';
+    return $value                               if $kind eq 'url';
+    return "http://$value" . $self->mirror_path if $kind eq 'address';
+
+    if ( $kind eq 'self' ) {
+        print "$domain is the mirror, so it is built from the archive rather than from itself.\n";
+        return q{};
+    }
+
+    my $url = 'http://' . $value . $self->mirror_path;
+    die <<"NOPE";
+No address for '$value', which $domain is configured to use as its package mirror.
+A bare name is resolved out of the ip pool, because a guest runs cloud-init before
+it has DNS -- so it has to be a domain this installation assigns an address to.
+A mirror anywhere else is named as a URL instead:
+
+    mirror: $url
+NOPE
+}
+
 =head2 $version = $recipe->release_version($release)
 
 The version of C<$release>, or of the release that C<release> pins, such as

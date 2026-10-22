@@ -166,9 +166,6 @@ must not return an undef that the caller carries somewhere else before it fails.
 
 =cut
 
-# The one hypervisor this process is talking to.
-my $INSTANCE;
-
 =head2 new(%opts)
 
 Build or return the hypervisor.
@@ -190,7 +187,8 @@ sub new {
 
     # An option that is not set is not a request for a different hypervisor,
     # so a call that passes none gets the current one.
-    return $INSTANCE if $INSTANCE && !any { $opts{$_} } keys %opts;
+    my $current = Trog::HV->kept();
+    return $current if $current && !any { $opts{$_} } keys %opts;
 
     return $class->candidate(%opts)->activate();
 }
@@ -204,8 +202,7 @@ object, so calls can chain.
 
 sub activate {
     my ($self) = @_;
-    $INSTANCE = $self;
-    return $self;
+    return Trog::HV->keep($self);
 }
 
 =head2 candidate(%opts)
@@ -414,16 +411,12 @@ sub config_value {
 
 =head2 forget()
 
-Drop the stored instance, so that the next C<new> or C<Trog::Hypervisors>
-choice makes a new one.  F<bin/provision> calls it before each guest it builds,
+Drops the hypervisor that C<new> returns, as L<Trog::Machine/keep($object),
+kept, forget> says, so that the next C<new> or C<Trog::Hypervisors> choice
+makes a new one.  F<bin/provision> calls it before each guest it builds,
 because the guests of one run can be on different hypervisors.
 
 =cut
-
-sub forget {
-    undef $INSTANCE;
-    return 1;
-}
 
 =head2 setting($name)
 
@@ -466,19 +459,6 @@ Returns the name of this hypervisor in F<hypervisors.conf>, or undef if it did
 not come from there.
 
 =cut
-
-sub name ($self) { return $self->{name} }
-
-=head2 explicit
-
-Whether somebody asked for this hypervisor, as opposed to a default choice.
-Callers read it as "somebody already decided, do not place around them".  Any
-backend can answer that, so it lives here.  At present, only a connection URI
-can take a default.
-
-=cut
-
-sub explicit ($self) { return $self->{explicit} }
 
 =head2 configured_transfer_ip, configured_transfer_port
 
@@ -636,9 +616,36 @@ guest is gone.  Never the base image, because every other guest is built on it.
 
 =cut
 
-# Declared, so the error names the class and the method that it owes.
-my sub abstract ( $self, $method ) {
-    die( ( ref($self) || $self ) . " does not implement $method, which every backend has to\n" );
+=head2 uri
+
+The address of the hypervisor, as a message names it: a libvirt connection
+URI, or the endpoint of the API of a service.
+
+=head2 The libvirt nouns
+
+C<define_domain>, C<cloudinit_iso>, C<eject_cdrom>, C<pool_path>,
+C<pool_target>, C<base_image>, C<create_disk>, C<lease_ip>,
+C<release_dhcp_lease>, C<guest_mac>, C<nic_slots>, C<nic_names> and C<has_tpm>
+are about a guest that is built from files in a storage pool.
+L<Trog::HV::Libvirt> answers them, and its documentation says what each does.
+A backend with no such thing refuses each with the reason, as
+L<Trog::HV::Cloud> does.
+
+=for Pod::Coverage define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image create_disk lease_ip release_dhcp_lease guest_mac nic_slots nic_names has_tpm
+
+=head2 $hv->abstract($method)
+
+Dies with an error that names the class of C<$hv>, C<$method>, and the class
+that declares C<$method>, which is the class that calls this.  A class
+declares a method that each of its subclasses has to provide with a sub that
+calls this, so that a subclass that leaves it out gets that error and not
+"method not found".
+
+=cut
+
+sub abstract ( $self, $method ) {
+    my ($declared) = caller;
+    die( ( ref($self) || $self ) . " does not implement $method, which every backend of $declared has to\n" );
 }
 
 sub build                 ( $self, @ ) { return abstract( $self, 'build' ) }
@@ -665,6 +672,20 @@ sub would_provision       ( $self, @ ) { return abstract( $self, 'would_provisio
 sub console_capture       ( $self, @ ) { return abstract( $self, 'console_capture' ) }
 sub console_output        ( $self, @ ) { return abstract( $self, 'console_output' ) }
 sub vnc_access            ( $self, @ ) { return abstract( $self, 'vnc_access' ) }
+sub uri                   ( $self, @ ) { return abstract( $self, 'uri' ) }
+sub define_domain         ( $self, @ ) { return abstract( $self, 'define_domain' ) }
+sub cloudinit_iso         ( $self, @ ) { return abstract( $self, 'cloudinit_iso' ) }
+sub eject_cdrom           ( $self, @ ) { return abstract( $self, 'eject_cdrom' ) }
+sub pool_path             ( $self, @ ) { return abstract( $self, 'pool_path' ) }
+sub pool_target           ( $self, @ ) { return abstract( $self, 'pool_target' ) }
+sub base_image            ( $self, @ ) { return abstract( $self, 'base_image' ) }
+sub create_disk           ( $self, @ ) { return abstract( $self, 'create_disk' ) }
+sub lease_ip              ( $self, @ ) { return abstract( $self, 'lease_ip' ) }
+sub release_dhcp_lease    ( $self, @ ) { return abstract( $self, 'release_dhcp_lease' ) }
+sub guest_mac             ( $self, @ ) { return abstract( $self, 'guest_mac' ) }
+sub nic_slots             ( $self, @ ) { return abstract( $self, 'nic_slots' ) }
+sub nic_names             ( $self, @ ) { return abstract( $self, 'nic_names' ) }
+sub has_tpm               ( $self, @ ) { return abstract( $self, 'has_tpm' ) }
 
 =head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
 
@@ -1277,57 +1298,6 @@ lp: for Launchpad.  Holding them here rather than naming an identity for the
 guest to resolve is deliberate: cloud-init would fetch them from GitHub while
 the guest boots, which delays every provision and fails when GitHub is down.
 FIX
-}
-
-=head2 @pairs = $hv->distros_in_use()
-
-The distributions and releases that the configuration builds guests of, as
-pairs of a loaded distro recipe and a release: the C<distro> of each domain's
-C<_global>, C<ubuntu> where it names none, and the C<release> there, or the one
-that recipe pins.  For a configuration with no domains yet, the
-pinned release of C<ubuntu> alone.  A preflight check that asks whether a
-hypervisor has an image asks it for each pair.
-
-=cut
-
-sub distros_in_use {
-    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
-
-    my %named;
-    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
-        my $global = eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {};
-        my $name   = $global->{distro}                                               // 'ubuntu';
-        $named{$name}{ $global->{release} // Provisioner::Cookbook->load($name)->release } = 1;
-    }
-    $named{ubuntu} = { Provisioner::Cookbook->load('ubuntu')->release => 1 } unless %named;
-
-    return map {
-        my $name = $_;
-        map { [ Provisioner::Cookbook->load($name), $_ ] } sort keys %{ $named{$name} }
-    } sort keys %named;
-}
-
-=head2 @values = $hv->globals_in_use($key)
-
-Every value that C<$key> takes in the C<_global> of a domain, sorted, without
-repeats.  A preflight check that asks whether a hypervisor can build what the
-guests ask for asks it for C<size_key>: the types the configuration names, and
-nothing about a type nobody uses.
-
-=cut
-
-sub globals_in_use {
-    my ( $class, $key ) = @_;
-
-    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
-    my %named;
-    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
-        my $value = ( eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {} )->{$key};
-        $named{$value} = 1 if defined $value && length $value;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- what somebody wrote, whatever it is
-    }
-
-    my @named = sort keys %named;
-    return @named;
 }
 
 =head2 $result = $hv->note_stale_image()
