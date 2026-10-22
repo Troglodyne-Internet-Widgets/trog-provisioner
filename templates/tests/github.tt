@@ -29,7 +29,7 @@ ok($home && -d $home, 'the account [% account %] has a home for its configuratio
 [% IF github_token %]
 # The login state, which is the whole point of installing it for an account
 # that nobody logs in as.  0600 because the token is in it.
-my $hosts = "$home/.config/gh/hosts.yml";
+my $hosts = [% IF config_dir %]'[% config_dir %]/hosts.yml'[% ELSE %]"$home/.config/gh/hosts.yml"[% END %];
 ok(-f $hosts, 'gh has login state for [% account %]');
 
 SKIP: {

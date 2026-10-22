@@ -56,6 +56,11 @@ that account's home, which is the state C<gh auth login> would write.  So
 C<gh repo clone> and C<gh api> work with nothing interactive, and
 C<gh auth setup-git> makes git send the same token over HTTPS.
 
+=item * C<config_dir> puts that file in another directory, for a login beside
+the one that the account has.  gh reads it where C<GH_CONFIG_DIR> names the
+directory.  L<Provisioner::Recipe::claude> gives its agent a bot this way, on a
+guest where the account is a person too.
+
 =back
 
 Neither is required.  A domain that names this recipe and nothing else gets the
@@ -83,7 +88,8 @@ sub args {
             github_user  => { type => 'string', description => 'The GitHub account to log in as.' },
             github_token => { type => 'string', 'x-secret'  => 1, description => 'A personal access token for that account.  It is written into the login state of the account on the guest, so it is as secret as the guest is.' },
 
-            git_protocol => { type => 'string', enum => [qw{https ssh}], default => 'https', description => 'What gh clones with.  ssh where the account has a key, which Provisioner::Recipe::git gives it; https otherwise, which authenticates with the token.' },
+            git_protocol => { type => 'string', enum    => [qw{https ssh}], default => 'https', description => 'What gh clones with.  ssh where the account has a key, which Provisioner::Recipe::git gives it; https otherwise, which authenticates with the token.' },
+            config_dir   => { type => 'string', pattern => '^/', description => 'Where the login state goes, as an absolute path, in place of .config/gh in the home of the account.  For a second login beside the one the account has, which a program reaches with GH_CONFIG_DIR.  Its parent must exist.' },
         },
     );
 }

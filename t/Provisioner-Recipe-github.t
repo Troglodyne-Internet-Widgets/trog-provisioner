@@ -129,6 +129,22 @@ subtest 'the fragment does only what it was asked for' => sub {
     like( $login, qr/getent[ ]passwd[ ]'koan'/, 'the fragment asks where the account lives' );
 };
 
+subtest 'a login in a directory of its own' => sub {
+    my $dir   = '/opt/domains/bot.test.test/.claude/gh';
+    my $login = recipe()->render( %G, github_user => 'bot', github_token => 'ghp_x', config_dir => $dir );
+
+    like( $login, qr/install[ ]-d[^\n]*'\Q$dir\E'/,                                'the directory is made' );
+    like( $login, qr/install[ ][^\n]*github\.hosts\.yml[ ]'\Q$dir\E\/hosts\.yml'/, 'and the login state goes into it' );
+    unlike( $login, qr/\.config\/gh/, 'and not into the login of the account' );
+    like( $login, qr/GH_CONFIG_DIR='\Q$dir\E'[ ]gh[ ]auth[ ]setup-git/, 'setup-git asks the same login' );
+
+    like(
+        exception { recipe()->validated( %G, github_user => 'bot', github_token => 'ghp_x', config_dir => 'relative/gh' ) },
+        qr/config_dir/,
+        'a relative directory is refused, because the account that reads it starts anywhere'
+    );
+};
+
 subtest 'what the recipes that require it ask for' => sub {
     my %koan = Provisioner::Cookbook->load( 'koan', distro => 'ubuntu' )->required_recipes(%G);
     ok( ref $koan{github} eq 'CODE', 'koan requires github' );
