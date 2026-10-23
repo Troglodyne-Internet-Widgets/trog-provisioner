@@ -294,6 +294,7 @@ if mt.conninfo(conn, "client.test.test", ip) ~= nil then error("conninfo") end
 mt.macro(conn, SMFIC_MAIL, "i", "SPFSELFTEST")
 if mt.mailfrom(conn, from) ~= nil then error("mailfrom") end
 if mt.rcptto(conn, from) ~= nil then error("rcptto") end
+if ar ~= nil and mt.header(conn, "Authentication-Results", ar) ~= nil then error("ar") end
 if mt.header(conn, "From", from) ~= nil then error("header") end
 if mt.eoh(conn) ~= nil then error("eoh") end
 if mt.eom(conn) ~= nil then error("eom") end
@@ -309,8 +310,9 @@ LUA
     close $fh or die "Cannot write $lua: $!\n";
 
     my $verdict = sub {
-        my ($ip) = @_;
-        return scalar `miltertest -s $lua -D ip=$ip -D from=postmaster\@[% domain %] 2>&1`;
+        my ( $ip, $ar ) = @_;
+        my $with = defined $ar ? "-D 'ar=$ar'" : q{};
+        return scalar `miltertest -s $lua -D ip=$ip -D from=postmaster\@[% domain %] $with 2>&1`;
     };
 
     # An address from the documentation ranges, which no SPF record allows.
@@ -326,6 +328,15 @@ LUA
         my $pass = $verdict->($own);
         like( $pass, qr/\bspf=pass\b/, "and $own, which SPF allows, passes" ) or diag $pass;
     }
+[% IF edge -%]
+
+    # The edge saw the client, so its verdict stands, and the edge is the only
+    # client whose verdict does.
+    my $trusted = $verdict->( '203.0.113.9', '[% edge %]; spf=pass smtp.mailfrom=[% domain %]' );
+    like( $trusted, qr/\bdmarc=pass\b/, 'a pass that the edge wrote decides DMARC' ) or diag $trusted;
+    my $forged = $verdict->( '203.0.113.9', 'elsewhere.test.test; spf=pass smtp.mailfrom=[% domain %]' );
+    unlike( $forged, qr/\bdmarc=pass\b/, 'and one under another name does not' ) or diag $forged;
+[% END -%]
     unlink $lua;
 };
 

@@ -24,4 +24,11 @@ relay_domains = texthash:/etc/nginx/edge.d/mail.relay_domains
 transport_maps = texthash:/etc/nginx/edge.d/mail.transport
 relay_recipient_maps = texthash:/etc/nginx/edge.d/mail.recipients
 
-[% INCLUDE "files/postfix.smtpd_restrictions.tt" %]
+[% INCLUDE "files/postfix.smtpd_restrictions.tt" WITH spf_policy = 1 %]
+
+# The SPF policy service writes its verdict as Authentication-Results under the
+# name of this guest, which the guests behind it trust.  So a header under that
+# name that a client sent is thrown away here.  Provisioner::Recipe::edge has
+# the whole account, under SPF.
+policyd-spf_time_limit = 3600
+header_checks = regexp:/etc/postfix/edge_header_checks

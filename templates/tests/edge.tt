@@ -147,6 +147,33 @@ is( ( split ' ', $pub )[1], ( split ' ', $host )[1], 'the host key that the gues
 my $clients = `postconf -h smtpd_client_restrictions 2>&1`;
 like( $clients, qr/\breject_unknown_reverse_client_hostname\b.*\breject_rbl_client\b/, 'port 25 checks the reverse DNS of a client and the RBLs' ) or diag $clients;
 
+# The SPF policy service, asked as postfix asks it on 25.  A sender in a domain
+# with no SPF record gets a verdict under the name of this guest, which the
+# guests behind it trust.
+sub spf_policy {
+    my ( $ip, $sender ) = @_;
+    my $request = join( q{}, map { "$_\n" } 'request=smtpd_access_policy', 'protocol_state=RCPT', 'protocol_name=ESMTP', "client_address=$ip", 'client_name=unknown', 'helo_name=client.nosuch.test.test', "sender=$sender", 'recipient=postmaster@[% domain %]', 'instance=spf.selftest' ) . "\n";
+    my $pid = IPC::Open2::open2( my $out, my $in, '/usr/bin/policyd-spf' );
+    print {$in} $request;
+    close $in;
+    my $answer = do { local $/; <$out> } // q{};
+    waitpid( $pid, 0 );
+    return $answer;
+}
+my $none = spf_policy( '203.0.113.9', 'someone@nosuch.test.test' );
+like( $none, qr/^action=prepend Authentication-Results: \Q[% domain %]\E;.*\bspf=/mi, 'the SPF verdict goes into the message, under the name of this guest' ) or diag $none;
+SKIP: {
+    my $spf = `dig +short TXT [% domain %] 2>/dev/null`;
+    skip( 'the SPF record of [% domain %] does not end in -all', 1 ) unless $spf =~ m/v=spf1[^"]*-all/;
+    my $fail = spf_policy( '203.0.113.9', 'someone@[% domain %]' );
+    like( $fail, qr/^action=5\d\d /mi, 'and a sender that fails SPF is refused' ) or diag $fail;
+}
+
+my $forged = `postmap -q 'Authentication-Results: [% domain %]; spf=pass' regexp:/etc/postfix/edge_header_checks 2>&1`;
+like( $forged, qr/^IGNORE/, 'a verdict under the name of this guest that a client sent is thrown away' ) or diag $forged;
+my $other = `postmap -q 'Authentication-Results: elsewhere.test.test; spf=pass' regexp:/etc/postfix/edge_header_checks 2>&1`;
+is( $other, q{}, 'and one under another name is kept' );
+
 # postfix.service is a wrapper that stays active when the instance does not
 # start, so ask the instance, and ask postfix what it makes of main.cf.
 is( system('systemctl is-active --quiet postfix@-'), 0, 'the postfix instance runs, not only its wrapper' );

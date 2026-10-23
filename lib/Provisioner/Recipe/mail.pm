@@ -189,6 +189,11 @@ login on the edge.
 A message with an empty sender, such as a bounce that this guest makes, is not
 in the domain, so it does not go through the edge.
 
+The edge checks the SPF of the mail that it relays in, because this guest sees
+only the edge as the client.  opendmarc here trusts the verdict that the edge
+writes under its own name, in C<TrustedAuthservIDs>.  See
+L<Provisioner::Recipe::edge/SPF>.
+
 =head3 What cannot come apart
 
 postfix has one C<myhostname> and one TLS certificate, and C</etc/aliases> is

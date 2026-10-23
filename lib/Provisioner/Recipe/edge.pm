@@ -122,6 +122,20 @@ edge knows who the client was.  fail2ban bans here an address that fails too
 often.  The reverse DNS of the public address of this guest must name it, or
 the receivers of what it sends will refuse it.
 
+=head2 SPF
+
+The guest behind the edge sees the edge as the client of every message that
+comes in, so only the edge can check the SPF of the sender.  The SPF policy
+service on 25, C<policyd-spf>, rejects a message whose sender fails SPF.  It
+writes any other verdict into the message as C<Authentication-Results> under
+the name of this guest.  The opendmarc of the guest trusts that name, and uses
+the verdict for DMARC.  See L<Provisioner::Recipe::mail/Sending through an
+edge guest>.
+
+A client could send such a header itself, to claim a pass.  So C<header_checks>
+throws away every C<Authentication-Results> under the name of this guest that
+a message brings in, before the policy service adds its own.
+
 =head2 Ports
 
 The stream proxy listens on C<tls_port>, and ufw forwards 443 there for every
@@ -431,6 +445,8 @@ sub template_files {
         'edge.postfix.main.tt'   => 'edge.postfix.main',
         'edge.postfix.master.tt' => 'edge.postfix.master',
         'edge.dovecot.tt'        => 'edge.dovecot.conf',
+        'edge.policyd_spf.tt'    => 'edge.policyd_spf',
+        'edge.header_checks.tt'  => 'edge.header_checks',
     );
 }
 

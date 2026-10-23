@@ -1,6 +1,9 @@
 # OpenDMARC configuration
 AuthservID mail.[% domain %]
-TrustedAuthservIDs mail.[% domain %]
+[%# The edge in front of this guest writes its SPF verdict under its own name,
+    because only the edge saw the client.  Provisioner::Recipe::edge has the
+    whole account, under SPF. -%]
+TrustedAuthservIDs mail.[% domain %][% IF edge %], [% edge %][% END %]
 
 # XXX Do not change UMask or UserID.  With a chrooted postfix, only a 0777
 # socket works, and only when opendmarc runs as the opendmarc user.
