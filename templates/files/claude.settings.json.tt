@@ -39,6 +39,23 @@
       }
     }
   },
+[% IF github_user || pr_assignee %]
+  "env": {
+[% IF github_user %]
+    "GH_CONFIG_DIR": "[% gh_config_dir %]",
+    "GIT_AUTHOR_NAME": "[% github_user %]",
+    "GIT_AUTHOR_EMAIL": "[% git_email %]",
+    "GIT_COMMITTER_NAME": "[% github_user %]",
+    "GIT_COMMITTER_EMAIL": "[% git_email %]",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"[% IF pr_assignee %],[% END %]
+[% END %]
+[% IF pr_assignee %]
+    "PERL_SLOP_ASSIGNEE": "[% pr_assignee %]"
+[% END %]
+  },
+[% END %]
   "tui": "fullscreen",
   "theme": "dark"
 }

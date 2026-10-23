@@ -13,7 +13,8 @@ t/Provisioner-Recipe-claude.t - what the claude recipe installs, and in what ord
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use File::Basename();
 use File::Find();
 use File::Path();
@@ -93,9 +94,16 @@ subtest 'where it fetches from, and what the cache keeps' => sub {
 # The rendered settings, as JSON, for a guest running these modules.
 sub settings_for {
     my (@modules) = @_;
+    return settings_with( modules => [@modules] );
+}
+
+# The rendered settings, as JSON, for a guest running this recipe with these
+# options, and only this recipe unless they name modules.
+sub settings_with {
+    my (%opts) = @_;
 
     my $dir = tempdir( CLEANUP => 1 );
-    recipe()->generate_files( $dir, %G, modules => [@modules] );
+    recipe()->generate_files( $dir, %G, modules => ['claude'], %opts );
 
     my $text = do { local ( @ARGV, $/ ) = "$dir/claude.settings.json"; <> }
       // q{};
@@ -228,6 +236,70 @@ subtest 'the memories go back where the agent reads them' => sub {
         { '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects', owner => 'someadmin:someadmin' } },
         'into .claude/projects of the domain, for the admin'
     );
+};
+
+my %BOT = ( github_user => 'bot', github_token => 'ghp_x', git_email => 'bot@test.test' );
+
+subtest 'a bot that the agent acts as' => sub {
+    my %required = recipe()->required_recipes( %G, %BOT );
+    ok( ref $required{github} eq 'CODE', 'it requires github' ) or return;
+
+    my %asked = $required{github}->( %G, %BOT );
+    is( $asked{account},     'someadmin',                               'for the admin, who owns the settings' );
+    is( $asked{github_user}, 'bot',                                     'logged in as the bot' );
+    is( $asked{config_dir},  '/opt/domains/agent.test.test/.claude/gh', 'in a directory of its own, beside the login of the admin' );
+
+    my %plain = recipe()->required_recipes(%G);
+    ok( !exists $plain{github}, 'and a domain with no bot does not require github' );
+};
+
+subtest 'half a bot is refused' => sub {
+    foreach my $field ( sort keys %BOT ) {
+        my %some = %BOT;
+        delete $some{$field};
+        like( exception { recipe()->validated( %G, %some ) }, qr/go[ ]together/, "without $field" );
+    }
+};
+
+# Each value goes into JSON and into a quoted string of the guest test.
+subtest 'a value that would need quoting is refused' => sub {
+    like( exception { recipe()->validated( %G, %BOT, github_user => 'a bot' ) },          qr/github_user/, 'a login with a blank' );
+    like( exception { recipe()->validated( %G, %BOT, git_email   => q{o'k@test.test} ) }, qr/git_email/,   'an address with a quote' );
+    like( exception { recipe()->validated( %G, %BOT, pr_assignee => 'a"b' ) },            qr/pr_assignee/, 'a reviewer with a double quote' );
+};
+
+# The environment that the settings give each command of the agent, as git
+# reads it.  Run here, because what git makes of the variables is the point.
+sub git_says {
+    my ( $env, @args ) = @_;
+    local @ENV{ keys %$env } = values %$env;
+    local $ENV{HOME} = tempdir( CLEANUP => 1 );
+    IPC::Run3::run3( [ 'git', @args ], \undef, \my $out, \my $err );
+    chomp $out;
+    return $out;
+}
+
+subtest 'the settings make each command of the agent the bot' => sub {
+    my ( $text, $conf ) = settings_with( %BOT, pr_assignee => 'reviewer' );
+    ok( $conf, 'the settings render as valid JSON' ) or diag $text;
+    my $env = $conf->{env} // {};
+
+    is( $env->{GH_CONFIG_DIR}, '/opt/domains/agent.test.test/.claude/gh', 'gh reads the login of the bot' );
+    like( git_says( $env, qw{var GIT_AUTHOR_IDENT} ),    qr/\Abot[ ]<bot\@test\.test>[ ]/, 'git commits as the bot' );
+    like( git_says( $env, qw{var GIT_COMMITTER_IDENT} ), qr/\Abot[ ]<bot\@test\.test>[ ]/, 'and as its committer' );
+    is( git_says( $env, qw{config --get url.https://github.com/.insteadOf} ), 'git@github.com:', 'and pushes over https, which the token of the bot authenticates' );
+    is( $env->{PERL_SLOP_ASSIGNEE},                                           'reviewer',        'and assigns each pull request to the reviewer' );
+
+    my ( $alone, $bot ) = settings_with(%BOT);
+    ok( $bot,                                    'a bot with no reviewer renders as valid JSON' ) or diag $alone;
+    ok( !exists $bot->{env}{PERL_SLOP_ASSIGNEE}, 'and names none' );
+
+    my ( $only, $reviewer ) = settings_with( pr_assignee => 'reviewer' );
+    ok( $reviewer, 'a reviewer with no bot renders as valid JSON' ) or diag $only;
+    is_deeply( [ keys %{ $reviewer->{env} // {} } ], ['PERL_SLOP_ASSIGNEE'], 'and names only the reviewer' );
+
+    my ( undef, $plain ) = settings_with();
+    ok( !exists $plain->{env}, 'a domain with neither gets no environment' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -14,9 +14,15 @@
 # nothing interactive.  Then setup-git makes git send the same token over
 # HTTPS.  It needs no GH_TOKEN of its own: the file below is what gh reads, and
 # a token on a command line is a token in the process table.
+[% IF config_dir %]
+install -d -o '[% account %]' -g '[% account %]' -m 0700 '[% config_dir %]' \
+    && install -o '[% account %]' -g '[% account %]' -m 0600 github.hosts.yml '[% config_dir %]/hosts.yml'
+runuser -u '[% account %]' -- env GH_CONFIG_DIR='[% config_dir %]' gh auth setup-git -h github.com
+[% ELSE %]
 home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
     install -d -o '[% account %]' -g '[% account %]' -m 0700 "$$home/.config/gh" \
     && install -o '[% account %]' -g '[% account %]' -m 0600 github.hosts.yml "$$home/.config/gh/hosts.yml"
 home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
     runuser -u '[% account %]' -- gh auth setup-git -h github.com
+[% END %]
 [% END %]

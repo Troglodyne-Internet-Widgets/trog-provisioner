@@ -22,6 +22,15 @@ use parent qw{Provisioner::Recipe};
         claude:
             rtk_version: "v0.49.0"
 
+    # Or with a GitHub bot that the agent acts as, and the reviewer of its
+    # pull requests:
+    somedomain:
+        claude:
+            github_user:  "yourname-bot"
+            github_token: "secret:github/yourname-bot/password"
+            git_email:    "bot@example.test"
+            pr_assignee:  "yourname"
+
 =head2 DESCRIPTION
 
 Install claude-code globally with C<npm>, if the guest has no C<claude> command.
@@ -70,6 +79,34 @@ skills in their F<.claude/skills>, wherever its session starts.  The admincode
 fragment queues C<claude_settings add-repos> as a postrun task, because it
 knows the C<basedir>, and this target can run after its own.
 
+=head2 A BOT FOR THE AGENT
+
+GitHub tells nobody of what they did themselves.  So a pull request that the
+agent opens with the login of the operator never reaches the inbox of the
+operator.  With C<github_user>, C<github_token> and C<git_email>, the agent acts
+as a bot of its own:
+
+=over 4
+
+=item * L<Provisioner::Recipe::github> writes the login of the bot into
+F<.claude/gh> in the directory of the domain, for the admin.  The login that the
+admin has in F<~/.config/gh> stays the login of the admin.
+
+=item * The settings give each command of the agent an C<env>.  C<GH_CONFIG_DIR>
+names that directory, the four C<GIT_AUTHOR_*> and C<GIT_COMMITTER_*> variables
+name the bot, and C<GIT_CONFIG_*> makes git reach C<git@github.com:> over https.
+So a push goes with the token of the bot through the credential helper of gh,
+and not with the ssh key of the admin.
+
+=item * C<pr_assignee> becomes C<PERL_SLOP_ASSIGNEE>, which the perl-slop plugin
+holds each C<gh pr create> of the agent to.  A pull request from the bot that is
+assigned to the operator reaches the inbox of the operator.
+
+=back
+
+A domain that runs L<Provisioner::Recipe::koan> logs its own bot in through
+C<github>, so it names none here.
+
 =head2 RTK
 
 L<rtk|https://github.com/rtk-ai/rtk> filters the output of a shell command
@@ -100,8 +137,69 @@ sub args {
                 default     => 'v0.49.0',
                 description => 'The rtk release to install, as its tag.  The .deb of that release is what goes on the guest.',
             },
+
+            # Each of these goes into the JSON of the settings and into a quoted
+            # string of the guest test, so each is held to characters that need
+            # no quoting in either.
+            github_user  => { type => 'string', pattern    => '^[A-Za-z0-9-]+$',                description => 'The GitHub account of a bot that the agent acts as.  See A BOT FOR THE AGENT.' },
+            github_token => { type => 'string', 'x-secret' => 1,                                description => 'A personal access token for that account.' },
+            git_email    => { type => 'string', pattern    => q{^[^\\s"'\\\\]+@[^\\s"'\\\\]+$}, description => 'The address that the commits of the bot carry.  GitHub links a commit to the account that has this address.' },
+            pr_assignee  => { type => 'string', pattern    => '^[A-Za-z0-9-]+$',                description => 'The login that each pull request of the agent is assigned to, as PERL_SLOP_ASSIGNEE.' },
         },
     );
+}
+
+=head2 %required = $recipe->required_recipes(%opts)
+
+C<github>, for the login of the bot, when the domain names one.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+    return if !$opts{github_user};
+
+    return (
+        github => sub {
+            my (%given) = @_;
+            return (
+                account      => $given{admin_user},
+                github_user  => $given{github_user},
+                github_token => $given{github_token},
+                config_dir   => $self->bot_config_dir(%given),
+            );
+        },
+    );
+}
+
+=head2 $dir = $recipe->bot_config_dir(%opts)
+
+Where the login of the bot goes: F<.claude/gh> in the directory of the domain.
+
+=cut
+
+sub bot_config_dir {
+    my ( $self, %opts ) = @_;
+    return "$opts{install_dir}/$opts{domain}/.claude/gh";
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<gh_config_dir>, the directory of C<bot_config_dir>, when the domain
+names a bot.  Dies when it names only some of C<github_user>, C<github_token>
+and C<git_email>.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    my $given = grep { defined $opts{$_} } qw{github_user github_token git_email};
+    die "claude: github_user, github_token and git_email go together.  Without one of them the bot cannot log in, or its commits name nobody.\n"
+      if $given && $given != 3;
+
+    $opts{gh_config_dir} = $self->bot_config_dir(%opts) if $given;
+    return %opts;
 }
 
 =head2 @hosts = $recipe->fetch_hosts()

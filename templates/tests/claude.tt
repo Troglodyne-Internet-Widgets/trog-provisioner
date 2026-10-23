@@ -71,5 +71,27 @@ SKIP: {
     my $fragment = eval { decode_json(do { local (@ARGV, $/) = $fragment_path; <> }) };
     is_deeply($conf->{autoMode}, $fragment, 'the settings carry the auto mode configuration of the domain');
 }
+[% IF github_user %]
+
+# The bot that each command of the agent acts as.  Asked of gh and git with the
+# environment that the installed settings give, because that is what the agent
+# runs with.  The token is never printed.
+SKIP: {
+    skip 'settings did not parse', 3 unless $conf;
+    my %env = %{ $conf->{env} // {} };
+
+    is($env{GH_CONFIG_DIR}, '[% gh_config_dir %]', 'the agent reads the login of the bot');
+
+    my $token = qx{runuser -u '[% admin_user %]' -- env GH_CONFIG_DIR='[% gh_config_dir %]' gh auth token 2>/dev/null};
+    chomp $token;
+    ok(length $token, 'and gh finds a token there for the admin');
+
+    # In variables first, because an @ in an address interpolates in a regex.
+    my ($bot, $email) = ('[% github_user %]', '[% git_email %]');
+    local @ENV{ keys %env } = values %env;
+    my $ident = qx{git var GIT_AUTHOR_IDENT 2>&1};
+    like($ident, qr/^\Q$bot\E[ ]<\Q$email\E>[ ]/x, 'and git commits as the bot') or diag $ident;
+}
+[% END %]
 
 done_testing();
