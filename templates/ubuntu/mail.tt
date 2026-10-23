@@ -12,11 +12,12 @@ mkdir -p /etc/opendkim/keys/[% domain %]
     unique, because each domain names the guest too.  The order of the signing
     rows does not matter, because each names only its own domain. -%]
 install -d -m 0755 /etc/opendkim/tables.d/[% domain %]
-mv TrustedHosts SigningTable KeyTable InternalHosts /etc/opendkim/tables.d/[% domain %]/
+mv TrustedHosts SigningTable KeyTable InternalHosts RemoveARFrom /etc/opendkim/tables.d/[% domain %]/
 cat /etc/opendkim/tables.d/*/SigningTable > /etc/opendkim/SigningTable
 cat /etc/opendkim/tables.d/*/KeyTable > /etc/opendkim/KeyTable
 sort -u /etc/opendkim/tables.d/*/TrustedHosts > /etc/opendkim/TrustedHosts
 sort -u /etc/opendkim/tables.d/*/InternalHosts > /etc/opendkim/InternalHosts
+sort -u /etc/opendkim/tables.d/*/RemoveARFrom > /etc/opendkim/RemoveARFrom
 # The signing key that the last guest used, or a new one.  The data target
 # restores the key of this domain before this target runs.  If there is no
 # key, make one.

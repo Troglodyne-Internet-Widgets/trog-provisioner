@@ -74,6 +74,16 @@ C<.dovecot.sieve> and compiles it with sievec.
 Give each password as a C<secret:> reference, not in the clear.  See
 L<Trog::Secrets>.
 
+=head3 Who may say that a message passed
+
+opendmarc decides DMARC from the C<Authentication-Results> under the names it
+trusts: C<mail.DOMAIN>, and the edge of the domain if it has one.  A message
+can carry such a header from anywhere, and a client could write a pass of its
+own.  So opendkim, which runs before opendmarc, removes every
+C<Authentication-Results> under a name in F</etc/opendkim/RemoveARFrom>, which
+lists the C<mail.DOMAIN> of each domain on the guest.  The edge removes the ones
+under its own name.  See L<Provisioner::Recipe::edge/SPF>.
+
 =head3 Two domains on one guest
 
 postfix, opendkim and opendmarc each keep their configuration in a single file
@@ -190,8 +200,8 @@ A message with an empty sender, such as a bounce that this guest makes, is not
 in the domain, so it does not go through the edge.
 
 The edge checks the SPF of the mail that it relays in, because this guest sees
-only the edge as the client.  opendmarc here trusts the verdict that the edge
-writes under its own name, in C<TrustedAuthservIDs>.  See
+only the edge as the client.  opendmarc here trusts the verdict that the
+opendmarc of the edge writes under its name, in C<TrustedAuthservIDs>.  See
 L<Provisioner::Recipe::edge/SPF>.
 
 =head3 What cannot come apart
@@ -375,6 +385,7 @@ sub template_files {
         'mail.opendkim-signingtable.tt'  => 'SigningTable',
         'mail.opendkim-keytable.tt'      => 'KeyTable',
         'mail.opendkim-internalhosts.tt' => 'InternalHosts',
+        'mail.opendkim-removearfrom.tt'  => 'RemoveARFrom',
         'mail.opendmarc.tt'              => 'opendmarc.conf',
         'mail.opendmarc-ignorehosts.tt'  => 'ignore.hosts',
         'mail.postfix.master.tt'         => 'master.cf',

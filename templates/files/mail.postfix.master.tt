@@ -117,6 +117,9 @@ smtp-amavis unix -      -       n     -       2  smtp
   -o max_use=20
 
 # Also amavis.  XXX This probably has more settings than it needs.
+# no_milters, because the milters judged and signed the message when it first
+# came in.  A second pass of opendkim would remove the verdict that opendmarc
+# wrote then.
 127.0.0.1:10025 inet n  -       n     -       -  smtpd
   -o content_filter=
   -o local_recipient_maps=
@@ -135,5 +138,5 @@ smtp-amavis unix -      -       n     -       2  smtp
   -o smtpd_hard_error_limit=1000
   -o smtpd_client_connection_count_limit=0
   -o smtpd_client_connection_rate_limit=0
-  -o receive_override_options=no_header_body_checks,no_unknown_recipient_checks
+  -o receive_override_options=no_header_body_checks,no_unknown_recipient_checks,no_milters
 

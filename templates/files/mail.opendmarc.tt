@@ -17,7 +17,6 @@ RejectFailures true
 FailureReports true
 Syslog true
 SyslogFacility mail
-HistoryFile /var/log/opendmarc.log
 
 FailureReportsSentBy postmaster@[% domain %]
 FailureReportsBcc postmaster@[% domain %]
