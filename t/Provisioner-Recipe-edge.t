@@ -54,6 +54,37 @@ subtest 'bin/destroy releases them by the same script' => sub {
     like( $revocation{stays}, qr/Run[ ]\Q$revocation{command}\E[ ]there/, 'and an edge that is not up is told the same command' );
 };
 
+subtest 'a mail guest gets a login on the relay, and loses it' => sub {
+    my %grant = ( recipe => 'edge', guest => 'edge.test.test', client => 'web.test.test', service => 'mail' );
+    is_deeply(
+        { $edge->issue_grant( \%grant ) },
+        {
+            '/etc/postfix/edge/web.test.test.password' => {
+                issue => { guest => 'edge.test.test', command => '/root/bin/edge_client register-mail web.test.test' },
+                owner => 'root:root',
+                mode  => '0600',
+            },
+        },
+        'edge_client registers the login, and the password lands where the mail recipe reads it'
+    );
+    my %revocation = $edge->revoke_grant( \%grant );
+    is( $revocation{command}, '/root/bin/edge_client release-mail web.test.test', 'and bin/destroy removes it, leaving the names alone' );
+};
+
+subtest 'the relay listens at the address where the guests reach the edge, on its port' => sub {
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
+    my %opts = $edge->enrich( domain => 'edge.test.test' );
+    is( $opts{relay_address}, '192.0.2.5', 'the relay binds the address in the pool' );
+
+    my %port;
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $port{$domain} // {} } );
+    $port{'edge.test.test'} = { edge => { relay_port => 3587 } };
+    is( $edge->relay_port_of('edge.test.test'),  3587, 'the port that the edge sets' );
+    is( $edge->relay_port_of('other.test.test'), 2587, 'or the default' );
+};
+
 subtest 'the guests reach the edge through its tunnel when it has one' => sub {
     my %held;
     my $pool = Test::MockModule->new('Provisioner::IPPool');

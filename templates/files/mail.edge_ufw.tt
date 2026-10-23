@@ -1,0 +1,6 @@
+[%# Outbound, the relay of the edge.  setup-ufw-rules issues "allow out" for
+    every profile, and opens the port inbound too, where nothing listens. -%]
+[mail-edge-relay]
+title=Edge relay
+description=The relay of the edge that the mail of this guest goes out through
+ports=[% edge_relay.port %]/tcp

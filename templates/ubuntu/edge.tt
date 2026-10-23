@@ -14,4 +14,20 @@ install -o root -g root -m 0644 edge.sshd.conf /etc/ssh/sshd_config.d/edge-bans.
 install -d -o root -g root -m 0700 /var/lib/edge-bans
 install -d -o root -g root -m 0750 /etc/ufw/after.init.d
 install -o root -g root -m 0750 edge.bans /etc/ufw/after.init.d/edge-bans
+[%# The relay for the mail of the guests.  configd makes main.cf and
+    master.cf from these fragments.  Provisioner::Recipe::edge has the whole
+    account, under Mail out. -%]
+install -d -m 0755 -o root -g root /etc/postfix/main.cf.d /etc/postfix/master.cf.d
+install -m 0644 -o root -g root edge.postfix.main /etc/postfix/main.cf.d/30-edge
+install -m 0600 -o root -g root edge.postfix.master /etc/postfix/master.cf.d/30-edge
+install -m 0644 -o root -g root edge.dovecot.conf /etc/dovecot/dovecot.conf
+test -e /etc/nginx/edge.d/mail.passwd || install -m 0640 -o root -g dovecot /dev/null /etc/nginx/edge.d/mail.passwd
+test -e /etc/nginx/edge.d/mail.senders || install -m 0644 -o root -g root /dev/null /etc/nginx/edge.d/mail.senders
+doveconf -n > /dev/null
+[%# Where the guest test of mail sends its message, so that a build sends
+    nothing to the internet. -%]
+grep -q '^relay-selftest:' /etc/aliases || printf '%s\n' 'relay-selftest: /dev/null' >> /etc/aliases
+newaliases
+[% script_dir %]/queue_postrun_task systemctl restart dovecot
+[% script_dir %]/queue_postrun_task systemctl restart postfix
 [% script_dir %]/queue_postrun_task systemctl reload nginx

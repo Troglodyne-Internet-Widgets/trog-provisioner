@@ -12,6 +12,7 @@ use Fcntl          qw{:flock};
 use File::Basename ();
 use File::Temp     ();
 use IPC::Open3     ();
+use Crypt::PRNG    ();
 use List::Util     qw{any};
 use MIME::Base64   ();
 use Time::HiRes    ();
@@ -22,6 +23,8 @@ use Time::HiRes    ();
 
     edge_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME [NAME ...]
     edge_client release DOMAIN
+    edge_client register-mail DOMAIN
+    edge_client release-mail DOMAIN
 
 =head2 DESCRIPTION
 
@@ -45,6 +48,14 @@ is the address of the guest.  See F<scripts/edge_ban>.
 C<release> removes everything that DOMAIN registered, its key included.  Any of
 it can be gone already.
 
+C<register-mail> lets the guest of DOMAIN send its mail out through the relay
+of this guest.  It makes a new password for the login DOMAIN, keeps only its
+hash, and prints the password on one line.  The relay takes mail from that
+login only with a sender in DOMAIN.  dovecot makes the hash, with its
+C<ARGON2ID> scheme.  It replaces what DOMAIN registered for
+mail before.  C<release-mail> removes the login.  See
+L<Provisioner::Recipe::edge/Mail out>.
+
 Each one waits up to a minute for another C<register> or C<release> to
 finish, and then gives up and says which file is locked.
 
@@ -55,6 +66,8 @@ with another status.
 
 my $USAGE = "usage: edge_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME [NAME ...]
 " . "       edge_client release DOMAIN
+" . "       edge_client register-mail DOMAIN
+" . "       edge_client release-mail DOMAIN
 ";
 
 our $EDGE_D = '/etc/nginx/edge.d';
@@ -82,11 +95,14 @@ sub upstream {
 # no shell reads it.  Answers the output and whether it succeeded.  The output
 # holds its standard error as well, so that nothing but the key reaches the
 # output of this script: bin/provision reads it over ssh on a pty, which joins
-# the two streams.
+# the two streams.  A hash first gives the command its standard input, as
+# { input => $text }.
 sub run {
     my (@command) = @_;
+    my $opts = ref $command[0] eq 'HASH' ? shift @command : {};
 
     my $pid = IPC::Open3::open3( my $in, my $out, undef, @command );
+    print {$in} $opts->{input} // q{};
     close $in or die "Could not close the input of @command: $!\n";
     my $output = do { local $/ = undef; <$out> }
       // q{};
@@ -112,9 +128,10 @@ sub read_file {
 }
 
 # Replaces $file with $content, through a file beside it, so that nginx never
-# reads half of it, or removes $file when $content is undef.
+# reads half of it, or removes $file when $content is undef.  The file is 0644,
+# or $mode and the group $group.
 sub write_file {
-    my ( $file, $content ) = @_;
+    my ( $file, $content, $mode, $group ) = @_;
 
     if ( !defined $content ) {
         unlink $file or $!{ENOENT} or die "Cannot remove $file: $!\n";
@@ -128,7 +145,15 @@ sub write_file {
     umask $umask;
     $opened or die "Cannot write $file.new: $!\n";
     print {$fh} $content;
-    close $fh                    or die "Cannot write $file.new: $!\n";
+    close $fh or die "Cannot write $file.new: $!\n";
+
+    if ( defined $mode ) {
+        chmod( $mode, "$file.new" ) or die "Cannot chmod $file.new: $!\n";
+    }
+    if ( defined $group ) {
+        my $gid = getgrnam($group) // die "There is no group $group for $file\n";
+        chown( -1, $gid, "$file.new" ) or die "Cannot chown $file.new: $!\n";
+    }
     rename( "$file.new", $file ) or die "Cannot replace $file: $!\n";
     return;
 }
@@ -139,6 +164,78 @@ sub write_authorized_keys {
     my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort glob("$EDGE_D/*.ban.pub");
     write_file( "$EDGE_D/authorized_keys.root", join( q{}, @lines ) );
     return;
+}
+
+# The files of the mail login of $domain: its hash, and the senders it owns.
+sub mail_files_of {
+    my ($domain) = @_;
+    return ( passwd => "$EDGE_D/$domain.mail.passwd", senders => "$EDGE_D/$domain.mail.senders" );
+}
+
+# The group that dovecot reads the hashes as.
+our $DOVECOT_GROUP = 'dovecot';
+
+# The logins and senders of every domain, in the two files that dovecot and
+# postfix read.
+sub write_mail_tables {
+    my %all = ( passwd => 'mail.passwd', senders => 'mail.senders' );
+    foreach my $kind ( sort keys %all ) {
+        my $content = join( q{}, map { read_file($_) // q{} } sort glob("$EDGE_D/*.mail.$kind") );
+        write_file( "$EDGE_D/$all{$kind}", $content, $kind eq 'passwd' ? ( oct 640, $DOVECOT_GROUP ) : () );
+    }
+    return;
+}
+
+# The hash of $password that dovecot reads, made by dovecot itself, because the
+# CryptX of the system perl is too old for Argon2.  setsid, because doveadm
+# reads a password from the terminal when it has one, and bin/provision runs
+# this on a pty.  It asks twice, so it gets the password twice.
+sub hash_password {
+    my ($password) = @_;
+    my ( $hash, $ok ) = run( { input => "$password\n$password\n" }, qw{setsid --wait doveadm pw -s ARGON2ID} );
+    die "doveadm could not hash the password: $hash\n" unless $ok && $hash =~ m/\A(\{ARGON2ID\}\S+)\s*\z/;
+    return $1;
+}
+
+sub reload_postfix {
+    my ( $said, $ok ) = run(qw{systemctl reload postfix});
+    die "postfix did not reload: $said\n" unless $ok;
+    return;
+}
+
+sub register_mail {
+    my ($domain) = @_;
+
+    my $lock     = lock_edge();
+    my %file     = mail_files_of($domain);
+    my $password = Crypt::PRNG::random_bytes_hex(24);
+
+    write_file( $file{passwd}, "$domain:" . hash_password($password) . "\n", oct 600 );
+    write_file( $file{senders}, "\@$domain $domain\n" );
+    write_mail_tables();
+    reload_postfix();
+
+    print "$password\n";
+    close $lock or die "Cannot unlock $EDGE_D: $!\n";
+    return 0;
+}
+
+sub release_mail {
+    my ($domain) = @_;
+
+    my $lock = lock_edge();
+    my %file = mail_files_of($domain);
+    write_file( $_, undef ) foreach values %file;
+    write_mail_tables();
+
+    # A postfix that is not up reads the tables when it starts.
+    my $err = do {
+        local $@;
+        eval { reload_postfix(); 1 } ? undef : $@;
+    };
+    warn $err if defined $err;
+    close $lock or die "Cannot unlock $EDGE_D: $!\n";
+    return 0;
 }
 
 # Held until the caller closes it, so that two guests that register at one
@@ -240,7 +337,9 @@ sub main {
         die $USAGE if any { !dns_name($_) } @names;
         return register( $domain, $tls, $http, @names );
     }
-    return release($domain) if $command eq 'release' && !@args;
+    return release($domain)       if $command eq 'release'       && !@args;
+    return register_mail($domain) if $command eq 'register-mail' && !@args;
+    return release_mail($domain)  if $command eq 'release-mail'  && !@args;
     die $USAGE;
 }
 

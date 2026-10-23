@@ -18,7 +18,9 @@ use URI();
 # A static check cannot see these used.  The dispatch table below names the
 # Crypt::PK classes as strings, and the rest are called by their full names.
 ## no critic (ProhibitUnusedImports)
+use Crypt::KeyDerivation();
 use Crypt::PK::Ed25519();
+use Crypt::PRNG();
 use Net::SSH::Perl::Key();
 use File::Slurper();
 use File::Slurper::Temp();
@@ -179,6 +181,31 @@ sub qualify_address {
     return $value if Data::Validate::Email::is_email($value);
     return $value unless $domain;
     return "$value\@$domain";
+}
+
+=head3 dovecot_password_hash($password)
+
+The Argon2id hash of C<$password>, in the form that dovecot reads as its
+C<ARGON2ID> scheme, with that scheme in front:
+
+    {ARGON2ID}$argon2id$v=19$m=65536,t=3,p=1$SALT$HASH
+
+The costs are the ones C<doveadm pw -s ARGON2ID> uses, and the salt is 16
+random bytes, so each call gives a different hash of the same password.
+C<doveadm pw -t> verifies it.
+
+=cut
+
+sub dovecot_password_hash {
+    my ($password) = @_;
+    my ( $time, $memory, $lanes ) = ( 3, 65536, 1 );
+
+    my $salt = Crypt::PRNG::random_bytes(16);
+    my $hash = Crypt::KeyDerivation::argon2_pbkdf( 'argon2id', $password, $salt, $time, $memory, $lanes, 32 );
+
+    # The PHC string format: base64 with no padding.
+    my ( $b64_salt, $b64_hash ) = map { encode_base64( $_, q{} ) =~ s/=+\z//r } $salt, $hash;
+    return "{ARGON2ID}\$argon2id\$v=19\$m=$memory,t=$time,p=$lanes\$$b64_salt\$$b64_hash";
 }
 
 =head3 host_of($url)

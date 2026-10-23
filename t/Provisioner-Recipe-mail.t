@@ -14,7 +14,8 @@ t/Provisioner-Recipe-mail.t - what the mail recipe accepts for its relay, and th
 
 use Test::More;
 use Test::NoWarnings;
-use Test::Fatal qw{exception};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
 
 use FindBin::libs;
 
@@ -57,6 +58,32 @@ subtest 'the catchall is an account of the domain it catches for' => sub {
     my @field = split /:/, $catchall[0] // q{};
     is( $field[0], 'catchall@mail.test.test',       'under the domain' );
     is( $field[5], '/mail/mail.test.test/catchall', 'with its mailbox there too' );
+
+    my ($someuser) = grep { /^someuser\@/ } split /\n/, $passwd;
+    like( ( split /:/, $someuser // q{} )[1], qr/\A\{ARGON2ID\}\$argon2id\$/, 'an account with a password gets the Argon2id hash of it, which dovecot reads' );
+};
+
+subtest 'a domain with an edge sends its mail through the relay there' => sub {
+    is_deeply(
+        [ $recipe->grants( 'mail.test.test', edge => 'edge.test.test' ) ],
+        [ { recipe => 'edge', guest => 'edge.test.test', client => 'mail.test.test', service => 'mail' } ],
+        'the edge issues it a login on its relay'
+    );
+    is_deeply( [ $recipe->grants('mail.test.test') ], [], 'and a domain with no edge holds none' );
+
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { return {} } );
+
+    my %opts = $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test' ) );
+    is_deeply( $opts{edge_relay}, { address => '192.0.2.5', port => 2587, password => '/etc/postfix/edge/mail.test.test.password' }, 'at the address where the guests reach the edge, on its relay port, with the password that it issued' );
+
+    like(
+        exception { $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test', relay => { host => 'relay.test.test', port => 25 } ) ) },
+        qr/both[ ]a[ ]relay[ ]and[ ]an[ ]edge/,
+        'a relay and an edge together are refused, because they disagree about where the mail goes'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();

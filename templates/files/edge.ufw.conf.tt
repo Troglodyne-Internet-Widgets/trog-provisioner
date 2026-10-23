@@ -14,3 +14,16 @@ ports=[% tls_port %]/tcp
 title=Edge upstreams
 description=The ports of the guests behind this edge
 ports=8080,8443/tcp
+
+[%# Inbound, the relay for the guests, which postfix binds only to the address
+    where they reach this guest.  Outbound, port 25, where the relay delivers
+    to the internet.  setup-ufw-rules opens each port of a profile both ways. -%]
+[edge-relay]
+title=Edge relay
+description=The relay that the guests behind this edge send their mail through
+ports=[% relay_port %]/tcp
+
+[edge-smtp]
+title=Edge SMTP
+description=Where the relay delivers mail
+ports=25/tcp

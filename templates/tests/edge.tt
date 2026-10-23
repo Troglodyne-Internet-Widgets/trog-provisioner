@@ -5,6 +5,7 @@ use Test::More;
 use IO::Socket::INET;
 use IO::Select;
 use MIME::Base64 ();
+use IPC::Open2 ();
 
 my $client = '[% script_dir %]/edge_client';
 my $domain = 'edge-selftest.test.test';
@@ -42,6 +43,28 @@ sub status {
     my ( $name, $port ) = @_;
     my $scheme = $port == [% tls_port %] ? 'https' : 'http';
     return `curl -sk --max-time 5 -o /dev/null -w '%{http_code}' --resolve '$name:$port:127.0.0.1' '$scheme://$name:$port/' 2>/dev/null` || '000';
+}
+
+# Each command of an SMTP session with the relay over STARTTLS, and the reply of
+# the relay to it.
+sub smtp_session {
+    my (@commands) = @_;
+    my $pid = IPC::Open2::open2( my $out, my $in, qw{openssl s_client -quiet -crlf -starttls smtp -connect [% relay_address %]:[% relay_port %]} );
+    my @replies;
+    foreach my $command (@commands) {
+        print {$in} "$command\n";
+        $in->flush;
+        my $reply = q{};
+        while ( IO::Select->new($out)->can_read(10) ) {
+            my $got = sysread( $out, my $buf, 4096 ) or last;
+            $reply .= $buf;
+            last if $reply =~ m/^\d{3} [^\n]*\n\z/m;
+        }
+        push @replies, $reply;
+    }
+    close $in;
+    waitpid( $pid, 0 );
+    return \@replies;
 }
 
 # A reload starts new workers, which take a moment to answer.
@@ -118,6 +141,49 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
 my $host = `ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key 2>&1`;
 my $pub  = do { local ( @ARGV, $/ ) = '/etc/ssh/ssh_host_ed25519_key.pub'; <> } // '';
 is( ( split ' ', $pub )[1], ( split ' ', $host )[1], 'the host key that the guests pin is the one that sshd has' );
+
+# postfix.service is a wrapper that stays active when the instance does not
+# start, so ask the instance, and ask postfix what it makes of main.cf.
+is( system('systemctl is-active --quiet postfix@-'), 0, 'the postfix instance runs, not only its wrapper' );
+my $postfix_check = `postfix check 2>&1`;
+unlike( $postfix_check, qr/^(?:postfix: )?(?:fatal|error):/mi, 'postfix accepts its configuration' ) or diag $postfix_check;
+
+subtest 'a guest sends its mail through the relay, as its own domain only' => sub {
+    my $password = `$client register-mail $domain 2>&1`;
+    is( $?, 0, 'a guest registers for mail' ) or diag $password;
+    chomp $password;
+    like( $password, qr/\A[0-9a-f]{48}\z/, 'and gets its password on one line' );
+
+    my $auth = `doveadm auth test '$domain' '$password' 2>&1`;
+    like( $auth, qr/auth succeeded/, 'dovecot takes the login' ) or diag $auth;
+    $auth = `doveadm auth test '$domain' wrong 2>&1`;
+    unlike( $auth, qr/auth succeeded/, 'and not with another password' );
+    $auth = `doveadm auth test root '$password' 2>&1`;
+    unlike( $auth, qr/auth succeeded/, 'and knows no account of this guest' );
+
+    my $listen = `ss -Hlnt 'sport = :[% relay_port %]' 2>&1`;
+    like( $listen, qr/\Q[% relay_address %]:[% relay_port %]\E/, 'the relay listens where the guests reach this guest' ) or diag $listen;
+    unlike( $listen, qr/(?:0[.]0[.]0[.]0|\*):[% relay_port %]/, 'and not on every address' );
+
+    my $smtp = smtp_session(
+        "EHLO selftest.test.test",
+        'AUTH PLAIN ' . MIME::Base64::encode_base64( "\0$domain\0$password", q{} ),
+        "MAIL FROM:<someone\@$domain>",
+        'RCPT TO:<relay-selftest@[% domain %]>',
+        'RSET',
+        'MAIL FROM:<someone@other.test.test>',
+        'RCPT TO:<relay-selftest@[% domain %]>',
+        'QUIT',
+    );
+    like( $smtp->[1], qr/^235 /m, 'the relay takes the login over TLS' ) or diag explain $smtp;
+    like( $smtp->[3], qr/^250 /m, 'and a sender in its domain' )          or diag explain $smtp;
+    like( $smtp->[6], qr/^553 /m, 'and refuses a sender in another domain' ) or diag explain $smtp;
+
+    my $released = `$client release-mail $domain 2>&1`;
+    is( $?, 0, 'a guest releases its login' ) or diag $released;
+    $auth = `doveadm auth test '$domain' '$password' 2>&1`;
+    unlike( $auth, qr/auth succeeded/, 'and dovecot takes it no more' );
+};
 
 my $released = `$client release $domain 2>&1`;
 is( $?, 0, 'a guest releases its names' ) or diag $released;

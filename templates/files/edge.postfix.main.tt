@@ -1,0 +1,18 @@
+# main.cf for the relay of the edge, as a fragment.  configd merges every file
+# in /etc/postfix/main.cf.d when postfix starts or reloads.
+# Provisioner::Recipe::edge has the whole account, under Mail out.
+#
+# These comments do not go into the generated main.cf.  configd joins a list
+# parameter such as inet_interfaces or mydestination with the one of the
+# package, so this leaves them as the package sets them.
+myhostname = [% domain %]
+
+# dovecot checks the logins of the guests, at the socket that it makes in the
+# spool of postfix.
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+
+smtpd_tls_cert_file = /etc/ssl/certs/[% domain %].pem
+smtpd_tls_key_file = /etc/ssl/private/[% domain %].pem
+smtpd_tls_security_level = may
+smtp_tls_security_level = may
