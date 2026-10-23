@@ -11,6 +11,7 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use Provisioner::Cookbook();
+use Provisioner::IPPool();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::mail
@@ -177,7 +178,9 @@ and not straight to the internet.  This is for a guest that cannot send on port
 C<relay>, and the build stops when both are set.
 
 When this domain is built, the edge issues it a password for a login of its
-own, as a grant.  See L<Provisioner::Recipe::edge/Mail out>.  This recipe puts
+own, as a grant, and relays to this guest the mail of the domain that comes
+in from the internet.  See L<Provisioner::Recipe::edge/Mail out> and
+L<Provisioner::Recipe::edge/Mail in>.  This recipe puts
 the password in the C<sasl_passwd> table of the domain, which postfix uses for
 a sender in this domain.  It sends to the relay only over TLS, and the relay
 takes from this login only a sender in this domain.  C<bin/destroy> removes the
@@ -326,6 +329,26 @@ sub grants {
     my ( $self, $domain, %opts ) = @_;
     return () unless defined $opts{edge};
     return { recipe => 'edge', guest => $opts{edge}, client => $domain, service => 'mail' };
+}
+
+=head2 %terms = $recipe->grant_terms($grant, %opts)
+
+The address of the guest of the client of C<$grant>, where the edge relays the
+mail of the domain that comes in from the internet.  See
+L<Provisioner::Recipe::edge/Mail in>.
+
+Dies when that guest has no address in the address pool.
+
+=cut
+
+sub grant_terms {
+    my ( $self, $grant, %opts ) = @_;
+    my $domain = $grant->{client};
+
+    my ( $guest, $address ) = Provisioner::IPPool::guest_address($domain);
+    die "mail: $grant->{guest} relays the mail of $domain to the address of $guest.  $guest has no address in " . Provisioner::IPPool::db_path() . ".\n"
+      unless defined $address;
+    return ( address => $address );
 }
 
 sub template_files {

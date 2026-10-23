@@ -16,3 +16,12 @@ smtpd_tls_cert_file = /etc/ssl/certs/[% domain %].pem
 smtpd_tls_key_file = /etc/ssl/private/[% domain %].pem
 smtpd_tls_security_level = may
 smtp_tls_security_level = may
+
+# The mail that comes in from the internet for each domain that registered,
+# relayed to its guest.  edge_client writes these tables.  Provisioner::Recipe::edge
+# has the whole account, under Mail in.
+relay_domains = texthash:/etc/nginx/edge.d/mail.relay_domains
+transport_maps = texthash:/etc/nginx/edge.d/mail.transport
+relay_recipient_maps = texthash:/etc/nginx/edge.d/mail.recipients
+
+[% INCLUDE "files/postfix.smtpd_restrictions.tt" %]
