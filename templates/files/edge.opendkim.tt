@@ -1,0 +1,15 @@
+# opendkim on the edge verifies, and signs nothing: the guests sign their own
+# mail.  It removes every Authentication-Results under the name of this guest
+# that a client sent, before opendmarc reads the message, because the guests
+# behind the edge trust that name.  Provisioner::Recipe::edge has the whole
+# account, under SPF.
+Mode                    v
+AuthservID              [% domain %]
+RemoveARFrom            [% domain %]
+RemoveARAll             yes
+Syslog                  yes
+UserID                  opendkim:opendkim
+UMask                   000
+Socket                  local:/var/spool/postfix/opendkim/opendkim.sock
+PidFile                 /run/opendkim/opendkim.pid
+TrustAnchorFile         /usr/share/dns/root.key

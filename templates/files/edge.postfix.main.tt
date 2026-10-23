@@ -26,9 +26,10 @@ relay_recipient_maps = texthash:/etc/nginx/edge.d/mail.recipients
 
 [% INCLUDE "files/postfix.smtpd_restrictions.tt" WITH spf_policy = 1 %]
 
-# The SPF policy service writes its verdict as Authentication-Results under the
-# name of this guest, which the guests behind it trust.  So a header under that
-# name that a client sent is thrown away here.  Provisioner::Recipe::edge has
-# the whole account, under SPF.
+# The SPF policy service refuses a sender that fails SPF.  opendkim removes any
+# Authentication-Results under the name of this guest that a client sent, and
+# opendmarc then writes the verdict under that name, which the guests behind it
+# trust.  Provisioner::Recipe::edge has the whole account, under SPF.
 policyd-spf_time_limit = 3600
-header_checks = regexp:/etc/postfix/edge_header_checks
+smtpd_milters = local:opendkim/opendkim.sock, local:opendmarc/opendmarc.sock
+milter_default_action = tempfail

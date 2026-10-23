@@ -125,17 +125,30 @@ the receivers of what it sends will refuse it.
 =head2 SPF
 
 The guest behind the edge sees the edge as the client of every message that
-comes in, so only the edge can check the SPF of the sender.  The SPF policy
-service on 25, C<policyd-spf>, rejects a message whose sender fails SPF.  It
-writes any other verdict into the message as C<Authentication-Results> under
-the name of this guest.  The opendmarc of the guest trusts that name, and uses
-the verdict for DMARC.  See L<Provisioner::Recipe::mail/Sending through an
-edge guest>.
+comes in, so only the edge can check the SPF of the sender.  On 25, before the
+message:
 
-A client could send such a header itself, to claim a pass.  So C<header_checks>
-throws away every C<Authentication-Results> under the name of this guest that
-a message brings in, before the policy service adds its own.
+=over 4
 
+=item * The SPF policy service, C<policyd-spf>, refuses a sender that fails
+SPF.  It adds nothing to the message.
+
+=item * opendkim verifies the signatures, and signs nothing.  It removes every
+C<Authentication-Results> under the name of this guest that the message
+brought in, because the guests behind the edge trust that name.  Without it, a
+client could write a pass of its own under that name.
+
+=item * opendmarc then checks SPF against the client, and writes its verdicts
+under the name of this guest.
+
+=back
+
+The opendmarc of the guest trusts that name, and takes the SPF verdict of the
+edge for DMARC.  It checks DKIM itself, which does not depend on the client.
+See L<Provisioner::Recipe::mail/Sending through an edge guest>.  The relay for
+the mail of the guests runs neither, because that mail is theirs.
+
+=head2 Ports
 =head2 Ports
 
 The stream proxy listens on C<tls_port>, and ufw forwards 443 there for every
@@ -185,7 +198,7 @@ my sub relay_port (%opts) {
 
 sub required_recipes {
     return (
-        configd     => sub { return ( languages           => ['postfix'] ) },
+        configd     => sub { return ( languages           => [qw{postfix opendkim opendmarc}] ) },
         letsencrypt => sub { return ( certificate_readers => ['postfix'] ) },
         nginx       => sub { return () },
         ufw         => sub {
@@ -446,7 +459,8 @@ sub template_files {
         'edge.postfix.master.tt' => 'edge.postfix.master',
         'edge.dovecot.tt'        => 'edge.dovecot.conf',
         'edge.policyd_spf.tt'    => 'edge.policyd_spf',
-        'edge.header_checks.tt'  => 'edge.header_checks',
+        'edge.opendkim.tt'       => 'edge.opendkim.conf',
+        'edge.opendmarc.tt'      => 'edge.opendmarc.conf',
     );
 }
 

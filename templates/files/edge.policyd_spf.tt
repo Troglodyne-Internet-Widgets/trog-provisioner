@@ -1,6 +1,6 @@
 # The SPF policy service of the edge.  It rejects a message whose sender fails
-# SPF, and writes any other verdict as Authentication-Results under the name of
-# this guest, for the opendmarc of the guest behind it.
+# SPF, and adds nothing to the message: the verdict that the guests behind the
+# edge read is the one that opendmarc writes.
 # Provisioner::Recipe::edge has the whole account, under SPF.
 debugLevel = 1
 HELO_reject = Fail
@@ -8,5 +8,4 @@ Mail_From_reject = Fail
 PermError_reject = False
 TempError_Defer = False
 skip_addresses = 127.0.0.0/8,::ffff:127.0.0.0/104,::1
-Header_Type = AR
-Authserv_Id = [% domain %]
+Header_Type = None

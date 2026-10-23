@@ -13,6 +13,7 @@
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_milters=
 
 # The SPF policy service of port 25.
 policyd-spf unix  -       n       n       -       0       spawn

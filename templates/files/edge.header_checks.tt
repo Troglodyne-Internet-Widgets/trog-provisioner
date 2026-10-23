@@ -1,4 +1,0 @@
-[%# An Authentication-Results header under the name of this guest that a client
-    sent, which would claim a verdict that this guest never made.  postfix
-    reads this as POSIX regular expressions. -%]
-/^Authentication-Results:[[:space:]]*[% domain.replace('\.', '[.]') %]([[:space:]]|;)/ IGNORE
