@@ -279,6 +279,56 @@ SKIP: {
         is($count, 1, "one DKIM record for the $selector selector");
     }
 }
+# opendmarc checks SPF itself.  miltertest gives it a message as a client
+# would, from an address that the test chooses, and the test reads what
+# opendmarc concluded.  An SMTP session from here would stop at the reverse DNS
+# check of postfix, before opendmarc saw it.
+subtest 'opendmarc checks SPF for a message from outside' => sub {
+    my $lua = '/root/.spf-selftest.lua';
+    open( my $fh, '>', $lua ) or die "Cannot write $lua: $!\n";
+    print {$fh} <<'LUA';
+conn = mt.connect("unix:/var/spool/postfix/opendmarc/opendmarc.sock")
+if conn == nil then error("cannot connect to opendmarc") end
+mt.macro(conn, SMFIC_CONNECT, "j", "selftest.test.test")
+if mt.conninfo(conn, "client.test.test", ip) ~= nil then error("conninfo") end
+mt.macro(conn, SMFIC_MAIL, "i", "SPFSELFTEST")
+if mt.mailfrom(conn, from) ~= nil then error("mailfrom") end
+if mt.rcptto(conn, from) ~= nil then error("rcptto") end
+if mt.header(conn, "From", from) ~= nil then error("header") end
+if mt.eoh(conn) ~= nil then error("eoh") end
+if mt.eom(conn) ~= nil then error("eom") end
+n = 0
+while true do
+  h = mt.getheader(conn, "Authentication-Results", n)
+  if h == nil then break end
+  print(h)
+  n = n + 1
+end
+mt.disconnect(conn)
+LUA
+    close $fh or die "Cannot write $lua: $!\n";
+
+    my $verdict = sub {
+        my ($ip) = @_;
+        return scalar `miltertest -s $lua -D ip=$ip -D from=postmaster\@[% domain %] 2>&1`;
+    };
+
+    # An address from the documentation ranges, which no SPF record allows.
+    my $stranger = $verdict->('203.0.113.9');
+    like( $stranger, qr/\bspf=(?:fail|softfail|neutral|none)\b/, 'a stranger gets an SPF result, which DMARC can use' ) or diag $stranger;
+    unlike( $stranger, qr/\bspf=pass\b/, 'and not a pass' );
+
+    # The record that the zone of this domain publishes allows its own A record.
+    my $spf     = `dig +short TXT [% domain %] 2>/dev/null`;
+    my ($own)   = `dig +short A [% domain %] 2>/dev/null` =~ m/^(\d+\.\d+\.\d+\.\d+)$/m;
+    SKIP: {
+        skip( 'the SPF record of [% domain %] does not allow its A record', 1 ) unless $own && $spf =~ m/v=spf1[^"]*[ +]a\b/;
+        my $pass = $verdict->($own);
+        like( $pass, qr/\bspf=pass\b/, "and $own, which SPF allows, passes" ) or diag $pass;
+    }
+    unlink $lua;
+};
+
 [% IF edge_relay -%]
 subtest 'the mail of this domain goes out through the edge' => sub {
     my $relay = `postmap -q '\@[% domain %]' hash:/etc/postfix/domains/[% domain %]/sdd_relay_maps 2>&1`;

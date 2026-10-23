@@ -21,4 +21,9 @@ FailureReportsBcc postmaster@[% domain %]
 
 IgnoreHosts /etc/opendmarc/ignore.hosts
 
+# Check SPF here when no trusted result for it is in the message, which is
+# every message from a client that connects here.  Without it, nothing on the
+# guest checks SPF, and DMARC passes only on DKIM.
+SPFSelfValidate true
+
 PublicSuffixList /usr/share/publicsuffix/effective_tld_names.dat
