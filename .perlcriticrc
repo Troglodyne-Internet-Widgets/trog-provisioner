@@ -90,6 +90,9 @@ allow_subs = inspection_address secret_blocks check_client check_transfer_route 
 [ProhibitPrintSTDERR]
 [InputOutput::ProhibitRepeatedPrints]
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
+# An if, elsif, else or unless with nothing in its block, which a comment does
+# not fill.  Invert the condition or return early instead.
+[ControlStructures::ProhibitEmptyConditionalBlocks]
 [Subroutines::ProhibitTailRecursion]
 [Variables::ProhibitUselessVarClearing]
 [ValuesAndExpressions::ProhibitLiteralArithmetic]
