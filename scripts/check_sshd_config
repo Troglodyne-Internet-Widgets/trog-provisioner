@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# sshd -t, for a fragment that installs a file that sshd reads, so that a file
+# that sshd refuses fails the target that installed it.
+#
+# sshd -t refuses to run without its privilege separation directory: "Missing
+# privilege separation directory: /run/sshd".  ssh.service makes it when it
+# starts, and on a fresh Ubuntu 24.04 guest it can be missing while the
+# makefile runs.  So this makes it first.
+mkdir -p -m 0755 "${SSHD_PRIVSEP_DIR:-/run/sshd}" || exit 1
+exec sshd -t "$@"

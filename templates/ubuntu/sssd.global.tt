@@ -8,10 +8,10 @@ chown root:root /etc/sssd/sssd.conf
 # Make the home directory of a user at the first login.
 [% script_dir %]/serially pam-auth-update --enable mkhomedir; /bin/true
 
-# sshd takes the keys of a user of the directory from SSSD.  sshd -t fails
+# sshd takes the keys of a user of the directory from SSSD.  The check fails
 # the target here, where a reload in the postrun would fail with no reason.
 install -m 0644 -o root -g root sssd.sshd.conf /etc/ssh/sshd_config.d/50-sssd.conf
-sshd -t
+[% script_dir %]/check_sshd_config
 
 # visudo first, because sudo refuses to run at all while a file in
 # sudoers.d does not parse.
