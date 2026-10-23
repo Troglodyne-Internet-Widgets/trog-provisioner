@@ -1,0 +1,12 @@
+[%# What fail2ban runs on this guest for each ban and unban of a jail that
+    reads the traffic of the edge: edge_ban on the edge, with the key that the
+    edge issued to this domain, against the host key that it pinned.
+    Provisioner::Recipe::nginx has the whole account. -%]
+[% IF edge_address -%]
+[Definition]
+actionban = <edge_ssh> ban <ip> <bantime>
+actionunban = <edge_ssh> unban <ip>
+
+[Init]
+edge_ssh = ssh -n -i /etc/fail2ban/edge/[% domain %].key -o BatchMode=yes -o IdentitiesOnly=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile=/etc/fail2ban/edge/[% domain %].known_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=10 root@[% edge_address %]
+[% END -%]

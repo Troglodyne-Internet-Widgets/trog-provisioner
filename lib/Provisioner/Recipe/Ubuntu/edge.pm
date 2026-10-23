@@ -17,7 +17,7 @@ Provisioner::Recipe::Ubuntu::edge - Ubuntu's C<deps> for L<Provisioner::Recipe::
 =cut
 
 sub deps {
-    return qw{libnginx-mod-stream};
+    return qw{libnginx-mod-stream ipset};
 }
 
 1;

@@ -1,0 +1,39 @@
+#!/bin/sh
+# The firewall half of the bans that the guests behind this edge send through
+# edge_ban.  /etc/ufw/after.init runs this after ufw loads its rules, and again
+# when it unloads them.  Provisioner::Recipe::edge has the whole account.
+
+SET=edge-bans
+CHAIN=trog-edge-bans
+SAVED=/var/lib/edge-bans/saved
+
+start() {
+    # A timeout of 0 by default, so that each ban gives its own.
+    ipset -exist create "$SET" hash:ip family inet timeout 0 || return 1
+    [ -s "$SAVED" ] && grep "^add $SET " "$SAVED" | ipset -exist restore
+
+    # Every packet and not only a new connection, so that a ban also ends the
+    # connections that the address has open.  The ports that the edge proxies,
+    # after the forward of 443, so that a banned address can still reach ssh.
+    iptables -N "$CHAIN" 2>/dev/null
+    iptables -F "$CHAIN"
+    iptables -A "$CHAIN" -p tcp -m multiport --dports 80,[% tls_port %] -m set --match-set "$SET" src -j DROP
+
+    # Once, because ufw-init runs start twice on a reload.
+    iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
+}
+
+stop() {
+    while iptables -D INPUT -j "$CHAIN" 2>/dev/null; do :; done
+    iptables -F "$CHAIN" 2>/dev/null
+    iptables -X "$CHAIN" 2>/dev/null
+
+    # The time that each ban has left goes with it, through a reboot as well.
+    ipset list -n "$SET" >/dev/null 2>&1 || return 0
+    ipset save "$SET" > "$SAVED.new" && mv "$SAVED.new" "$SAVED"
+}
+
+case "$1" in
+start) start ;;
+stop | flush-all) stop ;;
+esac

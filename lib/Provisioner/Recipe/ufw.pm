@@ -43,6 +43,22 @@ the domain.  The error names the port, the addresses and the recipes that
 claim them.  One recipe on 127.0.0.1 and another on an external address of
 the guest can share a port, as the kernel lets them.
 
+=head2 Rules that ufw cannot write
+
+A ufw rule cannot match an ipset, so a recipe that needs one adds its rules
+with C<iptables> itself.  This recipe installs F</etc/ufw/after.init>, which
+ufw-init runs with C<start> after it loads the rules, and with C<stop> or
+C<flush-all> when it unloads them.  It runs each script in
+F</etc/ufw/after.init.d> with the same argument, through C<run-parts>.  So a
+recipe installs one executable there, with a name that has no dot, and does
+not touch F<after.init>.  C<ufw reset> restores the C<.rules> files and leaves
+both alone, so the rules come back after the reset in the C<ufw> target.
+
+ufw-init runs C<start> twice on a reload, so a script adds each rule once.  A
+script that fails is reported and does not fail the firewall, because the
+rules of ufw are loaded by then.  L<Provisioner::Recipe::sshfastlane> and
+L<Provisioner::Recipe::edge> each install one.
+
 =cut
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -189,7 +205,7 @@ sub template_files {
     rmtree $dir;
     mkdir $dir;
 
-    my %ret = ( 'ufw.http.tt' => 'ufw/http' );
+    my %ret = ( 'ufw.http.tt' => 'ufw/http', 'ufw.after.init.tt' => 'ufw.after.init' );
 
     return %ret unless @recipes;
 

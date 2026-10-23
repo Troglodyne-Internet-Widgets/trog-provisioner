@@ -20,6 +20,9 @@ use File::Temp();
 use File::Slurper();
 use File::Slurper::Temp();
 use MIME::Base64();
+use Fcntl();
+use POSIX();
+use Time::HiRes();
 
 use FindBin;
 use FindBin::libs;
@@ -82,11 +85,24 @@ subtest 'a domain registers each name, for TLS and for plain HTTP, and gets a ke
     is( File::Slurper::read_text("$edge/$DOMAIN.http.map"), "public.web.test.test 192.0.2.10:8080;\nwww.customer.test 192.0.2.10:8080;\n", 'and to its HTTP port by its Host header' );
     is( MIME::Base64::decode_base64($out),                  "PRIVATE KEY\n",                                                               'it prints the private half of the key, in base64' );
     unlike( $out, qr/\n/, 'on one line, which is what bin/provision takes from it' );
-    like( File::Slurper::read_text("$edge/$DOMAIN.ban.pub"), qr/\Assh-ed25519 /, 'and keeps the public half' );
+    my $authorized = File::Slurper::read_text("$edge/authorized_keys.root");
+    my $command    = qr/command="\S+\/edge_ban[ ]\Q$DOMAIN\E"/;
+    my $options    = qr/restrict,from="192[.]0[.]2[.]10",$command/;
+    like( $authorized, qr/\A$options[ ]ssh-ed25519[ ]AAAAbogus[ ]/, 'and authorizes the public half for root, to run edge_ban for the domain from the address of its guest' );
     is_deeply( [ grep { m/\A(?:nginx|systemctl)/ } @ran ], [ 'nginx -t', 'systemctl reload nginx' ], 'after nginx accepts the files, it reloads nginx' );
 
     register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 www.customer.test} );
     is( File::Slurper::read_text("$edge/$DOMAIN.tls.map"), "www.customer.test 192.0.2.10:8443;\n", 'a second registration replaces the first' );
+};
+
+subtest 'root takes only a key that is restricted' => sub {
+    my $edge = fresh_edge();
+    File::Slurper::Temp::write_text( "$edge/old.test.test.ban.pub", "ssh-ed25519 AAAAbare bans of old.test.test\n" );
+
+    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES );
+    my @lines = split m/\n/, File::Slurper::read_text("$edge/authorized_keys.root");
+    is( scalar @lines, 1, 'a bare public key in edge.d is not authorized, because it would log in as root with no restriction' );
+    like( $lines[0], qr/\Q$DOMAIN\E/, 'and the restricted key of the domain is' );
 };
 
 subtest 'a name that another domain registered is refused' => sub {
@@ -125,10 +141,42 @@ subtest 'a domain releases everything that it registered' => sub {
 
     is( $rc, 0, 'it exits 0' );
     is_deeply( [ glob("$edge/$DOMAIN.*") ], [], 'and the maps and the key of the domain are gone' );
+    is( File::Slurper::read_text("$edge/authorized_keys.root"), q{}, 'and root no longer takes the key' );
     like( $err, qr/nginx[ ]is[ ]not[ ]up/, 'an nginx that does not reload is a warning, because it reads the files when it starts' );
 
     ( undef, undef, $rc ) = capture { Trog::EdgeClient::main( 'release', $DOMAIN ) };
     is( $rc, 0, 'a domain that registered nothing releases nothing, and that is no error' );
+};
+
+# The lock of $edge, held as another edge_client holds it, until it is closed.
+sub held_lock {
+    my ($edge) = @_;
+    open( my $held, '>>', "$edge/.lock" ) or die "Cannot open the lock: $!";
+    flock( $held, Fcntl::LOCK_EX() )      or die "Cannot take the lock: $!";
+    return $held;
+}
+
+subtest 'a registration waits for another one, but not forever' => sub {
+    my $edge = fresh_edge();
+    local $Trog::EdgeClient::LOCK_WAIT = 0.5;
+
+    my $held  = held_lock($edge);
+    my $start = Time::HiRes::time();
+    my $err   = exception { Trog::EdgeClient::lock_edge() };
+    my $took  = Time::HiRes::time() - $start;
+    like( $err, qr/held[ ]\S+\/[.]lock[ ]for[ ]all[ ]of[ ]the[ ]0[.]5[ ]seconds/, 'a lock that another one holds for too long is an error that names the file' );
+    cmp_ok( $took, '>=', 0.5, 'after the whole of the wait' );
+
+    # A child that lets go partway through the wait.
+    local $Trog::EdgeClient::LOCK_WAIT = 5;
+    my $pid = fork() // die "Cannot fork: $!";
+    if ( !$pid ) {
+        Time::HiRes::sleep(0.5);
+        POSIX::_exit( close($held) ? 0 : 1 );
+    }
+    close $held or die "Cannot close the lock: $!";
+    ok( Trog::EdgeClient::lock_edge(), 'and the lock that the other one gives back is taken' );
+    waitpid( $pid, 0 );
 };
 
 subtest 'it refuses what it cannot put in a file of nginx' => sub {
