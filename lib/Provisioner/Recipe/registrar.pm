@@ -160,8 +160,8 @@ already.  See L<Provisioner::Recipe::pdns/Zones that it holds for accounts>.
 
 A guest that serves a name in such a zone writes it as it writes a name of any
 account, through F</opt/lexicon/zones/ZONE>.  The shortcut reaches the API
-proxy of the authority with a token that C<guest_secrets> asks the authority
-for.  The token can write the C<A> and C<CNAME> records of the names of that
+proxy of the authority with a token that the authority grants it.  See
+C<grants>.  The token can write the C<A> and C<CNAME> records of the names of that
 guest in the zone, and the challenges of those names, and nothing else.  So
 several guests can serve names in one zone, and none of them can change the
 names of another.  F<bin/destroy> removes the tokens of a guest, and leaves
@@ -594,38 +594,63 @@ sub delegated_to {
     return ( defined $holder && $holder ne $server ) ? $holder : undef;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 @grants = $recipe->grants($domain, %opts)
 
-For a domain with an C<authority>, where this recipe holds the zone, the token
-of the domain, which the authority issues.  See
-L<Provisioner::Recipe::pdns/client_secret>.
+What the pdns guests that serve C<$domain> grant it, as C<grants> in
+L<Provisioner::Recipe> says.  See L<Provisioner::Recipe::pdns/issue_grant>.
 
-And for each zone of an account with an C<authority> that holds a served name of
-the domain, a token from that authority that writes only those names.  The
-served names are C<domain_aliases> of C<%opts>, where C<hostnames> is what the
-recipes on the domain handed over.  See
-L<Provisioner::Recipe::pdns/zone_secret>.
+For a domain with an C<authority>, where this recipe holds the zone, the zone
+of the domain and its token, on the guest that C<delegated_to> names.  And for
+each guest that an account names the C<authority> of a zone, the tokens of the
+domain in those zones, as one grant with C<zones>.  See
+L</Zones that a pdns guest holds>.  This names every such zone, so that
+C<bin/destroy> asks about each of them.  C<grant_terms> leaves out a zone that
+holds no served name of the domain.
 
 =cut
 
-sub guest_secrets {
-    my ( $self, $install_dir, $domain, %opts ) = @_;
+sub grants {
+    my ( $self, $domain, %opts ) = @_;
 
-    my $pdns  = Provisioner::Cookbook->load('pdns');
-    my $own   = $self->delegated_to($domain);
-    my %files = defined $own ? $pdns->client_secret( $own, Provisioner::Utils::dns_name($domain) ) : ();
+    my $client = Provisioner::Utils::dns_name($domain);
+    my @grants;
+
+    my $own = $self->delegated_to($domain);
+    push( @grants, { recipe => 'pdns', guest => $own, client => $client } ) if defined $own;
 
     my %zones = $self->configured_zones($domain);
+    my %of;
+    foreach my $zone ( sort keys %zones ) {
+        push( @{ $of{ Provisioner::Utils::dns_name( $zones{$zone}{authority} // next ) } }, $zone );
+    }
+    push( @grants, map { +{ recipe => 'pdns', guest => $_, client => $client, zones => $of{$_} } } sort keys %of );
+
+    return @grants;
+}
+
+=head2 %terms = $recipe->grant_terms($grant, %opts)
+
+For a grant with C<zones>, C<names>: each of those zones that holds a served
+name of the client, mapped to those names.  The served names are
+C<domain_aliases> of C<%opts>, where C<hostnames> is what the recipes on the
+domain handed over.  Otherwise nothing.
+
+=cut
+
+sub grant_terms {
+    my ( $self, $grant, %opts ) = @_;
+    return () unless $grant->{zones};
+
+    my $domain = $grant->{client};
+    my %zones  = $self->configured_zones($domain);
+    my %wanted = map { $_ => 1 } @{ $grant->{zones} };
+
     my %names;
     foreach my $name ( $self->domain_aliases( %opts, domain => $domain ) ) {
         my $zone = $self->zone_of( $name, $domain, \%zones ) // next;
-        push( @{ $names{$zone} }, lc $name ) if defined $zones{$zone}{authority};
+        push( @{ $names{$zone} }, lc $name ) if $wanted{$zone};
     }
-    foreach my $zone ( sort keys %names ) {
-        my $guest = Provisioner::Utils::dns_name( $zones{$zone}{authority} );
-        %files = ( %files, $pdns->zone_secret( $guest, $zone, Provisioner::Utils::dns_name($domain), @{ $names{$zone} } ) );
-    }
-    return %files;
+    return ( names => \%names );
 }
 
 =head2 %publication = $recipe->publication(%opts)
@@ -815,54 +840,6 @@ sub required_recipes {
     return (
         lexicon => sub { return () },
     );
-}
-
-=head2 @releases = $recipe->releases($domain)
-
-What the pdns guests that serve C<$domain> issued it, as C<releases> in
-L<Provisioner::Recipe> says.  That is the zone of C<$domain> and its token, on
-the guest that C<delegated_to> names, and the tokens of C<$domain> in each zone
-that an account names a guest the C<authority> of, one command for each such
-guest.  See L</Zones that a pdns guest holds>.  Those zones stay, because other
-guests serve names in them.  It asks about every such zone, because a token
-that is gone already is no error.  If a guest is not up, what it holds stays,
-and C<bin/provision> replaces it when C<$domain> is built again.
-
-=cut
-
-sub releases {
-    my ( $self, $domain ) = @_;
-
-    my $pdns = Provisioner::Cookbook->load('pdns');
-    my @releases;
-
-    my $authority = eval { $self->delegated_to($domain) };
-    if ( defined $authority ) {
-        push @releases, {
-            guest   => $authority,
-            command => $pdns->release_command( $authority, lc $domain ),
-            doing   => "remove the zone and the token of $domain",
-            done    => "Removed the zone and the token of $domain",
-            stays   => "the zone and the token of $domain stay on it.  bin/provision replaces them when $domain is built again",
-        };
-    }
-
-    my %zones = eval { $self->configured_zones($domain) };
-    my %of;
-    foreach my $zone ( sort keys %zones ) {
-        my $guest = Provisioner::Utils::dns_name( $zones{$zone}{authority} // next );
-        push( @{ $of{$guest} }, $pdns->revoke_command( $guest, $zone, lc $domain ) );
-    }
-    foreach my $guest ( sort keys %of ) {
-        push @releases, {
-            guest   => $guest,
-            command => join( ' ; ', @{ $of{$guest} } ),
-            doing   => "remove the zone tokens of $domain",
-            done    => "Removed the zone tokens of $domain",
-            stays   => "the zone tokens of $domain stay on it.  bin/provision replaces them when $domain is built again",
-        };
-    }
-    return @releases;
 }
 
 1;

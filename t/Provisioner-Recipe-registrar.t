@@ -114,10 +114,10 @@ subtest 'a domain that names an authority reaches it with a token of its own' =>
     is( $creds{key_file}, "/etc/lexicon/$name.token", 'with the token in a file' );
     is( $creds{key},      q{},                        'and not in the payload' );
 
-    my %secrets = fresh('registrar')->guest_secrets( '/bogus', $name );
+    my %secrets = fresh('registrar')->granted_secrets($name);
     is_deeply( [ keys %secrets ], ["/etc/lexicon/$name.token"], 'which bin/provision puts on the guest' );
     is( $secrets{"/etc/lexicon/$name.token"}{issue}{guest}, 'ns.example.net', 'from the authority, which issues it' );
-    is_deeply( { fresh('registrar')->guest_secrets( '/bogus', 'web.example.net' ) }, {}, 'and a domain that names no authority needs none' );
+    is_deeply( { fresh('registrar')->granted_secrets('web.example.net') }, {}, 'and a domain that names no authority needs none' );
 
     my $out        = fresh('lexicon')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
     my $token_line = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat /etc/lexicon/$name.token)"};
@@ -489,7 +489,7 @@ subtest 'a zone of an account with an authority is written through that pdns gue
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { return $configured } );
     $cookbook->redefine( host_of       => sub { return } );
-    my %secrets = fresh('registrar')->guest_secrets( '/bogus', $PUBLIC, %ON_PUBLIC, hostnames => $hostnames );
+    my %secrets = fresh('registrar')->granted_secrets( $PUBLIC, %ON_PUBLIC, hostnames => $hostnames );
     is_deeply( [ keys %secrets ], ['/etc/lexicon/customer.test.token'], 'the guest gets a token for the zone of the authority, and for no other' );
     is( $secrets{'/etc/lexicon/customer.test.token'}{issue}{guest}, 'ns.example.net', 'from the authority, which issues it' );
     like(
@@ -498,8 +498,11 @@ subtest 'a zone of an account with an authority is written through that pdns gue
         'which grants the names of this guest in the zone, and no others'
     );
 
-    my %none = fresh('registrar')->guest_secrets( '/bogus', $PUBLIC, %ON_PUBLIC, hostnames => ["www.$PUBLIC"] );
+    my %none = fresh('registrar')->granted_secrets( $PUBLIC, %ON_PUBLIC, hostnames => ["www.$PUBLIC"] );
     is_deeply( \%none, {}, 'and a guest with no name in the zone gets no token for it' );
+
+    my @grants = fresh('registrar')->grants( $PUBLIC, %ON_PUBLIC );
+    is_deeply( \@grants, [ { recipe => 'pdns', guest => 'ns.example.net', client => $PUBLIC, zones => ['customer.test'] } ], 'but the grant names the zone still, so that bin/destroy takes back any token in it' );
 };
 
 Test::NoWarnings::had_no_warnings();

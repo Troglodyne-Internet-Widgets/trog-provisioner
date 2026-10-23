@@ -155,7 +155,7 @@ subtest 'remove_rsync_modules takes the part of the domain out of every guest th
     ok( -e $_,         'and the part of the host itself stays' ) for @kept;
 };
 
-# --- release_issued: the authority ---
+# --- revoke_grants: the authority ---
 subtest 'the zone and the token of a domain come off the guest that its registrar names' => sub {
     my $domain   = 'web.lab.test.test';
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
@@ -171,29 +171,29 @@ subtest 'the zone and the token of a domain come off the guest that its registra
 
     $rc = 0;
     my $removed;
-    capture { $removed = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    capture { $removed = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $removed, 1, 'they are removed' );
     is_deeply( \@asked, ['ns.test.test'], 'on the authority, in the form that DNS compares' );
     like( $ran[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]'/,                        'as root' );
     like( $ran[0], qr{/root/bin/pdns_client[ ]release[ ]\Q$domain\E'\z}, 'which runs pdns_client release, for the domain' );
 
     @ran = ();
-    capture { Trog::Bin::Destroy::release_issued( $domain, 1 ) };
+    capture { Trog::Bin::Destroy::revoke_grants( $domain, 1 ) };
     is( scalar @ran, 0, 'a dry run sends nothing' );
 
     $rc = 1;
-    my ( undef, $warned ) = capture { $removed = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    my ( undef, $warned ) = capture { $removed = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $removed, 0, 'a command that failed removed nothing' );
     like( $warned, qr/Could[ ]not[ ]remove/, 'and says so' );
 
     $fleet->redefine( guest_of => sub { return } );
-    ( undef, $warned ) = capture { $removed = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    ( undef, $warned ) = capture { $removed = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     like( $warned, qr/ns[.]test[.]test[ ]is[ ]not[ ]up/, 'an authority that is not up is named, and the destroy goes on' );
 
-    is( Trog::Bin::Destroy::release_issued( 'other.test.test', 0 ), 0, 'a domain that names no authority has nothing to remove' );
+    is( Trog::Bin::Destroy::revoke_grants( 'other.test.test', 0 ), 0, 'a domain that names no authority has nothing to remove' );
 };
 
-# --- release_issued: the zone tokens ---
+# --- revoke_grants: the zone tokens ---
 subtest 'the zone tokens of a domain come off each pdns guest that an account names, and the zones stay' => sub {
     my $domain   = 'web.lab.test.test';
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
@@ -219,7 +219,7 @@ subtest 'the zone tokens of a domain come off each pdns guest that an account na
     $fleet->redefine( guest_of => sub { push( @asked, $_[1] ); return bless {}, 'AuthorityProbe' } );
 
     my $revoked;
-    capture { $revoked = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    capture { $revoked = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $revoked, 1, 'one guest is asked once' );
     is_deeply( \@asked, ['ns.test.test'], 'the authority of the account, in the form that DNS compares' );
     my $one = qr{pdns_client[ ]revoke[ ]one[.]test[ ]\Q$domain\E};
@@ -228,11 +228,50 @@ subtest 'the zone tokens of a domain come off each pdns guest that an account na
     unlike( $ran[0], qr/three[.]test|release/, 'and neither a zone of a registrar nor a zone itself is touched' );
 
     @ran = ();
-    capture { Trog::Bin::Destroy::release_issued( $domain, 1 ) };
+    capture { Trog::Bin::Destroy::revoke_grants( $domain, 1 ) };
     is( scalar @ran, 0, 'a dry run sends nothing' );
 };
 
-# --- release_issued: the VPN ---
+# --- revoke_grants: a configuration that a recipe refuses ---
+subtest 'a recipe that dies on the configuration is named, and the rest are still asked' => sub {
+    my $domain   = 'web.test.test';
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( host_of => sub { return } );
+    $cookbook->redefine(
+        domain_config => sub {
+            my ( undef, $asked ) = @_;
+            return {} unless $asked eq $domain;
+            return {
+                registrar     => { accounts   => { one => { zones => ['dup.test'] }, two => { zones => ['dup.test'] } } },
+                openvpnclient => { issue_from => 'vpn.test.test' },
+            };
+        }
+    );
+
+    my @asked;
+    no warnings 'once';
+    local *RefusedProbe::run_cmd = sub { return 0 };
+    use warnings;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( guest_of => sub { push( @asked, $_[1] ); return bless {}, 'RefusedProbe' } );
+
+    my ( $revoked, $warned );
+    is(
+        exception {
+            ( undef, $warned ) = capture { $revoked = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) }
+        },
+        undef,
+        'the teardown goes on'
+    );
+    my $who = qr/registrar[ ]could[ ]not[ ]say[ ]what[ ]\S+/;
+    $who = qr/$who.*[ ]granted[ ]\Q$domain\E/;
+    my $why = qr/both[ ]list[ ]the[ ]zone/;
+    like( $warned, qr/$who.*$why/s, 'and the recipe and its reason are named' );
+    is_deeply( \@asked, ['vpn.test.test'], 'and what another recipe holds is still taken back' );
+    is( $revoked, 1, 'which is the one revocation that ran' );
+};
+
+# --- revoke_grants: the VPN ---
 subtest 'a VPN client is revoked on the server that issued it, which frees its address there' => sub {
     my $domain   = 'edge.test.test';
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
@@ -247,25 +286,25 @@ subtest 'a VPN client is revoked on the server that issued it, which frees its a
 
     $rc = 0;
     my ( $out, $revoked );
-    ($out) = capture { $revoked = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    ($out) = capture { $revoked = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $revoked, 1, 'it is revoked' );
     is_deeply( \@asked, ['vpn.test.test'], 'on the server of its issue_from' );
     is( $ran[0], "sudo -n sh -c '/usr/local/sbin/openvpn-revoke-client $domain'", 'as root, by the script that also takes away its address' );
     like( $out, qr/\QRevoked the VPN certificate of $domain on vpn.test.test\E/, 'and says so' );
 
     @ran = ();
-    capture { Trog::Bin::Destroy::release_issued( $domain, 1 ) };
+    capture { Trog::Bin::Destroy::revoke_grants( $domain, 1 ) };
     is( scalar @ran, 0, 'a dry run sends nothing' );
 
     $fleet->redefine( guest_of => sub { return } );
-    my ( undef, $warned ) = capture { $revoked = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    my ( undef, $warned ) = capture { $revoked = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $revoked, 0, 'a server that is not up revokes nothing' );
     like( $warned, qr/\Qvpn.test.test is not up\E .* \Qopenvpn-revoke-client $domain\E/, 'and the warning says what to run there' );
 
-    is( Trog::Bin::Destroy::release_issued( 'other.test.test', 0 ), 0, 'a domain with no issue_from has nothing to revoke' );
+    is( Trog::Bin::Destroy::revoke_grants( 'other.test.test', 0 ), 0, 'a domain with no issue_from has nothing to revoke' );
 };
 
-# --- release_issued: the edge ---
+# --- revoke_grants: the edge ---
 subtest 'the public names of a domain are released on its edge, which would send them to a freed address' => sub {
     my $domain   = 'web.test.test';
     my %config   = ( nginx => { edge => 'edge.test.test', public_names => { 'shop.test.test' => $domain } } );
@@ -281,25 +320,25 @@ subtest 'the public names of a domain are released on its edge, which would send
 
     $rc = 0;
     my ( $out, $released );
-    ($out) = capture { $released = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    ($out) = capture { $released = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $released, 1, 'they are released' );
     is_deeply( \@asked, ['edge.test.test'], 'on the edge of its nginx' );
     is( $ran[0], "sudo -n sh -c '/root/bin/edge_client release $domain'", 'as root, by the script that registered them' );
     like( $out, qr/\QReleased the public names of $domain on edge.test.test\E/, 'and says so' );
 
     @ran = ();
-    capture { Trog::Bin::Destroy::release_issued( $domain, 1 ) };
+    capture { Trog::Bin::Destroy::revoke_grants( $domain, 1 ) };
     is( scalar @ran, 0, 'a dry run sends nothing' );
 
-    is( Trog::Bin::Destroy::release_issued( 'other.test.test', 0 ), 0, 'a domain with no edge has nothing to release' );
+    is( Trog::Bin::Destroy::revoke_grants( 'other.test.test', 0 ), 0, 'a domain with no edge has nothing to release' );
     my %public = %{ $config{nginx}{public_names} };
     $config{nginx}{public_names} = {};
-    is( Trog::Bin::Destroy::release_issued( $domain, 0 ), 0, 'and a domain with an edge and no public name registered nothing' );
-    is( scalar @ran,                                      0, 'so neither sends anything' );
+    is( Trog::Bin::Destroy::revoke_grants( $domain, 0 ), 0, 'and a domain with an edge and no public name registered nothing' );
+    is( scalar @ran,                                     0, 'so neither sends anything' );
     $config{nginx}{public_names} = \%public;
 
     $fleet->redefine( guest_of => sub { return } );
-    my ( undef, $warned ) = capture { $released = Trog::Bin::Destroy::release_issued( $domain, 0 ) };
+    my ( undef, $warned ) = capture { $released = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $released, 0, 'an edge that is not up releases nothing' );
     like( $warned, qr/\Qedge.test.test is not up\E .* \Qedge_client release $domain\E/, 'and the warning says what to run there' );
 };
@@ -867,7 +906,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
     $bin->redefine( $_ => sub { 1 } ) for qw{remove_authorized_key remove_runner_key};
     $bin->redefine( $_ => sub { push( @asked, $_[0] ); 1 } ) for qw{destroy_vm destroy_disks};
-    $bin->redefine( release_issued => sub { push( @order, 'revoke' ); 1 } );
+    $bin->redefine( revoke_grants => sub { push( @order, 'revoke' ); 1 } );
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');

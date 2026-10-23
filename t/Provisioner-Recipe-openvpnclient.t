@@ -142,14 +142,14 @@ subtest 'the fragment splits the issued configuration into the four files' => su
     is( sprintf( '%04o', Fcntl::S_IMODE( ( stat "$dir/client.key" )[2] ) ), '0600',                 'which nobody else can read from the start' );
 };
 
-subtest 'guest_secrets asks the server for the configuration, with an address from the bin' => sub {
+subtest 'granted_secrets asks the server for the configuration, with an address from the bin' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     my $cook = Test::MockModule->new('Provisioner::Cookbook');
     my @asked;
     $pool->redefine( assign        => sub { push @asked, [@_]; return '10.8.0.129' } );
     $cook->redefine( global_config => sub { return {%POOL} } );
 
-    my %secrets = fresh()->guest_secrets( '/opt/domains', 'first.test', %ISSUED );
+    my %secrets = fresh()->granted_secrets( 'first.test', %ISSUED );
     is_deeply( \@asked, [ [ 'first.test', $POOL{ip_pool}, 'vpnclients' ] ], 'the address comes from the bin that names the server' );
     is_deeply(
         \%secrets,
@@ -163,18 +163,18 @@ subtest 'guest_secrets asks the server for the configuration, with an address fr
         'and the server issues the configuration with that address, on one line'
     );
 
-    is_deeply( { fresh()->guest_secrets( '/opt/domains', 'first.test', %BASE ) }, {}, 'a domain with a cert_dir asks for nothing' );
+    is_deeply( { fresh()->granted_secrets( 'first.test', %BASE ) }, {}, 'a domain with a cert_dir asks for nothing' );
 };
 
 subtest 'bin/destroy knows where to revoke' => sub {
     my $cook = Test::MockModule->new('Provisioner::Cookbook');
     $cook->redefine( domain_config => sub { return $_[1] eq 'first.test' ? { openvpnclient => { issue_from => 'vpn.test.test' } } : { openvpnclient => { cert_dir => '/bogus' } } } );
 
-    my ($release) = fresh()->releases('first.test');
+    my ($release) = fresh()->revocations('first.test');
     is( $release->{guest},   'vpn.test.test',                                    'a domain with issue_from is revoked on that server' );
     is( $release->{command}, '/usr/local/sbin/openvpn-revoke-client first.test', 'by the script that also frees the address' );
     like( $release->{stays}, qr/openvpn-revoke-client[ ]first[.]test/, 'and says what to run there when the server is not up' );
-    is_deeply( [ fresh()->releases('second.test') ], [], 'and one with a cert_dir nowhere' );
+    is_deeply( [ fresh()->revocations('second.test') ], [], 'and one with a cert_dir nowhere' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -19,6 +19,7 @@ use File::Slurper::Temp();
 
 use JSON::Validator::Schema::Troglodyne;
 use Mojo::JSON::Pointer();
+use Provisioner::Cookbook();
 
 =head1 NAME
 
@@ -1248,11 +1249,7 @@ C<ref> must name a field that the store keeps: C<password> or C<username>.  The
 store keeps a multi-line value and returns it exactly.  So a private key is a
 password as far as the store is concerned.
 
-A secret that another guest issues has C<issue> in place of C<ref> and
-C<generate>: C<< { guest => $domain, command => $shell } >>.  C<bin/provision>
-runs the command as root on that guest, and places what it prints.  The store
-never holds it, and the guest must be up first.  See
-L<Provisioner::Recipe::pdns/client_secret>.
+A secret that another guest issues is not one of these.  See C<grants>.
 
 C<%opts> is the configuration of the recipe, for a secret that only some
 domains want.  If the recipe returns nothing for a domain, no secret is placed
@@ -1270,57 +1267,118 @@ sub guest_secrets {
     return ();
 }
 
-=head3 %files = $recipe->client_secret($guest, $client, %opts)
+=head3 @grants = $recipe->grants($domain, %opts)
 
-For a recipe whose guest issues something to other guests, such as a token or
-a certificate: the file that C<$guest> issues for the domain C<$client>, as an
-entry of C<guest_secrets> with C<issue>.  A recipe on the guest of C<$client>
-returns it from its own C<guest_secrets>.  C<%opts> is what the issue needs
-besides the two names, and each recipe that answers says what.  Nothing here,
-because most recipes issue nothing.
+A grant is something that a guest of one recipe issues to another domain, such
+as a token, a certificate or a registration, and takes back when that domain
+goes away.  The recipe of the domain that holds it declares it here.
+The recipe of the guest that issues it says how in C<issue_grant> and
+C<revoke_grant>.  From those, this class derives what C<bin/new_config> asks the
+other guest for and what C<bin/destroy> takes back, so the two cannot disagree.
+
+This returns what other guests grant C<$domain> because this recipe is on it.  Each grant is
+a hash:
+
+    {
+        recipe => 'openvpn',              # the recipe that issues it
+        guest  => 'vpn.example.test',     # the guest that runs that recipe
+        client => 'web.example.test',     # the domain that holds it
+    }
+
+The recipe that issues it can ask for more keys, and says which.  C<%opts> is
+the configuration of this recipe on C<$domain>.  It is the validated one when
+C<bin/new_config> asks, and the one that the file holds when C<bin/destroy>
+asks, so a grant must follow from what the operator wrote.  This must have no
+side effects, because C<bin/destroy> calls it.  Nothing here, because most
+recipes hold nothing.
 
 =cut
 
-sub client_secret {
+sub grants {
     return ();
 }
 
-=head3 $command = $recipe->release_command($guest, $client)
+=head3 %terms = $recipe->grant_terms($grant, %opts)
 
-The shell command that root runs on C<$guest> to take back what
-C<client_secret> issued there for C<$client>.  Undef here, because most
-recipes issue nothing.
+What the issue of C<$grant> needs that the grant does not say, such as an
+address or a list of names, for C<issue_grant>.  C<%opts> is as for C<grants>.
+Only C<granted_secrets> calls this, so this is where a side effect goes, such
+as an address that the pool assigns.  Nothing here.
 
 =cut
 
-sub release_command {
-    return undef;
+sub grant_terms {
+    return ();
 }
 
-=head3 @releases = $recipe->releases($domain)
+=head3 %files = $recipe->issue_grant($grant, %terms)
 
-What C<bin/destroy> takes back from other guests when C<$domain> goes away,
-because this recipe of C<$domain> was issued it there.  Each one is a hash:
+For the recipe that a grant names: the files that its guest issues for
+C<$grant>, with C<issue> in place of C<ref> and C<generate>, as
+C<guest_secrets> describes the rest of each entry.  C<issue> is
+C<< { guest => $domain, command => $shell } >>.  C<bin/provision> runs the
+command as root on that guest, and places what it prints on the guest of the
+client.  The store never holds it, and the guest must be up first.  This
+returns nothing when C<%terms> leave nothing to issue.  Nothing here, because
+most recipes issue nothing.
 
-    {
-        guest   => 'vpn.example.test',
+=cut
+
+sub issue_grant {
+    return ();
+}
+
+=head3 %revocation = $recipe->revoke_grant($grant)
+
+For the recipe that a grant names: how C<bin/destroy> takes C<$grant> back from
+its guest.
+
+    (
         command => '/usr/local/sbin/openvpn-revoke-client web.example.test',
         doing   => 'revoke the VPN certificate of web.example.test',
         done    => 'Revoked the VPN certificate of web.example.test',
         stays   => 'the certificate and the address of web.example.test stay on it.  Run ...',
-    }
+    )
 
-C<bin/destroy> runs C<command> as root on C<guest>.  It prints C<done> and the
-guest when the command succeeds, and C<doing> on a dry run.  When the guest is
-not up, it warns that C<stays>, so C<stays> says what is left and how to take it
-back by hand.  A recipe reads what it needs from the configuration of
-C<$domain>, so this is asked of every recipe, and one that took nothing
-returns nothing, which is the default.
+C<bin/destroy> runs C<command> as root on the guest of the grant.  It prints
+C<done> and the guest when the command succeeds, and C<doing> on a dry run.
+When the guest is not up, it warns that C<stays>, so C<stays> says what is left
+and how to take it back by hand.  Nothing here.
 
 =cut
 
-sub releases {
+sub revoke_grant {
     return ();
+}
+
+=head3 %files = $recipe->granted_secrets($domain, %opts)
+
+The files that other guests issue for the C<grants> of this recipe on
+C<$domain>, from the C<issue_grant> of each recipe that issues one.
+C<bin/new_config> places them beside what C<guest_secrets> places.
+
+=cut
+
+sub granted_secrets {
+    my ( $self, $domain, %opts ) = @_;
+
+    return map { Provisioner::Cookbook->load( $_->{recipe} )->issue_grant( $_, $self->grant_terms( $_, %opts ) ) } $self->grants( $domain, %opts );
+}
+
+=head3 @revocations = $recipe->revocations($domain)
+
+What C<bin/destroy> takes back from other guests when C<$domain> goes away: the
+C<revoke_grant> of each of the C<grants> of this recipe, as the configuration
+of C<$domain> declares them, with the C<guest> of the grant added.  This is
+asked of every recipe, and one that holds nothing returns nothing.
+
+=cut
+
+sub revocations {
+    my ( $self, $domain ) = @_;
+
+    my %opts = %{ Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} };
+    return map { +{ guest => $_->{guest}, Provisioner::Cookbook->load( $_->{recipe} )->revoke_grant($_) } } $self->grants( $domain, %opts );
 }
 
 =head3 $hv = $recipe->hv()

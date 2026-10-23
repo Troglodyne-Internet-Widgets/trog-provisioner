@@ -235,7 +235,7 @@ sub main {
         # 3a. Take back what other guests issued it: a zone and its tokens, a
         # VPN certificate, public names on an edge.  Before release_ip, because
         # some of those name the address that release_ip frees.
-        release_issued( $domain, $dryrun );
+        revoke_grants( $domain, $dryrun );
 
         # 4. Optionally purge the domain directory, and the data directory
         if ($purge) {
@@ -456,30 +456,34 @@ sub remove_runner_key {
     return;
 }
 
-=head2 release_issued($domain, $dryrun)
+=head2 revoke_grants($domain, $dryrun)
 
-Takes back from other guests what they issued to C<$domain>: each release that a
-recipe returns from C<releases>.  See
-L<Provisioner::Recipe/@releases = $recipe-E<gt>releases($domain)>.  It asks
+Takes back from other guests what they granted C<$domain>: each revocation that
+a recipe returns from C<revocations>.  See
+L<Provisioner::Recipe/@grants = $recipe-E<gt>grants($domain, %opts)>.  It asks
 every recipe, because each one reads the configuration of C<$domain> itself,
-and a recipe that took nothing answers nothing.  Returns the number of releases
-that succeeded.
+and a recipe that holds nothing answers nothing.  Returns the number of
+revocations that succeeded.
 
 This is the counterpart of the C<issue> that F<bin/provision> runs.  It warns
-and goes on when a guest is not up, or did not answer, as C<as_root_on> does.
+and goes on when a guest is not up, or did not answer, as C<as_root_on> does,
+and when a recipe dies on the configuration of C<$domain>, because the guest
+of the domain is going away either way.
 
 =cut
 
-sub release_issued {
+sub revoke_grants {
     my ( $domain, $dryrun ) = @_;
 
-    my $released = 0;
+    my $revoked = 0;
     foreach my $name ( Provisioner::Cookbook->names() ) {
-        foreach my $release ( Provisioner::Cookbook->load($name)->releases($domain) ) {
-            $released += as_root_on( $release->{guest}, $release->{command}, dryrun => $dryrun, map { $_ => $release->{$_} } qw{doing done stays} );
+        my @revocations = eval { Provisioner::Cookbook->load($name)->revocations($domain) };
+        warn "$name could not say what other guests granted $domain, so none of it is taken back: $@" if $@;
+        foreach my $revocation (@revocations) {
+            $revoked += as_root_on( $revocation->{guest}, $revocation->{command}, dryrun => $dryrun, map { $_ => $revocation->{$_} } qw{doing done stays} );
         }
     }
-    return $released;
+    return $revoked;
 }
 
 =head2 as_root_on($guest, $command, %how)

@@ -148,27 +148,28 @@ sub key_path {
     return "/etc/fail2ban/edge/$domain.key.b64";
 }
 
-=head2 %files = $recipe->client_secret($edge, $client, %opts)
+=head2 %files = $recipe->issue_grant($grant, %terms)
 
-The key that C<$edge> issues when it registers the names of the domain
-C<$client>, at C<key_path> of C<$client>, as C<client_secret> in
-L<Provisioner::Recipe> says.  C<%opts> has
+The key that the edge issues when it registers the names of the client of
+C<$grant>, at C<key_path> of the client, as C<issue_grant> in
+L<Provisioner::Recipe> says.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >> and
 C<< names => \@names >>.
 
-The command is F<scripts/edge_client> C<register>, which root runs on
-C<$edge>.  C<$tls> and C<$http> are each an IPv4 address and a port, where
-C<$edge> sends TLS and plain HTTP for C<@names>.  See L</Registration>.
+The command is F<scripts/edge_client> C<register>, which root runs on the edge.
+C<$tls> and C<$http> are each an IPv4 address and a port, where the edge sends
+TLS and plain HTTP for C<@names>.  See L</Registration>.
 
 =cut
 
-sub client_secret {
-    my ( $self, $edge, $client, %opts ) = @_;
+sub issue_grant {
+    my ( $self, $grant, %terms ) = @_;
+    my $client = $grant->{client};
     return (
         $self->key_path($client) => {
             issue => {
-                guest   => $edge,
-                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $client, @{ $opts{upstreams} }{qw{tls http}}, @{ $opts{names} } ),
+                guest   => $grant->{guest},
+                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/edge_client register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} } ),
             },
             owner => 'root:root',
             mode  => '0600',
@@ -176,16 +177,26 @@ sub client_secret {
     );
 }
 
-=head2 $command = $recipe->release_command($edge, $client)
+=head2 %revocation = $recipe->revoke_grant($grant)
 
-The shell command that root runs on C<$edge> to release the names of
-C<$client>: F<scripts/edge_client> C<release>.
+The release of the names of the client of C<$grant>, by F<scripts/edge_client>
+C<release>, as C<revoke_grant> in L<Provisioner::Recipe> says.  If the edge is
+not up, the revocation says to run the command there by hand before another
+guest gets the address, because the edge sends the names to whatever answers at
+it.
 
 =cut
 
-sub release_command {
-    my ( $self, $edge, $client ) = @_;
-    return "$Provisioner::Vars::SCRIPT_DIR/edge_client release $client";
+sub revoke_grant {
+    my ( $self, $grant ) = @_;
+    my $client  = $grant->{client};
+    my $command = "$Provisioner::Vars::SCRIPT_DIR/edge_client release $client";
+    return (
+        command => $command,
+        doing   => "release the public names of $client",
+        done    => "Released the public names of $client",
+        stays   => "it still sends the public names of $client to its old address.  Run $command there before another guest gets the address",
+    );
 }
 
 sub template_files {
