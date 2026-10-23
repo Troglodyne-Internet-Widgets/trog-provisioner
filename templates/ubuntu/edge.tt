@@ -9,10 +9,7 @@ install -o root -g root -m 0644 edge_ufw.conf /etc/ufw/applications.d/edge
     still trust this edge after a rebuild.  bin/provision placed it. -%]
 ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
 install -o root -g root -m 0644 edge.sshd.conf /etc/ssh/sshd_config.d/edge-bans.conf
-[%# sshd -t refuses to run without /run/sshd, which the socket of ssh makes
-    only when the first connection starts the service. -%]
-install -d -o root -g root -m 0755 /run/sshd
-sshd -t
+[% script_dir %]/check_sshd_config
 [% script_dir %]/queue_postrun_task systemctl try-reload-or-restart ssh
 install -d -o root -g root -m 0700 /var/lib/edge-bans
 install -d -o root -g root -m 0750 /etc/ufw/after.init.d
