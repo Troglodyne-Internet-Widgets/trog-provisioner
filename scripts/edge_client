@@ -12,6 +12,7 @@ use Fcntl          qw{:flock};
 use File::Basename ();
 use File::Temp     ();
 use IPC::Open3     ();
+use Crypt::PRNG    ();
 use List::Util     qw{any};
 use MIME::Base64   ();
 use Time::HiRes    ();
@@ -50,7 +51,8 @@ it can be gone already.
 C<register-mail> lets the guest of DOMAIN send its mail out through the relay
 of this guest.  It makes a new password for the login DOMAIN, keeps only its
 hash, and prints the password on one line.  The relay takes mail from that
-login only with a sender in DOMAIN.  It replaces what DOMAIN registered for
+login only with a sender in DOMAIN.  dovecot makes the hash, with its
+C<ARGON2ID> scheme.  It replaces what DOMAIN registered for
 mail before.  C<release-mail> removes the login.  See
 L<Provisioner::Recipe::edge/Mail out>.
 
@@ -93,11 +95,14 @@ sub upstream {
 # no shell reads it.  Answers the output and whether it succeeded.  The output
 # holds its standard error as well, so that nothing but the key reaches the
 # output of this script: bin/provision reads it over ssh on a pty, which joins
-# the two streams.
+# the two streams.  A hash first gives the command its standard input, as
+# { input => $text }.
 sub run {
     my (@command) = @_;
+    my $opts = ref $command[0] eq 'HASH' ? shift @command : {};
 
     my $pid = IPC::Open3::open3( my $in, my $out, undef, @command );
+    print {$in} $opts->{input} // q{};
     close $in or die "Could not close the input of @command: $!\n";
     my $output = do { local $/ = undef; <$out> }
       // q{};
@@ -181,22 +186,15 @@ sub write_mail_tables {
     return;
 }
 
-# A salted SHA-512 crypt of $password, which dovecot reads as SHA512-CRYPT.
+# The hash of $password that dovecot reads, made by dovecot itself, because the
+# CryptX of the system perl is too old for Argon2.  setsid, because doveadm
+# reads a password from the terminal when it has one, and bin/provision runs
+# this on a pty.  It asks twice, so it gets the password twice.
 sub hash_password {
     my ($password) = @_;
-    my @salt       = ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9, '.', '/' );
-    my $salt       = join( q{}, map { $salt[ ord($_) % @salt ] } split( m//, random_bytes(16) ) );
-    my $hash       = crypt( $password, "\$6\$$salt\$" );
-    die "The crypt of this perl makes no SHA-512 hash, which dovecot needs\n" unless defined $hash && $hash =~ m/\A\$6\$/;
-    return $hash;
-}
-
-sub random_bytes {
-    my ($count) = @_;
-    open( my $fh, '<:raw', '/dev/urandom' )  or die "Cannot read /dev/urandom: $!\n";
-    read( $fh, my $bytes, $count ) == $count or die "Cannot read $count bytes of /dev/urandom\n";
-    close $fh                                or die "Cannot close /dev/urandom: $!\n";
-    return $bytes;
+    my ( $hash, $ok ) = run( { input => "$password\n$password\n" }, qw{setsid --wait doveadm pw -s ARGON2ID} );
+    die "doveadm could not hash the password: $hash\n" unless $ok && $hash =~ m/\A(\{ARGON2ID\}\S+)\s*\z/;
+    return $1;
 }
 
 sub reload_postfix {
@@ -210,9 +208,9 @@ sub register_mail {
 
     my $lock     = lock_edge();
     my %file     = mail_files_of($domain);
-    my $password = unpack( 'H*', random_bytes(24) );
+    my $password = Crypt::PRNG::random_bytes_hex(24);
 
-    write_file( $file{passwd}, "$domain:{SHA512-CRYPT}" . hash_password($password) . "\n", oct 600 );
+    write_file( $file{passwd}, "$domain:" . hash_password($password) . "\n", oct 600 );
     write_file( $file{senders}, "\@$domain $domain\n" );
     write_mail_tables();
     reload_postfix();

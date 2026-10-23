@@ -17,7 +17,7 @@ Provisioner::Recipe::Ubuntu::edge - Ubuntu's C<deps> and C<dep_conflicts> for L<
 =cut
 
 sub deps {
-    return qw{libnginx-mod-stream ipset postfix dovecot-core};
+    return qw{libnginx-mod-stream ipset postfix dovecot-core libcryptx-perl};
 }
 
 # The relay is postfix, which conflicts with the sendmail of every other guest.

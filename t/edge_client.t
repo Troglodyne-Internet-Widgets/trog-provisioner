@@ -51,7 +51,14 @@ my $client = Test::MockModule->new( 'Trog::EdgeClient', no_auto => 1 );
 $client->redefine(
     run => sub {
         my (@command) = @_;
+        my $opts = ref $command[0] eq 'HASH' ? shift @command : {};
         push( @ran, "@command" );
+
+        # doveadm hashes what it reads, twice over, on its standard input.
+        if ( "@command" eq 'setsid --wait doveadm pw -s ARGON2ID' ) {
+            my ( $first, $second ) = split m/\n/, $opts->{input} // q{};
+            return ( "{ARGON2ID}hash-of-$first\n", $first eq $second ? 1 : 0 );
+        }
         if ( $command[0] eq 'ssh-keygen' ) {
             my ($file) = map { $command[ $_ + 1 ] } grep { $command[$_] eq '-f' } 0 .. $#command;
             File::Slurper::Temp::write_text( $file,       "PRIVATE KEY\n" );
@@ -189,9 +196,11 @@ subtest 'a domain registers a login for the relay, and releases it' => sub {
     chomp( my $password = $out );
     like( $password, qr/\A[[:xdigit:]]{48}\z/, 'and prints a password on one line' );
 
-    my ( $login, $hash ) = File::Slurper::read_text("$edge/mail.passwd") =~ m/\A([^:]+):\{SHA512-CRYPT\}(\S+)\n\z/;
-    is( $login,                                         $DOMAIN,               'dovecot gets a login named for the domain' );
-    is( crypt( $password, $hash ),                      $hash,                 'whose hash is of that password, which is not kept' );
+    is(
+        File::Slurper::read_text("$edge/mail.passwd"), "$DOMAIN:{ARGON2ID}hash-of-$password
+", 'dovecot gets a login named for the domain, with the hash that doveadm made of the password, which is not kept'
+    );
+    ok( ( grep { $_ eq 'setsid --wait doveadm pw -s ARGON2ID' } @ran ), 'doveadm reads the password on its input, away from the terminal, and not on its command line' );
     is( ( stat "$edge/mail.passwd" )[2] & oct 7777,     oct 640,               'readable by its group, and not by everybody' );
     is( File::Slurper::read_text("$edge/mail.senders"), "\@$DOMAIN $DOMAIN\n", 'and the login owns every sender in the domain' );
     is_deeply( [ grep { m/\A(?:systemctl)/ } @ran ], ['systemctl reload postfix'], 'and postfix reads the tables again' );

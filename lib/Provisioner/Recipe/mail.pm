@@ -195,10 +195,6 @@ wrote them.
 
 =cut
 
-use UUID                  qw{uuid};
-use MIME::Base64          qw{encode_base64};
-use Crypt::Digest::SHA512 qw{sha512};
-
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
@@ -228,7 +224,7 @@ sub args {
                             type       => 'string',
                             'x-secret' => 1,
 
-                            # The template renders a salted_sha_512 hash, so
+                            # The template renders an Argon2id hash, so
                             # the payload never holds the plaintext.  A literal
                             # password stays in the configuration file, and
                             # bin/preflight says so.
@@ -402,17 +398,7 @@ sub enrich {
 sub formatters {
     my ($class) = shift;
     return (
-        salted_sha_512 => Text::Xslate::html_builder(
-            sub {
-                my $pw   = shift;
-                my $salt = uuid();
-
-                # https://doc.dovecot.org/2.3/configuration_manual/authentication/password_schemes/#salting
-                my $raw = encode_base64( sha512("$pw$salt") . $salt );
-                $raw =~ s/\n//g;
-                return "{SSHA512}$raw";
-            }
-        ),
+        dovecot_password_hash => Text::Xslate::html_builder( \&Provisioner::Utils::dovecot_password_hash ),
     );
 }
 

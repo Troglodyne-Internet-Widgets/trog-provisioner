@@ -18,6 +18,8 @@ use File::Temp  qw{tempdir};
 use File::Slurper();
 
 use FindBin::libs;
+use MIME::Base64();
+use Crypt::KeyDerivation();
 
 use_ok('Provisioner::Utils');
 
@@ -125,6 +127,24 @@ subtest 'somewhere it cannot write is fatal, not silent' => sub {
     # A key that was not written is a service that will not start.  Whoever is
     # reading the build output should be told, rather than finding out later.
     ok( exception { Provisioner::Utils::write_pem( "$dir/no/such/dir/key.pem", "key\n", 0600 ) }, 'a directory that does not exist' );
+};
+
+subtest 'dovecot_password_hash makes the Argon2id hash that dovecot reads' => sub {
+    my $hash = Provisioner::Utils::dovecot_password_hash('s3cret');
+    my $part = qr/([^\$]+)/;
+    my ( $params, $salt, $digest ) = $hash =~ m/\A\{ARGON2ID\}\$argon2id\$v=19\$$part\$$part\$$part\z/;
+    ok( defined $digest, 'the ARGON2ID scheme in front of the PHC string' ) or diag $hash;
+    is( $params, 'm=65536,t=3,p=1', 'with the costs that doveadm pw uses' );
+
+    # Decoded independently of the encoder: the digest is the Argon2id of the
+    # password with the salt that the string carries.
+    my ( $raw_salt, $raw_digest ) = map { MIME::Base64::decode_base64( $_ . '=' x ( -length($_) % 4 ) ) } $salt, $digest;
+    is( length $raw_salt, 16,                                                                                     'a salt of 16 bytes' );
+    is( $raw_digest,      Crypt::KeyDerivation::argon2_pbkdf( 'argon2id', 's3cret', $raw_salt, 3, 65536, 1, 32 ), 'whose digest is of that password' );
+    isnt( Crypt::KeyDerivation::argon2_pbkdf( 'argon2id', 'wrong', $raw_salt, 3, 65536, 1, 32 ), $raw_digest, 'and of no other' );
+
+    unlike( "$salt$digest", qr/=/, 'the salt and the digest in base64 with no padding, as the format wants' );
+    isnt( Provisioner::Utils::dovecot_password_hash('s3cret'), $hash, 'and a new salt each time' );
 };
 
 Test::NoWarnings::had_no_warnings();

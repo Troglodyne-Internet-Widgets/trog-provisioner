@@ -58,6 +58,9 @@ subtest 'the catchall is an account of the domain it catches for' => sub {
     my @field = split /:/, $catchall[0] // q{};
     is( $field[0], 'catchall@mail.test.test',       'under the domain' );
     is( $field[5], '/mail/mail.test.test/catchall', 'with its mailbox there too' );
+
+    my ($someuser) = grep { /^someuser\@/ } split /\n/, $passwd;
+    like( ( split /:/, $someuser // q{} )[1], qr/\A\{ARGON2ID\}\$argon2id\$/, 'an account with a password gets the Argon2id hash of it, which dovecot reads' );
 };
 
 subtest 'a domain with an edge sends its mail through the relay there' => sub {

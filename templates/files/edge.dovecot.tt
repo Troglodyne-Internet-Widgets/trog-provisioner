@@ -7,7 +7,7 @@ auth_mechanisms = plain login
 
 passdb {
   driver = passwd-file
-  args = scheme=SHA512-CRYPT /etc/nginx/edge.d/mail.passwd
+  args = scheme=ARGON2ID /etc/nginx/edge.d/mail.passwd
 }
 userdb {
   driver = static
