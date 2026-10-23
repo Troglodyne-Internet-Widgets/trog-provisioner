@@ -989,7 +989,7 @@ sub handle_domain {
 
         # Collected for one lookup below, so that a run asks for the password of
         # the store one time.  They go through the store, not the payload.
-        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ) );
+        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ), $builder->granted_secrets( $fqdn, %$pconf ) );
 
         my %sources = $builder->fetch_sources(%$pconf);
         foreach my $name ( sort keys %sources ) {

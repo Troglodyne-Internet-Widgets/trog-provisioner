@@ -244,7 +244,7 @@ subtest 'a domain with an edge registers there the names that the proxy routes, 
 
     my $nginx  = 'Provisioner::Recipe::nginx';
     my %public = ( public_names => { 'www.customer.test' => 'shop.test.test' } );
-    my %files  = $nginx->guest_secrets( '/bogus', 'shop.test.test', %public, edge => 'edge.test.test' );
+    my %files  = $nginx->granted_secrets( 'shop.test.test', %public, edge => 'edge.test.test' );
     is_deeply(
         \%files,
         {
@@ -257,11 +257,11 @@ subtest 'a domain with an edge registers there the names that the proxy routes, 
         'the edge issues the key of the domain, and a domain built onto another guest sends its names to that guest'
     );
 
-    is_deeply( { $nginx->guest_secrets( '/bogus', 'shop.test.test', %public ) },                                      {}, 'a domain with no edge registers nothing' );
-    is_deeply( { $nginx->guest_secrets( '/bogus', 'shop.test.test', public_names => {}, edge => 'edge.test.test' ) }, {}, 'and nor does one with no public name' );
+    is_deeply( { $nginx->granted_secrets( 'shop.test.test', %public ) },                                      {}, 'a domain with no edge registers nothing' );
+    is_deeply( { $nginx->granted_secrets( 'shop.test.test', public_names => {}, edge => 'edge.test.test' ) }, {}, 'and nor does one with no public name' );
 
     $pool->redefine( assignments => sub { return {} } );
-    like( exception { $nginx->guest_secrets( '/bogus', 'shop.test.test', %public, edge => 'edge.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the edge cannot reach stops the build' );
+    like( exception { $nginx->granted_secrets( 'shop.test.test', %public, edge => 'edge.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the edge cannot reach stops the build' );
 };
 
 Test::NoWarnings::had_no_warnings();

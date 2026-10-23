@@ -23,7 +23,7 @@ use Provisioner::Cookbook();
 my $edge = Provisioner::Cookbook->load('edge');
 
 subtest 'a guest registers its names on the edge, which issues it a key' => sub {
-    my %files = $edge->client_secret( 'edge.test.test', 'web.test.test', upstreams => { tls => '192.0.2.10:8443', http => '192.0.2.10:8080' }, names => [qw{public.web.test.test www.customer.test}] );
+    my %files = $edge->issue_grant( { recipe => 'edge', guest => 'edge.test.test', client => 'web.test.test' }, upstreams => { tls => '192.0.2.10:8443', http => '192.0.2.10:8080' }, names => [qw{public.web.test.test www.customer.test}] );
     is_deeply(
         \%files,
         {
@@ -39,7 +39,9 @@ subtest 'a guest registers its names on the edge, which issues it a key' => sub 
 };
 
 subtest 'bin/destroy releases them by the same script' => sub {
-    is( $edge->release_command( 'edge.test.test', 'web.test.test' ), '/root/bin/edge_client release web.test.test', 'edge_client release, for the domain' );
+    my %revocation = $edge->revoke_grant( { recipe => 'edge', guest => 'edge.test.test', client => 'web.test.test' } );
+    is( $revocation{command}, '/root/bin/edge_client release web.test.test', 'edge_client release, for the domain' );
+    like( $revocation{stays}, qr/Run[ ]\Q$revocation{command}\E[ ]there/, 'and an edge that is not up is told the same command' );
 };
 
 Test::NoWarnings::had_no_warnings();

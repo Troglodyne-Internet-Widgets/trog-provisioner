@@ -42,7 +42,7 @@ L<Provisioner::Recipe::registrar>.  Then this guest holds a zone of the name of
 that guest, and that guest writes its records here, through the API proxy
 below.  C<bin/provision> makes the zone when it builds that guest, with this
 domain as its nameserver, and deletes the zone that a build before it made.
-See C<client_secret>.  The recursor of this guest forwards the zone to the
+See C<issue_grant>.  The recursor of this guest forwards the zone to the
 authoritative server, so that the CA of this guest finds the challenges of that
 guest, wherever its name is.  A build of this guest forwards each zone that
 its database holds again.
@@ -66,7 +66,7 @@ again.
 
 Unlike a zone of another guest, no build of a guest replaces such a zone,
 because several guests can serve names in it.  Each of them gets a token of
-its own from C<zone_secret>.
+its own from C<issue_grant>.
 
 =head2 The API proxy
 
@@ -100,7 +100,7 @@ F</var/spool/powerdns>.  The tokens are in F</var/lib/pdns-acl/acl.db>.
 
 A guest that names this guest as its authority gets a token from this guest
 when it is built.  C<bin/provision> runs C<pdns-acl> here over ssh, and puts the
-token on the other guest.  See C<client_secret>.  The token is labeled with the
+token on the other guest.  See C<issue_grant>.  The token is labeled with the
 name that it writes, and a new build of that guest replaces it.  So C<pdns-acl
 token list> shows each of them, and C<pdns-acl token remove> revokes one.
 C<bin/destroy> of that guest removes the token and the zone.
@@ -298,7 +298,7 @@ sub api_key_for {
 
 What lexicon needs on another guest to write C<$name> through the proxy on
 C<$guest>, as L<Provisioner::Recipe::registrar/lexicon_credentials> returns it.  The
-token is in C<key_file>, which C<client_secret> puts there.
+token is in C<key_file>, which C<issue_grant> puts there.
 
 C<opts> is C<--resolve-zone-name>, so that lexicon asks the DNS for the zone.
 The guest resolves its own zone through C<$guest>.  See
@@ -337,98 +337,84 @@ sub token_path {
     return "/etc/lexicon/$name.token";
 }
 
-=head2 %files = $recipe->client_secret($guest, $name)
+=head2 %files = $recipe->issue_grant($grant, %terms)
 
-The token that writes C<$name> and the names below it, in a zone of that name
-on C<$guest>.  It is a file for the C<guest_secrets> of a recipe on the guest
-that writes the name, with C<issue> in place of C<ref>: see C<guest_secrets> in
-L<Provisioner::Recipe>.
+The tokens that the guest of C<$grant> issues to its client, as C<issue_grant>
+in L<Provisioner::Recipe> says.  A grant to this recipe is one of two kinds.
 
-The command is F<scripts/pdns_client> C<issue>, which root runs on C<$guest>.
-It replaces the zone and the token that a build before this one made, so each
-build starts from an empty zone, which the guest fills again in its postrun.
+Without C<zones>, the guest holds the zone of the client, and the file is the
+token that writes the client and the names below it, at C<token_path> of the
+client.  The command is F<scripts/pdns_client> C<issue>.  It replaces the zone
+and the token that a build before this one made, so each build starts from an
+empty zone, which the guest fills again in its postrun.
 
-Dies as C<checked_names> does.
-
-=cut
-
-sub client_secret {
-    my ( $self, $guest, $name ) = @_;
-
-    $self->checked_names( $guest, $name );
-    return (
-        $self->token_path($name) => {
-            issue => {
-                guest   => $guest,
-                command => "$Provisioner::Vars::SCRIPT_DIR/pdns_client issue $name $guest",
-            },
-            owner => 'root:root',
-            mode  => '0600',
-        },
-    );
-}
-
-=head2 %files = $recipe->zone_secret($guest, $zone, $client, @names)
-
-The token that lets C<$client> write C<@names> in C<$zone>, a zone that
-C<$guest> builds because an account of L<Provisioner::Recipe::registrar> names
-it as the authority.  It is a file for the C<guest_secrets> of the registrar of
-C<$client>, at C<token_path> of C<$zone>, as C<client_secret> is.
-
-The command is F<scripts/pdns_client> C<grant>.  It leaves the zone alone,
-because other guests serve names in it, and gives the token only the records
-of C<@names> and of their challenges.
+With C<< zones => \@zones >>, the guest builds each of C<@zones> because an
+account of L<Provisioner::Recipe::registrar> names it as the authority.
+C<%terms> has C<< names => { $zone => \@names } >>, and for each zone with
+names, the file is the token that lets the client write only those names and
+their challenges, at C<token_path> of the zone.  The command is
+F<scripts/pdns_client> C<grant>.  It leaves the zone alone, because other guests
+serve names in it.  A zone with no names gets no token.
 
 Dies as C<checked_names> does.
 
 =cut
 
-sub zone_secret {
-    my ( $self, $guest, $zone, $client, @names ) = @_;
+sub issue_grant {
+    my ( $self, $grant, %terms ) = @_;
+    my ( $guest, $client ) = @{$grant}{qw{guest client}};
 
-    $self->checked_names( $guest, $zone, $client, @names );
+    my %commands;
+    if ( !$grant->{zones} ) {
+        $self->checked_names( $guest, $client );
+        %commands = ( $client => "$Provisioner::Vars::SCRIPT_DIR/pdns_client issue $client $guest" );
+    }
+    foreach my $zone ( @{ $grant->{zones} // [] } ) {
+        my @names = sort @{ $terms{names}{$zone} // next };
+        $self->checked_names( $guest, $zone, $client, @names );
+        $commands{$zone} = join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/pdns_client grant", $zone, $client, @names );
+    }
+
+    return map { $self->token_path($_) => { issue => { guest => $guest, command => $commands{$_} }, owner => 'root:root', mode => '0600' } } keys %commands;
+}
+
+=head2 %revocation = $recipe->revoke_grant($grant)
+
+How C<bin/destroy> takes C<$grant> back, as C<revoke_grant> in
+L<Provisioner::Recipe> says.  Without C<zones>, F<scripts/pdns_client>
+C<release> deletes the zone of the client and its token.  With C<zones>,
+F<scripts/pdns_client> C<revoke> deletes the token of the client in each zone,
+and the zones stay.  It asks about every zone of the grant, because a token
+that is gone already is no error.  If the guest is not up, what it holds stays,
+and C<bin/provision> replaces it when the client is built again.
+
+Dies as C<checked_names> does.
+
+=cut
+
+sub revoke_grant {
+    my ( $self,  $grant )  = @_;
+    my ( $guest, $client ) = @{$grant}{qw{guest client}};
+
+    my $replaced = "bin/provision replaces them when $client is built again";
+    if ( !$grant->{zones} ) {
+        $self->checked_names( $guest, $client );
+        return (
+            command => "$Provisioner::Vars::SCRIPT_DIR/pdns_client release $client",
+            doing   => "remove the zone and the token of $client",
+            done    => "Removed the zone and the token of $client",
+            stays   => "the zone and the token of $client stay on it.  $replaced",
+        );
+    }
+
+    my @zones = @{ $grant->{zones} };
+    $self->checked_names( $guest, $client, @zones );
     return (
-        $self->token_path($zone) => {
-            issue => {
-                guest   => $guest,
-                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/pdns_client grant", $zone, $client, sort @names ),
-            },
-            owner => 'root:root',
-            mode  => '0600',
-        },
+        command => join( ' ; ', map { "$Provisioner::Vars::SCRIPT_DIR/pdns_client revoke $_ $client" } @zones ),
+        doing   => "remove the zone tokens of $client",
+        done    => "Removed the zone tokens of $client",
+        stays   => "the zone tokens of $client stay on it.  $replaced",
     );
-}
-
-=head2 $command = $recipe->revoke_command($guest, $zone, $client)
-
-The shell command that root runs on C<$guest> to delete the token of C<$client>
-in C<$zone>: F<scripts/pdns_client> C<revoke>.  C<bin/destroy> runs it for each
-zone that an account names C<$guest> the authority of.  Dies as
-C<checked_names> does.
-
-=cut
-
-sub revoke_command {
-    my ( $self, $guest, $zone, $client ) = @_;
-
-    $self->checked_names( $guest, $zone, $client );
-    return "$Provisioner::Vars::SCRIPT_DIR/pdns_client revoke $zone $client";
-}
-
-=head2 $command = $recipe->release_command($guest, $name)
-
-The shell command that root runs on C<$guest> to delete the zone C<$name> and
-the token labeled C<$name>: F<scripts/pdns_client> C<release>.  C<bin/destroy>
-runs it for a guest that named C<$guest> as its authority.  Dies as
-C<checked_names> does.
-
-=cut
-
-sub release_command {
-    my ( $self, $guest, $name ) = @_;
-
-    $self->checked_names( $guest, $name );
-    return "$Provisioner::Vars::SCRIPT_DIR/pdns_client release $name";
 }
 
 =head2 $recipe->checked_names(@names)

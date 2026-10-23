@@ -314,57 +314,48 @@ sub proxied_names {
     return @names;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 @grants = $recipe->grants($domain, %opts)
 
-With C<edge> and a public name, the key that the edge issues when it registers
-the names of C<$domain>, from L<Provisioner::Recipe::edge/client_secret>.
-Otherwise nothing.  See L</Registration with an edge guest>.
+With C<edge> and a public name, the registration of the names of C<$domain> on
+the edge, as C<grants> in L<Provisioner::Recipe> says.  The edge issues a key
+for it, and releases the names when the domain goes away.  See
+L<Provisioner::Recipe::edge/issue_grant> and L</Registration with an edge guest>.
 
-Dies when the guest of C<$domain> has no address in the address pool, because
+=cut
+
+sub grants {
+    my ( $self, $domain, %opts ) = @_;
+    my $edge = $opts{edge};
+    return () unless defined $edge && %{ $opts{public_names} // {} };
+
+    return { recipe => 'edge', guest => $edge, client => $domain };
+}
+
+=head2 %terms = $recipe->grant_terms($grant, %opts)
+
+Where the edge sends TLS and plain HTTP for the client of C<$grant>, and the
+names that it sends there, as L<Provisioner::Recipe::edge/issue_grant> takes
+them.
+
+Dies when the guest of the client has no address in the address pool, because
 the edge reaches the guest by that address.
 
 =cut
 
-sub guest_secrets {
-    my ( $self, $install_dir, $domain, %opts ) = @_;
-    my $edge = $opts{edge};
-    return () unless defined $edge && %{ $opts{public_names} // {} };
+sub grant_terms {
+    my ( $self, $grant, %opts ) = @_;
+    my $domain = $grant->{client};
 
     my $guest   = Provisioner::Cookbook->host_of($domain) // $domain;
     my $address = Provisioner::IPPool::assignments()->{$guest};
-    die "nginx: $domain registers its public names on $edge, which reaches them at the address of $guest.  $guest has no address in " . Provisioner::IPPool::db_path() . ".\n"
+    die "nginx: $domain registers its public names on $grant->{guest}, which reaches them at the address of $guest.  $guest has no address in " . Provisioner::IPPool::db_path() . ".\n"
       unless defined $address;
 
-    my %port  = $self->proxy_ports();
-    my @names = $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() );
-    return Provisioner::Cookbook->load('edge')->client_secret( $edge, $domain, upstreams => { tls => "$address:$port{443}", http => "$address:$port{80}" }, names => \@names );
-}
-
-=head2 @releases = $recipe->releases($domain)
-
-The release of the public names of C<$domain> on its C<edge>, when it has an
-edge and a public name, as C<releases> in L<Provisioner::Recipe> says.  If the
-edge is not up, the release says to run the command there by hand before
-another guest gets the address, because the edge sends the names to whatever
-answers at it.
-
-=cut
-
-sub releases {
-    my ( $self, $domain ) = @_;
-
-    my $config = Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {};
-    my $edge   = $config->{edge};
-    return if !defined $edge || !%{ $config->{public_names} // {} };
-
-    my $command = Provisioner::Cookbook->load('edge')->release_command( $edge, $domain );
-    return {
-        guest   => $edge,
-        command => $command,
-        doing   => "release the public names of $domain",
-        done    => "Released the public names of $domain",
-        stays   => "it still sends the public names of $domain to its old address.  Run $command there before another guest gets the address",
-    };
+    my %port = $self->proxy_ports();
+    return (
+        upstreams => { tls => "$address:$port{443}", http => "$address:$port{80}" },
+        names     => [ $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() ) ],
+    );
 }
 
 =head2 %opts = $recipe->enrich(%opts)

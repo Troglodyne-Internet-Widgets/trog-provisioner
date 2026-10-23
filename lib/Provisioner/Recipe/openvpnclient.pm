@@ -172,51 +172,39 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 @grants = $recipe->grants($domain, %opts)
 
-With C<issue_from>, the configuration of this domain, which the server of
-C<issue_from> issues with the static address of the domain.  The address comes
-from the bin of the C<ip_pool> of this installation whose C<via> is that
-server.  This assigns it, as C<bin/new_config> assigns the address of a guest:
-a domain that has one keeps it.  Without C<issue_from>, nothing.
+With C<issue_from>, the certificate and the static address that that server
+issues to C<$domain>, as C<grants> in L<Provisioner::Recipe> says.  See
+L<Provisioner::Recipe::openvpn/issue_grant>.  Without it, nothing.
 
 =cut
 
-sub guest_secrets {
-    my ( $self, $install_dir, $domain, %opts ) = @_;
+sub grants {
+    my ( $self, $domain, %opts ) = @_;
     my $issuer = $opts{issue_from};
     return () unless defined $issuer;
 
-    my $pool    = Provisioner::Cookbook->global_config($domain)->{ip_pool};
-    my ($bin)   = bin_of( $pool, $issuer );
-    my $address = Provisioner::IPPool::assign( $domain, $pool, $bin );
-
-    return Provisioner::Cookbook->load('openvpn')->client_secret( $issuer, $domain, address => $address, server => $opts{server} );
+    return { recipe => 'openvpn', guest => $issuer, client => $domain };
 }
 
-=head2 @releases = $recipe->releases($domain)
+=head2 %terms = $recipe->grant_terms($grant, %opts)
 
-With C<issue_from>, the revoke of the certificate of C<$domain> on that server,
-which also frees the static address that the server gave it, as C<releases> in
-L<Provisioner::Recipe> says.  If the server is not up, the release says to
-revoke the client there by hand before another one gets the address, because
-two clients with one address cut each other off.
+The static address of the client of C<$grant> and the C<server> block that it
+connects to, as L<Provisioner::Recipe::openvpn/issue_grant> takes them.  The
+address comes from the bin of the C<ip_pool> of this installation whose C<via>
+is the server.  This assigns it, as C<bin/new_config> assigns the address of a
+guest: a domain that has one keeps it.
 
 =cut
 
-sub releases {
-    my ( $self, $domain ) = @_;
+sub grant_terms {
+    my ( $self, $grant, %opts ) = @_;
+    my $domain = $grant->{client};
 
-    my $issuer = ( Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} )->{issue_from};
-    return if !defined $issuer;
-
-    return {
-        guest   => $issuer,
-        command => Provisioner::Cookbook->load('openvpn')->release_command( $issuer, $domain ),
-        doing   => "revoke the VPN certificate of $domain",
-        done    => "Revoked the VPN certificate of $domain",
-        stays   => "the certificate and the address of $domain stay on it.  Run openvpn-revoke-client $domain there before another client gets the address",
-    };
+    my $pool = Provisioner::Cookbook->global_config($domain)->{ip_pool};
+    my ($bin) = bin_of( $pool, $grant->{guest} );
+    return ( address => Provisioner::IPPool::assign( $domain, $pool, $bin ), server => $opts{server} );
 }
 
 sub template_files {

@@ -208,18 +208,20 @@ subtest 'what a guest that names this one as its authority gets' => sub {
     is( $credentials{zone},     $name,                      'which is its own name, also for the names under it' );
     is_deeply( $credentials{extra}, [ { key => 'PDNS_SERVER', value => "https://dnsapi.$DOMAIN" } ], 'at the proxy of the authority' );
 
-    my %secret = $recipe->client_secret( $DOMAIN, $name );
+    my %grant  = ( recipe => 'pdns', guest => $DOMAIN, client => $name );
+    my %secret = $recipe->issue_grant( \%grant );
     my $token  = $secret{ $credentials{key_file} };
     ok( $token, 'the token is the file that the credentials name' ) or return;
     is( $token->{issue}{guest}, $DOMAIN, 'issued by the authority' );
     ok( !$token->{ref}, 'and not kept in the store' );
 
-    is( $token->{issue}{command},                   "/root/bin/pdns_client issue $name $DOMAIN", 'which runs pdns_client there, for the name, with the authority as its nameserver' );
-    is( $recipe->release_command( $DOMAIN, $name ), "/root/bin/pdns_client release $name",       'and bin/destroy runs it to remove them' );
+    my %revocation = $recipe->revoke_grant( \%grant );
+    is( $token->{issue}{command}, "/root/bin/pdns_client issue $name $DOMAIN", 'which runs pdns_client there, for the name, with the authority as its nameserver' );
+    is( $revocation{command},     "/root/bin/pdns_client release $name",       'and bin/destroy runs it to remove them' );
 
-    like( Test::Fatal::exception { $recipe->client_secret( $DOMAIN, 'web;reboot' ) },      qr/not[ ]one/, 'a name that is not a domain never reaches the shell of root' );
-    like( Test::Fatal::exception { $recipe->client_secret( $DOMAIN, 'Web.Example.Net' ) }, qr/not[ ]one/, 'nor one in capitals, which the zone and the token would not match' );
-    like( Test::Fatal::exception { $recipe->release_command( 'ns.nosuchtld', $name ) }, qr/not[ ]one/, 'nor a domain under a TLD that does not exist' );
+    like( Test::Fatal::exception { $recipe->issue_grant( { %grant, client => 'web;reboot' } ) },      qr/not[ ]one/, 'a name that is not a domain never reaches the shell of root' );
+    like( Test::Fatal::exception { $recipe->issue_grant( { %grant, client => 'Web.Example.Net' } ) }, qr/not[ ]one/, 'nor one in capitals, which the zone and the token would not match' );
+    like( Test::Fatal::exception { $recipe->revoke_grant( { %grant, guest => 'ns.nosuchtld' } ) }, qr/not[ ]one/, 'nor a domain under a TLD that does not exist' );
     is( $recipe->checked_names( 'web.lab.zone.test', 'ns.example.net' ), 1, 'and a reserved TLD is a TLD here' );
 };
 
@@ -259,7 +261,7 @@ subtest 'a zone that an account names this guest the authority of is built here,
     like( $script, qr{^\@[ ]300[ ]IN[ ]NS[ ]ns2[.]zone[.]test[.]$}m, 'beside the other nameservers of the installation' );
     my $asks = qr{sqlite3[ ]\S+zones[.]db[ ]"SELECT[ ].*};
     $asks = qr{${asks}name='customer[.]test'"};
-    like( $script, qr{^$asks[ ][|][ ]grep[ ]-q[ ][.][ ][|][|][ ]}m,           'loaded only where the database does not hold it yet' );
+    like( $script, qr{^$asks[ ][|][ ]grep[ ]-q[ ][.][ ][|][|][ ]}m, 'loaded only where the database does not hold it yet' );
 
     my $err;
     IPC::Run3::run3( [ qw{bash -n -c}, $script ], \undef, \undef, \$err );

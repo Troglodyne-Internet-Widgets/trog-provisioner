@@ -523,24 +523,24 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->client_secret($server, $client, address => $address, server => $name)
+=head2 %files = $recipe->issue_grant($grant, address => $address, server => $name)
 
-The configuration that C<$server> issues for the client C<$client>, at the
-static C<$address>, as C<client_secret> in L<Provisioner::Recipe> says.
-C<$name> is the server block that the client connects to, as
-C<openvpn-client-config> takes it.  The file lands at
-F</etc/openvpn/client/CLIENT/issued.ovpn.b64>, in base64, because an issued
-secret is one line.
+The configuration that the server of C<$grant> issues for its client, at the
+static C<$address>, as C<issue_grant> in L<Provisioner::Recipe> says.  C<$name>
+is the server block that the client connects to, as C<openvpn-client-config>
+takes it.  The file lands at F</etc/openvpn/client/CLIENT/issued.ovpn.b64>, in
+base64, because an issued secret is one line.
 
 =cut
 
-sub client_secret {
-    my ( $self, $server, $client, %opts ) = @_;
+sub issue_grant {
+    my ( $self, $grant, %terms ) = @_;
+    my $client = $grant->{client};
     return (
         "/etc/openvpn/client/$client/issued.ovpn.b64" => {
             issue => {
-                guest   => $server,
-                command => "/usr/local/sbin/openvpn-client-config --address $opts{address} $client $opts{server} | base64 -w0",
+                guest   => $grant->{guest},
+                command => "/usr/local/sbin/openvpn-client-config --address $terms{address} $client $terms{server} | base64 -w0",
             },
             owner => 'root:root',
             mode  => '0600',
@@ -548,17 +548,25 @@ sub client_secret {
     );
 }
 
-=head2 $command = $recipe->release_command($server, $client)
+=head2 %revocation = $recipe->revoke_grant($grant)
 
-The shell command that root runs on C<$server> to revoke the certificate of
-C<$client>, which also frees its static address there:
-C<openvpn-revoke-client>.
+The revoke of the certificate of the client of C<$grant> by
+C<openvpn-revoke-client>, which also frees its static address on the server, as
+C<revoke_grant> in L<Provisioner::Recipe> says.  If the server is not up, the
+revocation says to revoke the client there by hand before another one gets the
+address, because two clients with one address cut each other off.
 
 =cut
 
-sub release_command {
-    my ( $self, $server, $client ) = @_;
-    return "/usr/local/sbin/openvpn-revoke-client $client";
+sub revoke_grant {
+    my ( $self, $grant ) = @_;
+    my $client = $grant->{client};
+    return (
+        command => "/usr/local/sbin/openvpn-revoke-client $client",
+        doing   => "revoke the VPN certificate of $client",
+        done    => "Revoked the VPN certificate of $client",
+        stays   => "the certificate and the address of $client stay on it.  Run openvpn-revoke-client $client there before another client gets the address",
+    );
 }
 
 sub template_files {
