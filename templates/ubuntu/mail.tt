@@ -110,6 +110,16 @@ postmap /etc/postfix/domains/[% domain %]/virtual_aliases
 postmap /etc/postfix/domains/[% domain %]/transport_maps
 postmap /etc/postfix/domains/[% domain %]/sdd_relay_maps
 postmap /etc/postfix/domains/[% domain %]/sender_login
+[% IF edge_relay -%]
+[%# The password that the edge issued, as the login of this domain for each of
+    its senders.  Provisioner::Recipe::mail has the whole account, under
+    Sending through an edge guest. -%]
+umask 077 && printf '@%s %s:%s\n' '[% domain %]' '[% domain %]' "$$(cat '[% edge_relay.password %]')" > /etc/postfix/domains/[% domain %]/sasl_passwd
+install -m 0600 -o root -g root edge_tls_policy /etc/postfix/domains/[% domain %]/edge_tls_policy
+postmap /etc/postfix/domains/[% domain %]/sasl_passwd
+postmap /etc/postfix/domains/[% domain %]/edge_tls_policy
+install -o root -g root -m 0644 mail_edge_ufw.conf /etc/ufw/applications.d/mail-edge-relay
+[% END -%]
 # main.cf, as the fragment of this domain, not as a run of `postconf -e`.
 # postconf sets a parameter and cannot add to one.  configd merges the
 # fragments, so list parameters stay lists.  The global fragment writes 40-mail,
@@ -117,8 +127,12 @@ postmap /etc/postfix/domains/[% domain %]/sender_login
 install -d -m 0755 -o root -g root /etc/postfix/main.cf.d
 install -m 0644 -o root -g root main.cf.domain /etc/postfix/main.cf.d/50-[% domain %]
 # postmap makes the .db as restrictive as the source it read, and the daemons
-# that open these are not root.
+# that open these are not root.  The smtp client reads the passwords as root,
+# before it drops its privileges, so they stay 0600.
 chmod 0644 /etc/postfix/domains/[% domain %]/*.db
+[% IF edge_relay -%]
+chmod 0600 /etc/postfix/domains/[% domain %]/sasl_passwd.db
+[% END -%]
 # Give the postfix chroot the real resolv.conf.  Its own copy gets the broken
 # default configuration from systemd-resolved.
 [% script_dir %]/queue_postrun_task "cat /etc/resolv.conf > /var/spool/postfix/resolv.conf"

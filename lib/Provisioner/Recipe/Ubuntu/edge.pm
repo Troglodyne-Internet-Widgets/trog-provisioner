@@ -12,12 +12,17 @@ use parent qw{Provisioner::Recipe::edge};
 
 =head1 NAME
 
-Provisioner::Recipe::Ubuntu::edge - Ubuntu's C<deps> for L<Provisioner::Recipe::edge>.
+Provisioner::Recipe::Ubuntu::edge - Ubuntu's C<deps> and C<dep_conflicts> for L<Provisioner::Recipe::edge>.
 
 =cut
 
 sub deps {
-    return qw{libnginx-mod-stream ipset};
+    return qw{libnginx-mod-stream ipset postfix dovecot-core};
+}
+
+# The relay is postfix, which conflicts with the sendmail of every other guest.
+sub dep_conflicts {
+    return qw{sendmail};
 }
 
 1;

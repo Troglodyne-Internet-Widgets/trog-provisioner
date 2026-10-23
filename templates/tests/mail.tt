@@ -279,4 +279,27 @@ SKIP: {
         is($count, 1, "one DKIM record for the $selector selector");
     }
 }
+[% IF edge_relay -%]
+subtest 'the mail of this domain goes out through the edge' => sub {
+    my $relay = `postmap -q '\@[% domain %]' hash:/etc/postfix/domains/[% domain %]/sdd_relay_maps 2>&1`;
+    chomp $relay;
+    is( $relay, '[[% edge_relay.address %]]:[% edge_relay.port %]', 'every sender of this domain is sent to the relay of the edge' );
+    my $login = `postmap -q '\@[% domain %]' hash:/etc/postfix/domains/[% domain %]/sasl_passwd 2>&1`;
+    like( $login, qr/\A\Q[% domain %]\E:[0-9a-f]+$/, 'with the login that the edge issued' );
+
+    # relay-selftest on the edge delivers to /dev/null, so this sends nothing to
+    # the internet.
+    open( my $mail, '|-', '/usr/sbin/sendmail', '-f', 'postmaster@[% domain %]', 'relay-selftest@[% edge %]' ) or die "sendmail: $!";
+    print {$mail} "Subject: a test of the relay of the edge\n\nNothing to read.\n";
+    close $mail or die "sendmail: $!";
+
+    my $log = '';
+    for ( 1 .. 60 ) {
+        $log = `journalctl -t postfix/cleanup -t postfix/smtp --since '-5min' --no-pager -o cat 2>&1`;
+        last if $log =~ m/to=<relay-selftest\@\Q[% edge %]\E>, relay=\Q[% edge_relay.address %]\E\[[^\]]*\]:[% edge_relay.port %],.* status=sent/;
+        sleep 1;
+    }
+    like( $log, qr/to=<relay-selftest\@\Q[% edge %]\E>, relay=\Q[% edge_relay.address %]\E\[[^\]]*\]:[% edge_relay.port %],.* status=sent/, 'a message reaches the relay, which takes it' ) or diag $log;
+};
+[% END -%]
 done_testing();

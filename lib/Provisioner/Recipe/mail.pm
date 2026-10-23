@@ -10,6 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::mail
@@ -163,6 +164,28 @@ the fetched copy goes into the data directory of the provisioner and into its
 backups.  That copy holds all the mail of this domain and the key that signs
 its outbound mail.
 
+=head3 Sending through an edge guest
+
+    somedomain:
+        mail:
+            edge: edge.somedomain
+
+C<edge> names a guest that runs L<Provisioner::Recipe::edge>.  Then every
+message with a sender in this domain goes out through the relay of that guest,
+and not straight to the internet.  This is for a guest that cannot send on port
+25 itself, such as one behind an ISP that blocks it.  It is the opposite of
+C<relay>, and the build stops when both are set.
+
+When this domain is built, the edge issues it a password for a login of its
+own, as a grant.  See L<Provisioner::Recipe::edge/Mail out>.  This recipe puts
+the password in the C<sasl_passwd> table of the domain, which postfix uses for
+a sender in this domain.  It sends to the relay only over TLS, and the relay
+takes from this login only a sender in this domain.  C<bin/destroy> removes the
+login on the edge.
+
+A message with an empty sender, such as a bounce that this guest makes, is not
+in the domain, so it does not go through the edge.
+
 =head3 What cannot come apart
 
 postfix has one C<myhostname> and one TLS certificate, and C</etc/aliases> is
@@ -241,6 +264,12 @@ sub args {
                 },
             },
 
+            edge => {
+                type        => 'string',
+                format      => 'hostname',
+                description => 'The guest that runs the edge recipe, whose relay sends the mail of this domain out.  See "Sending through an edge guest".',
+            },
+
             ipv6 => { type => 'boolean', default => 1 },
         },
     );
@@ -290,6 +319,19 @@ sub subdomains {
     return qw{mail autodiscover autoconfig};
 }
 
+=head2 @grants = $recipe->grants($domain, %opts)
+
+With C<edge>, the login of C<$domain> on the relay of the edge, as C<grants> in
+L<Provisioner::Recipe> says.  See L</Sending through an edge guest>.
+
+=cut
+
+sub grants {
+    my ( $self, $domain, %opts ) = @_;
+    return () unless defined $opts{edge};
+    return { recipe => 'edge', guest => $opts{edge}, client => $domain, service => 'mail' };
+}
+
 sub template_files {
     my ( $self, @recipes ) = @_;
 
@@ -320,6 +362,8 @@ sub template_files {
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',
         'mail.junk.sieve'                => 'junk.sieve',
+        'mail.edge_tls_policy.tt'        => 'edge_tls_policy',
+        'mail.edge_ufw.tt'               => 'mail_edge_ufw.conf',
     );
 }
 
@@ -345,6 +389,12 @@ sub enrich {
 
     $opts{sender_logins}  = \@logins;
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
+
+    if ( defined $opts{edge} ) {
+        die "mail: $opts{domain} names both a relay and an edge, and they disagree about where its mail goes.  Set one.\n" if $opts{relay}{host};
+        my $edge = Provisioner::Cookbook->load('edge');
+        $opts{edge_relay} = { address => $edge->address( $opts{edge} ), port => $edge->relay_port_of( $opts{edge} ), password => $edge->relay_password_path( $opts{domain} ) };
+    }
 
     return %opts;
 }

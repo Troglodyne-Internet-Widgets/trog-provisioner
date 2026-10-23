@@ -1,0 +1,25 @@
+# dovecot on the edge only checks the logins of the relay, for postfix.  It
+# serves no mail, so it has no protocols, and it knows no account but the
+# logins that edge_client registers.  Provisioner::Recipe::edge has the whole
+# account, under Mail out.
+protocols =
+auth_mechanisms = plain login
+
+passdb {
+  driver = passwd-file
+  args = scheme=SHA512-CRYPT /etc/nginx/edge.d/mail.passwd
+}
+userdb {
+  driver = static
+  args = uid=nobody gid=nogroup home=/nonexistent
+}
+
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+log_path = syslog

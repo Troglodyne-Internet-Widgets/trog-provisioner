@@ -11,6 +11,7 @@ use re '/aasx';
 use File::Slurper();
 use File::Temp();
 
+use Provisioner::Cookbook();
 use Provisioner::IPPool();
 use Provisioner::Utils();
 use Provisioner::Vars();
@@ -84,6 +85,26 @@ the time that each ban has left, and it comes back when ufw loads.
 The guests pin the ed25519 host key of this guest, so it comes from the secret
 store, and a rebuild keeps it.
 
+=head2 Mail out
+
+A guest whose C<mail> names this guest as its C<edge> sends all the mail of its
+domain out through the relay here.  The office cannot send on port 25, and the
+reverse DNS and the SPF of the domain can name this guest.  See
+L<Provisioner::Recipe::mail/Sending through an edge guest>.
+
+When the guest is built, C<edge_client register-mail> makes a login for its
+domain, with a new password that it prints and does not keep.  The guest
+places the password as a grant.  F</etc/nginx/edge.d> keeps the hash, for
+dovecot, which checks the logins for postfix and does nothing else.  It also
+keeps the senders that each login owns, which is every address in its domain.
+So a guest cannot send as another domain through this relay.
+
+The relay is postfix on C<relay_port>, bound to the address that C<address> returns,
+where the guests reach this guest, and not to the public address.  It takes
+mail only over TLS, only from a login, and only with a sender that the login
+owns.  It then delivers the mail itself, on port 25.  C<bin/destroy> runs
+C<edge_client release-mail>, which removes the login.
+
 =head2 Ports
 
 The stream proxy listens on C<tls_port>, and ufw forwards 443 there for every
@@ -110,6 +131,13 @@ sub args {
                 default     => 4443,
                 description => 'The port of the stream proxy, where ufw forwards 443 from outside.  See "Ports".',
             },
+            relay_port => {
+                type        => 'integer',
+                minimum     => 1024,
+                maximum     => 65535,
+                default     => 2587,
+                description => 'The port of the relay that the guests behind this edge send their mail through.  See "Mail out".',
+            },
         },
     );
 }
@@ -120,10 +148,16 @@ my sub tls_port (%opts) {
     return $opts{tls_port} // 4443;
 }
 
+my sub relay_port (%opts) {
+    return $opts{relay_port} // 2587;
+}
+
 sub required_recipes {
     return (
-        nginx => sub { return () },
-        ufw   => sub {
+        configd     => sub { return ( languages           => ['postfix'] ) },
+        letsencrypt => sub { return ( certificate_readers => ['postfix'] ) },
+        nginx       => sub { return () },
+        ufw         => sub {
             my (%opts) = @_;
             return ( port_forwards => [ { from => 443, to => tls_port(%opts) } ] );
         },
@@ -133,13 +167,38 @@ sub required_recipes {
 =head2 %limits = $recipe->rate_limits(%opts)
 
 The limit of 443 for C<tls_port>, because the forward happens before the limit
-counts a connection.
+counts a connection.  The limit of a port of mail for C<relay_port>.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
-    return ( tls_port(%opts) => 1024 );
+    return ( tls_port(%opts) => 1024, relay_port(%opts) => 64 );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<relay_address>, the address that C<address> returns, where the relay
+listens.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    $opts{relay_address} = $self->address( $opts{domain} );
+    return %opts;
+}
+
+=head2 $port = $recipe->relay_port_of($edge)
+
+The C<relay_port> of the edge C<$edge>, from its configuration, or the default
+when it sets none.
+
+=cut
+
+sub relay_port_of {
+    my ( $self, $edge ) = @_;
+    return relay_port( %{ Provisioner::Cookbook->domain_config($edge)->{edge} // {} } );
 }
 
 =head2 %path_map = $recipe->remote_files($install_dir, $domain)
@@ -187,6 +246,18 @@ base64.
 sub host_key_path {
     my ( $self, $domain ) = @_;
     return "/etc/fail2ban/edge/$domain.host.b64";
+}
+
+=head2 $path = $recipe->relay_password_path($domain)
+
+Where the password of the relay that this guest issues for C<$domain> is, on
+the guest of C<$domain>.
+
+=cut
+
+sub relay_password_path {
+    my ( $self, $domain ) = @_;
+    return "/etc/postfix/edge/$domain.password";
 }
 
 =head2 $address = $recipe->address($edge)
@@ -238,8 +309,12 @@ sub guest_secrets {
 
 =head2 %files = $recipe->issue_grant($grant, %terms)
 
-The key that the edge issues when it registers the names of the client of
-C<$grant>, at C<key_path> of the client, as C<issue_grant> in
+For a grant with C<< service => 'mail' >>, the password of the relay that the
+edge issues for the client of C<$grant>, at C<relay_password_path> of the
+client.  See L</Mail out>.
+
+For any other grant, the key that the edge issues when it registers the names
+of the client of C<$grant>, at C<key_path> of the client, as C<issue_grant> in
 L<Provisioner::Recipe> says.  Also the public host key of the edge, at
 C<host_key_path>, which the client pins.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >> and
@@ -254,6 +329,17 @@ TLS and plain HTTP for C<@names>.  See L</Registration>.
 sub issue_grant {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
+
+    if ( ( $grant->{service} // q{} ) eq 'mail' ) {
+        return (
+            $self->relay_password_path($client) => {
+                issue => { guest => $grant->{guest}, command => "$Provisioner::Vars::SCRIPT_DIR/edge_client register-mail $client" },
+                owner => 'root:root',
+                mode  => '0600',
+            },
+        );
+    }
+
     return (
         $self->key_path($client) => {
             issue => {
@@ -273,8 +359,9 @@ sub issue_grant {
 
 =head2 %revocation = $recipe->revoke_grant($grant)
 
-The release of the names of the client of C<$grant>, by F<scripts/edge_client>
-C<release>, as C<revoke_grant> in L<Provisioner::Recipe> says.  If the edge is
+For a mail grant, the removal of the relay login of the client of C<$grant>,
+by F<scripts/edge_client> C<release-mail>.  For any other, the release of the
+names of the client of C<$grant>, by F<scripts/edge_client> C<release>, as C<revoke_grant> in L<Provisioner::Recipe> says.  If the edge is
 not up, the revocation says to run the command there by hand before another
 guest gets the address, because the edge sends the names to whatever answers at
 it.
@@ -283,7 +370,18 @@ it.
 
 sub revoke_grant {
     my ( $self, $grant ) = @_;
-    my $client  = $grant->{client};
+    my $client = $grant->{client};
+
+    if ( ( $grant->{service} // q{} ) eq 'mail' ) {
+        my $command = "$Provisioner::Vars::SCRIPT_DIR/edge_client release-mail $client";
+        return (
+            command => $command,
+            doing   => "remove the relay login of $client",
+            done    => "Removed the relay login of $client",
+            stays   => "its relay still takes mail from the login of $client.  Run $command there",
+        );
+    }
+
     my $command = "$Provisioner::Vars::SCRIPT_DIR/edge_client release $client";
     return (
         command => $command,
@@ -295,11 +393,14 @@ sub revoke_grant {
 
 sub template_files {
     return (
-        'edge.stream.conf.tt' => 'edge.stream.conf',
-        'edge.http.conf.tt'   => 'edge.http.conf',
-        'edge.ufw.conf.tt'    => 'edge_ufw.conf',
-        'edge.sshd.tt'        => 'edge.sshd.conf',
-        'edge.bans.tt'        => 'edge.bans',
+        'edge.stream.conf.tt'    => 'edge.stream.conf',
+        'edge.http.conf.tt'      => 'edge.http.conf',
+        'edge.ufw.conf.tt'       => 'edge_ufw.conf',
+        'edge.sshd.tt'           => 'edge.sshd.conf',
+        'edge.bans.tt'           => 'edge.bans',
+        'edge.postfix.main.tt'   => 'edge.postfix.main',
+        'edge.postfix.master.tt' => 'edge.postfix.master',
+        'edge.dovecot.tt'        => 'edge.dovecot.conf',
     );
 }
 

@@ -61,6 +61,11 @@ my $template_dir = "$FindBin::Bin/../templates";
 my $garage = Test::MockModule->new('Provisioner::Recipe::garage');
 $garage->redefine( latest_version => sub { return 'v2.4.1' } );
 
+# The edge binds its relay to its own address in the pool, which bin/new_config
+# assigns before it renders, and this file never does.
+my $holdings = Test::MockModule->new('Provisioner::IPPool');
+$holdings->redefine( holdings => sub { return { guests => '192.0.2.100' } } );
+
 # The search path bin/new_config builds: a distribution's own directory first,
 # then the generic one.  Every fragment lives under ubuntu/ today, being written
 # against apt and systemd; templates/ holds makefile.tt and what is genuinely
@@ -1108,6 +1113,14 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         tcms_dir    => 'tCMS',         basedir     => 'code',
         port        => 636,            users       => [],
         tls_port    => 4443,
+
+        # The branches that only a guest behind an edge renders.
+        edge          => 'edge.d.test',
+        edge_address  => '192.0.2.5',
+        edge_jails    => ['nginx-botsearch'],
+        edge_relay    => { address => '192.0.2.5', port => 2587, password => '/etc/postfix/edge/d.test.password' },
+        relay_address => '192.0.2.5',
+        relay_port    => 2587,
     );
 
     my $dir = tempdir( CLEANUP => 1 );

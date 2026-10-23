@@ -179,6 +179,36 @@ subtest 'a registration waits for another one, but not forever' => sub {
     waitpid( $pid, 0 );
 };
 
+subtest 'a domain registers a login for the relay, and releases it' => sub {
+    no warnings 'once';
+    local $Trog::EdgeClient::DOVECOT_GROUP = getgrgid($));
+    my $edge = fresh_edge();
+
+    my ( $out, $err, $rc ) = capture { Trog::EdgeClient::main( 'register-mail', $DOMAIN ) };
+    is( $rc, 0, 'it exits 0' ) or diag $err;
+    chomp( my $password = $out );
+    like( $password, qr/\A[[:xdigit:]]{48}\z/, 'and prints a password on one line' );
+
+    my ( $login, $hash ) = File::Slurper::read_text("$edge/mail.passwd") =~ m/\A([^:]+):\{SHA512-CRYPT\}(\S+)\n\z/;
+    is( $login,                                         $DOMAIN,               'dovecot gets a login named for the domain' );
+    is( crypt( $password, $hash ),                      $hash,                 'whose hash is of that password, which is not kept' );
+    is( ( stat "$edge/mail.passwd" )[2] & oct 7777,     oct 640,               'readable by its group, and not by everybody' );
+    is( File::Slurper::read_text("$edge/mail.senders"), "\@$DOMAIN $DOMAIN\n", 'and the login owns every sender in the domain' );
+    is_deeply( [ grep { m/\A(?:systemctl)/ } @ran ], ['systemctl reload postfix'], 'and postfix reads the tables again' );
+
+    capture { Trog::EdgeClient::main( 'register-mail', 'other.test.test' ) };
+    my ( $second, undef, undef ) = capture { Trog::EdgeClient::main( 'register-mail', $DOMAIN ) };
+    my @logins = map { m/\A([^:]+):/ } split m/\n/, File::Slurper::read_text("$edge/mail.passwd");
+    is_deeply( \@logins, [ 'other.test.test', $DOMAIN ], 'a second registration replaces the login of the domain, beside the others' );
+    isnt( $second, $out, 'with a new password' );
+
+    ( undef, undef, $rc ) = capture { Trog::EdgeClient::main( 'release-mail', $DOMAIN ) };
+    is( $rc,                                            0,                                     'a release exits 0' );
+    is( File::Slurper::read_text("$edge/mail.senders"), "\@other.test.test other.test.test\n", 'and takes away the login of the domain only' );
+    unlike( File::Slurper::read_text("$edge/mail.passwd"), qr/\Q$DOMAIN\E/, 'and its hash' );
+    like( exception { Trog::EdgeClient::main( 'register-mail', $DOMAIN, 'extra' ) }, qr/\Ausage:/, 'and a registration with more than the domain is refused' );
+};
+
 subtest 'it refuses what it cannot put in a file of nginx' => sub {
     fresh_edge();
     my %bad = (
