@@ -20,6 +20,9 @@ use File::Temp();
 use File::Slurper();
 use File::Slurper::Temp();
 use MIME::Base64();
+use Fcntl();
+use POSIX();
+use Time::HiRes();
 
 use FindBin;
 use FindBin::libs;
@@ -143,6 +146,37 @@ subtest 'a domain releases everything that it registered' => sub {
 
     ( undef, undef, $rc ) = capture { Trog::EdgeClient::main( 'release', $DOMAIN ) };
     is( $rc, 0, 'a domain that registered nothing releases nothing, and that is no error' );
+};
+
+# The lock of $edge, held as another edge_client holds it, until it is closed.
+sub held_lock {
+    my ($edge) = @_;
+    open( my $held, '>>', "$edge/.lock" ) or die "Cannot open the lock: $!";
+    flock( $held, Fcntl::LOCK_EX() )      or die "Cannot take the lock: $!";
+    return $held;
+}
+
+subtest 'a registration waits for another one, but not forever' => sub {
+    my $edge = fresh_edge();
+    local $Trog::EdgeClient::LOCK_WAIT = 0.5;
+
+    my $held  = held_lock($edge);
+    my $start = Time::HiRes::time();
+    my $err   = exception { Trog::EdgeClient::lock_edge() };
+    my $took  = Time::HiRes::time() - $start;
+    like( $err, qr/held[ ]\S+\/[.]lock[ ]for[ ]all[ ]of[ ]the[ ]0[.]5[ ]seconds/, 'a lock that another one holds for too long is an error that names the file' );
+    cmp_ok( $took, '>=', 0.5, 'after the whole of the wait' );
+
+    # A child that lets go partway through the wait.
+    local $Trog::EdgeClient::LOCK_WAIT = 5;
+    my $pid = fork() // die "Cannot fork: $!";
+    if ( !$pid ) {
+        Time::HiRes::sleep(0.5);
+        POSIX::_exit( close($held) ? 0 : 1 );
+    }
+    close $held or die "Cannot close the lock: $!";
+    ok( Trog::EdgeClient::lock_edge(), 'and the lock that the other one gives back is taken' );
+    waitpid( $pid, 0 );
 };
 
 subtest 'it refuses what it cannot put in a file of nginx' => sub {

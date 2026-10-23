@@ -14,6 +14,7 @@ use File::Temp     ();
 use IPC::Open3     ();
 use List::Util     qw{any};
 use MIME::Base64   ();
+use Time::HiRes    ();
 
 =head1 edge_client
 
@@ -44,6 +45,9 @@ is the address of the guest.  See F<scripts/edge_ban>.
 C<release> removes everything that DOMAIN registered, its key included.  Any of
 it can be gone already.
 
+Each one waits up to a minute for another C<register> or C<release> to
+finish, and then gives up and says which file is locked.
+
 It exits 0 when it did that.  When a step fails, it says which, and exits
 with another status.
 
@@ -54,6 +58,10 @@ my $USAGE = "usage: edge_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME 
 ";
 
 our $EDGE_D = '/etc/nginx/edge.d';
+
+# How many seconds to wait for another registration to finish.  The lock is
+# held only while it runs a few short commands, so a longer wait is a hang.
+our $LOCK_WAIT = 60;
 
 # Beside this script, as every script of the provisioner is.
 our $EDGE_BAN = File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/edge_ban';
@@ -138,7 +146,14 @@ sub write_authorized_keys {
 sub lock_edge {
     my $lock = "$EDGE_D/.lock";
     open( my $fh, '>>', $lock ) or die "Cannot open $lock: $!\n";
-    flock( $fh, LOCK_EX )       or die "Cannot lock $lock: $!\n";
+
+    my $until = Time::HiRes::time() + $LOCK_WAIT;
+    while ( !flock( $fh, LOCK_EX | LOCK_NB ) ) {
+        die "Cannot lock $lock: $!\n" unless $!{EWOULDBLOCK};
+        die "Another registration or release held $lock for all of the $LOCK_WAIT seconds that this one waited, so it is probably stuck.  ps -o pid,etime,args -C edge_client shows it.\n"
+          if Time::HiRes::time() >= $until;
+        Time::HiRes::sleep(0.2);
+    }
     return $fh;
 }
 
