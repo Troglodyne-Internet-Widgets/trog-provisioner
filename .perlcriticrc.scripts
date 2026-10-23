@@ -130,6 +130,9 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 # handle a helper may write to, not that it may write to it in pieces.
 [InputOutput::ProhibitRepeatedPrints]
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
+# An if, elsif, else or unless with nothing in its block, which a comment does
+# not fill.  Invert the condition or return early instead.
+[ControlStructures::ProhibitEmptyConditionalBlocks]
 [Subroutines::ProhibitTailRecursion]
 [Variables::ProhibitUselessVarClearing]
 [ValuesAndExpressions::ProhibitLiteralArithmetic]
