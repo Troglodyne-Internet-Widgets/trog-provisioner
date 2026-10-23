@@ -22,7 +22,9 @@ install -m 0644 -o root -g root edge.postfix.main /etc/postfix/main.cf.d/30-edge
 install -m 0600 -o root -g root edge.postfix.master /etc/postfix/master.cf.d/30-edge
 install -m 0644 -o root -g root edge.dovecot.conf /etc/dovecot/dovecot.conf
 test -e /etc/nginx/edge.d/mail.passwd || install -m 0640 -o root -g dovecot /dev/null /etc/nginx/edge.d/mail.passwd
-test -e /etc/nginx/edge.d/mail.senders || install -m 0644 -o root -g root /dev/null /etc/nginx/edge.d/mail.senders
+[% FOR table IN ['senders', 'relay_domains', 'transport', 'recipients'] -%]
+test -e /etc/nginx/edge.d/mail.[% table %] || install -m 0644 -o root -g root /dev/null /etc/nginx/edge.d/mail.[% table %]
+[% END -%]
 doveconf -n > /dev/null
 [%# Where the guest test of mail sends its message, so that a build sends
     nothing to the internet. -%]

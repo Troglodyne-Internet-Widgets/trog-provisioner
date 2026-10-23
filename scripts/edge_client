@@ -23,7 +23,7 @@ use Time::HiRes    ();
 
     edge_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME [NAME ...]
     edge_client release DOMAIN
-    edge_client register-mail DOMAIN
+    edge_client register-mail DOMAIN ADDRESS
     edge_client release-mail DOMAIN
 
 =head2 DESCRIPTION
@@ -52,9 +52,11 @@ C<register-mail> lets the guest of DOMAIN send its mail out through the relay
 of this guest.  It makes a new password for the login DOMAIN, keeps only its
 hash, and prints the password on one line.  The relay takes mail from that
 login only with a sender in DOMAIN.  dovecot makes the hash, with its
-C<ARGON2ID> scheme.  It replaces what DOMAIN registered for
-mail before.  C<release-mail> removes the login.  See
-L<Provisioner::Recipe::edge/Mail out>.
+C<ARGON2ID> scheme.  It also makes this guest relay the mail for DOMAIN that
+comes in from the internet to ADDRESS, the IPv4 address of the guest, on port
+25.  It replaces what DOMAIN registered for mail before.  C<release-mail>
+removes the login and the relay.  See L<Provisioner::Recipe::edge/Mail out>
+and L<Provisioner::Recipe::edge/Mail in>.
 
 Each one waits up to a minute for another C<register> or C<release> to
 finish, and then gives up and says which file is locked.
@@ -66,7 +68,7 @@ with another status.
 
 my $USAGE = "usage: edge_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME [NAME ...]
 " . "       edge_client release DOMAIN
-" . "       edge_client register-mail DOMAIN
+" . "       edge_client register-mail DOMAIN ADDRESS
 " . "       edge_client release-mail DOMAIN
 ";
 
@@ -166,22 +168,24 @@ sub write_authorized_keys {
     return;
 }
 
-# The files of the mail login of $domain: its hash, and the senders it owns.
+# The files of the mail of $domain, by the table that each goes into: the hash
+# of its login and the senders it owns, for mail out, and its domain, where
+# that goes, and its recipients, for mail in.
+my @MAIL_TABLES = qw{passwd senders relay_domains transport recipients};
+
 sub mail_files_of {
     my ($domain) = @_;
-    return ( passwd => "$EDGE_D/$domain.mail.passwd", senders => "$EDGE_D/$domain.mail.senders" );
+    return map { $_ => "$EDGE_D/$domain.mail.$_" } @MAIL_TABLES;
 }
 
 # The group that dovecot reads the hashes as.
 our $DOVECOT_GROUP = 'dovecot';
 
-# The logins and senders of every domain, in the two files that dovecot and
-# postfix read.
+# The tables of every domain, in the files that dovecot and postfix read.
 sub write_mail_tables {
-    my %all = ( passwd => 'mail.passwd', senders => 'mail.senders' );
-    foreach my $kind ( sort keys %all ) {
+    foreach my $kind (@MAIL_TABLES) {
         my $content = join( q{}, map { read_file($_) // q{} } sort glob("$EDGE_D/*.mail.$kind") );
-        write_file( "$EDGE_D/$all{$kind}", $content, $kind eq 'passwd' ? ( oct 640, $DOVECOT_GROUP ) : () );
+        write_file( "$EDGE_D/mail.$kind", $content, $kind eq 'passwd' ? ( oct 640, $DOVECOT_GROUP ) : () );
     }
     return;
 }
@@ -204,14 +208,20 @@ sub reload_postfix {
 }
 
 sub register_mail {
-    my ($domain) = @_;
+    my ( $domain, $address ) = @_;
 
     my $lock     = lock_edge();
     my %file     = mail_files_of($domain);
     my $password = Crypt::PRNG::random_bytes_hex(24);
 
-    write_file( $file{passwd}, "$domain:" . hash_password($password) . "\n", oct 600 );
-    write_file( $file{senders}, "\@$domain $domain\n" );
+    write_file( $file{passwd},        "$domain:" . hash_password($password) . "\n", oct 600 );
+    write_file( $file{senders},       "\@$domain $domain\n" );
+    write_file( $file{relay_domains}, "$domain OK\n" );
+    write_file( $file{transport},     "$domain smtp:[$address]:25\n" );
+
+    # The guest takes mail for any address in its domain, which its catchall
+    # delivers.  So the edge takes every recipient there too.
+    write_file( $file{recipients}, "\@$domain OK\n" );
     write_mail_tables();
     reload_postfix();
 
@@ -337,9 +347,13 @@ sub main {
         die $USAGE if any { !dns_name($_) } @names;
         return register( $domain, $tls, $http, @names );
     }
-    return release($domain)       if $command eq 'release'       && !@args;
-    return register_mail($domain) if $command eq 'register-mail' && !@args;
-    return release_mail($domain)  if $command eq 'release-mail'  && !@args;
+    return release($domain) if $command eq 'release' && !@args;
+    if ( $command eq 'register-mail' ) {
+        my ( $address, @rest ) = @args;
+        die $USAGE if @rest || !defined $address || !upstream("$address:25");
+        return register_mail( $domain, $address );
+    }
+    return release_mail($domain) if $command eq 'release-mail' && !@args;
     die $USAGE;
 }
 

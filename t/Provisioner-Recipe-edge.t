@@ -57,15 +57,15 @@ subtest 'bin/destroy releases them by the same script' => sub {
 subtest 'a mail guest gets a login on the relay, and loses it' => sub {
     my %grant = ( recipe => 'edge', guest => 'edge.test.test', client => 'web.test.test', service => 'mail' );
     is_deeply(
-        { $edge->issue_grant( \%grant ) },
+        { $edge->issue_grant( \%grant, address => '192.0.2.10' ) },
         {
             '/etc/postfix/edge/web.test.test.password' => {
-                issue => { guest => 'edge.test.test', command => '/root/bin/edge_client register-mail web.test.test' },
+                issue => { guest => 'edge.test.test', command => '/root/bin/edge_client register-mail web.test.test 192.0.2.10' },
                 owner => 'root:root',
                 mode  => '0600',
             },
         },
-        'edge_client registers the login, and the password lands where the mail recipe reads it'
+        'edge_client registers the login and the route in to the guest, and the password lands where the mail recipe reads it'
     );
     my %revocation = $edge->revoke_grant( \%grant );
     is( $revocation{command}, '/root/bin/edge_client release-mail web.test.test', 'and bin/destroy removes it, leaving the names alone' );

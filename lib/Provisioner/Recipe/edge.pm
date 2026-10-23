@@ -105,6 +105,23 @@ mail only over TLS, only from a login, and only with a sender that the login
 owns.  It then delivers the mail itself, on port 25.  C<bin/destroy> runs
 C<edge_client release-mail>, which removes the login.
 
+=head2 Mail in
+
+The registration of L</Mail out> also makes this guest take the mail of the
+domain from the internet, on 25, and relay it to the guest of the domain over
+the tunnel.  C<edge_client register-mail> gets the address of that guest from
+the grant, and writes the domain into C<relay_domains>, its route into
+C<transport_maps>, and C<@domain> into C<relay_recipient_maps>.  The guest
+delivers any address of its domain to its catchall, so the edge takes every
+recipient there.  Mail for any other domain is refused.
+
+The edge makes the checks that a mail guest makes of a client: reverse DNS,
+RBLs and C<HELO>, from F<templates/files/postfix.smtpd_restrictions.tt>, which
+both include.  The guest then trusts the address of the edge, because only the
+edge knows who the client was.  fail2ban bans here an address that fails too
+often.  The reverse DNS of the public address of this guest must name it, or
+the receivers of what it sends will refuse it.
+
 =head2 Ports
 
 The stream proxy listens on C<tls_port>, and ufw forwards 443 there for every
@@ -167,13 +184,25 @@ sub required_recipes {
 =head2 %limits = $recipe->rate_limits(%opts)
 
 The limit of 443 for C<tls_port>, because the forward happens before the limit
-counts a connection.  The limit of a port of mail for C<relay_port>.
+counts a connection.  The limit of a port of mail for C<relay_port>, and for
+25, where the mail of the guests comes in.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
-    return ( tls_port(%opts) => 1024, relay_port(%opts) => 64 );
+    return ( tls_port(%opts) => 1024, relay_port(%opts) => 64, 25 => 64 );
+}
+
+=head2 %jails = $recipe->jails()
+
+The jail that fail2ban ships for postfix, because the edge takes mail from the
+internet on 25.  It bans here, where the client connects.
+
+=cut
+
+sub jails {
+    return ( postfix => {} );
 }
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -311,7 +340,8 @@ sub guest_secrets {
 
 For a grant with C<< service => 'mail' >>, the password of the relay that the
 edge issues for the client of C<$grant>, at C<relay_password_path> of the
-client.  See L</Mail out>.
+client.  C<%terms> has C<< address => $address >>, where the edge relays the
+mail of the client that comes in.  See L</Mail out> and L</Mail in>.
 
 For any other grant, the key that the edge issues when it registers the names
 of the client of C<$grant>, at C<key_path> of the client, as C<issue_grant> in
@@ -333,7 +363,7 @@ sub issue_grant {
     if ( ( $grant->{service} // q{} ) eq 'mail' ) {
         return (
             $self->relay_password_path($client) => {
-                issue => { guest => $grant->{guest}, command => "$Provisioner::Vars::SCRIPT_DIR/edge_client register-mail $client" },
+                issue => { guest => $grant->{guest}, command => "$Provisioner::Vars::SCRIPT_DIR/edge_client register-mail $client $terms{address}" },
                 owner => 'root:root',
                 mode  => '0600',
             },

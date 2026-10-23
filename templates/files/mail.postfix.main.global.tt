@@ -48,28 +48,7 @@ mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
 # Prevent SMTP smuggling.
 smtpd_forbid_bare_newline = normalize
 
-# The restriction lists.  configd does not join these across fragments,
-# because their order is their meaning.  A permit_ before a check that must run
-# first makes an open relay.  They are the policy of the guest, so they are here.
-#
-# Refuse clients that do not resolve or that are on an RBL.
-smtpd_client_restrictions = permit_mynetworks, reject_unknown_reverse_client_hostname, reject_unknown_client_hostname, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, permit
-# Refuse abusive use of DATA.
-smtpd_data_restrictions = reject_unauth_pipelining, permit
-# Reject a bad HELO.
-smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, reject_non_fqdn_helo_hostname, permit
-# Refuse incoming mail FROM addresses that are clearly bogus.
-#
-# reject_authenticated_sender_login_mismatch comes before
-# permit_sasl_authenticated, because a restriction list stops at the first
-# permit.  It applies only to authenticated clients.  DMARC deals with the
-# others.
-smtpd_sender_restrictions = permit_mynetworks, reject_authenticated_sender_login_mismatch, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit
-# Refuse incoming mail TO addresses that are bogus or not hosted here.  postfix
-# rejects a recipient that is not in virtual_mailbox_maps by itself, with "User
-# unknown in virtual mailbox table".
-smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, permit
-
+[% INCLUDE "files/postfix.smtpd_restrictions.tt" %]
 # Delivery, the content filter and the milters.
 mailbox_transport = lmtp:unix:private/dovecot-lmtp
 virtual_transport = lmtp:unix:private/dovecot-lmtp

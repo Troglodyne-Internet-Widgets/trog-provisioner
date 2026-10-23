@@ -191,7 +191,7 @@ subtest 'a domain registers a login for the relay, and releases it' => sub {
     local $Trog::EdgeClient::DOVECOT_GROUP = getgrgid($));
     my $edge = fresh_edge();
 
-    my ( $out, $err, $rc ) = capture { Trog::EdgeClient::main( 'register-mail', $DOMAIN ) };
+    my ( $out, $err, $rc ) = capture { Trog::EdgeClient::main( 'register-mail', $DOMAIN, '192.0.2.10' ) };
     is( $rc, 0, 'it exits 0' ) or diag $err;
     chomp( my $password = $out );
     like( $password, qr/\A[[:xdigit:]]{48}\z/, 'and prints a password on one line' );
@@ -201,12 +201,15 @@ subtest 'a domain registers a login for the relay, and releases it' => sub {
 ", 'dovecot gets a login named for the domain, with the hash that doveadm made of the password, which is not kept'
     );
     ok( ( grep { $_ eq 'setsid --wait doveadm pw -s ARGON2ID' } @ran ), 'doveadm reads the password on its input, away from the terminal, and not on its command line' );
-    is( ( stat "$edge/mail.passwd" )[2] & oct 7777,     oct 640,               'readable by its group, and not by everybody' );
-    is( File::Slurper::read_text("$edge/mail.senders"), "\@$DOMAIN $DOMAIN\n", 'and the login owns every sender in the domain' );
+    is( ( stat "$edge/mail.passwd" )[2] & oct 7777,           oct 640,                          'readable by its group, and not by everybody' );
+    is( File::Slurper::read_text("$edge/mail.senders"),       "\@$DOMAIN $DOMAIN\n",            'and the login owns every sender in the domain' );
+    is( File::Slurper::read_text("$edge/mail.relay_domains"), "$DOMAIN OK\n",                   'the edge takes mail for the domain from the internet' );
+    is( File::Slurper::read_text("$edge/mail.transport"),     "$DOMAIN smtp:[192.0.2.10]:25\n", 'and relays it to the guest, on 25' );
+    is( File::Slurper::read_text("$edge/mail.recipients"),    "\@$DOMAIN OK\n",                 'for any recipient there, which the catchall of the guest delivers' );
     is_deeply( [ grep { m/\A(?:systemctl)/ } @ran ], ['systemctl reload postfix'], 'and postfix reads the tables again' );
 
-    capture { Trog::EdgeClient::main( 'register-mail', 'other.test.test' ) };
-    my ( $second, undef, undef ) = capture { Trog::EdgeClient::main( 'register-mail', $DOMAIN ) };
+    capture { Trog::EdgeClient::main(qw{register-mail other.test.test 192.0.2.11}) };
+    my ( $second, undef, undef ) = capture { Trog::EdgeClient::main( 'register-mail', $DOMAIN, '192.0.2.12' ) };
     my @logins = map { m/\A([^:]+):/ } split m/\n/, File::Slurper::read_text("$edge/mail.passwd");
     is_deeply( \@logins, [ 'other.test.test', $DOMAIN ], 'a second registration replaces the login of the domain, beside the others' );
     isnt( $second, $out, 'with a new password' );
@@ -215,7 +218,10 @@ subtest 'a domain registers a login for the relay, and releases it' => sub {
     is( $rc,                                            0,                                     'a release exits 0' );
     is( File::Slurper::read_text("$edge/mail.senders"), "\@other.test.test other.test.test\n", 'and takes away the login of the domain only' );
     unlike( File::Slurper::read_text("$edge/mail.passwd"), qr/\Q$DOMAIN\E/, 'and its hash' );
-    like( exception { Trog::EdgeClient::main( 'register-mail', $DOMAIN, 'extra' ) }, qr/\Ausage:/, 'and a registration with more than the domain is refused' );
+    is( File::Slurper::read_text("$edge/mail.transport"), "other.test.test smtp:[192.0.2.11]:25\n", 'and its route in, leaving the others' );
+    like( exception { Trog::EdgeClient::main( 'register-mail', $DOMAIN ) },                        qr/\Ausage:/, 'a registration without the address of the guest is refused' );
+    like( exception { Trog::EdgeClient::main( 'register-mail', $DOMAIN, 'web.test.test' ) },       qr/\Ausage:/, 'and one with a name for an address' );
+    like( exception { Trog::EdgeClient::main( 'register-mail', $DOMAIN, '192.0.2.10', 'extra' ) }, qr/\Ausage:/, 'and one with more' );
 };
 
 subtest 'it refuses what it cannot put in a file of nginx' => sub {

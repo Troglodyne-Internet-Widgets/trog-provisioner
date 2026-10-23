@@ -79,6 +79,15 @@ subtest 'a domain with an edge sends its mail through the relay there' => sub {
     my %opts = $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test' ) );
     is_deeply( $opts{edge_relay}, { address => '192.0.2.5', port => 2587, password => '/etc/postfix/edge/mail.test.test.password' }, 'at the address where the guests reach the edge, on its relay port, with the password that it issued' );
 
+    my $guests = Test::MockModule->new('Provisioner::IPPool');
+    $guests->redefine( guest_address => sub { my ($domain) = @_; return ( $domain, $domain eq 'mail.test.test' ? '192.0.2.10' : undef ) } );
+    is_deeply( { $recipe->grant_terms( { recipe => 'edge', guest => 'edge.test.test', client => 'mail.test.test', service => 'mail' } ) }, { address => '192.0.2.10' }, 'the edge relays the mail that comes in to the address of the guest' );
+    like(
+        exception { $recipe->grant_terms( { recipe => 'edge', guest => 'edge.test.test', client => 'none.test.test', service => 'mail' } ) },
+        qr/none[.]test[.]test[ ]has[ ]no[ ]address/,
+        'and a guest that the edge cannot reach stops the build'
+    );
+
     like(
         exception { $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test', relay => { host => 'relay.test.test', port => 25 } ) ) },
         qr/both[ ]a[ ]relay[ ]and[ ]an[ ]edge/,

@@ -40,6 +40,11 @@ smtp_sasl_security_options = noanonymous
 smtp_sasl_tls_security_options = noanonymous
 smtp_sasl_password_maps = hash:/etc/postfix/domains/[% domain %]/sasl_passwd
 smtp_tls_policy_maps = hash:/etc/postfix/domains/[% domain %]/edge_tls_policy
+
+# The edge relays here the mail that comes in for this domain, after it made
+# the checks of the client, which only it can make.  So the guest trusts it as
+# it trusts itself.  configd joins mynetworks across fragments.
+mynetworks = [% edge_relay.address %]/32
 [% END %]
 
 # Behind NAT, this setting can cause problems, because routers differ.  In a

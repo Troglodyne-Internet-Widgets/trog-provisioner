@@ -142,6 +142,11 @@ my $host = `ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key 2>&1`;
 my $pub  = do { local ( @ARGV, $/ ) = '/etc/ssh/ssh_host_ed25519_key.pub'; <> } // '';
 is( ( split ' ', $pub )[1], ( split ' ', $host )[1], 'the host key that the guests pin is the one that sshd has' );
 
+# Port 25 takes mail from the internet, so it checks the client as a mail guest
+# does, from the same template.
+my $clients = `postconf -h smtpd_client_restrictions 2>&1`;
+like( $clients, qr/\breject_unknown_reverse_client_hostname\b.*\breject_rbl_client\b/, 'port 25 checks the reverse DNS of a client and the RBLs' ) or diag $clients;
+
 # postfix.service is a wrapper that stays active when the instance does not
 # start, so ask the instance, and ask postfix what it makes of main.cf.
 is( system('systemctl is-active --quiet postfix@-'), 0, 'the postfix instance runs, not only its wrapper' );
@@ -149,7 +154,7 @@ my $postfix_check = `postfix check 2>&1`;
 unlike( $postfix_check, qr/^(?:postfix: )?(?:fatal|error):/mi, 'postfix accepts its configuration' ) or diag $postfix_check;
 
 subtest 'a guest sends its mail through the relay, as its own domain only' => sub {
-    my $password = `$client register-mail $domain 2>&1`;
+    my $password = `$client register-mail $domain 192.0.2.10 2>&1`;
     is( $?, 0, 'a guest registers for mail' ) or diag $password;
     chomp $password;
     like( $password, qr/\A[0-9a-f]{48}\z/, 'and gets its password on one line' );
@@ -179,8 +184,17 @@ subtest 'a guest sends its mail through the relay, as its own domain only' => su
     like( $smtp->[3], qr/^250 /m, 'and a sender in its domain' )          or diag explain $smtp;
     like( $smtp->[6], qr/^553 /m, 'and refuses a sender in another domain' ) or diag explain $smtp;
 
+    # What postfix finds in the tables, for mail in.
+    my $lookup = sub { my ( $key, $table ) = @_; my $r = `postmap -q '$key' texthash:/etc/nginx/edge.d/mail.$table 2>&1`; chomp $r; $r };
+    is( $lookup->( $domain, 'transport' ), 'smtp:[192.0.2.10]:25', 'mail for the domain from the internet goes to its guest, on 25' );
+    # postmap looks up the key as given, and postfix tries @domain for every
+    # address in the domain that has no entry of its own.
+    is( $lookup->( "\@$domain", 'recipients' ), 'OK', 'for any recipient in the domain' );
+    is( $lookup->( 'other.test.test', 'relay_domains' ), q{}, 'and the edge takes no mail for a domain that did not register' );
+
     my $released = `$client release-mail $domain 2>&1`;
     is( $?, 0, 'a guest releases its login' ) or diag $released;
+    is( $lookup->( $domain, 'transport' ), q{}, 'and its route in' );
     $auth = `doveadm auth test '$domain' '$password' 2>&1`;
     unlike( $auth, qr/auth succeeded/, 'and dovecot takes it no more' );
 };

@@ -363,8 +363,7 @@ sub grant_terms {
     my ( $self, $grant, %opts ) = @_;
     my $domain = $grant->{client};
 
-    my $guest   = Provisioner::Cookbook->host_of($domain) // $domain;
-    my $address = Provisioner::IPPool::assignments()->{$guest};
+    my ( $guest, $address ) = Provisioner::IPPool::guest_address($domain);
     die "nginx: $domain registers its public names on $grant->{guest}, which reaches them at the address of $guest.  $guest has no address in " . Provisioner::IPPool::db_path() . ".\n"
       unless defined $address;
 

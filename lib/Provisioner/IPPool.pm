@@ -222,6 +222,21 @@ sub assignments {
     return { map { $_->{domain} => $_->{ip} } @$rows };
 }
 
+=head2 ($guest, $address) = guest_address($domain)
+
+The guest that runs C<$domain>, which is C<host_of> it in
+L<Provisioner::Cookbook> or the domain itself, and the address of that guest in
+C<assignments>.  The address is undef when the guest has none, so that the
+caller can say what needed it.
+
+=cut
+
+sub guest_address {
+    my ($domain) = @_;
+    my $guest = Provisioner::Cookbook->host_of($domain) // $domain;
+    return ( $guest, assignments()->{$guest} );
+}
+
 =head2 taken()
 
 Returns a hash reference of each address in the database to the name that holds

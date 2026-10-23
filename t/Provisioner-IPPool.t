@@ -89,6 +89,19 @@ subtest 'assign: a domain that already has one is answered with it' => sub {
     is( Provisioner::IPPool::assign( 'b.test', $pool ), '10.9.9.11', 'and nothing else was consumed' );
 };
 
+subtest 'guest_address: the guest that runs a domain, and its address' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10 10.9.9.11' };
+    Provisioner::IPPool::assign( 'host.test', $pool );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( host_of => sub { my ( undef, $domain ) = @_; return $domain eq 'layered.test' ? 'host.test' : () } );
+
+    is_deeply( [ Provisioner::IPPool::guest_address('host.test') ],    [ 'host.test', '10.9.9.10' ], 'a domain with a guest of its own' );
+    is_deeply( [ Provisioner::IPPool::guest_address('layered.test') ], [ 'host.test', '10.9.9.10' ], 'a domain built onto another guest, at the address of that guest' );
+    is_deeply( [ Provisioner::IPPool::guest_address('none.test') ],    [ 'none.test', undef ],       'and a guest with no address, which the caller names' );
+};
+
 subtest 'assign: reservations are not handed out' => sub {
     fresh_db();
     my $pool = { addresses => '10.9.9.10 10.9.9.11' };
