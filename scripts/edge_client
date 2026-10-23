@@ -7,11 +7,13 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use Fcntl        qw{:flock};
-use File::Temp   ();
-use IPC::Open3   ();
-use List::Util   qw{any};
-use MIME::Base64 ();
+use Cwd            ();
+use Fcntl          qw{:flock};
+use File::Basename ();
+use File::Temp     ();
+use IPC::Open3     ();
+use List::Util     qw{any};
+use MIME::Base64   ();
 
 =head1 edge_client
 
@@ -32,12 +34,15 @@ replaces what DOMAIN registered before.  It refuses a NAME that another domain
 registered, because nginx would send that name to only one of them.  If
 C<nginx -t> refuses the result, it puts the old files of DOMAIN back.
 
-Then it makes a new key for DOMAIN, keeps the public half, and prints the
-private half in base64 on one line, after all of that worked.  The guest of
-DOMAIN pushes its bans to this guest with that key.
+Then it makes a new key for DOMAIN, and prints the private half in base64 on
+one line, after all of that worked.  The guest of DOMAIN pushes its bans to
+this guest with that key.  The public half goes into
+F<authorized_keys.root>, which sshd reads beside the keys of root.  It can run
+only F<edge_ban> for DOMAIN, and only from the address of TLS_UPSTREAM, which
+is the address of the guest.  See F<scripts/edge_ban>.
 
-C<release> removes everything that DOMAIN registered.  Any of it can be gone
-already.
+C<release> removes everything that DOMAIN registered, its key included.  Any of
+it can be gone already.
 
 It exits 0 when it did that.  When a step fails, it says which, and exits
 with another status.
@@ -49,6 +54,9 @@ my $USAGE = "usage: edge_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME 
 ";
 
 our $EDGE_D = '/etc/nginx/edge.d';
+
+# Beside this script, as every script of the provisioner is.
+our $EDGE_BAN = File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/edge_ban';
 
 # A name of the DNS, in lower case.  Each one goes into a file that nginx reads.
 sub dns_name {
@@ -117,6 +125,14 @@ sub write_file {
     return;
 }
 
+# The keys of every domain, in the one file that sshd reads for root.  Only a
+# line that restricts its key, so that a bare key never logs in as root.
+sub write_authorized_keys {
+    my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort glob("$EDGE_D/*.ban.pub");
+    write_file( "$EDGE_D/authorized_keys.root", join( q{}, @lines ) );
+    return;
+}
+
 # Held until the caller closes it, so that two guests that register at one
 # time do not both take a name.
 sub lock_edge {
@@ -170,7 +186,9 @@ sub register {
         die "nginx refused what $domain registered, so it keeps what it had: $said\n";
     }
 
-    write_file( $file{key}, read_file("$dir/key.pub") );
+    my ($address) = split( m/:/, $tls );
+    write_file( $file{key}, qq{restrict,from="$address",command="$EDGE_BAN $domain" } . read_file("$dir/key.pub") );
+    write_authorized_keys();
     reload_nginx();
 
     print MIME::Base64::encode_base64( read_file("$dir/key"), q{} );
@@ -184,6 +202,7 @@ sub release {
     my $lock = lock_edge();
     my %file = files_of($domain);
     write_file( $_, undef ) foreach values %file;
+    write_authorized_keys();
 
     # An nginx that is not up reads the files when it starts.
     my $err = do {

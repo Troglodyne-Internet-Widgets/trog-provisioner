@@ -8,6 +8,11 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use File::Slurper();
+use File::Temp();
+
+use Provisioner::IPPool();
+use Provisioner::Utils();
 use Provisioner::Vars();
 
 use parent qw{Provisioner::Recipe};
@@ -54,6 +59,30 @@ the registrations in F</etc/nginx/edge.d> are salvaged.
 
 Two guests cannot register one name.  The second one fails to build, and the
 error names the domain that holds it.
+
+=head2 Bans
+
+A guest behind this edge sees the address of each client, so its fail2ban
+finds the abuse.  But a ban there blocks nothing, because the packets come from
+this guest.  So the guest also sends each ban here, and this guest drops the
+address.  See L<Provisioner::Recipe::nginx/Bans through the edge>.
+
+When C<edge_client register> issues the key of a domain, it authorizes the key
+for root in F</etc/nginx/edge.d/authorized_keys.root>, which sshd reads beside
+the keys of root.  The key runs only F<scripts/edge_ban> for that domain, and
+only from the address of its guest.  C<edge_ban> adds the address to the ipset
+C<edge-bans> for the time of the ban, or removes it.  The registrations and
+their keys are salvaged together, so a rebuild keeps both.
+
+F</etc/ufw/after.init.d/edge-bans> drops every packet from an address in the
+set to port 80 and to C<tls_port>, each time ufw loads.  See
+L<Provisioner::Recipe::ufw/Rules that ufw cannot write>.  ssh stays open to a
+banned address, so a ban that a guest sends cannot lock the operator out of
+the edge.  When ufw unloads, the set goes to F</var/lib/edge-bans/saved> with
+the time that each ban has left, and it comes back when ufw loads.
+
+The guests pin the ed25519 host key of this guest, so it comes from the secret
+store, and a rebuild keeps it.
 
 =head2 Ports
 
@@ -148,11 +177,71 @@ sub key_path {
     return "/etc/fail2ban/edge/$domain.key.b64";
 }
 
+=head2 $path = $recipe->host_key_path($domain)
+
+Where the public host key of the edge is, on the guest of C<$domain>, in
+base64.
+
+=cut
+
+sub host_key_path {
+    my ( $self, $domain ) = @_;
+    return "/etc/fail2ban/edge/$domain.host.b64";
+}
+
+=head2 $address = $recipe->address($edge)
+
+The address at which the guests reach the guest C<$edge>: its address in a bin
+other than C<guests> of the address pool, which is the tunnel of an edge that
+is a client of the VPN, and otherwise its address in C<guests>.  Dies when it
+has neither, or more than one of the first kind.
+
+=cut
+
+sub address {
+    my ( $self, $edge ) = @_;
+    my $held = Provisioner::IPPool::holdings($edge);
+    my @vpn  = grep { $_ ne $Provisioner::IPPool::GUESTS } sort keys %$held;
+
+    die "edge: $edge has an address in each of " . join( ', ', @vpn ) . ", so the guests behind it cannot tell which one reaches it.\n" if @vpn > 1;
+    my $address = @vpn ? $held->{ $vpn[0] } : $held->{$Provisioner::IPPool::GUESTS};
+    die "edge: $edge has no address in " . Provisioner::IPPool::db_path() . ", so the guests behind it cannot send it their bans.\n" unless defined $address;
+    return $address;
+}
+
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+
+The ed25519 host key of sshd, which the guests behind this edge pin.  See
+L</Bans>.
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        '/etc/ssh/ssh_host_ed25519_key' => {
+            ref      => "secret:edge/$domain-ssh-host-key/password",
+            generate => sub {
+                my $path = File::Temp::tempdir( CLEANUP => 1 ) . '/host_key';
+                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, "root\@$domain" );
+
+                # bin/provision adds a newline, and ssh-keygen refuses a key
+                # that ends with a blank line.
+                chomp( my $key = File::Slurper::read_binary($path) );
+                return $key;
+            },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
 =head2 %files = $recipe->issue_grant($grant, %terms)
 
 The key that the edge issues when it registers the names of the client of
 C<$grant>, at C<key_path> of the client, as C<issue_grant> in
-L<Provisioner::Recipe> says.  C<%terms> has
+L<Provisioner::Recipe> says.  Also the public host key of the edge, at
+C<host_key_path>, which the client pins.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >> and
 C<< names => \@names >>.
 
@@ -173,6 +262,11 @@ sub issue_grant {
             },
             owner => 'root:root',
             mode  => '0600',
+        },
+        $self->host_key_path($client) => {
+            issue => { guest => $grant->{guest}, command => 'base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub' },
+            owner => 'root:root',
+            mode  => '0644',
         },
     );
 }
@@ -204,6 +298,8 @@ sub template_files {
         'edge.stream.conf.tt' => 'edge.stream.conf',
         'edge.http.conf.tt'   => 'edge.http.conf',
         'edge.ufw.conf.tt'    => 'edge_ufw.conf',
+        'edge.sshd.tt'        => 'edge.sshd.conf',
+        'edge.bans.tt'        => 'edge.bans',
     );
 }
 

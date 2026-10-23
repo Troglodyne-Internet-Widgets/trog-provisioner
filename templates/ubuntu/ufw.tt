@@ -1,3 +1,5 @@
+install -o root -g root -m 0750 ufw.after.init /etc/ufw/after.init
+install -d -o root -g root -m 0750 /etc/ufw/after.init.d
 mv ufw/* /etc/ufw/applications.d/
 chmod 0644 /etc/ufw/applications.d/*
 chown root:root /etc/ufw/applications.d/*

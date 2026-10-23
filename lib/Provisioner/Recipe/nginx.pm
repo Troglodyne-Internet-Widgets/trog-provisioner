@@ -134,6 +134,23 @@ C<bin/destroy> releases the names on the edge.  If the edge is not up then, it
 warns and says what to run there.  Until then, the edge sends those names to an
 address that the pool can give to the next guest.
 
+=head2 Bans through the edge
+
+A ban on this guest blocks nothing that comes through the edge, because those
+packets come from the edge.  So with C<edge> and a public name, each jail of
+this recipe also bans through the action C<edge-DOMAIN>.  It runs
+C<edge_ban> on the edge over ssh, with the key that the edge issued, and the
+edge drops the address.  See L<Provisioner::Recipe::edge/Bans>.
+
+The edge also issues its host key, which this guest pins in
+F</etc/fail2ban/edge/DOMAIN.known_hosts>, so a ban never goes to a guest that
+only claims to be the edge.  The jails never ban the address of the edge.  That
+address is the one in L<Provisioner::Recipe::edge/address>, and it goes into
+C<ignoreip> beside loopback.
+
+The jails of other recipes still ban through ufw only, because what they read
+does not come through the edge.
+
 =cut
 
 sub rate_limits {
@@ -371,6 +388,10 @@ recipe lists or one outside the zone of the domain, when another vhost lists a
 public name, and when there are public names and no network to believe a PROXY
 header from.
 
+With C<edge> and a public name, it also adds C<edge_address>, where this guest
+reaches the edge, and C<edge_jails>, the jails that ban through it.  See
+L</Bans through the edge>.
+
 =cut
 
 sub enrich {
@@ -406,6 +427,11 @@ sub enrich {
         $opts{proxy_from} //= [ map { Provisioner::IPPool::blocks( $bins{$_} ) } grep { defined $bins{$_}{via} } sort keys %bins ];
         die "nginx: $opts{domain} has public_names, but nothing says where the proxy connects from.  Give a bin of ip_pool a via, or set proxy_from.\n"
           unless @{ $opts{proxy_from} };
+
+        if ( defined $opts{edge} ) {
+            $opts{edge_address} = Provisioner::Cookbook->load('edge')->address( $opts{edge} );
+            $opts{edge_jails}   = [ sort keys %{ { $self->jails(%opts) } } ];
+        }
     }
 
     if ( $listed{ $opts{domain} } ) {
@@ -424,6 +450,8 @@ sub template_files {
         'nginx.global.conf.tt' => 'nginx.global.conf',
         'nginx.sysctl.conf.tt' => 'nginx.sysctl.conf',
         'nginx.ufw.conf.tt'    => 'nginx_proxy_ufw.conf',
+        'nginx.edge.action.tt' => 'nginx_edge.action',
+        'nginx.edge.jail.tt'   => 'nginx_edge.jail',
     );
 }
 

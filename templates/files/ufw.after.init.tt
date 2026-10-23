@@ -1,0 +1,15 @@
+#!/bin/sh
+# ufw-init runs this after it loads the rules, and again when it unloads them.
+# The ufw recipe owns this file, and each recipe that adds rules of its own puts
+# a script in /etc/ufw/after.init.d.  Provisioner::Recipe::ufw has the whole
+# account.
+#
+# It never fails, because ufw-init reports a failure here as a failure of the
+# whole firewall, and the rules of ufw are already loaded by then.
+case "$1" in
+start | stop | flush-all)
+    [ -d /etc/ufw/after.init.d ] && run-parts --arg="$1" /etc/ufw/after.init.d \
+        || echo "after.init: a script in /etc/ufw/after.init.d failed to $1" >&2
+    ;;
+esac
+exit 0

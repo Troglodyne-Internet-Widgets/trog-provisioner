@@ -1,0 +1,116 @@
+#!/usr/bin/perl
+
+package Trog::EdgeBan;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use List::Util ();
+
+=head1 edge_ban
+
+=head2 SYNOPSIS
+
+In the line of F</etc/nginx/edge.d/authorized_keys.root> that
+F<scripts/edge_client> writes for a domain:
+
+    restrict,from="ADDRESS",command="edge_ban DOMAIN" ssh-ed25519 ...
+
+What the guest of DOMAIN sends over ssh with that key:
+
+    ban IP SECONDS
+    unban IP
+    check IP
+
+=head2 DESCRIPTION
+
+Runs as root on an edge guest, as the forced command of the key that the edge
+issued to DOMAIN.  sshd puts what the guest asked for in
+C<SSH_ORIGINAL_COMMAND>.  See L<Provisioner::Recipe::edge/Bans>.
+
+C<ban> adds IP to the ipset C<edge-bans> for SECONDS, and the edge drops what
+IP sends to the ports that it proxies.  A SECONDS of 0 or less bans until an
+C<unban>, as fail2ban means by a C<bantime> of -1.  A ban of IP that is already
+there takes the new time.  C<unban> removes IP from the set, and an IP that is
+not there is no error.  C<check> exits 0 when IP is in the set, and 1 when it
+is not.
+
+The set is shared by every domain behind the edge, because the edge cannot
+tell which guest a connection is for before nginx reads its first bytes.  So a
+domain can unban an address that another domain banned.
+
+IP is an IPv4 address, because the edge proxies IPv4 only.  Each ban and unban
+goes to syslog with DOMAIN.  It exits 2 for a request that it does not take,
+and 3 when ipset fails.
+
+=cut
+
+our $SET = 'edge-bans';
+
+# The longest timeout that ipset takes.
+our $MAX_SECONDS = 2_147_483;
+
+my $USAGE = "usage: ban IP SECONDS | unban IP | check IP\n";
+
+sub ipv4 {
+    my ($ip) = @_;
+    my $octet = qr/[[:digit:]]{1,3}/;
+    return 0 unless defined $ip && $ip =~ m/\A$octet(?:[.]$octet){3}\z/;
+    return ( grep { $_ > 255 } split( m/[.]/, $ip ) ) ? 0 : 1;
+}
+
+# Every command this runs, as the one thing a test stands in for.  A list, so
+# no shell reads it.  Answers whether it succeeded.
+sub run {
+    my (@command) = @_;
+    return system(@command) == 0 ? 1 : 0;
+}
+
+sub ipset {
+    my (@args) = @_;
+    return run( 'ipset', @args );
+}
+
+sub logged {
+    my ( $domain, $what ) = @_;
+    run( qw{logger -t edge_ban}, "$domain: $what" );
+    return;
+}
+
+sub main {
+    my ( $domain, $request ) = @_;
+
+    die "edge_ban runs as the forced command of a key, which names the domain\n" if ( $domain // q{} ) eq q{};
+    my ( $verb, $ip, $seconds, @rest ) = split( q{ }, $request // q{} );
+
+    if ( @rest || !ipv4($ip) ) {
+        print {*STDERR} $USAGE;
+        return 2;
+    }
+
+    if ( $verb eq 'check' && !defined $seconds ) {
+        return ipset( qw{-quiet test}, $SET, $ip ) ? 0 : 1;
+    }
+
+    if ( $verb eq 'unban' && !defined $seconds ) {
+        return 3 unless ipset( qw{-exist del}, $SET, $ip );
+        logged( $domain, "unban $ip" );
+        return 0;
+    }
+
+    if ( $verb eq 'ban' && defined $seconds && $seconds =~ m/\A-?[[:digit:]]+\z/ ) {
+        my $timeout = $seconds <= 0 ? 0 : List::Util::min( $seconds, $MAX_SECONDS );
+        return 3 unless ipset( qw{-exist add}, $SET, $ip, timeout => $timeout );
+        logged( $domain, "ban $ip for " . ( $timeout ? "$timeout seconds" : 'good' ) );
+        return 0;
+    }
+
+    print {*STDERR} $USAGE;
+    return 2;
+}
+
+exit main( $ARGV[0], $ENV{SSH_ORIGINAL_COMMAND} ) unless caller;
+
+1;

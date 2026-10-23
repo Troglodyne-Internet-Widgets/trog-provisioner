@@ -81,10 +81,10 @@ is at most 24.
 =head2 The firewall
 
 ufw does not own these rules, because a ufw rule cannot match an ipset.
-F</etc/ufw/after.init> calls C<ssh-fastlane firewall start> each time ufw
-loads, and C<firewall stop> each time ufw unloads.  C<ufw reset> restores the
-C<.rules> files and does not touch F<after.init>, so the rules survive the
-reset in the C<ufw> target.  They also stay out of F<before.rules>, where
+F</etc/ufw/after.init.d/sshfastlane> calls C<ssh-fastlane firewall start> each
+time ufw loads, and C<firewall stop> each time ufw unloads.  See
+L<Provisioner::Recipe::ufw/Rules that ufw cannot write>.  They also stay out of
+F<before.rules>, where
 C<setup-port-forwards> and C<setup-masquerade> share the one C<*nat> table.
 The script makes the set before the first rule that reads it.
 

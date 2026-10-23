@@ -21,3 +21,15 @@ printf '%s\n' 'listen 8080;' 'real_ip_header X-Forwarded-For;'[% IF proxied.$vho
 [% END -%]
 [% END -%]
 [% script_dir %]/queue_postrun_task systemctl reload nginx
+[%# The ban action that sends each ban of the jails of nginx to the edge.
+    Provisioner::Recipe::nginx has the whole account. -%]
+rm -f /etc/fail2ban/jail.d/[% domain %]-edge.conf /etc/fail2ban/action.d/edge-[% domain %].conf
+[% IF edge_address -%]
+umask 077 && base64 -d /etc/fail2ban/edge/[% domain %].key.b64 > /etc/fail2ban/edge/[% domain %].key
+printf '%s %s\n' '[% edge_address %]' "$$(base64 -d /etc/fail2ban/edge/[% domain %].host.b64 | cut -d' ' -f1,2)" > /etc/fail2ban/edge/[% domain %].known_hosts
+install -o root -g root -m 0644 nginx_edge.action /etc/fail2ban/action.d/edge-[% domain %].conf
+install -o root -g root -m 0644 nginx_edge.jail /etc/fail2ban/jail.d/[% domain %]-edge.conf
+[%# Here, because fail2ban runs no jail at all while one action does not
+    parse, and the restart in the postrun would fail with no reason. -%]
+fail2ban-client -t
+[% END -%]

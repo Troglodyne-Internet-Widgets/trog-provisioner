@@ -114,5 +114,39 @@ subtest 'nginx believes X-Forwarded-For on 8080 only from proxy_from' => sub {
     like( $ufw, qr/^nginx-proxy\s+ALLOW\s/m, 'ufw lets the proxy reach the two ports' ) or diag $ufw;
 };
 [% END -%]
+[% IF edge_address -%]
+
+subtest 'the jails of nginx ban through the edge' => sub {
+    my $edge = '[% edge_address %]';
+    foreach my $jail (qw{[% edge_jails.join(' ') %]}) {
+        my $actions = `fail2ban-client get $jail actions 2>&1`;
+        like( $actions, qr/\bedge-\Q[% domain %]\E\b/, "$jail bans through the edge" ) or diag $actions;
+        my $ignored = `fail2ban-client get $jail ignoreip 2>&1`;
+        like( $ignored, qr/\Q$edge\E/, 'and never bans the edge itself' ) or diag $ignored;
+    }
+
+    # As the action asks: with the key that the edge issued, against the host
+    # key that this guest pinned.
+    my $ssh = "ssh -n -i /etc/fail2ban/edge/[% domain %].key -o BatchMode=yes -o IdentitiesOnly=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile=/etc/fail2ban/edge/[% domain %].known_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=10 root\@$edge";
+    my $banned = sub {
+        my ($ip) = @_;
+        my $said = `$ssh 'check $ip' 2>&1`;
+        my $rc   = $? >> 8;
+        diag "the edge said: $said" if $rc > 1;
+        return $rc == 0;
+    };
+
+    # An address from the documentation ranges, which no client has.  fail2ban
+    # runs the action after it answers, so wait for the edge.
+    my $abuser = '192.0.2.78';
+    my ($jail) = qw{[% edge_jails.join(' ') %]};
+    my $wait   = sub { my ($want) = @_; for ( 1 .. 15 ) { return 1 if !!$banned->($abuser) == $want; sleep 1 } return 0 };
+
+    system("fail2ban-client set $jail banip $abuser >/dev/null 2>&1");
+    ok( $wait->(1), "a ban in $jail reaches the edge" );
+    system("fail2ban-client set $jail unbanip $abuser >/dev/null 2>&1");
+    ok( $wait->(0), 'and so does the unban' );
+};
+[% END -%]
 
 done_testing();
