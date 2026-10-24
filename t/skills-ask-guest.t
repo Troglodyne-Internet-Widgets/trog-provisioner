@@ -17,6 +17,7 @@ use Test::More;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use Capture::Tiny    qw{capture_stdout};
+use File::Slurper::Temp();
 
 use FindBin;
 use FindBin::libs;
@@ -81,6 +82,23 @@ subtest 'the command reaches the guest whole, quotes and all' => sub {
     my $said = capture_stdout { Trog::Skill::AskGuest::main( 'vm.test', q{awk '{print $1}'}, '/etc/hosts' ) };
     is( $sent->{sent}, q{sudo sh -c 'awk '\''{print $1}'\'' /etc/hosts'}, 'as root, with its own quotes kept inside the quoting' );
     is( $said,         "said\n",                                          'and what the guest said is printed' );
+};
+
+subtest 'a domain that shares the guest of another is asked of that guest' => sub {
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_shared:\n    host.test.test:\n        - tenant.test.test\n" );
+
+    my ( @addressed, @keyed );
+    my $sent    = bless {}, 'FakeGuest';
+    my $address = Test::MockModule->new( 'FakeHV', no_auto => 1 );
+    $address->redefine( inspection_address => sub { push( @addressed, $_[1] ); return '192.0.2.10' } );
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { push( @keyed, $_[1] ); return '/bogus/key.rsa' } );
+    $guest->redefine( new      => sub { return $sent } );
+
+    capture_stdout { Trog::Skill::AskGuest::main( 'tenant.test.test', 'true' ) };
+    is_deeply( \@addressed, ['host.test.test'], 'the address is of the host' );
+    is_deeply( \@keyed,     ['host.test.test'], 'and so is the key' );
+    is( $sent->{sent}, q{sudo sh -c 'true'}, 'and the command reaches it' );
 };
 
 done_testing();

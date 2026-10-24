@@ -25,6 +25,7 @@ use Trog::Config();
 use Trog::Guest();
 use Trog::HV();
 use Trog::Hypervisors();
+use Provisioner::Cookbook();
 
 # For the marker of a scratch configuration and the check of the configuration
 # in play, which teardown owns.  At compile time, so that the name of the
@@ -272,28 +273,31 @@ sub capture_to {
 sub connect_to {
     my ( $domain, %opts ) = @_;
 
-    my $hv         = hypervisor( $domain, $opts{hypervisor}, $opts{hvconf} );
-    my $domain_dir = $hv->domain_dir;
-    my $cfg_dir    = "$domain_dir/$domain";
+    # A domain in _shared runs on the guest of its host, and has none of its own.
+    my $machine = Provisioner::Cookbook->host_of($domain) // $domain;
 
-    my $key = $opts{key} // Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" );
+    my $hv         = hypervisor( $machine, $opts{hypervisor}, $opts{hvconf} );
+    my $domain_dir = $hv->domain_dir;
+    my $cfg_dir    = "$domain_dir/$machine";
+
+    my $key = $opts{key} // Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" );
 
     # Before the connection rather than after it fails.  key_path prompts for
     # the store's password and a script has nothing to type into, so it comes
     # back undef -- and ssh offered no key is refused with "Permission denied
     # (publickey)", which reads as a guest that will not have us rather than a
     # store we never opened.
-    die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | collect_artifacts $domain\n}
+    die "No key for $machine, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | collect_artifacts $domain\n}
       unless defined $key;
 
     my $user = $opts{user} // admin_user("$cfg_dir/provision.conf");
 
-    my $host = $opts{host} // $hv->inspection_address($domain);
-    die "Could not find an address for $domain on " . $hv->describe . ", so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
+    my $host = $opts{host} // $hv->inspection_address($machine);
+    die "Could not find an address for $machine on " . $hv->describe . ", so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
 
-    print {*STDERR} "Collecting from $domain at $user\@$host\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT carries the artifact directory alone
+    print {*STDERR} "Collecting from $machine at $user\@$host\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT carries the artifact directory alone
 
-    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => $key );
+    my $guest = Trog::Guest->new( name => $machine, host => $host, user => $user, key_path => $key );
 
     # Prove the connection before reading anything through it.  Without this a
     # guest that cannot be reached at all reports every artifact as absent,
@@ -301,7 +305,7 @@ sub connect_to {
     # did -- and those want opposite things done about them.
     my $whoami = eval { $guest->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
-    die "Could not get a shell on $user\@$host for $domain.\n" . "  key:  $key\n" . "  host: $host (from the hypervisor; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
+    die "Could not get a shell on $user\@$host for $machine.\n" . "  key:  $key\n" . "  host: $host (from the hypervisor; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
       if !defined $whoami || $whoami eq q{};
 
     return $guest;

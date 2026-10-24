@@ -323,6 +323,9 @@ with its key from the store, or undef when no hypervisor runs it.  A class
 method: it loads the fleet that C<default_path> names.  Without a fleet, it
 asks the hypervisor that L<Trog::HV/new> returns.
 
+The guest of a domain in C<_shared> is the guest of its host, which
+L<Provisioner::Cookbook/host_of> names.
+
 Dies when there is no key for the guest.  The store holds the key, and a
 program with nobody at its terminal cannot ask for the password of the store,
 so the message says to give it on standard input.
@@ -332,18 +335,20 @@ so the message says to give it on standard input.
 sub guest_of {
     my ( $class, $domain ) = @_;
 
+    my $machine = Provisioner::Cookbook->host_of($domain) // $domain;
+
     my $fleet = $class->load( $class->default_path() );
-    my $hv    = $fleet->configured ? $fleet->hosting($domain) : Trog::HV->new();
+    my $hv    = $fleet->configured ? $fleet->hosting($machine) : Trog::HV->new();
     return unless $hv;
 
-    my $host = $hv->inspection_address($domain) or return;
+    my $host = $hv->inspection_address($machine) or return;
 
-    my $cfg_dir = $hv->domain_dir . "/$domain";
+    my $cfg_dir = $hv->domain_dir . "/$machine";
     my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
-    my $key     = Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" )
-      or die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n";
+    my $key     = Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" )
+      or die "No key for $machine, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n";
 
-    return Trog::Guest->new( name => $domain, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', key_path => $key );
+    return Trog::Guest->new( name => $machine, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', key_path => $key );
 }
 
 =head2 place($domain, %needs)
