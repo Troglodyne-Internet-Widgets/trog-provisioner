@@ -112,13 +112,20 @@ subtest 'installdeps and dzil' => sub {
 };
 
 subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => sub {
+
+    # A git config of its own in the environment, as the shell of an agent can
+    # have, which the step must leave as it found it.
+    my @keys   = qw{GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0};
+    my %before = ( GIT_CONFIG_COUNT => 1, GIT_CONFIG_KEY_0 => 'bogus.key', GIT_CONFIG_VALUE_0 => 'bogus value' );
+    local @ENV{@keys} = @before{@keys};
+
     my $r = install( args => [qw{dzil /bogus/checkout}] );
     is_deeply(
         $r->{git_config},
         [ ( [ 1, 'safe.directory', '/bogus/checkout' ] ) x 2 ],
         'git trusts the checkout for both dzil commands, which it would otherwise refuse as owned by the service user'
     );
-    ok( !exists $ENV{GIT_CONFIG_COUNT}, 'and for nothing after them' );
+    is_deeply( { map { $_ => $ENV{$_} } @keys }, \%before, 'and for nothing after them' );
 
     $r = install(
         args         => [qw{dzil /bogus/checkout}],
