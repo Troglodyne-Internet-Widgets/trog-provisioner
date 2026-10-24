@@ -74,37 +74,64 @@ SKIP: {
     ok(-S $onhost, "the API socket is at $onhost") or diag $api;
 }
 
-# Every client of this API presents one key.  See api_key_for in
-# Provisioner::Recipe::pdns.  A different key gets a 401 on every challenge,
-# and that shows only when the fetcher fails, after this target passed.
+# The key of the API, which only pdns, the proxy and pdns_client present.
 my ($api_key) = $api =~ m/^api-key=(\S+)/m;
 ok($api_key && length($api_key) >= 32, 'the API is configured with a credential')
     or diag $api;
 
+# What a client exports as its token, as bash expands it, because the line
+# reads the token from a file.
+sub token_exported_by {
+    my ($script) = @_;
+    my ($line) = $script =~ m/^(export LEXICON_POWERDNS_AUTH_TOKEN=.*)$/m or return;
+    open( my $bash, '-|', 'bash', '-c', qq{$line; printf %s "\$LEXICON_POWERDNS_AUTH_TOKEN"} ) or die "bash: $!";
+    my $token = do { local $/; <$bash> };
+    close $bash;
+    return $token;
+}
+
+# What the proxy answers $token for $path, as an HTTP status.  The token goes
+# to curl on its standard input, as pdns_client sends the key.
+sub proxy_status {
+    my ( $token, $path ) = @_;
+    require IPC::Open2;
+    my $pid = IPC::Open2::open2( my $out, my $in, qw{curl -s -o /dev/null -w %{http_code} --unix-socket [% proxy_socket %] -H @-}, "http://localhost/api/v1/servers/localhost/$path" );
+    print {$in} "X-API-Key: $token\n";
+    close $in;
+    my $status = do { local $/; <$out> } // '';
+    waitpid( $pid, 0 );
+    return $status;
+}
+
+# lexicon on this guest presents a token for the zone of this domain, to the
+# proxy.  See socket_credentials in Provisioner::Recipe::pdns.  A token that the
+# proxy does not take is a 401 on every challenge, and that shows only when the
+# fetcher fails, after this target passed.
+my $token = do { local (@ARGV, $/) = '[% token_file %]'; <> } // '';
+chomp $token;
 my $shortcut = do { local (@ARGV, $/) = '/opt/lexicon/[% domain %]'; <> } // '';
 SKIP: {
-    skip 'the API has no key to compare against', 1 unless $api_key;
-
     # There is one shortcut per domain, for the provider that holds its zone.
-    # If the registrar holds the zone, the shortcut does not use this key.
-    skip 'this domain writes its records through another provider', 1
+    # If the registrar holds the zone, the shortcut does not use this server.
+    skip 'this domain writes its records through another provider', 6
         unless $shortcut =~ m/^export LEXICON_POWERDNS_/m;
 
-    my ($shortcut_key) = $shortcut =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
-    is($shortcut_key, $api_key, 'the lexicon shortcut presents the key the server runs with')
-        or diag "shortcut has " . ($shortcut_key // '(none)');
+    ok( length $token, 'this guest made a token for the zone of [% domain %]' );
+    isnt( $token, $api_key, 'which is not the key of the API' );
+    is( ( stat '[% token_file %]' )[2] & 0077, 0, 'and only root can read it' );
+    is( token_exported_by($shortcut), $token, 'the lexicon shortcut presents it' );
+    is( proxy_status( $token, 'zones/[% domain %].' ), 200, 'the proxy takes it for the zone of [% domain %]' );
+    is( proxy_status( $token, 'zones' ),               403, 'and for nothing that names every zone on the guest' );
 }
 
 # The hook of dehydrated, if the domain also runs letsencrypt.  Without
 # letsencrypt, the guest has no hook to compare.
 my $hook_path = '/etc/dehydrated/hooks/[% domain %].sh';
 SKIP: {
-    skip 'this domain does not run dehydrated', 1 unless $api_key && -f $hook_path;
+    skip 'this domain does not run dehydrated', 1 unless length $token && -f $hook_path;
 
     my $hook = do { local (@ARGV, $/) = $hook_path; <> } // '';
-    my ($hook_key) = $hook =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
-    is($hook_key, $api_key, 'and so does the hook dehydrated executes')
-        or diag "hook has " . ($hook_key // '(none)');
+    is( token_exported_by($hook), $token, 'and so does the hook dehydrated executes' );
 }
 
 my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> } // '';

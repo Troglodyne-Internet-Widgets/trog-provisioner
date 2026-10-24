@@ -19,7 +19,7 @@ $TTL    300
 [% FOREACH subdo IN ipmap.keys().sort() %]
 [% NEXT IF subdo != domain %]
 @       IN A    [% ipmap.$subdo %]
-ns1     IN A    [% ipmap.$subdo %]
+ns1     IN A    [% public_address // ipmap.$subdo %]
 ;[% ipmap.$subdo | reverse_ip %] IN PTR  [% subdo %]
 [% END -%]
 

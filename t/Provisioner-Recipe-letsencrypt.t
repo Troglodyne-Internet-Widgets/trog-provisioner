@@ -121,17 +121,17 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # validate() ends by calling enrich, so this is the real path: calling both
     # ran enrich twice, and the second pass saw ca already set, skipped the
     # branch under test and asserted nothing about it.
-    my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
-    my %server = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu' )->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( length $server{api_key}, 'pdns makes an api key' );
-    is( $server{api_key}, $opts{lexicon}{key}, 'and the hook is given the same one' );
+    my %opts = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
+    my $file = Provisioner::Cookbook->load('pdns')->token_path($DOMAIN);
+    is( $opts{lexicon}{key_file}, $file, 'the hook is given the file that holds the token of the domain' );
 
     # The token reaching the file dehydrated executes, which is the thing that
-    # actually failed: every other consumer had it and agreed, while the hook
+    # once failed: every other consumer had it and agreed, while the hook
     # rendered no export, because new_config supplies an empty token before the
     # depsolver has added the pdns this recipe asks for.
-    my $hook = $slurp->('domain.hook');
-    like( $hook, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="[\da-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
+    my $hook   = $slurp->('domain.hook');
+    my $export = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat $file)"};
+    ok( ( grep { $_ eq $export } split( m/\n/, $hook ) ), 'and the hook exports it from there, rather than omitting it' ) or diag $hook;
 };
 
 subtest 'the services that read the certificate are those that the recipes on the guest name' => sub {
@@ -191,7 +191,7 @@ subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
     is( scalar @calls, 2, 'the hook deploys a record and cleans it up' );
     like( $_, qr/--resolve-zone-name/, 'and asks lexicon to find the zone itself' ) for @calls;
 
-    like( $hook, qr{LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"}, 'and the socket is named for the provider' );
+    like( $hook, qr{LEXICON_POWERDNS_PDNS_SERVER="\Q$Provisioner::Recipe::pdns::PROXY_SOCKET\E"}, 'and the socket of the proxy is named for the provider' );
 };
 
 subtest 'a registrar is left alone' => sub {
@@ -260,8 +260,8 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     # place are queued behind the fetcher.  Measured on a guest: lexicon found
     # no socket, so the af-unix patch left the endpoint unmangled and requests
     # refused it, and --resolve-zone-name resolved to nothing.
-    ok( index( $fetcher, '/var/spool/powerdns/api.sock' ) >= 0, 'it waits for the socket lexicon talks to' );
-    ok( index( $fetcher, 'SOA' ) >= 0,                          'and for the zone to be answered' );
+    ok( index( $fetcher, $Provisioner::Recipe::pdns::PROXY_SOCKET ) >= 0, 'it waits for the socket lexicon talks to' );
+    ok( index( $fetcher, 'SOA' ) >= 0,                                    'and for the zone to be answered' );
 
     # Two SOA lookups, and the difference between them is the whole finding.
     # @127.0.0.1 asks the server; the bare one asks the resolver lexicon walks
@@ -276,11 +276,11 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     {
         my $registrar = with_registrar();
         ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
-        ok( index( $slurp->('get_cert'), '/var/spool/powerdns/api.sock' ) < 0, 'and waits for nothing where the DNS is somebody else' );
+        ok( index( $slurp->('get_cert'), $Provisioner::Recipe::pdns::PROXY_SOCKET ) < 0, 'and waits for nothing where the DNS is somebody else' );
     }
 };
 
-subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
+subtest 'a domain sharing a machine asks its proxy with a token of its own' => sub {
     my %common = ( install_dir => '/opt/domains', admin_user => 'someadmin', modules => [qw{pdns letsencrypt}] );
 
     # The arrangement said the way an operator says it, in _shared, rather than
@@ -305,24 +305,15 @@ YAML
     Provisioner::Cookbook->forget();
 
     # One pdns serves the whole guest, and its global target is made once -- so a
-    # domain layered onto another never rewrites api.conf and the key in it stays
-    # the first domain's.  A token of its own is one the server does not know:
-    # measured on a shared host, where every challenge came back 401.
-    my %host   = fresh()->validate( %common, domain => 'first.test' );
-    my %tenant = fresh()->validate( %common, domain => 'second.test' );
-    my %alone  = fresh()->validate( %common, domain => 'third.test' );
-
-    # Length first, and not merely equality: two empty strings are equal, so an
-    # absent credential would satisfy the comparison below while rendering a
-    # hook that authenticates with nothing.
-    ok( length( $host{lexicon}{key} // q{} ) >= 32, 'the machine has a token' );
-    is( $tenant{lexicon}{key}, $host{lexicon}{key}, 'a domain on it presents that one' );
-    isnt( $alone{lexicon}{key}, $host{lexicon}{key}, 'while a domain with a machine of its own gets its own' );
-
-    # The hook is only half of it.  The server configures itself with its own
-    # key, and a hook that presents another gets a 401.
+    # domain layered onto another never rewrites api.conf.  So each domain
+    # presents a token of its own to the proxy, which the fragment of the domain
+    # makes on the guest.  See socket_credentials in Provisioner::Recipe::pdns.
     my $pdns = Provisioner::Cookbook->load('pdns');
-    is( $pdns->api_key_for('second.test'), $host{lexicon}{key}, 'and the server of the machine expects that key' );
+    foreach my $domain (qw{first.test second.test third.test}) {
+        my %opts = fresh()->validate( %common, domain => $domain );
+        is( $opts{lexicon}{key_file}, $pdns->token_path($domain), "$domain presents the token of its own zone" );
+        is( $opts{lexicon}{key},      q{},                        'and the payload holds no key' );
+    }
 
     Provisioner::Cookbook->forget();
 };
@@ -419,8 +410,8 @@ subtest 'a public guest that holds its own zone answers its own challenge' => su
     my $registrar = with_registrar( pdns => { api_key => 'a-key' }, registrar => { type => 'easydns', key => 'a-token', authority => $PUBLIC } );
 
     my %opts = fresh()->enrich( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    is( $opts{lexicon}{type}, 'powerdns', 'the local server is what lexicon is given' );
-    is( $opts{lexicon}{key},  'a-key',    'with the key that the operator set for it' );
+    is( $opts{lexicon}{type},     'powerdns',                                               'the local server is what lexicon is given' );
+    is( $opts{lexicon}{key_file}, Provisioner::Cookbook->load('pdns')->token_path($PUBLIC), 'with the token of its zone, and not the key that the operator set' );
 };
 
 subtest 'the hook writes the challenge of a name in a zone of the registrar through the shortcut of that zone' => sub {

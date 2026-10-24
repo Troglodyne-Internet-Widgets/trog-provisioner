@@ -1,11 +1,17 @@
-# The PSGI application of the API proxy of the pdns recipe.  The key of the API comes from
-# the environment, which the unit reads from a file only root and pdns can read.
+# The PSGI application of the API proxy of the pdns recipe.  The key of the API
+# is in a file that only root and pdns can read.  A plain open, because the
+# perl that runs this has only what the pdns recipe installs into it.
 use strict;
 use warnings;
 use PowerDNS::API::ACL::Proxy;
 
+open( my $fh, '<', '[% api_key_file %]' ) or die "Cannot read [% api_key_file %]: $!\n";
+my ($api_key) = do { local $/; <$fh> } =~ m/(\S+)/
+  or die "[% api_key_file %] holds no key\n";
+close $fh;
+
 PowerDNS::API::ACL::Proxy->new(
     db       => '/var/lib/pdns-acl/acl.db',
     upstream => '[% api_socket %]',
-    api_key  => $ENV{PDNS_API_KEY},
+    api_key  => $api_key,
 )->to_app;

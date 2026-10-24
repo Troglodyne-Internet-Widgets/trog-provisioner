@@ -77,7 +77,9 @@ A client presents a token of its own as its API key.  A grant lets a token read
 or write the records of one name, or every name under a name, in one zone, or
 create and delete one zone.  The proxy checks each request against the grants,
 and passes an allowed one to pdns with the real key.  So a guest can publish
-its own records and nothing else.
+its own records and nothing else.  lexicon on this guest presents a token too,
+one for the zone of each domain, so the key stays with pdns, the proxy and
+F<scripts/pdns_client>.  See C<socket_credentials>.
 
 The API answers at C<dnsapi.$domain>, over TLS.  That name is a served name of
 this recipe, so it gets a record and a certificate as every served name does.
@@ -118,7 +120,6 @@ system perl, which has none of the modules.
 use Text::Xslate;
 use Net::IP;
 use File::Slurper;
-use Crypt::PRNG();
 
 use Data::Validate::Domain();
 use List::Util  qw{any uniq};
@@ -132,6 +133,14 @@ use Provisioner::Vars();
 # The API socket as the host sees it.  pdns binds /api.sock inside its chroot,
 # which is this path from outside.
 our $API_SOCKET = '/var/spool/powerdns/api.sock';
+
+# The key of the API, which the global fragment makes on the guest, and which
+# only pdns, the proxy and pdns_client read.  See "The API proxy".
+our $API_KEY_FILE = '/etc/powerdns/api-key';
+
+# Where the proxy listens.  nginx passes the requests of other guests to it, and
+# lexicon on this guest asks it directly.
+our $PROXY_SOCKET = '/run/pdns-acl/proxy.sock';
 
 sub rate_limits {
 
@@ -206,7 +215,7 @@ sub args {
                 type        => 'string',
                 'x-secret'  => 1,
                 description =>
-                  'The credential everything on this guest presents to talk to the API on its loopback socket, such as lexicon writing an _acme-challenge record.  Made here when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  It belongs to the server, so a domain layered onto another guest presents that machine key rather than one of its own.',
+                  'The key of the API on its unix socket, which only pdns, the API proxy and pdns_client present.  Every other client, on this guest as well, presents a token of its own to the proxy.  Made on the guest when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  It belongs to the server, so it is set on the domain of the guest, and a domain layered onto another guest does not set it.',
             },
             extra_records => { type => 'string' },
 
@@ -237,10 +246,17 @@ sub args {
 
 =head2 %credentials = $recipe->socket_credentials(%opts)
 
-The credentials for the API on the unix socket of this server.  Anything on
-this guest writes a record into the zone of this server through that API.  See
+The credentials with which lexicon on this guest writes the zone of
+C<$opts{domain}>, through the API proxy on its unix socket.  See
 L<Provisioner::Recipe::registrar/lexicon_credentials> for the keys that come
 back.
+
+The token is in C<key_file>, at C<token_path> of the domain.  The fragment of
+the domain makes it in the postrun, with F<scripts/pdns_client> C<own>, because
+C<pdns-acl> comes with the perl target.  It writes the zone of the domain and
+every name below it, and nothing else on the guest.  So a domain layered onto
+another guest cannot write the zone of that guest, and the key of the API is
+not in the payload.
 
 C<opts> is C<--resolve-zone-name>, because lexicon reduces a name to its
 registrable form with tldextract before it asks for a zone.  A reserved TLD is
@@ -252,46 +268,14 @@ gets a 404.
 sub socket_credentials {
     my ( $self, %opts ) = @_;
 
-    # The registrar calls this as a class method, on a path where enrich does not run.
-    my $key =
-        $opts{api_key}
-      ? $opts{api_key}
-      : $self->api_key_for( $opts{domain} );
-
     return (
-        type  => 'powerdns',
-        user  => q{},
-        key   => $key,
-        opts  => '--resolve-zone-name',
-        extra => [ { key => 'PDNS_SERVER', value => $API_SOCKET } ],
+        type     => 'powerdns',
+        user     => q{},
+        key      => q{},
+        key_file => $self->token_path( $opts{domain} ),
+        opts     => '--resolve-zone-name',
+        extra    => [ { key => 'PDNS_SERVER', value => $PROXY_SOCKET } ],
     );
-}
-
-=head2 $key = $recipe->api_key_for($domain)
-
-Returns the API key of the pdns server on the guest that holds C<$domain>.
-
-If an operator set C<api_key> for that server, it returns that value.  If not,
-it makes one random key per server and returns that key on each call.  The API
-configuration, the dehydrated hook and the lexicon shortcut must present the
-same key, because a different key gets a 401.
-
-The server belongs to a guest, not to a domain.  For a domain that is layered
-onto another guest, L<Provisioner::Cookbook/host_of> finds that guest, and the
-method returns the key of its server.
-
-=cut
-
-sub api_key_for {
-    my ( $self, $domain ) = @_;
-
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-
-    my $configured = Provisioner::Cookbook->domain_config($server)->{ $self->recipe_name }{api_key};
-    return $configured if $configured;
-
-    state %made;
-    return $made{ $server // q{} } //= Crypt::PRNG::random_bytes_hex(32);
 }
 
 =head2 %credentials = $recipe->client_credentials($guest, $name)
@@ -440,9 +424,6 @@ sub checked_names {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{api_key} = $self->api_key_for( $opts{domain} )
-      unless $opts{api_key};
-
     my $extras = $opts{extra_records} // '';
     if ($extras) {
         my $is_abs_path = index( $extras, '/' ) == 0;
@@ -452,7 +433,10 @@ sub enrich {
 
     $opts{serial} = int time;
 
-    $opts{api_socket} = $API_SOCKET;
+    $opts{api_socket}   = $API_SOCKET;
+    $opts{api_key_file} = $API_KEY_FILE;
+    $opts{proxy_socket} = $PROXY_SOCKET;
+    $opts{token_file}   = $self->token_path( $opts{domain} );
 
     my @ours = @{ $opts{transfer_ips} // [] };
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
@@ -461,7 +445,9 @@ sub enrich {
     $opts{api_allowed} = [ uniq( qw{127.0.0.1 ::1}, @ours, @pool, sort( values %{ $opts{ipmap} // {} } ), @{ $opts{api_allow} } ) ];
 
     # Nobody can ask a server on loopback, and the zone above names this one.
-    $opts{public_address} = $opts{main_ip};
+    # The address of the guest, because a domain layered onto it has an
+    # address of its own, and the server listens only where its guest does.
+    $opts{public_address} = ( Provisioner::IPPool::guest_address( $opts{domain} ) )[1] // $opts{main_ip};
 
     $opts{acme_port} = Provisioner::Cookbook->load('acmeca')->port_for( $opts{domain} ) if any { $_ eq 'acmeca' } @{ $opts{modules} // [] };
 
@@ -496,7 +482,7 @@ sub template_files {
         'pdns.rsyslog.tt'      => '10-powerdns.conf',
         'pdns.api.tt'          => 'pdns-api.conf',
         'pdns.acl.psgi.tt'     => 'pdns-acl.psgi',
-        'pdns.acl.env.tt'      => 'pdns-acl.env',
+        'pdns.api_key.tt'      => 'pdns-api-key',
         'pdns.acl.service.tt'  => 'pdns-acl.service',
         'pdns.acl.nginx.tt'    => 'pdns-acl.nginx.conf',
         'pdns.acl.dropin.tt'   => 'pdns-acl.dropin.conf',

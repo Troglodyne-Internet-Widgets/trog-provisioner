@@ -251,7 +251,9 @@ subtest 'a guest that runs pdns holds its own zone only where it says so' => sub
     ( $err, $makefile, $dir ) = generate( $REMOTE, letsencrypt => undef, registrar => { %registrar, authority => $REMOTE }, pdns => { api_key => 'an-api-key' } );
     is( $err, undef, 'naming itself as its authority runs to the end' ) or diag $err;
     $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
-    like( $shortcut, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$/m, 'and points lexicon at its own server, with its key' );
+    my $token  = Provisioner::Cookbook->load('pdns')->token_path($REMOTE);
+    my $export = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat $token)"};
+    ok( ( grep { $_ eq $export } split( m/\n/, $shortcut ) ), 'and points lexicon at its own server, with the token of its zone' ) or diag $shortcut;
 };
 
 done_testing;

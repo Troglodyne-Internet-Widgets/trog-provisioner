@@ -186,15 +186,51 @@ subtest 'the API proxy' => sub {
     my $upstream = qr!proxy_pass[ ]https://127[.]0[.]0[.]1:9000;!;
     like( $with_ca, qr/$location\s*$upstream/, 'while it passes /acme/ to the CA of a guest that runs one, for the guests under this one' );
 
-    is( $fresh->()->render_file( 'files/pdns.acl.env.tt', %held ), "PDNS_API_KEY=the-server-key\n", 'the proxy gets the key of the server in its environment file' );
-    like( $fresh->()->render_file( 'files/pdns.acl.dropin.tt', %held ), qr{^UMask=0002$}m, 'and pdns makes its socket writable by its group, where the proxy runs' );
+    like( $fresh->()->render_file( 'files/pdns.acl.psgi.tt',   %held ), qr{open\([ ]my[ ]\$fh,[ ]'<',[ ]'\Q$Provisioner::Recipe::pdns::API_KEY_FILE\E'[ ]\)}, 'the proxy reads the key of the server from its file' );
+    like( $fresh->()->render_file( 'files/pdns.acl.dropin.tt', %held ), qr{^UMask=0002$}m,                                                                    'and pdns makes its socket writable by its group, where the proxy runs' );
 
     like( $fresh->()->render_file( 'files/pdns.global.tt', %held ), qr/^local-address=127[.]0[.]0[.]1,[ ]192[.]0[.]2[.]50:53$/m, 'the server answers on the address of the guest, which the zone above names' );
     like( $fresh->()->render_file( 'files/pdns.global.tt', %held, main_ip => undef ), qr/^local-address=127[.]0[.]0[.]1$/m, 'and on loopback alone where the hypervisor gives the address later' );
 
-    my $fragment = $fresh->()->render_file( 'ubuntu/pdns.tt', %held );
-    like( $fragment, qr{^install[ ].*pdns-acl[.]dropin[.]conf[ ]}m, 'the fragment installs the drop-in' );
-    ok( index( $fragment, 'pdns-acl.dropin.conf' ) < index( $fragment, 'systemctl restart pdns' ), 'before it restarts pdns, which reads it' );
+    # Once for the guest, so that a domain layered onto it does not replace the
+    # proxy of the guest.  The global targets run before those of the domains,
+    # whose fragment restarts pdns.
+    my $global = $fresh->()->render_file( 'ubuntu/pdns.global.tt', %held );
+    like( $global,                                            qr{^install[ ].*pdns-acl[.]dropin[.]conf[ ]}m, 'the global fragment installs the drop-in' );
+    like( $global,                                            qr{^install[ ].*pdns-acl[.]psgi[ ]}m,          'and the proxy' );
+    like( $fresh->()->render_file( 'ubuntu/pdns.tt', %held ), qr{^systemctl[ ]restart[ ]pdns$}m,             'which the fragment of the domain restarts pdns after' );
+};
+
+# One server for the guest, and one key, which stays with pdns and the proxy.
+# lexicon on the guest presents a token for the zone of its domain, so a domain
+# layered onto a guest cannot write the zone of the guest.
+subtest 'each domain on the guest writes its zone with a token of its own' => sub {
+    my $recipe = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' );
+    my $fresh  = sub { return $recipe->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu' ) };
+    my $proxy  = $Provisioner::Recipe::pdns::PROXY_SOCKET;
+
+    my %host   = $fresh->()->socket_credentials( domain => 'host.test.test' );
+    my %tenant = $fresh->()->socket_credentials( domain => 'tenant.test.test' );
+    is( $host{key_file},   $recipe->token_path('host.test.test'),   'lexicon reads the token of the domain' );
+    is( $tenant{key_file}, $recipe->token_path('tenant.test.test'), 'and a domain layered onto the guest reads its own' );
+    is( $host{key},        q{},                                     'and the payload holds no key' );
+    my ($server) = grep { $_->{key} eq 'PDNS_SERVER' } @{ $tenant{extra} };
+    is( $server->{value}, $proxy, 'which it presents to the proxy, on its socket' );
+
+    my $task     = qq{"umask 077 && mkdir -p \$\$(dirname /etc/lexicon/tenant.test.test.token) && /bogus/bin/pdns_client own tenant.test.test > /etc/lexicon/tenant.test.test.token.new && mv /etc/lexicon/tenant.test.test.token.new /etc/lexicon/tenant.test.test.token"};
+    my $fragment = $fresh->()->render_file( 'ubuntu/pdns.tt', %VARS, domain => 'tenant.test.test', script_dir => '/bogus/bin' );
+    ok( ( grep { $_ eq "POSTRUN_SLOT=0 /bogus/bin/queue_postrun_task $task" } split( m/\n/, $fragment ) ), 'the fragment of the domain makes the token in the postrun, for its zone alone' ) or diag $fragment;
+
+    my $file     = $Provisioner::Recipe::pdns::API_KEY_FILE;
+    my $global   = $fresh->()->render_file( 'ubuntu/pdns.global.tt', %VARS, domain => 'host.test.test', script_dir => '/bogus/bin' );
+    my @installs = grep { index( $_, 'grep -q . pdns-api-key && install ' ) == 0 && index( $_, " pdns-api-key $file || " ) > 0 } split( m/\n/, $global );
+    is( scalar @installs, 1, 'the global fragment installs the api_key that an operator set' ) or diag $global;
+    like( $global, qr{\Qtest -s $file || { umask 027 && openssl rand -hex 32 > $file; }\E}, 'or makes one on the guest, once' );
+    my $line = qq{KEY=\$\$(cat $file) && test -n "\$\$KEY" && printf 'api-key=%s\\n' "\$\$KEY" >> /etc/powerdns/pdns.d/api.conf};
+    ok( ( grep { $_ eq $line } split( m/\n/, $global ) ), 'and the server runs with it, and refuses an empty one' ) or diag $global;
+
+    is( $fresh->()->render_file( 'files/pdns.api_key.tt', %VARS, api_key => 'an-operator-key' ), "an-operator-key\n", 'the key of an operator is rendered for the global fragment' );
+    is( $fresh->()->render_file( 'files/pdns.api_key.tt', %VARS ), "\n", 'and nothing when nobody set one' );
 };
 
 subtest 'what a guest that names this one as its authority gets' => sub {
