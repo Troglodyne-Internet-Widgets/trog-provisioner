@@ -1697,16 +1697,6 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     like( $out, qr{systemctl[ ]enable[ ]--now[ ]tmp\.mount}, 'and is mounted, not merely enabled' );
 };
 
-subtest 'pdns makes the credential its own API is reached with' => sub {
-    my %bare = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->validate( %G, domain => 'mint.test' );
-    ok( length( $bare{api_key} // q{} ) >= 32, 'a guest that configured no key gets one made for it' );
-
-    # An operator who set one owns it: this is a secret nobody chose, not a
-    # decision to take away from somebody who made it.
-    my %set = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->validate( %G, domain => 'mint.test', api_key => 'chosen-by-hand' );
-    is( $set{api_key}, 'chosen-by-hand', 'and one that did keeps it' );
-};
-
 subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
 
     # lexicon builds an environment variable from provider plus option name --

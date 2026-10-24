@@ -74,12 +74,23 @@ SKIP: {
     ok(-S $onhost, "the API socket is at $onhost") or diag $api;
 }
 
-# Every client of this API presents one key.  See api_key_for in
+# Every client of this API presents one key.  See guest_secrets in
 # Provisioner::Recipe::pdns.  A different key gets a 401 on every challenge,
 # and that shows only when the fetcher fails, after this target passed.
 my ($api_key) = $api =~ m/^api-key=(\S+)/m;
 ok($api_key && length($api_key) >= 32, 'the API is configured with a credential')
     or diag $api;
+
+# What a client exports as its token, as bash expands it, because the line
+# reads the key from a file.
+sub token_exported_by {
+    my ($script) = @_;
+    my ($line) = $script =~ m/^(export LEXICON_POWERDNS_AUTH_TOKEN=.*)$/m or return;
+    open( my $bash, '-|', 'bash', '-c', qq{$line; printf %s "\$LEXICON_POWERDNS_AUTH_TOKEN"} ) or die "bash: $!";
+    my $token = do { local $/; <$bash> };
+    close $bash;
+    return $token;
+}
 
 my $shortcut = do { local (@ARGV, $/) = '/opt/lexicon/[% domain %]'; <> } // '';
 SKIP: {
@@ -90,7 +101,7 @@ SKIP: {
     skip 'this domain writes its records through another provider', 1
         unless $shortcut =~ m/^export LEXICON_POWERDNS_/m;
 
-    my ($shortcut_key) = $shortcut =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
+    my $shortcut_key = token_exported_by($shortcut);
     is($shortcut_key, $api_key, 'the lexicon shortcut presents the key the server runs with')
         or diag "shortcut has " . ($shortcut_key // '(none)');
 }
@@ -102,7 +113,7 @@ SKIP: {
     skip 'this domain does not run dehydrated', 1 unless $api_key && -f $hook_path;
 
     my $hook = do { local (@ARGV, $/) = $hook_path; <> } // '';
-    my ($hook_key) = $hook =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
+    my $hook_key = token_exported_by($hook);
     is($hook_key, $api_key, 'and so does the hook dehydrated executes')
         or diag "hook has " . ($hook_key // '(none)');
 }

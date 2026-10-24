@@ -45,11 +45,12 @@ sub fresh {
 my $DOMAIN = 'dns.test.test';
 
 subtest 'what pdns tells lexicon' => sub {
-    my %creds = fresh('pdns')->socket_credentials( api_key => 'an-api-key' );
+    my %creds = fresh('pdns')->socket_credentials();
 
-    is( $creds{type}, 'powerdns',            'the provider lexicon knows it by' );
-    is( $creds{key},  'an-api-key',          'authenticating with the key the server runs with' );
-    is( $creds{opts}, '--resolve-zone-name', 'and resolving the zone rather than composing it' );
+    is( $creds{type},     'powerdns',                               'the provider lexicon knows it by' );
+    is( $creds{key_file}, $Provisioner::Recipe::pdns::API_KEY_FILE, 'authenticating with the key the server runs with, from its file' );
+    is( $creds{key},      q{},                                      'which is not in the payload' );
+    is( $creds{opts},     '--resolve-zone-name',                    'and resolving the zone rather than composing it' );
 
     # The socket is named once, by the recipe that binds it.
     my ($server) = grep { $_->{key} eq 'PDNS_SERVER' } @{ $creds{extra} // [] };
@@ -60,9 +61,9 @@ subtest 'what pdns tells lexicon' => sub {
 subtest 'the shortcut is rendered from that, and names what lexicon reads' => sub {
 
     # Through the lexicon recipe, which is what installs the shortcut: it asks
-    # the registrar who holds this zone and renders whatever that answers.  The
-    # configuration is mocked so the token is one to assert on, rather than the
-    # one pdns mints for a server nobody configured a key for.
+    # the registrar who holds this zone and renders whatever that answers.  An
+    # api_key that an operator set reaches the guest through the store, so the
+    # shortcut still reads the file.
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
     $conf->redefine( domain_config => sub { return { pdns => { api_key => 'an-api-key' } } } );
     $conf->redefine( host_of       => sub { return } );
@@ -76,7 +77,9 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     like( $out, qr{^export[ ]LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"$}m, 'the socket, under the name lexicon resolves' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     unlike( $out, qr{^export[ ]LEXICON_POWERDNS_SERVER=}m, 'and not the one it ignores' );
 
-    like( $out, qr{^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$}m, 'the token' );
+    my $export = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat $Provisioner::Recipe::pdns::API_KEY_FILE)"};
+    ok( ( grep { $_ eq $export } split( m/\n/, $out ) ), 'the token, from the file of the server' ) or diag $out;
+    unlike( $out, qr{an-api-key},    'and never the key itself' );
     unlike( $out, qr{AUTH_USERNAME}, 'and no empty username, since this provider takes none' );
 
     like( $out, qr{^lexicon[ ]--resolve-zone-name[ ]powerdns[ ]}m, 'invoked with the flag the provider needs' );

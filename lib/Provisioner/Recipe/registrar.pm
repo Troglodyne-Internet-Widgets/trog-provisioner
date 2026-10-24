@@ -314,10 +314,7 @@ sub lexicon_credentials {
     my $domain = $opts{domain};
     my $pdns   = Provisioner::Cookbook->load('pdns');
 
-    if ( $self->serves_itself($domain) ) {
-        my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-        return $pdns->socket_credentials( %{ Provisioner::Cookbook->domain_config($server)->{pdns} // {} }, domain => $domain );
-    }
+    return $pdns->socket_credentials() if $self->serves_itself($domain);
 
     my $guest = $self->delegated_to($domain);
     return $pdns->client_credentials( $guest, $domain ) if defined $guest;

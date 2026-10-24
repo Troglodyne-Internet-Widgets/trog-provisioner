@@ -31,6 +31,12 @@ grep -qF 'addNTA("[% zone %]"' /etc/powerdns/recursor.lua || echo 'addNTA("[% zo
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
 # The API, which lexicon uses
 mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
+[%# The key, from the file that bin/provision put on the guest.  An empty file
+    is a store that was not reached, and a server with no key fails here, not
+    at the first challenge.  See guest_secrets in Provisioner::Recipe::pdns. -%]
+chown root:pdns [% api_key_file %]
+chmod 0640 [% api_key_file %]
+KEY=$$(cat [% api_key_file %]) && test -n "$$KEY" && printf 'api-key=%s\n' "$$KEY" >> /etc/powerdns/pdns.d/api.conf
 [%# pdns must read these files, and a file moved out of the payload keeps the
     transfer user and mode 0600.  If pdns cannot read them, it uses the
     packaged defaults, binds 0.0.0.0:53 where the recursor is, and exits.
@@ -50,6 +56,23 @@ mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf
 mkdir -p /var/spool/powerdns/run/pdns/; /bin/true
 chown -R pdns:pdns /var/spool/powerdns/run
 mv 10-powerdns.conf /etc/rsyslog.d/10-powerdns.conf
+[%# The proxy that other guests reach the API through, one for the guest.  See
+    "The API proxy" in Provisioner::Recipe::pdns.  pdns owns the database of
+    tokens, because the proxy runs as pdns to reach the API socket, and reads
+    the key from the file above. -%]
+install -d -o pdns -g pdns -m 0750 /var/lib/pdns-acl
+install -d -o root -g root -m 0755 /etc/pdns-acl
+install -o root -g root -m 0644 pdns-acl.psgi /etc/pdns-acl/app.psgi
+install -o root -g root -m 0644 pdns-acl.service /etc/systemd/system/pdns-acl.service
+[%# The umask with which pdns creates its API socket, so that the proxy, in the
+    group pdns, can write to it.  Before the restart in the fragment of the
+    domain. -%]
+install -d -o root -g root -m 0755 /etc/systemd/system/pdns.service.d
+install -o root -g root -m 0644 pdns-acl.dropin.conf /etc/systemd/system/pdns.service.d/pdns-acl.conf
+[%# In the postrun, because the perl target runs after this fragment, and it
+    installs Starman and the proxy. -%]
+[% script_dir %]/queue_postrun_task systemctl enable pdns-acl
+[% script_dir %]/queue_postrun_task systemctl restart pdns-acl
 [%# Here, not in the postrun queue.  post_install runs its queue one task at a
     time, and the letsencrypt certificate fetcher that needs pdns is ahead in
     it.  configure_pdns rewrote the unit above, so the reload goes with it.

@@ -108,8 +108,9 @@ with a valid public suffix (TLD)>.
 This default pulls in L<Provisioner::Recipe::acmeca>, which serves the CA.  A
 guest under a reserved TLD holds its own zone unless it names an authority, so
 L<Provisioner::Recipe::registrar> pulls in L<Provisioner::Recipe::pdns>, which
-answers the C<dns-01> challenge on loopback.  pdns makes its own C<api_key>, and
-lexicon gets the same key from it.  See L<Provisioner::Recipe::pdns/api_key_for>.
+answers the C<dns-01> challenge on loopback.  pdns keeps its own C<api_key> in
+a file on the guest, and lexicon reads the key from there.  See
+L<Provisioner::Recipe::pdns/guest_secrets>.
 
 A guest whose C<registrar> names an C<authority> is different.  The authority
 holds the zone of the guest, so lexicon writes the challenge there, and the

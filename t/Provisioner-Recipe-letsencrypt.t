@@ -121,17 +121,17 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # validate() ends by calling enrich, so this is the real path: calling both
     # ran enrich twice, and the second pass saw ca already set, skipped the
     # branch under test and asserted nothing about it.
-    my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
-    my %server = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu' )->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    ok( length $server{api_key}, 'pdns makes an api key' );
-    is( $server{api_key}, $opts{lexicon}{key}, 'and the hook is given the same one' );
+    my %opts = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
+    my $file = $Provisioner::Recipe::pdns::API_KEY_FILE;
+    is( $opts{lexicon}{key_file}, $file, 'the hook is given the file that holds the key of pdns' );
 
-    # The token reaching the file dehydrated executes, which is the thing that
-    # actually failed: every other consumer had it and agreed, while the hook
+    # The key reaching the file dehydrated executes, which is the thing that
+    # once failed: every other consumer had it and agreed, while the hook
     # rendered no export, because new_config supplies an empty token before the
     # depsolver has added the pdns this recipe asks for.
-    my $hook = $slurp->('domain.hook');
-    like( $hook, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="[\da-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
+    my $hook   = $slurp->('domain.hook');
+    my $export = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat $file)"};
+    ok( ( grep { $_ eq $export } split( m/\n/, $hook ) ), 'and the hook exports it from there, rather than omitting it' ) or diag $hook;
 };
 
 subtest 'the services that read the certificate are those that the recipes on the guest name' => sub {
@@ -305,24 +305,15 @@ YAML
     Provisioner::Cookbook->forget();
 
     # One pdns serves the whole guest, and its global target is made once -- so a
-    # domain layered onto another never rewrites api.conf and the key in it stays
-    # the first domain's.  A token of its own is one the server does not know:
-    # measured on a shared host, where every challenge came back 401.
-    my %host   = fresh()->validate( %common, domain => 'first.test' );
-    my %tenant = fresh()->validate( %common, domain => 'second.test' );
-    my %alone  = fresh()->validate( %common, domain => 'third.test' );
-
-    # Length first, and not merely equality: two empty strings are equal, so an
-    # absent credential would satisfy the comparison below while rendering a
-    # hook that authenticates with nothing.
-    ok( length( $host{lexicon}{key} // q{} ) >= 32, 'the machine has a token' );
-    is( $tenant{lexicon}{key}, $host{lexicon}{key}, 'a domain on it presents that one' );
-    isnt( $alone{lexicon}{key}, $host{lexicon}{key}, 'while a domain with a machine of its own gets its own' );
-
-    # The hook is only half of it.  The server configures itself with its own
-    # key, and a hook that presents another gets a 401.
-    my $pdns = Provisioner::Cookbook->load('pdns');
-    is( $pdns->api_key_for('second.test'), $host{lexicon}{key}, 'and the server of the machine expects that key' );
+    # domain layered onto another never rewrites api.conf.  So the hook reads
+    # the key from the file that the server runs with, which the store gives
+    # every domain of the guest.  See guest_secrets in Provisioner::Recipe::pdns.
+    my $file = $Provisioner::Recipe::pdns::API_KEY_FILE;
+    foreach my $domain (qw{first.test second.test third.test}) {
+        my %opts = fresh()->validate( %common, domain => $domain );
+        is( $opts{lexicon}{key_file}, $file, "$domain presents the key of the server of its guest" );
+        is( $opts{lexicon}{key},      q{},   'and has none of its own in the payload' );
+    }
 
     Provisioner::Cookbook->forget();
 };
@@ -419,8 +410,8 @@ subtest 'a public guest that holds its own zone answers its own challenge' => su
     my $registrar = with_registrar( pdns => { api_key => 'a-key' }, registrar => { type => 'easydns', key => 'a-token', authority => $PUBLIC } );
 
     my %opts = fresh()->enrich( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
-    is( $opts{lexicon}{type}, 'powerdns', 'the local server is what lexicon is given' );
-    is( $opts{lexicon}{key},  'a-key',    'with the key that the operator set for it' );
+    is( $opts{lexicon}{type},     'powerdns',                               'the local server is what lexicon is given' );
+    is( $opts{lexicon}{key_file}, $Provisioner::Recipe::pdns::API_KEY_FILE, 'with the key of the server, which holds the one that the operator set' );
 };
 
 subtest 'the hook writes the challenge of a name in a zone of the registrar through the shortcut of that zone' => sub {

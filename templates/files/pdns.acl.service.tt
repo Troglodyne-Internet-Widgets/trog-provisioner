@@ -7,7 +7,6 @@ Wants=network-online.target
 Type=simple
 User=pdns
 Group=pdns
-EnvironmentFile=/etc/pdns-acl/env
 [%# The directory and the socket are for nginx to reach, so they are open to
     every user.  Every request still needs a token. -%]
 RuntimeDirectory=pdns-acl

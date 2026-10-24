@@ -133,6 +133,10 @@ use Provisioner::Vars();
 # which is this path from outside.
 our $API_SOCKET = '/var/spool/powerdns/api.sock';
 
+# The key of the API on the guest, which bin/provision puts there from the
+# store.  See guest_secrets.
+our $API_KEY_FILE = '/etc/powerdns/api-key';
+
 sub rate_limits {
 
     # A resolver asks over udp and asks often, and a recursor in front of this
@@ -206,7 +210,7 @@ sub args {
                 type        => 'string',
                 'x-secret'  => 1,
                 description =>
-                  'The credential everything on this guest presents to talk to the API on its loopback socket, such as lexicon writing an _acme-challenge record.  Made here when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  It belongs to the server, so a domain layered onto another guest presents that machine key rather than one of its own.',
+                  'The credential everything on this guest presents to talk to the API on its loopback socket, such as lexicon writing an _acme-challenge record.  Made when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  The first build keeps it in the store, at secret:pdns/GUEST-api-key/password, and every later build reads it from there, so a later change goes in the store.  It belongs to the server, set on the domain of the guest, and a domain layered onto another guest presents that key.',
             },
             extra_records => { type => 'string' },
 
@@ -250,48 +254,46 @@ gets a 404.
 =cut
 
 sub socket_credentials {
-    my ( $self, %opts ) = @_;
-
-    # The registrar calls this as a class method, on a path where enrich does not run.
-    my $key =
-        $opts{api_key}
-      ? $opts{api_key}
-      : $self->api_key_for( $opts{domain} );
-
     return (
-        type  => 'powerdns',
-        user  => q{},
-        key   => $key,
-        opts  => '--resolve-zone-name',
-        extra => [ { key => 'PDNS_SERVER', value => $API_SOCKET } ],
+        type     => 'powerdns',
+        user     => q{},
+        key      => q{},
+        key_file => $API_KEY_FILE,
+        opts     => '--resolve-zone-name',
+        extra    => [ { key => 'PDNS_SERVER', value => $API_SOCKET } ],
     );
 }
 
-=head2 $key = $recipe->api_key_for($domain)
+=head2 %files = $recipe->guest_secrets($install_dir, $domain)
 
-Returns the API key of the pdns server on the guest that holds C<$domain>.
+The key of the API, at C<$API_KEY_FILE>, as C<guest_secrets> in
+L<Provisioner::Recipe> says.  The global fragment writes it into the
+configuration of pdns, and the proxy, the lexicon shortcut and the dehydrated
+hook read it from there.  So every client presents the key that the server
+runs with, and the key is not in the payload.
 
-If an operator set C<api_key> for that server, it returns that value.  If not,
-it makes one random key per server and returns that key on each call.  The API
-configuration, the dehydrated hook and the lexicon shortcut must present the
-same key, because a different key gets a 401.
-
-The server belongs to a guest, not to a domain.  For a domain that is layered
-onto another guest, L<Provisioner::Cookbook/host_of> finds that guest, and the
-method returns the key of its server.
+The server belongs to a guest, not to a domain.  The reference names the
+guest that L<Provisioner::Cookbook/host_of> finds for C<$domain>, so each
+domain on one guest gets the same key.  The key is the C<api_key> of that
+guest if an operator set one, and random if not.  The store keeps whichever the
+first build made.
 
 =cut
 
-sub api_key_for {
-    my ( $self, $domain ) = @_;
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
 
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
-
+    my $server     = Provisioner::Cookbook->host_of($domain) // $domain;
     my $configured = Provisioner::Cookbook->domain_config($server)->{ $self->recipe_name }{api_key};
-    return $configured if $configured;
 
-    state %made;
-    return $made{ $server // q{} } //= Crypt::PRNG::random_bytes_hex(32);
+    return (
+        $API_KEY_FILE => {
+            ref      => "secret:pdns/$server-api-key/password",
+            generate => sub { return $configured || Crypt::PRNG::random_bytes_hex(32) },
+            owner    => 'root:pdns',
+            mode     => '0640',
+        },
+    );
 }
 
 =head2 %credentials = $recipe->client_credentials($guest, $name)
@@ -440,9 +442,6 @@ sub checked_names {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{api_key} = $self->api_key_for( $opts{domain} )
-      unless $opts{api_key};
-
     my $extras = $opts{extra_records} // '';
     if ($extras) {
         my $is_abs_path = index( $extras, '/' ) == 0;
@@ -452,7 +451,8 @@ sub enrich {
 
     $opts{serial} = int time;
 
-    $opts{api_socket} = $API_SOCKET;
+    $opts{api_socket}   = $API_SOCKET;
+    $opts{api_key_file} = $API_KEY_FILE;
 
     my @ours = @{ $opts{transfer_ips} // [] };
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
@@ -461,7 +461,9 @@ sub enrich {
     $opts{api_allowed} = [ uniq( qw{127.0.0.1 ::1}, @ours, @pool, sort( values %{ $opts{ipmap} // {} } ), @{ $opts{api_allow} } ) ];
 
     # Nobody can ask a server on loopback, and the zone above names this one.
-    $opts{public_address} = $opts{main_ip};
+    # The address of the guest, because a domain layered onto it has an
+    # address of its own, and the server listens only where its guest does.
+    $opts{public_address} = ( Provisioner::IPPool::guest_address( $opts{domain} ) )[1] // $opts{main_ip};
 
     $opts{acme_port} = Provisioner::Cookbook->load('acmeca')->port_for( $opts{domain} ) if any { $_ eq 'acmeca' } @{ $opts{modules} // [] };
 
@@ -496,7 +498,6 @@ sub template_files {
         'pdns.rsyslog.tt'      => '10-powerdns.conf',
         'pdns.api.tt'          => 'pdns-api.conf',
         'pdns.acl.psgi.tt'     => 'pdns-acl.psgi',
-        'pdns.acl.env.tt'      => 'pdns-acl.env',
         'pdns.acl.service.tt'  => 'pdns-acl.service',
         'pdns.acl.nginx.tt'    => 'pdns-acl.nginx.conf',
         'pdns.acl.dropin.tt'   => 'pdns-acl.dropin.conf',

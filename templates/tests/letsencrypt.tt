@@ -81,9 +81,18 @@ SKIP: {
 subtest 'nginx serves the certificate that letsencrypt linked, and learns of a renewal' => sub {
     my $fingerprint = sub { my ($cmd) = @_; my $out = `$cmd 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null`; return $out };
     my $linked = $fingerprint->('cat /etc/ssl/certs/[% domain %].pem');
-    my $served = $fingerprint->('echo | openssl s_client -connect 127.0.0.1:443 -servername [% domain %]');
     isnt( $linked, '', 'there is a certificate to compare' ) or return;
-    is( $served, $linked, 'nginx serves it on 443' );
+
+    # A name that a vhost of nginx serves with this certificate.  A name that no
+    # vhost serves gets the default server, which on a guest that several
+    # domains share has the certificate of another domain.
+    my %vhost = map { $_ => 1 } map { split } `nginx -T 2>/dev/null` =~ m/^\s*server_name\s+([^;]+);/mg;
+    my ($name) = grep { $vhost{$_} } '[% domain %]'[% FOR alias IN domain_aliases.sort() %], '[% alias %]'[% END %];
+    SKIP: {
+        skip 'nginx serves no name of this certificate', 1 unless $name;
+        my $served = $fingerprint->("echo | openssl s_client -connect 127.0.0.1:443 -servername $name");
+        is( $served, $linked, "nginx serves it on 443, as $name" );
+    }
 
     # What dehydrated runs after the nightly renewal writes a new certificate.
     my $since = `date '+%Y-%m-%d %H:%M:%S'`;

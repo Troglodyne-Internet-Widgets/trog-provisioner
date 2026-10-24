@@ -33,8 +33,15 @@ use File::Slurper::Temp();
 use YAML::XS();
 
 use Provisioner::Cookbook();
+use Trog::Credentials();
+use Trog::Secrets();
 
 File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
+
+# A throwaway store, because pdns keeps the key of its API there.  Seeded
+# rather than mocked: prompt() hands back a credential this run already has.
+Trog::Secrets->create( "$ENV{TROG_PROVISIONER_CONFIG}/secrets.kdbx", 'throwaway' );
+Trog::Credentials->remember( 'keepass', 'throwaway' );
 
 require Trog::HV;
 require Trog::HV::Libvirt;
