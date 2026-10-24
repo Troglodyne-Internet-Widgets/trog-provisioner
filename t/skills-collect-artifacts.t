@@ -169,4 +169,18 @@ subtest 'a key the store never gave up is said so, rather than handed to ssh as 
     unlike( $err, qr/Permission \s+ denied/, 'instead of leaving ssh to report a refusal it cannot explain' );
 };
 
+subtest 'a domain that shares the guest of another is collected from that guest' => sub {
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_shared:\n    host.test.test:\n        - tenant.test.test\n" );
+
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( new => sub { return bless {}, 'FakeHV' } );
+    my @keyed;
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { push( @keyed, [ @_[ 1, 2 ] ] ); return undef } );
+
+    exception { Trog::Skill::CollectArtifacts::connect_to( 'tenant.test.test', uri => 'qemu:///bogus' ) };
+    is_deeply( \@keyed, [ [ 'host.test.test', '/bogus/domains/host.test.test/key.rsa' ] ], 'the key is of the host, from its directory' );
+    is( ( Trog::Skill::CollectArtifacts::artifacts('tenant.test.test') )[0], '/var/log/tenant.test.test.setup.log', 'and the setup log is still the log of the domain' );
+};
+
 done_testing();
