@@ -206,8 +206,10 @@ L<Provisioner::Recipe::edge/SPF>.
 
 =head3 What cannot come apart
 
-postfix has one C<myhostname> and one TLS certificate, and C</etc/aliases> is
-one file.  So the last domain provisioned sets all three.  C<configd status
+postfix has one C<myhostname> and one TLS certificate, C</etc/aliases> is
+one file, and opendmarc has one C<AuthservID>.  So the last domain provisioned
+sets all four.  opendmarc still trusts the edge of every domain, because
+configd joins the C<TrustedAuthservIDs> of every domain.  C<configd status
 postfix> shows these disagreements, because it lists the fragments and what
 wrote them.
 
