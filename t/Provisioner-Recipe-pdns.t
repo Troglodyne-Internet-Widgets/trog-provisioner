@@ -19,7 +19,6 @@ use Test::Fatal();
 use Test::MockModule();
 use IPC::Run3();
 use File::Temp qw{tempdir};
-use File::Slurper::Temp();
 
 use FindBin::libs;
 
@@ -202,47 +201,36 @@ subtest 'the API proxy' => sub {
     like( $fresh->()->render_file( 'ubuntu/pdns.tt', %held ), qr{^systemctl[ ]restart[ ]pdns$}m,             'which the fragment of the domain restarts pdns after' );
 };
 
-# One server for the guest, so every domain on it presents one key, which the
-# store keeps.  A key that each build made for itself was a 401 for every domain
-# but the first, because pdns kept the key of the first build.
-subtest 'the key of the API is the secret of the guest' => sub {
+# One server for the guest, and one key, which stays with pdns and the proxy.
+# lexicon on the guest presents a token for the zone of its domain, so a domain
+# layered onto a guest cannot write the zone of the guest.
+subtest 'each domain on the guest writes its zone with a token of its own' => sub {
     my $recipe = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' );
     my $fresh  = sub { return $recipe->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu' ) };
-    my $file   = $Provisioner::Recipe::pdns::API_KEY_FILE;
+    my $proxy  = $Provisioner::Recipe::pdns::PROXY_SOCKET;
 
-    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", <<'YAML' );
-_shared:
-    host.test.test:
-        - tenant.test.test
-host.test.test:
-    pdns:
-tenant.test.test:
-    pdns:
-alone.test.test:
-    pdns:
-        api_key: an-operator-key
-YAML
-    Provisioner::Cookbook->forget();
+    my %host   = $fresh->()->socket_credentials( domain => 'host.test.test' );
+    my %tenant = $fresh->()->socket_credentials( domain => 'tenant.test.test' );
+    is( $host{key_file},   $recipe->token_path('host.test.test'),   'lexicon reads the token of the domain' );
+    is( $tenant{key_file}, $recipe->token_path('tenant.test.test'), 'and a domain layered onto the guest reads its own' );
+    is( $host{key},        q{},                                     'and the payload holds no key' );
+    my ($server) = grep { $_->{key} eq 'PDNS_SERVER' } @{ $tenant{extra} };
+    is( $server->{value}, $proxy, 'which it presents to the proxy, on its socket' );
 
-    my %host   = $fresh->()->guest_secrets( '/bogus/dir', 'host.test.test' );
-    my %tenant = $fresh->()->guest_secrets( '/bogus/dir', 'tenant.test.test' );
-    my %alone  = $fresh->()->guest_secrets( '/bogus/dir', 'alone.test.test' );
+    my $task     = qq{"umask 077 && mkdir -p \$\$(dirname /etc/lexicon/tenant.test.test.token) && /bogus/bin/pdns_client own tenant.test.test > /etc/lexicon/tenant.test.test.token.new && mv /etc/lexicon/tenant.test.test.token.new /etc/lexicon/tenant.test.test.token"};
+    my $fragment = $fresh->()->render_file( 'ubuntu/pdns.tt', %VARS, domain => 'tenant.test.test', script_dir => '/bogus/bin' );
+    ok( ( grep { $_ eq "POSTRUN_SLOT=0 /bogus/bin/queue_postrun_task $task" } split( m/\n/, $fragment ) ), 'the fragment of the domain makes the token in the postrun, for its zone alone' ) or diag $fragment;
 
-    is( $host{$file}{ref},   'secret:pdns/host.test.test-api-key/password', 'the store keeps the key of the guest' );
-    is( $tenant{$file}{ref}, $host{$file}{ref},                             'and a domain layered onto it gets that one' );
-    like( $host{$file}{generate}->(), qr/\A[[:xdigit:]]{64}\z/, 'which is random when nobody chose one' );
-    is( $alone{$file}{generate}->(), 'an-operator-key', 'and the api_key of the guest when an operator did' );
-    is( $host{$file}{owner},         'root:pdns',       'pdns and the proxy can read it' );
-
-    my %shortcut = $fresh->()->socket_credentials();
-    is( $shortcut{key_file}, $file, 'lexicon reads the key from that file' );
-    is( $shortcut{key},      q{},   'and the payload holds none' );
-
-    my $api  = $fresh->()->render_file( 'ubuntu/pdns.global.tt', %VARS, domain => 'host.test.test', script_dir => '/bogus/bin' );
+    my $file     = $Provisioner::Recipe::pdns::API_KEY_FILE;
+    my $global   = $fresh->()->render_file( 'ubuntu/pdns.global.tt', %VARS, domain => 'host.test.test', script_dir => '/bogus/bin' );
+    my @installs = grep { index( $_, 'grep -q . pdns-api-key && install ' ) == 0 && index( $_, " pdns-api-key $file || " ) > 0 } split( m/\n/, $global );
+    is( scalar @installs, 1, 'the global fragment installs the api_key that an operator set' ) or diag $global;
+    like( $global, qr{\Qtest -s $file || { umask 027 && openssl rand -hex 32 > $file; }\E}, 'or makes one on the guest, once' );
     my $line = qq{KEY=\$\$(cat $file) && test -n "\$\$KEY" && printf 'api-key=%s\\n' "\$\$KEY" >> /etc/powerdns/pdns.d/api.conf};
-    ok( ( grep { $_ eq $line } split( m/\n/, $api ) ), 'the server runs with it, and refuses an empty one' ) or diag $api;
+    ok( ( grep { $_ eq $line } split( m/\n/, $global ) ), 'and the server runs with it, and refuses an empty one' ) or diag $global;
 
-    Provisioner::Cookbook->forget();
+    is( $fresh->()->render_file( 'files/pdns.api_key.tt', %VARS, api_key => 'an-operator-key' ), "an-operator-key\n", 'the key of an operator is rendered for the global fragment' );
+    is( $fresh->()->render_file( 'files/pdns.api_key.tt', %VARS ), "\n", 'and nothing when nobody set one' );
 };
 
 subtest 'what a guest that names this one as its authority gets' => sub {

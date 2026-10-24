@@ -237,6 +237,31 @@ subtest 'grant refuses a name outside the zone, and a zone that this guest does 
     is( scalar grep( { is_acl($_) } @{$ran} ), 0, 'before any token is touched' );
 };
 
+subtest 'own gives this guest a token for the zone of one of its domains, and leaves the zone alone' => sub {
+    my ( $ran, undef, $err, $out ) = against( $holds_zone, 'own', $ZONE );
+
+    is( $err, undef,          'it succeeds' ) or diag $err;
+    is( $out, 'a-zone-token', 'and prints the token, and nothing else' );
+
+    my @api = grep { is_api($_) } @{$ran};
+    is( scalar @api,                                    1, 'the API is asked one thing' );
+    is( ( grep { $_ eq 'GET' } @{ $api[0]{command} } ), 1, 'whether the zone is there, and nothing is made or deleted' );
+
+    my @acl   = map { join( q{ }, @{ $_->{command} } ) } grep { is_acl($_) } @{$ran};
+    my $label = qr/\Q$ZONE\E[ ]for[ ]\Q$ZONE\E/;
+    my $zone  = qr/--zone[ ]\Q$ZONE\E[.]/;
+    my $apex  = qr/--name[ ]\Q$ZONE\E[.][ ]--write/;
+    my $below = qr/--name[ ][*][.]\Q$ZONE\E[.][ ]--write/;
+    like( $acl[0], qr/token[ ]remove[ ]$label\z/,               'the token of a build before goes first' );
+    like( $acl[1], qr/token[ ]add[ ]$label[ ]$zone[ ]$apex\z/,  'then a token that writes the zone' );
+    like( $acl[2], qr/grant[ ]add[ ]$label[ ]$zone[ ]$below\z/, 'and every name below it' );
+    is( scalar @acl, 3, 'and nothing else' );
+
+    ( $ran, undef, $err ) = against( sub { return ( 'not found', 0 ) }, 'own', $ZONE );
+    like( $err, qr/holds[ ]no[ ]zone[ ]\Q$ZONE\E/, 'a zone that the API does not have is refused' );
+    is( scalar grep( { is_acl($_) } @{$ran} ), 0, 'before any token is touched' );
+};
+
 subtest 'revoke deletes the token of the client in the zone, and minds it being gone' => sub {
     my ( $ran, $rc, $err ) = against( sub { return ( 'no such token', 0 ) }, 'revoke', $ZONE, $CLIENT );
     is( $err, undef, 'it succeeds' );

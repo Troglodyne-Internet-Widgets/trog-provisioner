@@ -31,9 +31,11 @@ grep -qF 'addNTA("[% zone %]"' /etc/powerdns/recursor.lua || echo 'addNTA("[% zo
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
 # The API, which lexicon uses
 mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
-[%# The key, from the file that bin/provision put on the guest.  An empty file
-    is a store that was not reached, and a server with no key fails here, not
-    at the first challenge.  See guest_secrets in Provisioner::Recipe::pdns. -%]
+[%# The key, which never leaves the guest: the api_key that an operator set, or
+    one made here.  Only pdns, the proxy and pdns_client read it.
+    See "The API proxy" in Provisioner::Recipe::pdns. -%]
+grep -q . pdns-api-key && install -o root -g pdns -m 0640 pdns-api-key [% api_key_file %] || { test -s [% api_key_file %] || { umask 027 && openssl rand -hex 32 > [% api_key_file %]; }; }
+rm -f pdns-api-key
 chown root:pdns [% api_key_file %]
 chmod 0640 [% api_key_file %]
 KEY=$$(cat [% api_key_file %]) && test -n "$$KEY" && printf 'api-key=%s\n' "$$KEY" >> /etc/powerdns/pdns.d/api.conf
@@ -70,9 +72,11 @@ install -o root -g root -m 0644 pdns-acl.service /etc/systemd/system/pdns-acl.se
 install -d -o root -g root -m 0755 /etc/systemd/system/pdns.service.d
 install -o root -g root -m 0644 pdns-acl.dropin.conf /etc/systemd/system/pdns.service.d/pdns-acl.conf
 [%# In the postrun, because the perl target runs after this fragment, and it
-    installs Starman and the proxy. -%]
-[% script_dir %]/queue_postrun_task systemctl enable pdns-acl
-[% script_dir %]/queue_postrun_task systemctl restart pdns-acl
+    installs Starman and the proxy.  Slot 0, ahead of every other task,
+    because lexicon on this guest writes through the proxy, and the fetcher of
+    letsencrypt is queued ahead of this target. -%]
+POSTRUN_SLOT=0 [% script_dir %]/queue_postrun_task systemctl enable pdns-acl
+POSTRUN_SLOT=0 [% script_dir %]/queue_postrun_task systemctl restart pdns-acl
 [%# Here, not in the postrun queue.  post_install runs its queue one task at a
     time, and the letsencrypt certificate fetcher that needs pdns is ahead in
     it.  configure_pdns rewrote the unit above, so the reload goes with it.

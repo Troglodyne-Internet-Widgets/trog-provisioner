@@ -41,6 +41,11 @@ chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/p
 mkdir -p /etc/nginx/sites-enabled
 install -o root -g root -m 0644 pdns-acl.nginx.conf /etc/nginx/sites-enabled/dnsapi.[% domain %].conf
 [% script_dir %]/queue_postrun_task systemctl reload nginx
+[%# The token with which lexicon on this guest writes the zone of this domain,
+    through the proxy.  In the postrun, because pdns-acl comes with the perl
+    target, and in slot 0, because the fetcher of letsencrypt is queued ahead
+    of this target.  See socket_credentials in Provisioner::Recipe::pdns. -%]
+POSTRUN_SLOT=0 [% script_dir %]/queue_postrun_task "umask 077 && mkdir -p $$(dirname [% token_file %]) && [% script_dir %]/pdns_client own [% domain %] > [% token_file %].new && mv [% token_file %].new [% token_file %]"
 [%# Restart here, not in the postrun queue, for the reason in the global
     fragment.  A pdns that does not start then fails its own target. -%]
 systemctl restart pdns

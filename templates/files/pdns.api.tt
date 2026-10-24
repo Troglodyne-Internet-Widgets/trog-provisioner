@@ -1,6 +1,6 @@
 api=yes
-[%# The api-key line follows, from the file that bin/provision puts on the
-    guest.  See guest_secrets in Provisioner::Recipe::pdns. -%]
+[%# The global fragment adds the api-key line, from the key that it makes on
+    the guest. -%]
 # A path inside the chroot, so [% api_socket %] on the host.  The patched
 # lexicon and the API proxy use that path.
 webserver-address=/api.sock

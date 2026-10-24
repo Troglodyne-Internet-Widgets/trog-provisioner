@@ -1,0 +1,3 @@
+[%# The api_key that an operator set, which the global fragment installs in place
+    of one that it makes.  Empty when nobody set one. -%]
+[% api_key %]

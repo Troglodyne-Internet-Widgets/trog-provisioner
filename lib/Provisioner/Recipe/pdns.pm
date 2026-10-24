@@ -77,7 +77,9 @@ A client presents a token of its own as its API key.  A grant lets a token read
 or write the records of one name, or every name under a name, in one zone, or
 create and delete one zone.  The proxy checks each request against the grants,
 and passes an allowed one to pdns with the real key.  So a guest can publish
-its own records and nothing else.
+its own records and nothing else.  lexicon on this guest presents a token too,
+one for the zone of each domain, so the key stays with pdns, the proxy and
+F<scripts/pdns_client>.  See C<socket_credentials>.
 
 The API answers at C<dnsapi.$domain>, over TLS.  That name is a served name of
 this recipe, so it gets a record and a certificate as every served name does.
@@ -118,7 +120,6 @@ system perl, which has none of the modules.
 use Text::Xslate;
 use Net::IP;
 use File::Slurper;
-use Crypt::PRNG();
 
 use Data::Validate::Domain();
 use List::Util  qw{any uniq};
@@ -133,9 +134,13 @@ use Provisioner::Vars();
 # which is this path from outside.
 our $API_SOCKET = '/var/spool/powerdns/api.sock';
 
-# The key of the API on the guest, which bin/provision puts there from the
-# store.  See guest_secrets.
+# The key of the API, which the global fragment makes on the guest, and which
+# only pdns, the proxy and pdns_client read.  See "The API proxy".
 our $API_KEY_FILE = '/etc/powerdns/api-key';
+
+# Where the proxy listens.  nginx passes the requests of other guests to it, and
+# lexicon on this guest asks it directly.
+our $PROXY_SOCKET = '/run/pdns-acl/proxy.sock';
 
 sub rate_limits {
 
@@ -210,7 +215,7 @@ sub args {
                 type        => 'string',
                 'x-secret'  => 1,
                 description =>
-                  'The credential everything on this guest presents to talk to the API on its loopback socket, such as lexicon writing an _acme-challenge record.  Made when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  The first build keeps it in the store, at secret:pdns/GUEST-api-key/password, and every later build reads it from there, so a later change goes in the store.  It belongs to the server, set on the domain of the guest, and a domain layered onto another guest presents that key.',
+                  'The key of the API on its unix socket, which only pdns, the API proxy and pdns_client present.  Every other client, on this guest as well, presents a token of its own to the proxy.  Made on the guest when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  It belongs to the server, so it is set on the domain of the guest, and a domain layered onto another guest does not set it.',
             },
             extra_records => { type => 'string' },
 
@@ -241,10 +246,17 @@ sub args {
 
 =head2 %credentials = $recipe->socket_credentials(%opts)
 
-The credentials for the API on the unix socket of this server.  Anything on
-this guest writes a record into the zone of this server through that API.  See
+The credentials with which lexicon on this guest writes the zone of
+C<$opts{domain}>, through the API proxy on its unix socket.  See
 L<Provisioner::Recipe::registrar/lexicon_credentials> for the keys that come
 back.
+
+The token is in C<key_file>, at C<token_path> of the domain.  The fragment of
+the domain makes it in the postrun, with F<scripts/pdns_client> C<own>, because
+C<pdns-acl> comes with the perl target.  It writes the zone of the domain and
+every name below it, and nothing else on the guest.  So a domain layered onto
+another guest cannot write the zone of that guest, and the key of the API is
+not in the payload.
 
 C<opts> is C<--resolve-zone-name>, because lexicon reduces a name to its
 registrable form with tldextract before it asks for a zone.  A reserved TLD is
@@ -254,45 +266,15 @@ gets a 404.
 =cut
 
 sub socket_credentials {
+    my ( $self, %opts ) = @_;
+
     return (
         type     => 'powerdns',
         user     => q{},
         key      => q{},
-        key_file => $API_KEY_FILE,
+        key_file => $self->token_path( $opts{domain} ),
         opts     => '--resolve-zone-name',
-        extra    => [ { key => 'PDNS_SERVER', value => $API_SOCKET } ],
-    );
-}
-
-=head2 %files = $recipe->guest_secrets($install_dir, $domain)
-
-The key of the API, at C<$API_KEY_FILE>, as C<guest_secrets> in
-L<Provisioner::Recipe> says.  The global fragment writes it into the
-configuration of pdns, and the proxy, the lexicon shortcut and the dehydrated
-hook read it from there.  So every client presents the key that the server
-runs with, and the key is not in the payload.
-
-The server belongs to a guest, not to a domain.  The reference names the
-guest that L<Provisioner::Cookbook/host_of> finds for C<$domain>, so each
-domain on one guest gets the same key.  The key is the C<api_key> of that
-guest if an operator set one, and random if not.  The store keeps whichever the
-first build made.
-
-=cut
-
-sub guest_secrets {
-    my ( $self, $install_dir, $domain ) = @_;
-
-    my $server     = Provisioner::Cookbook->host_of($domain) // $domain;
-    my $configured = Provisioner::Cookbook->domain_config($server)->{ $self->recipe_name }{api_key};
-
-    return (
-        $API_KEY_FILE => {
-            ref      => "secret:pdns/$server-api-key/password",
-            generate => sub { return $configured || Crypt::PRNG::random_bytes_hex(32) },
-            owner    => 'root:pdns',
-            mode     => '0640',
-        },
+        extra    => [ { key => 'PDNS_SERVER', value => $PROXY_SOCKET } ],
     );
 }
 
@@ -453,6 +435,8 @@ sub enrich {
 
     $opts{api_socket}   = $API_SOCKET;
     $opts{api_key_file} = $API_KEY_FILE;
+    $opts{proxy_socket} = $PROXY_SOCKET;
+    $opts{token_file}   = $self->token_path( $opts{domain} );
 
     my @ours = @{ $opts{transfer_ips} // [] };
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
@@ -498,6 +482,7 @@ sub template_files {
         'pdns.rsyslog.tt'      => '10-powerdns.conf',
         'pdns.api.tt'          => 'pdns-api.conf',
         'pdns.acl.psgi.tt'     => 'pdns-acl.psgi',
+        'pdns.api_key.tt'      => 'pdns-api-key',
         'pdns.acl.service.tt'  => 'pdns-acl.service',
         'pdns.acl.nginx.tt'    => 'pdns-acl.nginx.conf',
         'pdns.acl.dropin.tt'   => 'pdns-acl.dropin.conf',

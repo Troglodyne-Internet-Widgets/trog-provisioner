@@ -45,17 +45,18 @@ sub fresh {
 my $DOMAIN = 'dns.test.test';
 
 subtest 'what pdns tells lexicon' => sub {
-    my %creds = fresh('pdns')->socket_credentials();
+    my $pdns  = fresh('pdns');
+    my %creds = $pdns->socket_credentials( domain => $DOMAIN );
 
-    is( $creds{type},     'powerdns',                               'the provider lexicon knows it by' );
-    is( $creds{key_file}, $Provisioner::Recipe::pdns::API_KEY_FILE, 'authenticating with the key the server runs with, from its file' );
-    is( $creds{key},      q{},                                      'which is not in the payload' );
-    is( $creds{opts},     '--resolve-zone-name',                    'and resolving the zone rather than composing it' );
+    is( $creds{type},     'powerdns',                 'the provider lexicon knows it by' );
+    is( $creds{key_file}, $pdns->token_path($DOMAIN), 'authenticating with the token of the zone, from its file' );
+    is( $creds{key},      q{},                        'which is not in the payload' );
+    is( $creds{opts},     '--resolve-zone-name',      'and resolving the zone rather than composing it' );
 
-    # The socket is named once, by the recipe that binds it.
+    # The socket is named once, by the recipe that runs the proxy.
     my ($server) = grep { $_->{key} eq 'PDNS_SERVER' } @{ $creds{extra} // [] };
     ok( $server, 'the API endpoint is handed over as a provider option' ) or return;
-    is( $server->{value}, $Provisioner::Recipe::pdns::API_SOCKET, 'naming the socket this recipe binds' );
+    is( $server->{value}, $Provisioner::Recipe::pdns::PROXY_SOCKET, 'naming the socket of the proxy' );
 };
 
 subtest 'the shortcut is rendered from that, and names what lexicon reads' => sub {
@@ -74,11 +75,13 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     # --pdns-server is LEXICON_POWERDNS_PDNS_SERVER.  Its legacy fallback only
     # strips _AUTH_, so the shorter spelling resolved to nothing and this
     # shortcut asked the default endpoint of a server that has none.
-    like( $out, qr{^export[ ]LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"$}m, 'the socket, under the name lexicon resolves' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    my $socket = qq{export LEXICON_POWERDNS_PDNS_SERVER="$Provisioner::Recipe::pdns::PROXY_SOCKET"};
+    ok( ( grep { $_ eq $socket } split( m/\n/, $out ) ), 'the socket, under the name lexicon resolves' ) or diag $out;
     unlike( $out, qr{^export[ ]LEXICON_POWERDNS_SERVER=}m, 'and not the one it ignores' );
 
-    my $export = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat $Provisioner::Recipe::pdns::API_KEY_FILE)"};
-    ok( ( grep { $_ eq $export } split( m/\n/, $out ) ), 'the token, from the file of the server' ) or diag $out;
+    my $token  = Provisioner::Cookbook->load('pdns')->token_path($DOMAIN);
+    my $export = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat $token)"};
+    ok( ( grep { $_ eq $export } split( m/\n/, $out ) ), 'the token of the zone, from its file' ) or diag $out;
     unlike( $out, qr{an-api-key},    'and never the key itself' );
     unlike( $out, qr{AUTH_USERNAME}, 'and no empty username, since this provider takes none' );
 
