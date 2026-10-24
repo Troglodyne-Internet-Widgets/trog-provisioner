@@ -21,6 +21,8 @@ smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, rejec
 smtpd_sender_restrictions = permit_mynetworks, reject_authenticated_sender_login_mismatch, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit
 # Refuse incoming mail TO addresses that are bogus or not hosted here.  postfix
 # rejects a recipient that is not in virtual_mailbox_maps by itself, with "User
-# unknown in virtual mailbox table".
-smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, permit
+# unknown in virtual mailbox table".  With spf_policy, which the edge sets, the
+# SPF policy service judges the client after the destination is known to be
+# ours, and records what it found.
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination,[% IF spf_policy %] check_policy_service unix:private/policyd-spf,[% END %] reject_non_fqdn_recipient, reject_unknown_recipient_domain, permit
 

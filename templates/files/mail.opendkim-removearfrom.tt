@@ -1,0 +1,3 @@
+[%# The name that opendmarc writes its results under for this domain, and so
+    trusts.  See mail.opendkim.tt. -%]
+mail.[% domain %]

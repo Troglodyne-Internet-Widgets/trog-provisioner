@@ -26,6 +26,8 @@ my @exposed;
 File::Find::find({ no_chdir => 1, wanted => sub {
     my @f = lstat $File::Find::name or return;
     return if -l _;
+    # dovecot makes this marker 0444, and it is empty.
+    return if -z _ && $File::Find::name =~ m{/dovecot-uidvalidity\.[0-9a-f]+\z};
     push @exposed, $File::Find::name if $f[2] & 0007;
 } }, $store);
 is(scalar @exposed, 0, 'and nothing under the mail store is readable by anybody else')
@@ -138,12 +140,18 @@ ok(defined $sasl_permit && defined $mismatch && $mismatch < $sasl_permit,
 
 # And the map answers for the accounts of this domain.  If it misses an
 # address, the owner cannot send from it.
-my $login_maps = `postconf -h smtpd_sender_login_maps 2>/dev/null` // '';
-chomp $login_maps;
+my @login_maps = grep { length } split( m/[,\s]+/, `postconf -h smtpd_sender_login_maps 2>/dev/null` // '' );
 [% FOR name IN names.keys().sort() %]
 SKIP: {
-    skip 'no sender login map', 1 unless $login_maps;
-    my $owner = `postmap -q '[% name %]\@[% domain %]' $login_maps 2>&1`;
+    skip 'no sender login map', 1 unless @login_maps;
+
+    # postmap queries one table, and postfix takes the answer of the first
+    # table in the list that has one.
+    my $owner = '';
+    foreach my $map (@login_maps) {
+        $owner = `postmap -q '[% name %]\@[% domain %]' $map 2>&1`;
+        last if !$? || $owner =~ m/fatal/;
+    }
     chomp $owner;
     is($owner, '[% name %]@[% domain %]', '[% name %]@[% domain %] owns its own address') or diag $owner;
 }
@@ -283,34 +291,12 @@ SKIP: {
 # would, from an address that the test chooses, and the test reads what
 # opendmarc concluded.  An SMTP session from here would stop at the reverse DNS
 # check of postfix, before opendmarc saw it.
-subtest 'opendmarc checks SPF for a message from outside' => sub {
-    my $lua = '/root/.spf-selftest.lua';
-    open( my $fh, '>', $lua ) or die "Cannot write $lua: $!\n";
-    print {$fh} <<'LUA';
-conn = mt.connect("unix:/var/spool/postfix/opendmarc/opendmarc.sock")
-if conn == nil then error("cannot connect to opendmarc") end
-mt.macro(conn, SMFIC_CONNECT, "j", "selftest.test.test")
-if mt.conninfo(conn, "client.test.test", ip) ~= nil then error("conninfo") end
-mt.macro(conn, SMFIC_MAIL, "i", "SPFSELFTEST")
-if mt.mailfrom(conn, from) ~= nil then error("mailfrom") end
-if mt.rcptto(conn, from) ~= nil then error("rcptto") end
-if mt.header(conn, "From", from) ~= nil then error("header") end
-if mt.eoh(conn) ~= nil then error("eoh") end
-if mt.eom(conn) ~= nil then error("eom") end
-n = 0
-while true do
-  h = mt.getheader(conn, "Authentication-Results", n)
-  if h == nil then break end
-  print(h)
-  n = n + 1
-end
-mt.disconnect(conn)
-LUA
-    close $fh or die "Cannot write $lua: $!\n";
+[% INCLUDE "files/milter_probe.t.tt" %]
 
+subtest 'opendmarc checks SPF for a message from outside' => sub {
     my $verdict = sub {
-        my ($ip) = @_;
-        return scalar `miltertest -s $lua -D ip=$ip -D from=postmaster\@[% domain %] 2>&1`;
+        my ( $ip, $ar ) = @_;
+        return milter_probe( socket => '/var/spool/postfix/opendmarc/opendmarc.sock', ip => $ip, from => 'postmaster@[% domain %]', ar => $ar );
     };
 
     # An address from the documentation ranges, which no SPF record allows.
@@ -326,7 +312,43 @@ LUA
         my $pass = $verdict->($own);
         like( $pass, qr/\bspf=pass\b/, "and $own, which SPF allows, passes" ) or diag $pass;
     }
-    unlink $lua;
+[% IF edge -%]
+
+    # The edge saw the client, so its verdict stands, and the edge is the only
+    # client whose verdict does.
+    my $trusted = $verdict->( '203.0.113.9', '[% edge %]; spf=pass smtp.mailfrom=[% domain %]' );
+    like( $trusted, qr/\bdmarc=pass\b/, 'a pass that the edge wrote decides DMARC' ) or diag $trusted;
+    my $forged = $verdict->( '203.0.113.9', 'elsewhere.test.test; spf=pass smtp.mailfrom=[% domain %]' );
+    unlike( $forged, qr/\bdmarc=pass\b/, 'and one under another name does not' ) or diag $forged;
+[% END -%]
+};
+
+# One opendmarc serves every domain on this guest, so a later domain must not
+# take away the ids that an earlier one trusts.
+subtest 'opendmarc trusts every id that a domain on this guest names' => sub {
+    my %ids;
+    foreach my $fragment ( glob '/etc/opendmarc.conf.d/*' ) {
+        open( my $fh, '<', $fragment ) or die "$fragment: $!";
+        while ( my $line = <$fh> ) {
+            next unless $line =~ m/^\s*TrustedAuthservIDs\s+(.*?)\s*$/;
+            $ids{$_} = $fragment for grep { length } split m/[\s,]+/, $1;
+        }
+    }
+    ok( scalar( keys %ids ), 'the fragments name ids to trust' );
+    foreach my $id ( sort keys %ids ) {
+        my $verdict = milter_probe( socket => '/var/spool/postfix/opendmarc/opendmarc.sock', ip => '203.0.113.9', from => 'postmaster@[% domain %]', ar => "$id; spf=pass smtp.mailfrom=[% domain %]" );
+        like( $verdict, qr/\bdmarc=pass\b/, "a pass under $id, from $ids{$id}, decides DMARC" ) or diag $verdict;
+    }
+};
+
+# opendmarc trusts what is written under the name of this guest, so a client
+# must not be able to write it.  opendkim, which runs first, removes it.
+subtest 'a verdict under the name of this guest that a client sent is removed' => sub {
+    my %probe = ( socket => '/var/spool/postfix/opendkim/opendkim.sock', ip => '203.0.113.9', from => 'someone@nosuch.test.test', body => 1 );
+    my $own = milter_probe( %probe, ar => 'mail.[% domain %]; spf=pass smtp.mailfrom=nosuch.test.test' );
+    like( $own, qr/^removed$/m, 'opendkim removes it before opendmarc reads the message' ) or diag $own;
+    my $other = milter_probe( %probe, ar => 'elsewhere.test.test; spf=pass smtp.mailfrom=nosuch.test.test' );
+    unlike( $other, qr/^removed$/m, 'and keeps one under another name, which opendmarc does not trust anyway' ) or diag $other;
 };
 
 [% IF edge_relay -%]

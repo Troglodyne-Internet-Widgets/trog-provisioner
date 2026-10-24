@@ -147,6 +147,39 @@ is( ( split ' ', $pub )[1], ( split ' ', $host )[1], 'the host key that the gues
 my $clients = `postconf -h smtpd_client_restrictions 2>&1`;
 like( $clients, qr/\breject_unknown_reverse_client_hostname\b.*\breject_rbl_client\b/, 'port 25 checks the reverse DNS of a client and the RBLs' ) or diag $clients;
 
+# The SPF policy service, asked as postfix asks it on 25.  It refuses a sender
+# that fails SPF, and adds nothing to any other message.
+sub spf_policy {
+    my ( $ip, $sender ) = @_;
+    my $request = join( q{}, map { "$_\n" } 'request=smtpd_access_policy', 'protocol_state=RCPT', 'protocol_name=ESMTP', "client_address=$ip", 'client_name=unknown', 'helo_name=client.nosuch.test.test', "sender=$sender", 'recipient=postmaster@[% domain %]', 'instance=spf.selftest' ) . "\n";
+    my $pid = IPC::Open2::open2( my $out, my $in, '/usr/bin/policyd-spf' );
+    print {$in} $request;
+    close $in;
+    my $answer = do { local $/; <$out> } // q{};
+    waitpid( $pid, 0 );
+    return $answer;
+}
+my $none = spf_policy( '203.0.113.9', 'someone@nosuch.test.test' );
+unlike( $none, qr/^action=(?:prepend|5)/mi, 'a sender with no SPF record passes the SPF policy service, which adds no header' ) or diag $none;
+SKIP: {
+    my $spf = `dig +short TXT [% domain %] 2>/dev/null`;
+    skip( 'the SPF record of [% domain %] does not end in -all', 1 ) unless $spf =~ m/v=spf1[^"]*-all/;
+    my $fail = spf_policy( '203.0.113.9', 'someone@[% domain %]' );
+    like( $fail, qr/^action=5\d\d /mi, 'and a sender that fails SPF is refused' ) or diag $fail;
+}
+
+# The milters of 25.  opendkim removes a verdict under the name of this guest
+# that a client wrote, and opendmarc writes the real one, from the client that
+# connected, which the guests behind the edge trust.
+[% INCLUDE "files/milter_probe.t.tt" %]
+my %probe   = ( ip => '203.0.113.9', from => 'someone@nosuch.test.test' );
+my $removed = milter_probe( %probe, socket => '/var/spool/postfix/opendkim/opendkim.sock', body => 1, ar => '[% domain %]; spf=pass smtp.mailfrom=nosuch.test.test' );
+like( $removed, qr/^removed$/m, 'a verdict under the name of this guest that a client wrote is removed' ) or diag $removed;
+my $kept = milter_probe( %probe, socket => '/var/spool/postfix/opendkim/opendkim.sock', body => 1, ar => 'elsewhere.test.test; spf=pass smtp.mailfrom=nosuch.test.test' );
+unlike( $kept, qr/^removed$/m, 'and one under another name is kept, which nobody trusts' ) or diag $kept;
+my $written = milter_probe( %probe, socket => '/var/spool/postfix/opendmarc/opendmarc.sock' );
+like( $written, qr/^added: \Q[% domain %]\E; spf=/m, 'opendmarc writes its SPF verdict under the name of this guest' ) or diag $written;
+
 # postfix.service is a wrapper that stays active when the instance does not
 # start, so ask the instance, and ask postfix what it makes of main.cf.
 is( system('systemctl is-active --quiet postfix@-'), 0, 'the postfix instance runs, not only its wrapper' );
