@@ -74,12 +74,18 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
 subtest 'the relay listens at the address where the guests reach the edge, on its port' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
-    my %opts = $edge->enrich( domain => 'edge.test.test' );
-    is( $opts{relay_address}, '192.0.2.5', 'the relay binds the address in the pool' );
-
     my %port;
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $port{$domain} // {} } );
+    $cookbook->redefine( host_of       => sub { return } );
+
+    my %opts = $edge->enrich( domain => 'edge.test.test' );
+    is( $opts{relay_address}, '192.0.2.5',      'the relay binds the address in the pool' );
+    is( $opts{helo_name},     'edge.test.test', 'and an edge on a guest that runs no mail announces the name of the guest' );
+
+    $port{'edge.test.test'} = { mail => {}, edge => {} };
+    is( $edge->helo_name('edge.test.test'), 'mail.edge.test.test', 'but on a guest that runs mail, the name that mail announces' );
+
     $port{'edge.test.test'} = { edge => { relay_port => 3587 } };
     is( $edge->relay_port_of('edge.test.test'),  3587, 'the port that the edge sets' );
     is( $edge->relay_port_of('other.test.test'), 2587, 'or the default' );

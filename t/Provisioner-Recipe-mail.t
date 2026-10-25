@@ -75,6 +75,7 @@ subtest 'a domain with an edge sends its mail through the relay there' => sub {
     $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { return {} } );
+    $cookbook->redefine( host_of       => sub { return } );
 
     my %opts = $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test' ) );
     is_deeply( $opts{edge_relay}, { address => '192.0.2.5', port => 2587, password => '/etc/postfix/edge/mail.test.test.password' }, 'at the address where the guests reach the edge, on its relay port, with the password that it issued' );
@@ -93,6 +94,24 @@ subtest 'a domain with an edge sends its mail through the relay there' => sub {
         qr/both[ ]a[ ]relay[ ]and[ ]an[ ]edge/,
         'a relay and an edge together are refused, because they disagree about where the mail goes'
     );
+};
+
+subtest 'helo_name is one name for the machine, whatever domain asks' => sub {
+    my ( %config, %host );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $config{$domain} // {} } );
+    $cookbook->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
+
+    %config = ( 'mx.test.test' => { mail => {} } );
+    is( $recipe->helo_name('mx.test.test'), 'mail.mx.test.test', 'a guest of its own that runs mail announces the mail name of its domain' );
+
+    %host   = ( 'a.test.test'  => 'mx.test.test', 'b.test.test' => 'mx.test.test' );
+    %config = ( 'mx.test.test' => { nginx => {} }, 'a.test.test' => { mail => {} }, 'b.test.test' => { mail => {} } );
+    is( $recipe->helo_name('a.test.test'), 'mx.test.test', 'a tenant on a host that runs no mail announces the name of the host' );
+    is( $recipe->helo_name('b.test.test'), 'mx.test.test', 'and so does every other tenant there' );
+
+    $config{'mx.test.test'}{mail} = {};
+    is( $recipe->helo_name('a.test.test'), 'mail.mx.test.test', 'and on a host that runs mail, the mail name of the host' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -1267,40 +1267,63 @@ subtest 'the reverse DNS of a guest is set to the name its mail announces' => su
     Trog::HV->forget();
     Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => tempdir( CLEANUP => 1 ) );
 
-    my %recipes;
+    my ( %config, %host );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( domain_config => sub { return {%recipes} } );
+    $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return { %{ $config{$domain} // {} } } } );
+    $cookbook->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
 
     my ( @asked, $answer );
     my $hv = Test::MockModule->new('Trog::HV');
     $hv->redefine( set_reverse_dns => sub { my ( undef, @args ) = @_; push @asked, \@args; return $answer->() } );
 
     # What it printed, what it warned, and what it returned.
-    my $point = sub ($address) {
-        my ( $out, $err, $result ) = capture( sub { Trog::Bin::Provisioner::point_reverse_dns( 'mx.test.test', $address ) } );
+    my $point = sub ( $address, $domain = 'mx.test.test' ) {
+        my ( $out, $err, $result ) = capture( sub { Trog::Bin::Provisioner::point_reverse_dns( $domain, $address ) } );
         return ( $out, $err, $result );
     };
 
-    %recipes = ( nginx => {} );
-    $answer  = sub { return '9.9.9.9' };
+    %config = ( 'mx.test.test' => { nginx => {} } );
+    $answer = sub { return '9.9.9.9' };
     is( ( $point->('9.9.9.9') )[2], 0, 'a guest that sends no mail gets no reverse DNS' );
     is( scalar @asked,              0, 'and its hypervisor is not asked' );
 
-    %recipes = ( mail => {}, nginx => {}, _shared => {} );
+    %config = ( 'mx.test.test' => { mail => {}, nginx => {}, _shared => {} } );
     my ( $out, $err, $result ) = $point->('9.9.9.9');
     is( $result, 1, 'a mail guest gets it' );
     is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'set to the name that its postfix announces' );
     like( $out, qr/\QThe reverse DNS of 9.9.9.9 is now mail.mx.test.test\E/, 'and it says so' );
 
-    @asked   = ();
-    %recipes = ( mail => {}, edge => {} );
+    @asked  = ();
+    %config = ( 'mx.test.test' => { mail => {}, edge => {} } );
+    ( $out, $err, $result ) = $point->('9.9.9.9');
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'a guest that runs mail and edge announces one name' );
+
+    # A domain built onto a host that runs no mail of its own.
+    @asked  = ();
+    %host   = ( 'tenant.test.test' => 'mx.test.test' );
+    %config = ( 'mx.test.test'     => { nginx => {} }, 'tenant.test.test' => { mail => {} } );
+    ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
+    is( $result, 1, 'a tenant that sends mail gets it' );
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mx.test.test' ] ], 'on the guest of its host, set to the name of that guest' );
+
+    @asked = ();
+    $config{'mx.test.test'}{mail} = {};
+    ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'and to the mail name of the host, when the host runs mail' );
+    %host = ();
+
+    @asked = ();
+    my $edge = Test::MockModule->new('Provisioner::Recipe::edge');
+    $edge->redefine( helo_name => sub { return 'other.test.test' } );
+    %config = ( 'mx.test.test' => { mail => {}, edge => {} } );
     ( $out, $err, $result ) = $point->('9.9.9.9');
     is( $result,       0, 'a guest whose recipes announce two names gets neither' );
     is( scalar @asked, 0, 'and its hypervisor is not asked' );
-    like( $err, qr/\Qannounces mx.test.test and mail.mx.test.test\E/, 'and it names both' );
+    like( $err, qr/\Qannounces other.test.test and mail.mx.test.test\E/, 'and it names both' );
+    $edge->unmock('helo_name');
 
-    %recipes = ( edge => {} );
-    $answer  = sub { die "Linode refused put-ip: 403 not authorized\n" };
+    %config = ( 'mx.test.test' => { edge => {} } );
+    $answer = sub { die "Linode refused put-ip: 403 not authorized\n" };
     ( $out, $err, $result ) = $point->('9.9.9.9');
     is( $result, 0, 'a refusal of the hypervisor does not stop the run' );
     like( $err, qr/\QCould not set the reverse DNS of mx.test.test to mx.test.test\E/, 'and it says what it could not set' );

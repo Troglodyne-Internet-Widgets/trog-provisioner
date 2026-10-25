@@ -1437,8 +1437,9 @@ sub subdomains {
 The name that the mail server of this recipe announces on the guest of
 C<$domain>, in C<HELO> and as the C<myhostname> of postfix.  A receiver of mail
 checks that the reverse DNS of the address of the guest gives this name, so
-F<bin/provision> sets the reverse DNS to it.  Undef here, because most recipes
-send no mail.
+F<bin/provision> sets the reverse DNS to it.  An address has one reverse DNS,
+so every domain on one machine, and every recipe that sends mail there, must
+give the same name.  Undef here, because most recipes send no mail.
 
 =cut
 

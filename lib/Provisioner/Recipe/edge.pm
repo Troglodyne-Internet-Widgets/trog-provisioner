@@ -248,13 +248,16 @@ sub enrich {
 
 =head2 $name = $recipe->helo_name($domain)
 
-C<$domain>, which the A record of the edge names.
+The C<helo_name> of L<Provisioner::Recipe::mail>.  On a machine that does not
+run mail for its own domain, that is the name of the machine, which the A
+record of the edge names.  The two recipes give one name, because a guest that
+runs both has one C<myhostname> and one reverse DNS.
 
 =cut
 
 sub helo_name {
     my ( $self, $domain ) = @_;
-    return $domain;
+    return Provisioner::Cookbook->load('mail')->helo_name($domain);
 }
 
 =head2 $port = $recipe->relay_port_of($edge)

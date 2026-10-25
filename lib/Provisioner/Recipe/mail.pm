@@ -206,10 +206,12 @@ L<Provisioner::Recipe::edge/SPF>.
 
 =head3 What cannot come apart
 
-postfix has one C<myhostname> and one TLS certificate, C</etc/aliases> is
-one file, and opendmarc has one C<AuthservID>.  So the last domain provisioned
-sets all four.  opendmarc still trusts the edge of every domain, because
-configd joins the C<TrustedAuthservIDs> of every domain.  C<configd status
+postfix has one TLS certificate, C</etc/aliases> is one file, and opendmarc
+has one C<AuthservID>.  So the last domain provisioned sets all three.  postfix
+also has one C<myhostname>, which the global half sets to the C<helo_name> of
+the machine, so every domain on the guest gives the same one.  opendmarc still
+trusts the edge of every domain, because configd joins the
+C<TrustedAuthservIDs> of every domain.  C<configd status
 postfix> shows these disagreements, because it lists the fragments and what
 wrote them.
 
@@ -337,13 +339,19 @@ sub subdomains {
 
 =head2 $name = $recipe->helo_name($domain)
 
-C<mail.$domain>, the first of the C<subdomains>.
+The name of the machine that runs C<$domain>, as C<machine_of> in
+L<Provisioner::Cookbook> gives it.  That is C<mail.$machine>, the first of the
+C<subdomains>, when the machine runs this recipe for its own domain.  Otherwise
+it is C<$machine>, which has an A record of its own and is not a mailbox
+domain, so it can be in C<mydestination>.  So every domain on a guest gives the
+same name, and so does an edge on it.
 
 =cut
 
 sub helo_name {
     my ( $self, $domain ) = @_;
-    return "mail.$domain";
+    my $machine = Provisioner::Cookbook->machine_of($domain);
+    return exists Provisioner::Cookbook->domain_config($machine)->{ $self->recipe_name } ? "mail.$machine" : $machine;
 }
 
 =head2 @grants = $recipe->grants($domain, %opts)

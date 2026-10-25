@@ -464,6 +464,9 @@ sub authorize_runner_key {
 
 Sets the reverse DNS of the guest of C<$domain> to the C<helo_name> of its
 recipes, through L<Trog::HV/$address = $hv-E<gt>set_reverse_dns($domain, $name)>.
+The guest is C<machine_of> the domain in L<Provisioner::Cookbook>.  So a domain
+built onto another domain's guest sets the reverse DNS of that guest, to the
+same name that every domain on it gives.
 When the hypervisor offers no way and C<$address> is public, it prints what the
 operator must set, and where.  A private address gets neither, because no
 receiver of mail connects from it.
@@ -489,7 +492,7 @@ sub point_reverse_dns {
     my ($name) = @names;
 
     my $hv  = Trog::HV->new();
-    my $set = eval { $hv->set_reverse_dns( $domain, $name ) };
+    my $set = eval { $hv->set_reverse_dns( Provisioner::Cookbook->machine_of($domain), $name ) };
     if ( my $error = $@ ) {
         warn "Could not set the reverse DNS of $domain to $name, so receivers can reject its mail.\n$error";
         return 0;
@@ -858,9 +861,8 @@ sub build_guest {
             $guest->wait_for_makefile($domain)
               or die "The build for $domain failed; read /var/log/$domain.setup.log on the guest\n";
 
-            # After the build, because the build publishes the name, and only
-            # for a guest of its own, because the address of a host is the host's.
-            point_reverse_dns( $domain, $ip ) unless $depends;
+            # After the build, because the build publishes the name.
+            point_reverse_dns( $domain, $ip );
         }
     );
 
