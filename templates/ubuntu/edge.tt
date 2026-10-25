@@ -21,6 +21,16 @@ install -d -m 0755 -o root -g root /etc/postfix/main.cf.d /etc/postfix/master.cf
 install -m 0644 -o root -g root edge.postfix.main /etc/postfix/main.cf.d/30-edge
 install -m 0600 -o root -g root edge.postfix.master /etc/postfix/master.cf.d/30-edge
 install -m 0644 -o root -g root edge.dovecot.conf /etc/dovecot/dovecot.conf
+install -m 0644 -o root -g root edge.policyd_spf /etc/postfix-policyd-spf-python/policyd-spf.conf
+[%# The milters of port 25, in the chroot of postfix, as the mail recipe has
+    them.  configd makes opendkim.conf and opendmarc.conf from the fragments. -%]
+install -d -m 0755 -o root -g root /etc/opendkim.conf.d /etc/opendmarc.conf.d
+install -m 0600 -o root -g root edge.opendkim.conf /etc/opendkim.conf.d/30-edge
+install -m 0600 -o root -g root edge.opendmarc.conf /etc/opendmarc.conf.d/30-edge
+install -d -m 0770 -o opendkim -g postfix /var/spool/postfix/opendkim
+install -d -m 0770 -o opendmarc -g postfix /var/spool/postfix/opendmarc
+[% script_dir %]/queue_postrun_task systemctl restart opendkim
+[% script_dir %]/queue_postrun_task systemctl restart opendmarc
 test -e /etc/nginx/edge.d/mail.passwd || install -m 0640 -o root -g dovecot /dev/null /etc/nginx/edge.d/mail.passwd
 [% FOR table IN ['senders', 'relay_domains', 'transport', 'recipients'] -%]
 test -e /etc/nginx/edge.d/mail.[% table %] || install -m 0644 -o root -g root /dev/null /etc/nginx/edge.d/mail.[% table %]

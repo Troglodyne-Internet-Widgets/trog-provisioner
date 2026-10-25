@@ -132,13 +132,11 @@ sub args {
                 items => { type => 'string', pattern => '^\w+$' },
             },
 
-            # 0.003 is the first version that joins each item of a list once.
-            # With 0.002, a fragment that repeats inet_interfaces = all of the
-            # package makes "all, all", and postfix does not start.  0.002 was
-            # the first to accumulate smtpd_sender_login_maps, without which
-            # a guest with two mail domains refuses the users of all but one.
-            # install_configd fails the build if it gets an older version.
-            version => { type => 'string', default => '0.003' },
+            # A guest with two mail domains needs every list that each domain
+            # adds to joined, and 0.005 is the first version that joins all
+            # of those that the mail recipe writes.  install_configd fails the
+            # build if it gets an older version.
+            version => { type => 'string', default => '0.005' },
 
             source => { type => 'string' },
         },

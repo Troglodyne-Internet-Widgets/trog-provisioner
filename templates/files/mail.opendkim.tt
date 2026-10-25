@@ -16,6 +16,13 @@ KeyTable				/etc/opendkim/KeyTable
 SigningTable			refile:/etc/opendkim/SigningTable
 InternalHosts			/etc/opendkim/InternalHosts
 
+# opendmarc trusts the Authentication-Results under the names of this guest,
+# so any that a message brings in is a claim that nobody here made.  opendkim
+# runs before opendmarc, and removes them before opendmarc reads the message,
+# the SPF results with them.
+RemoveARFrom			/etc/opendkim/RemoveARFrom
+RemoveARAll				yes
+
 UserID                  opendkim:opendkim
 UMask                   000
 
