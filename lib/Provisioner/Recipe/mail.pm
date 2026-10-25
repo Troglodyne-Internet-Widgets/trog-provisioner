@@ -335,6 +335,17 @@ sub subdomains {
     return qw{mail autodiscover autoconfig};
 }
 
+=head2 $name = $recipe->helo_name($domain)
+
+C<mail.$domain>, the first of the C<subdomains>.
+
+=cut
+
+sub helo_name {
+    my ( $self, $domain ) = @_;
+    return "mail.$domain";
+}
+
 =head2 @grants = $recipe->grants($domain, %opts)
 
 With C<edge>, the login of C<$domain> on the relay of the edge, as C<grants> in
@@ -426,6 +437,7 @@ sub enrich {
 
     $opts{sender_logins}  = \@logins;
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
+    $opts{helo_name}      = $self->helo_name( $opts{domain} );
 
     if ( defined $opts{edge} ) {
         die "mail: $opts{domain} names both a relay and an edge, and they disagree about where its mail goes.  Set one.\n" if $opts{relay}{host};

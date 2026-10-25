@@ -1886,7 +1886,7 @@ subtest 'each backend names the client it talks through' => sub {
     my %client = (
         'Trog::HV::Libvirt'   => ['Sys::Virt'],
         'Trog::HV::OpenStack' => ['OpenStack::MetaAPI'],
-        'Trog::HV::Linode'    => [ 'Linode::API',     '0.002' ],
+        'Trog::HV::Linode'    => [ 'Linode::API',     '0.003' ],
         'Trog::HV::SolusVM'   => [ 'SolusVM::Client', '0.001' ],
     );
 
@@ -1938,7 +1938,7 @@ subtest 'a client that will not load says which, and how to install it' => sub {
     like( $bad->{fix},  qr/cpanm[ ]Trog::No::Such::Client/,             'with the fix to print' );
 
     # A client too old is as unusable as one that is absent, and says so
-    # differently: 0.002 of Linode::API is what a Linode type needs.
+    # differently: 0.003 of Linode::API is what the Linode backend needs.
     $mock->redefine( client_module => sub { return ( 'File::Which', '999.0' ) } );
     like( exception { $hv->require_client }, qr/cpanm[ ]File::Which~999[.]0/, 'a version too old asks for the version that is wanted' );
 };

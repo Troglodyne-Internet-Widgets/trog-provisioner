@@ -1432,6 +1432,20 @@ sub subdomains {
     return ();
 }
 
+=head3 $name = $recipe->helo_name($domain)
+
+The name that the mail server of this recipe announces on the guest of
+C<$domain>, in C<HELO> and as the C<myhostname> of postfix.  A receiver of mail
+checks that the reverse DNS of the address of the guest gives this name, so
+F<bin/provision> sets the reverse DNS to it.  Undef here, because most recipes
+send no mail.
+
+=cut
+
+sub helo_name {
+    return undef;
+}
+
 =head3 @names = $recipe->served_names(%opts)
 
 The C<subdomains> of this recipe, qualified with C<$opts{domain}>.
