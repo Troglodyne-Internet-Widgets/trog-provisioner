@@ -335,7 +335,7 @@ so the message says to give it on standard input.
 sub guest_of {
     my ( $class, $domain ) = @_;
 
-    my $machine = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $machine = Provisioner::Cookbook->machine_of($domain);
 
     my $fleet = $class->load( $class->default_path() );
     my $hv    = $fleet->configured ? $fleet->hosting($machine) : Trog::HV->new();

@@ -1263,6 +1263,18 @@ sub host_of {
     return;
 }
 
+=head2 machine_of($domain, $conf)
+
+Returns the domain whose guest runs C<$domain>: C<host_of> it, or C<$domain>
+itself when it has a machine of its own.  C<$conf> is as for C<host_of>.
+
+=cut
+
+sub machine_of {
+    my ( $class, $domain, $conf ) = @_;
+    return $class->host_of( $domain, $conf ) // $domain;
+}
+
 =head2 $class->needs_recipe($domain, $guest, $recipe, $role)
 
 Dies unless the configuration of C<$guest> names C<$recipe>, where C<$domain>

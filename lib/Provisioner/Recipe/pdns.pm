@@ -459,7 +459,7 @@ sub enrich {
     # The zones that an account of the registrar names this guest the authority
     # of, once for the guest and not again for a domain layered onto it.
     my $registrar = Provisioner::Cookbook->load('registrar');
-    my $server    = Provisioner::Utils::dns_name( Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain} );
+    my $server    = Provisioner::Utils::dns_name( Provisioner::Cookbook->machine_of( $opts{domain} ) );
     my %zones     = $registrar->configured_zones( $opts{domain} );
     my @held      = $server eq Provisioner::Utils::dns_name( $opts{domain} ) ? sort grep { Provisioner::Utils::dns_name( $zones{$_}{authority} // q{} ) eq $server } keys %zones : ();
     $self->checked_names(@held) if @held;
