@@ -31,6 +31,7 @@ install -d -m 0770 -o opendkim -g postfix /var/spool/postfix/opendkim
 install -d -m 0770 -o opendmarc -g postfix /var/spool/postfix/opendmarc
 [% script_dir %]/queue_postrun_task systemctl restart opendkim
 [% script_dir %]/queue_postrun_task systemctl restart opendmarc
+[% INCLUDE "files/milter_client.tt" %]
 test -e /etc/nginx/edge.d/mail.passwd || install -m 0640 -o root -g dovecot /dev/null /etc/nginx/edge.d/mail.passwd
 [% FOR table IN ['senders', 'relay_domains', 'transport', 'recipients'] -%]
 test -e /etc/nginx/edge.d/mail.[% table %] || install -m 0644 -o root -g root /dev/null /etc/nginx/edge.d/mail.[% table %]

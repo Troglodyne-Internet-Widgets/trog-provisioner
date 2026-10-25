@@ -1,0 +1,5 @@
+[%# Milter::Client, and its milterprobe, for the guest tests of mail and edge,
+    which give a milter a message as postfix would.  It goes into the system
+    perl, as Configd does, so a guest does not build a perl for a test.
+    scripts/install_configd says how cpanm can install into the wrong perl. -%]
+/usr/bin/perl -e 'require Milter::Client; Milter::Client->VERSION(0.002)' 2>/dev/null || env -u PERL5LIB -u PERL_LOCAL_LIB_ROOT -u PERL_MB_OPT -u PERL_MM_OPT /usr/bin/perl /usr/bin/cpanm --notest --mirror-only 'Milter::Client~>=0.002'

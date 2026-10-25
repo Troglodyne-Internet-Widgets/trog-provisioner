@@ -31,3 +31,4 @@ install -m 0600 -o root -g root master.cf /etc/postfix/master.cf.d/40-mail
 # 0600 root:root, not the opendkim account.  configd reads the fragments as
 # root from ExecStartPre, and the daemon never reads them.
 install -m 0600 -o root -g root opendkim.conf /etc/opendkim.conf.d/40-mail
+[% INCLUDE "files/milter_client.tt" %]

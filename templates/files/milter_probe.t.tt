@@ -1,47 +1,28 @@
 [%# A message given to one milter as a client would give it, through
-    miltertest, and what the milter did with it.  Included by the guest tests
+    milterprobe, and what the milter did with it.  Included by the guest tests
     of mail and edge. -%]
-# milter_probe(socket => ..., ip => ..., from => ..., ar => ..., body => 1)
-# gives the milter at socket a message from the client at ip, with sender and
-# From from, and an Authentication-Results of ar if there is one.  opendkim
-# reads the body and opendmarc does not, so body says whether to send one.
-# Answers each Authentication-Results that the milter added, one to a line
-# after "added: ", and "removed" when it removed the one that it was given.
+# milter_probe(socket => ..., ip => ..., from => ..., ar => ...) gives the
+# milter at socket a message from the client at ip, with sender and From from,
+# and an Authentication-Results of ar if there is one.  Answers what milterprobe
+# printed: each change that the milter asked for, one to a line, then its
+# verdict.  Dies when milterprobe gets no verdict, so that a test which asserts
+# a line is absent cannot pass on no output.  files/milter_client.tt installed
+# milterprobe.
 sub milter_probe {
     my (%probe) = @_;
-    my $lua = "/root/.milter-probe-$$.lua";
-    open( my $fh, '>', $lua ) or die "Cannot write $lua: $!\n";
-    print {$fh} <<'LUA';
-conn = mt.connect(sock)
-if conn == nil then error("cannot connect to " .. sock) end
-mt.macro(conn, SMFIC_CONNECT, "j", "probe.test.test")
-if mt.conninfo(conn, "client.test.test", ip) ~= nil then error("conninfo") end
-mt.macro(conn, SMFIC_MAIL, "i", "MILTERPROBE")
-if mt.mailfrom(conn, from) ~= nil then error("mailfrom") end
-if mt.rcptto(conn, from) ~= nil then error("rcptto") end
-if ar ~= nil and mt.header(conn, "Authentication-Results", ar) ~= nil then error("ar") end
-if mt.header(conn, "From", from) ~= nil then error("header") end
-if mt.eoh(conn) ~= nil then error("eoh") end
-if body ~= nil and mt.bodystring(conn, "A probe.\r\n") ~= nil then error("body") end
-if mt.eom(conn) ~= nil then error("eom") end
-n = 0
-while true do
-  h = mt.getheader(conn, "Authentication-Results", n)
-  if h == nil then break end
-  print("added: " .. h)
-  n = n + 1
-end
-if ar ~= nil and mt.eom_check(conn, MT_HDRCHANGE, "Authentication-Results", "") then print("removed") end
-mt.disconnect(conn)
-LUA
-    close $fh or die "Cannot write $lua: $!\n";
-
-    my @define = map { ( '-D', "$_=$probe{$_}" ) } grep { defined $probe{$_} } qw{ip from ar};
-    push @define, ( '-D', "sock=unix:$probe{socket}" );
-    push @define, ( '-D', 'body=1' ) if $probe{body};
-    open( my $out, '-|', 'miltertest', '-s', $lua, @define ) or die "Cannot run miltertest: $!\n";
+    my @args = (
+        '--socket',      "unix:$probe{socket}",
+        '--client-ip',   $probe{ip},
+        '--client-host', 'client.test.test',
+        '--macro',       'connect:j=probe.test.test',
+        '--from',        $probe{from},
+        '--rcpt',        $probe{from},
+        ( defined $probe{ar} ? ( '--header', "Authentication-Results: $probe{ar}" ) : () ),
+        '--header',      "From: $probe{from}",
+        '--body',        "A probe.\n",
+    );
+    open( my $out, '-|', '/usr/bin/perl', '/usr/local/bin/milterprobe', @args ) or die "Cannot run milterprobe: $!\n";
     my $said = do { local $/; <$out> } // q{};
-    close $out;
-    unlink $lua;
+    close $out or die 'milterprobe exited ' . ( $? >> 8 ) . " for $probe{socket}, after: $said\n";
     return $said;
 }
