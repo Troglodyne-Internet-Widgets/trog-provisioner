@@ -912,8 +912,20 @@ subtest 'two recipes that cannot share a domain are refused, however they got th
     is( exception { $resolve->(qw{t_loner}) },    undef, 'either alone is fine' );
     is( exception { $resolve->(qw{t_requirer}) }, undef, 'and so is the other' );
 
+    # A machine is wider than a domain, so a pair that cannot share a machine
+    # cannot share a domain either.
+    my $loner = Test::MockModule->new( 'Provisioner::Recipe::t_loner', no_auto => 1 );
+    $loner->redefine( exclusive_with            => sub { return () } );
+    $loner->redefine( exclusive_on_machine_with => sub { return qw{t_deep} } );
+    $err = exception { $resolve->(qw{t_loner t_requirer}) };
+    $err //= q{};
+    like( $err, qr/d[.]test[ ]has[ ]both[ ]t_loner[ ]and[ ]t_deep/, 'a domain with a pair that cannot share a machine is refused too' );
+    like( $err, qr/cannot[ ]be[ ]on[ ]one[ ]machine/,               'and told that the pair cannot share a machine' );
+    $loner->unmock_all();
+
     $mock->unmock('load');
-    is_deeply( [ Provisioner::Cookbook->load('nginxdirindex')->exclusive_with() ], [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
+    is_deeply( [ Provisioner::Cookbook->load('nginxdirindex')->exclusive_with() ],   [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
+    is_deeply( [ Provisioner::Cookbook->load('edge')->exclusive_on_machine_with() ], [qw{mail}],       'edge and mail both answer port 25 of the machine' );
 };
 
 subtest 'a recipe the caller already named is left to the caller' => sub {

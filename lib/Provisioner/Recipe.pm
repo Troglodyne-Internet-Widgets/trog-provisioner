@@ -338,6 +338,22 @@ Empty by default.
 
 sub exclusive_with { return () }
 
+=head3 @names = $recipe->exclusive_on_machine_with()
+
+The recipes that cannot be on one machine with this one, because both run a
+service that owns something of the machine, such as port 25.  So they cannot
+be on one domain either, and L<Provisioner::Cookbook/resolve_dependencies>
+refuses that as it refuses C<exclusive_with>.  F<bin/new_config> also refuses a
+domain layered onto a host that has the other recipe.  Like the check of
+C<is_multi_tenant>, it compares a tenant with its host, not with the other
+tenants.  One side says it, and the checks read both.
+
+Empty by default.
+
+=cut
+
+sub exclusive_on_machine_with { return () }
+
 =head3 %args = $recipe->args()
 
 Declares the arguments of the recipe as a hash for the schema() method of
