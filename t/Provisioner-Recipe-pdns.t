@@ -128,17 +128,21 @@ subtest 'the apex is the origin, not a name of its own' => sub {
     like( $zone, qr/^\@\s+300\s+IN\s+NS\s+\Qns1.$DOMAIN\E\./m, 'with an absolute nameserver' );
 };
 
-subtest 'the submission SRV record names the port postfix listens on' => sub {
+subtest 'the submission SRV records name the ports postfix listens on' => sub {
 
     # Asked of a zone that serves mail, since the mail records are written only
     # where something answers on the name they point at.
     my $zone = zone( modules => ['mail'] );
 
-    # RFC 6186 spells it _submission._tcp, and mail.postfix.master.tt runs
-    # submission on 587.
-    my ($record) = $zone =~ m/^(_submission\N*)$/m;
-    is( ( split ' ', $record // q{} )[0], '_submission._tcp', 'on _submission._tcp' ) or diag $zone;
-    like( $record, qr/SRV\s+0\s+0\s+587\s+\Qmail.$DOMAIN\E\./, 'at port 587 on the mail host' );
+    # RFC 6186 spells it _submission._tcp, and RFC 8314 _submissions._tcp for
+    # submission over TLS.  mail.postfix.master.tt runs them on 587 and 465.
+    my ($record) = $zone =~ m/^(_submission[.]_tcp\s\N*)$/m;
+    ok( defined $record, 'on _submission._tcp' ) or diag $zone;
+    like( $record // q{}, qr/SRV\s+0\s+0\s+587\s+\Qmail.$DOMAIN\E\./, 'at port 587 on the mail host' );
+
+    my ($tls) = $zone =~ m/^(_submissions[.]_tcp\s\N*)$/m;
+    ok( defined $tls, 'and on _submissions._tcp' ) or diag $zone;
+    like( $tls // q{}, qr/SRV\s+0\s+0\s+465\s+\Qmail.$DOMAIN\E\./, 'at port 465 on the mail host' );
 };
 
 subtest 'the API config names the socket the recipe binds' => sub {

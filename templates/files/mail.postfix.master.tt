@@ -16,10 +16,13 @@ submission inet  n       -       y       -       -       smtpd
   	-o smtpd_client_restrictions=permit_sasl_authenticated,reject
 	-o smtpd_milters=local:opendkim/opendkim.sock
 #628       inet  n       -       -       -       -       qmqpd
-# Port 465, encrypted incoming untrusted mail.
+# Port 465, submission over TLS from the first byte, as RFC 8314 has it.  The
+# same as 587 otherwise: a login, and no DMARC checks.  Other servers send to
+# 25.
 smtps      inet  n       -       y       -       -       smtpd
     -o smtpd_tls_wrappermode=yes
-    -o smtpd_sasl_auth_enable=no
+  	-o smtpd_client_restrictions=permit_sasl_authenticated,reject
+	-o smtpd_milters=local:opendkim/opendkim.sock
 pickup     unix  n       -       y       60      1       pickup
 cleanup    unix  n       -       y       -       0       cleanup
 qmgr      unix  n       -       n       300     1       qmgr

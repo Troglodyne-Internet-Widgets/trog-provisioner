@@ -381,4 +381,33 @@ subtest 'the jails of mail never ban the mail relay' => sub {
     }
 };
 [% END -%]
+
+subtest '465 is submission over TLS, which takes mail only after a login' => sub {
+    require IO::Select;
+    require IPC::Open2;
+
+    # Each command of one session on 465, which is TLS from the first byte, and
+    # the reply of postfix to it.
+    my $pid = IPC::Open2::open2( my $out, my $in, qw{openssl s_client -quiet -crlf -connect 127.0.0.1:465 -servername [% domain %]} );
+    my @replies;
+    foreach my $command ( undef, 'EHLO client.nosuch.test.test', 'MAIL FROM:<someone@nosuch.test.test>', 'RCPT TO:<postmaster@[% domain %]>', 'QUIT' ) {
+        if ( defined $command ) {
+            print {$in} "$command\n";
+            $in->flush;
+        }
+        my $reply = q{};
+        while ( IO::Select->new($out)->can_read(10) ) {
+            my $got = sysread( $out, my $buf, 4096 ) or last;
+            $reply .= $buf;
+            last if $reply =~ m/^\d{3} [^\n]*\n\z/m;
+        }
+        push @replies, $reply;
+    }
+    close $in;
+    waitpid( $pid, 0 );
+
+    like( $replies[0], qr/^220 /m,       'postfix greets a client in TLS on 465' ) or diag explain \@replies;
+    like( $replies[1], qr/^250[- ]AUTH /m, 'and offers a login' ) or diag $replies[1];
+    like( $replies[3], qr/^5\d\d /m,      'and refuses a message for this domain from a client with no login, which only 25 takes' ) or diag $replies[3];
+};
 done_testing();

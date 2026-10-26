@@ -298,7 +298,7 @@ sub args {
 
 =head2 @claims = $recipe->listens()
 
-The ports of postfix: SMTP on 25, SMTP over TLS on 465 and submission on 587,
+The ports of postfix: SMTP on 25, and submission on 465 over TLS and on 587,
 on every address, and the return from amavis on 10025, on 127.0.0.1.  The
 ports of dovecot, on every address: POP3 on 110 and 995, IMAP on 143 and 993.
 C<postgrey> on 10023, on 127.0.0.1.  amavis on 10024 and C<spamd> on 783, both
