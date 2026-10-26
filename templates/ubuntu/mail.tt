@@ -121,6 +121,12 @@ postmap /etc/postfix/domains/[% domain %]/sasl_passwd
 postmap /etc/postfix/domains/[% domain %]/mailrelay_tls_policy
 install -o root -g root -m 0644 mail_mailrelay_ufw.conf /etc/ufw/applications.d/mail-mailrelay
 [% END -%]
+[%# The jails that never ban the mail relay.  Provisioner::Recipe::mail has
+    the whole account, under Sending through a mail relay. -%]
+rm -f /etc/fail2ban/jail.d/[% domain %]-mailrelay.conf
+[% IF mailrelay_login -%]
+install -o root -g root -m 0644 mail_mailrelay.jail /etc/fail2ban/jail.d/[% domain %]-mailrelay.conf
+[% END -%]
 # main.cf, as the fragment of this domain, not as a run of `postconf -e`.
 # postconf sets a parameter and cannot add to one.  configd merges the
 # fragments, so list parameters stay lists.  The global fragment writes 40-mail,

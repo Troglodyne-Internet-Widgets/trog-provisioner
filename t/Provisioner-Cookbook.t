@@ -261,6 +261,14 @@ subtest 'machine_of names the guest that runs a domain' => sub {
     is( Provisioner::Cookbook->machine_of( 'alone.test',  $conf ), 'alone.test', 'and so does a domain with a machine of its own' );
 };
 
+subtest 'configures says whether a name is a domain of this installation' => sub {
+    my $conf = { _base => {}, 'guest.test' => { nginx => {} } };
+    is( Provisioner::Cookbook->configures( 'guest.test',   $conf ), 1, 'a domain of the configuration is one of ours' );
+    is( Provisioner::Cookbook->configures( 'outside.test', $conf ), 0, 'a host that it does not name is outside' );
+    is( Provisioner::Cookbook->configures( '_base',        $conf ), 0, 'and a section of the configuration is no domain' );
+    is( Provisioner::Cookbook->configures( undef,          $conf ), 0, 'and nor is no name' );
+};
+
 subtest 'helo_name_of is one name for the machine, whatever domain asks' => sub {
     my $conf = { 'mx.test' => { mail => {} } };
     is( Provisioner::Cookbook->helo_name_of( 'mx.test', $conf ), 'mail.mx.test', 'a guest of its own that runs mail announces the mail name of its domain' );

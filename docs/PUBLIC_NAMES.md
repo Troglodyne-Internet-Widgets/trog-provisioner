@@ -32,16 +32,18 @@ record at the provider first.
 
 ## The relay guest
 
-A relay guest runs the `nginxrelay` recipe.  It sends a TLS connection to the
-guest that registered its SNI name, and a plain HTTP request to the guest that
-registered its `Host` header.  `perldoc Provisioner::Recipe::nginxrelay` has
-the details.  The same guest can also run the `mailrelay` recipe, which relays
-the mail of the guests behind it.  `perldoc Provisioner::Recipe::mailrelay` has
-those details.
+A relay guest runs the `nginxrelay` recipe, and usually the `mailrelay` recipe
+too.  `nginxrelay` sends a TLS connection to the guest that registered its SNI
+name, and a plain HTTP request to the guest that registered its `Host` header.
+`mailrelay` takes the mail of the guests behind it out to the internet, and in
+from it, for each guest whose `mail.relay.host` names it.  `perldoc
+Provisioner::Recipe::nginxrelay` and `perldoc Provisioner::Recipe::mailrelay`
+have the details.  Public names are the business of `nginxrelay` alone.
 
 ```yaml
 relay.ours.example:
     nginxrelay:
+    mailrelay:
 
 staging.ours.example:
     nginx:

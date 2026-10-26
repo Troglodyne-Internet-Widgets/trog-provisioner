@@ -279,7 +279,7 @@ sub holdings {
     return { map { $_->{bin} => $_->{ip} } @$rows };
 }
 
-=head2 reach_address($domain)
+=head2 reachable_address($domain)
 
 Returns the address at which the other guests reach the guest of C<$domain>:
 its address in a bin other than C<guests>, which is the tunnel of a guest that
@@ -288,7 +288,7 @@ has neither, or more than one of the first kind.
 
 =cut
 
-sub reach_address {
+sub reachable_address {
     my ($domain) = @_;
     my $held     = holdings($domain);
     my @vpn      = grep { $_ ne $GUESTS } sort keys %$held;
