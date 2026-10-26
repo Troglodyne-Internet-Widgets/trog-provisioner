@@ -234,20 +234,20 @@ subtest 'the ports of the proxy get the limits of the ports that it fronts' => s
     is( $limits{8443}, $limits{443}, 'at the same limit' );
 };
 
-subtest 'the jails of a domain with an edge ban through it' => sub {
+subtest 'the jails of a domain with a relay ban through it' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'edge.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
+    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
 
     my %public = ( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } );
-    my $opts   = enriched( %public, edge => 'edge.test.test' );
-    is( $opts->{edge_address}, '10.8.0.197', 'the guest reaches the edge at its address in the tunnel' );
-    is_deeply( $opts->{edge_jails}, [qw{nginx-botsearch nginx-http-auth}], 'and every jail of nginx bans through it' );
+    my $opts   = enriched( %public, relay => 'relay.test.test' );
+    is( $opts->{relay_address}, '10.8.0.197', 'the guest reaches the relay at its address in the tunnel' );
+    is_deeply( $opts->{relay_jails}, [qw{nginx-botsearch nginx-http-auth}], 'and every jail of nginx bans through it' );
 
     $opts = enriched(%public);
-    ok( !exists $opts->{edge_address}, 'a domain with no edge bans through none' );
+    ok( !exists $opts->{relay_address}, 'a domain with no relay bans through none' );
 };
 
-subtest 'a domain with an edge registers there the names that the proxy routes, at the address of its guest' => sub {
+subtest 'a domain with a relay registers there the names that the proxy routes, at the address of its guest' => sub {
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
     $mock->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $domain eq 'shop.test.test' ? 'web.test.test' : undef } );
     $mock->redefine( alias_map     => sub { return {} } );
@@ -257,29 +257,29 @@ subtest 'a domain with an edge registers there the names that the proxy routes, 
 
     my $nginx  = 'Provisioner::Recipe::nginx';
     my %public = ( public_names => { 'www.customer.test' => 'shop.test.test' } );
-    my %files  = $nginx->granted_secrets( 'shop.test.test', %public, edge => 'edge.test.test' );
+    my %files  = $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test' );
     is_deeply(
         \%files,
         {
-            '/etc/fail2ban/edge/shop.test.test.key.b64' => {
-                issue => { guest => 'edge.test.test', command => '/root/bin/edge_client register shop.test.test 192.0.2.10:8443 192.0.2.10:8080 public.shop.test.test www.customer.test' },
+            '/etc/fail2ban/nginxrelay/shop.test.test.key.b64' => {
+                issue => { guest => 'relay.test.test', command => '/root/bin/nginxrelay_client register shop.test.test 192.0.2.10:8443 192.0.2.10:8080 public.shop.test.test www.customer.test' },
                 owner => 'root:root',
                 mode  => '0600',
             },
-            '/etc/fail2ban/edge/shop.test.test.host.b64' => {
-                issue => { guest => 'edge.test.test', command => 'base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub' },
+            '/etc/fail2ban/nginxrelay/shop.test.test.host.b64' => {
+                issue => { guest => 'relay.test.test', command => 'base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub' },
                 owner => 'root:root',
                 mode  => '0644',
             },
         },
-        'the edge issues the key of the domain and its own host key, and a domain built onto another guest sends its names to that guest'
+        'the relay issues the key of the domain and its own host key, and a domain built onto another guest sends its names to that guest'
     );
 
-    is_deeply( { $nginx->granted_secrets( 'shop.test.test', %public ) },                                      {}, 'a domain with no edge registers nothing' );
-    is_deeply( { $nginx->granted_secrets( 'shop.test.test', public_names => {}, edge => 'edge.test.test' ) }, {}, 'and nor does one with no public name' );
+    is_deeply( { $nginx->granted_secrets( 'shop.test.test', %public ) },                                        {}, 'a domain with no relay registers nothing' );
+    is_deeply( { $nginx->granted_secrets( 'shop.test.test', public_names => {}, relay => 'relay.test.test' ) }, {}, 'and nor does one with no public name' );
 
     $pool->redefine( assignments => sub { return {} } );
-    like( exception { $nginx->granted_secrets( 'shop.test.test', %public, edge => 'edge.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the edge cannot reach stops the build' );
+    like( exception { $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the relay cannot reach stops the build' );
 };
 
 Test::NoWarnings::had_no_warnings();

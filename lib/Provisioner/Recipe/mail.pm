@@ -77,12 +77,12 @@ L<Trog::Secrets>.
 =head3 Who may say that a message passed
 
 opendmarc decides DMARC from the C<Authentication-Results> under the names it
-trusts: C<mail.DOMAIN>, and the edge of the domain if it has one.  A message
-can carry such a header from anywhere, and a client could write a pass of its
-own.  So opendkim, which runs before opendmarc, removes every
+trusts: C<mail.DOMAIN>, and the mail relay of the domain if it has one.  A
+message can carry such a header from anywhere, and a client could write a pass
+of its own.  So opendkim, which runs before opendmarc, removes every
 C<Authentication-Results> under a name in F</etc/opendkim/RemoveARFrom>, which
-lists the C<mail.DOMAIN> of each domain on the guest.  The edge removes the ones
-under its own name.  See L<Provisioner::Recipe::edge/SPF>.
+lists the C<mail.DOMAIN> of each domain on the guest.  The mail relay removes
+the ones under its own name.  See L<Provisioner::Recipe::mailrelay/SPF>.
 
 =head3 Two domains on one guest
 
@@ -175,34 +175,35 @@ the fetched copy goes into the data directory of the provisioner and into its
 backups.  That copy holds all the mail of this domain and the key that signs
 its outbound mail.
 
-=head3 Sending through an edge guest
+=head3 Sending through a mail relay
 
     somedomain:
         mail:
-            edge: edge.somedomain
+            mailrelay: relay.somedomain
 
-C<edge> names a guest that runs L<Provisioner::Recipe::edge>.  Then every
-message with a sender in this domain goes out through the relay of that guest,
-and not straight to the internet.  This is for a guest that cannot send on port
-25 itself, such as one behind an ISP that blocks it.  It is the opposite of
-C<relay>, and the build stops when both are set.
+C<mailrelay> names a guest that runs L<Provisioner::Recipe::mailrelay>.  Then
+every message with a sender in this domain goes out through that guest, and not
+straight to the internet.  This is for a guest that cannot send on port 25
+itself, such as one behind an ISP that blocks it.  It is the opposite of
+C<relay>, which names a host outside that relays for it, and the build stops
+when both are set.
 
-When this domain is built, the edge issues it a password for a login of its
-own, as a grant, and relays to this guest the mail of the domain that comes
-in from the internet.  See L<Provisioner::Recipe::edge/Mail out> and
-L<Provisioner::Recipe::edge/Mail in>.  This recipe puts
-the password in the C<sasl_passwd> table of the domain, which postfix uses for
-a sender in this domain.  It sends to the relay only over TLS, and the relay
-takes from this login only a sender in this domain.  C<bin/destroy> removes the
-login on the edge.
+When this domain is built, the mail relay issues it a password for a login of
+its own, as a grant, and relays to this guest the mail of the domain that comes
+in from the internet.  See L<Provisioner::Recipe::mailrelay/Mail out> and
+L<Provisioner::Recipe::mailrelay/Mail in>.  This recipe puts the password in
+the C<sasl_passwd> table of the domain, which postfix uses for a sender in this
+domain.  It sends to the relay only over TLS, and the relay takes from this
+login only a sender in this domain.  C<bin/destroy> removes the login on the
+mail relay.
 
 A message with an empty sender, such as a bounce that this guest makes, is not
-in the domain, so it does not go through the edge.
+in the domain, so it does not go through the mail relay.
 
-The edge checks the SPF of the mail that it relays in, because this guest sees
-only the edge as the client.  opendmarc here trusts the verdict that the
-opendmarc of the edge writes under its name, in C<TrustedAuthservIDs>.  See
-L<Provisioner::Recipe::edge/SPF>.
+The mail relay checks the SPF of the mail that it relays in, because this guest
+sees only the relay as the client.  opendmarc here trusts the verdict that the
+opendmarc of the relay writes under its name, in C<TrustedAuthservIDs>.  See
+L<Provisioner::Recipe::mailrelay/SPF>.
 
 =head3 What cannot come apart
 
@@ -210,10 +211,10 @@ postfix has one TLS certificate, C</etc/aliases> is one file, and opendmarc
 has one C<AuthservID>.  So the last domain provisioned sets all three.  postfix
 also has one C<myhostname>.  The global half sets it to C<helo_name_of> in
 L<Provisioner::Cookbook>, which is one name for the machine, so every domain on
-the guest gives the same one.  opendmarc still trusts the edge of every domain,
-because configd joins the C<TrustedAuthservIDs> of every domain.  C<configd
-status postfix> shows these disagreements, because it lists the fragments and
-what wrote them.
+the guest gives the same one.  opendmarc still trusts the mail relay of every
+domain, because configd joins the C<TrustedAuthservIDs> of every domain.
+C<configd status postfix> shows these disagreements, because it lists the
+fragments and what wrote them.
 
 =cut
 
@@ -282,10 +283,10 @@ sub args {
                 },
             },
 
-            edge => {
+            mailrelay => {
                 type        => 'string',
                 format      => 'hostname',
-                description => 'The guest that runs the edge recipe, whose relay sends the mail of this domain out.  See "Sending through an edge guest".',
+                description => 'The guest that runs the mailrelay recipe, which sends the mail of this domain out, and takes it in.  See "Sending through a mail relay".',
             },
 
             ipv6 => { type => 'boolean', default => 1 },
@@ -349,22 +350,22 @@ sub sends_mail {
 
 =head2 @grants = $recipe->grants($domain, %opts)
 
-With C<edge>, the login of C<$domain> on the relay of the edge, as C<grants> in
-L<Provisioner::Recipe> says.  See L</Sending through an edge guest>.
+With C<mailrelay>, the login of C<$domain> on that guest, as C<grants> in
+L<Provisioner::Recipe> says.  See L</Sending through a mail relay>.
 
 =cut
 
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    return () unless defined $opts{edge};
-    return { recipe => 'edge', guest => $opts{edge}, client => $domain, service => 'mail' };
+    return () unless defined $opts{mailrelay};
+    return { recipe => 'mailrelay', guest => $opts{mailrelay}, client => $domain };
 }
 
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
-The address of the guest of the client of C<$grant>, where the edge relays the
-mail of the domain that comes in from the internet.  See
-L<Provisioner::Recipe::edge/Mail in>.
+The address of the guest of the client of C<$grant>, where the mail relay sends
+the mail of the domain that comes in from the internet.  See
+L<Provisioner::Recipe::mailrelay/Mail in>.
 
 Dies when that guest has no address in the address pool.
 
@@ -411,8 +412,8 @@ sub template_files {
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',
         'mail.junk.sieve'                => 'junk.sieve',
-        'mail.edge_tls_policy.tt'        => 'edge_tls_policy',
-        'mail.edge_ufw.tt'               => 'mail_edge_ufw.conf',
+        'mail.mailrelay_tls_policy.tt'   => 'mailrelay_tls_policy',
+        'mail.mailrelay_ufw.tt'          => 'mail_mailrelay_ufw.conf',
     );
 }
 
@@ -440,10 +441,14 @@ sub enrich {
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
     $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
 
-    if ( defined $opts{edge} ) {
-        die "mail: $opts{domain} names both a relay and an edge, and they disagree about where its mail goes.  Set one.\n" if $opts{relay}{host};
-        my $edge = Provisioner::Cookbook->load('edge');
-        $opts{edge_relay} = { address => $edge->address( $opts{edge} ), port => $edge->relay_port_of( $opts{edge} ), password => $edge->relay_password_path( $opts{domain} ) };
+    if ( defined $opts{mailrelay} ) {
+        die "mail: $opts{domain} names both a relay and a mailrelay, and they disagree about where its mail goes.  Set one.\n" if $opts{relay}{host};
+        my $mailrelay = Provisioner::Cookbook->load('mailrelay');
+        $opts{mailrelay_login} = {
+            address  => Provisioner::IPPool::reach_address( $opts{mailrelay} ),
+            port     => $mailrelay->relay_port_of( $opts{mailrelay} ),
+            password => $mailrelay->password_path( $opts{domain} ),
+        };
     }
 
     return %opts;

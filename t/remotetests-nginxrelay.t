@@ -8,7 +8,7 @@ use re q{/aasx};
 
 =head1 NAME
 
-t/remotetests-edge.t - the C<edge> recipe generates, with its guest tests
+t/remotetests-nginxrelay.t - the C<nginxrelay> recipe generates, with its guest tests
 (AUTHOR_TESTING only)
 
 =cut
@@ -16,4 +16,4 @@ t/remotetests-edge.t - the C<edge> recipe generates, with its guest tests
 use FindBin::libs;
 use Trog::Test::RemoteTests();
 
-Trog::Test::RemoteTests::run(q{edge});
+Trog::Test::RemoteTests::run(q{nginxrelay});

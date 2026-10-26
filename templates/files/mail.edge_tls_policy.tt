@@ -1,5 +1,0 @@
-[%# The relay of the edge takes a login only over TLS.  It is reached by its
-    address, so no name can be verified, and encrypt is as strict as it gets. -%]
-[% IF edge_relay -%]
-[[% edge_relay.address %]]:[% edge_relay.port %] encrypt
-[% END -%]

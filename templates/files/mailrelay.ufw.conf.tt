@@ -1,0 +1,13 @@
+[%# Inbound, the relay for the guests, which postfix binds only to the
+    address where they reach this guest.  Outbound, port 25, where the relay
+    delivers to the internet.  setup-ufw-rules opens each port of a profile
+    both ways. -%]
+[mailrelay]
+title=Mail relay
+description=The relay that the guests behind this one send their mail through
+ports=[% relay_port %]/tcp
+
+[mailrelay-smtp]
+title=Mail relay SMTP
+description=Where the relay delivers mail
+ports=25/tcp

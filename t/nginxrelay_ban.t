@@ -7,7 +7,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/edge_ban.t - scripts/edge_ban: what a guest behind the edge can ask of the
+t/nginxrelay_ban.t - scripts/nginxrelay_ban: what a guest behind the relay can ask of the
 set of bans, and what it cannot
 
 =cut
@@ -20,7 +20,7 @@ use Test::MockModule qw{strict};
 use FindBin;
 use FindBin::libs;
 
-my $script = "$FindBin::Bin/../scripts/edge_ban";
+my $script = "$FindBin::Bin/../scripts/nginxrelay_ban";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
 my $DOMAIN = 'web.test.test';
@@ -28,7 +28,7 @@ my $DOMAIN = 'web.test.test';
 # Every command answered with what $ok says.  Answers the commands that ran.
 my $ok;
 my @ran;
-my $ban = Test::MockModule->new( 'Trog::EdgeBan', no_auto => 1 );
+my $ban = Test::MockModule->new( 'Trog::NginxRelayBan', no_auto => 1 );
 $ban->redefine(
     run => sub {
         my (@command) = @_;
@@ -41,7 +41,7 @@ $ban->redefine(
 sub ask {
     my ($request) = @_;
     @ran = ();
-    my ( undef, undef, $rc ) = capture { Trog::EdgeBan::main( $DOMAIN, $request ) };
+    my ( undef, undef, $rc ) = capture { Trog::NginxRelayBan::main( $DOMAIN, $request ) };
     return ( $rc, [ grep { m/\Aipset/ } @ran ] );
 }
 
@@ -49,15 +49,15 @@ subtest 'a guest bans and unbans an address' => sub {
     $ok = 1;
     my ( $rc, $ran ) = ask('ban 198.51.100.7 600');
     is( $rc, 0, 'a ban exits 0' );
-    is_deeply( $ran, ['ipset -exist add edge-bans 198.51.100.7 timeout 600'], 'and adds the address for the time of the ban, or renews it' );
+    is_deeply( $ran, ['ipset -exist add nginxrelay-bans 198.51.100.7 timeout 600'], 'and adds the address for the time of the ban, or renews it' );
     like( $ran[-1], qr/\Alogger[ ].*\Q$DOMAIN\E:[ ]ban[ ]198[.]51[.]100[.]7/, 'and says in syslog which domain banned it' );
 
     ( $rc, $ran ) = ask('unban 198.51.100.7');
     is( $rc, 0, 'an unban exits 0' );
-    is_deeply( $ran, ['ipset -exist del edge-bans 198.51.100.7'], 'and removes the address, which can be gone already' );
+    is_deeply( $ran, ['ipset -exist del nginxrelay-bans 198.51.100.7'], 'and removes the address, which can be gone already' );
 
     ( $rc, $ran ) = ask('check 198.51.100.7');
-    is_deeply( [ $rc, $ran ], [ 0, ['ipset -quiet test edge-bans 198.51.100.7'] ], 'a check of a banned address exits 0' );
+    is_deeply( [ $rc, $ran ], [ 0, ['ipset -quiet test nginxrelay-bans 198.51.100.7'] ], 'a check of a banned address exits 0' );
     $ok = 0;
     ( $rc, $ran ) = ask('check 198.51.100.7');
     is( $rc, 1, 'and of any other address 1' );
@@ -104,7 +104,7 @@ subtest 'it refuses anything else' => sub {
         my ( $rc, $ran ) = ask( $bad{$case} );
         is_deeply( [ $rc, $ran ], [ 2, [] ], "$case exits 2 and runs nothing" );
     }
-    like( exception { Trog::EdgeBan::main( undef, 'check 198.51.100.7' ) }, qr/names[ ]the[ ]domain/, 'and a key with no domain in its command dies' );
+    like( exception { Trog::NginxRelayBan::main( undef, 'check 198.51.100.7' ) }, qr/names[ ]the[ ]domain/, 'and a key with no domain in its command dies' );
 };
 
 done_testing;

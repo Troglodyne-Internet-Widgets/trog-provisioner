@@ -1,6 +1,6 @@
-# main.cf for the relay of the edge, as a fragment.  configd merges every file
+# main.cf for the mail relay, as a fragment.  configd merges every file
 # in /etc/postfix/main.cf.d when postfix starts or reloads.
-# Provisioner::Recipe::edge has the whole account, under Mail out.
+# Provisioner::Recipe::mailrelay has the whole account, under Mail out.
 #
 # These comments do not go into the generated main.cf.  configd joins a list
 # parameter such as inet_interfaces or mydestination with the one of the
@@ -22,18 +22,18 @@ smtpd_tls_security_level = may
 smtp_tls_security_level = may
 
 # The mail that comes in from the internet for each domain that registered,
-# relayed to its guest.  edge_client writes these tables.  Provisioner::Recipe::edge
-# has the whole account, under Mail in.
-relay_domains = texthash:/etc/nginx/edge.d/mail.relay_domains
-transport_maps = texthash:/etc/nginx/edge.d/mail.transport
-relay_recipient_maps = texthash:/etc/nginx/edge.d/mail.recipients
+# relayed to its guest.  mailrelay_client writes these
+# tables.  Provisioner::Recipe::mailrelay has the whole account, under Mail in.
+relay_domains = texthash:/etc/postfix/mailrelay.d/mail.relay_domains
+transport_maps = texthash:/etc/postfix/mailrelay.d/mail.transport
+relay_recipient_maps = texthash:/etc/postfix/mailrelay.d/mail.recipients
 
 [% INCLUDE "files/postfix.smtpd_restrictions.tt" WITH spf_policy = 1 %]
 
 # The SPF policy service refuses a sender that fails SPF.  opendkim removes any
 # Authentication-Results under the name of this guest that a client sent, and
 # opendmarc then writes the verdict under that name, which the guests behind it
-# trust.  Provisioner::Recipe::edge has the whole account, under SPF.
+# trust.  Provisioner::Recipe::mailrelay has the whole account, under SPF.
 policyd-spf_time_limit = 3600
 smtpd_milters = local:opendkim/opendkim.sock, local:opendmarc/opendmarc.sock
 milter_default_action = tempfail

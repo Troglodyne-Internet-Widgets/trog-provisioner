@@ -1,0 +1,6 @@
+[%# Outbound, the mail relay.  setup-ufw-rules issues "allow out" for
+    every profile, and opens the port inbound too, where nothing listens. -%]
+[mail-mailrelay]
+title=Mail relay
+description=The mail relay that the mail of this guest goes out through
+ports=[% mailrelay_login.port %]/tcp

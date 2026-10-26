@@ -1,0 +1,16 @@
+[%# Inbound, the port of the stream proxy, where ufw forwards 443.
+    Provisioner::Recipe::nginxrelay says why it is not 443 itself. -%]
+[nginxrelay]
+title=Web relay
+description=The stream proxy, where 443 is forwarded
+ports=[% tls_port %]/tcp
+
+[%# Outbound: the guests deny outgoing traffic by default, and
+    setup-ufw-rules issues "allow out" for every profile.  Without it, nginx
+    cannot reach the ports where a guest listens for this one.  Those are the
+    proxy_ports of Provisioner::Recipe::nginx.  The profile also opens the
+    ports inbound, where nothing listens. -%]
+[nginxrelay-upstream]
+title=Web relay upstreams
+description=The ports of the guests behind this relay
+ports=8080,8443/tcp

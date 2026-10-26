@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-package Trog::EdgeBan;
+package Trog::NginxRelayBan;
 
 use 5.014;
 
@@ -9,14 +9,14 @@ use warnings FATAL => 'all';
 
 use List::Util ();
 
-=head1 edge_ban
+=head1 nginxrelay_ban
 
 =head2 SYNOPSIS
 
-In the line of F</etc/nginx/edge.d/authorized_keys.root> that
-F<scripts/edge_client> writes for a domain:
+In the line of F</etc/nginx/nginxrelay.d/authorized_keys.root> that
+F<scripts/nginxrelay_client> writes for a domain:
 
-    restrict,from="ADDRESS",command="edge_ban DOMAIN" ssh-ed25519 ...
+    restrict,from="ADDRESS",command="nginxrelay_ban DOMAIN" ssh-ed25519 ...
 
 What the guest of DOMAIN sends over ssh with that key:
 
@@ -26,28 +26,29 @@ What the guest of DOMAIN sends over ssh with that key:
 
 =head2 DESCRIPTION
 
-Runs as root on an edge guest, as the forced command of the key that the edge
-issued to DOMAIN.  sshd puts what the guest asked for in
-C<SSH_ORIGINAL_COMMAND>.  See L<Provisioner::Recipe::edge/Bans>.
+Runs as root on a guest that runs L<Provisioner::Recipe::nginxrelay>, as the
+forced command of the key that the relay issued to DOMAIN.  sshd puts what the
+guest asked for in C<SSH_ORIGINAL_COMMAND>.  See
+L<Provisioner::Recipe::nginxrelay/Bans>.
 
-C<ban> adds IP to the ipset C<edge-bans> for SECONDS, and the edge drops what
-IP sends to the ports that it proxies.  A SECONDS of 0 or less bans until an
-C<unban>, as fail2ban means by a C<bantime> of -1.  A ban of IP that is already
-there takes the new time.  C<unban> removes IP from the set, and an IP that is
-not there is no error.  C<check> exits 0 when IP is in the set, and 1 when it
-is not.
+C<ban> adds IP to the ipset C<nginxrelay-bans> for SECONDS, and the relay drops
+what IP sends to the ports that it proxies.  A SECONDS of 0 or less bans until
+an C<unban>, as fail2ban means by a C<bantime> of -1.  A ban of IP that is
+already there takes the new time.  C<unban> removes IP from the set, and an IP
+that is not there is no error.  C<check> exits 0 when IP is in the set, and 1
+when it is not.
 
-The set is shared by every domain behind the edge, because the edge cannot
+The set is shared by every domain behind the relay, because the relay cannot
 tell which guest a connection is for before nginx reads its first bytes.  So a
 domain can unban an address that another domain banned.
 
-IP is an IPv4 address, because the edge proxies IPv4 only.  Each ban and unban
+IP is an IPv4 address, because the relay proxies IPv4 only.  Each ban and unban
 goes to syslog with DOMAIN.  It exits 2 for a request that it does not take,
 and 3 when ipset fails.
 
 =cut
 
-our $SET = 'edge-bans';
+our $SET = 'nginxrelay-bans';
 
 # The longest timeout that ipset takes.
 our $MAX_SECONDS = 2_147_483;
@@ -75,14 +76,14 @@ sub ipset {
 
 sub logged {
     my ( $domain, $what ) = @_;
-    run( qw{logger -t edge_ban}, "$domain: $what" );
+    run( qw{logger -t nginxrelay_ban}, "$domain: $what" );
     return;
 }
 
 sub main {
     my ( $domain, $request ) = @_;
 
-    die "edge_ban runs as the forced command of a key, which names the domain\n" if ( $domain // q{} ) eq q{};
+    die "nginxrelay_ban runs as the forced command of a key, which names the domain\n" if ( $domain // q{} ) eq q{};
     my ( $verb, $ip, $seconds, @rest ) = split( q{ }, $request // q{} );
 
     if ( @rest || !ipv4($ip) ) {

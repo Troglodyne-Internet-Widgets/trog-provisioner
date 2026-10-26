@@ -1,7 +1,7 @@
 # Public names
 
 A public name is a name under which the internet reaches a guest through a
-proxy, such as an edge guest on the VPN.  `nginx.public_names` maps each public
+proxy, such as a relay guest on the VPN.  `nginx.public_names` maps each public
 name to the vhost that answers for it.  `perldoc Provisioner::Recipe::nginx`
 has the details, under "Names that reach the guest through a proxy".
 
@@ -30,32 +30,34 @@ domain.  A name that holds a `CNAME` gets no `A` record, and a name that holds
 an `A` record gets no `CNAME`.  The build fails there instead.  Remove the old
 record at the provider first.
 
-## The edge guest
+## The relay guest
 
-An edge guest runs the `edge` recipe.  It sends a TLS connection to the guest
-that registered its SNI name, and a plain HTTP request to the guest that
-registered its `Host` header.  `perldoc Provisioner::Recipe::edge` has the
-details.
+A relay guest runs the `nginxrelay` recipe.  It sends a TLS connection to the
+guest that registered its SNI name, and a plain HTTP request to the guest that
+registered its `Host` header.  `perldoc Provisioner::Recipe::nginxrelay` has
+the details.  The same guest can also run the `mailrelay` recipe, which relays
+the mail of the guests behind it.  `perldoc Provisioner::Recipe::mailrelay` has
+those details.
 
 ```yaml
-edge.ours.example:
-    edge:
+relay.ours.example:
+    nginxrelay:
 
 staging.ours.example:
     nginx:
-        edge: edge.ours.example
+        relay: relay.ours.example
         public_names:
             www.ours.example: staging.ours.example
 ```
 
-Build the edge first.  When `bin/provision` builds a guest whose `nginx` names
-an `edge`, it registers the public names of the guest there before the makefile
-starts.  The build of the guest fails if the edge is not up, or if another
+Build the relay first.  When `bin/provision` builds a guest whose `nginx` names
+a `relay`, it registers the public names of the guest there before the makefile
+starts.  The build of the guest fails if the relay is not up, or if another
 domain registered one of the names.  `bin/destroy` releases the names.  If the
-edge is not up then, it says what to run there.
+relay is not up then, it says what to run there.
 
-The DNS record of a public name points at the address of the edge, so set
-`registrar.address` to that address for each domain behind the edge.
+The DNS record of a public name points at the address of the relay, so set
+`registrar.address` to that address for each domain behind the relay.
 
 ## A zone at a registrar that we have an account with
 
@@ -125,5 +127,5 @@ vhost answers for both names.  You can then test the path through the proxy at
 
 To serve the name itself, the owner can delegate its zone to us, as in the
 section above.  The other way is a claim by an HTTP-01 challenge, after the
-owner points the `A` record of the name at the edge.  That claim needs the
-edge guest to answer the CA, and it comes after the edge, in issue #414.
+owner points the `A` record of the name at the relay.  That claim needs the
+relay guest to answer the CA, and it comes after the relay, in issue #414.

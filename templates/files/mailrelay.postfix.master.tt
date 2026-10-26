@@ -1,14 +1,14 @@
-# The relay of the edge, as a fragment of master.cf.  It listens only where the
-# guests reach this guest, takes mail only from a login that dovecot accepts,
-# only over TLS, and only with a sender that the login owns.  The other
-# services of the package stay as they are.  Provisioner::Recipe::edge has the
-# whole account, under Mail out.
+# The mail relay, as a fragment of master.cf.  It listens only where the guests
+# reach this guest, takes mail only from a login that dovecot accepts, only over
+# TLS, and only with a sender that the login owns.  The other services of the
+# package stay as they are.  Provisioner::Recipe::mailrelay has the whole
+# account, under Mail out.
 [% relay_address %]:[% relay_port %] inet n       -       y       -       -       smtpd
-  -o syslog_name=postfix/edge-relay
+  -o syslog_name=postfix/mailrelay
   -o smtpd_tls_security_level=encrypt
   -o smtpd_tls_auth_only=yes
   -o smtpd_sasl_auth_enable=yes
-  -o smtpd_sender_login_maps=texthash:/etc/nginx/edge.d/mail.senders
+  -o smtpd_sender_login_maps=texthash:/etc/postfix/mailrelay.d/mail.senders
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject

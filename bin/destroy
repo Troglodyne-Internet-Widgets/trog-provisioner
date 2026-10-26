@@ -233,7 +233,7 @@ sub main {
         remove_runner_key( $domain, $dryrun );
 
         # 3a. Take back what other guests issued it: a zone and its tokens, a
-        # VPN certificate, public names on an edge.  Before release_ip, because
+        # VPN certificate, public names on a relay.  Before release_ip, because
         # some of those name the address that release_ip frees.
         revoke_grants( $domain, $dryrun );
 

@@ -1,0 +1,171 @@
+#!/usr/bin/perl
+
+package Trog::NginxRelayClient;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use Cwd            ();
+use File::Basename ();
+use File::Temp     ();
+use List::Util     qw{any};
+use MIME::Base64   ();
+
+BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' ) }
+
+=head1 nginxrelay_client
+
+=head2 SYNOPSIS
+
+    nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME [NAME ...]
+    nginxrelay_client release DOMAIN
+
+=head2 DESCRIPTION
+
+Runs as root on a guest that runs L<Provisioner::Recipe::nginxrelay>, for
+another guest whose C<nginx> names this one as its C<relay>.
+
+C<register> sends each NAME to DOMAIN: a TLS connection by its SNI name to
+TLS_UPSTREAM, and a plain HTTP request by its C<Host> header to HTTP_UPSTREAM.
+An upstream is an IPv4 address and a port, such as C<192.0.2.10:8443>.  It
+replaces what DOMAIN registered before.  It refuses a NAME that another domain
+registered, because nginx would send that name to only one of them.  If
+C<nginx -t> refuses the result, it puts the old files of DOMAIN back.
+
+Then it makes a new key for DOMAIN, and prints the private half in base64 on
+one line, after all of that worked.  The guest of DOMAIN pushes its bans to
+this guest with that key.  The public half goes into
+F<authorized_keys.root>, which sshd reads beside the keys of root.  It can run
+only F<nginxrelay_ban> for DOMAIN, and only from the address of TLS_UPSTREAM,
+which is the address of the guest.  See F<scripts/nginxrelay_ban>.
+
+C<release> removes everything that DOMAIN registered, its key included.  Any of
+it can be gone already.
+
+Each one waits up to a minute for another C<register> or C<release> to
+finish, and then gives up and says which file is locked.
+
+It exits 0 when it did that.  When a step fails, it says which, and exits
+with another status.
+
+=cut
+
+my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM NAME [NAME ...]
+" . "       nginxrelay_client release DOMAIN
+";
+
+our $RELAY_D = '/etc/nginx/nginxrelay.d';
+
+# Beside this script, as every script of the provisioner is.
+our $RELAY_BAN = File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/nginxrelay_ban';
+
+# The files of $domain: the map of each port, and the public half of its key.
+sub files_of {
+    my ($domain) = @_;
+    return ( tls => "$RELAY_D/$domain.tls.map", http => "$RELAY_D/$domain.http.map", key => "$RELAY_D/$domain.ban.pub" );
+}
+
+# The keys of every domain, in the one file that sshd reads for root.  Only a
+# line that restricts its key, so that a bare key never logs in as root.
+sub write_authorized_keys {
+    my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, Trog::RelayFiles::read_file($_) // q{} ) } sort glob("$RELAY_D/*.ban.pub");
+    Trog::RelayFiles::write_file( "$RELAY_D/authorized_keys.root", join( q{}, @lines ) );
+    return;
+}
+
+sub lock_relay {
+    return Trog::RelayFiles::lock_dir( $RELAY_D, 'nginxrelay_client' );
+}
+
+# Each name that a domain other than $domain registered, mapped to that domain.
+sub names_of_others {
+    my ($domain) = @_;
+
+    my %holder;
+    foreach my $map ( glob("$RELAY_D/*.tls.map") ) {
+        my ($other) = $map =~ m{/([^/]+)[.]tls[.]map\z};
+        next if $other eq $domain;
+        $holder{$_} = $other foreach map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, Trog::RelayFiles::read_file($map) // q{};
+    }
+    return %holder;
+}
+
+sub reload_nginx {
+    my ( $said, $ok ) = Trog::RelayFiles::run(qw{systemctl reload nginx});
+    die "nginx did not reload: $said\n" unless $ok;
+    return;
+}
+
+sub register {
+    my ( $domain, $tls, $http, @names ) = @_;
+
+    my $lock   = lock_relay();
+    my %holder = names_of_others($domain);
+    my @taken  = grep { defined $holder{$_} } @names;
+    die join( q{}, map { "$_ is registered to $holder{$_}\n" } @taken ) . "So $domain cannot register it.  Release it there first.\n" if @taken;
+
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    ## no critic (PreferredBinaries) -- this runs under the system perl of the relay, which has no Provisioner::Utils
+    my ( $said, $ok ) = Trog::RelayFiles::run( qw{ssh-keygen -q -t ed25519 -N}, q{}, '-C', "bans of $domain", '-f', "$dir/key" );
+    ## use critic
+    die "Could not make the key of $domain: $said\n" unless $ok;
+
+    my %file = files_of($domain);
+    my %old  = map { $_ => scalar Trog::RelayFiles::read_file( $file{$_} ) } qw{tls http};
+    Trog::RelayFiles::write_file( $file{tls},  join( q{}, map { "$_ $tls;\n" } @names ) );
+    Trog::RelayFiles::write_file( $file{http}, join( q{}, map { "$_ $http;\n" } @names ) );
+
+    ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
+    if ( !$ok ) {
+        Trog::RelayFiles::write_file( $file{$_}, $old{$_} ) foreach qw{tls http};
+        die "nginx refused what $domain registered, so it keeps what it had: $said\n";
+    }
+
+    my ($address) = split( m/:/, $tls );
+    Trog::RelayFiles::write_file( $file{key}, qq{restrict,from="$address",command="$RELAY_BAN $domain" } . Trog::RelayFiles::read_file("$dir/key.pub") );
+    write_authorized_keys();
+    reload_nginx();
+
+    print MIME::Base64::encode_base64( Trog::RelayFiles::read_file("$dir/key"), q{} );
+    close $lock or die "Cannot unlock $RELAY_D: $!\n";
+    return 0;
+}
+
+sub release {
+    my ($domain) = @_;
+
+    my $lock = lock_relay();
+    my %file = files_of($domain);
+    Trog::RelayFiles::write_file( $_, undef ) foreach values %file;
+    write_authorized_keys();
+
+    # An nginx that is not up reads the files when it starts.
+    my $err = do {
+        local $@;
+        eval { reload_nginx(); 1 } ? undef : $@;
+    };
+    warn $err if defined $err;
+    close $lock or die "Cannot unlock $RELAY_D: $!\n";
+    return 0;
+}
+
+sub main {
+    my ( $command, $domain, @args ) = @_;
+
+    die $USAGE unless defined $command && Trog::RelayFiles::dns_name($domain);
+
+    if ( $command eq 'register' ) {
+        my ( $tls, $http, @names ) = @args;
+        die $USAGE unless Trog::RelayFiles::upstream($tls) && Trog::RelayFiles::upstream($http) && @names;
+        die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names;
+        return register( $domain, $tls, $http, @names );
+    }
+    return release($domain) if $command eq 'release' && !@args;
+    die $USAGE;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

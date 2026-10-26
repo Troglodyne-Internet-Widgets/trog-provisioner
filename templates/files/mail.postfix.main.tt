@@ -28,22 +28,22 @@ transport_maps = hash:/etc/postfix/domains/[% domain %]/transport_maps
 sender_dependent_relayhost_maps = hash:/etc/postfix/domains/[% domain %]/sdd_relay_maps
 smtpd_sender_login_maps = hash:/etc/postfix/domains/[% domain %]/sender_login
 header_checks = regexp:/etc/postfix/domains/[% domain %]/header_checks
-[% IF edge_relay %]
+[% IF mailrelay_login %]
 
-# The login of this domain on the relay of its edge, which sdd_relay_maps sends
+# The login of this domain on its mail relay, which sdd_relay_maps sends
 # every sender of this domain to.  Provisioner::Recipe::mail has the whole
-# account, under Sending through an edge guest.
+# account, under Sending through a mail relay.
 smtp_sasl_auth_enable = yes
 smtp_sender_dependent_authentication = yes
 smtp_sasl_security_options = noanonymous
 smtp_sasl_tls_security_options = noanonymous
 smtp_sasl_password_maps = hash:/etc/postfix/domains/[% domain %]/sasl_passwd
-smtp_tls_policy_maps = hash:/etc/postfix/domains/[% domain %]/edge_tls_policy
+smtp_tls_policy_maps = hash:/etc/postfix/domains/[% domain %]/mailrelay_tls_policy
 
-# The edge relays here the mail that comes in for this domain, after it made
-# the checks of the client, which only it can make.  So the guest trusts it as
-# it trusts itself.  configd joins mynetworks across fragments.
-mynetworks = [% edge_relay.address %]/32
+# The mail relay sends here the mail that comes in for this domain, after it
+# made the checks of the client, which only it can make.  So the guest trusts
+# it as it trusts itself.  configd joins mynetworks across fragments.
+mynetworks = [% mailrelay_login.address %]/32
 [% END %]
 
 # Behind NAT, this setting can cause problems, because routers differ.  In a

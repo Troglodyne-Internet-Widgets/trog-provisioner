@@ -1,6 +1,6 @@
 [%# A message given to one milter as a client would give it, through
     milterprobe, and what the milter did with it.  Included by the guest tests
-    of mail and edge. -%]
+    of mail and mailrelay. -%]
 # milter_probe(socket => ..., ip => ..., from => ..., ar => ...) gives the
 # milter at socket a message from the client at ip, with sender and From from,
 # and an Authentication-Results of ar if there is one.  Answers what milterprobe

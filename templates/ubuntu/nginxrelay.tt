@@ -1,0 +1,17 @@
+[%# The data target puts back the registrations of the guests behind this
+    one.  Provisioner::Recipe::nginxrelay says why. -%]
+install -d -o root -g root -m 0755 /etc/nginx/nginxrelay.d
+rm -f /etc/nginx/sites-enabled/default
+install -o root -g root -m 0644 nginxrelay.stream.conf /etc/nginx/modules-enabled/99-nginxrelay-stream.conf
+install -o root -g root -m 0644 nginxrelay.http.conf /etc/nginx/conf.d/00-nginxrelay.conf
+install -o root -g root -m 0644 nginxrelay_ufw.conf /etc/ufw/applications.d/nginxrelay
+[%# The host key comes from the secret store, so the guests that pinned it
+    still trust this relay after a rebuild.  bin/provision placed it. -%]
+ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
+install -o root -g root -m 0644 nginxrelay.sshd.conf /etc/ssh/sshd_config.d/nginxrelay-bans.conf
+[% script_dir %]/check_sshd_config
+[% script_dir %]/queue_postrun_task systemctl try-reload-or-restart ssh
+install -d -o root -g root -m 0700 /var/lib/nginxrelay-bans
+install -d -o root -g root -m 0750 /etc/ufw/after.init.d
+install -o root -g root -m 0750 nginxrelay.bans /etc/ufw/after.init.d/nginxrelay-bans
+[% script_dir %]/queue_postrun_task systemctl reload nginx

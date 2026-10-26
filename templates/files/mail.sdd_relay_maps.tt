@@ -5,6 +5,6 @@
 opendmarc@[% domain %] [[% relay.host %]]:[% relay.port %]
 root@[% domain %] [[% relay.host %]]:[% relay.port %]
 [% END %]
-[% IF edge_relay %]
-@[% domain %] [[% edge_relay.address %]]:[% edge_relay.port %]
+[% IF mailrelay_login %]
+@[% domain %] [[% mailrelay_login.address %]]:[% mailrelay_login.port %]
 [% END %]

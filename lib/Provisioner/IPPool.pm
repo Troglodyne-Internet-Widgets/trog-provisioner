@@ -279,6 +279,26 @@ sub holdings {
     return { map { $_->{bin} => $_->{ip} } @$rows };
 }
 
+=head2 reach_address($domain)
+
+Returns the address at which the other guests reach the guest of C<$domain>:
+its address in a bin other than C<guests>, which is the tunnel of a guest that
+is a client of the VPN, and otherwise its address in C<guests>.  Dies when it
+has neither, or more than one of the first kind.
+
+=cut
+
+sub reach_address {
+    my ($domain) = @_;
+    my $held     = holdings($domain);
+    my @vpn      = grep { $_ ne $GUESTS } sort keys %$held;
+
+    die "$domain has an address in each of " . join( ', ', @vpn ) . ", so the guests that use it cannot tell which one reaches it.\n" if @vpn > 1;
+    my $address = @vpn ? $held->{ $vpn[0] } : $held->{$GUESTS};
+    die "$domain has no address in " . db_path() . ", so the guests that use it cannot reach it.\n" unless defined $address;
+    return $address;
+}
+
 =head2 reserve($ip, $name)
 
 Records C<$ip> as an address that no guest gets, for example a hypervisor or a

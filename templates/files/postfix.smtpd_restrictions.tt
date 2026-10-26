@@ -1,10 +1,10 @@
 [%# The checks of a client that delivers mail from the internet, which a mail
-    guest makes on its port 25, and an edge on its own before it relays the
-    mail to the guest.  One file, so that the two cannot drift apart. -%]
+    guest makes on its port 25, and a mail relay on its own before it relays
+    the mail to the guest.  One file, so that the two cannot drift apart. -%]
 # The restriction lists.  configd does not join these across fragments,
 # because their order is their meaning.  A permit_ before a check that must run
-# first makes an open relay.  They are the policy of the guest, and of an edge
-# in front of it.
+# first makes an open relay.  They are the policy of the guest, and of a mail
+# relay in front of it.
 #
 # Refuse clients that do not resolve or that are on an RBL.
 smtpd_client_restrictions = permit_mynetworks, reject_unknown_reverse_client_hostname, reject_unknown_client_hostname, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, permit
@@ -21,7 +21,7 @@ smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, rejec
 smtpd_sender_restrictions = permit_mynetworks, reject_authenticated_sender_login_mismatch, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit
 # Refuse incoming mail TO addresses that are bogus or not hosted here.  postfix
 # rejects a recipient that is not in virtual_mailbox_maps by itself, with "User
-# unknown in virtual mailbox table".  With spf_policy, which the edge sets, the
+# unknown in virtual mailbox table".  With spf_policy, which the mail relay sets, the
 # SPF policy service judges the client after the destination is known to be
 # ours, and records what it found.
 smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination,[% IF spf_policy %] check_policy_service unix:private/policyd-spf,[% END %] reject_non_fqdn_recipient, reject_unknown_recipient_domain, permit

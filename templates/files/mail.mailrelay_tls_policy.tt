@@ -1,0 +1,5 @@
+[%# The mail relay takes a login only over TLS.  It is reached by its
+    address, so no name can be verified, and encrypt is as strict as it gets. -%]
+[% IF mailrelay_login -%]
+[[% mailrelay_login.address %]]:[% mailrelay_login.port %] encrypt
+[% END -%]
