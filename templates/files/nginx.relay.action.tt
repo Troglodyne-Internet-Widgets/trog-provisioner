@@ -1,0 +1,12 @@
+[%# What fail2ban runs on this guest for each ban and unban of a jail that
+    reads the traffic of the relay: nginxrelay_ban on the relay, with the key
+    that the relay issued to this domain, against the host key that it pinned.
+    Provisioner::Recipe::nginx has the whole account. -%]
+[% IF relay_address -%]
+[Definition]
+actionban = <relay_ssh> ban <ip> <bantime>
+actionunban = <relay_ssh> unban <ip>
+
+[Init]
+relay_ssh = ssh -n -i /etc/fail2ban/nginxrelay/[% domain %].key -o BatchMode=yes -o IdentitiesOnly=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile=/etc/fail2ban/nginxrelay/[% domain %].known_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=10 root@[% relay_address %]
+[% END -%]

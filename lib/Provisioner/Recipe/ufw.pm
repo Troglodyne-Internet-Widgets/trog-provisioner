@@ -57,7 +57,7 @@ both alone, so the rules come back after the reset in the C<ufw> target.
 ufw-init runs C<start> twice on a reload, so a script adds each rule once.  A
 script that fails is reported and does not fail the firewall, because the
 rules of ufw are loaded by then.  L<Provisioner::Recipe::sshfastlane> and
-L<Provisioner::Recipe::edge> each install one.
+L<Provisioner::Recipe::nginxrelay> each install one.
 
 =cut
 

@@ -1307,7 +1307,7 @@ subtest 'the reverse DNS of a guest is set to the name its mail announces' => su
     is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'and to the mail name of the host, when the host runs mail' );
     %host = ();
 
-    %config = ( 'mx.test.test' => { edge => {} } );
+    %config = ( 'mx.test.test' => { mailrelay => {} } );
     $answer = sub { die "Linode refused put-ip: 403 not authorized\n" };
     ( $out, $err, $result ) = $point->('9.9.9.9');
     is( $result, 0, 'a refusal of the hypervisor does not stop the run' );

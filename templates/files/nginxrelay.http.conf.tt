@@ -1,22 +1,24 @@
 [%# A request goes to the guest that registered its Host header.  The client
     is $remote_addr alone, because a client can send any X-Forwarded-For. -%]
 [%# 64 is too small for a long name, and only nginx -t says why.  See
-    server_names_hash_bucket_size in nginx.global.conf.tt. -%]
+    server_names_hash_bucket_size in nginx.global.conf.tt.  nginx fixes the
+    size at the first map that it reads, and conf.d/global.conf has one, so
+    this file is 00-nginxrelay.conf, which nginx reads first. -%]
 map_hash_bucket_size 256;
 
-map $host $edge_http {
-    include /etc/nginx/edge.d/*.http.map;
+map $host $relay_http {
+    include /etc/nginx/nginxrelay.d/*.http.map;
 }
 
 server {
     listen 80 default_server;
 
-    if ($edge_http = "") {
+    if ($relay_http = "") {
         return 444;
     }
 
     location / {
-        proxy_pass http://$edge_http;
+        proxy_pass http://$relay_http;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto http;

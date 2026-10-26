@@ -1,5 +1,0 @@
-[%# The keys that edge_client issues to the guests behind this edge, beside
-    the keys of each account.  Only root has such a file, and each of its keys
-    runs edge_ban and nothing else.  Provisioner::Recipe::edge has the whole
-    account. -%]
-AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2 /etc/nginx/edge.d/authorized_keys.%u

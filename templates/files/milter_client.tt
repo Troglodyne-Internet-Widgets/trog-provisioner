@@ -1,4 +1,4 @@
-[%# Milter::Client, and its milterprobe, for the guest tests of mail and edge,
+[%# Milter::Client, and its milterprobe, for the guest tests of mail and mailrelay,
     which give a milter a message as postfix would.  It goes into the system
     perl, as Configd does, so a guest does not build a perl for a test.
     scripts/install_configd says how cpanm can install into the wrong perl. -%]

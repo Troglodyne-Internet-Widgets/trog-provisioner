@@ -1,0 +1,10 @@
+[%# The jails of nginx ban through the relay as well as through ufw, and never
+    ban the relay itself.  fail2ban merges these sections into the jails of the
+    domain. -%]
+[% FOR jail IN relay_jails -%]
+[[% jail %]]
+action = %(action_)s
+         relay-[% domain %]
+ignoreip = 127.0.0.1/8 ::1 [% relay_address %]
+
+[% END -%]

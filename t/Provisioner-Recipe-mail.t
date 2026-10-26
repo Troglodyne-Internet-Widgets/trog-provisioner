@@ -63,13 +63,13 @@ subtest 'the catchall is an account of the domain it catches for' => sub {
     like( ( split /:/, $someuser // q{} )[1], qr/\A\{ARGON2ID\}\$argon2id\$/, 'an account with a password gets the Argon2id hash of it, which dovecot reads' );
 };
 
-subtest 'a domain with an edge sends its mail through the relay there' => sub {
+subtest 'a domain with a mail relay sends its mail through it' => sub {
     is_deeply(
-        [ $recipe->grants( 'mail.test.test', edge => 'edge.test.test' ) ],
-        [ { recipe => 'edge', guest => 'edge.test.test', client => 'mail.test.test', service => 'mail' } ],
-        'the edge issues it a login on its relay'
+        [ $recipe->grants( 'mail.test.test', mailrelay => 'relay.test.test' ) ],
+        [ { recipe => 'mailrelay', guest => 'relay.test.test', client => 'mail.test.test' } ],
+        'the relay issues it a login'
     );
-    is_deeply( [ $recipe->grants('mail.test.test') ], [], 'and a domain with no edge holds none' );
+    is_deeply( [ $recipe->grants('mail.test.test') ], [], 'and a domain with no mail relay holds none' );
 
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
@@ -77,22 +77,22 @@ subtest 'a domain with an edge sends its mail through the relay there' => sub {
     $cookbook->redefine( domain_config => sub { return {} } );
     $cookbook->redefine( host_of       => sub { return } );
 
-    my %opts = $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test' ) );
-    is_deeply( $opts{edge_relay}, { address => '192.0.2.5', port => 2587, password => '/etc/postfix/edge/mail.test.test.password' }, 'at the address where the guests reach the edge, on its relay port, with the password that it issued' );
+    my %opts = $recipe->enrich( $recipe->validate( %BASE, mailrelay => 'relay.test.test' ) );
+    is_deeply( $opts{mailrelay_login}, { address => '192.0.2.5', port => 2587, password => '/etc/postfix/mailrelay/mail.test.test.password' }, 'at the address where the guests reach the relay, on its relay port, with the password that it issued' );
 
     my $guests = Test::MockModule->new('Provisioner::IPPool');
     $guests->redefine( guest_address => sub { my ($domain) = @_; return ( $domain, $domain eq 'mail.test.test' ? '192.0.2.10' : undef ) } );
-    is_deeply( { $recipe->grant_terms( { recipe => 'edge', guest => 'edge.test.test', client => 'mail.test.test', service => 'mail' } ) }, { address => '192.0.2.10' }, 'the edge relays the mail that comes in to the address of the guest' );
+    is_deeply( { $recipe->grant_terms( { recipe => 'mailrelay', guest => 'relay.test.test', client => 'mail.test.test' } ) }, { address => '192.0.2.10' }, 'the relay sends the mail that comes in to the address of the guest' );
     like(
-        exception { $recipe->grant_terms( { recipe => 'edge', guest => 'edge.test.test', client => 'none.test.test', service => 'mail' } ) },
+        exception { $recipe->grant_terms( { recipe => 'mailrelay', guest => 'relay.test.test', client => 'none.test.test' } ) },
         qr/none[.]test[.]test[ ]has[ ]no[ ]address/,
-        'and a guest that the edge cannot reach stops the build'
+        'and a guest that the relay cannot reach stops the build'
     );
 
     like(
-        exception { $recipe->enrich( $recipe->validate( %BASE, edge => 'edge.test.test', relay => { host => 'relay.test.test', port => 25 } ) ) },
-        qr/both[ ]a[ ]relay[ ]and[ ]an[ ]edge/,
-        'a relay and an edge together are refused, because they disagree about where the mail goes'
+        exception { $recipe->enrich( $recipe->validate( %BASE, mailrelay => 'relay.test.test', relay => { host => 'relay.test.test', port => 25 } ) ) },
+        qr/both[ ]a[ ]relay[ ]and[ ]a[ ]mailrelay/,
+        'a relay and a mailrelay together are refused, because they disagree about where the mail goes'
     );
 };
 

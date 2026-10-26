@@ -111,15 +111,15 @@ postmap /etc/postfix/domains/[% domain %]/virtual_aliases
 postmap /etc/postfix/domains/[% domain %]/transport_maps
 postmap /etc/postfix/domains/[% domain %]/sdd_relay_maps
 postmap /etc/postfix/domains/[% domain %]/sender_login
-[% IF edge_relay -%]
-[%# The password that the edge issued, as the login of this domain for each of
-    its senders.  Provisioner::Recipe::mail has the whole account, under
-    Sending through an edge guest. -%]
-umask 077 && printf '@%s %s:%s\n' '[% domain %]' '[% domain %]' "$$(cat '[% edge_relay.password %]')" > /etc/postfix/domains/[% domain %]/sasl_passwd
-install -m 0600 -o root -g root edge_tls_policy /etc/postfix/domains/[% domain %]/edge_tls_policy
+[% IF mailrelay_login -%]
+[%# The password that the mail relay issued, as the login of this domain for
+    each of its senders.  Provisioner::Recipe::mail has the whole account,
+    under Sending through a mail relay. -%]
+umask 077 && printf '@%s %s:%s\n' '[% domain %]' '[% domain %]' "$$(cat '[% mailrelay_login.password %]')" > /etc/postfix/domains/[% domain %]/sasl_passwd
+install -m 0600 -o root -g root mailrelay_tls_policy /etc/postfix/domains/[% domain %]/mailrelay_tls_policy
 postmap /etc/postfix/domains/[% domain %]/sasl_passwd
-postmap /etc/postfix/domains/[% domain %]/edge_tls_policy
-install -o root -g root -m 0644 mail_edge_ufw.conf /etc/ufw/applications.d/mail-edge-relay
+postmap /etc/postfix/domains/[% domain %]/mailrelay_tls_policy
+install -o root -g root -m 0644 mail_mailrelay_ufw.conf /etc/ufw/applications.d/mail-mailrelay
 [% END -%]
 # main.cf, as the fragment of this domain, not as a run of `postconf -e`.
 # postconf sets a parameter and cannot add to one.  configd merges the
@@ -131,7 +131,7 @@ install -m 0644 -o root -g root main.cf.domain /etc/postfix/main.cf.d/50-[% doma
 # that open these are not root.  The smtp client reads the passwords as root,
 # before it drops its privileges, so they stay 0600.
 chmod 0644 /etc/postfix/domains/[% domain %]/*.db
-[% IF edge_relay -%]
+[% IF mailrelay_login -%]
 chmod 0600 /etc/postfix/domains/[% domain %]/sasl_passwd.db
 [% END -%]
 # Give the postfix chroot the real resolv.conf.  Its own copy gets the broken

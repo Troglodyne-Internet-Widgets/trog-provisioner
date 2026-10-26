@@ -1,7 +1,7 @@
-# opendmarc on the edge sees the client that connects, which the guests behind
+# opendmarc on the relay sees the client that connects, which the guests behind
 # it do not.  It checks SPF itself, and writes its verdicts under the name of
 # this guest, which those guests trust.  It sends no reports, and keeps no
-# history.  Provisioner::Recipe::edge has the whole account, under SPF.
+# history.  Provisioner::Recipe::mailrelay has the whole account, under SPF.
 AuthservID [% domain %]
 TrustedAuthservIDs [% domain %]
 SPFSelfValidate true

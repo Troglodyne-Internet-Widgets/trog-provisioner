@@ -66,7 +66,7 @@ guest.
 =head2 Names that reach the guest through a proxy
 
 C<public_names> maps each name under which the internet reaches this guest,
-through a proxy elsewhere such as an edge guest on the VPN, to the vhost that
+through a proxy elsewhere such as a relay guest on the VPN, to the vhost that
 answers for it.  The proxy passes TLS through by its SNI name, so the guest
 keeps its own certificate.  It speaks the PROXY protocol, so the guest learns
 the address of the real client.
@@ -109,47 +109,47 @@ nginx believes the address in a PROXY header or in C<X-Forwarded-For> only
 from C<proxy_from>.  A client anywhere else that sends one keeps its own
 address in the logs.  The default of
 C<proxy_from> is each network of C<ip_pool> that a bin routes through an
-openvpn server, which is where the edge gets its address.  See
+openvpn server, which is where the relay gets its address.  See
 L<Provisioner::IPPool/BINS>.
 
-=head2 Registration with an edge guest
+=head2 Registration with a relay guest
 
     internal.somedomain:
         nginx:
-            edge: edge.somedomain
+            relay: relay.somedomain
             public_names:
                 shop.internal.somedomain: internal.somedomain
 
-C<edge> names the guest that runs L<Provisioner::Recipe::edge>.  When this
-domain has public names, C<bin/provision> registers them there before the
-makefile starts, so the edge must be up first.  The edge sends each name in
-C<proxied_names> to the address of this guest in the address pool, on the
-ports of C<proxy_ports>.  A domain built onto another guest registers the
-address of that guest.
+C<relay> names the guest that runs L<Provisioner::Recipe::nginxrelay>.  When
+this domain has public names, C<bin/provision> registers them there before the
+makefile starts, so the relay must be up first.  The relay sends each name in
+C<proxied_names> to the address of this guest in the address pool, on the ports
+of C<proxy_ports>.  A domain built onto another guest registers the address of
+that guest.
 
-The edge refuses a name that another domain registered.  It issues a key for
-this domain, which lands at F</etc/fail2ban/edge/DOMAIN.key.b64>.
+The relay refuses a name that another domain registered.  It issues a key for
+this domain, which lands at F</etc/fail2ban/nginxrelay/DOMAIN.key.b64>.
 
-C<bin/destroy> releases the names on the edge.  If the edge is not up then, it
-warns and says what to run there.  Until then, the edge sends those names to an
+C<bin/destroy> releases the names on the relay.  If the relay is not up then, it
+warns and says what to run there.  Until then, the relay sends those names to an
 address that the pool can give to the next guest.
 
-=head2 Bans through the edge
+=head2 Bans through the relay
 
-A ban on this guest blocks nothing that comes through the edge, because those
-packets come from the edge.  So with C<edge> and a public name, each jail of
-this recipe also bans through the action C<edge-DOMAIN>.  It runs
-C<edge_ban> on the edge over ssh, with the key that the edge issued, and the
-edge drops the address.  See L<Provisioner::Recipe::edge/Bans>.
+A ban on this guest blocks nothing that comes through the relay, because those
+packets come from the relay.  So with C<relay> and a public name, each jail of
+this recipe also bans through the action C<relay-DOMAIN>.  It runs
+C<nginxrelay_ban> on the relay over ssh, with the key that the relay issued,
+and the relay drops the address.  See L<Provisioner::Recipe::nginxrelay/Bans>.
 
-The edge also issues its host key, which this guest pins in
-F</etc/fail2ban/edge/DOMAIN.known_hosts>, so a ban never goes to a guest that
-only claims to be the edge.  The jails never ban the address of the edge.  That
-address is the one in L<Provisioner::Recipe::edge/address>, and it goes into
-C<ignoreip> beside loopback.
+The relay also issues its host key, which this guest pins in
+F</etc/fail2ban/nginxrelay/DOMAIN.known_hosts>, so a ban never goes to a guest
+that only claims to be the relay.  The jails never ban the address of the
+relay.  That address is the one in L<Provisioner::IPPool/reach_address>, and it
+goes into C<ignoreip> beside loopback.
 
 The jails of other recipes still ban through ufw only, because what they read
-does not come through the edge.
+does not come through the relay.
 
 =cut
 
@@ -226,13 +226,13 @@ sub args {
                 additionalProperties => { type   => 'string', format => 'hostname' },
                 default              => {},
                 description          =>
-                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as an edge guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
+                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as a relay guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
-            edge => {
+            relay => {
                 type        => 'string',
                 format      => 'hostname',
-                description => 'The guest that runs the edge recipe, where the public names of this domain are registered when it is built.  Read only when public_names has a name.  See "Registration with an edge guest".',
+                description => 'The guest that runs the nginxrelay recipe, where the public names of this domain are registered when it is built.  Read only when public_names has a name.  See "Registration with a relay guest".',
             },
 
             proxy_from => {
@@ -333,29 +333,30 @@ sub proxied_names {
 
 =head2 @grants = $recipe->grants($domain, %opts)
 
-With C<edge> and a public name, the registration of the names of C<$domain> on
-the edge, as C<grants> in L<Provisioner::Recipe> says.  The edge issues a key
+With C<relay> and a public name, the registration of the names of C<$domain> on
+the relay, as C<grants> in L<Provisioner::Recipe> says.  The relay issues a key
 for it, and releases the names when the domain goes away.  See
-L<Provisioner::Recipe::edge/issue_grant> and L</Registration with an edge guest>.
+L<Provisioner::Recipe::nginxrelay/issue_grant> and L</Registration with a relay
+guest>.
 
 =cut
 
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    my $edge = $opts{edge};
-    return () unless defined $edge && %{ $opts{public_names} // {} };
+    my $relay = $opts{relay};
+    return () unless defined $relay && %{ $opts{public_names} // {} };
 
-    return { recipe => 'edge', guest => $edge, client => $domain };
+    return { recipe => 'nginxrelay', guest => $relay, client => $domain };
 }
 
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
-Where the edge sends TLS and plain HTTP for the client of C<$grant>, and the
-names that it sends there, as L<Provisioner::Recipe::edge/issue_grant> takes
-them.
+Where the relay sends TLS and plain HTTP for the client of C<$grant>, and the
+names that it sends there, as L<Provisioner::Recipe::nginxrelay/issue_grant>
+takes them.
 
 Dies when the guest of the client has no address in the address pool, because
-the edge reaches the guest by that address.
+the relay reaches the guest by that address.
 
 =cut
 
@@ -387,9 +388,9 @@ recipe lists or one outside the zone of the domain, when another vhost lists a
 public name, and when there are public names and no network to believe a PROXY
 header from.
 
-With C<edge> and a public name, it also adds C<edge_address>, where this guest
-reaches the edge, and C<edge_jails>, the jails that ban through it.  See
-L</Bans through the edge>.
+With C<relay> and a public name, it also adds C<relay_address>, where this
+guest reaches the relay, and C<relay_jails>, the jails that ban through it.  See
+L</Bans through the relay>.
 
 =cut
 
@@ -427,9 +428,9 @@ sub enrich {
         die "nginx: $opts{domain} has public_names, but nothing says where the proxy connects from.  Give a bin of ip_pool a via, or set proxy_from.\n"
           unless @{ $opts{proxy_from} };
 
-        if ( defined $opts{edge} ) {
-            $opts{edge_address} = Provisioner::Cookbook->load('edge')->address( $opts{edge} );
-            $opts{edge_jails}   = [ sort keys %{ { $self->jails(%opts) } } ];
+        if ( defined $opts{relay} ) {
+            $opts{relay_address} = Provisioner::IPPool::reach_address( $opts{relay} );
+            $opts{relay_jails}   = [ sort keys %{ { $self->jails(%opts) } } ];
         }
     }
 
@@ -446,11 +447,11 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'nginx.global.conf.tt' => 'nginx.global.conf',
-        'nginx.sysctl.conf.tt' => 'nginx.sysctl.conf',
-        'nginx.ufw.conf.tt'    => 'nginx_proxy_ufw.conf',
-        'nginx.edge.action.tt' => 'nginx_edge.action',
-        'nginx.edge.jail.tt'   => 'nginx_edge.jail',
+        'nginx.global.conf.tt'  => 'nginx.global.conf',
+        'nginx.sysctl.conf.tt'  => 'nginx.sysctl.conf',
+        'nginx.ufw.conf.tt'     => 'nginx_proxy_ufw.conf',
+        'nginx.relay.action.tt' => 'nginx_relay.action',
+        'nginx.relay.jail.tt'   => 'nginx_relay.jail',
     );
 }
 

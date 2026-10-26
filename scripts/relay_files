@@ -1,0 +1,159 @@
+#!/usr/bin/perl
+
+package Trog::RelayFiles;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use Fcntl       qw{:flock};
+use IPC::Open3  ();
+use Time::HiRes ();
+
+=head1 relay_files
+
+=head2 SYNOPSIS
+
+    require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' );
+
+    my $lock = Trog::RelayFiles::lock_dir( $dir, 'nginxrelay_client' );
+    Trog::RelayFiles::write_file( "$dir/$domain.map", $content );
+
+=head2 DESCRIPTION
+
+What F<scripts/nginxrelay_client> and F<scripts/mailrelay_client> share: each
+keeps the registrations of other guests in files of one directory, which a
+service reads.  This runs under the system perl of the guest, which has no
+Provisioner libraries, so the two load it from beside themselves.  It runs
+nothing on its own.
+
+=head2 dns_name($name)
+
+True when C<$name> is a name of the DNS in lower case.  Each one goes into a
+file that a service reads.
+
+=cut
+
+sub dns_name {
+    my ($name) = @_;
+    return defined $name && $name =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/ ? 1 : 0;
+}
+
+=head2 upstream($upstream)
+
+True when C<$upstream> is an IPv4 address and a port, such as
+C<192.0.2.10:8443>.
+
+=cut
+
+sub upstream {
+    my ($upstream) = @_;
+    my $octet = qr/[[:digit:]]{1,3}/;
+    return defined $upstream && $upstream =~ m/\A$octet(?:[.]$octet){3}:[[:digit:]]{1,5}\z/ ? 1 : 0;
+}
+
+=head2 ($output, $ok) = run([\%opts,] @command)
+
+Runs C<@command>, a list, so that no shell reads it.  Returns its output and
+whether it succeeded.  The output holds its standard error as well, so that
+nothing but what a client prints on purpose reaches the output of the client:
+F<bin/provision> reads it over ssh on a pty, which joins the two streams.
+C<< { input => $text } >> first gives the command its standard input.  This is
+the one thing that a test of a client stands in for.
+
+=cut
+
+sub run {
+    my (@command) = @_;
+    my $opts = ref $command[0] eq 'HASH' ? shift @command : {};
+
+    my $pid = IPC::Open3::open3( my $in, my $out, undef, @command );
+    print {$in} $opts->{input} // q{};
+    close $in or die "Could not close the input of @command: $!\n";
+    my $output = do { local $/ = undef; <$out> }
+      // q{};
+    waitpid( $pid, 0 );
+
+    return ( $output, $? == 0 ? 1 : 0 );
+}
+
+=head2 read_file($file)
+
+The content of C<$file>, or undef where there is no file.
+
+=cut
+
+sub read_file {
+    my ($file) = @_;
+
+    open( my $fh, '<', $file ) or return;
+    my $content = do { local $/ = undef; <$fh> };
+    close $fh or die "Cannot read $file: $!\n";
+    return $content;
+}
+
+=head2 write_file($file, $content, $mode, $group)
+
+Replaces C<$file> with C<$content>, through a file beside it, so that a service
+never reads half of it, or removes C<$file> when C<$content> is undef.  The
+file is 0644, or C<$mode> and the group C<$group>.
+
+=cut
+
+sub write_file {
+    my ( $file, $content, $mode, $group ) = @_;
+
+    if ( !defined $content ) {
+        unlink $file or $!{ENOENT} or die "Cannot remove $file: $!\n";
+        return;
+    }
+
+    # open keeps the mode of a file that exists, such as one a failed run left.
+    unlink "$file.new";
+    my $umask  = umask oct 22;
+    my $opened = open( my $fh, '>', "$file.new" );
+    umask $umask;
+    $opened or die "Cannot write $file.new: $!\n";
+    print {$fh} $content;
+    close $fh or die "Cannot write $file.new: $!\n";
+
+    if ( defined $mode ) {
+        chmod( $mode, "$file.new" ) or die "Cannot chmod $file.new: $!\n";
+    }
+    if ( defined $group ) {
+        my $gid = getgrnam($group) // die "There is no group $group for $file\n";
+        chown( -1, $gid, "$file.new" ) or die "Cannot chown $file.new: $!\n";
+    }
+    rename( "$file.new", $file ) or die "Cannot replace $file: $!\n";
+    return;
+}
+
+=head2 $lock = lock_dir($dir, $client)
+
+Locks C<$dir> until the caller closes C<$lock>, so that two guests that
+register at one time do not both take a name.  It waits up to C<$LOCK_WAIT>
+seconds for another run of C<$client>, and then dies, naming the file.
+
+=cut
+
+# The lock is held only while a client runs a few short commands, so a longer
+# wait is a hang.
+our $LOCK_WAIT = 60;
+
+sub lock_dir {
+    my ( $dir, $client ) = @_;
+    my $lock = "$dir/.lock";
+    open( my $fh, '>>', $lock ) or die "Cannot open $lock: $!\n";
+
+    my $until = Time::HiRes::time() + $LOCK_WAIT;
+    while ( !flock( $fh, LOCK_EX | LOCK_NB ) ) {
+        die "Cannot lock $lock: $!\n" unless $!{EWOULDBLOCK};
+        die "Another registration or release held $lock for all of the $LOCK_WAIT seconds that this one waited, so it is probably stuck.  ps -o pid,etime,args -C $client shows it.\n"
+          if Time::HiRes::time() >= $until;
+        Time::HiRes::sleep(0.2);
+    }
+    return $fh;
+}
+
+1;

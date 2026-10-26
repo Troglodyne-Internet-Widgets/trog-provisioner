@@ -102,6 +102,24 @@ subtest 'guest_address: the guest that runs a domain, and its address' => sub {
     is_deeply( [ Provisioner::IPPool::guest_address('none.test') ],    [ 'none.test', undef ],       'and a guest with no address, which the caller names' );
 };
 
+subtest 'reach_address: the guests reach a guest through its tunnel when it has one' => sub {
+    my %held;
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( holdings => sub { return {%held} } );
+
+    %held = ( guests => '192.0.2.5' );
+    is( Provisioner::IPPool::reach_address('relay.test'), '192.0.2.5', 'a guest on the LAN, at its address there' );
+
+    %held = ( guests => '192.0.2.5', vpnclients => '198.51.100.5' );
+    is( Provisioner::IPPool::reach_address('relay.test'), '198.51.100.5', 'a guest that is a client of the VPN, at its address there' );
+
+    %held = ( vpnclients => '198.51.100.5', others => '203.0.113.5' );
+    like( exception { Provisioner::IPPool::reach_address('relay.test') }, qr/an[ ]address[ ]in[ ]each[ ]of[ ]others,[ ]vpnclients/, 'two tunnels are a question it does not guess at' );
+
+    %held = ();
+    like( exception { Provisioner::IPPool::reach_address('relay.test') }, qr/relay[.]test[ ]has[ ]no[ ]address/, 'and a guest with no address stops the build' );
+};
+
 subtest 'assign: reservations are not handed out' => sub {
     fresh_db();
     my $pool = { addresses => '10.9.9.10 10.9.9.11' };
