@@ -179,14 +179,18 @@ its outbound mail.
 
     somedomain:
         mail:
-            mailrelay: relay.somedomain
+            relay:
+                host: relay.somedomain
 
-C<mailrelay> names a guest that runs L<Provisioner::Recipe::mailrelay>.  Then
+When C<relay.host> is a guest of this installation, it must run
+L<Provisioner::Recipe::mailrelay>, and the build stops when it does not.  Then
 every message with a sender in this domain goes out through that guest, and not
 straight to the internet.  This is for a guest that cannot send on port 25
-itself, such as one behind an ISP that blocks it.  It is the opposite of
-C<relay>, which names a host outside that relays for it, and the build stops
-when both are set.
+itself, such as one behind an ISP that blocks it.  The relay sets its own
+port, so C<relay.port> and C<relay.to> are refused there, because they are for
+a host outside.  So the configuration of the relay guest decides how every
+domain that names it sends its mail: a guest that gains or loses C<mailrelay>
+changes them all.
 
 When this domain is built, the mail relay issues it a password for a login of
 its own, as a grant, and relays to this guest the mail of the domain that comes
@@ -196,6 +200,10 @@ the C<sasl_passwd> table of the domain, which postfix uses for a sender in this
 domain.  It sends to the relay only over TLS, and the relay takes from this
 login only a sender in this domain.  C<bin/destroy> removes the login on the
 mail relay.
+
+Every message from the internet comes to this guest from the address of the
+relay, so the jails of this recipe never ban that address.  The relay bans the
+real client itself, on its own port 25.
 
 A message with an empty sender, such as a bounce that this guest makes, is not
 in the domain, so it does not go through the mail relay.
@@ -283,12 +291,6 @@ sub args {
                 },
             },
 
-            mailrelay => {
-                type        => 'string',
-                format      => 'hostname',
-                description => 'The guest that runs the mailrelay recipe, which sends the mail of this domain out, and takes it in.  See "Sending through a mail relay".',
-            },
-
             ipv6 => { type => 'boolean', default => 1 },
         },
     );
@@ -350,15 +352,30 @@ sub sends_mail {
 
 =head2 @grants = $recipe->grants($domain, %opts)
 
-With C<mailrelay>, the login of C<$domain> on that guest, as C<grants> in
-L<Provisioner::Recipe> says.  See L</Sending through a mail relay>.
+When C<relay.host> is a mail relay of this installation, the login of
+C<$domain> on that guest, as C<grants> in L<Provisioner::Recipe> says.  See
+L</Sending through a mail relay>.
 
 =cut
 
+# The guest of this installation that relay.host names, which runs mailrelay,
+# or nothing when relay.host is a host outside.
+my sub mailrelay_of ( $domain, %opts ) {
+    my $host = ( $opts{relay} // {} )->{host};
+    return unless Provisioner::Cookbook->configures($host);
+
+    die "mail: $domain relays through $host, which is a guest of this installation but runs no mailrelay.  Give $host the mailrelay recipe, or relay through a host outside.\n"
+      unless exists Provisioner::Cookbook->domain_config($host)->{mailrelay};
+    die "mail: $domain relays through $host, which runs mailrelay and sets its own port, so relay.port and relay.to are for a host outside.  Remove them.\n"
+      if defined $opts{relay}{port} || @{ $opts{relay}{to} // [] };
+    return $host;
+}
+
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    return () unless defined $opts{mailrelay};
-    return { recipe => 'mailrelay', guest => $opts{mailrelay}, client => $domain };
+    my $relay = mailrelay_of( $domain, %opts );
+    return () unless defined $relay;
+    return { recipe => 'mailrelay', guest => $relay, client => $domain };
 }
 
 =head2 %terms = $recipe->grant_terms($grant, %opts)
@@ -414,6 +431,7 @@ sub template_files {
         'mail.junk.sieve'                => 'junk.sieve',
         'mail.mailrelay_tls_policy.tt'   => 'mailrelay_tls_policy',
         'mail.mailrelay_ufw.tt'          => 'mail_mailrelay_ufw.conf',
+        'mail.mailrelay_jail.tt'         => 'mail_mailrelay.jail',
     );
 }
 
@@ -441,14 +459,16 @@ sub enrich {
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
     $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
 
+    # The templates treat relay.host as a host outside unless mailrelay is set.
+    $opts{mailrelay} = mailrelay_of( $opts{domain}, %opts );
     if ( defined $opts{mailrelay} ) {
-        die "mail: $opts{domain} names both a relay and a mailrelay, and they disagree about where its mail goes.  Set one.\n" if $opts{relay}{host};
         my $mailrelay = Provisioner::Cookbook->load('mailrelay');
         $opts{mailrelay_login} = {
-            address  => Provisioner::IPPool::reach_address( $opts{mailrelay} ),
+            address  => Provisioner::IPPool::reachable_address( $opts{mailrelay} ),
             port     => $mailrelay->relay_port_of( $opts{mailrelay} ),
             password => $mailrelay->password_path( $opts{domain} ),
         };
+        $opts{relay_jails} = [ sort keys %{ { $self->jails(%opts) } } ];
     }
 
     return %opts;

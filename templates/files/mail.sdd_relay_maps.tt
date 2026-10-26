@@ -1,4 +1,4 @@
-[% IF relay.host %]
+[% IF relay.host && !mailrelay %]
 [% FOR user IN names.keys().sort() %]
 [% user %]@[% domain %]    [[% relay.host %]]:[% relay.port %]
 [%- END %]

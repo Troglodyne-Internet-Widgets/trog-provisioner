@@ -23,12 +23,13 @@ use parent qw{Provisioner::Recipe};
 
     internal.somedomain:
         mail:
-            mailrelay: relay.somedomain
+            relay:
+                host: relay.somedomain
 
 =head2 DESCRIPTION
 
 Makes this guest the mail server, for the internet, of the guests whose
-C<mail> names it as their C<mailrelay>.  This is for a guest that cannot send
+C<mail.relay.host> names it.  This is for a guest that cannot send
 or take mail on port 25 itself, such as one behind an ISP that blocks it.  The
 reverse DNS and the SPF of the domain can then name this guest.  See
 L<Provisioner::Recipe::mail/Sending through a mail relay>.
@@ -150,7 +151,7 @@ sub jails {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Adds C<relay_address>, where the guests reach this guest, as C<reach_address>
+Adds C<relay_address>, where the guests reach this guest, as C<reachable_address>
 in L<Provisioner::IPPool> gives it, and where the relay listens.  Adds
 C<helo_name>, which is C<helo_name_of> in L<Provisioner::Cookbook>.
 
@@ -158,7 +159,7 @@ C<helo_name>, which is C<helo_name_of> in L<Provisioner::Cookbook>.
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    $opts{relay_address} = Provisioner::IPPool::reach_address( $opts{domain} );
+    $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{domain} );
     $opts{helo_name}     = Provisioner::Cookbook->helo_name_of( $opts{domain} );
     return %opts;
 }

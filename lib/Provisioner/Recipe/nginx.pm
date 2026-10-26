@@ -145,7 +145,7 @@ and the relay drops the address.  See L<Provisioner::Recipe::nginxrelay/Bans>.
 The relay also issues its host key, which this guest pins in
 F</etc/fail2ban/nginxrelay/DOMAIN.known_hosts>, so a ban never goes to a guest
 that only claims to be the relay.  The jails never ban the address of the
-relay.  That address is the one in L<Provisioner::IPPool/reach_address>, and it
+relay.  That address is the one in L<Provisioner::IPPool/reachable_address>, and it
 goes into C<ignoreip> beside loopback.
 
 The jails of other recipes still ban through ufw only, because what they read
@@ -429,7 +429,7 @@ sub enrich {
           unless @{ $opts{proxy_from} };
 
         if ( defined $opts{relay} ) {
-            $opts{relay_address} = Provisioner::IPPool::reach_address( $opts{relay} );
+            $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{relay} );
             $opts{relay_jails}   = [ sort keys %{ { $self->jails(%opts) } } ];
         }
     }

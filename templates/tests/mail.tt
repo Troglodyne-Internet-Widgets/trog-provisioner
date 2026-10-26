@@ -373,5 +373,12 @@ subtest 'the mail of this domain goes out through the mail relay' => sub {
     }
     like( $log, qr/to=<relay-selftest\@\Q[% mailrelay %]\E>, relay=\Q[% mailrelay_login.address %]\E\[[^\]]*\]:[% mailrelay_login.port %],.* status=sent/, 'a message reaches the relay, which takes it' ) or diag $log;
 };
+
+subtest 'the jails of mail never ban the mail relay' => sub {
+    foreach my $jail (qw{[% relay_jails.join(' ') %]}) {
+        my $ignored = `fail2ban-client get $jail ignoreip 2>&1`;
+        like( $ignored, qr/\Q[% mailrelay_login.address %]\E/, "$jail ignores the address of the relay, which every message from the internet comes from" ) or diag $ignored;
+    }
+};
 [% END -%]
 done_testing();

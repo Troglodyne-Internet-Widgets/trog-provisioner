@@ -23,7 +23,7 @@ BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_fi
 =head2 DESCRIPTION
 
 Runs as root on a guest that runs L<Provisioner::Recipe::mailrelay>, for
-another guest whose C<mail> names this one as its C<mailrelay>.
+another guest whose C<mail.relay.host> names this one.
 
 C<register> lets the guest of DOMAIN send its mail out through this guest.  It
 makes a new password for the login DOMAIN, keeps only its hash, and prints the

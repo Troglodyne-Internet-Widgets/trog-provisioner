@@ -1280,6 +1280,21 @@ sub machine_of {
     return $class->host_of( $domain, $conf ) // $domain;
 }
 
+=head2 configures($name, $conf)
+
+True when the configuration has a domain named C<$name>, so that C<$name> is a
+guest of this installation and not a host outside it.  C<$conf> is as for
+C<host_of>.
+
+=cut
+
+sub configures {
+    my ( $class, $name, $conf ) = @_;
+    return 0 if !defined $name || $name =~ m/\A_/;
+    $conf //= $class->configuration();
+    return exists $conf->{$name} ? 1 : 0;
+}
+
 =head2 helo_name_of($domain, $conf)
 
 Returns the name that the machine of C<$domain> announces when it sends mail:
