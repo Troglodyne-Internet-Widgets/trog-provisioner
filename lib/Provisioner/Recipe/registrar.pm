@@ -348,7 +348,7 @@ of the guest that C<$domain> is layered onto, from L<Provisioner::Cookbook>.
 =cut
 
 sub configuration_of ( $self, $domain ) {
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $server = Provisioner::Cookbook->machine_of($domain);
     my $name   = $self->recipe_name;
     return Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
 }
@@ -524,7 +524,7 @@ answers from it.
 sub authority_of {
     my ( $self, $domain ) = @_;
 
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $server = Provisioner::Cookbook->machine_of($domain);
     my @where  = map { Provisioner::Cookbook->domain_config($_) } uniq( $domain, $server );
 
     foreach my $conf (@where) {
@@ -546,7 +546,7 @@ C<authority_of> says.
 sub serves_itself {
     my ( $self, $domain ) = @_;
 
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $server = Provisioner::Cookbook->machine_of($domain);
     my $holder = $self->authority_of($domain);
 
     return ( defined $holder && $holder eq $server ) ? 1 : 0;
@@ -585,7 +585,7 @@ server of C<$domain>, and undef otherwise.
 sub delegated_to {
     my ( $self, $domain ) = @_;
 
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $server = Provisioner::Cookbook->machine_of($domain);
     my $holder = $self->authority_of($domain);
 
     return ( defined $holder && $holder ne $server ) ? $holder : undef;
@@ -748,7 +748,7 @@ sub enrich {
     my ( $self, %opts ) = @_;
 
     my $domain = $opts{domain};
-    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $server = Provisioner::Cookbook->machine_of($domain);
     my $holder = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->authority_of($domain);
     delete $opts{authority};
     unless ( defined $holder ) {

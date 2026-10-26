@@ -233,7 +233,7 @@ caller can say what needed it.
 
 sub guest_address {
     my ($domain) = @_;
-    my $guest = Provisioner::Cookbook->host_of($domain) // $domain;
+    my $guest = Provisioner::Cookbook->machine_of($domain);
     return ( $guest, assignments()->{$guest} );
 }
 

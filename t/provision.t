@@ -13,7 +13,7 @@ t/provision.t - bin/provision: the order it does things in, and the XML it write
 =cut
 
 use Test::More;
-use Capture::Tiny qw{capture_stdout};
+use Capture::Tiny qw{capture capture_stdout};
 use Test::Fatal   qw{exception};
 use IPC::Run3();
 use File::Temp qw{tempdir};
@@ -1261,6 +1261,81 @@ subtest 'a guest that is not a runner, or one that asked for nothing' => sub {
     is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {} ), 0, 'a runner with the default access: still nothing' );
 
     is( $touched, 0, 'neither of them reached a hypervisor' );
+};
+
+subtest 'the reverse DNS of a guest is set to the name its mail announces' => sub {
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => tempdir( CLEANUP => 1 ) );
+
+    my ( %config, %host );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return { %{ $config{$domain} // {} } } } );
+    $cookbook->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
+
+    my ( @asked, $answer );
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( set_reverse_dns => sub { my ( undef, @args ) = @_; push @asked, \@args; return $answer->() } );
+
+    # What it printed, what it warned, and what it returned.
+    my $point = sub ( $address, $domain = 'mx.test.test' ) {
+        my ( $out, $err, $result ) = capture( sub { Trog::Bin::Provisioner::point_reverse_dns( $domain, $address ) } );
+        return ( $out, $err, $result );
+    };
+
+    %config = ( 'mx.test.test' => { nginx => {} } );
+    $answer = sub { return '9.9.9.9' };
+    is( ( $point->('9.9.9.9') )[2], 0, 'a guest that sends no mail gets no reverse DNS' );
+    is( scalar @asked,              0, 'and its hypervisor is not asked' );
+
+    %config = ( 'mx.test.test' => { mail => {}, nginx => {}, _shared => {} } );
+    my ( $out, $err, $result ) = $point->('9.9.9.9');
+    is( $result, 1, 'a mail guest gets it' );
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'set to the name that its postfix announces' );
+    like( $out, qr/\QThe reverse DNS of 9.9.9.9 is now mail.mx.test.test\E/, 'and it says so' );
+
+    @asked  = ();
+    %config = ( 'mx.test.test' => { mail => {}, edge => {} } );
+    ( $out, $err, $result ) = $point->('9.9.9.9');
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'a guest that runs mail and edge announces one name' );
+
+    # A domain built onto a host that runs no mail of its own.
+    @asked  = ();
+    %host   = ( 'tenant.test.test' => 'mx.test.test' );
+    %config = ( 'mx.test.test'     => { nginx => {} }, 'tenant.test.test' => { mail => {} } );
+    ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
+    is( $result, 1, 'a tenant that sends mail gets it' );
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mx.test.test' ] ], 'on the guest of its host, set to the name of that guest' );
+
+    @asked = ();
+    $config{'mx.test.test'}{mail} = {};
+    ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'and to the mail name of the host, when the host runs mail' );
+    %host = ();
+
+    @asked = ();
+    my $edge = Test::MockModule->new('Provisioner::Recipe::edge');
+    $edge->redefine( helo_name => sub { return 'other.test.test' } );
+    %config = ( 'mx.test.test' => { mail => {}, edge => {} } );
+    ( $out, $err, $result ) = $point->('9.9.9.9');
+    is( $result,       0, 'a guest whose recipes announce two names gets neither' );
+    is( scalar @asked, 0, 'and its hypervisor is not asked' );
+    like( $err, qr/\Qannounces other.test.test and mail.mx.test.test\E/, 'and it names both' );
+    $edge->unmock('helo_name');
+
+    %config = ( 'mx.test.test' => { edge => {} } );
+    $answer = sub { die "Linode refused put-ip: 403 not authorized\n" };
+    ( $out, $err, $result ) = $point->('9.9.9.9');
+    is( $result, 0, 'a refusal of the hypervisor does not stop the run' );
+    like( $err, qr/\QCould not set the reverse DNS of mx.test.test to mx.test.test\E/, 'and it says what it could not set' );
+    like( $err, qr/\Q403 not authorized\E/,                                            'and what the hypervisor said' );
+
+    $answer = sub { return };
+    ( $out, $err, $result ) = $point->('9.9.9.9');
+    is( $result, 0, 'a hypervisor that offers no way sets nothing' );
+    like( $out, qr/\QSet the reverse DNS of 9.9.9.9 to mx.test.test\E/, 'and the operator is told what to set, for a public address' );
+
+    ( $out, $err, $result ) = $point->('192.168.1.20');
+    is( $out . $err, q{}, 'but not for a private one, which no receiver sees' );
 };
 
 # The generator places the guest, so it has to place it in the fleet that

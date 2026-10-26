@@ -254,6 +254,13 @@ YAML
     Provisioner::Cookbook->forget();
 };
 
+subtest 'machine_of names the guest that runs a domain' => sub {
+    my $conf = { _shared => { 'host.test' => ['tenant.test'] } };
+    is( Provisioner::Cookbook->machine_of( 'tenant.test', $conf ), 'host.test',  'a tenant runs on its host' );
+    is( Provisioner::Cookbook->machine_of( 'host.test',   $conf ), 'host.test',  'the host runs on itself' );
+    is( Provisioner::Cookbook->machine_of( 'alone.test',  $conf ), 'alone.test', 'and so does a domain with a machine of its own' );
+};
+
 subtest 'the data source, and a domain inside it' => sub {
     my $conf = {
         _base       => { _global => { data_source => '/opt/data', install_dir => '/opt/domains' } },

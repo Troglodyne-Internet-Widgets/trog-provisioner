@@ -76,6 +76,7 @@ our $BUILD_TIMEOUT  = 900;
 our $IMAGE_TIMEOUT  = 3600;
 our $BUSY_TIMEOUT   = 300;
 our $DELETE_TIMEOUT = 300;
+our $RDNS_TIMEOUT   = 600;
 our $POLL           = 5;
 
 =head2 config_keys
@@ -92,9 +93,10 @@ L<Trog::HV/backend_for(%opts)>.
 
 Returns L<Linode::API> and the version of it that this backend needs, which
 L<Trog::HV/$module = $hv-E<gt>require_client> loads when a client is first
-built.  0.002 is the first release that reads a path Linode writes a slash into as a
-path rather than as one escaped segment, without which every call about a type
-is a 404.
+built.  0.003 is the first release that has a rule for the C<ip> format, without
+which every call of L</$address = $hv-E<gt>set_reverse_dns($domain, $name)> warns.
+0.002 is the first that reads a path Linode writes a slash into as a path rather
+than as one escaped segment, without which every call about a type is a 404.
 
 =cut
 
@@ -103,7 +105,7 @@ sub config_keys {
 }
 sub marker        { return 'linode_token' }
 sub size_key      { return 'linode_type' }
-sub client_module { return ( 'Linode::API', '0.002' ) }
+sub client_module { return ( 'Linode::API', '0.003' ) }
 
 =head2 build(%opts)
 
@@ -476,6 +478,30 @@ sub guest_ssh_ip {
     return $public // die "The guest '$name' has no public IPv4 address on " . $self->describe . "\n";
 }
 
+=head2 $address = $hv->set_reverse_dns($domain, $name)
+
+Points the reverse DNS of the public IPv4 address of the guest at C<$name>, and
+returns the address.  The token needs C<ips:read_write>.
+
+Linode takes C<$name> only when it resolves to the address.  The name can be
+one that the build of the guest published a moment ago, which the resolver of
+Linode has not seen yet.  So a refusal about C<rdns> is asked again until
+C<$RDNS_TIMEOUT>.  Dies with what Linode said after that, or at once on any
+other refusal.
+
+=cut
+
+sub set_reverse_dns ( $self, $domain, $name ) {
+    my $address  = $self->guest_ssh_ip($domain);
+    my $deadline = time + $RDNS_TIMEOUT;
+
+    while ( !eval { call( $self, 'put-ip', { address => $address }, json => { rdns => $name } ); 1 } ) {
+        die $@ if $@ !~ m/\ALinode[ ]refused[ ]put-ip:[ ]400[ ].*rdns/i || time >= $deadline;
+        sleep $POLL;
+    }
+    return $address;
+}
+
 # Linode takes the payload base64 encoded, for its metadata service to hand to
 # cloud-init, and refuses one over 64KB before encoding.
 my sub metadata ($user_data) {
@@ -792,7 +818,7 @@ sub check_reachable {
     return $self->verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" );
 $@
 The token is $self->{linode_token} in the secret store.  It needs read_write on
-linodes and images, and it may have expired: a personal access token is minted
+linodes, images and ips, and it may have expired: a personal access token is minted
 with an expiry, in the Cloud Manager under API Tokens.
 FIX
 }

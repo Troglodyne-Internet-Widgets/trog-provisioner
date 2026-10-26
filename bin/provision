@@ -24,6 +24,7 @@ use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
+use Net::IP();
 use Provisioner::IPPool();
 use YAML::XS();
 use List::Util   qw{uniq};
@@ -178,7 +179,9 @@ generation is what chooses the hypervisor, and the address, the bridge and the
 transfer address all follow from that choice.  Then it reads
 F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> in the domain directory,
 chooses the hypervisor, and asks the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
-and waits for cloud-init and the makefile to finish.
+and waits for cloud-init and the makefile to finish.  For a guest that sends
+mail, it then sets the reverse DNS of its address, or says who must, as
+L</point_reverse_dns($domain, $address)> describes.
 
 When C<_shared> in the configuration lists DOMAIN under another domain, DOMAIN
 goes onto the guest of that domain.  F<bin/new_config> writes that domain into
@@ -455,6 +458,55 @@ sub authorize_runner_key {
 
     print "$domain now has $grant{access} on: " . join( ', ', sort keys %$hypervisors ) . "\n";
     return 1;
+}
+
+=head2 point_reverse_dns($domain, $address)
+
+Sets the reverse DNS of the guest of C<$domain> to the C<helo_name> of its
+recipes, through L<Trog::HV/$address = $hv-E<gt>set_reverse_dns($domain, $name)>.
+The guest is C<machine_of> the domain in L<Provisioner::Cookbook>.  So a domain
+built onto another domain's guest sets the reverse DNS of that guest, to the
+same name that every domain on it gives.
+When the hypervisor offers no way and C<$address> is public, it prints what the
+operator must set, and where.  A private address gets neither, because no
+receiver of mail connects from it.
+
+A guest that sends no mail gets nothing.  A guest whose recipes announce two
+names gets a warning, because an address has one reverse record.  So does a
+refusal of the hypervisor, because the guest is built and works, and only its
+mail out suffers.  Returns 1 when the reverse DNS was set.
+
+=cut
+
+sub point_reverse_dns {
+    my ( $domain, $address ) = @_;
+
+    my $config = eval { Provisioner::Cookbook->domain_config($domain) } // {};
+    my @names  = uniq grep { defined } map { scalar Provisioner::Cookbook->load($_)->helo_name($domain) } grep { Provisioner::Cookbook->has($_) } sort keys %$config;
+    return 0 unless @names;
+
+    if ( @names > 1 ) {
+        warn "The mail of $domain announces " . join( ' and ', @names ) . ", and an address has one reverse DNS, so it is left as it is.\n";
+        return 0;
+    }
+    my ($name) = @names;
+
+    my $hv  = Trog::HV->new();
+    my $set = eval { $hv->set_reverse_dns( Provisioner::Cookbook->machine_of($domain), $name ) };
+    if ( my $error = $@ ) {
+        warn "Could not set the reverse DNS of $domain to $name, so receivers can reject its mail.\n$error";
+        return 0;
+    }
+    if ($set) {
+        print "The reverse DNS of $set is now $name\n";
+        return 1;
+    }
+
+    my $ip = Net::IP->new($address);
+    return 0 unless $ip && $ip->iptype eq 'PUBLIC';
+
+    print "Set the reverse DNS of $address to $name where the address is held.  " . $hv->describe . " offers no way to do it from here, and until it is set, receivers can reject the mail of $domain.\n";
+    return 0;
 }
 
 # What to do about a rebuild that destroys the guest, as the
@@ -809,6 +861,8 @@ sub build_guest {
             $guest->wait_for_makefile($domain)
               or die "The build for $domain failed; read /var/log/$domain.setup.log on the guest\n";
 
+            # After the build, because the build publishes the name.
+            point_reverse_dns( $domain, $ip );
         }
     );
 

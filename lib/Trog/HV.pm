@@ -138,6 +138,9 @@ on the disks of a guest after it is gone.  A backend with nothing to do for one
 of them does nothing.  So the scripts above call all three, and do not ask first
 which kind of hypervisor they have.
 
+=item * C<set_reverse_dns>, if the hypervisor holds public addresses and lets
+us set their reverse records.  See L</$address = $hv-E<gt>set_reverse_dns($domain, $name)>.
+
 =item * C<builds_by_api> and C<manages_addresses>.  L<Provisioner::Recipe::ubuntu>,
 F<bin/new_config> and L<Provisioner::IPPool> branch on these, not on a class
 name.  They are only for where the two kinds take different paths: a guest
@@ -749,6 +752,21 @@ names themselves, so the name of a copy stays the business of the backend.
 =cut
 
 sub backup_volumes { return () }
+
+=head2 $address = $hv->set_reverse_dns($domain, $name)
+
+Points the reverse DNS of the public address of the guest of C<$domain> at
+C<$name>, and returns that address.  A receiver of mail rejects a client whose
+address does not answer to the name that the client announces.  Only the holder
+of the address can set its reverse record.
+
+Returns nothing here, which means that this hypervisor offers no way.
+F<bin/provision> then tells the operator to set it by hand.  A backend that
+offers one overrides this, and dies when its hypervisor refuses.
+
+=cut
+
+sub set_reverse_dns { return }
 
 =head1 PLACEMENT
 

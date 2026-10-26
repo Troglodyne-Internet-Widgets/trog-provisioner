@@ -38,6 +38,7 @@ local $Trog::HV::Linode::BUILD_TIMEOUT  = 2;
 local $Trog::HV::Linode::IMAGE_TIMEOUT  = 2;
 local $Trog::HV::Linode::BUSY_TIMEOUT   = 1;
 local $Trog::HV::Linode::DELETE_TIMEOUT = 1;
+local $Trog::HV::Linode::RDNS_TIMEOUT   = 1;
 
 # A stand-in for Linode that keeps state, so a wait for a state change has one
 # to wait for, and records every request, so the assertions are about what was
@@ -241,6 +242,18 @@ $FAKE->log->level('fatal');
 
     $r->get('/v4/linode/instances/:id/disks')->to( cb => sub ($c) { $asked->($c); $page->( $c, @{ $STATE{disks}{ $c->param('id') } // [] } ) } );
     $r->get('/v4/linode/instances/:id/volumes')->to( cb => sub ($c) { $asked->($c); $page->( $c, @{ $STATE{volumes}{ $c->param('id') } // [] } ) } );
+
+    # Linode looks the name up before it takes it.  unresolved is how many
+    # more times the lookup fails, and refuse_rdns refuses for another reason.
+    $r->put('/v4/networking/ips/*address')->to(
+        cb => sub ($c) {
+            $asked->($c);
+            return $c->render( status => 403, json => { errors => [ { reason => 'Your OAuth token is not authorized to use this endpoint.' } ] } ) if $STATE{refuse_rdns};
+            return $c->render( status => 400, json => { errors => [ { field  => 'rdns', reason => 'Unable to look up the name.' } ] } )            if $STATE{unresolved} && $STATE{unresolved}--;
+            $STATE{rdns}{ $c->param('address') } = $c->req->json->{rdns};
+            $c->render( json => { address => $c->param('address'), rdns => $c->req->json->{rdns} } );
+        }
+    );
 }
 
 my $mock = Test::MockModule->new('Trog::HV::Linode');
@@ -495,6 +508,34 @@ subtest 'provision_guest' => sub {
     $out = Capture::Tiny::capture_stdout( sub { $ip = linode_hv()->provision_guest( config_for('new.test.test'), { 'user-data' => "#cloud-config\n" } ) } );
     is( $ip, '203.0.113.20', 'a new guest comes back at its public address' );
     like( $out, qr/Asking[ ]Linode[ ]in[ ]us-east[ ]for[ ]new\.test\.test/, 'saying where it was asked for' );
+};
+
+subtest 'set_reverse_dns' => sub {
+    reset_linode();
+    add_linode( label => 'mail.test.test', ipv4 => [ '192.168.139.4', '203.0.113.30' ] );
+    my $hv = linode_hv();
+
+    is( $hv->set_reverse_dns( 'mail.test.test', 'mail.mail.test.test' ), '203.0.113.30', 'it answers the address that it set' );
+    is_deeply( $STATE{rdns}, { '203.0.113.30' => 'mail.mail.test.test' }, 'the public address, not the private one, now names the guest' );
+
+    @ASKED = ();
+    $STATE{unresolved} = 2;
+    {
+        # What this counts is the asking, not the waiting, as for a busy Linode.
+        local $Trog::HV::Linode::RDNS_TIMEOUT = 30;
+        is( $hv->set_reverse_dns( 'mail.test.test', 'mail.mail.test.test' ), '203.0.113.30', 'a name that Linode cannot resolve yet is asked again' );
+    }
+    is( scalar asked_to( PUT => '/v4/networking/ips/203.0.113.30' ), 3, 'twice refused, and the third time taken' );
+
+    $STATE{unresolved} = 1_000_000;
+    like( exception { $hv->set_reverse_dns( 'mail.test.test', 'mail.mail.test.test' ) }, qr/put-ip:[ ]400[ ]rdns:[ ]Unable/, 'and one still unresolved after RDNS_TIMEOUT is said' );
+    $STATE{unresolved} = 0;
+
+    @ASKED = ();
+    $STATE{refuse_rdns} = 1;
+    like( exception { $hv->set_reverse_dns( 'mail.test.test', 'mail.mail.test.test' ) }, qr/put-ip:[ ]403/, 'another refusal is said' );
+    is( scalar asked_to( PUT => '/v4/networking/ips/203.0.113.30' ), 1, 'at once, and not asked again' );
+    $STATE{refuse_rdns} = 0;
 };
 
 subtest 'annihilate_domain' => sub {

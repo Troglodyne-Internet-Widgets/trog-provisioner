@@ -5,7 +5,11 @@
 # These comments do not go into the generated main.cf.  configd joins a list
 # parameter such as inet_interfaces or mydestination with the one of the
 # package, so this leaves them as the package sets them.
-myhostname = [% domain %]
+myhostname = [% helo_name %]
+
+# IPv4 only.  bin/provision sets the reverse DNS of the IPv4 address alone, and
+# a receiver rejects a client whose address has no reverse DNS of its own.
+inet_protocols = ipv4
 
 # dovecot checks the logins of the guests, at the socket that it makes in the
 # spool of postfix.

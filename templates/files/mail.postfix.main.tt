@@ -11,7 +11,6 @@
 # These comments do not go into the generated main.cf.  After a merge, the
 # setting under a comment can be a different one.
 mydomain = [% domain %]
-myhostname = mail.[% domain %]
 myorigin = $mydomain
 masquerade_domains = [% domain %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
 

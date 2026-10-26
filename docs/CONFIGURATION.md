@@ -777,8 +777,8 @@ One, carried over from the old documentation and still true:
   `configd` recipe closes most of this: postfix, opendkim, opendmarc and redis
   now get a fragment directory each, so `mail` and `redis` write a file named
   for the domain instead of rewriting the service's config. What is left is the
-  settings that genuinely cannot have two values -- postfix's `myhostname` and
-  its TLS certificate, opendmarc's `AuthservID` -- and the postfix map files,
+  settings that genuinely cannot have two values -- postfix's TLS certificate
+  and opendmarc's `AuthservID` -- and the postfix map files,
   which are still one per guest written by whichever domain provisioned last.
   Those are visible now (`configd status postfix` lists the fragments and who
   wrote them) rather than silent.
