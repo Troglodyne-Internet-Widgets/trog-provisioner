@@ -14,7 +14,7 @@
 # where this file does not set a parameter.
 
 # One name for the machine, whatever domains it hosts, because the reverse DNS
-# of its address gives one name.  Provisioner::Recipe::mail has helo_name.
+# of its address gives one name.  helo_name_of in Provisioner::Cookbook has it.
 myhostname = [% helo_name %]
 [% UNLESS ipv6 %]
 inet_protocols = ipv4

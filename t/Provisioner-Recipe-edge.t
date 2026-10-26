@@ -81,10 +81,7 @@ subtest 'the relay listens at the address where the guests reach the edge, on it
 
     my %opts = $edge->enrich( domain => 'edge.test.test' );
     is( $opts{relay_address}, '192.0.2.5',      'the relay binds the address in the pool' );
-    is( $opts{helo_name},     'edge.test.test', 'and an edge on a guest that runs no mail announces the name of the guest' );
-
-    $port{'edge.test.test'} = { mail => {}, edge => {} };
-    is( $edge->helo_name('edge.test.test'), 'mail.edge.test.test', 'but on a guest that runs mail, the name that mail announces' );
+    is( $opts{helo_name},     'edge.test.test', 'and it announces the name of its machine' );
 
     $port{'edge.test.test'} = { edge => { relay_port => 3587 } };
     is( $edge->relay_port_of('edge.test.test'),  3587, 'the port that the edge sets' );

@@ -462,19 +462,18 @@ sub authorize_runner_key {
 
 =head2 point_reverse_dns($domain, $address)
 
-Sets the reverse DNS of the guest of C<$domain> to the C<helo_name> of its
-recipes, through L<Trog::HV/$address = $hv-E<gt>set_reverse_dns($domain, $name)>.
-The guest is C<machine_of> the domain in L<Provisioner::Cookbook>.  So a domain
-built onto another domain's guest sets the reverse DNS of that guest, to the
-same name that every domain on it gives.
+When a recipe of C<$domain> C<sends_mail>, sets the reverse DNS of the guest to
+C<helo_name_of> the domain in L<Provisioner::Cookbook>, through
+L<Trog::HV/$address = $hv-E<gt>set_reverse_dns($domain, $name)>.  The guest is
+C<machine_of> the domain.  So a domain built onto another domain's guest sets
+the reverse DNS of that guest, to the name of that guest.
 When the hypervisor offers no way and C<$address> is public, it prints what the
 operator must set, and where.  A private address gets neither, because no
 receiver of mail connects from it.
 
-A guest that sends no mail gets nothing.  A guest whose recipes announce two
-names gets a warning, because an address has one reverse record.  So does a
-refusal of the hypervisor, because the guest is built and works, and only its
-mail out suffers.  Returns 1 when the reverse DNS was set.
+A guest that sends no mail gets nothing.  A refusal of the hypervisor gets a
+warning, because the guest is built and works, and only its mail out suffers.
+Returns 1 when the reverse DNS was set.
 
 =cut
 
@@ -482,14 +481,8 @@ sub point_reverse_dns {
     my ( $domain, $address ) = @_;
 
     my $config = eval { Provisioner::Cookbook->domain_config($domain) } // {};
-    my @names  = uniq grep { defined } map { scalar Provisioner::Cookbook->load($_)->helo_name($domain) } grep { Provisioner::Cookbook->has($_) } sort keys %$config;
-    return 0 unless @names;
-
-    if ( @names > 1 ) {
-        warn "The mail of $domain announces " . join( ' and ', @names ) . ", and an address has one reverse DNS, so it is left as it is.\n";
-        return 0;
-    }
-    my ($name) = @names;
+    return 0 unless List::Util::any { Provisioner::Cookbook->load($_)->sends_mail } grep { Provisioner::Cookbook->has($_) } keys %$config;
+    my $name = Provisioner::Cookbook->helo_name_of($domain);
 
     my $hv  = Trog::HV->new();
     my $set = eval { $hv->set_reverse_dns( Provisioner::Cookbook->machine_of($domain), $name ) };
