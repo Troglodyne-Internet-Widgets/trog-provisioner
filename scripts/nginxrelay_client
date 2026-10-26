@@ -9,9 +9,7 @@ use warnings FATAL => 'all';
 
 use Cwd            ();
 use File::Basename ();
-use File::Temp     ();
 use List::Util     qw{any};
-use MIME::Base64   ();
 
 BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' ) }
 
@@ -38,8 +36,9 @@ Then it makes a new key for DOMAIN, and prints the private half in base64 on
 one line, after all of that worked.  The guest of DOMAIN pushes its bans to
 this guest with that key.  The public half goes into
 F<authorized_keys.root>, which sshd reads beside the keys of root.  It can run
-only F<nginxrelay_ban> for DOMAIN, and only from the address of TLS_UPSTREAM,
-which is the address of the guest.  See F<scripts/nginxrelay_ban>.
+only F<relay_ban> for DOMAIN and the set C<nginxrelay-bans>, and only from the
+address of TLS_UPSTREAM, which is the address of the guest.  See
+F<scripts/relay_ban>.
 
 C<release> removes everything that DOMAIN registered, its key included.  Any of
 it can be gone already.
@@ -58,21 +57,12 @@ my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM
 
 our $RELAY_D = '/etc/nginx/nginxrelay.d';
 
-# Beside this script, as every script of the provisioner is.
-our $RELAY_BAN = File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/nginxrelay_ban';
+our $BAN_SET = 'nginxrelay-bans';
 
-# The files of $domain: the map of each port, and the public half of its key.
+# The files of $domain: the map of each port.  relay_files keeps its key.
 sub files_of {
     my ($domain) = @_;
-    return ( tls => "$RELAY_D/$domain.tls.map", http => "$RELAY_D/$domain.http.map", key => "$RELAY_D/$domain.ban.pub" );
-}
-
-# The keys of every domain, in the one file that sshd reads for root.  Only a
-# line that restricts its key, so that a bare key never logs in as root.
-sub write_authorized_keys {
-    my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, Trog::RelayFiles::read_file($_) // q{} ) } sort glob("$RELAY_D/*.ban.pub");
-    Trog::RelayFiles::write_file( "$RELAY_D/authorized_keys.root", join( q{}, @lines ) );
-    return;
+    return ( tls => "$RELAY_D/$domain.tls.map", http => "$RELAY_D/$domain.http.map" );
 }
 
 sub lock_relay {
@@ -106,29 +96,22 @@ sub register {
     my @taken  = grep { defined $holder{$_} } @names;
     die join( q{}, map { "$_ is registered to $holder{$_}\n" } @taken ) . "So $domain cannot register it.  Release it there first.\n" if @taken;
 
-    my $dir = File::Temp::tempdir( CLEANUP => 1 );
-    ## no critic (PreferredBinaries) -- this runs under the system perl of the relay, which has no Provisioner::Utils
-    my ( $said, $ok ) = Trog::RelayFiles::run( qw{ssh-keygen -q -t ed25519 -N}, q{}, '-C', "bans of $domain", '-f', "$dir/key" );
-    ## use critic
-    die "Could not make the key of $domain: $said\n" unless $ok;
-
     my %file = files_of($domain);
     my %old  = map { $_ => scalar Trog::RelayFiles::read_file( $file{$_} ) } qw{tls http};
     Trog::RelayFiles::write_file( $file{tls},  join( q{}, map { "$_ $tls;\n" } @names ) );
     Trog::RelayFiles::write_file( $file{http}, join( q{}, map { "$_ $http;\n" } @names ) );
 
-    ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
+    my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
     if ( !$ok ) {
         Trog::RelayFiles::write_file( $file{$_}, $old{$_} ) foreach qw{tls http};
         die "nginx refused what $domain registered, so it keeps what it had: $said\n";
     }
 
     my ($address) = split( m/:/, $tls );
-    Trog::RelayFiles::write_file( $file{key}, qq{restrict,from="$address",command="$RELAY_BAN $domain" } . Trog::RelayFiles::read_file("$dir/key.pub") );
-    write_authorized_keys();
+    my $key = Trog::RelayFiles::issue_ban_key( $RELAY_D, $domain, $address, $BAN_SET );
     reload_nginx();
 
-    print MIME::Base64::encode_base64( Trog::RelayFiles::read_file("$dir/key"), q{} );
+    print $key;
     close $lock or die "Cannot unlock $RELAY_D: $!\n";
     return 0;
 }
@@ -139,7 +122,7 @@ sub release {
     my $lock = lock_relay();
     my %file = files_of($domain);
     Trog::RelayFiles::write_file( $_, undef ) foreach values %file;
-    write_authorized_keys();
+    Trog::RelayFiles::revoke_ban_key( $RELAY_D, $domain );
 
     # An nginx that is not up reads the files when it starts.
     my $err = do {

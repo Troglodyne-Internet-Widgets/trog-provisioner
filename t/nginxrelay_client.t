@@ -86,9 +86,9 @@ subtest 'a domain registers each name, for TLS and for plain HTTP, and gets a ke
     is( MIME::Base64::decode_base64($out),                   "PRIVATE KEY\n",                                                               'it prints the private half of the key, in base64' );
     unlike( $out, qr/\n/, 'on one line, which is what bin/provision takes from it' );
     my $authorized = File::Slurper::read_text("$relay/authorized_keys.root");
-    my $command    = qr/command="\S+\/nginxrelay_ban[ ]\Q$DOMAIN\E"/;
+    my $command    = qr/command="\S+\/relay_ban[ ]nginxrelay-bans[ ]\Q$DOMAIN\E"/;
     my $options    = qr/restrict,from="192[.]0[.]2[.]10",$command/;
-    like( $authorized, qr/\A$options[ ]ssh-ed25519[ ]AAAAbogus[ ]/, 'and authorizes the public half for root, to run nginxrelay_ban for the domain from the address of its guest' );
+    like( $authorized, qr/\A$options[ ]ssh-ed25519[ ]AAAAbogus[ ]/, 'and authorizes the public half for root, to run relay_ban for the domain from the address of its guest' );
     is_deeply( [ grep { m/\A(?:nginx|systemctl)/ } @ran ], [ 'nginx -t', 'systemctl reload nginx' ], 'after nginx accepts the files, it reloads nginx' );
 
     register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 www.customer.test} );

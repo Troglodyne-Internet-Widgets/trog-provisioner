@@ -139,7 +139,7 @@ address that the pool can give to the next guest.
 A ban on this guest blocks nothing that comes through the relay, because those
 packets come from the relay.  So with C<relay> and a public name, each jail of
 this recipe also bans through the action C<relay-DOMAIN>.  It runs
-C<nginxrelay_ban> on the relay over ssh, with the key that the relay issued,
+C<relay_ban> on the relay over ssh, with the key that the relay issued,
 and the relay drops the address.  See L<Provisioner::Recipe::nginxrelay/Bans>.
 
 The relay also issues its host key, which this guest pins in

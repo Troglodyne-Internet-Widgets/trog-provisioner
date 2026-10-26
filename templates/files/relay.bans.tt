@@ -1,12 +1,12 @@
 #!/bin/sh
-# The firewall half of the bans that the guests behind this relay send through
-# nginxrelay_ban.  /etc/ufw/after.init runs this after ufw loads its rules, and
-# again when it unloads them.  Provisioner::Recipe::nginxrelay has the whole
-# account.
+# The firewall half of the bans that the guests behind [% relay_name %] send
+# through relay_ban.  /etc/ufw/after.init runs this after ufw loads its rules,
+# and again when it unloads them.  Provisioner::RelayRecipe has the whole
+# account, under Bans.
 
-SET=nginxrelay-bans
-CHAIN=trog-nginxrelay-bans
-SAVED=/var/lib/nginxrelay-bans/saved
+SET=[% ban_set %]
+CHAIN=trog-[% ban_set %]
+SAVED=/var/lib/[% ban_set %]/saved
 
 start() {
     # A timeout of 0 by default, so that each ban gives its own.
@@ -15,10 +15,10 @@ start() {
 
     # Every packet and not only a new connection, so that a ban also ends the
     # connections that the address has open.  The ports that the relay proxies,
-    # after the forward of 443, so that a banned address can still reach ssh.
+    # after any forward, so that a banned address can still reach ssh.
     iptables -N "$CHAIN" 2>/dev/null
     iptables -F "$CHAIN"
-    iptables -A "$CHAIN" -p tcp -m multiport --dports 80,[% tls_port %] -m set --match-set "$SET" src -j DROP
+    iptables -A "$CHAIN" -p tcp -m multiport --dports [% banned_ports.join(',') %] -m set --match-set "$SET" src -j DROP
 
     # Once, because ufw-init runs start twice on a reload.
     iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"

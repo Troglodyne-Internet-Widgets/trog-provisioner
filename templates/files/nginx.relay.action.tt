@@ -1,5 +1,5 @@
 [%# What fail2ban runs on this guest for each ban and unban of a jail that
-    reads the traffic of the relay: nginxrelay_ban on the relay, with the key
+    reads the traffic of the relay: relay_ban on the relay, with the key
     that the relay issued to this domain, against the host key that it pinned.
     Provisioner::Recipe::nginx has the whole account. -%]
 [% IF relay_address -%]

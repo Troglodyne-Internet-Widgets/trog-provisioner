@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-package Trog::NginxRelayBan;
+package Trog::RelayBan;
 
 use 5.014;
 
@@ -9,14 +9,14 @@ use warnings FATAL => 'all';
 
 use List::Util ();
 
-=head1 nginxrelay_ban
+=head1 relay_ban
 
 =head2 SYNOPSIS
 
-In the line of F</etc/nginx/nginxrelay.d/authorized_keys.root> that
-F<scripts/nginxrelay_client> writes for a domain:
+In the line of the F<authorized_keys.root> of a relay that its client writes for
+a domain, such as F<scripts/nginxrelay_client>:
 
-    restrict,from="ADDRESS",command="nginxrelay_ban DOMAIN" ssh-ed25519 ...
+    restrict,from="ADDRESS",command="relay_ban SET DOMAIN" ssh-ed25519 ...
 
 What the guest of DOMAIN sends over ssh with that key:
 
@@ -26,19 +26,19 @@ What the guest of DOMAIN sends over ssh with that key:
 
 =head2 DESCRIPTION
 
-Runs as root on a guest that runs L<Provisioner::Recipe::nginxrelay>, as the
-forced command of the key that the relay issued to DOMAIN.  sshd puts what the
-guest asked for in C<SSH_ORIGINAL_COMMAND>.  See
-L<Provisioner::Recipe::nginxrelay/Bans>.
+Runs as root on a guest that runs a relay, as the forced command of the key that
+the relay issued to DOMAIN.  sshd puts what the guest asked for in
+C<SSH_ORIGINAL_COMMAND>.  See L<Provisioner::RelayRecipe/Bans>.
 
-C<ban> adds IP to the ipset C<nginxrelay-bans> for SECONDS, and the relay drops
-what IP sends to the ports that it proxies.  A SECONDS of 0 or less bans until
+SET is the ipset of the relay, such as C<nginxrelay-bans>.  C<ban> adds IP to
+SET for SECONDS, and the relay drops what IP sends to the ports that it
+proxies.  A SECONDS of 0 or less bans until
 an C<unban>, as fail2ban means by a C<bantime> of -1.  A ban of IP that is
 already there takes the new time.  C<unban> removes IP from the set, and an IP
 that is not there is no error.  C<check> exits 0 when IP is in the set, and 1
 when it is not.
 
-The set is shared by every domain behind the relay, because the relay cannot
+Each set is shared by every domain behind the relay, because the relay cannot
 tell which guest a connection is for before nginx reads its first bytes.  So a
 domain can unban an address that another domain banned.
 
@@ -47,8 +47,6 @@ goes to syslog with DOMAIN.  It exits 2 for a request that it does not take,
 and 3 when ipset fails.
 
 =cut
-
-our $SET = 'nginxrelay-bans';
 
 # The longest timeout that ipset takes.
 our $MAX_SECONDS = 2_147_483;
@@ -76,14 +74,15 @@ sub ipset {
 
 sub logged {
     my ( $domain, $what ) = @_;
-    run( qw{logger -t nginxrelay_ban}, "$domain: $what" );
+    run( qw{logger -t relay_ban}, "$domain: $what" );
     return;
 }
 
 sub main {
-    my ( $domain, $request ) = @_;
+    my ( $set, $domain, $request ) = @_;
 
-    die "nginxrelay_ban runs as the forced command of a key, which names the domain\n" if ( $domain // q{} ) eq q{};
+    die "relay_ban runs as the forced command of a key, which names the set and the domain\n"
+      if ( $set // q{} ) !~ m/\A[[:lower:]]+-bans\z/ || ( $domain // q{} ) eq q{};
     my ( $verb, $ip, $seconds, @rest ) = split( q{ }, $request // q{} );
 
     if ( @rest || !ipv4($ip) ) {
@@ -92,18 +91,18 @@ sub main {
     }
 
     if ( $verb eq 'check' && !defined $seconds ) {
-        return ipset( qw{-quiet test}, $SET, $ip ) ? 0 : 1;
+        return ipset( qw{-quiet test}, $set, $ip ) ? 0 : 1;
     }
 
     if ( $verb eq 'unban' && !defined $seconds ) {
-        return 3 unless ipset( qw{-exist del}, $SET, $ip );
+        return 3 unless ipset( qw{-exist del}, $set, $ip );
         logged( $domain, "unban $ip" );
         return 0;
     }
 
     if ( $verb eq 'ban' && defined $seconds && $seconds =~ m/\A-?[[:digit:]]+\z/ ) {
         my $timeout = $seconds <= 0 ? 0 : List::Util::min( $seconds, $MAX_SECONDS );
-        return 3 unless ipset( qw{-exist add}, $SET, $ip, timeout => $timeout );
+        return 3 unless ipset( qw{-exist add}, $set, $ip, timeout => $timeout );
         logged( $domain, "ban $ip for " . ( $timeout ? "$timeout seconds" : 'good' ) );
         return 0;
     }
@@ -112,6 +111,6 @@ sub main {
     return 2;
 }
 
-exit main( $ARGV[0], $ENV{SSH_ORIGINAL_COMMAND} ) unless caller;
+exit main( @ARGV[ 0, 1 ], $ENV{SSH_ORIGINAL_COMMAND} ) unless caller;
 
 1;

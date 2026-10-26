@@ -86,7 +86,7 @@ sub as_guest {
     my $said = `ssh -n -i $keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1 '$request' 2>&1`;
     return ( $? >> 8, $said );
 }
-sub banned { return system("ipset test nginxrelay-bans '$_[0]' >/dev/null 2>&1") == 0 }
+sub banned { return system("ipset test [% ban_set %] '$_[0]' >/dev/null 2>&1") == 0 }
 
 # An address from the documentation ranges, which no client has.
 my $abuser = '192.0.2.77';
@@ -96,11 +96,11 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     is( $rc, 0, 'a guest bans an address' ) or diag $said;
     ok( banned($abuser), 'and the address is in the set' );
 
-    my $rules = `iptables -S trog-nginxrelay-bans 2>&1`;
-    like( $rules, qr/--dports 80,[% tls_port %] .*--match-set nginxrelay-bans src -j DROP/, 'whose members are dropped on the ports that the relay proxies' ) or diag $rules;
+    my $rules = `iptables -S trog-[% ban_set %] 2>&1`;
+    like( $rules, qr/--dports 80,[% tls_port %] .*--match-set [% ban_set %] src -j DROP/, 'whose members are dropped on the ports that the relay proxies' ) or diag $rules;
 
     system('ufw reload >/dev/null 2>&1');
-    my @jumps = `iptables -S INPUT` =~ m/^-A INPUT -j trog-nginxrelay-bans$/mg;
+    my @jumps = `iptables -S INPUT` =~ m/^-A INPUT -j trog-[% ban_set %]$/mg;
     is( scalar @jumps, 1, 'INPUT enters the chain once after a reload' );
     ok( banned($abuser), 'and the ban is still there' );
 
@@ -108,7 +108,7 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     is( $rc, 0, 'a guest can ask whether an address is banned' ) or diag $said;
 
     ( $rc, $said ) = as_guest('id');
-    is( $rc, 2, 'and the key runs nothing but nginxrelay_ban' ) or diag $said;
+    is( $rc, 2, 'and the key runs nothing but relay_ban' ) or diag $said;
 
     ( $rc, $said ) = as_guest("unban $abuser");
     is( $rc, 0, 'a guest unbans an address' ) or diag $said;
