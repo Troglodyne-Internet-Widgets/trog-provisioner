@@ -208,12 +208,12 @@ L<Provisioner::Recipe::edge/SPF>.
 
 postfix has one TLS certificate, C</etc/aliases> is one file, and opendmarc
 has one C<AuthservID>.  So the last domain provisioned sets all three.  postfix
-also has one C<myhostname>, which the global half sets to the C<helo_name> of
-the machine, so every domain on the guest gives the same one.  opendmarc still
-trusts the edge of every domain, because configd joins the
-C<TrustedAuthservIDs> of every domain.  C<configd status
-postfix> shows these disagreements, because it lists the fragments and what
-wrote them.
+also has one C<myhostname>.  The global half sets it to C<helo_name_of> in
+L<Provisioner::Cookbook>, which is one name for the machine, so every domain on
+the guest gives the same one.  opendmarc still trusts the edge of every domain,
+because configd joins the C<TrustedAuthservIDs> of every domain.  C<configd
+status postfix> shows these disagreements, because it lists the fragments and
+what wrote them.
 
 =cut
 
@@ -337,21 +337,14 @@ sub subdomains {
     return qw{mail autodiscover autoconfig};
 }
 
-=head2 $name = $recipe->helo_name($domain)
+=head2 $bool = $recipe->sends_mail
 
-The name of the machine that runs C<$domain>, as C<machine_of> in
-L<Provisioner::Cookbook> gives it.  That is C<mail.$machine>, the first of the
-C<subdomains>, when the machine runs this recipe for its own domain.  Otherwise
-it is C<$machine>, which has an A record of its own and is not a mailbox
-domain, so it can be in C<mydestination>.  So every domain on a guest gives the
-same name, and so does an edge on it.
+True.  See L<Provisioner::Recipe>.
 
 =cut
 
-sub helo_name {
-    my ( $self, $domain ) = @_;
-    my $machine = Provisioner::Cookbook->machine_of($domain);
-    return exists Provisioner::Cookbook->domain_config($machine)->{ $self->recipe_name } ? "mail.$machine" : $machine;
+sub sends_mail {
+    return 1;
 }
 
 =head2 @grants = $recipe->grants($domain, %opts)
@@ -445,7 +438,7 @@ sub enrich {
 
     $opts{sender_logins}  = \@logins;
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
-    $opts{helo_name}      = $self->helo_name( $opts{domain} );
+    $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
 
     if ( defined $opts{edge} ) {
         die "mail: $opts{domain} names both a relay and an edge, and they disagree about where its mail goes.  Set one.\n" if $opts{relay}{host};

@@ -235,29 +235,28 @@ sub jails {
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<relay_address>, the address that C<address> returns, where the relay
-listens, and C<helo_name>.
+listens, and C<helo_name>, which is C<helo_name_of> in L<Provisioner::Cookbook>.
+That is the name of the machine, which the A record of the edge names, unless
+the machine runs L<Provisioner::Recipe::mail> too.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
     $opts{relay_address} = $self->address( $opts{domain} );
-    $opts{helo_name}     = $self->helo_name( $opts{domain} );
+    $opts{helo_name}     = Provisioner::Cookbook->helo_name_of( $opts{domain} );
     return %opts;
 }
 
-=head2 $name = $recipe->helo_name($domain)
+=head2 $bool = $recipe->sends_mail
 
-The C<helo_name> of L<Provisioner::Recipe::mail>.  On a machine that does not
-run mail for its own domain, that is the name of the machine, which the A
-record of the edge names.  The two recipes give one name, because a guest that
-runs both has one C<myhostname> and one reverse DNS.
+True, because the relay delivers the mail of the guests to the internet.  See
+L<Provisioner::Recipe>.
 
 =cut
 
-sub helo_name {
-    my ( $self, $domain ) = @_;
-    return Provisioner::Cookbook->load('mail')->helo_name($domain);
+sub sends_mail {
+    return 1;
 }
 
 =head2 $port = $recipe->relay_port_of($edge)

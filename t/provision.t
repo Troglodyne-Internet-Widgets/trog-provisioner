@@ -1293,11 +1293,6 @@ subtest 'the reverse DNS of a guest is set to the name its mail announces' => su
     is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'set to the name that its postfix announces' );
     like( $out, qr/\QThe reverse DNS of 9.9.9.9 is now mail.mx.test.test\E/, 'and it says so' );
 
-    @asked  = ();
-    %config = ( 'mx.test.test' => { mail => {}, edge => {} } );
-    ( $out, $err, $result ) = $point->('9.9.9.9');
-    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'a guest that runs mail and edge announces one name' );
-
     # A domain built onto a host that runs no mail of its own.
     @asked  = ();
     %host   = ( 'tenant.test.test' => 'mx.test.test' );
@@ -1311,16 +1306,6 @@ subtest 'the reverse DNS of a guest is set to the name its mail announces' => su
     ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
     is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'and to the mail name of the host, when the host runs mail' );
     %host = ();
-
-    @asked = ();
-    my $edge = Test::MockModule->new('Provisioner::Recipe::edge');
-    $edge->redefine( helo_name => sub { return 'other.test.test' } );
-    %config = ( 'mx.test.test' => { mail => {}, edge => {} } );
-    ( $out, $err, $result ) = $point->('9.9.9.9');
-    is( $result,       0, 'a guest whose recipes announce two names gets neither' );
-    is( scalar @asked, 0, 'and its hypervisor is not asked' );
-    like( $err, qr/\Qannounces other.test.test and mail.mx.test.test\E/, 'and it names both' );
-    $edge->unmock('helo_name');
 
     %config = ( 'mx.test.test' => { edge => {} } );
     $answer = sub { die "Linode refused put-ip: 403 not authorized\n" };

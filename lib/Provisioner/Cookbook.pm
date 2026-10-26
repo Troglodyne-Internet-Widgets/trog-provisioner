@@ -1275,6 +1275,28 @@ sub machine_of {
     return $class->host_of( $domain, $conf ) // $domain;
 }
 
+=head2 helo_name_of($domain, $conf)
+
+Returns the name that the machine of C<$domain> announces when it sends mail:
+in C<HELO>, as the C<myhostname> of postfix, and as the reverse DNS of its
+address.  An address has one reverse DNS, so this is one name for the machine,
+whatever domain on it asks, and whatever recipe there sends the mail.
+
+The machine is C<machine_of> the domain.  When the configuration of the machine
+itself names L<Provisioner::Recipe::mail>, the name is C<mail.$machine>, which
+that recipe publishes.  Otherwise it is C<$machine>.  It is never the bare name
+of a domain that takes mail, because postfix puts C<$myhostname> in
+C<mydestination>, and so delivers the mail of that name on the guest.
+C<$conf> is as for C<host_of>.
+
+=cut
+
+sub helo_name_of {
+    my ( $class, $domain, $conf ) = @_;
+    my $machine = $class->machine_of( $domain, $conf );
+    return exists $class->domain_config( $machine, $conf )->{mail} ? "mail.$machine" : $machine;
+}
+
 =head2 $class->needs_recipe($domain, $guest, $recipe, $role)
 
 Dies unless the configuration of C<$guest> names C<$recipe>, where C<$domain>

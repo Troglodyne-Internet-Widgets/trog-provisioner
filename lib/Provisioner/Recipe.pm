@@ -1432,19 +1432,19 @@ sub subdomains {
     return ();
 }
 
-=head3 $name = $recipe->helo_name($domain)
+=head3 $bool = $recipe->sends_mail
 
-The name that the mail server of this recipe announces on the guest of
-C<$domain>, in C<HELO> and as the C<myhostname> of postfix.  A receiver of mail
-checks that the reverse DNS of the address of the guest gives this name, so
-F<bin/provision> sets the reverse DNS to it.  An address has one reverse DNS,
-so every domain on one machine, and every recipe that sends mail there, must
-give the same name.  Undef here, because most recipes send no mail.
+True when this recipe runs a mail server that delivers mail to other servers.
+A receiver checks that the reverse DNS of the address of the sender gives the
+name that the sender announces, so F<bin/provision> sets the reverse DNS of a
+guest that runs such a recipe.  The name is C<helo_name_of> in
+L<Provisioner::Cookbook>, and the recipe puts the same name in its
+configuration of postfix.  False here, because most recipes send no mail.
 
 =cut
 
-sub helo_name {
-    return undef;
+sub sends_mail {
+    return 0;
 }
 
 =head3 @names = $recipe->served_names(%opts)

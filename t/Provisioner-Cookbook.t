@@ -261,6 +261,21 @@ subtest 'machine_of names the guest that runs a domain' => sub {
     is( Provisioner::Cookbook->machine_of( 'alone.test',  $conf ), 'alone.test', 'and so does a domain with a machine of its own' );
 };
 
+subtest 'helo_name_of is one name for the machine, whatever domain asks' => sub {
+    my $conf = { 'mx.test' => { mail => {} } };
+    is( Provisioner::Cookbook->helo_name_of( 'mx.test', $conf ), 'mail.mx.test', 'a guest of its own that runs mail announces the mail name of its domain' );
+
+    $conf = { _shared => { 'mx.test' => [ 'a.test', 'b.test' ] }, 'mx.test' => { nginx => {} }, 'a.test' => { mail => {} }, 'b.test' => { mail => {} } };
+    is( Provisioner::Cookbook->helo_name_of( 'a.test', $conf ), 'mx.test', 'a tenant on a host that runs no mail announces the name of the host' );
+    is( Provisioner::Cookbook->helo_name_of( 'b.test', $conf ), 'mx.test', 'and so does every other tenant there' );
+
+    $conf->{'mx.test'}{mail} = {};
+    is( Provisioner::Cookbook->helo_name_of( 'a.test', $conf ), 'mail.mx.test', 'and on a host that runs mail, the mail name of the host' );
+
+    $conf = { _base => { mail => {} }, 'mx.test' => { nginx => {} } };
+    is( Provisioner::Cookbook->helo_name_of( 'mx.test', $conf ), 'mail.mx.test', 'mail named in _base counts, because the machine runs it' );
+};
+
 subtest 'the data source, and a domain inside it' => sub {
     my $conf = {
         _base       => { _global => { data_source => '/opt/data', install_dir => '/opt/domains' } },
