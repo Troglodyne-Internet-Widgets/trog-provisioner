@@ -894,7 +894,9 @@ The configuration of each dependency becomes the merge of what the domain wrote
 and what each dependent gave it.
 
 Dies when two recipes of the list cannot be on one domain, as
-L<Provisioner::Recipe/exclusive_with> says, and names what required each.
+L<Provisioner::Recipe/exclusive_with> or
+L<Provisioner::Recipe/exclusive_on_machine_with> says, and names what required
+each.
 
 The list comes back in build order.  A dependency is added again each time
 something requires it.  The last mention counts, because the dependency must
@@ -1081,6 +1083,9 @@ sub resolve_dependencies {
     foreach my $module ( grep { $builders{$_} } @resolved ) {
         foreach my $other ( grep { $on{$_} } $builders{$module}->exclusive_with ) {
             die "$domain has both " . $named->($module) . ' and ' . $named->($other) . ".\n" . "They cannot be on one domain; see exclusive_with in Provisioner::Recipe::$module.\n" . "Remove one of them, or the recipe that requires it, or give one of them a domain of its own.\n";
+        }
+        foreach my $other ( grep { $on{$_} } $builders{$module}->exclusive_on_machine_with ) {
+            die "$domain has both " . $named->($module) . ' and ' . $named->($other) . ".\n" . "They cannot be on one machine; see exclusive_on_machine_with in Provisioner::Recipe::$module.\n" . "Remove one of them, or the recipe that requires it, or give one of them a machine of its own.\n";
         }
     }
 

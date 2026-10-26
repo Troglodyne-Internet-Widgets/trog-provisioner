@@ -259,6 +259,17 @@ sub sends_mail {
     return 1;
 }
 
+=head2 @names = $recipe->exclusive_on_machine_with
+
+C<mail>, because the postfix of each answers port 25 of the machine, and a
+machine has one postfix.  See L<Provisioner::Recipe>.
+
+=cut
+
+sub exclusive_on_machine_with {
+    return qw{mail};
+}
+
 =head2 $port = $recipe->relay_port_of($edge)
 
 The C<relay_port> of the edge C<$edge>, from its configuration, or the default

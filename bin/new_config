@@ -912,9 +912,9 @@ sub handle_domain {
     # template gets `modules` as the list of what is on the guest.
     @modules = grep { $builders{$_}->is_module } @modules;
 
-    # A recipe that cannot serve a second domain replaces the first, so refuse
-    # it here.  This compares a tenant with its host only, not with the other
-    # tenants.
+    # A recipe that cannot serve a second domain replaces the first, and two
+    # recipes that cannot share a machine collide, so refuse both here.  This
+    # compares a tenant with its host only, not with the other tenants.
     $MACHINE_MODULES{$domain} = [@modules];
     if ($depends_on) {
         my %on_host = map  { $_ => 1 } @{ $MACHINE_MODULES{$depends_on} // [] };
@@ -922,6 +922,13 @@ sub handle_domain {
 
         die "$domain is provisioned onto $depends_on, and both are configured with: " . join( ', ', @cannot ) . "\n" . "There is one of that on a guest, and it cannot be told about a second domain -- so this\n" . "would replace what $depends_on configured rather than add to it.  Configure it on one of\n" . "the two, or give $domain a machine of its own.\n"
           if @cannot;
+
+        foreach my $mine (@modules) {
+            foreach my $theirs ( sort keys %on_host ) {
+                next unless any { $_ eq $theirs } $builders{$mine}->exclusive_on_machine_with or any { $_ eq $mine } Provisioner::Cookbook->load($theirs)->exclusive_on_machine_with;
+                die "$domain is provisioned onto $depends_on, and $domain has $mine, which cannot be on one machine with the $theirs of $depends_on.\n" . "See exclusive_on_machine_with in Provisioner::Recipe::$mine and Provisioner::Recipe::$theirs.\n" . "Give $domain a machine of its own, or remove one of them.\n";
+            }
+        }
     }
 
     # One guest has one of each address on each port.  Each domain resolves its

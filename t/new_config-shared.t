@@ -253,4 +253,27 @@ subtest 'two recipes on one guest cannot claim one port, from two domains either
     like( $err, qr{$named}, 'naming each address and the recipe on it' );
 };
 
+subtest 'two recipes that cannot share a machine are refused on a host and its tenant' => sub {
+    Provisioner::Cookbook->load($_) for qw{tmpfs};
+    my $tmpfs = Test::MockModule->new('Provisioner::Recipe::tmpfs');
+    $tmpfs->redefine( exclusive_on_machine_with => sub { return qw{nosnap} } );
+
+    my ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    ok( $err, 'the generation stops when the tenant names the recipe of the host' ) or return;
+    my $refused = qr/[ ]has[ ]tmpfs,[ ]which[ ]cannot[ ]be[ ]on[ ]one[ ]machine/;
+    my $holder  = qr/[ ]with[ ]the[ ]nosnap[ ]of[ ]/;
+    like( $err, qr/\Q$TENANT\E$refused$holder\Q$HOST\E/, 'naming both recipes and both domains' );
+    ok( !-f "$domains/$TENANT/Makefile", 'and nothing is generated for the tenant' );
+
+    $tmpfs->unmock('exclusive_on_machine_with');
+    my $nosnap = Test::MockModule->new('Provisioner::Recipe::nosnap');
+    $nosnap->redefine( exclusive_on_machine_with => sub { return qw{tmpfs} } );
+    ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    like( $err // q{}, qr/cannot[ ]be[ ]on[ ]one[ ]machine/, 'and when the host names the recipe of the tenant' );
+
+    $nosnap->unmock('exclusive_on_machine_with');
+    ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    is( $err, undef, 'and when neither names the other, both generate' ) or diag $err;
+};
+
 done_testing;
