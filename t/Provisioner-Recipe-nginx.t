@@ -243,6 +243,9 @@ subtest 'the jails of a domain with a relay ban through it' => sub {
     is( $opts->{relay_address}, '10.8.0.197', 'the guest reaches the relay at its address in the tunnel' );
     is_deeply( $opts->{relay_jails}, [qw{nginx-botsearch nginx-http-auth}], 'and every jail of nginx bans through it' );
 
+    $opts = enriched( %public, relay => 'relay.test.test', proxied_jails => [qw{roundcube-auth nginx-http-auth}] );
+    is_deeply( $opts->{relay_jails}, [qw{nginx-botsearch nginx-http-auth roundcube-auth}], 'so does a jail that another recipe hands over, once each' );
+
     $opts = enriched(%public);
     ok( !exists $opts->{relay_address}, 'a domain with no relay bans through none' );
 };
@@ -280,6 +283,24 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
 
     $pool->redefine( assignments => sub { return {} } );
     like( exception { $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the relay cannot reach stops the build' );
+};
+
+subtest 'the teardown releases the names on the relay whenever the domain names one' => sub {
+    my %config;
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( domain_config => sub { return {%config} } );
+    my $nginx = 'Provisioner::Recipe::nginx';
+
+    # roundcube adds its public name while the build resolves dependencies,
+    # and the teardown reads only what the operator wrote.
+    %config = ( nginx => { relay => 'relay.test.test' } );
+    my @revocations = $nginx->revocations('web.test.test');
+    is( scalar @revocations,      1,                                                   'a relay with no public name written' );
+    is( $revocations[0]{guest},   'relay.test.test',                                   'is told on the relay' );
+    is( $revocations[0]{command}, '/root/bin/nginxrelay_client release web.test.test', 'to release the names of the domain' );
+
+    %config = ( nginx => { public_names => { 'web.test.test' => 'web.test.test' } } );
+    is_deeply( [ $nginx->revocations('web.test.test') ], [], 'a domain with no relay releases nothing' );
 };
 
 Test::NoWarnings::had_no_warnings();

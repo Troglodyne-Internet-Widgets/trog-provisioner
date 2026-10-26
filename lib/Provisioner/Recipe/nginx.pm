@@ -148,8 +148,9 @@ that only claims to be the relay.  The jails never ban the address of the
 relay.  That address is the one in L<Provisioner::IPPool/reachable_address>, and it
 goes into C<ignoreip> beside loopback.
 
-The jails of other recipes still ban through ufw only, because what they read
-does not come through the relay.
+The jails of other recipes ban through ufw only, unless the recipe names them
+in C<proxied_jails>.  A recipe does that for a jail that reads the log of a
+vhost that the relay reaches, as L<Provisioner::Recipe::roundcube> does.
 
 =cut
 
@@ -233,6 +234,13 @@ sub args {
                 type        => 'string',
                 format      => 'hostname',
                 description => 'The guest that runs the nginxrelay recipe, where the public names of this domain are registered when it is built.  Read only when public_names has a name.  See "Registration with a relay guest".',
+            },
+
+            proxied_jails => {
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'The jails of other recipes that read the log of a vhost that a public name names, which the recipes that own them hand over.  With relay, they ban through the relay as the jails of nginx do.  See "Bans through the relay".',
             },
 
             proxy_from => {
@@ -341,12 +349,35 @@ guest>.
 
 =cut
 
+my sub relay_grant ( $domain, $relay ) {
+    return { recipe => 'nginxrelay', guest => $relay, client => $domain };
+}
+
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    my $relay = $opts{relay};
-    return () unless defined $relay && %{ $opts{public_names} // {} };
+    return () unless defined $opts{relay} && %{ $opts{public_names} // {} };
 
-    return { recipe => 'nginxrelay', guest => $relay, client => $domain };
+    return relay_grant( $domain, $opts{relay} );
+}
+
+=head2 @revocations = $recipe->revocations($domain)
+
+The release of the names of C<$domain> on the relay whenever the configuration
+of C<$domain> names a C<relay>, also with no public name.  The configuration
+that C<bin/destroy> reads is what the operator wrote, and another recipe can add
+the public names when the build resolves its dependencies, as
+L<Provisioner::Recipe::roundcube> does.  A release of a domain that registered
+nothing changes nothing.  See L<Provisioner::Recipe/revocations>.
+
+=cut
+
+sub revocations {
+    my ( $self, $domain ) = @_;
+
+    my $relay = ( Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} )->{relay};
+    return () unless defined $relay;
+
+    return { guest => $relay, Provisioner::Cookbook->load('nginxrelay')->revoke_grant( relay_grant( $domain, $relay ) ) };
 }
 
 =head2 %terms = $recipe->grant_terms($grant, %opts)
@@ -389,7 +420,8 @@ public name, and when there are public names and no network to believe a PROXY
 header from.
 
 With C<relay> and a public name, it also adds C<relay_address>, where this
-guest reaches the relay, and C<relay_jails>, the jails that ban through it.  See
+guest reaches the relay, and C<relay_jails>, the jails that ban through it: its
+own and those of C<proxied_jails>.  See
 L</Bans through the relay>.
 
 =cut
@@ -430,7 +462,7 @@ sub enrich {
 
         if ( defined $opts{relay} ) {
             $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{relay} );
-            $opts{relay_jails}   = [ sort keys %{ { $self->jails(%opts) } } ];
+            $opts{relay_jails}   = [ sort { $a cmp $b } List::Util::uniq( keys %{ { $self->jails(%opts) } }, @{ $opts{proxied_jails} // [] } ) ];
         }
     }
 

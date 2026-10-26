@@ -34,7 +34,8 @@ record at the provider first.
 
 A relay guest runs the `nginxrelay` recipe, and usually the `mailrelay` recipe
 too.  `nginxrelay` sends a TLS connection to the guest that registered its SNI
-name, and a plain HTTP request to the guest that registered its `Host` header.
+name.  It sends a plain HTTP request to the guest that registered its `Host`
+header.
 `mailrelay` takes the mail of the guests behind it out to the internet, and in
 from it, for each guest whose `mail.relay.host` names it.  `perldoc
 Provisioner::Recipe::nginxrelay` and `perldoc Provisioner::Recipe::mailrelay`
@@ -54,12 +55,16 @@ staging.ours.example:
 
 Build the relay first.  When `bin/provision` builds a guest whose `nginx` names
 a `relay`, it registers the public names of the guest there before the makefile
-starts.  The build of the guest fails if the relay is not up, or if another
-domain registered one of the names.  `bin/destroy` releases the names.  If the
+starts.  If the relay is not up, or if another domain registered one of the
+names, the build of the guest fails.  `bin/destroy` releases the names.  If the
 relay is not up then, it says what to run there.
 
-The DNS record of a public name points at the address of the relay, so set
-`registrar.address` to that address for each domain behind the relay.
+A guest that runs `roundcube` behind a relay needs no public name for webmail.
+`roundcube` adds `webmail.$domain` itself, and its login jail bans through the
+relay.  `perldoc Provisioner::Recipe::roundcube` has the details.
+
+The DNS record of a public name points at the address of the relay.  So for
+each domain behind the relay, set `registrar.address` to that address.
 
 ## A zone at a registrar that we have an account with
 
