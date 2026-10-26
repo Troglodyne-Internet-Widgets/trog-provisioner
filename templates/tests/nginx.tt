@@ -80,6 +80,8 @@ subtest 'each vhost that a public name names answers for it behind the proxy' =>
     };
 
 [% FOR vhost IN proxied.keys().sort() -%]
+    isnt( $status->( '[% vhost %]', 8443 ), '000', '[% vhost %] answers for its own name on 8443' );
+    isnt( $status->( '[% vhost %]', 8080 ), '000', 'and on 8080' );
 [% FOR name IN proxied.$vhost -%]
     isnt( $status->( '[% name %]', 8443 ), '000', '[% name %] reaches [% vhost %] on 8443' );
     isnt( $status->( '[% name %]', 8080 ), '000', 'and on 8080' );

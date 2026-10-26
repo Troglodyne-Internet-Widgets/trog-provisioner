@@ -10,6 +10,8 @@ use re '/aasx';
 
 use UUID ();
 
+use Provisioner::Cookbook();
+
 use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::roundcube
@@ -57,6 +59,28 @@ aliases of the domain.
 
 Requires the nginx and mail recipes.
 
+=head2 Webmail through a relay
+
+When the nginx of the domain names a C<relay>, roundcube adds C<webmail.$domain>
+to C<nginx.public_names>, so the relay sends it to this guest.  The operator
+writes nothing for it.
+
+    internal.somedomain:
+        nginx:
+            relay: relay.somedomain
+        mail: {}
+        roundcube:
+            version: "1.6.9"
+
+nginx then gives the vhost the listeners for the relay.  Roundcube reaches IMAP
+and submission on its own guest, so webmail works through the relay although
+the relay does not pass those ports.
+
+A failed login comes through the relay, so a ban by ufw on this guest blocks
+nothing.  So the C<roundcube-auth> jail goes to C<nginx.proxied_jails>, and it
+bans through the relay as the jails of nginx do.  See
+L<Provisioner::Recipe::nginx/Bans through the relay>.
+
 =cut
 
 sub required_recipes {
@@ -64,7 +88,13 @@ sub required_recipes {
 
     return (
         nginx => sub {
-            return ( sites => [ map { "$_.$opts{domain}" } $self->subdomains ] );
+            my @sites = map { "$_.$opts{domain}" } $self->subdomains;
+            return ( sites => \@sites ) unless defined( ( Provisioner::Cookbook->domain_config( $opts{domain} )->{nginx} // {} )->{relay} );
+            return (
+                sites         => \@sites,
+                public_names  => { map { $_ => $_ } @sites },
+                proxied_jails => [ sort keys %{ { $self->jails } } ],
+            );
         },
         mail => sub { () },
     );

@@ -333,8 +333,10 @@ subtest 'the public names of a domain are released on its relay, which would sen
     is( Trog::Bin::Destroy::revoke_grants( 'other.test.test', 0 ), 0, 'a domain with no relay has nothing to release' );
     my %public = %{ $config{nginx}{public_names} };
     $config{nginx}{public_names} = {};
-    is( Trog::Bin::Destroy::revoke_grants( $domain, 0 ), 0, 'and a domain with a relay and no public name registered nothing' );
-    is( scalar @ran,                                     0, 'so neither sends anything' );
+    capture { $released = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
+    is( $released, 1,                                                             'a domain with a relay and no public name written releases too, because a recipe such as roundcube can add one' );
+    is( $ran[0],   "sudo -n sh -c '/root/bin/nginxrelay_client release $domain'", 'by the same script' );
+    @ran = ();
     $config{nginx}{public_names} = \%public;
 
     $fleet->redefine( guest_of => sub { return } );
