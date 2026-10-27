@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use JSON::PP     ();
 use Getopt::Long qw{GetOptionsFromArray};
 
-my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--addressed NAME ...] [--records FILE] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
+my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--addressed NAME ...] [--records PATH] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
 
 # The shortcut Provisioner::Recipe::lexicon installs for this domain, which
 # already carries the provider holding the zone and the credential for it.
@@ -217,9 +217,18 @@ sub unalias {
     return $ok;
 }
 
-# The records of a recipe other than names, out of the file that
-# Provisioner::Recipe::registrar writes: a list of type, name, content and an
-# optional match.
+# The records other than names, out of a file or out of each .json file of a
+# directory, in the order of their names.  The registrar writes one file, and a
+# recipe that makes a record on the guest, as mail makes its DKIM key, writes
+# another beside it.
+sub records_at {
+    my ($path) = @_;
+
+    return read_records($path) unless -d $path;
+    return map { read_records($_) } sort glob("$path/*.json");
+}
+
+# The records in one file: a list of type, name, content and an optional match.
 sub read_records {
     my ($file) = @_;
 
@@ -306,7 +315,7 @@ sub main {
         }
     }
 
-    foreach my $record ( defined $records ? read_records($records) : () ) {
+    foreach my $record ( defined $records ? records_at($records) : () ) {
         my ( $type, $name ) = @{$record}{qw{type name}};
         if ( my $alias = held_for( $held->('CNAME'), $name ) ) {
             warn refusal( $type, $name, { type => 'CNAME', content => $alias->{content} // q{} } );

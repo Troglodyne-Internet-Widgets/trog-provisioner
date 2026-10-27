@@ -28,6 +28,9 @@ chmod -R 0755 /etc/opendkim
     above opened all of them.  opendkim refuses a key that others can read,
     and then tempfails every message of that domain. -%]
 find /etc/opendkim/keys -type f -exec chmod 0600 {} +
+[%# The DKIM records of the key, beside the records of the registrar, which
+    publishes both in the postrun.  See dns_records in Provisioner::Recipe::mail. -%]
+[% script_dir %]/dkim_records [% domain %]
 # Put a copy in /mail for the fetch to read.  remote_files names this copy,
 # not /etc/opendkim/keys.  Provisioner::Recipe::mail says why.
 #
@@ -57,8 +60,6 @@ mkdir -p /var/spool/postfix/opendmarc
 chown opendmarc:postfix /var/spool/postfix/opendmarc
 chmod 0770 /var/spool/postfix/opendmarc
 [% script_dir %]/queue_postrun_task systemctl restart opendmarc
-# Update the DNS records, if this guest runs a DNS server.
-[% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %]
 # dovecot
 # First, move the packaged conf.d out of the way, once.  The target of a second
 # domain on this guest must not move the conf.d that the first one wrote.

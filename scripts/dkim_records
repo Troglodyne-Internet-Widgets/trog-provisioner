@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Write the DKIM records of a domain into the records directory of the domain,
+# where publish_dns_records finds them.  The key is made on the guest during the
+# build, so these records cannot come from the configuration, as the other
+# records of mail do.  See dns_records in Provisioner::Recipe::mail.
+
+set -euo pipefail
+
+# The environment can move both directories, for a test.
+DOMAIN=$1
+KEY=${DKIM_KEYS:-/etc/opendkim/keys}/$DOMAIN/default.private
+DIR=${RECORDS_DIR:-/etc/provisioner/records}/$DOMAIN
+
+[[ -f $KEY ]] || { echo "No DKIM key for $DOMAIN at $KEY" >&2; exit 1; }
+
+PUBLIC=$(openssl rsa -in "$KEY" -pubout 2>/dev/null | sed '1d;$d' | tr -d '\n')
+[[ -n $PUBLIC ]] || { echo "Cannot read the public half of the DKIM key of $DOMAIN" >&2; exit 1; }
+
+RECORD="v=DKIM1; h=sha256; k=rsa; t=y; p=$PUBLIC"
+
+# One record for each selector, because the key table of opendkim names the key
+# under both.  The match lets the publisher replace an older key in place.
+ENTRIES=()
+for SELECTOR in default mail; do
+	ENTRIES+=("{\"type\":\"TXT\",\"name\":\"$SELECTOR._domainkey.$DOMAIN\",\"content\":\"$RECORD\",\"match\":\"v=DKIM1\"}")
+done
+
+install -d -m 0755 "$DIR"
+TMP=$(mktemp "$DIR/.dkim.XXXXXX")
+( IFS=,; printf '[%s]\n' "${ENTRIES[*]}" ) > "$TMP"
+chmod 0644 "$TMP"
+mv "$TMP" "$DIR/dkim.json"
+echo "Wrote the DKIM records of $DOMAIN to $DIR/dkim.json"

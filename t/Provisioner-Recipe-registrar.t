@@ -156,7 +156,7 @@ subtest 'what a guest that names an authority sets up' => sub {
     my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns.example.net";
     like( $fragment, qr{^\Q$dropin\E$}m,                                               'the fragment routes those names to the authority' );
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'and delegates its zone to the authority first in the postrun, before the fetcher of letsencrypt' );
-    ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records there' );
+    ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records --records /etc/provisioner/records/$name $name" ), 'before it publishes its records there' );
     unlike( $fragment, qr/--addressed[ ]ns1/, 'and publishes no ns1, because the authority is its nameserver' );
 
     my $resolved = fresh('registrar')->render_file( 'files/registrar.resolved.tt', %common, authority => 'ns.example.net', type => 'easydns' );
@@ -188,7 +188,7 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     my $fragment = fresh('registrar')->render(%common);
     my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'the zone above names its ns1 first in the postrun, with the address of ns1 as glue, because ns1 is inside the zone' );
-    my $records = "publish_dns_records --addressed ns1.$name $name 192.0.2.6";
+    my $records = "publish_dns_records --records /etc/provisioner/records/$name --addressed ns1.$name $name 192.0.2.6";
     like( $fragment, qr{\Q$records\E$}m, 'its own records include ns1, at the address of the domain' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, $records ), 'and go up after the delegation' );
 
@@ -396,7 +396,8 @@ subtest 'the registrar publishes the records of the domain' => sub {
     my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC );
 
     is( $opts->{publish_records}, 1, 'into the zone that a registrar holds' );
-    my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]/;
+    my $publisher = qr/\S+publish_dns_records[ ]--records[ ]\S+[ ]/;
+    my $queued    = qr/queue_postrun_task[ ]$publisher/;
     like( $fragment, qr/${queued}\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]/, 'in the postrun, with the address the guest was built with' );
     like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E$/m, 'and each name: the configured aliases and the names that recipes handed over, sorted' );
     unlike( $fragment, qr/--addressed[ ]ns1/, 'and no nameserver, because the registrar has its own' );
@@ -460,9 +461,10 @@ subtest 'the records of mail go to the publisher in a file of their own' => sub 
     is( $by{"TXT $PUBLIC v=spf1"}{content},            'v=spf1 +a +mx -all',    'the SPF policy is a record of mail, matched by its start' );
     is( $by{"SRV _submissions._tcp.$PUBLIC"}{content}, "0 0 465 mail.$PUBLIC.", 'and each port of a mail client has its SRV' );
 
-    my $installed = qr{/etc/provisioner/records/\Q$PUBLIC\E[.]json};
-    like( $fragment, qr{^install[ ].*registrar-records[.]json[ ]$installed$}m, 'the fragment installs the file' );
-    like( $fragment, qr{publish_dns_records[ ]--records[ ]$installed[ ]},      'and hands it to the publisher' );
+    my $directory = qr{/etc/provisioner/records/\Q$PUBLIC\E};
+    my $file      = qr{$directory/registrar[.]json};
+    like( $fragment, qr{^install[ ].*registrar-records[.]json[ ]$file$}m, 'the fragment installs the file in the records directory of the domain' );
+    like( $fragment, qr{publish_dns_records[ ]--records[ ]$directory[ ]}, 'and hands the directory to the publisher' );
 
     my $out      = tempdir( CLEANUP => 1 );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
@@ -475,7 +477,8 @@ subtest 'the records of mail go to the publisher in a file of their own' => sub 
 
     my ( $plain, $without ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, modules => ['registrar'] );
     is_deeply( $plain->{zone_records}, [], 'a guest that runs no mail has no such records' );
-    unlike( $without, qr/--records/, 'and its publisher is handed no file' );
+    unlike( $without, qr/registrar-records[.]json/, 'and installs no file of its own' );
+    like( $without, qr{--records[ ]/etc/provisioner/records/\Q$PUBLIC\E[ ]}, 'but still hands the publisher the directory, where another recipe can put its records' );
 };
 
 subtest 'each zone that an account lists gets the credentials of that account' => sub {

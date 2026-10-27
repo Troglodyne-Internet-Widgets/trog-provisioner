@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Test::More;
 use File::Find ();
+use JSON::PP ();
 
 # What the next fetch finds.  The fragment gives the whole mail store to
 # dovecot:dovecot.
@@ -273,18 +274,21 @@ SKIP: {
     is($filter, 'smtp-amavis:[127.0.0.1]:10024', 'postfix filters mail through amavis alone') or diag $filter;
 }
 
-# install_dkim_records publishes the key into a zone this guest serves itself,
-# once for each selector however many times the guest has been provisioned.
+# The publisher of the registrar puts the DKIM key in the zone of the domain,
+# wherever the zone is, once for each selector however many times the guest
+# has been provisioned.
 SKIP: {
-    my $zones = '/var/spool/powerdns/zones.db';
-    skip 'this guest serves no zones with pdns', 2 unless -f $zones;
-    my $served = `sqlite3 $zones "SELECT count(*) FROM domains WHERE name='[% domain %]'" 2>&1`;
-    chomp $served;
-    skip 'this guest does not serve the zone for [% domain %]', 2 unless $served;
+    my $shortcut = '/opt/lexicon/[% domain %]';
+    skip 'no lexicon shortcut, so the registrar publishes nothing', 4 unless -x $shortcut;
+    my $public = `openssl rsa -in /etc/opendkim/keys/[% domain %]/default.private -pubout 2>/dev/null`;
+    $public =~ s/-----[^-]+-----//g;
+    $public =~ s/\s+//g;
+    my $listed = `$shortcut list TXT --output=JSON 2>/dev/null`;
+    my $rows   = eval { JSON::PP->new->decode($listed) } // [];
     foreach my $selector (qw{default mail}) {
-        my $count = `sqlite3 $zones "SELECT count(*) FROM records WHERE name='$selector._domainkey.[% domain %]' AND type='TXT'" 2>&1`;
-        chomp $count;
-        is($count, 1, "one DKIM record for the $selector selector");
+        my @keys = grep { lc( $_->{name} // '' ) =~ m/\A\Q$selector._domainkey.[% domain %]\E[.]?\z/ && ( $_->{content} // '' ) =~ m/v=DKIM1/ } @$rows;
+        is( scalar @keys, 1, "one DKIM record for the $selector selector" ) or diag $listed;
+        like( ( $keys[0] // {} )->{content} // '', qr/p=\Q$public\E/, 'which holds the key that opendkim signs with' );
     }
 }
 # opendmarc checks SPF itself.  milterprobe gives it a message as a client

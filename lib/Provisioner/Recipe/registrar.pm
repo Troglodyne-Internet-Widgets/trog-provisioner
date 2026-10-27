@@ -714,7 +714,10 @@ the C<hostnames> that the recipes handed over.  The exceptions are the names
 of C<address_names>, which C<zone_address_names> gives, such as the target of
 an C<MX>.  Each gets an C<A> record at the address.  The records also include
 C<zone_records>, such as the C<MX> itself, which F<registrar-records.json>
-carries to the publisher.  Where the domain holds its own
+carries to the publisher.  The fragment installs that file in
+F</etc/provisioner/records/DOMAIN/>, and the publisher reads every file there.
+So a recipe that makes a record on the guest writes a file of its own beside
+it, as L<Provisioner::Recipe::mail> does with its DKIM key.  Where the domain holds its own
 zone, they also include an C<A> record of C<own_nameserver>, which is C<ns1> of
 the domain, at the same address.  The target of an C<NS> record must not be a
 C<CNAME> either.  F<scripts/publish_dns_records> writes them through the lexicon

@@ -532,6 +532,45 @@ subtest 'a record at a name that holds a CNAME is refused' => sub {
     );
 };
 
+subtest 'a records directory gives the records of every .json file in it' => sub {
+    my $records = tempdir( CLEANUP => 1 );
+    my $write   = sub {
+        my ( $name, $text ) = @_;
+        open my $out, '>', "$records/$name" or BAIL_OUT("Cannot write $records/$name: $!");
+        print {$out} $text;
+        close $out or BAIL_OUT("Cannot close $records/$name: $!");
+    };
+    $write->( 'registrar.json', Cpanel::JSON::XS->new->encode( [ \%MX ] ) );
+    $write->( 'dkim.json',      Cpanel::JSON::XS->new->encode( [ { type => 'TXT', name => "default._domainkey.$DOMAIN", content => 'v=DKIM1; p=KEY', match => 'v=DKIM1' } ] ) );
+    $write->( 'notes.txt',      'not records' );
+
+    against(
+        holding(),
+        sub {
+            my ($ran) = @_;
+            my $rc;
+            capture { $rc = Trog::PublishDNSRecords::main( '--records', $records, $DOMAIN, $ADDRESS ) };
+            is( $rc, 0, 'the run succeeds, past a file that is not .json' );
+            my @made = sent( $ran, 'create' );
+            ok( ( grep { index( $_, ' create MX ' ) >= 0 } @made ),                         'the records of one file go up' );
+            ok( ( grep { index( $_, "--name='default._domainkey.$DOMAIN'" ) >= 0 } @made ), 'and those of the other' );
+        }
+    );
+
+    against(
+        holding(),
+        sub {
+            like(
+                exception {
+                    capture { Trog::PublishDNSRecords::main( '--records', "$records/nothing-is-here", $DOMAIN, $ADDRESS ) }
+                },
+                qr/Cannot[ ]read[ ]the[ ]records/,
+                'a path that is neither stops the run'
+            );
+        }
+    );
+};
+
 subtest 'a records file that is not a list stops the run' => sub {
     my $file = "$dir/broken.json";
     open my $out, '>', $file or BAIL_OUT("Cannot write $file: $!");

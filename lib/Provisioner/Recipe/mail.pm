@@ -410,6 +410,11 @@ sub addressed_names {
 The MX of the domain, which names C<mail.DOMAIN>, its SPF and DMARC policies,
 the records that point a mail client at its settings, and an SRV record for
 each port that a client sends or reads mail on.  See L<Provisioner::Recipe>.
+
+The DKIM records are not here, because the key is made on the guest during
+the build.  F<scripts/dkim_records> writes them into the records directory of
+the domain, where the publisher of L<Provisioner::Recipe::registrar> finds
+them beside these.
 The SPF policy passes the address of the domain and of its MX, which is the
 address of a mail relay where the domain has one.
 

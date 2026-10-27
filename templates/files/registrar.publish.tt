@@ -6,14 +6,15 @@
     runs after this one.  The postrun runs after every target, so both are
     settled by the time this goes. -%]
 [% IF publish_records -%]
-[%# The records other than names.  A file, because their content holds
-    spaces, semicolons and quotes.  See zone_records in
-    Provisioner::Recipe::registrar. -%]
+[%# The records other than names, in a directory of files, because their
+    content holds spaces, semicolons and quotes.  This recipe writes one file,
+    and a recipe that makes a record on the guest writes another, as mail does
+    with its DKIM key.  See zone_records in Provisioner::Recipe::registrar. -%]
+install -d -o root -g root -m 0755 /etc/provisioner/records/[% domain %]
 [% IF zone_records.size() -%]
-install -d -o root -g root -m 0755 /etc/provisioner/records
-install -o root -g root -m 0644 registrar-records.json /etc/provisioner/records/[% domain %].json
+install -o root -g root -m 0644 registrar-records.json /etc/provisioner/records/[% domain %]/registrar.json
 [% END -%]
-[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% IF zone_records.size() %]--records /etc/provisioner/records/[% domain %].json [% END %][% IF own_nameserver %]--addressed [% own_nameserver %] [% END %][% FOREACH name IN address_names %]--addressed [% name %] [% END %][% domain %] [% address %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records --records /etc/provisioner/records/[% domain %] [% IF own_nameserver %]--addressed [% own_nameserver %] [% END %][% FOREACH name IN address_names %]--addressed [% name %] [% END %][% domain %] [% address %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
 [%# A name in a zone of a registrar account is a CNAME of the domain, but the
     apex of that zone holds an A record.  See publication in
     Provisioner::Recipe::registrar. -%]
