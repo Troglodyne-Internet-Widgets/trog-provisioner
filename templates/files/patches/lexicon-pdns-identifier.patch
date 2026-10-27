@@ -1,0 +1,27 @@
+Subject: [PATCH] Let a PowerDNS record whose content holds a slash be deleted and updated
+
+An identifier is TYPE/NAME=CONTENT, and _parse_identifier split it at every
+slash.  The base64 of a DKIM key holds slashes, so the content came back cut
+at its first slash, delete_record matched no record, and update_record added
+a second record beside the first.  It splits once at the first slash, and
+once at the first equals sign after it, because a name holds neither.
+
+---
+--- a/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
++++ b/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
+@@ -116,11 +116,10 @@
+         return f"{rtype}/{name}={content}"
+ 
+     def _parse_identifier(self, identifier):
+-        parts = identifier.split("/")
+-        rtype = parts[0]
+-        parts = parts[1].split("=")
+-        name = parts[0]
+-        content = "=".join(parts[1:])
++        # Split once at each, because the content can hold either character,
++        # as the base64 of a DKIM key does.  A name holds neither.
++        rtype, rest = identifier.split("/", 1)
++        name, content = rest.split("=", 1)
+         return rtype, name, content
+ 
+     def list_records(self, rtype=None, name=None, content=None):

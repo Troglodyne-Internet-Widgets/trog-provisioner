@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Test::More;
 use File::Find ();
+use JSON::PP ();
 
 # What the next fetch finds.  The fragment gives the whole mail store to
 # dovecot:dovecot.
@@ -37,9 +38,7 @@ is(scalar @exposed, 0, 'and nothing under the mail store is readable by anybody 
 my $gripes = `sudo -u '[% admin_user %]' find '$store' -print 2>&1 >/dev/null`;
 isnt($gripes, '', 'the admin user can no longer walk the mail store');
 
-# The DKIM key, and the staged copy of it.  remote_files names the staged copy,
-# not the original.  Provisioner::Recipe::mail says why.  restores() takes the
-# key back from exactly this path.
+# The DKIM key, which bin/provision put here from the secret store.
 ok(-s '/etc/opendkim/keys/[% domain %]/default.private', 'this domain has a DKIM signing key');
 
 # The tables that opendkim reads are the rows of every domain on the guest.  If
@@ -67,13 +66,26 @@ ok(-s '/etc/opendkim/keys/[% domain %]/default.private', 'this domain has a DKIM
     like($headers, qr/^DKIM-Signature:.*\bd=\Q[% domain %]\E;/msx, 'and signs the mail of [% domain %]') or diag $headers;
     system('doveadm', 'expunge', '-u', 'catchall@[% domain %]', 'mailbox', 'INBOX', 'subject', $subject);
 }
-ok(!-e '/mail/keys/keys', 'staged once, rather than into itself');
+
+# The publisher of the registrar puts the DKIM key in the zone of the domain,
+# wherever the zone is, once for each selector however many times the guest
+# has been provisioned.
 SKIP: {
-    my $staged = '/mail/keys/[% domain %]/default.private';
-    ok(-s $staged, 'and a copy of it where the next fetch will look') or skip 'nothing staged to read', 2;
-    isnt(system('sudo', '-u', '[% admin_user %]', 'test', '-r', $staged), 0, 'which the admin user can no longer read');
-    my $mode = (stat $staged)[2] & 07777;
-    is($mode & 0077, 0, sprintf('and nobody but root can (%04o)', $mode));
+    my $shortcut = '/opt/lexicon/[% domain %]';
+    skip 'no lexicon shortcut, so the registrar publishes nothing', 4 unless -x $shortcut;
+    my $public = `openssl rsa -in /etc/opendkim/keys/[% domain %]/default.private -pubout 2>/dev/null`;
+    $public =~ s/-----[^-]+-----//g;
+    $public =~ s/\s+//g;
+    my $listed = `$shortcut list TXT --output=JSON 2>/dev/null`;
+    my $rows   = eval { JSON::PP->new->decode($listed) } // [];
+    foreach my $selector (qw{default mail}) {
+        my @keys = grep { lc( $_->{name} // '' ) =~ m/\A\Q$selector._domainkey.[% domain %]\E[.]?\z/ && ( $_->{content} // '' ) =~ m/v=DKIM1/ } @$rows;
+        is( scalar @keys, 1, "one DKIM record for the $selector selector" ) or diag $listed;
+        # pdns quotes each string of a long record apart, and lexicon takes off
+        # only the outer quotes, so the answer can read a" "b.
+        my $text = ( ( $keys[0] // {} )->{content} // '' ) =~ s/\A"//r =~ s/"\z//r =~ s/"[ ]+"//gr;
+        like( $text, qr/p=\Q$public\E\z/, 'which holds the key that opendkim signs with' );
+    }
 }
 
 my $postfix = `systemctl is-active postfix 2>/dev/null`;
@@ -273,20 +285,6 @@ SKIP: {
     is($filter, 'smtp-amavis:[127.0.0.1]:10024', 'postfix filters mail through amavis alone') or diag $filter;
 }
 
-# install_dkim_records publishes the key into a zone this guest serves itself,
-# once for each selector however many times the guest has been provisioned.
-SKIP: {
-    my $zones = '/var/spool/powerdns/zones.db';
-    skip 'this guest serves no zones with pdns', 2 unless -f $zones;
-    my $served = `sqlite3 $zones "SELECT count(*) FROM domains WHERE name='[% domain %]'" 2>&1`;
-    chomp $served;
-    skip 'this guest does not serve the zone for [% domain %]', 2 unless $served;
-    foreach my $selector (qw{default mail}) {
-        my $count = `sqlite3 $zones "SELECT count(*) FROM records WHERE name='$selector._domainkey.[% domain %]' AND type='TXT'" 2>&1`;
-        chomp $count;
-        is($count, 1, "one DKIM record for the $selector selector");
-    }
-}
 # opendmarc checks SPF itself.  milterprobe gives it a message as a client
 # would, from an address that the test chooses, and the test reads what
 # opendmarc concluded.  An SMTP session from here would stop at the reverse DNS

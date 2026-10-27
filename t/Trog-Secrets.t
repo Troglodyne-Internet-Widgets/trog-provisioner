@@ -197,6 +197,20 @@ subtest 'the whole cycle, as new_config runs it' => sub {
     is( $config->{recipe}{other}, 'left alone',     'and nothing else moved' );
 };
 
+subtest 'held answers what remember read or made in this process, and opens nothing' => sub {
+    my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+    my $file = "$dir/secrets.kdbx";
+    Trog::Secrets->create( $file, 'throwaway', 'secret:existing/entry/password' => 'written by somebody' );
+
+    local %Trog::Secrets::HELD;
+    is( Trog::Secrets->held('secret:existing/entry/password'), undef, 'nothing before remember ran' );
+
+    Trog::Secrets->remember( $file, 'throwaway', 'secret:existing/entry/password' => sub { 'replaced' }, 'secret:new/entry/password' => sub { 'made' } );
+    is( Trog::Secrets->held('secret:existing/entry/password'), 'written by somebody', 'a value that the store held' );
+    is( Trog::Secrets->held('secret:new/entry/password'),      'made',                'and a value that it made' );
+    is( Trog::Secrets->held('secret:other/entry/password'),    undef,                 'and nothing for a reference that remember was not asked about' );
+};
+
 subtest 'remember makes a secret once and keeps it' => sub {
     my $dir  = File::Temp::tempdir( CLEANUP => 1 );
     my $file = "$dir/secrets.kdbx";

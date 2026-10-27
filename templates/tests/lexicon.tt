@@ -41,6 +41,10 @@ PYTHON
 my $sent = `python3 -I -c '$easydns' 2>&1`;
 is($sent, "10 mail.zone.test.\n", 'the easydns provider sends the priority of an MX apart from its target') or diag $sent;
 
+# The patch lexicon-pdns-identifier: an identifier keeps the whole content.
+my $identifier = `python3 -I -c 'from lexicon._private.providers.powerdns import Provider; c = "v=DKIM1; p=ab/cd+ef/gh=="; print(Provider._parse_identifier(None, Provider._make_identifier(None, "TXT", "x.zone.test.", c))[2])' 2>&1`;
+is($identifier, "v=DKIM1; p=ab/cd+ef/gh==\n", 'the powerdns provider reads back the content of a record that holds a slash, so it can delete it') or diag $identifier;
+
 # An argument with spaces in it, such as the content of an SPF record, reaches
 # lexicon whole.  A fake lexicon early on PATH prints the last argument that
 # arrives.

@@ -16,6 +16,9 @@ use Time::HiRes  qw{time sleep};
 # How many seconds a writer waits for another writer to finish with the store.
 our $LOCK_WAIT = 120;
 
+# What remember read or made in this process, by reference.  See held.
+our %HELD;
+
 =head1 NAME
 
 Trog::Secrets - the KeePass database: what a configuration asks it for, and what
@@ -262,6 +265,8 @@ Dies if the database cannot be opened or unlocked, or if a generator returns a
 false value.  Also dies if the database did not keep a new value: after a save
 it opens the file again and makes sure that each new value is there.
 
+Each value is also kept for C<held>, for the rest of the process.
+
 =cut
 
 sub remember {
@@ -299,6 +304,8 @@ sub remember {
                 $made{$ref}   = 1;
             }
 
+            %HELD = ( %HELD, %values );
+
             # Save only when there is something new, because a save rewrites the store
             # that every other domain also uses.
             return %values unless %made;
@@ -328,6 +335,21 @@ sub remember {
             return %values;
         }
     );
+}
+
+=head2 $value = held($ref)
+
+The value that C<remember> read or made for C<$ref> earlier in this process,
+or undef.  It opens no store.  So a recipe can derive something public from a
+secret that the provisioner owns, such as the public half of a key for a DNS
+record, once C<bin/new_config> has read the secrets of the guest.  A test sets
+C<%Trog::Secrets::HELD> with C<local>.
+
+=cut
+
+sub held {
+    my ( $class, $ref ) = @_;
+    return $HELD{$ref};
 }
 
 =head2 replace($file, $password, %value_by_ref)

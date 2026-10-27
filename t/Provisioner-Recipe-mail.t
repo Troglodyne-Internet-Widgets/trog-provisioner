@@ -20,6 +20,10 @@ use Test::MockModule qw{strict};
 use FindBin::libs;
 
 use Provisioner::Cookbook();
+use Trog::Secrets();
+
+use Crypt::PK::RSA();
+use MIME::Base64();
 
 my $recipe = Provisioner::Cookbook->load( 'mail', distro => 'ubuntu' )->new(
     template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
@@ -139,6 +143,28 @@ subtest 'behind a relay of nginx, the settings of mail clients are public names'
     is_deeply( $relayed->{sites},                          \@sites,                     'the vhost answers for both names' );
     is_deeply( $relayed->{public_names},                   { map { $_ => $_ } @sites }, 'and the relay sends both to it' );
     is_deeply( [ sort keys %{ $asked->( nginx => {} ) } ], ['sites'],                   'without a relay, mail asks nginx for the vhost alone' );
+};
+
+subtest 'the DKIM key comes from the store, and its public half is a record' => sub {
+    my $mail = Provisioner::Cookbook->load('mail');
+    my ($file) = values %{ { $mail->guest_secrets( '/nonexistent', 'mail.test.test' ) } };
+    is( $file->{ref}, 'secret:mail/mail.test.test-dkim-key/password', 'the store keeps it for the domain' );
+
+    my $made = $file->{generate}->();
+    my $key  = Crypt::PK::RSA->new( \$made );
+    ok( $key->is_private, 'the generator makes a private key' );
+    is( $key->size * 8, 2048, 'of 2048 bits' );
+
+    local %Trog::Secrets::HELD;
+    is_deeply( [ $mail->dkim_records('mail.test.test') ], [], 'without the key, as in a run that opened no store, there is no record' );
+
+    $Trog::Secrets::HELD{ $file->{ref} } = $made;
+    my @records = $mail->dkim_records('mail.test.test');
+    is_deeply( [ map { $_->{name} } @records ], [qw{default._domainkey.mail.test.test mail._domainkey.mail.test.test}], 'with it, a record for each selector of the key table' );
+    my $public = MIME::Base64::encode_base64( $key->export_key_der('public'), q{} );
+    is( $records[0]{content}, "v=DKIM1; h=sha256; k=rsa; t=y; p=$public", 'holding the public half of that key' );
+    is( $records[0]{match},   'v=DKIM1',                                  'matched by its start, so that a new key replaces it' );
+    ok( ( grep { $_->{name} eq 'default._domainkey.mail.test.test' } $mail->dns_records( domain => 'mail.test.test' ) ), 'and among the records of mail' );
 };
 
 Test::NoWarnings::had_no_warnings();
