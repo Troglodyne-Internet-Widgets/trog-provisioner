@@ -15,9 +15,11 @@ handed, what it must never be handed, and what it does with no checkout
 
 use Test::More;
 use Test::NoWarnings;
-use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 use File::Temp();
 use FindBin::libs;
 use Provisioner::Utils();
@@ -412,6 +414,173 @@ subtest 'the symlink is made with -n, or the second provision fails' => sub {
     # and this recipe does not require one -- so a dotfile there is read by
     # nobody.  perl.tt was fixed for the same assumption.
     like( $fragment, qr{/etc/profile\.d/trogrunner\.sh}, 'and the shell profile goes somewhere every login shell reads' );
+};
+
+# --- What a runner needs on its hypervisors -----------------------------------
+#
+# The steps run on machines that a test cannot have, so each machine is a fake
+# that records what it was asked.  Trog::Steps, which hands the steps their
+# machines, has a test of its own.
+
+{
+
+    package Test::FakeLogin;    # a hypervisor as the user of a libvirt URI
+
+    sub new ( $class, %files ) { return bless { files => {%files}, appended => [] }, $class }
+    sub ssh_user ($)           { return 'runner' }
+    sub describe ($)           { return 'the fake' }
+    sub authorized_keys ($)    { return '/bogus/home/runner/.ssh/authorized_keys' }
+    sub file_exists ( $self, $path )        { return exists $self->{files}{$path} }
+    sub read_text   ( $self, $path )        { return $self->{files}{$path} }
+    sub write_text  ( $self, $path, $text ) { $self->{files}{$path} = $text; return 1 }
+
+    sub append_line ( $self, $path, $line ) {
+        push @{ $self->{appended} }, $line;
+        $self->{files}{$path} .= "$line\n";
+        return 1;
+    }
+
+    package Test::FakeAdmin;    # a hypervisor as the account of hypervisors.conf
+
+    sub new ($class) { return bless { asked => [] }, $class }
+
+    sub runner_account_plan      ( $self, %args )            { push @{ $self->{asked} }, [ plan => \%args ];            return {%args} }
+    sub runner_account_steps     ( $self, $plan )            { push @{ $self->{asked} }, [ account => $plan ];          return { what => 'make it' } }
+    sub runner_removal_steps     ( $self, $plan )            { push @{ $self->{asked} }, [ remove => $plan ];           return { what => 'unmake it' } }
+    sub runner_key_steps         ( $self, $user, $line )     { push @{ $self->{asked} }, [ key => $user, $line ];       return { what => 'let it in' } }
+    sub runner_key_removal_steps ( $self, $user, $material ) { push @{ $self->{asked} }, [ unkey => $user, $material ]; return { what => 'shut it out' } }
+}
+
+# The store as bin/provision hands it to a step: by reference.  The recipe's own
+# generator, rather than a key made some other way here.  A made-up string would
+# only prove that CryptX rejects made-up strings, and a key from ssh-keygen would
+# not exercise the thing that actually goes in the store, which has a rewrap in
+# it because the two do not agree by default.
+sub runner_secrets {
+    my ( undef, $recipe ) = built();
+    my ($entry) = values %{ { $recipe->guest_secrets( $INSTALL, $DOMAIN ) } };
+    return { $entry->{ref} => $entry->{generate}->() };
+}
+
+subtest 'a runner is let in to each hypervisor that it names, as the user of its URI' => sub {
+    my $dir   = tempdir( CLEANUP => 1 );
+    my $class = Provisioner::Cookbook->load('trogrunner');
+
+    my %two   = ( %HYPERVISORS, hv2 => { libvirt_uri => 'qemu+ssh://runner@hv2.test.test/system' } );
+    my @steps = $class->outside_steps( $DOMAIN, hypervisor_access => 'least', restrict_key_to_ip => 0, hypervisors => \%two );
+    is_deeply( [ map { $_->{machine} } @steps ], [ map { { uri => $two{$_}{libvirt_uri} } } qw{hv1 hv2} ], 'one step for each hypervisor, on its URI' );
+    is_deeply( [ map { $_->{when} } @steps ],    [qw{secrets secrets}],                                    'once the key is out of the store, before the makefile starts' );
+
+    my %context = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 0, secrets => runner_secrets() );
+    my $login   = Test::FakeLogin->new();
+    my @actions = $steps[0]{apply}->( $login, %context );
+    ok( !$actions[0]{done}->(), 'a hypervisor without the key does not have it yet' );
+    $actions[0]{do}->();
+
+    my ($line) = @{ $login->{appended} };
+    like( $line, qr/\Assh-ed25519[ ]/,                               'the public half, derived rather than stored' );
+    like( $line, qr/\Qtrog-provisioner runner runner.test.test\E\z/, 'and it says whose it is' );
+    ok( $actions[0]{done}->(), 'and a second provision finds it there' );
+
+    # bin/destroy reads this rather than the store, so that taking the access
+    # away never stops to ask for a passphrase.
+    chomp( my $written = File::Slurper::read_text("$dir/hypervisor-key.pub") );
+    is( $written, $line, 'and it is written beside the domain for the revert' );
+
+    my @undo = $steps[0]{revert}->( $login, domain => $DOMAIN, domain_dir => $dir, secrets => {} );
+    $undo[0]{do}->();
+    is( $login->{files}{ $login->authorized_keys }, q{}, 'the revert takes it away again, from the public half alone' );
+};
+
+subtest 'the key is held to the address of the runner' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    my $held = '192.0.2.77';
+    $pool->redefine( held_by => sub { return $held } );
+
+    # Fresh steps for each run, as Trog::Steps asks for them: the steps of one
+    # run work the line out once.
+    my $step    = sub { ( Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least', hypervisors => \%HYPERVISORS ) )[0] };
+    my $login   = Test::FakeLogin->new();
+    my %context = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 0, secrets => runner_secrets() );
+    ( $step->()->{apply}->( $login, %context ) )[0]{do}->();
+    like( $login->{appended}[0], qr/\Afrom="192[.]0[.]2[.]77"[ ]ssh-ed25519[ ]/, 'with from= and the address that it holds in the pool' );
+
+    # A runner that takes a lease has no address that stays.
+    $held = undef;
+    my @warned;
+    local $SIG{__WARN__} = sub { push @warned, @_ };
+    $login = Test::FakeLogin->new();
+    ( $step->()->{apply}->( $login, %context ) )[0]{do}->();
+    like( $login->{appended}[0], qr/\Assh-ed25519[ ]/,                            'without an address, the key goes in unrestricted' );
+    like( "@warned",             qr/holds[ ]no[ ]address[ ]in[ ]the[ ]ip[ ]pool/, 'and it says so' );
+};
+
+subtest 'a dry run has no store, and says what it would let in' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    my $steps    = sub { ( Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least', restrict_key_to_ip => 0, hypervisors => \%HYPERVISORS ) )[0] };
+    my $step     = $steps->();
+    my %context  = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 1, secrets => {} );
+    my ($action) = $step->{apply}->( Test::FakeLogin->new(), %context );
+    like( $action->{what}, qr/a[ ]dry[ ]run[ ]does[ ]not[ ]open/, 'a first provision has no public half yet, and says why' );
+
+    File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusBogusBogusBogusBogusBogusBogus x\n" );
+    my $login = Test::FakeLogin->new( '/bogus/home/runner/.ssh/authorized_keys' => "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusBogusBogusBogusBogusBogusBogus x\n" );
+    ($action) = $steps->()->{apply}->( $login, %context );
+    ok( $action->{done}->(), 'a later one asks the hypervisor about the key that the last provision left' );
+
+    like( exception { $steps->()->{apply}->( $login, %context, dryrun => 0 ) }, qr/the[ ]store[ ]had[ ]no[ ]key/, 'and a real provision without the key from the store stops' );
+};
+
+subtest 'a runner with an account has it made, and its key put in as root' => sub {
+    my $dir     = tempdir( CLEANUP => 1 );
+    my %blocks  = ( hv1 => { %{ $HYPERVISORS{hv1} }, account => { quota => '500G', cpu_quota => '400%' } } );
+    my @steps   = Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least', restrict_key_to_ip => 0, hypervisors => \%blocks );
+    my %context = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 0, secrets => runner_secrets() );
+
+    is_deeply( [ map { $_->{id} } @steps ],      [qw{trogrunner:account:hv1 trogrunner:key:hv1}],      'the account, and then the key' );
+    is_deeply( [ map { $_->{machine} } @steps ], [ { hypervisor => 'hv1' }, { hypervisor => 'hv1' } ], 'both as the account of the block of that name in hypervisors.conf, and not as the runner' );
+
+    my $admin = Test::FakeAdmin->new();
+    $_->{apply}->( $admin, %context ) for @steps;
+    my ( $plan, $account, $key ) = @{ $admin->{asked} };
+    is_deeply(
+        $plan->[1],
+        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', partition => '/machine/runner', quota => '500G', cpu_quota => '400%' },
+        'the plan is the user of the URI, the pool and the slice of the entry, and the limits of the account'
+    );
+    is( $account->[0], 'account', 'and the account is made from it' );
+    is( $key->[1],     'runner',  'and the key goes to that user' );
+    my ( $type, undef, $comment ) = split q{ }, $key->[2], 3;
+    is( "$type $comment", "ssh-ed25519 trog-provisioner runner $DOMAIN", 'and it is the key of the runner' );
+
+    $admin = Test::FakeAdmin->new();
+    $_->{revert}->( $admin, %context, secrets => {} ) for reverse @steps;
+    is_deeply( [ map { $_->[0] } @{ $admin->{asked} } ], [qw{unkey plan remove}], 'the revert takes the key away, and then the account' );
+};
+
+subtest 'access taken away leaves only what to take back' => sub {
+    my @steps = Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisors => \%HYPERVISORS );
+    is( scalar @steps, 1, 'the hypervisor that a provision may have let the runner in to' );
+    ok( !$steps[0]{apply} && $steps[0]{revert}, 'with a revert, and nothing to apply' );
+
+    is_deeply( [ Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least' ) ], [], 'and nothing at all for a runner that names no hypervisor' );
+};
+
+subtest 'an account that cannot be made is refused when the configuration is written' => sub {
+    my %entry = %{ $HYPERVISORS{hv1} };
+    my $with  = sub (%changed) { return ( hypervisor_access => 'least', hypervisors => { hv1 => { %entry, account => { quota => '1T' }, %changed } } ) };
+
+    like( exception { built( $with->(), hypervisor_access => 'none' ) }, qr/hypervisor_access[ ]is[ ]none/, 'an account with no access to make it' );
+    like( exception { built( $with->( pool_name   => q{} ) ) },                               qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
+    like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/system' ) ) }, qr/names[ ]no[ ]user/,                   'an account for nobody' );
+    like( exception { built( $with->( account     => {} ) ) },                                qr/not[ ]valid/,                         'and an account with no quota' );
+
+    my @warned;
+    local $SIG{__WARN__} = sub { push @warned, @_ };
+    built( hypervisor_access => 'least' );
+    like( "@warned", qr/no[ ]hypervisor[ ]is[ ]named/, 'access with no hypervisor to give it gets a warning' );
 };
 
 Test::NoWarnings::had_no_warnings();

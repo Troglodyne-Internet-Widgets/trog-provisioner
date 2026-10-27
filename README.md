@@ -172,7 +172,7 @@ That means:
 
     Name `pool_name` as well as `pool_path` -- libvirt looks a pool up by name, so a path given beside the name of a pool that already exists elsewhere is ignored and every volume lands in the existing one.  Then `zfs create -o quota=500G` (or any other filesystem that can carry one) under that path, and `systemctl set-property machine-runner.slice CPUQuota=400%` for the slice.  `bin/preflight` says whether the pool you have is actually limited or is just the whole filesystem.
 
-    On ZFS, `bin/runner_account` does all of it for a runner: an account of its own on the hypervisor, the dataset with its quota, the pool, the slice, and sudo for only the commands a build runs.
+    On ZFS, an `account` block in the runner's `hypervisors` entry has `bin/provision` do all of it when it builds the runner: an account of its own on the hypervisor, the dataset with its quota, the pool, the slice, sudo for only the commands a build runs, and the runner's key in that account.  `bin/destroy` takes it away again.  ACCOUNTS in `perldoc Provisioner::Recipe::trogrunner` has the block, and `bin/runner_account` does the same by hand.
 
     Leave memory to `reserve_memory`: a `MemoryMax` on a slice full of VMs kills one rather than refusing the next.
 

@@ -23,9 +23,7 @@ use Provisioner::Utils();
 use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
-use File::Temp();
-use Net::IP();
-use Provisioner::IPPool();
+use Trog::Steps();
 use YAML::XS();
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
@@ -147,6 +145,11 @@ directory, and does not do it.  It makes no disk and no cloud-init seed.  It
 does not destroy or define the domain.  It does not change the
 C<authorized_keys> of this machine.
 
+It asks each other machine that a recipe needs a change on whether the change
+is there, and prints each one that it would make.  See L<Trog::Steps>.  It does
+not open the secret store for that, so a change that needs a secret, such as
+the key of a runner, is described from what the last provision left.
+
 A domain that already has a key keeps it.  The guest that is up has the public
 half.  If provision replaces the private half here, it loses the way in to a
 machine that the dry run does not touch.  A domain with no key gets one,
@@ -179,9 +182,12 @@ generation is what chooses the hypervisor, and the address, the bridge and the
 transfer address all follow from that choice.  Then it reads
 F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> in the domain directory,
 chooses the hypervisor, and asks the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
-and waits for cloud-init and the makefile to finish.  For a guest that sends
-mail, it then sets the reverse DNS of its address, or says who must, as
-L</point_reverse_dns($domain, $address)> describes.
+and waits for cloud-init and the makefile to finish.
+
+The recipes of the domain can need changes on other machines, such as the
+account of a runner on a hypervisor, or the reverse DNS of a guest that sends
+mail.  provision makes them at the moment that each one asks for, through
+L<Trog::Steps>, and C<--dryrun> says which of them would change something.
 
 When C<_shared> in the configuration lists DOMAIN under another domain, DOMAIN
 goes onto the guest of that domain.  F<bin/new_config> writes that domain into
@@ -246,6 +252,10 @@ my sub must_read {
     return $fh;
 }
 
+# The --hvconf of this run, for the steps of Trog::Steps that work on a
+# hypervisor as the account of its block.  build_guest sets it.
+our $HVCONF;
+
 # Each domain gets its secrets once in a run.  On the reuse path,
 # reprovision_guest places them and schedules the makefile, and then main
 # places them again.  A second write replaces a key that the recipe already
@@ -268,12 +278,19 @@ A file can name C<issue> in place of a reference.  Another guest issues that
 secret when this guest is built, and the store never holds it.  See
 C<issue_secret>.
 
+Then it does the C<secrets> steps of the recipes of the domain, with the values
+that it read from the store.  See L<Trog::Steps>.  A step that changes another
+machine with a secret, such as the key of a runner on its hypervisors, is done
+here, because anywhere else the operator types the password of the store a
+second time.
+
 Most guests ask for no secret, and F<bin/new_config> writes no manifest for
-them.  With no manifest, this sub does nothing and returns an empty list.  It
-also returns an empty list on a second call for the same domain.  It returns 1
-after it places the files, calls C<authorize_runner_key>, and writes the file
-that L<Trog::Guest/secrets_marker> names.  F<setup.sh> waits for that file
-before it starts make, so the makefile never runs without the secrets.
+them.  With no manifest, this sub places nothing, does the steps, and returns
+an empty list.  It does nothing and returns an empty list on a second call for
+the same domain.  It returns 1 after it places the files, does the steps, and
+writes the file that L<Trog::Guest/secrets_marker> names.  F<setup.sh> waits
+for that file before it starts make, so the makefile never runs without the
+secrets, or before the steps are done.
 
 It asks for the password of the store through L<Trog::Credentials>, when a
 file names a reference.  It dies if
@@ -293,11 +310,11 @@ sub place_guest_secrets {
     # The domain directory of the hypervisor of this run, which is the
     # directory that bin/destroy purges.
     my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
-
-    return unless -e $manifest;
-
-    my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
-    return unless ref $wanted eq 'HASH' && %$wanted;
+    my $wanted   = -e $manifest ? YAML::XS::Load( File::Slurper::read_binary($manifest) ) : undef;
+    unless ( ref $wanted eq 'HASH' && %$wanted ) {
+        Trog::Steps->apply( $domain, when => 'secrets', hvconf => $HVCONF );
+        return;
+    }
 
     my %needed = map { $_ => $wanted->{$_}{ref} } grep { $wanted->{$_}{ref} } keys %$wanted;
     my %values = %needed ? Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed ) : ();
@@ -329,7 +346,10 @@ sub place_guest_secrets {
         print "Placed $path on $domain from " . ( $wanted->{$path}{ref} // "$wanted->{$path}{issue}{guest}" ) . "\n";
     }
 
-    authorize_runner_key( $domain, \%values );
+    # By the reference, which is what a recipe knows its secret by.  The path
+    # is where this guest keeps it.
+    my %by_ref = map { $wanted->{$_}{ref} => $values{$_} } grep { $wanted->{$_}{ref} } keys %$wanted;
+    Trog::Steps->apply( $domain, when => 'secrets', secrets => \%by_ref, hvconf => $HVCONF );
 
     my $marker = Trog::Guest->secrets_marker($domain);
     $guest->write_text( $marker, "placed\n", sudo => 1, mode => '0600' )
@@ -368,141 +388,6 @@ sub issue_secret {
 
     print "$issuer issued $path for $domain\n";
     return $secret;
-}
-
-=head2 authorize_runner_key($domain, $values)
-
-Adds the key of a runner to the F<authorized_keys> of each hypervisor that the
-runner builds guests on.  A runner is a guest that runs the C<trogrunner>
-recipe.  $values is the hash reference, from path to value, that
-C<place_guest_secrets> got from the store.
-
-The change is to a machine that is not the guest, so the tool makes it and not
-the recipe.  C<authorize_guest_key> is here for the same reason.  This sub is
-not next to that one, because the key comes out of the store here.  In any
-other place, the operator must type the password of the store a second time.
-
-L<Provisioner::Cookbook> tells which hypervisors get the key.  This sub does
-nothing and returns 0 for a domain that does not run C<trogrunner>, or that
-keeps the default C<hypervisor_access> of C<none>.  It gives a warning and
-returns 0 for a domain that asks for access and names no hypervisor.  It
-returns 1 when it added the key.  It also warns when the key is to be restricted
-to the address of the domain, and the domain holds none in the pool, because then
-the key goes in unrestricted.
-
-It writes the public half beside the domain as F<hypervisor-key.pub>.  The file
-is public, and F<bin/destroy> reads it to remove the key without the password
-of the store.
-
-It dies if the store has no private key for the domain, if the value is not a
-key, if a hypervisor has no C<libvirt_uri>, or if it cannot add the key.
-
-A dry run never gets here, because C<provision_domain> returns before it
-places any secret.
-
-=cut
-
-sub authorize_runner_key {
-    my ( $domain, $values ) = @_;
-
-    my $config = eval { Provisioner::Cookbook->domain_config($domain) } // {};
-    my %grant  = Provisioner::Cookbook->load('trogrunner')->grant( $config->{trogrunner} );
-    return 0 unless %grant;
-
-    my $hypervisors = $grant{hypervisors};
-    unless (%$hypervisors) {
-        warn "$domain asked for $grant{access} on its hypervisors and names none, so there is nobody to authorize it with\n";
-        return 0;
-    }
-
-    my $domain_dir = Trog::HV->new()->domain_dir;
-    my ($private) = grep { m{/\.ssh/id_ed25519\z} } keys %$values;
-    die "$domain wants hypervisor access and the store had no key for it\n"
-      unless $private && length( $values->{$private} // q{} );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a key of "0" is still a key
-
-    # ssh_pubkey_from_private reads a key from a file, so the key goes to a
-    # temporary one that only this user can read, for as long as that takes.
-    my $pubkey = do {
-        my $tmp = File::Temp->new( UNLINK => 1 );
-        chmod 0600, $tmp->filename;
-        print {$tmp} "$values->{$private}\n";
-        $tmp->flush();
-
-        my $half = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
-        die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
-          unless $half;
-
-        # The comment names the line, so that a reader of authorized_keys can
-        # tell whose it is and remove it by hand.
-        "$half trog-provisioner runner $domain";
-    };
-    File::Slurper::Temp::write_binary( "$domain_dir/$domain/hypervisor-key.pub", "$pubkey\n" );
-
-    # from="<address>" when the domain holds one.  The address is stable,
-    # because a new provision keeps the address of the domain.  Only
-    # bin/destroy gives it back.
-    my $line = $pubkey;
-    if ( $grant{restrict} ) {
-        my $ip = eval { Provisioner::IPPool::held_by($domain) };
-        $line = qq{from="$ip" $pubkey} if $ip;
-        warn "$domain holds no address in the ip pool, so its key on the hypervisors is not restricted to an address.  A lease can change.\n" unless $ip;
-    }
-
-    foreach my $name ( sort keys %$hypervisors ) {
-        my $uri = $hypervisors->{$name}{libvirt_uri}
-          or die "$domain names a hypervisor '$name' with no libvirt_uri\n";
-
-        my $machine = Trog::HV->candidate( uri => $uri );
-        $machine->append_line( $machine->authorized_keys, $line )
-          or die "Could not authorize $domain on $name (" . $machine->describe . ")\n";
-
-        print "Authorized $domain on $name as " . ( $machine->ssh_user // 'the connecting user' ) . "\n";
-    }
-
-    print "$domain now has $grant{access} on: " . join( ', ', sort keys %$hypervisors ) . "\n";
-    return 1;
-}
-
-=head2 point_reverse_dns($domain, $address)
-
-When a recipe of C<$domain> C<sends_mail>, sets the reverse DNS of the guest to
-C<helo_name_of> the domain in L<Provisioner::Cookbook>, through
-L<Trog::HV/$address = $hv-E<gt>set_reverse_dns($domain, $name)>.  The guest is
-C<machine_of> the domain.  So a domain built onto another domain's guest sets
-the reverse DNS of that guest, to the name of that guest.
-When the hypervisor offers no way and C<$address> is public, it prints what the
-operator must set, and where.  A private address gets neither, because no
-receiver of mail connects from it.
-
-A guest that sends no mail gets nothing.  A refusal of the hypervisor gets a
-warning, because the guest is built and works, and only its mail out suffers.
-Returns 1 when the reverse DNS was set.
-
-=cut
-
-sub point_reverse_dns {
-    my ( $domain, $address ) = @_;
-
-    my $config = eval { Provisioner::Cookbook->domain_config($domain) } // {};
-    return 0 unless List::Util::any { Provisioner::Cookbook->load($_)->sends_mail } grep { Provisioner::Cookbook->has($_) } keys %$config;
-    my $name = Provisioner::Cookbook->helo_name_of($domain);
-
-    my $hv  = Trog::HV->new();
-    my $set = eval { $hv->set_reverse_dns( Provisioner::Cookbook->machine_of($domain), $name ) };
-    if ( my $error = $@ ) {
-        warn "Could not set the reverse DNS of $domain to $name, so receivers can reject its mail.\n$error";
-        return 0;
-    }
-    if ($set) {
-        print "The reverse DNS of $set is now $name\n";
-        return 1;
-    }
-
-    my $ip = Net::IP->new($address);
-    return 0 unless $ip && $ip->iptype eq 'PUBLIC';
-
-    print "Set the reverse DNS of $address to $name where the address is held.  " . $hv->describe . " offers no way to do it from here, and until it is set, receivers can reject the mail of $domain.\n";
-    return 0;
 }
 
 # What to do about a rebuild that destroys the guest, as the
@@ -699,6 +584,7 @@ they can be on different ones.
 sub build_guest {
     my (%args) = @_;
     my ( $domain, $reuse, $hv_name, $hvconf, $recipes, $dryrun, $nonreusable, $on_failure, $salvage_gaps_ok ) = @args{qw{domain reuse hypervisor hvconf recipes dryrun nonreusable on_failure salvage_gaps_ok}};
+    $HVCONF = $hvconf;
 
     Trog::HV->forget();
 
@@ -823,7 +709,7 @@ sub build_guest {
         $domain, $on_failure,
         sub {
             my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, own_hv => $own_hv, dryrun => $dryrun, nonreusable => $nonreusable );
-            return if $dryrun;
+            return Trog::Steps->preview( $domain, hvconf => $HVCONF ) if $dryrun;
 
             # After provision_domain, for the reason above.  A domain with a dependency
             # already has the key of that guest.
@@ -857,8 +743,9 @@ sub build_guest {
             $guest->wait_for_makefile($domain)
               or die "The build for $domain failed; read /var/log/$domain.setup.log on the guest\n";
 
-            # After the build, because the build publishes the name.
-            point_reverse_dns( $domain, $ip );
+            # After the build, because the build publishes the name that the
+            # reverse DNS of a guest that sends mail points at.
+            Trog::Steps->apply( $domain, when => 'built', address => $ip, hvconf => $HVCONF );
         }
     );
 
@@ -1363,7 +1250,13 @@ is here and not in the recipe that makes the key.  F<bin/destroy> removes the
 key again.  It knows nothing about a key from a configuration run that never
 became a guest.
 
-A dry run never gets here, for the same reason as C<authorize_runner_key>.
+A dry run never gets here, because C<provision_domain> returns before it.
+
+This is not one of the steps of L<Trog::Steps>, for three reasons.  No recipe
+owns it: F<setup.sh> fetches the payload of every guest, whatever its recipes
+are.  It must be done before the guest boots, which is before any step,
+because the fetch starts at once on a guest with no secrets.  And for a
+tenant, the key is the key of its host, not of the domain.
 
 =cut
 

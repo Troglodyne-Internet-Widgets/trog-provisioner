@@ -22,6 +22,7 @@ use File::Temp qw{tempdir};
 use Test::More;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
+use Capture::Tiny    qw{capture};
 
 use_ok('Provisioner::Recipe');
 use Provisioner::Cookbook();
@@ -647,6 +648,61 @@ subtest 'secrets_in finds each value that the schema marks, wherever it is' => s
     # wants a string is what validate refuses, not a secret.
     is_deeply( [ Test::Recipe::Secrets->secrets_in( { token => q{}, from => [ { key => undef } ], users => { someone => { password => ['x'] } } } ) ], [], 'an empty, undefined or structured value is not a secret' );
     is_deeply( [ Test::Recipe::Secrets->secrets_in( { bogus => { token => 'SeCrEt' } } ) ], [], 'nor is a value where the schema declares nothing' );
+};
+
+# --- What a recipe that sends mail needs outside its guest ---
+{
+
+    package Test::FakeHV;    # the hypervisor of the run, which a step is handed
+
+    sub new ( $class, $answer ) { return bless { answer => $answer, asked => [] }, $class }
+    sub describe ($)            { return 'the fake hypervisor' }
+
+    sub set_reverse_dns ( $self, @args ) {
+        push @{ $self->{asked} }, \@args;
+        return $self->{answer}->();
+    }
+}
+
+subtest 'the reverse DNS of a guest is set to the name its mail announces' => sub {
+    my ( %host, %config );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
+    $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return { %{ $config{$domain} // {} } } } );
+
+    # What the step printed, what it warned, and what the hypervisor was asked,
+    # after the build, for $domain, as the recipe $recipe declares it.  The
+    # name follows from the recipes of the domain, so $domain runs $recipe.
+    my $point = sub ( $recipe, $address, $answer, $domain = 'mx.test.test' ) {
+        $config{$domain} = { $recipe => {} };
+        my $hv = Test::FakeHV->new($answer);
+        my ($step) = Provisioner::Cookbook->load($recipe)->outside_steps($domain);
+        my ( $out, $err ) = capture( sub { $_->{do}->() for $step->{apply}->( $hv, domain => $domain, address => $address ) } );
+        return ( $out, $err, $hv->{asked}, $step );
+    };
+
+    is_deeply( [ Provisioner::Cookbook->load('nginx')->outside_steps('mx.test.test') ], [], 'a recipe that sends no mail asks for nothing' );
+
+    my ( $out, $err, $asked, $step ) = $point->( 'mail', '9.9.9.9', sub { '9.9.9.9' } );
+    is( $step->{when}, 'built',       'a mail guest asks after its build, because the build publishes the name' );
+    is( $step->{id},   'reverse_dns', 'once, under one id, however many of its recipes send mail' );
+    is_deeply( $asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'set to the name that its postfix announces' );
+    is( $out, "The reverse DNS of 9.9.9.9 is now mail.mx.test.test\n", 'and it says so' );
+
+    # A domain built onto a host.
+    %host = ( 'tenant.test.test' => 'mx.test.test' );
+    ( undef, undef, $asked ) = $point->( 'mail', '9.9.9.9', sub { '9.9.9.9' }, 'tenant.test.test' );
+    is( $asked->[0][0], 'mx.test.test', 'a tenant that sends mail gets it on the guest of its host' );
+    %host = ();
+
+    ( $out, $err ) = $point->( 'mailrelay', '9.9.9.9', sub { die "Linode refused put-ip: 403 not authorized\n" } );
+    is( $err, "Could not set the reverse DNS of mx.test.test to mx.test.test, so receivers can reject its mail.\nLinode refused put-ip: 403 not authorized\n", 'a refusal of the hypervisor is a warning with what it said, and does not stop the run' );
+
+    ( $out, $err ) = $point->( 'mailrelay', '9.9.9.9', sub { return } );
+    is( $out, "Set the reverse DNS of 9.9.9.9 to mx.test.test where the address is held.  the fake hypervisor offers no way to do it from here, and until it is set, receivers can reject the mail of mx.test.test.\n", 'a hypervisor that offers no way has the operator told what to set, for a public address' );
+
+    ( $out, $err ) = $point->( 'mailrelay', '192.168.1.20', sub { return } );
+    is( $out . $err, q{}, 'but not for a private one, which no receiver sees' );
 };
 
 done_testing();

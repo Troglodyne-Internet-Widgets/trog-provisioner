@@ -345,11 +345,11 @@ subtest 'the public names of a domain are released on its relay, which would sen
     like( $warned, qr/\Qrelay.test.test is not up\E .* \Qnginxrelay_client release $domain\E/, 'and the warning says what to run there' );
 };
 
-# --- remove_runner_key ---
+# --- The key of a runner, through Trog::Steps->revert ---
 #
-# The counterpart of authorize_runner_key in bin/provision.  It reads the public
-# half beside the domain rather than the store, so a destroy never stops to ask
-# for a passphrase -- one that did is one nobody would run.
+# The revert of the steps of trogrunner.  It reads the public half beside the
+# domain rather than the store, so a destroy never stops to ask for a
+# passphrase -- one that did is one nobody would run.
 subtest 'a runner key comes off every hypervisor it was let in to' => sub {
     my $domain = 'runner.example';
     my $dir    = make_domain_dir($domain);
@@ -379,7 +379,7 @@ subtest 'a runner key comes off every hypervisor it was let in to' => sub {
     $hv->redefine( read_text       => sub { $files{ $_[1] } } );
     $hv->redefine( write_text      => sub { $files{ $_[1] } = $_[2]; return 1 } );
 
-    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+    says( sub { Trog::Steps->revert( $domain, dryrun => 0 ) } );
 
     foreach my $host (qw{one.test.test two.test.test}) {
         unlike( $files{$host}, qr/\Qrunner-key\E/, "taken off $host" );
@@ -399,6 +399,8 @@ subtest 'the key material goes, however the line around it was written' => sub {
     my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIJtNOTAREALKEYbutlongenough';
     File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "ssh-ed25519 $material trog-provisioner runner $domain\n" );
 
+    # The default hypervisor_access of none, as if the configuration changed
+    # after the provision.  The key that the provision let in still goes.
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
 
@@ -409,7 +411,7 @@ subtest 'the key material goes, however the line around it was written' => sub {
     $hv->redefine( read_text       => sub { $files{ $_[1] } } );
     $hv->redefine( write_text      => sub { $files{ $_[1] } = $_[2]; return 1 } );
 
-    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+    says( sub { Trog::Steps->revert( $domain, dryrun => 0 ) } );
 
     unlike( $files{'one.test.test'}, qr/\Q$material\E/, 'both of them are gone' );
     like( $files{'one.test.test'}, qr/somebody-else/, 'and nobody else lost theirs' );
@@ -430,7 +432,8 @@ subtest 'a public key that is not one matches nothing, and says so' => sub {
     my $hv      = Test::MockModule->new('Trog::HV');
     $hv->redefine( write_text => sub { $touched++; return 1 } );
 
-    like( exception { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) }, qr/does[ ]not[ ]look[ ]like[ ]one;[ ]refusing/, 'refused rather than matched' );
+    my ( undef, $warned ) = capture { Trog::Steps->revert( $domain, dryrun => 0 ) };
+    like( $warned, qr/does[ ]not[ ]look[ ]like[ ]one;[ ]refusing/, 'refused rather than matched, with a warning, because the rest of the teardown goes on' );
     is( $touched, 0, 'and nothing was rewritten' );
 };
 
@@ -439,13 +442,9 @@ subtest 'a domain that is not a runner is nothing to do' => sub {
     make_domain_dir($domain);
 
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    my $asked    = 0;
-    $cookbook->redefine( domain_config => sub { $asked++; return {} } );
+    $cookbook->redefine( domain_config => sub { return { nginx => {} } } );
 
-    # No hypervisor-key.pub beside it, so it returns before it asks anything at
-    # all -- which is what every guest that is not a runner looks like.
-    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
-    is( $asked, 0, 'the configuration is not even consulted' );
+    is( Trog::Steps->revert( $domain, dryrun => 0 ), 0, 'nothing to undo' );
 };
 
 # --- purge_domain_dir ---
@@ -812,7 +811,7 @@ subtest '--purge-data is asked for, and never implied by --purge' => sub {
 
     my @purged;
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_             => sub { 1 } ) for qw{remove_authorized_key remove_runner_key purge_domain_dir release_ip};
+    $bin->redefine( $_             => sub { 1 } ) for qw{remove_authorized_key purge_domain_dir release_ip};
     $bin->redefine( purge_data_dir => sub { push @purged, [@_]; 1 } );
 
     Trog::HV->forget();
@@ -843,7 +842,7 @@ subtest 'a guest that will not stop still gives its address back' => sub {
 
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
     $bin->redefine( destroy_vm => sub { die "Could not undefine tenant.test: still running\n" } );
-    $bin->redefine( $_         => sub { 1 } ) for qw{destroy_disks remove_authorized_key remove_runner_key purge_domain_dir};
+    $bin->redefine( $_         => sub { 1 } ) for qw{destroy_disks remove_authorized_key purge_domain_dir};
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
@@ -906,7 +905,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
 
     my ( @asked, @order );
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_ => sub { 1 } ) for qw{remove_authorized_key remove_runner_key};
+    $bin->redefine( $_ => sub { 1 } ) for qw{remove_authorized_key};
     $bin->redefine( $_ => sub { push( @asked, $_[0] ); 1 } ) for qw{destroy_vm destroy_disks};
     $bin->redefine( revoke_grants => sub { push( @order, 'revoke' ); 1 } );
 

@@ -16,6 +16,8 @@ use Provisioner::Cookbook();
 use YAML::XS();
 use Text::Xslate();
 use File::Slurper();
+use File::Slurper::Temp();
+use Provisioner::IPPool();
 use Provisioner::Utils();
 use URI();
 use URI::Split();
@@ -51,6 +53,11 @@ use Trog::Utils();
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     partition:   "/machine/runner"
+
+                    # bin/provision makes the account above, with these
+                    # limits.  See ACCOUNTS.
+                    account:
+                        quota: 500G
 
             hypervisor_access: least
 
@@ -297,6 +304,21 @@ sub args {
                         reserve_disk   => { type => 'integer' },
                         cpu_overcommit => { type => 'integer' },
                         max_guests     => { type => 'integer' },
+
+                        # The account of the runner on this hypervisor, which
+                        # bin/provision makes and bin/destroy takes away.  See
+                        # ACCOUNTS.  The user is the one in libvirt_uri, and
+                        # the pool and the slice are the keys above.
+                        account => {
+                            type       => 'object',
+                            required   => [qw{quota}],
+                            properties => {
+                                quota     => { type => 'string' },
+                                cpu_quota => { type => 'string' },
+                                io_weight => { type => 'integer' },
+                            },
+                            additionalProperties => 0,
+                        },
                     },
                 },
             },
@@ -367,6 +389,19 @@ my sub under_the_domain ( $path, $field ) {
     return 1;
 }
 
+# The transport, host, user and port of a libvirt URI, or nothing when it has
+# no scheme to read.  URI does not know the driver+transport scheme of libvirt,
+# and gives an object that cannot say the host, user or port, so the authority
+# is parsed again under the ssh scheme, as Trog::HV does.
+my sub uri_parts ($uri) {
+    my ( $scheme, $authority ) = $uri ? URI::Split::uri_split($uri) : ();
+    return () unless $scheme;
+
+    my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
+    my $server = $authority ? URI->new("ssh://$authority") : undef;
+    return ( $transport // q{}, $server ? ( $server->host, $server->user, $server->port ) : () );
+}
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
@@ -417,23 +452,31 @@ sub enrich {
 
     foreach my $name ( sort keys %{ $opts{hypervisors} } ) {
         my $block = $opts{hypervisors}{$name};
-        my ( $scheme, $authority ) = $block->{libvirt_uri} ? URI::Split::uri_split( $block->{libvirt_uri} ) : ();
+        my ( $transport, @server ) = uri_parts( $block->{libvirt_uri} );
         die "trogrunner: could not read a host out of the libvirt_uri for hypervisor '$name': $block->{libvirt_uri}\n"
-          unless $scheme;
-
-        # URI does not know the driver+transport scheme of libvirt, and gives
-        # an object that cannot say the host, user or port, so the authority
-        # is parsed again under the ssh scheme, as Trog::HV does.
-        my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
-        my $server = $authority ? URI->new("ssh://$authority") : undef;
-        @{$block}{qw{ssh_host ssh_user ssh_port}} = $server ? ( $server->host, $server->user, $server->port ) : ();
+          unless defined $transport;
+        @{$block}{qw{ssh_host ssh_user ssh_port}} = @server;
 
         # Trog::HV needs the filesystem of a remote hypervisor as well as its
         # libvirt, so the runner must reach it over ssh.  Find that out here,
         # not on the guest.
         die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$block->{ssh_host}/system\n"
-          if $block->{ssh_host} && ( $transport // q{} ) ne 'ssh';
+          if $block->{ssh_host} && $transport ne 'ssh';
+
+        next unless $block->{account};
+
+        # Here, and not on the hypervisor twenty minutes into the build of the
+        # runner.
+        die "trogrunner: hypervisor '$name' asks for an account, and hypervisor_access is none, so nothing would make it\n"
+          if $opts{hypervisor_access} eq 'none';
+        die "trogrunner: hypervisor '$name' asks for an account, which needs pool_name and pool_path: the pool is where its quota is\n"
+          unless $block->{pool_name} && $block->{pool_path};
+        die "trogrunner: hypervisor '$name' asks for an account for the user in its libvirt_uri, and $block->{libvirt_uri} names no user\n"
+          unless $block->{ssh_user};
     }
+
+    warn "trogrunner: hypervisor_access is $opts{hypervisor_access}, and no hypervisor is named, so no hypervisor lets the runner in\n"
+      if $opts{hypervisor_access} ne 'none' && !%{ $opts{hypervisors} };
 
     return %opts;
 }
@@ -444,11 +487,10 @@ What the C<trogrunner> block of a domain asks for as hypervisor access:
 C<access>, C<restrict> and C<hypervisors>.  Returns an empty list if it asks
 for none, which is the default.
 
-This is here and not in F<bin/provision>, which acts on it, because the
-defaults are in C<args()>.  A second copy of them in a script can drift.
+It reads the defaults from C<args()>, because a second copy of them can drift.
 
-Takes the block as written, not a validated one.  A script asks this long after
-C<bin/new_config> ran, and it has a configuration but no recipe object.
+Takes the block as written, not a validated one, because L</outside_steps>
+does, for the reason that it gives.
 
 =cut
 
@@ -467,6 +509,242 @@ sub grant {
         restrict    => $block->{restrict_key_to_ip} // $props->{restrict_key_to_ip}{default},
         hypervisors => ( ref $block->{hypervisors} eq 'HASH' ? $block->{hypervisors} : {} ),
     );
+}
+
+# The reference in the store of the key that a hypervisor is asked to trust.
+my sub key_ref ($domain) { return "secret:trogrunner/$domain-hypervisor-key/password" }
+
+# The public half beside the domain, which bin/destroy reads instead of the
+# store.
+my sub pub_file (%context) { return "$context{domain_dir}/hypervisor-key.pub" }
+
+=head3 $line = Provisioner::Recipe::trogrunner->key_line($domain, $restrict, %context)
+
+The F<authorized_keys> line of the runner of C<$domain>: the public half of
+its key in C<$context{secrets}>, with C<from=> and the address that the domain
+holds in the pool when C<$restrict> is true.  C<%context> is the context of a
+step, as L<Trog::Steps> gives it.  It writes the public half to
+F<hypervisor-key.pub> in C<$context{domain_dir}>.
+
+A dry run has no store, so it reads that file instead, and returns undef when
+there is none.  Dies when the store has no key outside a dry run, or holds
+something that is not a key.  Warns when C<$restrict> is true and the domain
+holds no address, and leaves C<from=> out.
+
+=cut
+
+sub key_line {
+    my ( $class, $domain, $restrict, %context ) = @_;
+
+    my $private = $context{secrets}{ key_ref($domain) };
+    my $pubkey;
+    if ( defined $private && length $private ) {    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a key of "0" is still a key
+
+        # ssh_pubkey_from_private reads a key from a file, so the key goes to a
+        # temporary one that only this user can read, for as long as that takes.
+        my $tmp = File::Temp->new( UNLINK => 1 );
+        chmod 0600, $tmp->filename;
+        print {$tmp} "$private\n";
+        $tmp->flush();
+
+        my $half = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
+        die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
+          unless $half;
+
+        # The comment names the line, so that a reader of authorized_keys can
+        # tell whose it is and remove it by hand.
+        $pubkey = "$half trog-provisioner runner $domain";
+        File::Slurper::Temp::write_binary( pub_file(%context), "$pubkey\n" );
+    }
+    elsif ( $context{dryrun} ) {
+        $pubkey = eval { File::Slurper::read_text( pub_file(%context) ) } // return undef;
+        chomp $pubkey;
+    }
+    else {
+        die "$domain wants hypervisor access and the store had no key for it\n";
+    }
+
+    # from="<address>" when the domain holds one.  The address is stable,
+    # because a new provision keeps the address of the domain.  Only
+    # bin/destroy gives it back.
+    return $pubkey unless $restrict;
+    my $ip = eval { Provisioner::IPPool::held_by($domain) };
+    warn "$domain holds no address in the ip pool, so its key on the hypervisors is not restricted to an address.  A lease can change.\n" unless $ip;
+    return $ip ? qq{from="$ip" $pubkey} : $pubkey;
+}
+
+# The key material of the public half beside the domain, or undef when there is
+# none.  Dies on one too short to be a key, because a short string matches half
+# of an authorized_keys file.
+my sub pub_material (%context) {
+    my $pubkey = eval { File::Slurper::read_text( pub_file(%context) ) } // return undef;
+    my ($material) = ( split( q{ }, $pubkey ) )[1];
+    die "The public key in " . pub_file(%context) . " does not look like one; refusing to match on it\n"
+      if !defined $material || length($material) <= 32;
+    return $material;
+}
+
+# What a dry run says when it has no line to let in.
+my sub key_unknown ( $domain, $user ) {
+    return {
+        what => "let the key of $domain log in as $user, once the store gives it, which a dry run does not open",
+        done => sub { 0 },
+        do   => sub { die "There is no key of $domain to let in\n" },
+    };
+}
+
+=head3 outside_steps
+
+What a runner needs on its hypervisors, from C<grant> above.  Nothing to make
+while C<hypervisor_access> is C<none>, the default.  Otherwise, for each
+hypervisor in the C<hypervisors> block, in the order of the names, one of
+these:
+
+=over 4
+
+=item * With an C<account>, the account, from C<runner_account_steps> of
+L<Trog::HV::Libvirt>, and then the key of the runner in the
+F<authorized_keys> of the account, through C<runner_key_steps>.  Both run as
+the account of the block of the same name in F<hypervisors.conf>, which needs
+sudo for everything.  So the key of the operator never goes into the account
+of the runner.  See L</ACCOUNTS>.
+
+=item * Without one, the key of the runner in the F<authorized_keys> of the
+user of C<libvirt_uri>, written as that user.  That user must exist, and let
+the operator in.
+
+=back
+
+The line of the key is the public half of the key in the store, with C<from=>
+and the address that the domain holds in the pool, when C<restrict_key_to_ip>
+is on.  A domain that holds no address gets a warning, and its key goes in
+unrestricted.  The public half also goes beside the domain as
+F<hypervisor-key.pub>.  A dry run has no store, so it reads that file.
+
+F<bin/destroy> takes each step back, last first: the key, and then the account.
+It reads the key from F<hypervisor-key.pub>, so a teardown never stops to ask
+for the password of the store.  It removes every line that has the key
+material in it, not only the line that a provision wrote, because somebody can
+edit the C<from=> or the comment on the hypervisor.  The key is made for one
+domain and kept in the store, so no other line can have it.  The account does
+not go while its pool holds the disk of a guest.  See C<runner_removal_steps>.
+The steps of a block with C<hypervisor_access> of C<none> have only the
+revert, so that a teardown still takes back what a provision let in before
+somebody took the access away.
+
+Takes the block as written, because F<bin/destroy> has a configuration and no
+recipe object.
+
+=head3 ACCOUNTS
+
+An C<account> block in a C<hypervisors> entry gives the runner an account of
+its own there.  The user is the user of C<libvirt_uri>, and the pool and the
+slice are its C<pool_name>, C<pool_path> and C<partition>:
+
+    hypervisors:
+        hv1:
+            libvirt_uri: "qemu+ssh://runner@hv1.test.test/system"
+            pool_name:   "runner_disks"
+            pool_path:   "/srv/vm-disks/runner"
+            partition:   "/machine/runner"
+            account:
+                quota:     500G      # required: of the ZFS dataset of the pool
+                cpu_quota: "400%"    # CPUQuota of the slice
+                io_weight: 50        # IOWeight of the slice
+
+The parent of C<pool_path> must be where a ZFS dataset is mounted, because the
+quota is a quota of a child dataset.  C<cpu_quota> and C<io_weight> need a
+C<partition>.  C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
+values when F<bin/provision> builds the runner, before its makefile starts.
+F<bin/runner_account> makes the same account by hand.
+
+=cut
+
+sub outside_steps {
+    my ( $class, $domain, %opts ) = @_;
+
+    # Every hypervisor that the block names, with or without access, so that a
+    # teardown takes back what a provision let in under an earlier
+    # configuration.
+    my %grant       = $class->grant( \%opts );
+    my $hypervisors = ref $opts{hypervisors} eq 'HASH' ? $opts{hypervisors} : {};
+
+    # One line for every hypervisor of a run, so the warning about the address
+    # comes once.
+    my $line;
+    my $line_of = sub (%context) { return $line //= $class->key_line( $domain, $grant{restrict}, %context ) };
+
+    my @steps;
+    foreach my $name ( sort keys %$hypervisors ) {
+        my $block = $hypervisors->{$name};
+        my $uri   = $block->{libvirt_uri} or die "$domain names a hypervisor '$name' with no libvirt_uri\n";
+        my ( undef, undef, $user ) = uri_parts($uri);
+
+        if ( ref $block->{account} eq 'HASH' ) {
+            my %plan = ( user => $user, %{$block}{qw{pool_name pool_path partition}}, %{ $block->{account} } );
+            delete @plan{ grep { !defined $plan{$_} } keys %plan };
+            push @steps, {
+                id      => "trogrunner:account:$name",
+                machine => { hypervisor => $name },
+                when    => 'secrets',
+                apply   => sub ( $hv, %context ) { return $hv->runner_account_steps( $hv->runner_account_plan(%plan) ) },
+                revert  => sub ( $hv, %context ) { return $hv->runner_removal_steps( $hv->runner_account_plan(%plan) ) },
+              },
+              {
+                id      => "trogrunner:key:$name",
+                machine => { hypervisor => $name },
+                when    => 'secrets',
+                apply   => sub ( $hv, %context ) {
+                    my $key = $line_of->(%context) // return key_unknown( $domain, $user );
+                    return $hv->runner_key_steps( $user, $key );
+                },
+                revert => sub ( $hv, %context ) {
+                    my $material = pub_material(%context) // return ();
+                    return $hv->runner_key_removal_steps( $user, $material );
+                },
+              };
+            next;
+        }
+
+        push @steps, {
+            id      => "trogrunner:key:$name",
+            machine => { uri => $uri },
+            when    => 'secrets',
+            apply   => sub ( $machine, %context ) {
+                my $as  = $machine->ssh_user   // 'the connecting user';
+                my $key = $line_of->(%context) // return key_unknown( $domain, $as );
+                return {
+                    what => "let the key of $domain log in as $as on $name",
+                    done => sub {
+                        my $ak = $machine->authorized_keys;
+                        $machine->file_exists($ak) && any { $_ eq $key } split m/\n/, $machine->read_text($ak) // q{};
+                    },
+                    do => sub {
+                        $machine->append_line( $machine->authorized_keys, $key )
+                          or die "Could not authorize $domain on $name (" . $machine->describe . ")\n";
+                    },
+                };
+            },
+            revert => sub ( $machine, %context ) {
+                my $material = pub_material(%context) // return ();
+                my $ak       = $machine->authorized_keys;
+                return {
+                    what => "take the key of $domain away from " . ( $machine->ssh_user // 'the connecting user' ) . " on $name",
+                    done => sub { !$machine->file_exists($ak) || index( $machine->read_text($ak) // q{}, $material ) < 0 },
+                    do   => sub {
+                        my $contents = $machine->read_text($ak);
+                        die "Could not read $ak on $name; refusing to rewrite it blind\n" unless $contents;
+                        $machine->write_text( $ak, join( q{}, map { "$_\n" } grep { index( $_, $material ) < 0 } split m/\n/, $contents ) )
+                          or die "Could not write $ak on $name\n";
+                    },
+                };
+            },
+        };
+    }
+
+    # Without access there is nothing to make, and only what to take back.
+    delete $_->{apply} for %grant ? () : @steps;
+    return @steps;
 }
 
 sub template_files {
@@ -523,7 +801,7 @@ sub guest_secrets {
 
     return (
         "$install_dir/$domain/.ssh/id_ed25519" => {
-            ref      => "secret:trogrunner/$domain-hypervisor-key/password",
+            ref      => key_ref($domain),
             generate => sub {
                 my $dir  = File::Temp::tempdir( CLEANUP => 1 );
                 my $path = "$dir/id_ed25519";
