@@ -66,6 +66,24 @@ subtest 'sshd reads the keys of every relay of the guest from one directive' => 
     is_deeply( $opts{relay_dirs}, ['/etc/nginx/nginxrelay.d'], 'the directory of each relay, and of nothing else on the guest' );
     is( $opts{ban_set}, 'nginxrelay-bans', 'with the set' );
     is_deeply( $opts{banned_ports}, [ 80, 4443 ], 'and the ports that a ban closes' );
+
+    my %both = $nginxrelay->enrich( modules => [qw{ubuntu nginx nginxrelay mailrelay}] );
+    is_deeply( $both{relay_dirs}, [qw{/etc/nginx/nginxrelay.d /etc/postfix/mailrelay.d}], 'and with two relays on the guest, sshd reads the keys of both' );
+};
+
+subtest 'a guest behind a relay bans through it with what the relay issued' => sub {
+    is_deeply(
+        Bare::Relay->ban_client( 'web.test.test', '192.0.2.5' ),
+        {
+            action      => 'barerelay-web.test.test',
+            address     => '192.0.2.5',
+            key_b64     => '/etc/fail2ban/barerelay/web.test.test.key.b64',
+            key         => '/etc/fail2ban/barerelay/web.test.test.key',
+            host_b64    => '/etc/fail2ban/barerelay/web.test.test.host.b64',
+            known_hosts => '/etc/fail2ban/barerelay/web.test.test.known_hosts',
+        },
+        'an action named for the relay, and the key and the host key beside the files that the relay issued'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();

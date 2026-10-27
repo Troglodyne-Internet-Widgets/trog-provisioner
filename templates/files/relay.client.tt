@@ -1,0 +1,7 @@
+[%# The ban action of this guest for a relay, from the files that the relay
+    issued: the key, and the host key that the guest pins.  action_file is the
+    action that relay.action.tt rendered.  Provisioner::RelayRecipe has the
+    whole account, under Bans. -%]
+umask 077 && base64 -d [% ban_relay.key_b64 %] > [% ban_relay.key %]
+printf '%s %s\n' '[% ban_relay.address %]' "$$(base64 -d [% ban_relay.host_b64 %] | cut -d' ' -f1,2)" > [% ban_relay.known_hosts %]
+install -o root -g root -m 0644 [% action_file %] /etc/fail2ban/action.d/[% ban_relay.action %].conf

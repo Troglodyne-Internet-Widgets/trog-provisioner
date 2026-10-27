@@ -121,4 +121,64 @@ subtest 'a guest sends its mail through the relay, as its own domain only' => su
     unlike( $auth, qr/auth succeeded/, 'and dovecot takes it no more' );
 };
 
+subtest 'a mail client goes by its SNI name to its guest, with the PROXY protocol, and the guest bans through the relay' => sub {
+    require IO::Socket::INET;
+
+    # A listener for each service, which stands in for the guest, and the
+    # first line that a connection to it sends, or nothing within ten seconds.
+    my %listener = map { $_ => IO::Socket::INET->new( Listen => 1, LocalAddr => '127.0.0.1', LocalPort => 0, ReuseAddr => 1 ) || die "Cannot listen: $!\n" } qw{imaps submissions pop3s};
+    my $first_line = sub {
+        my ($listener) = @_;
+        return q{} unless IO::Select->new($listener)->can_read(10);
+        my $conn = $listener->accept() or return q{};
+        return q{} unless IO::Select->new($conn)->can_read(5);
+        sysread( $conn, my $buf, 4096 );
+        return $buf // q{};
+    };
+
+    my $name = "mail.$domain";
+    my $key  = `$client register-clients $domain @{[ map { '127.0.0.1:' . $listener{$_}->sockport } qw{imaps submissions pop3s} ]} $name 2>&1`;
+    is( $?, 0, 'a guest registers the names of its mail clients' ) or diag $key;
+    like( $key, qr/\A[A-Za-z0-9+\/=]+\z/, 'and gets its ban key in base64 on one line' );
+    my $check = `nginx -t 2>&1`;
+    like( $check, qr/test is successful/, 'which nginx accepts' ) or diag $check;
+    sleep 2;
+
+[% FOR service IN client_ports.keys().sort() -%]
+    system("echo | openssl s_client -connect 127.0.0.1:[% client_ports.$service %] -servername $name >/dev/null 2>&1 &");
+    like( $first_line->( $listener{[% service %]} ), qr/\APROXY TCP4 127[.]0[.]0[.]1 /, 'a client on [% client_ports.$service %] reaches the guest, which learns its address' );
+[% END -%]
+
+    # The key, as the guest holds it.  The test registered 127.0.0.1 as the
+    # address of the guest, so the key works from here.
+    my $keyfile = '/root/.mailrelay-selftest.key';
+    open( my $fh, '>', $keyfile ) or die "Cannot write $keyfile: $!\n";
+    chmod 0600, $keyfile;
+    print {$fh} MIME::Base64::decode_base64($key);
+    close $fh or die "Cannot write $keyfile: $!\n";
+    my $as_guest = sub {
+        my ($request) = @_;
+        my $said = `ssh -n -i $keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1 '$request' 2>&1`;
+        return ( $? >> 8, $said );
+    };
+
+    my $abuser = '192.0.2.79';
+    my ( $rc, $said ) = $as_guest->("ban $abuser 600");
+    is( $rc, 0, 'the guest bans an address' ) or diag $said;
+    is( system("ipset test [% ban_set %] $abuser >/dev/null 2>&1"), 0, 'in the set of this relay' );
+    my $rules = `iptables -S trog-[% ban_set %] 2>&1`;
+    like( $rules, qr/--dports [% banned_ports.join(',') %] .*--match-set [% ban_set %] src -j DROP/, 'whose members are dropped on the ports of the mail clients' ) or diag $rules;
+    ( $rc, $said ) = $as_guest->("unban $abuser");
+    is( $rc, 0, 'and unbans it' ) or diag $said;
+    ( $rc, $said ) = $as_guest->('id');
+    is( $rc, 2, 'and the key runs nothing but relay_ban' ) or diag $said;
+
+    my $released = `$client release $domain 2>&1`;
+    is( $?, 0, 'a guest releases its mail clients' ) or diag $released;
+    ok( !-e "/etc/postfix/mailrelay.d/$domain.imaps.map", 'and their routes' );
+    ( $rc, $said ) = $as_guest->("check $abuser");
+    is( $rc, 255, 'and the key logs in no more' ) or diag $said;
+    unlink $keyfile;
+};
+
 done_testing();

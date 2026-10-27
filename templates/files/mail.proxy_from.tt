@@ -1,0 +1,38 @@
+#!/bin/sh
+# The firewall of the ports where a mail relay passes the mail clients of the
+# domains of this guest, with the PROXY protocol.  postfix believes that header
+# from anybody, so these ports take only the relays in /etc/mail-proxy-from.d,
+# one address in the file of each domain behind one.  /etc/ufw/after.init runs
+# this after ufw loads its rules, and again when it unloads them.
+# Provisioner::Recipe::mail has the whole account, under Sending through a mail
+# relay.
+
+CHAIN=trog-mail-proxy-from
+PORTS=[% proxied_ports.values().sort().join(',') %]
+
+start() {
+    iptables -N "$CHAIN" 2>/dev/null
+    iptables -F "$CHAIN"
+    # Loopback, where the guest test speaks to the ports.
+    iptables -A "$CHAIN" -i lo -j RETURN
+    for file in /etc/mail-proxy-from.d/*; do
+        [ -s "$file" ] || continue
+        iptables -A "$CHAIN" -s "$(cat "$file")" -j RETURN
+    done
+    iptables -A "$CHAIN" -j DROP
+
+    # Once, because ufw-init runs start twice on a reload.
+    iptables -C INPUT -p tcp -m multiport --dports "$PORTS" -j "$CHAIN" 2>/dev/null ||
+        iptables -I INPUT 1 -p tcp -m multiport --dports "$PORTS" -j "$CHAIN"
+}
+
+stop() {
+    while iptables -D INPUT -p tcp -m multiport --dports "$PORTS" -j "$CHAIN" 2>/dev/null; do :; done
+    iptables -F "$CHAIN" 2>/dev/null
+    iptables -X "$CHAIN" 2>/dev/null
+}
+
+case "$1" in
+start) start ;;
+stop | flush-all) stop ;;
+esac

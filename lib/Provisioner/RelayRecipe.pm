@@ -136,6 +136,42 @@ sub host_key_path {
     return '/etc/fail2ban/' . $self->recipe_name . "/$domain.host.b64";
 }
 
+=head2 \%ban = $recipe->ban_client($domain, $address)
+
+What the guest of C<$domain> needs to send its bans to this relay, which it
+reaches at C<$address>.  F<templates/files/relay.action.tt> and
+F<templates/files/relay.client.tt> render it.  The keys are what
+C<issue_grant> placed:
+
+=over 4
+
+=item * C<action>: the name of the action of fail2ban, the name of the recipe
+and C<-DOMAIN>.
+
+=item * C<address>: C<$address>.
+
+=item * C<key_b64> and C<host_b64>: C<key_path> and C<host_key_path>.
+
+=item * C<key> and C<known_hosts>: where the guest decodes the key, and pins the
+host key.
+
+=back
+
+=cut
+
+sub ban_client {
+    my ( $self, $domain, $address ) = @_;
+    my $dir = '/etc/fail2ban/' . $self->recipe_name;
+    return {
+        action      => $self->recipe_name . "-$domain",
+        address     => $address,
+        key_b64     => $self->key_path($domain),
+        key         => "$dir/$domain.key",
+        host_b64    => $self->host_key_path($domain),
+        known_hosts => "$dir/$domain.known_hosts",
+    };
+}
+
 =head2 %files = $recipe->registration_files($grant, %terms)
 
 The files that the relay issues when it registers the client of C<$grant>, as

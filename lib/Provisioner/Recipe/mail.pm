@@ -205,6 +205,19 @@ Every message from the internet comes to this guest from the address of the
 relay, so the jails of this recipe never ban that address.  The relay bans the
 real client itself, on its own port 25.
 
+The mail clients of the domain reach this guest through the relay too, on 993,
+465 and 995, which the relay passes by their SNI name with the PROXY protocol.
+See L<Provisioner::Recipe::mailrelay/Mail clients>.  The relay registers the
+domain and C<mail.DOMAIN>.  The guest takes them on C<proxied_ports>, where
+dovecot and postfix read the PROXY header, so they see the real client.
+postfix believes that header from any client, so the firewall drops those ports
+from every address but a relay of a domain on this guest.
+F</etc/mail-proxy-from.d> keeps one file of an address for each domain behind a
+relay, and dovecot believes the header from those addresses only.  A failed
+login of a client there comes from the relay, so the jails of this recipe also
+ban through the relay, with the action C<mailrelay-DOMAIN>.  See
+L<Provisioner::RelayRecipe/Bans>.
+
 A message with an empty sender, such as a bounce that this guest makes, is not
 in the domain, so it does not go through the mail relay.
 
@@ -302,15 +315,30 @@ The ports of postfix: SMTP on 25, and submission on 465 over TLS and on 587,
 on every address, and the return from amavis on 10025, on 127.0.0.1.  The
 ports of dovecot, on every address: POP3 on 110 and 995, IMAP on 143 and 993.
 C<postgrey> on 10023, on 127.0.0.1.  amavis on 10024 and C<spamd> on 783, both
-on 127.0.0.1 and on ::1.
+on 127.0.0.1 and on ::1.  The C<proxied_ports>, on every address, which the
+firewall closes to all but the mail relays.
 
 =cut
 
 sub listens {
+    my ($self) = @_;
     return (
         qw{25 465 587 110 995 143 993 127.0.0.1:10025 127.0.0.1:10023},
+        ( sort { $a <=> $b } values %{ { $self->proxied_ports } } ),
         map { ( "127.0.0.1:$_", "[::1]:$_" ) } 10024, 783
     );
+}
+
+=head2 %ports = $recipe->proxied_ports()
+
+The port where this guest takes each service of the mail clients from a mail
+relay, with the PROXY protocol: C<imaps>, C<submissions> and C<pop3s>.  See
+L</Sending through a mail relay>.
+
+=cut
+
+sub proxied_ports {
+    return ( imaps => 10993, submissions => 10465, pop3s => 10995 );
 }
 
 =head2 %jails = $recipe->jails()
@@ -381,8 +409,11 @@ sub grants {
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
 The address of the guest of the client of C<$grant>, where the mail relay sends
-the mail of the domain that comes in from the internet.  See
-L<Provisioner::Recipe::mailrelay/Mail in>.
+the mail of the domain that comes in from the internet.  Also the upstream of
+each service of the mail clients, at that address and the port in
+C<proxied_ports>, and the names that the clients ask for, which are the domain
+and C<mail.DOMAIN>.  See L<Provisioner::Recipe::mailrelay/Mail in> and
+L<Provisioner::Recipe::mailrelay/Mail clients>.
 
 Dies when that guest has no address in the address pool.
 
@@ -395,7 +426,12 @@ sub grant_terms {
     my ( $guest, $address ) = Provisioner::IPPool::guest_address($domain);
     die "mail: $grant->{guest} relays the mail of $domain to the address of $guest.  $guest has no address in " . Provisioner::IPPool::db_path() . ".\n"
       unless defined $address;
-    return ( address => $address );
+    my %port = $self->proxied_ports;
+    return (
+        address   => $address,
+        upstreams => { map { $_ => "$address:$port{$_}" } keys %port },
+        names     => [ $domain, "mail.$domain" ],
+    );
 }
 
 sub template_files {
@@ -432,6 +468,8 @@ sub template_files {
         'mail.mailrelay_tls_policy.tt'   => 'mailrelay_tls_policy',
         'mail.mailrelay_ufw.tt'          => 'mail_mailrelay_ufw.conf',
         'mail.mailrelay_jail.tt'         => 'mail_mailrelay.jail',
+        'relay.action.tt'                => 'mail_relay.action',
+        'mail.proxy_from.tt'             => 'mail_proxy_from',
     );
 }
 
@@ -458,6 +496,7 @@ sub enrich {
     $opts{sender_logins}  = \@logins;
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
     $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
+    $opts{proxied_ports}  = { $self->proxied_ports };
 
     # The templates treat relay.host as a host outside unless mailrelay is set.
     $opts{mailrelay} = mailrelay_of( $opts{domain}, %opts );
@@ -468,6 +507,7 @@ sub enrich {
             port     => $mailrelay->relay_port_of( $opts{mailrelay} ),
             password => $mailrelay->password_path( $opts{domain} ),
         };
+        $opts{ban_relay}   = $mailrelay->ban_client( $opts{domain}, $opts{mailrelay_login}{address} );
         $opts{relay_jails} = [ sort keys %{ { $self->jails(%opts) } } ];
     }
 

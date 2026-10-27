@@ -121,12 +121,21 @@ postmap /etc/postfix/domains/[% domain %]/sasl_passwd
 postmap /etc/postfix/domains/[% domain %]/mailrelay_tls_policy
 install -o root -g root -m 0644 mail_mailrelay_ufw.conf /etc/ufw/applications.d/mail-mailrelay
 [% END -%]
-[%# The jails that never ban the mail relay.  Provisioner::Recipe::mail has
-    the whole account, under Sending through a mail relay. -%]
-rm -f /etc/fail2ban/jail.d/[% domain %]-mailrelay.conf
+[%# The mail relay passes the mail clients of this domain to the ports of
+    proxied_ports.  The firewall opens them, and dovecot believes the PROXY
+    header, only from the relays of the domains on this guest, which each
+    domain writes into /etc/mail-proxy-from.d.  The jails ban through the relay
+    and never ban the relay itself.  Provisioner::Recipe::mail has the whole
+    account, under Sending through a mail relay. -%]
+install -d -m 0755 -o root -g root /etc/mail-proxy-from.d
+rm -f /etc/mail-proxy-from.d/[% domain %] /etc/fail2ban/jail.d/[% domain %]-mailrelay.conf /etc/fail2ban/action.d/mailrelay-[% domain %].conf
 [% IF mailrelay_login -%]
+printf '%s\n' '[% mailrelay_login.address %]' > /etc/mail-proxy-from.d/[% domain %]
+[% INCLUDE "files/relay.client.tt" WITH action_file = 'mail_relay.action' %]
 install -o root -g root -m 0644 mail_mailrelay.jail /etc/fail2ban/jail.d/[% domain %]-mailrelay.conf
+fail2ban-client -t
 [% END -%]
+printf 'haproxy_trusted_networks = %s\n' "$$(cat /etc/mail-proxy-from.d/* 2>/dev/null | tr '\n' ' ')" > /etc/dovecot/proxy_from.conf
 # main.cf, as the fragment of this domain, not as a run of `postconf -e`.
 # postconf sets a parameter and cannot add to one.  configd merges the
 # fragments, so list parameters stay lists.  The global fragment writes 40-mail,

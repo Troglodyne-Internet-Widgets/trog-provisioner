@@ -1,0 +1,17 @@
+[%# The servers of this relay in the stream block of
+    Provisioner::RelayRecipe.  A TLS connection of a mail client goes to the
+    guest that registered its SNI name, with the PROXY protocol.
+    Provisioner::Recipe::mailrelay has the whole account, under Mail clients. -%]
+[% FOR service IN client_ports.keys().sort() -%]
+map $ssl_preread_server_name $mailrelay_[% service %] {
+    include /etc/postfix/mailrelay.d/*.[% service %].map;
+}
+
+server {
+    listen [% client_ports.$service %];
+    ssl_preread on;
+    proxy_protocol on;
+    proxy_pass $mailrelay_[% service %];
+}
+
+[% END -%]

@@ -374,11 +374,27 @@ subtest 'the mail of this domain goes out through the mail relay' => sub {
     like( $log, qr/to=<relay-selftest\@\Q[% mailrelay %]\E>, relay=\Q[% mailrelay_login.address %]\E\[[^\]]*\]:[% mailrelay_login.port %],.* status=sent/, 'a message reaches the relay, which takes it' ) or diag $log;
 };
 
-subtest 'the jails of mail never ban the mail relay' => sub {
-    foreach my $jail (qw{[% relay_jails.join(' ') %]}) {
-        my $ignored = `fail2ban-client get $jail ignoreip 2>&1`;
-        like( $ignored, qr/\Q[% mailrelay_login.address %]\E/, "$jail ignores the address of the relay, which every message from the internet comes from" ) or diag $ignored;
-    }
+[% INCLUDE "files/relay.client_test.tt" WITH recipe = 'mail' %]
+
+subtest 'the mail clients that the relay passes reach the proxy ports, which take the relay alone' => sub {
+    my $master = `postconf -M '[% proxied_ports.submissions %]/inet' 2>&1`;
+    like( $master, qr/smtpd_upstream_proxy_protocol=haproxy/, 'postfix reads the PROXY header on [% proxied_ports.submissions %]' ) or diag $master;
+    like( $master, qr/smtpd_client_restrictions=permit_sasl_authenticated,reject/, 'and takes mail there only after a login, as on 465' ) or diag $master;
+
+    my $dovecot = `doveconf -n 2>&1`;
+    like( $dovecot, qr/port = [% proxied_ports.imaps %]\s+ssl = yes|haproxy = yes\s+port = [% proxied_ports.imaps %]/, 'dovecot takes IMAP over TLS on [% proxied_ports.imaps %]' ) or diag $dovecot;
+    like( $dovecot, qr/^haproxy_trusted_networks = .*\Q[% mailrelay_login.address %]\E/m, 'and believes the PROXY header from the relay' ) or diag $dovecot;
+
+    my $listening = `ss -lnt 2>&1`;
+    like( $listening, qr/:\Q$_\E\s/, "something listens on $_" ) or diag $listening foreach [% proxied_ports.values().sort().join(', ') %];
+
+    my $chain = `iptables -S trog-mail-proxy-from 2>&1`;
+    like( $chain, qr/^-A trog-mail-proxy-from -s \Q[% mailrelay_login.address %]\E\/32 -j RETURN$/m, 'the firewall lets the relay reach those ports' ) or diag $chain;
+    like( $chain, qr/^-A trog-mail-proxy-from -j DROP$/m, 'and drops everybody else there' ) or diag $chain;
+    my $ufw = `ufw status 2>&1`;
+    like( $ufw, qr/^mail-proxy\s+ALLOW\s/m, 'ufw opens them, behind that' ) or diag $ufw;
+    my $input = `iptables -S INPUT 2>&1`;
+    like( $input, qr/--dports [% proxied_ports.values().sort().join(',') %] -j trog-mail-proxy-from/, 'for the proxy ports' ) or diag $input;
 };
 [% END -%]
 

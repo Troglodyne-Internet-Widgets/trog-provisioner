@@ -12,7 +12,7 @@ use Provisioner::Cookbook();
 use Provisioner::IPPool();
 use Provisioner::Vars();
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::RelayRecipe};
 
 =head1 Provisioner::Recipe::mailrelay
 
@@ -37,7 +37,8 @@ L<Provisioner::Recipe::mail/Sending through a mail relay>.
 It runs a postfix, so it cannot be on one machine with
 L<Provisioner::Recipe::mail>.  It does not need
 L<Provisioner::Recipe::nginxrelay>, but a guest that fronts the web and the
-mail of the guests behind it runs both.
+mail of the guests behind it runs both.  Both are a
+L<Provisioner::RelayRecipe>.
 
 =head2 Mail out
 
@@ -70,6 +71,25 @@ both include.  The guest then trusts the address of the relay, because only the
 relay knows who the client was.  fail2ban bans here an address that fails too
 often.  The reverse DNS of the public address of this guest must name it, or
 the receivers of what it sends will refuse it.
+
+=head2 Mail clients
+
+The mail clients of a domain behind this relay reach its guest through this
+guest, on the ports where TLS starts at once: IMAP on 993, submission on 465
+and POP3 on 995.  nginx reads the SNI name of each connection, and passes the
+connection to the guest that registered the name, with the PROXY protocol.  The
+connection stays encrypted, so the guest keeps its own certificate.  A name
+that no guest registered gets no TLS handshake.  The ports where a client starts
+TLS later, such as 587 and 143, are not passed, because no name arrives before
+the relay must choose a guest.
+
+C<mailrelay_client register-clients> registers the names of a domain when its
+guest is built, which are the domain and C<mail.DOMAIN>.  It refuses a name that
+another domain registered.  It also issues the domain the key that its guest
+sends its bans with, because a failed login on the guest comes from this guest,
+and a ban there blocks nothing.  This guest drops a banned address on the three
+ports.  See L<Provisioner::RelayRecipe/Bans> and
+L<Provisioner::Recipe::mail/Sending through a mail relay>.
 
 =head2 SPF
 
@@ -119,23 +139,52 @@ my sub relay_port (%opts) {
     return $opts{relay_port} // 2587;
 }
 
+# The ports where this guest passes the mail clients to their guests, by the
+# service that the guest listens for.
+my %CLIENT_PORTS = ( imaps => 993, submissions => 465, pop3s => 995 );
+
 sub required_recipes {
     return (
         configd     => sub { return ( languages           => [qw{postfix opendkim opendmarc}] ) },
         letsencrypt => sub { return ( certificate_readers => ['postfix'] ) },
+        nginx       => sub { return () },
     );
 }
 
 =head2 %limits = $recipe->rate_limits(%opts)
 
-The limit of a port of mail for C<relay_port>, and for 25, where the mail of
-the internet comes in.
+The limit of a port of mail for C<relay_port>, for 25, where the mail of the
+internet comes in, and for the ports of the mail clients.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
-    return ( relay_port(%opts) => 64, 25 => 64 );
+    return ( relay_port(%opts) => 64, 25 => 64, map { $_ => 64 } values %CLIENT_PORTS );
+}
+
+=head2 $dir = $recipe->relay_dir()
+
+F</etc/postfix/mailrelay.d>, which holds the registrations and the ban keys.
+See L<Provisioner::RelayRecipe>.
+
+=cut
+
+sub relay_dir {
+    return '/etc/postfix/mailrelay.d';
+}
+
+=head2 @ports = $recipe->banned_ports(%opts)
+
+The ports of the mail clients, where this guest passes connections to the guests
+behind it.  Not 25, because this guest takes that mail itself, and bans there
+itself.  See L</Mail clients>.
+
+=cut
+
+sub banned_ports {
+    my @ports = sort { $a <=> $b } values %CLIENT_PORTS;
+    return @ports;
 }
 
 =head2 %jails = $recipe->jails()
@@ -153,14 +202,21 @@ sub jails {
 
 Adds C<relay_address>, where the guests reach this guest, as C<reachable_address>
 in L<Provisioner::IPPool> gives it, and where the relay listens.  Adds
-C<helo_name>, which is C<helo_name_of> in L<Provisioner::Cookbook>.
+C<helo_name>, which is C<helo_name_of> in L<Provisioner::Cookbook>, and
+C<client_ports>, the port of each service of the mail clients, and
+C<upstream_ports>, where the guests behind this one take them, which are the
+C<proxied_ports> of L<Provisioner::Recipe::mail>.  Adds what
+L<Provisioner::RelayRecipe/enrich> adds.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{domain} );
-    $opts{helo_name}     = Provisioner::Cookbook->helo_name_of( $opts{domain} );
+    %opts                 = $self->SUPER::enrich(%opts);
+    $opts{relay_address}  = Provisioner::IPPool::reachable_address( $opts{domain} );
+    $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
+    $opts{client_ports}   = {%CLIENT_PORTS};
+    $opts{upstream_ports} = [ sort { $a <=> $b } values %{ { Provisioner::Cookbook->load('mail')->proxied_ports } } ];
     return %opts;
 }
 
@@ -234,23 +290,43 @@ sub restores {
     return ( '/etc/postfix/mailrelay.d' => { from => "$install_dir/$domain/mailrelay.d", owner => 'root:root' } );
 }
 
-=head2 %files = $recipe->issue_grant($grant, %terms)
+=head2 %files = $recipe->registration_files($grant, %terms)
 
-The password of the login that this guest issues for the client of C<$grant>,
-at C<password_path> of the client, as C<issue_grant> in L<Provisioner::Recipe>
-says.  C<%terms> has C<< address => $address >>, where the relay sends the mail
-of the client that comes in.  The command is F<scripts/mailrelay_client>
-C<register>, which root runs on this guest.  See L</Mail out> and L</Mail in>.
+What this guest issues to the client of C<$grant> when it registers.
+L<Provisioner::RelayRecipe/issue_grant> adds the host key.
+
+=over 4
+
+=item * The password of its login, at C<password_path> of the client, from
+F<scripts/mailrelay_client> C<register>.  C<%terms> has
+C<< address => $address >>, where the relay sends the mail of the client that
+comes in.  See L</Mail out> and L</Mail in>.
+
+=item * The ban key, at C<key_path> of the client, from C<register-clients>.
+C<%terms> has C<< upstreams => \%upstreams >>, the address and the port where
+the guest listens for each service of the mail clients, and
+C<< names => \@names >>.  See L</Mail clients>.
+
+=back
 
 =cut
 
-sub issue_grant {
+sub registration_files {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
+    my $script = "$Provisioner::Vars::SCRIPT_DIR/mailrelay_client";
 
     return (
         $self->password_path($client) => {
-            issue => { guest => $grant->{guest}, command => "$Provisioner::Vars::SCRIPT_DIR/mailrelay_client register $client $terms{address}" },
+            issue => { guest => $grant->{guest}, command => "$script register $client $terms{address}" },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+        $self->key_path($client) => {
+            issue => {
+                guest   => $grant->{guest},
+                command => join( q{ }, "$script register-clients", $client, @{ $terms{upstreams} }{qw{imaps submissions pop3s}}, @{ $terms{names} } ),
+            },
             owner => 'root:root',
             mode  => '0600',
         },
@@ -259,9 +335,9 @@ sub issue_grant {
 
 =head2 %revocation = $recipe->revoke_grant($grant)
 
-The removal of the login and the route in of the client of C<$grant>, by
-F<scripts/mailrelay_client> C<release>, as C<revoke_grant> in
-L<Provisioner::Recipe> says.
+The removal of the login, the route in, the routes of the mail clients and the
+ban key of the client of C<$grant>, by F<scripts/mailrelay_client> C<release>,
+as C<revoke_grant> in L<Provisioner::Recipe> says.
 
 =cut
 
@@ -273,12 +349,15 @@ sub revoke_grant {
         command => $command,
         doing   => "remove the relay login of $client",
         done    => "Removed the relay login of $client",
-        stays   => "its relay still takes mail from the login of $client, and relays the mail of $client to its old address.  Run $command there",
+        stays   => "its relay still takes mail from the login of $client, and relays the mail and the mail clients of $client to its old address.  Run $command there",
     );
 }
 
 sub template_files {
+    my ($self) = @_;
     return (
+        $self->SUPER::template_files(),
+        'mailrelay.stream.tt'         => 'mailrelay.stream',
         'mailrelay.postfix.main.tt'   => 'mailrelay.postfix.main',
         'mailrelay.postfix.master.tt' => 'mailrelay.postfix.master',
         'mailrelay.dovecot.tt'        => 'mailrelay.dovecot.conf',

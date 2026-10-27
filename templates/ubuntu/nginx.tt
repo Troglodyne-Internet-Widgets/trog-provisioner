@@ -23,11 +23,9 @@ printf '%s\n' 'listen 8080;' 'real_ip_header X-Forwarded-For;'[% IF proxied.$vho
 [% script_dir %]/queue_postrun_task systemctl reload nginx
 [%# The ban action that sends each ban of the jails of nginx to the relay.
     Provisioner::Recipe::nginx has the whole account. -%]
-rm -f /etc/fail2ban/jail.d/[% domain %]-relay.conf /etc/fail2ban/action.d/relay-[% domain %].conf
-[% IF relay_address -%]
-umask 077 && base64 -d /etc/fail2ban/nginxrelay/[% domain %].key.b64 > /etc/fail2ban/nginxrelay/[% domain %].key
-printf '%s %s\n' '[% relay_address %]' "$$(base64 -d /etc/fail2ban/nginxrelay/[% domain %].host.b64 | cut -d' ' -f1,2)" > /etc/fail2ban/nginxrelay/[% domain %].known_hosts
-install -o root -g root -m 0644 nginx_relay.action /etc/fail2ban/action.d/relay-[% domain %].conf
+rm -f /etc/fail2ban/jail.d/[% domain %]-relay.conf /etc/fail2ban/action.d/nginxrelay-[% domain %].conf
+[% IF ban_relay -%]
+[% INCLUDE "files/relay.client.tt" WITH action_file = 'nginx_relay.action' %]
 install -o root -g root -m 0644 nginx_relay.jail /etc/fail2ban/jail.d/[% domain %]-relay.conf
 [%# Here, because fail2ban runs no jail at all while one action does not
     parse, and the restart in the postrun would fail with no reason. -%]

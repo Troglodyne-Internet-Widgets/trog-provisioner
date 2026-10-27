@@ -1,9 +1,13 @@
 [%# The jails of mail never ban the mail relay in front of this guest, because
     every message from the internet comes from its address, and a ban of it
     would stop them all.  The relay bans the real client itself, on its own
-    port 25.  fail2ban merges these sections into the jails of the domain. -%]
+    port 25.  A mail client that fails to log in comes through the relay too,
+    so the jails also ban through it.  fail2ban merges these sections into the
+    jails of the domain. -%]
 [% FOR jail IN relay_jails -%]
 [[% jail %]]
+action = %(action_)s
+         [% ban_relay.action %]
 ignoreip = 127.0.0.1/8 ::1 [% mailrelay_login.address %]
 
 [% END -%]
