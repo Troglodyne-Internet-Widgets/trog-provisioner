@@ -194,7 +194,10 @@ $FAKE->log->level('fatal');
         cb => sub ($c) {
             $asked->($c);
             my $body = $c->req->json;
-            add_linode( label => $body->{label}, region => $body->{region}, type => $body->{type}, status => 'provisioning', ipv4 => [ '192.168.140.7', '203.0.113.20' ] );
+
+            # With no image, Linode makes no disk and does not boot it.
+            my $id = add_linode( label => $body->{label}, region => $body->{region}, type => $body->{type}, status => 'provisioning', ipv4 => [ '192.168.140.7', '203.0.113.20' ], ( $body->{image} ? () : ( becomes => 'offline' ) ) );
+            $STATE{disks}{$id} = [] unless $body->{image};
             $c->render( json => linode_of( $body->{label} ) );
         }
     );
@@ -222,9 +225,10 @@ $FAKE->log->level('fatal');
             return $c->render( status => 400, json => { errors => [ { reason => 'Linode busy.' } ] } ) if $STATE{busy} && $STATE{busy}--;
 
             # Linode goes on saying what it was saying for one more look.
-            $linode->{then}    = 'rebuilding';
-            $linode->{becomes} = 'running';
-            $linode->{type}    = $c->req->json->{type} if $c->req->json->{type};
+            $linode->{then}                = 'rebuilding';
+            $linode->{becomes}             = 'running';
+            $STATE{disks}{ $linode->{id} } = [ { id => $linode->{id} * 10, filesystem => 'ext4', size => 81408 } ] unless @{ $STATE{disks}{ $linode->{id} } // [] };
+            $linode->{type}                = $c->req->json->{type} if $c->req->json->{type};
             $c->render( json => $linode );
         }
     );
@@ -463,6 +467,34 @@ subtest 'create_guest' => sub {
     reset_linode();
     like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'ab' ) }, qr/Linode[ ]refused[ ]post-linode-instance:[ ]400[ ]\/body/, 'a body the specification refuses is refused before it is sent' );
     is( scalar asked_to( POST => '/v4/linode/instances' ), 0, 'and nothing was sent' ) or diag explain \@ASKED;
+};
+
+subtest 'reserve_guest' => sub {
+    reset_linode();
+    my $hv = linode_hv( firewall_id => 42 );
+
+    ok( $hv->reserve_guest( name => 'new.test.test', size => 'g6-standard-2' ), 'it says that it reserved the guest' );
+    is( linode_of('new.test.test')->{status}, 'offline', 'after Linode says the Linode is offline' );
+
+    my $body = ( asked_to( POST => '/v4/linode/instances' ) )[0][2];
+    is( $body->{label},       'new.test.test', 'labeled with the domain' );
+    is( $body->{type},        'g6-standard-2', 'of the type the guest named' );
+    is( $body->{firewall_id}, 42,              'behind its firewall' );
+    ok( !exists $body->{image},    'with no image, so with no disk' );
+    ok( !$body->{booted},          'and not booted' );
+    ok( !exists $body->{metadata}, 'and no seed, which comes with the rebuild' );
+    is( $hv->guest_ssh_ip('new.test.test'), '203.0.113.20', 'and its address is known now' );
+
+    ok( $hv->is_reservation('new.test.test'), 'it is a reservation, with no disk' );
+    is( $hv->rollback_possible('new.test.test'), 0, 'so there is nothing to snapshot before the build' );
+
+    $hv->rebuild_guest( 'new.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2', user_data => "#cloud-config\n" );
+    ok( !$hv->is_reservation('new.test.test'), 'after the rebuild from the image it has a disk' );
+    is( $hv->rollback_possible('new.test.test'),           1, 'and can be snapshot' );
+    is( scalar asked_to( POST => '/v4/linode/instances' ), 1, 'the rebuild made no second Linode' );
+    ok( !$hv->is_reservation('nope.test.test'), 'and a guest that is not there is no reservation' );
+
+    like( exception { linode_hv()->reserve_guest( name => 'x.test.test' ) }, qr/needs[ ]a[ ]size/, 'no size is said, not sent' );
 };
 
 subtest 'rebuild_guest' => sub {

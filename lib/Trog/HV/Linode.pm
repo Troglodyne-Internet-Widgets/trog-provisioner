@@ -528,6 +528,23 @@ my sub wait_for ( $self, $id, $name, $want ) {
     die "The guest '$name' was not $want ${BUILD_TIMEOUT}s later.\n" . "Check it in the Cloud Manager, and its console through Lish.\n";
 }
 
+# What every new Linode is made with: its label, region and type, the tag of
+# this toolkit, and the firewall and private address of the block.
+my sub instance_body ( $self, %spec ) {
+    my $name = $spec{name};
+    die "Making a guest on " . $self->describe . " needs a name\n" unless $name;
+    die "Linode labels are 64 characters at most, and '$name' is longer\n" if length $name > 64;
+    die "Building '$name' on " . $self->describe . " needs a size, which the guest names in linode_type\n" unless $spec{size};
+
+    my $region = $spec{region} // $self->region;
+    die "Building '$name' on " . $self->describe . " needs 'region'.\nSet it in the block in hypervisors.conf.\n" unless $region;
+
+    my %body = ( label => $name, region => $region, type => $spec{size}, tags => [$MANAGED_BY] );
+    $body{firewall_id} = 0 + $self->firewall_id   if $self->firewall_id;
+    $body{private_ip}  = Cpanel::JSON::XS::true() if $self->private_ip;
+    return %body;
+}
+
 =head1 BUILDING AND TEARING DOWN
 
 =head2 create_guest(%spec)
@@ -553,35 +570,52 @@ come up in C<$BUILD_TIMEOUT> seconds.
 sub create_guest {
     my ( $self, %spec ) = @_;
 
-    my $name = $spec{name};
-    die "create_guest needs a name\n" unless $name;
-    die "Linode labels are 64 characters at most, and '$name' is longer\n" if length $name > 64;
+    die "Building '" . ( $spec{name} // q{} ) . "' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
+    my %body = instance_body( $self, %spec );
 
-    die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides
-" unless $spec{image};
-    die "Building '$name' on " . $self->describe . " needs a size, which the guest names in linode_type
-" unless $spec{size};
-
-    $spec{region} //= $self->region;
-    die "Building '$name' on " . $self->describe . " needs 'region'.
-Set it in the block in hypervisors.conf.
-" unless $spec{region};
-
-    my %body = (
-        label     => $name,
-        region    => $spec{region},
-        type      => $spec{size},
-        image     => $spec{image},
-        root_pass => root_pass(),
-        tags      => [$MANAGED_BY],
-        booted    => Cpanel::JSON::XS::true(),
-        metadata( $spec{user_data} ),
-    );
-    $body{firewall_id} = 0 + $self->firewall_id   if $self->firewall_id;
-    $body{private_ip}  = Cpanel::JSON::XS::true() if $self->private_ip;
-
+    %body = ( %body, image => $spec{image}, root_pass => root_pass(), booted => Cpanel::JSON::XS::true(), metadata( $spec{user_data} ) );
     my $linode = call( $self, 'post-linode-instance', {}, json => \%body );
-    return wait_for( $self, $linode->{id}, $name, 'running' );
+    return wait_for( $self, $linode->{id}, $body{label}, 'running' );
+}
+
+=head2 reserve_guest(%spec)
+
+Makes a Linode with no image, and so no disk, and waits until Linode reports it
+C<offline>.  Linode gives a Linode its addresses when it makes it, so the
+address of the guest is known before its configuration is written.
+C<bin/new_config> calls this for C<bin/provision>, and C<provision_guest> then
+rebuilds the Linode from the image, with the seed.  See
+L<Trog::HV/reserve_guest>.
+
+C<name>, C<size> and C<region> are as C<create_guest> takes them.  The Linode
+runs nothing until the rebuild, and Linode bills it from now.
+
+Returns true.  Dies as C<create_guest> does, except over an image.
+
+=cut
+
+sub reserve_guest {
+    my ( $self, %spec ) = @_;
+
+    my %body   = ( instance_body( $self, %spec ), booted => Cpanel::JSON::XS::false() );
+    my $linode = call( $self, 'post-linode-instance', {}, json => \%body );
+    wait_for( $self, $linode->{id}, $body{label}, 'offline' );
+    return 1;
+}
+
+=head2 is_reservation($domain)
+
+True when the Linode of C<$domain> has no disk, as C<reserve_guest> leaves it.
+There is nothing on it to snapshot or to salvage.
+
+=cut
+
+sub is_reservation {
+    my ( $self, $domain ) = @_;
+
+    my $linode = $self->server($domain) // return 0;
+    my @disks  = every_page( $self, 'get-linode-disks', { linodeId => $linode->{id} } );
+    return @disks ? 0 : 1;
 }
 
 =head2 rebuild_guest($name, user_data => $seed, image => $image)

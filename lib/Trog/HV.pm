@@ -563,6 +563,29 @@ addresses do not come from the pool.
 sub builds_by_api     { return 0 }
 sub manages_addresses { return 0 }
 
+=head2 reserve_guest(%spec)
+
+Makes the guest C<name> empty, so that it has its addresses before its
+configuration is written, and returns true.  Returns false where the backend
+cannot, which is the default here.  C<bin/new_config> calls it for
+C<bin/provision>, on a backend that C<manages_addresses>, for a guest that does
+not exist yet.  Then it reads the address of the guest, and C<provision_guest>
+builds the image onto the guest that is there.  Without it, the address is known
+only after the build, so the configuration names none.
+
+C<size> is the value of the C<size_key> of the guest, and a backend can also
+take C<region>.
+
+=head2 is_reservation($domain)
+
+True when the guest of C<$domain> is as C<reserve_guest> left it, with nothing
+on it to snapshot or to salvage.  False by default.
+
+=cut
+
+sub reserve_guest  { return 0 }
+sub is_reservation { return 0 }
+
 =head2 @actions = $hv->debug_actions()
 
 The actions of F<bin/debug_boot> that this backend can do, named as the options

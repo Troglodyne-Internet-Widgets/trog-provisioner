@@ -1325,6 +1325,17 @@ subtest 'the reverse DNS of a guest is set to the name its mail announces' => su
 
 # The generator places the guest, so it has to place it in the fleet that
 # --hvconf names, which is the one choose_hypervisor reads afterwards.
+# The flags that generate_config handed the generator, less the domain at the
+# end.  A flag is given its value, or 1 when it takes none, as --reserve does.
+sub flags_given (@flags) {
+    pop @flags;
+    my %given;
+    while ( defined( my $flag = shift @flags ) ) {
+        $given{$flag} = ( @flags && $flags[0] !~ m/\A--/ ) ? shift @flags : 1;
+    }
+    return %given;
+}
+
 subtest 'the generator is handed the fleet that --hvconf names' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "_base:\n" );
@@ -1340,11 +1351,11 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
             Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml", hvconf => '/bogus/fleet.conf' } );
         }
     );
-    my %given = @flags[ 0 .. $#flags - 1 ];
+    my %given = flags_given(@flags);
     is( $given{'--hvconf'}, '/bogus/fleet.conf', 'passed on to the generator' );
 
     quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml" } ) } );
-    %given = @flags[ 0 .. $#flags - 1 ];
+    %given = flags_given(@flags);
     ok( !exists $given{'--hvconf'},     'and not passed when there is none, so the generator reads the default' );
     ok( !exists $given{'--hypervisor'}, 'nor --hypervisor' );
     ok( !exists $given{'--domaindir'},  'nor a domain directory that was only the default' );
@@ -1364,9 +1375,15 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
             );
         }
     );
-    %given = @flags[ 0 .. $#flags - 1 ];
+    %given = flags_given(@flags);
     is( $given{'--hypervisor'}, 'hv1', '--hypervisor is passed on' );
     is( $given{'--domaindir'},  $dir,  'and so is a --domaindir from the command line' );
+    ok( $given{'--reserve'}, 'a build has the guest reserved, on a hypervisor that gives it its address' );
+
+    quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml", dryrun => 1 } ) } );
+    %given = flags_given(@flags);
+    ok( $given{'--dryrun'},   'a dry run is a dry run of the generator too' );
+    ok( !$given{'--reserve'}, 'and makes no guest' );
 };
 
 # A domain added to a guest that is up gets its packages from these reruns, and

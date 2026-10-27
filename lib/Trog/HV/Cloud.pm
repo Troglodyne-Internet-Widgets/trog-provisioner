@@ -151,7 +151,7 @@ sub clear_guest { return 1 }
 Returns 1 if a snapshot taken now survives the rebuild, and 0 if it does not.
 A snapshot here is an image the service keeps apart from the guest, and a
 rebuild leaves the image alone.  So this only asks whether there is a guest to
-snapshot.
+snapshot.  A guest that C<is_reservation> holds nothing to snapshot.
 
 C<capacity> is accepted and ignored.  The libvirt backend uses it, because there
 the snapshot lives in the disk.
@@ -161,7 +161,7 @@ the snapshot lives in the disk.
 sub rollback_possible {
     my ( $self, $domain, %opts ) = @_;
 
-    return eval { $self->domain_exists($domain) } ? 1 : 0;
+    return eval { $self->domain_exists($domain) && !$self->is_reservation($domain) } ? 1 : 0;
 }
 
 =head2 snapshot_current_name($domain)
@@ -186,7 +186,8 @@ sub snapshot_current_name {
 =head2 provision_guest($config, $seed, %opts)
 
 Gets the guest from the service, and returns its address.  If the guest exists,
-this rebuilds it.  If not, this creates it.
+this rebuilds it.  If not, this creates it.  A guest that C<reserve_guest> made
+exists, so it is rebuilt from the image like any other.
 
 C<$seed> holds the C<user-data> that C<bin/provision> already wrote, and the
 C<image> in C<$config> is what C<image_for_distro> answered when

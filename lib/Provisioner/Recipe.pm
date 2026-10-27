@@ -452,14 +452,15 @@ sub global_args {
             admin_email => { type => 'string', description => 'Where mail for the administrator goes.' },
             admin_keys  => { type => 'array',  items       => { type => 'string' }, description => "The administrator's ssh keys, read from admin_authorized_keys beside the rest of the configuration and written straight into the guest." },
 
-            # These three are absent together.  A hypervisor that addresses its
-            # own guests gives out no address of ours, has no NAT bridge to
-            # reach, and leaves the guest no gateway of ours.  bin/new_config
-            # guards all three on manages_addresses, and
+            # A hypervisor that addresses its own guests gives out no address of
+            # ours, has no NAT bridge to reach, and leaves the guest no gateway
+            # of ours.  So tld_ip and gateway are absent there, and main_ip is
+            # the address that the hypervisor gave the guest.  bin/new_config
+            # guards them on manages_addresses, and
             # Provisioner::Recipe::ubuntu wants a gateway only where there are
-            # ips to go with it.
+            # ips of ours to go with it.
             gateway => { type => 'string', nullable => 1, description => 'The IPv4 gateway guests are built with, or nothing where the platform provides one.' },
-            main_ip => { type => 'string', nullable => 1, description => "The guest's static address, or nothing where the hypervisor allocates it." },
+            main_ip => { type => 'string', nullable => 1, description => "The guest's static address: from the pool, or the one that a hypervisor that allocates addresses gave the guest.  Nothing where the guest has none yet." },
             tld_ip  => { type => 'string', nullable => 1, description => "The hypervisor's NAT bridge address, or nothing where it has none." },
 
             transfer_ip   => { type => 'string',  description => 'The address of this machine the guest rsyncs its payload from.' },

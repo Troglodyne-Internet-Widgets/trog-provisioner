@@ -56,7 +56,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
+    new_config [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] [--reserve] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -87,6 +87,13 @@ The --hypervisor option names one hypervisor in the fleet definition, and the
 search is not done.  The --domaindir option names the directory that the configuration
 of each domain goes in, instead of the one that the hypervisor names.
 F<bin/provision> passes both when it gets them.
+
+The --reserve option is for F<bin/provision>, which passes it unless it makes
+a dry run.  On a hypervisor that gives its guests their addresses, it makes a
+guest that does not exist yet empty, through C<reserve_guest> in L<Trog::HV>.
+Then the guest has its address, and the configuration names it as C<main_ip>.
+So the registrar publishes its A record in the same build.  Without the option,
+this makes no guest, which a billing service charges for.
 
 Most of what you put in the main recipes.yaml goes in the _base section:
 
@@ -224,7 +231,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun );
+our ( $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun, $reserve );
 
 sub get_recipe_config {
     return Provisioner::Cookbook->configuration($pfile);
@@ -275,7 +282,7 @@ sub main {
     # Clear the gaps and the options of the last run, because a process can call
     # main() more than once: bin/provision does, once for each guest it builds.
     %SALVAGE_GAPS = ();
-    undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh;
+    undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh, $reserve;
 
     my ( $credentials, $help );
     GetOptionsFromArray(
@@ -288,6 +295,7 @@ sub main {
         'skip_ssh'     => \$skip_ssh,
         'credentials'  => \$credentials,
         'dryrun'       => \$dryrun,
+        'reserve'      => \$reserve,
         'help'         => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
@@ -706,6 +714,17 @@ sub handle_domain {
           if @unqualified;
     }
 
+    # A hypervisor that gives its guests their addresses gives one only to a
+    # guest that exists.  So bin/provision has the guest reserved first, empty,
+    # and then its address is the main_ip of the configuration.  A reservation
+    # holds nothing to salvage.
+    my ( $cloud_ip, $reserved );
+    if ( $hv->manages_addresses ) {
+        $reserved = $reserve && !$dryrun && !$hv->domain_exists($fqdn) && $hv->reserve_guest( name => $fqdn, size => $global_config->{ $hv->size_key // q{} } );
+        print "Reserved $fqdn on " . $hv->describe . ", so that its address is known now\n" if $reserved;
+        $cloud_ip = $hv->guest_ssh_ip($fqdn)                                                if $hv->domain_exists($fqdn);
+    }
+
     # The guest fetches its payload from this machine, not from the hypervisor.
     my $this_machine = Trog::Local->new();
 
@@ -836,7 +855,7 @@ sub handle_domain {
     $global_config->{ipmap}         = $ip_conf;
     $global_config->{aliases}       = $alias_conf;
     $global_config->{nameservers}   = $ns_conf;
-    $global_config->{main_ip}       = $static_ip;
+    $global_config->{main_ip}       = $static_ip // $cloud_ip;
     $global_config->{tld_ip}        = $tld_ip;
     $global_config->{transfer_user} = $transfer_user;
     $global_config->{transfer_port} = $transfer_port;
@@ -865,9 +884,11 @@ sub handle_domain {
     $global_config->{packager_up_invocation}     = $distro->packager_up_invocation;
     $global_config->{packager_remove_invocation} = $distro->packager_remove_invocation;
 
-    # Where the guest is, to salvage it: its address in the pool, or the lease
-    # of a guest that has none.  Not asked with --skip_ssh.
-    my $guest_ip = $static_ip // ( $skip_ssh || $hv->manages_addresses ? undef : $hv->nat_address($fqdn) );
+    # Where the guest is, to salvage it: its address in the pool, its address
+    # from a hypervisor that gives it one, or the lease of a guest that has
+    # none.  Not asked with --skip_ssh.
+    my $guest_ip = $static_ip // $cloud_ip // ( $skip_ssh || $hv->manages_addresses ? undef : $hv->nat_address($fqdn) );
+    undef $guest_ip if $reserved || ( $cloud_ip && $hv->is_reservation($fqdn) );
 
     # Whether the guest is up.  The connection is only the probe: the fetch
     # goes through salvage_guest.  A guest without an address yet is not
