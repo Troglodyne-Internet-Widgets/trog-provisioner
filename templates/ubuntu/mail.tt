@@ -18,29 +18,15 @@ cat /etc/opendkim/tables.d/*/KeyTable > /etc/opendkim/KeyTable
 sort -u /etc/opendkim/tables.d/*/TrustedHosts > /etc/opendkim/TrustedHosts
 sort -u /etc/opendkim/tables.d/*/InternalHosts > /etc/opendkim/InternalHosts
 sort -u /etc/opendkim/tables.d/*/RemoveARFrom > /etc/opendkim/RemoveARFrom
-# The signing key that the last guest used, or a new one.  The data target
-# restores the key of this domain before this target runs.  If there is no
-# key, make one.
-[ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
+[%# The signing key comes from the secret store.  bin/provision puts it in
+    /etc/opendkim/keys/<domain> before the makefile runs.  See guest_secrets in
+    Provisioner::Recipe::mail. -%]
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
 [%# Every key on the guest, not only the key of this domain, because the chmod
     above opened all of them.  opendkim refuses a key that others can read,
     and then tempfails every message of that domain. -%]
 find /etc/opendkim/keys -type f -exec chmod 0600 {} +
-# Put a copy in /mail for the fetch to read.  remote_files names this copy,
-# not /etc/opendkim/keys.  Provisioner::Recipe::mail says why.
-#
-# The trailing dot is necessary.  If /mail/keys exists, `cp -r
-# /etc/opendkim/keys /mail/keys` copies the directory into /mail/keys/keys.
-# restores() takes the key back from /mail/keys/<domain>.
-mkdir -p /mail/keys
-cp -r /etc/opendkim/keys/. /mail/keys/
-chown -R root:root /mail/keys
-# 0700 and 0600, because this is a private key outside the daemon that owns
-# it.  The fetch also copies it into the data directory of the provisioner.
-find /mail/keys -type d -exec chmod 0700 {} +
-find /mail/keys -type f -exec chmod 0600 {} +
 mkdir -p /var/spool/postfix/opendkim
 chown opendkim:postfix /var/spool/postfix/opendkim
 chmod 0770 /var/spool/postfix/opendkim
@@ -57,8 +43,6 @@ mkdir -p /var/spool/postfix/opendmarc
 chown opendmarc:postfix /var/spool/postfix/opendmarc
 chmod 0770 /var/spool/postfix/opendmarc
 [% script_dir %]/queue_postrun_task systemctl restart opendmarc
-# Update the DNS records, if this guest runs a DNS server.
-[% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %]
 # dovecot
 # First, move the packaged conf.d out of the way, once.  The target of a second
 # domain on this guest must not move the conf.d that the first one wrote.

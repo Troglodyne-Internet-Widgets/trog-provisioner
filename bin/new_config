@@ -954,7 +954,17 @@ sub handle_domain {
     # fill several, so each is looked for once per command.
     @secret_values = uniq @secret_values;
 
+    # The secrets of the guest, read or made before anything renders, because a
+    # recipe can derive a record from one, as mail does the DKIM record from its
+    # key.  See held in Trog::Secrets.  Collected for one lookup, so that a run
+    # asks for the password of the store one time.  They go through the store,
+    # not the payload.
     my %guest_secrets;
+    foreach my $module (@modules) {
+        my $pconf = $rconf->{$domain}{$module};
+        %guest_secrets = ( %guest_secrets, $builders{$module}->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ), $builders{$module}->granted_secrets( $fqdn, %$pconf ) );
+    }
+    write_guest_secrets( $cfg_dir, $fqdn, \%guest_secrets, $sfile, $keepass );
 
     foreach my $module (@modules) {
         my $builder = $builders{$module};
@@ -993,10 +1003,6 @@ sub handle_domain {
 
         my %t_vars = $builder->makefile_vars();
         %mf_vars = ( %mf_vars, %t_vars ) if %t_vars;
-
-        # Collected for one lookup below, so that a run asks for the password of
-        # the store one time.  They go through the store, not the payload.
-        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ), $builder->granted_secrets( $fqdn, %$pconf ) );
 
         my %sources = $builder->fetch_sources(%$pconf);
         foreach my $name ( sort keys %sources ) {
@@ -1141,8 +1147,6 @@ sub handle_domain {
 
     print "Writing Makefile to $cfg_dir\n";
     File::Slurper::Temp::write_binary( "$cfg_dir/Makefile", $makefile );
-
-    write_guest_secrets( $cfg_dir, $fqdn, \%guest_secrets, $sfile, $keepass );
 
     my $r_text = join( ', ', @$resolvers );
 

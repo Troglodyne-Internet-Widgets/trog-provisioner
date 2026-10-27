@@ -31,8 +31,19 @@ use File::Temp       qw{tempdir tempfile};
 use File::Slurper();
 use File::Slurper::Temp();
 use YAML::XS();
+use Cpanel::JSON::XS();
+use Crypt::PK::RSA();
+use MIME::Base64();
 
 use Provisioner::Cookbook();
+use Trog::Config();
+use Trog::Credentials();
+use Trog::Secrets();
+
+# A throwaway store, and its password handed over up front, because mail keeps
+# its DKIM key in the store.  As Trog::Test::RemoteTests does.
+Trog::Secrets->create( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
+Trog::Credentials->remember( keepass => 'throwaway' );
 
 File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 
@@ -168,6 +179,15 @@ subtest 'a name belonging to a dependency is handed over as well' => sub {
     my @served = qw{autoconfig.mail.test autodiscover.mail.test dnsapi.mail.test mail.mail.test webmail.mail.test www.mail.test};
     is_deeply( certificate_names($dir),         [ sort 'mail.test', @served ], 'the certificate names what each recipe serves' );
     is_deeply( zone_names( $dir, 'mail.test' ), \@served,                      'and the zone carries each of them' );
+
+    # The DKIM key is a secret of the guest, which new_config reads before it
+    # renders, so the records of the registrar can carry its public half.
+    my $records = Cpanel::JSON::XS::decode_json( File::Slurper::read_binary("$dir/registrar-records.json") );
+    my @dkim    = grep { $_->{name} =~ m/\A(?:default|mail)[.]_domainkey[.]mail[.]test\z/ } @$records;
+    is( scalar @dkim, 2, 'the records of the registrar carry the DKIM key, once for each selector' ) or diag explain $records;
+    my %held   = Trog::Secrets->remember( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:mail/mail.test-dkim-key/password' => sub { die "the store has no DKIM key\n" } );
+    my $public = MIME::Base64::encode_base64( Crypt::PK::RSA->new( \$held{'secret:mail/mail.test-dkim-key/password'} )->export_key_der('public'), q{} );
+    like( $dkim[0]{content} // q{}, qr/p=\Q$public\E\z/, 'the key that the store keeps' );
 };
 
 subtest 'the certificate list is the aliases, and invents nothing' => sub {

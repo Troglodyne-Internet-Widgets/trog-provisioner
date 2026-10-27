@@ -45,8 +45,10 @@ subtest 'the records of the domain are published to the zone that holds it' => s
 [% END -%]
 
     # The records of the recipes other than names.  A TXT record can come back
-    # in quotes, and a name or target with its trailing dot.
-    my $plain = sub { my ($text) = @_; $text = lc($text // ''); $text =~ s/\A"(.*)"\z/$1/s; $text =~ s/[.]\z//; return $text };
+    # in quotes, and a name or target with its trailing dot.  pdns quotes each
+    # string of a long record apart, and lexicon takes off only the outer
+    # quotes, so a long one can read a" "b.
+    my $plain = sub { my ($text) = @_; $text = lc($text // ''); $text =~ s/\A"//; $text =~ s/"\z//; $text =~ s/"[ ]+"//g; $text =~ s/[.]\z//; return $text };
     my %of;
 [% FOREACH record IN zone_records -%]
     {

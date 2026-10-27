@@ -1,5 +1,5 @@
-# Not recursive, because the target of each domain keeps its own mail store and
-# its staged DKIM key under /mail closed.
+# Not recursive, because the target of each domain keeps its own mail store
+# under /mail closed.
 install -d -m 0775 -o dovecot -g dovecot /mail /mail/scripts
 install -m 0775 -o dovecot -g dovecot [% script_dir %]/dovecot_overquota /mail/scripts/
 [%# Compiled here as root, because dovecot cannot write the binary into /etc

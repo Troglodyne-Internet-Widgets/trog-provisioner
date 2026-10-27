@@ -1578,10 +1578,9 @@ Two recipes that restore different things to one path disagree, and
 C<reconcile> settles that openly.
 
 This map is not derived from C<remote_files>.  It looks like the inverse, and
-it often is, but not always.  C<mail> salvages C</mail/keys> whole and puts one
-subdirectory of it back at C</etc/opendkim/keys/$domain>.  No rule that
-reverses the map produces that.  A restore to the wrong place destroys data, so
-each recipe states its map.
+it often is, but not always.  A recipe can salvage a directory whole and put
+only part of it back, or put it back at another path.  A restore to the wrong
+place destroys data, so each recipe states its map.
 
 Leave it empty, the default, for a recipe whose salvage lands in the domain
 directory that the service already reads.  The C<data> target already puts the

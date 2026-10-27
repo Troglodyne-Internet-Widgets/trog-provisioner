@@ -500,6 +500,23 @@ subtest 'a TXT record with a match replaces only the record that it matches' => 
     );
 };
 
+subtest 'a long TXT record that pdns answers with in several strings is the same record' => sub {
+    my $long = 'v=DKIM1; p=' . ( 'A' x 400 );
+    my $file = records_file( { type => 'TXT', name => "default._domainkey.$DOMAIN", content => $long, match => 'v=DKIM1' } );
+
+    # As lexicon lists it: the strings quoted apart, less the outer quotes.
+    my $split = join q{" "}, unpack( '(A255)*', $long );
+    against(
+        holding( { name => "default._domainkey.$DOMAIN", type => 'TXT', content => $split, id => 'zone-file' } ),
+        sub {
+            my ($ran)  = @_;
+            my ($said) = capture { Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            is( scalar grep( { index( $_, ' TXT ' ) >= 0 } sent( $ran, 'create' ), sent( $ran, 'update' ) ), 0, 'nothing is sent for it' );
+            like( $said, qr/TXT[ ]default[.]_domainkey[.]\Q$DOMAIN\E[ ]is[ ]already/, 'because it is already there' );
+        }
+    );
+};
+
 subtest 'a record without a match owns only the same content, and an empty match owns the name' => sub {
     my $file = records_file( \%MX, \%SRV );
     against(

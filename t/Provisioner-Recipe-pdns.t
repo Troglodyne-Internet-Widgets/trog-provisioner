@@ -29,6 +29,10 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
+use Trog::Secrets();
+
+use Crypt::PK::RSA();
+use Net::DNS::ZoneFile();
 use Provisioner::Recipe::pdns();
 
 # These patterns quotemeta a literal on purpose: a fixture domain full of dots
@@ -119,6 +123,23 @@ subtest 'a record points only at a name the guest actually has' => sub {
     like( $with, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./,      'and the MX is there where mail is served' );
     like( $with, qr/^\Q_imaps._tcp.$DOMAIN\E\.\s+IN\s+SRV/m, 'with the SRVs beside it' );
     like( $with, qr/mailconf=/,                              'and the autoconfig record' );
+};
+
+subtest 'a TXT record longer than one string is split, and reads back whole' => sub {
+    my $made = Crypt::PK::RSA->new;
+    $made->generate_key( 256, 65537 );
+    local %Trog::Secrets::HELD = ( Provisioner::Cookbook->load('mail')->dkim_key_ref($DOMAIN) => $made->export_key_pem('private') );
+
+    my $text   = zone( modules => ['mail'] );
+    my @rr     = Net::DNS::ZoneFile->parse( \$text );
+    my ($dkim) = grep { $_->type eq 'TXT' && lc( $_->owner ) eq "default._domainkey.$DOMAIN" } @rr;
+    ok( $dkim, 'a DNS parser finds the DKIM record in the zone' ) or diag $text;
+
+    my @strings = $dkim ? $dkim->txtdata : ();
+    cmp_ok( scalar @strings, '>', 1, 'in more than one string' );
+    is( scalar( grep { length > 255 } @strings ), 0, 'none of them over 255 characters' );
+    my ($wanted) = map { $_->{content} } grep { $_->{name} eq "default._domainkey.$DOMAIN" } Provisioner::Cookbook->load('mail')->dkim_records($DOMAIN);
+    is( join( q{}, @strings ), $wanted, 'and together they are the record of mail' );
 };
 
 subtest 'the apex is the origin, not a name of its own' => sub {

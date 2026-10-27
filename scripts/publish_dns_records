@@ -51,12 +51,14 @@ sub canonical {
     return lc( $value // q{} ) =~ s/[.]+\z//r;
 }
 
-# The text of a TXT record, which some providers answer with in quotes.  Case
-# matters in it, unlike in a name.
+# The text of a TXT record.  Some providers answer with it in quotes.  pdns
+# quotes each string of a long record apart, and lexicon takes off only the
+# outer quotes, so its answer reads a" "b.  Case matters in it, unlike in a
+# name.
 sub unquoted {
     my ($value) = @_;
 
-    return ( $value // q{} ) =~ s/\A"(.*)"\z/$1/sr;
+    return ( $value // q{} ) =~ s/\A"//r =~ s/"\z//r =~ s/"[ ]+"//gr;
 }
 
 # Whether two contents of a record of $type say the same.

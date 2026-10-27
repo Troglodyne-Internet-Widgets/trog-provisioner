@@ -13,6 +13,10 @@ use parent qw{Provisioner::Recipe};
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
 use Provisioner::Utils();
+use Trog::Secrets();
+
+use Crypt::PK::RSA();
+use MIME::Base64();
 
 =head1 Provisioner::Recipe::mail
 
@@ -153,16 +157,9 @@ what to do about those.
 
 =head3 What a rebuild keeps, and what that costs
 
-C<remote_files> names two things: the mail store of this domain, and
-C</mail/keys>.
-
-C</mail/keys> is not where opendkim keeps its keys.  opendkim owns
-C</etc/opendkim/keys>, and C</mail/keys> is a copy for the fetch to read.
-C<bin/new_config> reads the guest as root, so it can read
-C</etc/opendkim/keys> directly.  A possible follow-up is to point
-C<remote_files> at that directory and drop the copy.  The copy is
-C<root:root>, 0600 in a 0700 directory.  That is as tight as it can be for a
-file outside the daemon that owns the original.
+C<remote_files> names the mail store of this domain.  The DKIM key is not
+salvaged.  It is in the secret store, and C<bin/provision> puts it on the
+guest.  See C<guest_secrets>.
 
 The recipe salvages the mail store where it is.  Its mode is C<2750>, owned by
 C<dovecot:dovecot>.  This is necessary.  dovecot copies the mode and the group
@@ -172,8 +169,7 @@ the mode of the whole store.
 
 On the guest, only C<dovecot>, C<opendkim> and root can read these files.  But
 the fetched copy goes into the data directory of the provisioner and into its
-backups.  That copy holds all the mail of this domain and the key that signs
-its outbound mail.
+backups.  That copy holds all the mail of this domain.
 
 =head3 Sending through a mail relay
 
@@ -408,8 +404,8 @@ sub addressed_names {
 =head2 @records = $recipe->dns_records(%opts)
 
 The MX of the domain, which names C<mail.DOMAIN>, its SPF and DMARC policies,
-the records that point a mail client at its settings, and an SRV record for
-each port that a client sends or reads mail on.  See L<Provisioner::Recipe>.
+the records that point a mail client at its settings, an SRV record for each
+port that a client sends or reads mail on, and C<dkim_records>.  See L<Provisioner::Recipe>.
 The SPF policy passes the address of the domain and of its MX, which is the
 address of a mail relay where the domain has one.
 
@@ -427,7 +423,62 @@ sub dns_records {
         { type => 'TXT', name => "_dmarc.$domain",             content => 'v=DMARC1; p=none',                                         match => 'v=DMARC1' },
         { type => 'TXT', name => $domain,                      content => "mailconf=https://autoconfig.$domain/mail/config-v1.1.xml", match => 'mailconf=' },
         { type => 'SRV', name => "_autodiscover._tcp.$domain", content => "0 0 443 autodiscover.$domain.",                            match => q{} },
-        map { { type => 'SRV', name => "_$_._tcp.$domain", content => "0 0 $srv{$_} $mx", match => q{} } } sort keys %srv,
+        ( map { { type => 'SRV', name => "_$_._tcp.$domain", content => "0 0 $srv{$_} $mx", match => q{} } } sort keys %srv ),
+        $self->dkim_records($domain),
+    );
+}
+
+=head2 $ref = $recipe->dkim_key_ref($domain)
+
+Where the secret store keeps the DKIM key of C<$domain>, which signs its
+outbound mail.  See C<guest_secrets>.
+
+=cut
+
+sub dkim_key_ref {
+    my ( $self, $domain ) = @_;
+    return "secret:mail/$domain-dkim-key/password";
+}
+
+=head2 @records = $recipe->dkim_records($domain)
+
+The TXT record of the public half of the DKIM key of C<$domain>, once for each
+selector of F<mail.opendkim-keytable.tt>, which names the key under both.  Its
+match is C<v=DKIM1>, so that a new key replaces the old one.  None where
+C<held> in L<Trog::Secrets> has no key, as in a run that opened no store.
+
+=cut
+
+sub dkim_records {
+    my ( $self, $domain ) = @_;
+    my $private = Trog::Secrets->held( $self->dkim_key_ref($domain) ) // return;
+
+    my $public = MIME::Base64::encode_base64( Crypt::PK::RSA->new( \$private )->export_key_der('public'), q{} );
+    my $record = "v=DKIM1; h=sha256; k=rsa; t=y; p=$public";
+    return map { { type => 'TXT', name => "$_._domainkey.$domain", content => $record, match => 'v=DKIM1' } } qw{default mail};
+}
+
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+
+The DKIM key of the domain, which opendkim signs with.  It comes from the
+secret store, so a rebuild keeps it, and it never goes into the salvage of the
+guest.  The store makes it the first time: an RSA key of 2048 bits.
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        "/etc/opendkim/keys/$domain/default.private" => {
+            ref      => $self->dkim_key_ref($domain),
+            generate => sub {
+                my $key = Crypt::PK::RSA->new;
+                $key->generate_key( 256, 65537 );
+                return $key->export_key_pem('private');
+            },
+            owner => 'opendkim:opendkim',
+            mode  => '0600',
+        },
     );
 }
 
@@ -593,21 +644,12 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # Not the inverse of remote_files, so it is not derived from it.  The
-    # fetch takes all of /mail/keys, and one directory of it goes back to
-    # /etc/opendkim/keys.
-    return (
-        "/etc/opendkim/keys/$domain" => { from => "$install_dir/$domain/.mail/keys/$domain", owner => 'opendkim:opendkim' },
-        "/mail/$domain"              => { from => "$install_dir/$domain/mailnames",          owner => 'dovecot:dovecot' },
-    );
+    return ( "/mail/$domain" => { from => "$install_dir/$domain/mailnames", owner => 'dovecot:dovecot' } );
 }
 
 sub remote_files {
     my ( $class, $install_dir, $domain ) = @_;
-    return (
-        '/mail/keys'    => '.mail/keys',
-        "/mail/$domain" => 'mailnames',
-    );
+    return ( "/mail/$domain" => 'mailnames' );
 }
 
 sub tests {
