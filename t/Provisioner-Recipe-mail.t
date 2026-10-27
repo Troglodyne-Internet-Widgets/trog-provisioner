@@ -125,6 +125,22 @@ subtest 'a relay that is a mail relay of this installation takes every sender, w
     );
 };
 
+subtest 'behind a relay of nginx, the settings of mail clients are public names' => sub {
+    my $asked = sub {
+        my (%config) = @_;
+        my $cookbook = Test::MockModule->new( 'Provisioner::Cookbook', no_auto => 1 );
+        $cookbook->redefine( configuration => sub { return { 'mail.test.test' => {%config} } } );
+        my %required = Provisioner::Cookbook->load('mail')->required_recipes( domain => 'mail.test.test' );
+        return { $required{nginx}->() };
+    };
+    my @sites = qw{autodiscover.mail.test.test autoconfig.mail.test.test};
+
+    my $relayed = $asked->( nginx => { relay => 'relay.test.test' } );
+    is_deeply( $relayed->{sites},                          \@sites,                     'the vhost answers for both names' );
+    is_deeply( $relayed->{public_names},                   { map { $_ => $_ } @sites }, 'and the relay sends both to it' );
+    is_deeply( [ sort keys %{ $asked->( nginx => {} ) } ], ['sites'],                   'without a relay, mail asks nginx for the vhost alone' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

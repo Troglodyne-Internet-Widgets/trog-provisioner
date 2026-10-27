@@ -153,9 +153,10 @@ chmod 0600 /etc/postfix/domains/[% domain %]/sasl_passwd.db
 # default configuration from systemd-resolved.
 [% script_dir %]/queue_postrun_task "cat /etc/resolv.conf > /var/spool/postfix/resolv.conf"
 [% script_dir %]/queue_postrun_task systemctl restart postfix
-# Set up the autodiscover URIs.
-mkdir -p '[% install_dir %]/autodiscover.[% domain %]/autodiscover'; /bin/true
+# The settings of a mail client, for Outlook and for Thunderbird.
+mkdir -p '[% install_dir %]/autodiscover.[% domain %]/autodiscover' '[% install_dir %]/autodiscover.[% domain %]/mail'; /bin/true
 mv autodiscover.xml '[% install_dir %]/autodiscover.[% domain %]/autodiscover/'
+mv config-v1.1.xml '[% install_dir %]/autodiscover.[% domain %]/mail/'
 chown -R www-data:www-data  '[% install_dir %]/autodiscover.[% domain %]'
 chmod -R 0770 '[% install_dir %]/autodiscover.[% domain %]'
 mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf

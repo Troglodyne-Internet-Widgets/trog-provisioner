@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The settings of a mail client, in the format of Outlook Autodiscover.  SPA
+     is off, because it asks for NTLM, which neither dovecot nor postfix offers
+     here. -->
 <Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
   <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
     <Account>
@@ -6,20 +9,20 @@
       <Action>settings</Action>
       <Protocol>
         <Type>IMAP</Type>
-        <Server>[% domain %]</Server>
+        <Server>mail.[% domain %]</Server>
         <Port>993</Port>
-        <SPA>on</SPA>
+        <SPA>off</SPA>
         <SSL>on</SSL>
         <AuthRequired>on</AuthRequired>
       </Protocol>
       <Protocol>
         <Type>SMTP</Type>
-        <Server>[% domain %]</Server>
+        <Server>mail.[% domain %]</Server>
         <Port>465</Port>
-        <SPA>on</SPA>
+        <SPA>off</SPA>
         <SSL>on</SSL>
         <AuthRequired>on</AuthRequired>
-		<UsePOPAuth>on</UsePOPAuth>
+        <UsePOPAuth>on</UsePOPAuth>
         <SMTPLast>off</SMTPLast>
       </Protocol>
     </Account>

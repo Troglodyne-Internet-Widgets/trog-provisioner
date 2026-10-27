@@ -426,4 +426,36 @@ subtest '465 is submission over TLS, which takes mail only after a login' => sub
     like( $replies[1], qr/^250[- ]AUTH /m, 'and offers a login' ) or diag $replies[1];
     like( $replies[3], qr/^5\d\d /m,      'and refuses a message for this domain from a client with no login, which only 25 takes' ) or diag $replies[3];
 };
+
+subtest 'a mail client finds its settings, as Outlook and Thunderbird ask for them' => sub {
+    # The body and then the status, of one request to this guest by name.
+    my $fetch = sub {
+        my ( $method, $url ) = @_;
+        my ( $scheme, $name ) = $url =~ m{\A(\w+)://([^/]+)};
+        my $port = $scheme eq 'https' ? 443 : 80;
+        my $body = $method eq 'POST' ? q{-H 'Content-Type: text/xml' --data '<Autodiscover/>'} : q{};
+        my $got  = `curl -sk --max-time 10 -X $method $body -w '\n%{http_code}' --resolve '$name:$port:127.0.0.1' '$url' 2>&1`;
+        return $got =~ m/\A(.*)\n(\d{3})\z/s ? ( $1, $2 ) : ( $got, 'none' );
+    };
+
+    my ( $outlook, $code ) = $fetch->( POST => 'https://autodiscover.[% domain %]/autodiscover/autodiscover.xml' );
+    is( $code, 200, 'Outlook gets an answer to its POST over HTTPS' ) or diag $outlook;
+    like( $outlook, qr{<Server>mail[.]\Q[% domain %]\E</Server>}, 'which names the mail host' ) or diag $outlook;
+    like( $outlook, qr{<SPA>off</SPA>}, 'and asks for no NTLM, which neither server offers' );
+    ( undef, $code ) = $fetch->( POST => 'https://autodiscover.[% domain %]/Autodiscover/Autodiscover.xml' );
+    is( $code, 200, 'and with the path in capitals, as Outlook also spells it' );
+
+    my ( $thunderbird, $tb_code ) = $fetch->( GET => 'https://autoconfig.[% domain %]/mail/config-v1.1.xml?emailaddress=someone%40[% domain %]' );
+    is( $tb_code, 200, 'Thunderbird gets its config over HTTPS' ) or diag $thunderbird;
+    like( $thunderbird, qr{<incomingServer type="imap">\s*<hostname>mail[.]\Q[% domain %]\E</hostname>\s*<port>993</port>}, 'which names IMAP on 993 of the mail host' ) or diag $thunderbird;
+    like( $thunderbird, qr{<outgoingServer type="smtp">\s*<hostname>mail[.]\Q[% domain %]\E</hostname>\s*<port>465</port>}, 'and submission on 465' ) or diag $thunderbird;
+    ( undef, $code ) = $fetch->( GET => 'http://autoconfig.[% domain %]/mail/config-v1.1.xml' );
+    is( $code, 200, 'and over plain HTTP, which it tries when HTTPS fails' );
+
+    # Outlook refuses a certificate that does not name the host it asked.
+    foreach my $name ( 'autodiscover.[% domain %]', 'autoconfig.[% domain %]' ) {
+        my $names = `openssl s_client -connect 127.0.0.1:443 -servername $name </dev/null 2>/dev/null | openssl x509 -noout -ext subjectAltName 2>&1`;
+        like( $names, qr/DNS:\Q$name\E\b/, "the certificate on 443 names $name" ) or diag $names;
+    }
+};
 done_testing();

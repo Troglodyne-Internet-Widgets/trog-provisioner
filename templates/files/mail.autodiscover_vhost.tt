@@ -1,16 +1,53 @@
+[%# The settings of a mail client: Outlook asks autodiscover.<domain> for
+    /autodiscover/autodiscover.xml, and Thunderbird asks autoconfig.<domain>
+    for /mail/config-v1.1.xml.  Port 80 serves them too, because Thunderbird
+    tries plain HTTP when HTTPS fails. -%]
+[% MACRO settings BLOCK -%]
+    root [% install_dir %]/autodiscover.[% domain %]/;
+
+    # Outlook POSTs its request, and spells the path in either case.  nginx
+    # refuses a POST to a static file with 405, so the file answers that too.
+    location ~* ^/autodiscover/autodiscover\.xml$ {
+        default_type application/xml;
+        try_files /autodiscover/autodiscover.xml =404;
+        error_page 405 =200 /autodiscover/autodiscover.xml;
+    }
+
+    location = /mail/config-v1.1.xml {
+        default_type application/xml;
+    }
+
+    location / {
+        return 404;
+    }
+[% END -%]
+server {
+    listen 443 ssl;
+[% IF ipv6 %]    listen [::]:443 ssl;
+[% END -%]
+
+    server_name autodiscover.[% domain %] autoconfig.[% domain %];
+[%# The listener for a proxy, when a public name names this vhost.  See
+    Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/autodiscover.[% domain %].443.conf*;
+    include /etc/nginx/proxied/autoconfig.[% domain %].443.conf*;
+    server_tokens off;
+
+    ssl_certificate     /etc/ssl/certs/[% domain %].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain %].pem;
+
+[% settings() -%]
+}
+
 server {
     listen 80;
 [% IF ipv6 %]    listen [::]:80;
 [% END -%]
 
     server_name autodiscover.[% domain %] autoconfig.[% domain %];
-[%# The listener for a proxy, when a public name names this vhost.  See
-    Provisioner::Recipe::nginx. -%]
     include /etc/nginx/proxied/autodiscover.[% domain %].80.conf*;
     include /etc/nginx/proxied/autoconfig.[% domain %].80.conf*;
+    server_tokens off;
 
-    location / {
-        root [% install_dir %]/autodiscover.[% domain %]/;
-    }
-
+[% settings() -%]
 }

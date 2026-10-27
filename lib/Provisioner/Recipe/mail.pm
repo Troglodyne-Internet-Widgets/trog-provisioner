@@ -237,6 +237,28 @@ domain, because configd joins the C<TrustedAuthservIDs> of every domain.
 C<configd status postfix> shows these disagreements, because it lists the
 fragments and what wrote them.
 
+=head3 The settings of a mail client
+
+A mail client can find its own settings, given only the address.
+F<mail.autodiscover_vhost.tt> answers for C<autodiscover.DOMAIN> and
+C<autoconfig.DOMAIN>, over HTTPS and over plain HTTP:
+
+=over 4
+
+=item * Outlook asks for C</autodiscover/autodiscover.xml>, with a POST, and
+gets F<mail.autodiscover.tt>.  The SRV record C<_autodiscover._tcp> points it at
+C<autodiscover.DOMAIN> on 443.
+
+=item * Thunderbird asks C<autoconfig.DOMAIN> for C</mail/config-v1.1.xml>, and
+gets F<mail.autoconfig.tt>.  The C<mailconf=> TXT record names the same file,
+for the clients that read it.
+
+=back
+
+Both name C<mail.DOMAIN>, and the ports where TLS starts at once.  Behind a
+relay of L<Provisioner::Recipe::nginx>, this recipe makes both names public
+names, so that a client outside can fetch them.
+
 =cut
 
 sub required_recipes {
@@ -248,7 +270,9 @@ sub required_recipes {
         configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
         cron    => sub { return ( files     => { "$opts{domain}-mailcron" => 'mailcron' } ) },
         nginx   => sub {
-            return ( sites => [ map { "$_.$opts{domain}" } qw{autodiscover autoconfig} ] );
+            my @sites = map { "$_.$opts{domain}" } qw{autodiscover autoconfig};
+            return ( sites => \@sites ) unless defined( ( Provisioner::Cookbook->domain_config( $opts{domain} )->{nginx} // {} )->{relay} );
+            return ( sites => \@sites, public_names => { map { $_ => $_ } @sites } );
         },
         letsencrypt => sub { return ( certificate_readers => [qw{postfix dovecot}] ) },
     );
@@ -370,14 +394,15 @@ sub subdomains {
 
 =head2 @names = $recipe->addressed_names(%opts)
 
-C<mail.DOMAIN>, which the MX and the SRV records of F<pdns.zone.tt> name.  See
+C<mail.DOMAIN>, which the MX and most of the SRV records name, and
+C<autodiscover.DOMAIN>, which the SRV record of Autodiscover names.  See
 L<Provisioner::Recipe>.
 
 =cut
 
 sub addressed_names {
     my ( $self, %opts ) = @_;
-    return "mail.$opts{domain}";
+    return map { "$_.$opts{domain}" } qw{mail autodiscover};
 }
 
 =head2 @records = $recipe->dns_records(%opts)
@@ -395,12 +420,13 @@ sub dns_records {
     my $domain = $opts{domain};
     my $mx     = "mail.$domain.";
 
-    my %srv = ( imaps => 993, pop3s => 995, submissions => 465, submission => 587, autodiscover => 80 );
+    my %srv = ( imaps => 993, pop3s => 995, submissions => 465, submission => 587 );
     return (
-        { type => 'MX',  name => $domain,          content => "10 $mx" },
-        { type => 'TXT', name => $domain,          content => 'v=spf1 +a +mx -all',                                            match => 'v=spf1' },
-        { type => 'TXT', name => "_dmarc.$domain", content => 'v=DMARC1; p=none',                                              match => 'v=DMARC1' },
-        { type => 'TXT', name => $domain,          content => "mailconf=https://autoconfig.$domain/autoconfig/autoconfig.xml", match => 'mailconf=' },
+        { type => 'MX',  name => $domain,                      content => "10 $mx" },
+        { type => 'TXT', name => $domain,                      content => 'v=spf1 +a +mx -all',                                       match => 'v=spf1' },
+        { type => 'TXT', name => "_dmarc.$domain",             content => 'v=DMARC1; p=none',                                         match => 'v=DMARC1' },
+        { type => 'TXT', name => $domain,                      content => "mailconf=https://autoconfig.$domain/mail/config-v1.1.xml", match => 'mailconf=' },
+        { type => 'SRV', name => "_autodiscover._tcp.$domain", content => "0 0 443 autodiscover.$domain.",                            match => q{} },
         map { { type => 'SRV', name => "_$_._tcp.$domain", content => "0 0 $srv{$_} $mx", match => q{} } } sort keys %srv,
     );
 }
@@ -499,6 +525,7 @@ sub template_files {
         'mail.amavis.tt'                 => 'amavis.domain',
         'mail.amavis.global.tt'          => 'amavis.global',
         'mail.autodiscover.tt'           => 'autodiscover.xml',
+        'mail.autoconfig.tt'             => 'config-v1.1.xml',
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',
         'mail.junk.sieve'                => 'junk.sieve',
