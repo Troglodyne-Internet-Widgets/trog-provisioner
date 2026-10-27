@@ -26,6 +26,21 @@ my @st = stat $shortcut;
 is($st[4] // -1, 0, 'owned by root, since it carries the credentials') if @st;
 is(($st[2] // 0) & 07777, 0700, 'and readable by nobody else') if @st;
 
+# The easydns provider against a fake API, which records what it sends.  The
+# patch lexicon-easydns-priority moves the priority of an MX out of the
+# content.
+my $easydns = <<'PYTHON';
+from lexicon.config import ConfigResolver
+from lexicon._private.providers import easydns
+conf = {"provider_name": "easydns", "domain": "zone.test", "type": "MX", "easydns": {"auth_username": "u", "auth_token": "t"}}
+p = easydns.Provider(ConfigResolver().with_dict(conf))
+p.domain_id = "zone.test"
+p._put = lambda url, data=None, **kw: print(data["prio"], data["rdata"]) or {}
+p.create_record("MX", "zone.test", "10 mail.zone.test.")
+PYTHON
+my $sent = `python3 -I -c '$easydns' 2>&1`;
+is($sent, "10 mail.zone.test.\n", 'the easydns provider sends the priority of an MX apart from its target') or diag $sent;
+
 my $text = do { local (@ARGV, $/) = $shortcut; <> } // '';
 like($text, qr/^export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN=/m, 'carrying the token lexicon reads');
 
