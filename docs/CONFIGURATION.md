@@ -494,8 +494,11 @@ runner.example.test:
 Nothing in it is required, and `config` inherits `admin_user`, `admin_email`,
 `admin_keys` and `gateway` from the guest's own -- a runner administers what it
 builds the way this installation administers it, unless told otherwise. Give it
-`addresses` and `cidr` though: without an address pool it has none to hand out,
-and every guest it tries to build stops on "cannot auto-assign IP".
+`addresses` and `cidr` when something other than the runner must reach its
+guests. Without an address pool, each guest that it builds takes a lease on the
+NAT network of its hypervisor, and its bridged interface stays unconfigured. The
+runner reaches it there, because the runner is itself a guest of that
+hypervisor. That is enough for throwaway guests.
 
 Four more parts are worth knowing before writing one.
 

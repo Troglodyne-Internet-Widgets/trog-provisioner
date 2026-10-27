@@ -109,6 +109,12 @@ as C<image>.  Dies when this hypervisor has no image for it.
 built guest to look at it, for the scripts that collect its logs or ask it
 something.  It works when the build did not, which is when it is wanted.
 
+=item * C<nat_address($domain)> and C<on_nat_network>: the address at which
+this machine reaches a guest that got no address from the pool, or undef when it
+cannot reach one, and whether it can reach such a guest at all.  See
+L<Provisioner::IPPool/offers>.  Only a backend that does not manage addresses
+has such a guest.
+
 =item * C<clear_guest>, which removes what must go before a guest of that name
 can be made.  For libvirt, that is the domain, its disks and the addresses it
 held.  A cloud rebuilds the server it already has, so it has nothing to clear.
@@ -163,7 +169,7 @@ object method" from somewhere in F<bin/provision>.
 If a method means nothing to a backend, the backend must die and say so.  It
 must not return an undef that the caller carries somewhere else before it fails.
 
-=for Pod::Coverage config_keys marker client_module annihilate_domain revert_snapshot inspection_address image_for_distro
+=for Pod::Coverage config_keys marker client_module annihilate_domain revert_snapshot inspection_address nat_address on_nat_network image_for_distro
 
 =head1 CLASS METHODS
 
@@ -660,6 +666,8 @@ sub annihilate_domain     ( $self, @ ) { return abstract( $self, 'annihilate_dom
 sub guest_names           ( $self, @ ) { return abstract( $self, 'guest_names' ) }
 sub guest_ssh_ip          ( $self, @ ) { return abstract( $self, 'guest_ssh_ip' ) }
 sub inspection_address    ( $self, @ ) { return abstract( $self, 'inspection_address' ) }
+sub nat_address           ( $self, @ ) { return abstract( $self, 'nat_address' ) }
+sub on_nat_network        ( $self, @ ) { return abstract( $self, 'on_nat_network' ) }
 sub image_for_distro      ( $self, @ ) { return abstract( $self, 'image_for_distro' ) }
 sub snapshot_names        ( $self, @ ) { return abstract( $self, 'snapshot_names' ) }
 sub snapshot_current_name ( $self, @ ) { return abstract( $self, 'snapshot_current_name' ) }

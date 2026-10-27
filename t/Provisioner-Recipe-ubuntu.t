@@ -438,13 +438,16 @@ subtest 'a bin that another guest routes to gets a route through that guest, onc
     ok( !exists loaded( $dir, 'network-config' )->{network}{config}[0]{subnets}[0]{routes}, 'as does a guest that cannot know where its via is' );
 };
 
-subtest 'a guest with no addresses falls back to DHCP on both interfaces' => sub {
-    my ( $dir, undef ) = generated( ips => [], gateway => undef );
+subtest 'a guest with no addresses takes a lease on the NAT side, and leaves the bridge alone' => sub {
+    foreach my $gateway ( undef, '192.0.2.254' ) {
+        my $with = defined $gateway ? 'with the gateway of the fleet' : 'with no gateway';
+        my ( $dir, undef ) = generated( ips => [], gateway => $gateway );
 
-    my $config = loaded( $dir, 'network-config' )->{network}{config};
-    cmp_deeply( $config->[0]{subnets}, [ { type => 'dhcp' } ], 'the bridge asks for one' );
-    cmp_deeply( $config->[1]{subnets}, [ { type => 'dhcp' } ], 'as the NAT side always does' );
-    ok( !exists $config->[0]{gateway4}, 'and no gateway is claimed for an address it does not have' );
+        my $config = loaded( $dir, 'network-config' )->{network}{config};
+        ok( !exists $config->[0]{subnets},  "the bridge asks for no address, $with" );
+        ok( !exists $config->[0]{gateway4}, 'and claims no gateway, which it could not reach' );
+        cmp_deeply( $config->[1]{subnets}, [ { type => 'dhcp' } ], 'and the NAT side takes its lease, as it always does' );
+    }
 };
 
 subtest 'a guest with addresses and no gateway is refused' => sub {

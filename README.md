@@ -149,7 +149,7 @@ That means:
 
     Passwordless `sudo` there is strongly preferred but no longer required: `sudo` runs with `-n`, and if the far side asks for a password you get prompted once and it's remembered for the rest of the run.  Run non-interactively -- from cron, or with stdin redirected -- and there's nobody to ask, so you get an error naming the user and the `NOPASSWD` line to add instead of a hang.
 
-3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
+3. **The guest needs an address that this machine reaches.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is usually reachable only from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead.  If the ip pool offers no addresses, `ips` is empty and the guest has only its lease.  That works when this machine is itself a guest of that HV, on its NAT network, as a runner usually is.  `bin/new_config` refuses the domain before anything is built when it is not.  See `offers` in `Provisioner::IPPool`.
 
 
 4. **The domain directory is not copied to the HV at all.**  It used to be, the whole of it, because the guest fetched its payload from the hypervisor -- which meant the guest's private key was on the hypervisor too.  The guest fetches from *this* machine now, so neither is true; the key does not leave here, and since it is kept in the secret store rather than in the domain directory it is not at rest here either.  See `perldoc Trog::Guest`.

@@ -27,7 +27,7 @@ network:
     - type: physical
       name: [% bridge_devname | yaml %]
       mac_address: [% bridge_mac | yaml %]
-[% IF gateway -%]
+[% IF ips.size() && gateway -%]
       gateway4: [% gateway | yaml %]
 [% END -%]
       nameservers:
@@ -37,8 +37,8 @@ network:
 [% FOR resolver IN resolvers -%]
           - [% resolver | yaml %]
 [% END -%]
-      subnets:
 [% IF ips.size() -%]
+      subnets:
 [% FOR ip IN ips -%]
         - type: static
           address: [% ip | yaml %]
@@ -61,12 +61,10 @@ network:
             - [% resolver | yaml %]
 [% END -%]
 [% END -%]
-[% ELSE -%]
-[%# With no addresses configured, the bridge uses DHCP, as the NAT side does.
-    A guest with no ips in its provision.conf gets this.  It is rarely what you
-    want on the outbound side. -%]
-        - type: dhcp
 [% END -%]
+[%# With no ips, the bridge gets no subnets and no gateway, so it comes up with
+    no address.  The guest takes its lease and its default route on the NAT
+    side.  See offers in Provisioner::IPPool. -%]
     - type: physical
       name: [% dhcp_devname | yaml %]
       mac_address: [% nat_mac | yaml %]
