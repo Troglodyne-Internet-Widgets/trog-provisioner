@@ -41,6 +41,19 @@ PYTHON
 my $sent = `python3 -I -c '$easydns' 2>&1`;
 is($sent, "10 mail.zone.test.\n", 'the easydns provider sends the priority of an MX apart from its target') or diag $sent;
 
+# The patch lexicon-arbitrary-record-types: powerdns takes any type, and the
+# other providers keep their own list, also once powerdns has loaded.
+my $types = `python3 -I -c 'from lexicon._private.discovery import load_provider_module as load
+from lexicon.config import ConfigResolver as C
+load("powerdns")
+for name in ("easydns", "powerdns"):
+    try:
+        load(name).Provider(C().with_dict({"provider_name": name, "domain": "zone.test", "type": "TLSA", name: {"auth_username": "u", "auth_token": "t", "pdns_server": "http://127.0.0.1:8081"}}))
+        print(name, "takes TLSA")
+    except ValueError:
+        print(name, "refuses TLSA")' 2>&1`;
+is($types, "easydns refuses TLSA\npowerdns takes TLSA\n", 'powerdns takes any type of record, and easydns only its own') or diag $types;
+
 # The patch lexicon-pdns-identifier: an identifier keeps the whole content.
 my $identifier = `python3 -I -c 'from lexicon._private.providers.powerdns import Provider; c = "v=DKIM1; p=ab/cd+ef/gh=="; print(Provider._parse_identifier(None, Provider._make_identifier(None, "TXT", "x.zone.test.", c))[2])' 2>&1`;
 is($identifier, "v=DKIM1; p=ab/cd+ef/gh==\n", 'the powerdns provider reads back the content of a record that holds a slash, so it can delete it') or diag $identifier;
