@@ -140,8 +140,10 @@ subtest 'a record points only at a name that domain has' => sub {
     my $with = zone_for('post.test');
     ok( defined $with, 'a zone was written for the domain that does' ) or return;
 
-    like( $with, qr/IN\s+MX\s+10\s+mail[.]post[.]test\./, 'the MX is there where mail is served' ) or diag $with;
-    like( $with, qr/^_imaps\._tcp\s+IN\s+SRV/m,           'with the SRVs beside it' )              or diag $with;
+    like( $with, qr/IN\s+MX\s+10\s+mail[.]post[.]test\./,                          'the MX is there where mail is served' ) or diag $with;
+    like( $with, qr/^post[.]test\.\s+IN\s+TXT\s+"v=spf1[ ][+]a[ ][+]mx[ ]-all"$/m, 'and the SPF policy, quoted whole' )     or diag $with;
+    my $imaps = qr/^_imaps\._tcp[.]post[.]test\.\s+IN\s+SRV/m;
+    like( $with, qr/$imaps\s+0\s+0\s+993\s+mail[.]post[.]test\.$/m, 'with the SRVs beside it' ) or diag $with;
 
     # And the name it points at is one the zone actually carries, which is the
     # whole of why these two travel together.

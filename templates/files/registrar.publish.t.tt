@@ -43,6 +43,19 @@ subtest 'the records of the domain are published to the zone that holds it' => s
 [% FOREACH alias IN domain_aliases.sort() -%]
     ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
+
+    # The records of the recipes other than names.  A TXT record can come back
+    # in quotes, and a name or target with its trailing dot.
+    my $plain = sub { my ($text) = @_; $text = lc($text // ''); $text =~ s/\A"(.*)"\z/$1/s; $text =~ s/[.]\z//; return $text };
+    my %of;
+[% FOREACH record IN zone_records -%]
+    {
+        my $rows = $of{'[% record.type %]'} //= $listed->('[% record.type %]');
+        my $want = $plain->(q{[% record.content | mark_raw %]});
+        ok((grep { $plain->($_->{name}) eq $plain->('[% record.name %]') && $plain->($_->{content}) eq $want } @{ $rows // [] }),
+            '[% record.type %] [% record.name %] holds [% record.content | mark_raw %]') or diag explain $rows;
+    }
+[% END -%]
 };
 [% FOREACH zone IN zone_access.keys().sort() -%]
 

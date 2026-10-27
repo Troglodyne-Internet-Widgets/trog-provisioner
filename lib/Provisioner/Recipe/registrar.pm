@@ -10,7 +10,9 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Cpanel::JSON::XS();
 use File::Copy();
+use File::Slurper::Temp();
 use List::Util qw{uniq};
 
 use Provisioner::Cookbook();
@@ -517,6 +519,27 @@ sub zone_address_names ( $self, %opts ) {
     return grep { !defined $self->zone_of( $_, $opts{domain}, $zones ) } sort( uniq(@names) );
 }
 
+=head2 @records = $recipe->zone_records(%opts)
+
+The records other than names that the zone of C<$opts{domain}> holds: the
+C<dns_records> of each recipe in C<$opts{modules}>, as L<Provisioner::Recipe>
+says, less each record that C<zone_of> places in a zone of an account.  Each
+comes once, sorted by type, name and content.
+
+The writers of the zone that ask C<zone_aliases> ask this too.
+C<$opts{zones}> is as C<zone_aliases> says.
+
+=cut
+
+sub zone_records ( $self, %opts ) {
+    my $zones   = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
+    my @records = map { Provisioner::Cookbook->load($_)->dns_records( domain => $opts{domain} ) } @{ $opts{modules} // [] };
+    my %seen;
+    my @ours   = grep { !$seen{"$_->{type} $_->{name} $_->{content}"}++ && !defined $self->zone_of( $_->{name}, $opts{domain}, $zones ) } @records;
+    my @sorted = sort { $a->{type} cmp $b->{type} || $a->{name} cmp $b->{name} || $a->{content} cmp $b->{content} } @ours;
+    return @sorted;
+}
+
 =head2 $guest = $recipe->authority_of($domain)
 
 Returns the guest whose pdns holds the zone of C<$domain>, or undef where the
@@ -673,9 +696,9 @@ sub grant_terms {
 =head2 %publication = $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
-C<address>, C<domain_aliases>, C<address_names>, C<own_nameserver>,
-C<zone_cnames>, C<zone_apexes>, C<zone_access>, and C<publish_records>, which
-is true when there is an address to publish.
+C<address>, C<domain_aliases>, C<address_names>, C<zone_records>,
+C<own_nameserver>, C<zone_cnames>, C<zone_apexes>, C<zone_access>, and
+C<publish_records>, which is true when there is an address to publish.
 
 These three are for the served names in a zone of an account.  C<zone_cnames>
 maps each such zone to its names other than its apex, and each gets a C<CNAME>
@@ -689,7 +712,9 @@ The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
 each name in C<domain_aliases>: the aliases that the operator configured and
 the C<hostnames> that the recipes handed over.  The exceptions are the names
 of C<address_names>, which C<zone_address_names> gives, such as the target of
-an C<MX>.  Each gets an C<A> record at the address.  Where the domain holds its own
+an C<MX>.  Each gets an C<A> record at the address.  The records also include
+C<zone_records>, such as the C<MX> itself, which F<registrar-records.json>
+carries to the publisher.  Where the domain holds its own
 zone, they also include an C<A> record of C<own_nameserver>, which is C<ns1> of
 the domain, at the same address.  The target of an C<NS> record must not be a
 C<CNAME> either.  F<scripts/publish_dns_records> writes them through the lexicon
@@ -730,6 +755,7 @@ sub publication {
         address         => $address,
         domain_aliases  => [ $self->zone_aliases( %opts, zones => $zones ) ],
         address_names   => [ $self->zone_address_names( %opts, zones => $zones ) ],
+        zone_records    => [ $self->zone_records( %opts, zones => $zones ) ],
         zone_cnames     => \%zone_cnames,
         zone_apexes     => [ sort keys %zone_apexes ],
         zone_access     => \%zone_access,
@@ -815,8 +841,9 @@ sub enrich {
 
 =head2 @written = $recipe->generate_files($output_dir, %vars)
 
-Writes the templates, and the certificate of the fleet authority as
-F<registrar-anchor.crt> where C<enrich> sets C<fleet_anchor>.
+Writes the templates, and the C<zone_records> as F<registrar-records.json>
+where there are records to publish.  Also the certificate of the fleet
+authority as F<registrar-anchor.crt> where C<enrich> sets C<fleet_anchor>.
 
 =cut
 
@@ -825,6 +852,12 @@ sub generate_files {
 
     my @written = $self->SUPER::generate_files( $output_dir, %vars );
     my %opts    = $self->validated(%vars);
+
+    if ( $opts{publish_records} && @{ $opts{zone_records} } ) {
+        my $encoder = Cpanel::JSON::XS->new->canonical->pretty;
+        File::Slurper::Temp::write_binary( "$output_dir/registrar-records.json", $encoder->encode( $opts{zone_records} ) );
+        push( @written, 'registrar-records.json' );
+    }
     return @written unless $opts{fleet_anchor};
 
     my $authority = Provisioner::Cookbook->load('fetchcache')->authority();

@@ -37,31 +37,11 @@ ns1     IN A    [% public_address // ipmap.$subdo %]
 [% name %]. IN A [% ipmap.$domain %]
 [% END -%]
 
-[%# Only where the guest serves mail: every record below names mail.<domain> or
-    autoconfig.<domain>, which Provisioner::Recipe::mail declares and the
-    names above carry.  The names existing is a separate question from these
-    records pointing at them. -%]
-[% IF modules.grep('mail').size() %]
-; Mail
-[%# Absolute, as the SRV targets below are.  Written relative it resolves to
-    mail.<domain>.<domain>, which is nowhere. -%]
-@       IN MX 10 mail.[% domain %].
-
-; Autodiscover TXT record
-@ IN TXT "mailconf=https://autoconfig.[% domain %]/autoconfig/autoconfig.xml"
-
-; DKIM and DMARC placeholders.  If the guest runs mail, a lexicon script
-; replaces them.
-default._domainkey IN TXT  "o=-"
-mail._domainkey    IN TXT  "o=-"
-_dmarc             IN TXT  "v=DMARC1; p=none"
-@                  IN TXT  "v=spf1 +a +mx -all"
-
-_imaps._tcp        IN SRV 0 0 993 mail.[% domain %].
-_pop3s._tcp        IN SRV 0 0 995 mail.[% domain %].
-_submissions._tcp  IN SRV 0 0 465 mail.[% domain %].
-_submission._tcp   IN SRV 0 0 587 mail.[% domain %].
-_autodiscover._tcp IN SRV 0 0 80  mail.[% domain %].
+[%# The records of the recipes other than names, such as the MX of mail.  See
+    zone_records in Provisioner::Recipe::registrar.  Raw, because the content
+    of a TXT record is text, not HTML. -%]
+[% FOREACH record IN zone_records %]
+[% record.name %]. IN [% record.type %] [% IF record.type == 'TXT' %]"[% record.content | mark_raw %]"[% ELSE %][% record.content | mark_raw %][% END %]
 [% END -%]
 
 ; The extra_records from the configuration follow, for example a DKIM key,

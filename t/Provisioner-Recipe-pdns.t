@@ -95,10 +95,11 @@ subtest 'a label that belongs to the zone stays relative' => sub {
     # dot would make each of them a name at the root instead.
     like( $zone, qr/^ns1\s+IN\s+A\s/m, 'ns1 is a label' );
 
-    # Absolute already, and the pattern the MX record above should have
-    # followed.  Asked of a zone that serves mail: the SRVs are written only
+    # A record of a recipe is written with its whole name, and its target is
+    # absolute.  Asked of a zone that serves mail: the SRVs are written only
     # where something answers on the name they point at.
-    like( zone( modules => ['mail'] ), qr/^_imaps\._tcp\s+IN\s+SRV\s+0\s+0\s+993\s+\Qmail.$DOMAIN\E\./m, 'an SRV target is absolute' );
+    my $imaps = qr/^\Q_imaps._tcp.$DOMAIN\E\.\s+IN\s+SRV/m;
+    like( zone( modules => ['mail'] ), qr/$imaps\s+0\s+0\s+993\s+\Qmail.$DOMAIN\E\./m, 'an SRV name and its target are absolute' );
 };
 
 subtest 'a record points only at a name the guest actually has' => sub {
@@ -115,9 +116,9 @@ subtest 'a record points only at a name the guest actually has' => sub {
 
     my $with = zone( modules => ['mail'] );
 
-    like( $with, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./, 'and the MX is there where mail is served' );
-    like( $with, qr/^_imaps\._tcp\s+IN\s+SRV/m,         'with the SRVs beside it' );
-    like( $with, qr/mailconf=/,                         'and the autoconfig record' );
+    like( $with, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./,      'and the MX is there where mail is served' );
+    like( $with, qr/^\Q_imaps._tcp.$DOMAIN\E\.\s+IN\s+SRV/m, 'with the SRVs beside it' );
+    like( $with, qr/mailconf=/,                              'and the autoconfig record' );
 };
 
 subtest 'the apex is the origin, not a name of its own' => sub {
@@ -136,11 +137,11 @@ subtest 'the submission SRV records name the ports postfix listens on' => sub {
 
     # RFC 6186 spells it _submission._tcp, and RFC 8314 _submissions._tcp for
     # submission over TLS.  mail.postfix.master.tt runs them on 587 and 465.
-    my ($record) = $zone =~ m/^(_submission[.]_tcp\s\N*)$/m;
+    my ($record) = $zone =~ m/^(\Q_submission._tcp.$DOMAIN\E[.]\s\N*)$/m;
     ok( defined $record, 'on _submission._tcp' ) or diag $zone;
     like( $record // q{}, qr/SRV\s+0\s+0\s+587\s+\Qmail.$DOMAIN\E\./, 'at port 587 on the mail host' );
 
-    my ($tls) = $zone =~ m/^(_submissions[.]_tcp\s\N*)$/m;
+    my ($tls) = $zone =~ m/^(\Q_submissions._tcp.$DOMAIN\E[.]\s\N*)$/m;
     ok( defined $tls, 'and on _submissions._tcp' ) or diag $zone;
     like( $tls // q{}, qr/SRV\s+0\s+0\s+465\s+\Qmail.$DOMAIN\E\./, 'at port 465 on the mail host' );
 };

@@ -41,6 +41,22 @@ PYTHON
 my $sent = `python3 -I -c '$easydns' 2>&1`;
 is($sent, "10 mail.zone.test.\n", 'the easydns provider sends the priority of an MX apart from its target') or diag $sent;
 
+# An argument with spaces in it, such as the content of an SPF record, reaches
+# lexicon whole.  A fake lexicon early on PATH prints the last argument that
+# arrives.
+{
+    my $bin = '/root/lexicon-args-test';
+    mkdir $bin;
+    open(my $fake, '>', "$bin/lexicon") or die "Cannot write the fake lexicon: $!";
+    print {$fake} "#!/bin/sh\nfor arg; do last=\$arg; done\necho \"\$last\"\n";
+    close $fake;
+    chmod 0700, "$bin/lexicon";
+    my $last = `PATH=$bin:\$PATH $shortcut create TXT --content='v=spf1 +a -all' 2>&1`;
+    unlink "$bin/lexicon";
+    rmdir $bin;
+    is($last, "--content=v=spf1 +a -all\n", 'the shortcut hands lexicon each argument whole') or diag $last;
+}
+
 my $text = do { local (@ARGV, $/) = $shortcut; <> } // '';
 like($text, qr/^export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN=/m, 'carrying the token lexicon reads');
 

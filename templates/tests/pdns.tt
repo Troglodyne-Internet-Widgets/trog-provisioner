@@ -250,6 +250,16 @@ foreach my $name (qw([% FOREACH name IN address_names %][% name %] [% END %])) {
     like($answer, qr/\A\Q$name\E[.]\s+\d+\s+IN\s+A\s+\d/, "$name answers with an A record") or diag $answer;
 }
 
+# The records of the recipes other than names, as the server answers them.
+[% FOREACH record IN zone_records -%]
+[% IF record.type == 'MX' -%]
+{
+    my $answer = `dig \@127.0.0.1 -p 53 +short '[% record.name %]' MX 2>&1`;
+    like($answer, qr/^\Q[% record.content %]\E$/m, 'the MX of [% record.name %] is [% record.content %]') or diag $answer;
+}
+[% END -%]
+[% END -%]
+
 # The recursor forwards this zone to the authoritative server, and it validates
 # DNSSEC by default.  Without a negative trust anchor, it answers SERVFAIL for
 # the zone that this guest serves.

@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use JSON::PP     ();
 use Getopt::Long qw{GetOptionsFromArray};
 
-my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--addressed NAME ...] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
+my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--addressed NAME ...] [--records FILE] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
 
 # The shortcut Provisioner::Recipe::lexicon installs for this domain, which
 # already carries the provider holding the zone and the credential for it.
@@ -49,6 +49,22 @@ sub canonical {
     my ($value) = @_;
 
     return lc( $value // q{} ) =~ s/[.]+\z//r;
+}
+
+# The text of a TXT record, which some providers answer with in quotes.  Case
+# matters in it, unlike in a name.
+sub unquoted {
+    my ($value) = @_;
+
+    return ( $value // q{} ) =~ s/\A"(.*)"\z/$1/sr;
+}
+
+# Whether two contents of a record of $type say the same.
+sub same_content {
+    my ( $type, $one, $other ) = @_;
+
+    return unquoted($one) eq unquoted($other) if $type eq 'TXT';
+    return canonical($one) eq canonical($other);
 }
 
 # What the provider already holds of this type, as a list of rows.
@@ -92,7 +108,7 @@ sub publish {
 
     my ( $held, $type, $name, $content ) = @opts{qw{held type name content}};
 
-    if ( $held && canonical( $held->{content} ) eq canonical($content) ) {
+    if ( $held && same_content( $type, $held->{content}, $content ) ) {
         print "$type $name is already $content\n";
         return 0;
     }
@@ -201,12 +217,49 @@ sub unalias {
     return $ok;
 }
 
+# The records of a recipe other than names, out of the file that
+# Provisioner::Recipe::registrar writes: a list of type, name, content and an
+# optional match.
+sub read_records {
+    my ($file) = @_;
+
+    open( my $fh, '<', $file ) or die "Cannot read the records in $file: $!\n";
+    my $text = do { local $/; <$fh> };
+    close $fh or die "Cannot close $file: $!\n";
+
+    my $records = eval { JSON::PP->new->decode($text) };
+    die "$file holds no list of records\n" unless ref $records eq 'ARRAY';
+    return @{$records};
+}
+
+# Why a record of $type does not go up at $name, which the provider holds as
+# $clash.
+sub refusal {
+    my ( $type, $name, $clash ) = @_;
+    return "Refusing to publish $type $name: the provider holds $name as $clash->{type} $clash->{content}, and a name with a CNAME holds no other record.\n";
+}
+
+# Which row of the provider is the record of the recipe: the row with the same
+# content, or else the first row whose content starts with the match of the
+# record.  A record without a match owns only a row with the same content, and
+# an empty match owns every row of its type at its name.
+sub owned_row {
+    my ( $rows, $record ) = @_;
+
+    my @here = grep { canonical( $_->{name} ) eq canonical( $record->{name} ) } @{$rows};
+    my ($same) = grep { same_content( $record->{type}, $_->{content}, $record->{content} ) } @here;
+    return $same if $same || !defined $record->{match};
+
+    my ($ours) = grep { index( unquoted( $_->{content} ), $record->{match} ) == 0 } @here;
+    return $ours;
+}
+
 sub main {
     my @args = @_;
 
-    my ( $dryrun, $shortcut, $delegate, @addressed, $alias_of );
-    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'addressed=s' => \@addressed, 'alias-of=s' => \$alias_of ) or die $USAGE;
-    die $USAGE if ( $delegate || defined $alias_of ) && ( !$shortcut || @addressed );
+    my ( $dryrun, $shortcut, $delegate, @addressed, $alias_of, $records );
+    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'addressed=s' => \@addressed, 'alias-of=s' => \$alias_of, 'records=s' => \$records ) or die $USAGE;
+    die $USAGE if ( $delegate || defined $alias_of ) && ( !$shortcut || @addressed || defined $records );
     die $USAGE if $delegate                          && defined $alias_of;
 
     my %wanted = $delegate ? delegation(@args) : defined $alias_of ? aliases_of( $alias_of, @args ) : records( \@addressed, @args );
@@ -233,7 +286,7 @@ sub main {
         foreach my $name ( sort keys %{ $wanted{$type} } ) {
             if ( my $clash = clash( $held, $type, $name ) ) {
                 if ( !replaceable( $clash, $type, $owner ) ) {
-                    warn "Refusing to publish $type $name: the provider holds $name as $clash->{type} $clash->{content}, and a name with a CNAME holds no other record.\n";
+                    warn refusal( $type, $name, $clash );
                     $failures++;
                     next;
                 }
@@ -251,6 +304,23 @@ sub main {
                 dryrun   => $dryrun,
             );
         }
+    }
+
+    foreach my $record ( defined $records ? read_records($records) : () ) {
+        my ( $type, $name ) = @{$record}{qw{type name}};
+        if ( my $alias = held_for( $held->('CNAME'), $name ) ) {
+            warn refusal( $type, $name, { type => 'CNAME', content => $alias->{content} // q{} } );
+            $failures++;
+            next;
+        }
+        $failures += publish(
+            shortcut => $shortcut,
+            held     => owned_row( $held->($type), $record ),
+            type     => $type,
+            name     => $name,
+            content  => $record->{content},
+            dryrun   => $dryrun,
+        );
     }
 
     return $failures ? 1 : 0;
