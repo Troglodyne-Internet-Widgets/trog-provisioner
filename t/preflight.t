@@ -224,6 +224,21 @@ subtest 'passwordless sudo is the one that would hang the run' => sub {
     like( $result->{fix}, qr/NOPASSWD/,                        'the guidance is the sudoers line' );
     like( $result->{fix}, qr/hangs[ ]rather[ ]than[ ]failing/, 'and says why it matters more than it looks' );
     like( $result->{fix}, qr/take[ ]it[ ]away[ ]again/,        'and that it is a real grant of root' );
+
+    # The narrow grant of bin/runner_account pins the arguments of the lease
+    # helper, so it is asked about with the arguments that a release passes.
+    my @asked;
+    $hv->redefine( file_exists => sub { return $_[1] eq '/usr/libexec/libvirt_leaseshelper' ? 1 : 0 } );
+    $hv->redefine(
+        run_cmd => sub {
+            my ( undef, @argv ) = @_;
+            push @asked, "@argv";
+            return "@argv" eq 'sudo -n -l /usr/libexec/libvirt_leaseshelper del ip 192.0.2.1' ? 0 : 1;
+        }
+    );
+    ($result) = quietly( sub { Trog::HV->new()->check_passwordless_sudo } );
+    ok( $result->{ok}, 'a grant that pins the arguments of the lease helper passes' ) or diag explain \@asked;
+    like( $result->{what}, qr{/usr/libexec/libvirt_leaseshelper}, 'naming the helper where this hypervisor has it' );
 };
 
 subtest 'rsync is the one thing both ends have to have' => sub {

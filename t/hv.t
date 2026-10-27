@@ -24,6 +24,7 @@ use File::Temp    qw{tempdir};
 use List::Util    qw{any};
 use File::Slurper();
 use File::Slurper::Temp();
+use File::Which();
 use Test::MockModule qw{strict};
 use Config::Simple();
 use IPC::Run3();
@@ -1954,6 +1955,41 @@ subtest 'what a block is asked is a subset of what a hypervisor is asked' => sub
         ok( ( grep { $_ eq 'check_client' } @block ),         "$backend says whether its client is here" );
         ok( ( grep { $_ eq 'check_transfer_route' } @block ), "$backend says where the guests of a block fetch from" );
     }
+};
+
+subtest 'runner_sudoers pins each command to the pool' => sub {
+    my %args  = ( user => 'runner', pool_path => '/bogus/vm-disks/runner', lease_helper => '/usr/lib/libvirt/libvirt_leaseshelper', qemu_img => '/usr/bin/qemu-img' );
+    my $grant = Trog::HV::Libvirt->runner_sudoers(%args);
+
+  SKIP: {
+        my $visudo = File::Which::which('visudo') // ( -x '/usr/sbin/visudo' ? '/usr/sbin/visudo' : undef );
+        skip 'no visudo here to read the grant', 1 unless $visudo;
+        my $file = tempdir( CLEANUP => 1 ) . '/90-trog-runner-runner';
+        File::Slurper::Temp::write_text( $file, $grant );
+        IPC::Run3::run3( [ $visudo, '-c', '-f', $file ], \undef, \my $out, \my $err );
+        is( $? >> 8, 0, 'visudo takes the grant, which bin/runner_account also asks before it installs one' ) or diag $out, $err;
+    }
+
+    # How sudo matches each command, here in perl.  The patterns are POSIX
+    # extended expressions, which perl reads the same way for these, once (?^:)
+    # turns off the /x of this file: a space in them is a space.  Each command
+    # is the one this backend runs as root.
+    my @patterns = map { qr/(?^:$_)/ } $grant =~ m/[ ](\^.+?\$)[,\n]/g;
+    is( scalar @patterns, 4, 'four commands, each with its arguments pinned' );
+    my sub allowed ($argv) {
+        return any { $argv =~ $_ } @patterns;
+    }
+
+    ok( allowed('del ip 192.0.2.7'),                                                    'the lease release of release_dhcp_lease' );
+    ok( allowed('snapshot -a trog-pristine /bogus/vm-disks/runner/vm.test.test.qcow2'), 'a revert of a disk in the pool' );
+    ok( allowed('info -U --output=json /bogus/vm-disks/runner/vm.test.test.qcow2'),     'the layout of a disk in the pool' );
+    ok( !allowed('snapshot -a trog-pristine /bogus/vm-disks/runner/../other/vm.qcow2'), 'not a disk reached through ..' );
+    ok( !allowed('snapshot -a trog-pristine /bogus/vm-disks/other/vm.qcow2'),           'not a disk of another pool' );
+    ok( !allowed('snapshot -a x /bogus/vm-disks/runner/a.qcow2 /bogus/b.qcow2'),        'not a second file on the end' );
+    ok( !allowed('del ip 192.0.2.7; id'),                                               'not a lease release with more after it' );
+
+    like( exception { Trog::HV::Libvirt->runner_sudoers( %args, pool_path => '/bogus/vm,disks' ) }, qr/sudoers[ ]file[ ]can[ ]hold/, 'a path that sudoers reads as syntax' );
+    like( exception { Trog::HV::Libvirt->runner_sudoers( %args, user      => 'ALL' ) },             qr/sudoers[ ]file[ ]can[ ]hold/, 'and a user that is a keyword' );
 };
 
 done_testing;

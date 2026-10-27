@@ -172,6 +172,8 @@ That means:
 
     Name `pool_name` as well as `pool_path` -- libvirt looks a pool up by name, so a path given beside the name of a pool that already exists elsewhere is ignored and every volume lands in the existing one.  Then `zfs create -o quota=500G` (or any other filesystem that can carry one) under that path, and `systemctl set-property machine-runner.slice CPUQuota=400%` for the slice.  `bin/preflight` says whether the pool you have is actually limited or is just the whole filesystem.
 
+    On ZFS, `bin/runner_account` does all of it for a runner: an account of its own on the hypervisor, the dataset with its quota, the pool, the slice, and sudo for only the commands a build runs.
+
     Leave memory to `reserve_memory`: a `MemoryMax` on a slice full of VMs kills one rather than refusing the next.
 
     Neither stops a determined guest naming a different pool or partition; that takes libvirt's polkit access driver, which ships disabled.  These bound the accident, not the adversary, and it is worth knowing which you have before telling anybody a runner is capped.
