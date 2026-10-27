@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use JSON::PP     ();
 use Getopt::Long qw{GetOptionsFromArray};
 
-my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--nameserver NAME] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
+my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--addressed NAME ...] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
 
 # The shortcut Provisioner::Recipe::lexicon installs for this domain, which
 # already carries the provider holding the zone and the credential for it.
@@ -123,16 +123,15 @@ sub publish {
 }
 
 # The records of a domain, by type and name: the address, and one alias for
-# each name, pointing at the name that holds the address.  A nameserver, only
-# where the caller names one, because a zone somebody else holds has
-# nameservers of theirs that this is in no position to contradict.  It is an
-# address and not an alias, because the target of an NS must not be a CNAME.
+# each name, pointing at the name that holds the address.  Each addressed name
+# holds the address too, because it is the target of an NS, an MX or an SRV,
+# which must not be a CNAME.
 sub records {
-    my ( $nameserver, $domain, $address, @aliases ) = @_;
+    my ( $addressed, $domain, $address, @aliases ) = @_;
     die $USAGE unless $domain && $address;
 
     return (
-        A     => { $domain => $address, ( $nameserver ? ( $nameserver => $address ) : () ) },
+        A     => { map { $_ => $address } $domain, @{$addressed} },
         CNAME => { map { $_ => $domain } @aliases },
     );
 }
@@ -170,18 +169,48 @@ sub clash {
     my %other = ( A => 'CNAME', CNAME => 'A' );
     my $other = $other{$type}                      // return;
     my $row   = held_for( $held->($other), $name ) // return;
-    return { type => $other, content => $row->{content} // q{} };
+    return { type => $other, content => $row->{content} // q{}, id => $row->{id} };
+}
+
+# Whether the clash is a CNAME of $domain where an A record of $domain is
+# wanted: an alias that an earlier build published, before the name was to
+# hold the address.  Only that one is replaced, because it answers with the
+# same address.
+sub replaceable {
+    my ( $clash, $type, $domain ) = @_;
+    return defined $domain && $type eq 'A' && $clash->{type} eq 'CNAME' && canonical( $clash->{content} ) eq canonical($domain);
+}
+
+# Takes that alias away.  Answers whether it is gone.
+sub unalias {
+    my (%opts) = @_;
+
+    my ( $clash, $name ) = @opts{qw{clash name}};
+    my @command = ( quoted( $opts{shortcut} ), qw{delete CNAME}, '--name=' . quoted($name), '--content=' . quoted( $clash->{content} ) );
+    push @command, '--identifier=' . quoted( $clash->{id} ) if defined $clash->{id};
+    my $command = join ' ', @command;
+
+    if ( $opts{dryrun} ) {
+        print "[DRY RUN] $command\n";
+        return 1;
+    }
+
+    print "Deleting CNAME $name -> $clash->{content}, because $name holds the address now\n";
+    my ( $output, $ok ) = run($command);
+    warn "Could not delete CNAME $name:\n$output" unless $ok;
+    return $ok;
 }
 
 sub main {
     my @args = @_;
 
-    my ( $dryrun, $shortcut, $delegate, $nameserver, $alias_of );
-    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'nameserver=s' => \$nameserver, 'alias-of=s' => \$alias_of ) or die $USAGE;
-    die $USAGE if ( $delegate || defined $alias_of ) && ( !$shortcut || $nameserver );
+    my ( $dryrun, $shortcut, $delegate, @addressed, $alias_of );
+    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun, 'shortcut=s' => \$shortcut, 'delegate' => \$delegate, 'addressed=s' => \@addressed, 'alias-of=s' => \$alias_of ) or die $USAGE;
+    die $USAGE if ( $delegate || defined $alias_of ) && ( !$shortcut || @addressed );
     die $USAGE if $delegate                          && defined $alias_of;
 
-    my %wanted = $delegate ? delegation(@args) : defined $alias_of ? aliases_of( $alias_of, @args ) : records( $nameserver, @args );
+    my %wanted = $delegate ? delegation(@args) : defined $alias_of ? aliases_of( $alias_of, @args ) : records( \@addressed, @args );
+    my $owner  = ( $delegate || defined $alias_of ) ? undef : $args[0];
     $shortcut //= shortcut_for( $args[0] );
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether the shortcut is there to run is the thing being decided, and saying so beats a shell error
@@ -203,9 +232,15 @@ sub main {
 
         foreach my $name ( sort keys %{ $wanted{$type} } ) {
             if ( my $clash = clash( $held, $type, $name ) ) {
-                warn "Refusing to publish $type $name: the provider holds $name as $clash->{type} $clash->{content}, and a name with a CNAME holds no other record.\n";
-                $failures++;
-                next;
+                if ( !replaceable( $clash, $type, $owner ) ) {
+                    warn "Refusing to publish $type $name: the provider holds $name as $clash->{type} $clash->{content}, and a name with a CNAME holds no other record.\n";
+                    $failures++;
+                    next;
+                }
+                if ( !unalias( shortcut => $shortcut, clash => $clash, name => $name, dryrun => $dryrun ) ) {
+                    $failures++;
+                    next;
+                }
             }
             $failures += publish(
                 shortcut => $shortcut,

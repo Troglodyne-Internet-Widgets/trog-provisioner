@@ -454,14 +454,15 @@ sub enrich {
     # Not every served name: pdns refuses a record outside its zone, and a name
     # in a zone of a registrar account is published there.  See zone_aliases
     # in Provisioner::Recipe::registrar.
-    $opts{domain_aliases} = [ Provisioner::Cookbook->load('registrar')->zone_aliases(%opts) ];
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    $opts{domain_aliases} = [ $registrar->zone_aliases(%opts) ];
+    $opts{address_names}  = [ $registrar->zone_address_names(%opts) ];
 
     # The zones that an account of the registrar names this guest the authority
     # of, once for the guest and not again for a domain layered onto it.
-    my $registrar = Provisioner::Cookbook->load('registrar');
-    my $server    = Provisioner::Utils::dns_name( Provisioner::Cookbook->machine_of( $opts{domain} ) );
-    my %zones     = $registrar->configured_zones( $opts{domain} );
-    my @held      = $server eq Provisioner::Utils::dns_name( $opts{domain} ) ? sort grep { Provisioner::Utils::dns_name( $zones{$_}{authority} // q{} ) eq $server } keys %zones : ();
+    my $server = Provisioner::Utils::dns_name( Provisioner::Cookbook->machine_of( $opts{domain} ) );
+    my %zones  = $registrar->configured_zones( $opts{domain} );
+    my @held   = $server eq Provisioner::Utils::dns_name( $opts{domain} ) ? sort grep { Provisioner::Utils::dns_name( $zones{$_}{authority} // q{} ) eq $server } keys %zones : ();
     $self->checked_names(@held) if @held;
     $opts{held_zones}      = \@held;
     $opts{held_nameserver} = "ns1.$server";

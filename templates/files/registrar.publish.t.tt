@@ -28,6 +28,14 @@ subtest 'the records of the domain are published to the zone that holds it' => s
     is(($ns // {})->{content}, '[% address %]', '[% own_nameserver %] is at that address too')
         or diag explain $a_records;
 [% END -%]
+[% FOREACH name IN address_names -%]
+    {
+        # The target of an MX or an SRV, which must not be a CNAME.
+        my ($held) = grep { lc($_->{name} // '') =~ m/\A\Q[% name %]\E[.]?\z/ } @{ $a_records // [] };
+        is(($held // {})->{content}, '[% address %]', '[% name %] holds the address as an A record')
+            or diag explain $a_records;
+    }
+[% END -%]
 
     my $cnames = $listed->('CNAME');
     ok($cnames, 'and with a list of CNAMEs') or diag $why->('CNAME');

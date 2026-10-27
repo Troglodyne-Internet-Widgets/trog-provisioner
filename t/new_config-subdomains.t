@@ -110,12 +110,15 @@ sub certificate_names {
     return [ sort split ' ', $list ];
 }
 
+# The addressed names as well as the aliases, but not ns1, which the zone
+# names for itself rather than for a recipe.
 sub zone_names {
     my ( $dir, $domain ) = @_;
-    my $makefile   = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
-    my $nameserver = qr{(?:--nameserver[ ]\S+[ ])?};
-    my ($names)    = $makefile =~ m{publish_dns_records[ ]$nameserver\Q$domain\E[ ]\S+[ ]([^\n]*)};
-    return [ sort split ' ', $names // q{} ];
+    my $makefile  = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
+    my $addressed = qr{(?:--addressed[ ]\S+[ ])*};
+    my ( $options, $names ) = $makefile =~ m{publish_dns_records[ ]($addressed)\Q$domain\E[ ]\S+[ ]([^\n]*)};
+    my @addressed = grep { $_ ne '--addressed' && $_ ne "ns1.$domain" } split ' ', $options // q{};
+    return [ sort @addressed, split ' ', $names // q{} ];
 }
 
 subtest 'a recipe says which names it serves' => sub {

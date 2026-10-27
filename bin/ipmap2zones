@@ -133,7 +133,8 @@ sub main {
         my %vars = (
             domain         => $domain,
             ipmap          => $ip_conf,
-            domain_aliases => [ Provisioner::Cookbook->load('registrar')->zone_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames ) ],
+            domain_aliases => [ Provisioner::Cookbook->load('registrar')->zone_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames, modules => \@recipes ) ],
+            address_names  => [ Provisioner::Cookbook->load('registrar')->zone_address_names( domain => $domain, modules => \@recipes ) ],
             nameservers    => $ns_conf,
             admin_email    => $global_conf->{admin_email},
             serial         => int time,
