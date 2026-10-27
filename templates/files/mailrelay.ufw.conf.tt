@@ -11,3 +11,16 @@ ports=[% relay_port %]/tcp
 title=Mail relay SMTP
 description=Where the relay delivers mail
 ports=25/tcp
+
+[%# Inbound, the ports of the mail clients, which nginx passes to the guests.
+    Outbound, where the guests listen for them, which are the proxied_ports of
+    Provisioner::Recipe::mail. -%]
+[mailrelay-clients]
+title=Mail relay clients
+description=The ports of the mail clients that the relay passes to the guests
+ports=[% client_ports.values().sort().join(',') %]/tcp
+
+[mailrelay-upstream]
+title=Mail relay upstreams
+description=The ports where the guests behind this relay take their mail clients
+ports=[% upstream_ports.join(',') %]/tcp

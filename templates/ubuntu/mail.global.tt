@@ -28,6 +28,12 @@ install -d -m 0755 -o root -g root /etc/opendkim.conf.d
 sed -i "s/%DOVECOT_UID%/$$(id -u dovecot)/g" main.cf.global
 install -m 0644 -o root -g root main.cf.global /etc/postfix/main.cf.d/40-mail
 install -m 0600 -o root -g root master.cf /etc/postfix/master.cf.d/40-mail
+[%# The firewall of the ports where a mail relay passes the mail clients.
+    Provisioner::Recipe::mail has the whole account, under Sending through a
+    mail relay. -%]
+install -d -m 0755 -o root -g root /etc/mail-proxy-from.d
+install -d -o root -g root -m 0750 /etc/ufw/after.init.d
+install -o root -g root -m 0750 mail_proxy_from /etc/ufw/after.init.d/mail-proxy-from
 # 0600 root:root, not the opendkim account.  configd reads the fragments as
 # root from ExecStartPre, and the daemon never reads them.
 install -m 0600 -o root -g root opendkim.conf /etc/opendkim.conf.d/40-mail

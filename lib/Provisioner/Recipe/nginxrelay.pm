@@ -8,13 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use File::Slurper();
-use File::Temp();
-
-use Provisioner::Utils();
 use Provisioner::Vars();
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::RelayRecipe};
 
 =head1 Provisioner::Recipe::nginxrelay
 
@@ -65,29 +61,11 @@ error names the domain that holds it.
 
 =head2 Bans
 
-A guest behind this relay sees the address of each client, so its fail2ban
-finds the abuse.  But a ban there blocks nothing, because the packets come from
-this guest.  So the guest also sends each ban here, and this guest drops the
-address.  See L<Provisioner::Recipe::nginx/Bans through the relay>.
-
-When C<nginxrelay_client register> issues the key of a domain, it authorizes
-the key for root in F</etc/nginx/nginxrelay.d/authorized_keys.root>, which sshd
-reads beside the keys of root.  The key runs only F<scripts/nginxrelay_ban> for
-that domain, and only from the address of its guest.  C<nginxrelay_ban> adds
-the address to the ipset C<nginxrelay-bans> for the time of the ban, or
-removes it.  The registrations and their keys are salvaged together, so a
-rebuild keeps both.
-
-F</etc/ufw/after.init.d/nginxrelay-bans> drops every packet from an address in
-the set to port 80 and to C<tls_port>, each time ufw loads.  See
-L<Provisioner::Recipe::ufw/Rules that ufw cannot write>.  ssh stays open to a
-banned address, so a ban that a guest sends cannot lock the operator out of
-the relay.  When ufw unloads, the set goes to
-F</var/lib/nginxrelay-bans/saved> with the time that each ban has left, and it
-comes back when ufw loads.
-
-The guests pin the ed25519 host key of this guest, so it comes from the secret
-store, and a rebuild keeps it.
+A guest behind this relay sends its bans here, as
+L<Provisioner::RelayRecipe/Bans> says, and this guest drops the address on 80
+and on C<tls_port>.  C<nginxrelay_client register> issues the key of each
+domain, which F</etc/nginx/nginxrelay.d> keeps.  See
+L<Provisioner::Recipe::nginx/Bans through the relay> for what the guest does.
 
 =head2 Ports
 
@@ -170,63 +148,34 @@ sub restores {
     return ( '/etc/nginx/nginxrelay.d' => { from => "$install_dir/$domain/nginxrelay.d", owner => 'root:root' } );
 }
 
-=head2 $path = $recipe->key_path($domain)
+=head2 $dir = $recipe->relay_dir()
 
-Where the key that this guest issues for C<$domain> is, on the guest of
-C<$domain>.
-
-=cut
-
-sub key_path {
-    my ( $self, $domain ) = @_;
-    return "/etc/fail2ban/nginxrelay/$domain.key.b64";
-}
-
-=head2 $path = $recipe->host_key_path($domain)
-
-Where the public host key of the relay is, on the guest of C<$domain>, in
-base64.
+F</etc/nginx/nginxrelay.d>, which holds the registrations and the ban keys.
+See L<Provisioner::RelayRecipe>.
 
 =cut
 
-sub host_key_path {
-    my ( $self, $domain ) = @_;
-    return "/etc/fail2ban/nginxrelay/$domain.host.b64";
+sub relay_dir {
+    return '/etc/nginx/nginxrelay.d';
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 @ports = $recipe->banned_ports(%opts)
 
-The ed25519 host key of sshd, which the guests behind this relay pin.  See
-L</Bans>.
+80 and C<tls_port>, where this guest proxies.  The ban closes C<tls_port> and
+not 443, because the forward comes first.
 
 =cut
 
-sub guest_secrets {
-    my ( $self, $install_dir, $domain ) = @_;
-    return (
-        '/etc/ssh/ssh_host_ed25519_key' => {
-            ref      => "secret:nginxrelay/$domain-ssh-host-key/password",
-            generate => sub {
-                my $path = File::Temp::tempdir( CLEANUP => 1 ) . '/host_key';
-                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, "root\@$domain" );
-
-                # bin/provision adds a newline, and ssh-keygen refuses a key
-                # that ends with a blank line.
-                chomp( my $key = File::Slurper::read_binary($path) );
-                return $key;
-            },
-            owner => 'root:root',
-            mode  => '0600',
-        },
-    );
+sub banned_ports {
+    my ( $self, %opts ) = @_;
+    return ( 80, tls_port(%opts) );
 }
 
-=head2 %files = $recipe->issue_grant($grant, %terms)
+=head2 %files = $recipe->registration_files($grant, %terms)
 
-The key that the relay issues when it registers the names of the client of
-C<$grant>, at C<key_path> of the client, as C<issue_grant> in
-L<Provisioner::Recipe> says.  Also the public host key of the relay, at
-C<host_key_path>, which the client pins.  C<%terms> has
+The ban key that the relay issues when it registers the names of the client of
+C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant>
+adds the host key of the relay.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >> and
 C<< names => \@names >>.
 
@@ -236,7 +185,7 @@ relay sends TLS and plain HTTP for C<@names>.  See L</Registration>.
 
 =cut
 
-sub issue_grant {
+sub registration_files {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
 
@@ -248,11 +197,6 @@ sub issue_grant {
             },
             owner => 'root:root',
             mode  => '0600',
-        },
-        $self->host_key_path($client) => {
-            issue => { guest => $grant->{guest}, command => 'base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub' },
-            owner => 'root:root',
-            mode  => '0644',
         },
     );
 }
@@ -280,12 +224,12 @@ sub revoke_grant {
 }
 
 sub template_files {
+    my ($self) = @_;
     return (
-        'nginxrelay.stream.conf.tt' => 'nginxrelay.stream.conf',
-        'nginxrelay.http.conf.tt'   => 'nginxrelay.http.conf',
-        'nginxrelay.ufw.conf.tt'    => 'nginxrelay_ufw.conf',
-        'nginxrelay.sshd.tt'        => 'nginxrelay.sshd.conf',
-        'nginxrelay.bans.tt'        => 'nginxrelay.bans',
+        $self->SUPER::template_files(),
+        'nginxrelay.stream.tt'    => 'nginxrelay.stream',
+        'nginxrelay.http.conf.tt' => 'nginxrelay.http.conf',
+        'nginxrelay.ufw.conf.tt'  => 'nginxrelay_ufw.conf',
     );
 }
 

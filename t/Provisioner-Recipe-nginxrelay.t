@@ -55,8 +55,8 @@ subtest 'bin/destroy releases them by the same script' => sub {
 subtest 'the host key comes from the store' => sub {
     my %secrets = $relay->guest_secrets( '/opt/domains', 'relay.test.test' );
     my $secret  = $secrets{'/etc/ssh/ssh_host_ed25519_key'};
-    is( $secret->{ref},  'secret:nginxrelay/relay.test.test-ssh-host-key/password', 'so a rebuilt relay keeps the host key that the guests pinned' );
-    is( $secret->{mode}, '0600',                                                    'readable by root only' );
+    is( $secret->{ref},  'secret:relay/relay.test.test-ssh-host-key/password', 'so a rebuilt relay keeps the host key that the guests pinned' );
+    is( $secret->{mode}, '0600',                                               'readable by root only' );
 
     my $file = File::Temp::tempdir( CLEANUP => 1 ) . '/key';
     File::Slurper::Temp::write_binary( $file, $secret->{generate}->() . "\n" );

@@ -1,0 +1,14 @@
+[%# The servers of this relay in the stream block of
+    Provisioner::RelayRecipe.  A TLS connection goes to the guest that
+    registered its SNI name.  Provisioner::Recipe::nginxrelay has the whole
+    account. -%]
+map $ssl_preread_server_name $relay_tls {
+    include /etc/nginx/nginxrelay.d/*.tls.map;
+}
+
+server {
+    listen [% tls_port %];
+    ssl_preread on;
+    proxy_protocol on;
+    proxy_pass $relay_tls;
+}

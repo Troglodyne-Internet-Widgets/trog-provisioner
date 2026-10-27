@@ -85,6 +85,9 @@ subtest 'a relay that is a mail relay of this installation takes every sender, w
     is_deeply( $opts{mailrelay_login}, { address => '192.0.2.5', port => 2587, password => '/etc/postfix/mailrelay/mail.test.test.password' }, 'at the address where the guests reach the relay, on its relay port, with the password that it issued' );
     is( $opts{mailrelay}, 'relay.test.test', 'which the templates read as the mail relay, and not as a host outside' );
     is_deeply( $opts{relay_jails}, [qw{dovecot postfix}], 'and every jail of mail is told to leave the relay alone' );
+    is( $opts{ban_relay}{action},  'mailrelay-mail.test.test',                       'and to ban through it, with an action of its own' );
+    is( $opts{ban_relay}{address}, '192.0.2.5',                                      'at the address where the guests reach it' );
+    is( $opts{ban_relay}{key_b64}, '/etc/fail2ban/mailrelay/mail.test.test.key.b64', 'with the key that it issued' );
 
     %opts = $recipe->enrich( $recipe->validate( %BASE, relay => { host => 'smtp.outside.test', port => 25 } ) );
     is( $opts{mailrelay}, undef, 'a host outside is no mail relay' );
@@ -106,7 +109,15 @@ subtest 'a relay that is a mail relay of this installation takes every sender, w
 
     my $guests = Test::MockModule->new('Provisioner::IPPool');
     $guests->redefine( guest_address => sub { my ($domain) = @_; return ( $domain, $domain eq 'mail.test.test' ? '192.0.2.10' : undef ) } );
-    is_deeply( { $recipe->grant_terms( { recipe => 'mailrelay', guest => 'relay.test.test', client => 'mail.test.test' } ) }, { address => '192.0.2.10' }, 'the relay sends the mail that comes in to the address of the guest' );
+    is_deeply(
+        { $recipe->grant_terms( { recipe => 'mailrelay', guest => 'relay.test.test', client => 'mail.test.test' } ) },
+        {
+            address   => '192.0.2.10',
+            upstreams => { imaps => '192.0.2.10:10993', submissions => '192.0.2.10:10465', pop3s => '192.0.2.10:10995' },
+            names     => [qw{mail.test.test mail.mail.test.test}],
+        },
+        'the relay sends the mail that comes in to the address of the guest, and the mail clients of the domain and of its mail name to the proxy ports there'
+    );
     like(
         exception { $recipe->grant_terms( { recipe => 'mailrelay', guest => 'relay.test.test', client => 'none.test.test' } ) },
         qr/none[.]test[.]test[ ]has[ ]no[ ]address/,

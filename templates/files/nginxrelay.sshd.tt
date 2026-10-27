@@ -1,5 +1,0 @@
-[%# The keys that nginxrelay_client issues to the guests behind this relay,
-    beside the keys of each account.  Only root has such a file, and each of
-    its keys runs nginxrelay_ban and nothing else.
-    Provisioner::Recipe::nginxrelay has the whole account. -%]
-AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2 /etc/nginx/nginxrelay.d/authorized_keys.%u

@@ -1120,6 +1120,11 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         mailrelay_login => { address => '192.0.2.5', port => 2587, password => '/etc/postfix/mailrelay/d.test.password' },
         relay_address   => '192.0.2.5',
         relay_port      => 2587,
+        ban_relay       => { action => 'mailrelay-d.test', address => '192.0.2.5', key => '/etc/fail2ban/mailrelay/d.test.key', known_hosts => '/etc/fail2ban/mailrelay/d.test.known_hosts' },
+        proxied_ports   => { imaps  => 10993, submissions => 10465, pop3s => 10995 },
+        client_ports    => { imaps  => 993,   submissions => 465,   pop3s => 995 },
+        banned_ports    => [ 465, 993, 995 ],
+        ban_set         => 'mailrelay-bans',
     );
 
     my $dir = tempdir( CLEANUP => 1 );

@@ -1,0 +1,12 @@
+[%# In the main context, because a stream block cannot be inside http.  The
+    file goes into modules-enabled, the one directory that nginx.conf includes
+    there, after the module that it needs.  nginx takes one stream block, so
+    every relay of this guest puts its servers in relay-stream.d.
+    Provisioner::RelayRecipe has the whole account. -%]
+stream {
+    # 64 is too small for a long name, and only nginx -t says why.  See
+    # server_names_hash_bucket_size in nginx.global.conf.tt.
+    map_hash_bucket_size 256;
+
+    include /etc/nginx/relay-stream.d/*.conf;
+}

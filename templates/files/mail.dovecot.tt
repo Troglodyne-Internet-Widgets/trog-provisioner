@@ -58,6 +58,27 @@ ssl_key =  </etc/ssl/private/[% domain %].pem
 ssl = required
 disable_plaintext_auth = yes
 
+# IMAP and POP3 over TLS as a mail relay passes them, with the PROXY protocol,
+# so that dovecot sees the real client.  It believes the header only from the
+# networks in proxy_from.conf, which the fragment of each domain behind a relay
+# writes.  Provisioner::Recipe::mail has the whole account, under Sending
+# through a mail relay.
+service imap-login {
+  inet_listener imaps_proxy {
+    port = [% proxied_ports.imaps %]
+    ssl = yes
+    haproxy = yes
+  }
+}
+service pop3-login {
+  inet_listener pop3s_proxy {
+    port = [% proxied_ports.pop3s %]
+    ssl = yes
+    haproxy = yes
+  }
+}
+!include_try /etc/dovecot/proxy_from.conf
+
 # LMTPD
 service lmtp {
   unix_listener /var/spool/postfix/private/dovecot-lmtp {

@@ -1,0 +1,14 @@
+[%# What every relay installs, from Provisioner::RelayRecipe, which has the
+    whole account.  Two relays on one guest install the same files, except the
+    hook of the bans, which each has its own.
+    The host key comes from the secret store, so the guests that pinned it
+    still trust this relay after a rebuild.  bin/provision placed it. -%]
+ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
+install -o root -g root -m 0644 relay.sshd.conf /etc/ssh/sshd_config.d/relay-bans.conf
+[% script_dir %]/check_sshd_config
+[% script_dir %]/queue_postrun_task systemctl try-reload-or-restart ssh
+install -d -o root -g root -m 0755 /etc/nginx/relay-stream.d
+install -o root -g root -m 0644 relay.stream.conf /etc/nginx/modules-enabled/99-relay-stream.conf
+install -d -o root -g root -m 0700 /var/lib/[% ban_set %]
+install -d -o root -g root -m 0750 /etc/ufw/after.init.d
+install -o root -g root -m 0750 [% relay_name %].bans /etc/ufw/after.init.d/[% ban_set %]

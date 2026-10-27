@@ -4,3 +4,12 @@
 title=Mail relay
 description=The mail relay that the mail of this guest goes out through
 ports=[% mailrelay_login.port %]/tcp
+
+[%# Inbound, the ports where the mail relay passes the mail clients, which the
+    firewall hook of mail closes to all but the relays.
+    Provisioner::Recipe::mail has the whole account, under Sending through a
+    mail relay. -%]
+[mail-proxy]
+title=Mail clients through a relay
+description=The ports where the mail relay passes the mail clients, with the PROXY protocol
+ports=[% proxied_ports.values().sort().join(',') %]/tcp

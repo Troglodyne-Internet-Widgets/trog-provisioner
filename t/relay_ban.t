@@ -7,7 +7,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/nginxrelay_ban.t - scripts/nginxrelay_ban: what a guest behind the relay can ask of the
+t/relay_ban.t - scripts/relay_ban: what a guest behind a relay can ask of the
 set of bans, and what it cannot
 
 =cut
@@ -20,15 +20,16 @@ use Test::MockModule qw{strict};
 use FindBin;
 use FindBin::libs;
 
-my $script = "$FindBin::Bin/../scripts/nginxrelay_ban";
+my $script = "$FindBin::Bin/../scripts/relay_ban";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
 my $DOMAIN = 'web.test.test';
+my $SET    = 'nginxrelay-bans';
 
 # Every command answered with what $ok says.  Answers the commands that ran.
 my $ok;
 my @ran;
-my $ban = Test::MockModule->new( 'Trog::NginxRelayBan', no_auto => 1 );
+my $ban = Test::MockModule->new( 'Trog::RelayBan', no_auto => 1 );
 $ban->redefine(
     run => sub {
         my (@command) = @_;
@@ -41,7 +42,7 @@ $ban->redefine(
 sub ask {
     my ($request) = @_;
     @ran = ();
-    my ( undef, undef, $rc ) = capture { Trog::NginxRelayBan::main( $DOMAIN, $request ) };
+    my ( undef, undef, $rc ) = capture { Trog::RelayBan::main( $SET, $DOMAIN, $request ) };
     return ( $rc, [ grep { m/\Aipset/ } @ran ] );
 }
 
@@ -104,7 +105,10 @@ subtest 'it refuses anything else' => sub {
         my ( $rc, $ran ) = ask( $bad{$case} );
         is_deeply( [ $rc, $ran ], [ 2, [] ], "$case exits 2 and runs nothing" );
     }
-    like( exception { Trog::NginxRelayBan::main( undef, 'check 198.51.100.7' ) }, qr/names[ ]the[ ]domain/, 'and a key with no domain in its command dies' );
+    like( exception { Trog::RelayBan::main( $SET, undef, 'check 198.51.100.7' ) }, qr/names[ ]the[ ]set[ ]and[ ]the[ ]domain/, 'and a key with no domain in its command dies' );
+    foreach my $set ( undef, 'nginxrelay', 'other-bans;id' ) {
+        like( exception { Trog::RelayBan::main( $set, $DOMAIN, 'check 198.51.100.7' ) }, qr/names[ ]the[ ]set/, 'as does one that names no set of bans: ' . ( $set // 'none' ) );
+    }
 };
 
 done_testing;

@@ -138,8 +138,8 @@ address that the pool can give to the next guest.
 
 A ban on this guest blocks nothing that comes through the relay, because those
 packets come from the relay.  So with C<relay> and a public name, each jail of
-this recipe also bans through the action C<relay-DOMAIN>.  It runs
-C<nginxrelay_ban> on the relay over ssh, with the key that the relay issued,
+this recipe also bans through the action C<nginxrelay-DOMAIN>.  It runs
+C<relay_ban> on the relay over ssh, with the key that the relay issued,
 and the relay drops the address.  See L<Provisioner::Recipe::nginxrelay/Bans>.
 
 The relay also issues its host key, which this guest pins in
@@ -462,6 +462,7 @@ sub enrich {
 
         if ( defined $opts{relay} ) {
             $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{relay} );
+            $opts{ban_relay}     = Provisioner::Cookbook->load('nginxrelay')->ban_client( $opts{domain}, $opts{relay_address} );
             $opts{relay_jails}   = [ sort { $a cmp $b } List::Util::uniq( keys %{ { $self->jails(%opts) } }, @{ $opts{proxied_jails} // [] } ) ];
         }
     }
@@ -479,11 +480,11 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'nginx.global.conf.tt'  => 'nginx.global.conf',
-        'nginx.sysctl.conf.tt'  => 'nginx.sysctl.conf',
-        'nginx.ufw.conf.tt'     => 'nginx_proxy_ufw.conf',
-        'nginx.relay.action.tt' => 'nginx_relay.action',
-        'nginx.relay.jail.tt'   => 'nginx_relay.jail',
+        'nginx.global.conf.tt' => 'nginx.global.conf',
+        'nginx.sysctl.conf.tt' => 'nginx.sysctl.conf',
+        'nginx.ufw.conf.tt'    => 'nginx_proxy_ufw.conf',
+        'relay.action.tt'      => 'nginx_relay.action',
+        'nginx.relay.jail.tt'  => 'nginx_relay.jail',
     );
 }
 

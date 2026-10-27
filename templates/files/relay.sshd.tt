@@ -1,0 +1,6 @@
+[%# The keys that the relays of this guest issue to the guests behind them,
+    beside the keys of each account.  Only root has such a file, and each of
+    its keys runs relay_ban and nothing else.  One directive for every relay,
+    because sshd takes the first AuthorizedKeysFile that it reads.
+    Provisioner::RelayRecipe has the whole account. -%]
+AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2[% FOR dir IN relay_dirs %] [% dir %]/authorized_keys.%u[% END %]

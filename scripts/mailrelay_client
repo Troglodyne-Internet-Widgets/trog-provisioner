@@ -10,6 +10,7 @@ use warnings FATAL => 'all';
 use Cwd            ();
 use File::Basename ();
 use Crypt::PRNG    ();
+use List::Util     qw{any};
 
 BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' ) }
 
@@ -18,6 +19,7 @@ BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_fi
 =head2 SYNOPSIS
 
     mailrelay_client register DOMAIN ADDRESS
+    mailrelay_client register-clients DOMAIN IMAPS SUBMISSIONS POP3S NAME [NAME ...]
     mailrelay_client release DOMAIN
 
 =head2 DESCRIPTION
@@ -31,9 +33,21 @@ password on one line.  The relay takes mail from that login only with a sender
 in DOMAIN.  dovecot makes the hash, with its C<ARGON2ID> scheme.  It also makes
 this guest relay the mail for DOMAIN that comes in from the internet to
 ADDRESS, the IPv4 address of the guest, on port 25.  It replaces what DOMAIN
-registered before.  C<release> removes the login and the relay.  See
-L<Provisioner::Recipe::mailrelay/Mail out> and
+registered before.  See L<Provisioner::Recipe::mailrelay/Mail out> and
 L<Provisioner::Recipe::mailrelay/Mail in>.
+
+C<register-clients> sends the mail clients of DOMAIN to its guest.  A TLS
+connection on 993, 465 or 995 whose SNI name is a NAME goes to IMAPS,
+SUBMISSIONS or POP3S, with the PROXY protocol.  Each of those is an IPv4
+address and a port, such as C<192.0.2.10:10993>.  It refuses a NAME that
+another domain registered.  If C<nginx -t> refuses the result, it puts the old
+files of DOMAIN back.  Then it issues DOMAIN the key that its guest sends its
+bans with, and prints the private half in base64 on one line.  The key runs only
+F<relay_ban> for DOMAIN and the set C<mailrelay-bans>, and only from the
+address of IMAPS.  See L<Provisioner::Recipe::mailrelay/Mail clients>.
+
+C<release> removes all of it: the login, the relay, the routes of the clients
+and the key.  Any of it can be gone already.
 
 Each one waits up to a minute for another C<register> or C<release> to
 finish, and then gives up and says which file is locked.
@@ -44,6 +58,7 @@ with another status.
 =cut
 
 my $USAGE = "usage: mailrelay_client register DOMAIN ADDRESS
+" . "       mailrelay_client register-clients DOMAIN IMAPS SUBMISSIONS POP3S NAME [NAME ...]
 " . "       mailrelay_client release DOMAIN
 ";
 
@@ -57,6 +72,36 @@ my @TABLES = qw{passwd senders relay_domains transport recipients};
 sub files_of {
     my ($domain) = @_;
     return map { $_ => "$RELAY_D/$domain.mail.$_" } @TABLES;
+}
+
+our $BAN_SET = 'mailrelay-bans';
+
+# The services of the mail clients, in the order of the arguments of
+# register-clients.  nginx reads the map of each, $domain.$service.map.
+my @SERVICES = qw{imaps submissions pop3s};
+
+sub maps_of {
+    my ($domain) = @_;
+    return map { $_ => "$RELAY_D/$domain.$_.map" } @SERVICES;
+}
+
+# Each name that a domain other than $domain registered, mapped to that domain.
+sub names_of_others {
+    my ($domain) = @_;
+
+    my %holder;
+    foreach my $map ( glob("$RELAY_D/*.imaps.map") ) {
+        my ($other) = $map =~ m{/([^/]+)[.]imaps[.]map\z};
+        next if $other eq $domain;
+        $holder{$_} = $other foreach map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, Trog::RelayFiles::read_file($map) // q{};
+    }
+    return %holder;
+}
+
+sub reload_nginx {
+    my ( $said, $ok ) = Trog::RelayFiles::run(qw{systemctl reload nginx});
+    die "nginx did not reload: $said\n" unless $ok;
+    return;
 }
 
 # The group that dovecot reads the hashes as.
@@ -115,20 +160,52 @@ sub register {
     return 0;
 }
 
+sub register_clients {
+    my ( $domain, $upstreams, @names ) = @_;
+
+    my $lock   = lock_relay();
+    my %holder = names_of_others($domain);
+    my @taken  = grep { defined $holder{$_} } @names;
+    die join( q{}, map { "$_ is registered to $holder{$_}\n" } @taken ) . "So $domain cannot register it.  Release it there first.\n" if @taken;
+
+    my %map = maps_of($domain);
+    my %old = map { $_ => scalar Trog::RelayFiles::read_file( $map{$_} ) } @SERVICES;
+    foreach my $service (@SERVICES) {
+        Trog::RelayFiles::write_file( $map{$service}, join( q{}, map { "$_ $upstreams->{$service};\n" } @names ) );
+    }
+
+    my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
+    if ( !$ok ) {
+        Trog::RelayFiles::write_file( $map{$_}, $old{$_} ) foreach @SERVICES;
+        die "nginx refused what $domain registered, so it keeps what it had: $said\n";
+    }
+
+    my ($address) = split( m/:/, $upstreams->{imaps} );
+    my $key = Trog::RelayFiles::issue_ban_key( $RELAY_D, $domain, $address, $BAN_SET );
+    reload_nginx();
+
+    print $key;
+    close $lock or die "Cannot unlock $RELAY_D: $!\n";
+    return 0;
+}
+
 sub release {
     my ($domain) = @_;
 
     my $lock = lock_relay();
-    my %file = files_of($domain);
+    my %file = ( files_of($domain), maps_of($domain) );
     Trog::RelayFiles::write_file( $_, undef ) foreach values %file;
     write_tables();
+    Trog::RelayFiles::revoke_ban_key( $RELAY_D, $domain );
 
-    # A postfix that is not up reads the tables when it starts.
-    my $err = do {
-        local $@;
-        eval { reload_postfix(); 1 } ? undef : $@;
-    };
-    warn $err if defined $err;
+    # A service that is not up reads the files when it starts.
+    foreach my $reload ( \&reload_postfix, \&reload_nginx ) {
+        my $err = do {
+            local $@;
+            eval { $reload->(); 1 } ? undef : $@;
+        };
+        warn $err if defined $err;
+    }
     close $lock or die "Cannot unlock $RELAY_D: $!\n";
     return 0;
 }
@@ -142,6 +219,15 @@ sub main {
         my ( $address, @rest ) = @args;
         die $USAGE if @rest || !defined $address || !Trog::RelayFiles::upstream("$address:25");
         return register( $domain, $address );
+    }
+    if ( $command eq 'register-clients' ) {
+        my ( @upstreams, @names );
+        ( @upstreams[ 0 .. $#SERVICES ], @names ) = @args;
+        die $USAGE if !@names || any { !Trog::RelayFiles::upstream( $_ // q{} ) } @upstreams;
+        die $USAGE if any            { !Trog::RelayFiles::dns_name($_) } @names;
+        my %upstream;
+        @upstream{@SERVICES} = @upstreams;
+        return register_clients( $domain, \%upstream, @names );
     }
     return release($domain) if $command eq 'release' && !@args;
     die $USAGE;

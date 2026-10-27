@@ -7,9 +7,13 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use Fcntl       qw{:flock};
-use IPC::Open3  ();
-use Time::HiRes ();
+use Cwd            ();
+use Fcntl          qw{:flock};
+use File::Basename ();
+use File::Temp     ();
+use IPC::Open3     ();
+use MIME::Base64   ();
+use Time::HiRes    ();
 
 =head1 relay_files
 
@@ -24,7 +28,7 @@ use Time::HiRes ();
 
 What F<scripts/nginxrelay_client> and F<scripts/mailrelay_client> share: each
 keeps the registrations of other guests in files of one directory, which a
-service reads.  This runs under the system perl of the guest, which has no
+service reads, and issues the keys that those guests send their bans with.  This runs under the system perl of the guest, which has no
 Provisioner libraries, so the two load it from beside themselves.  It runs
 nothing on its own.
 
@@ -154,6 +158,59 @@ sub lock_dir {
         Time::HiRes::sleep(0.2);
     }
     return $fh;
+}
+
+=head2 $key = issue_ban_key($dir, $domain, $address, $set)
+
+Makes a new ed25519 key for C<$domain>, and returns the private half in base64
+on one line.  The public half goes into C<$dir/$domain.ban.pub>, and then into
+C<$dir/authorized_keys.root>, which sshd reads beside the keys of root.  It can
+run only F<scripts/relay_ban> for C<$set> and C<$domain>, and only from
+C<$address>, the IPv4 address of the guest of C<$domain>.  It replaces the key
+that C<$domain> had.  See L<Provisioner::RelayRecipe/Bans>.
+
+Dies, and leaves the old key, when C<ssh-keygen> fails.
+
+=cut
+
+# Beside this file, as every script of the provisioner is.
+our $RELAY_BAN = File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_ban';
+
+sub issue_ban_key {
+    my ( $dir, $domain, $address, $set ) = @_;
+
+    my $keys = File::Temp::tempdir( CLEANUP => 1 );
+    ## no critic (PreferredBinaries) -- this runs under the system perl of the relay, which has no Provisioner::Utils
+    my ( $said, $ok ) = run( qw{ssh-keygen -q -t ed25519 -N}, q{}, '-C', "bans of $domain", '-f', "$keys/key" );
+    ## use critic
+    die "Could not make the key of $domain: $said\n" unless $ok;
+
+    write_file( "$dir/$domain.ban.pub", qq{restrict,from="$address",command="$RELAY_BAN $set $domain" } . read_file("$keys/key.pub") );
+    write_authorized_keys($dir);
+    return MIME::Base64::encode_base64( read_file("$keys/key"), q{} );
+}
+
+=head2 revoke_ban_key($dir, $domain)
+
+Removes the key of C<$domain> that C<issue_ban_key> made.  It can be gone
+already.
+
+=cut
+
+sub revoke_ban_key {
+    my ( $dir, $domain ) = @_;
+    write_file( "$dir/$domain.ban.pub", undef );
+    write_authorized_keys($dir);
+    return;
+}
+
+# The keys of every domain, in the one file of $dir that sshd reads for root.
+# Only a line that restricts its key, so that a bare key never logs in as root.
+sub write_authorized_keys {
+    my ($dir) = @_;
+    my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort glob("$dir/*.ban.pub");
+    write_file( "$dir/authorized_keys.root", join( q{}, @lines ) );
+    return;
 }
 
 1;

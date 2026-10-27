@@ -4,7 +4,7 @@
 [% FOR jail IN relay_jails -%]
 [[% jail %]]
 action = %(action_)s
-         relay-[% domain %]
+         [% ban_relay.action %]
 ignoreip = 127.0.0.1/8 ::1 [% relay_address %]
 
 [% END -%]
