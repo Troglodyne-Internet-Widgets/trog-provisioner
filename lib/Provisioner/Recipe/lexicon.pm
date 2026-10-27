@@ -22,13 +22,14 @@ use Provisioner::Cookbook();
 =head2 DESCRIPTION
 
 This recipe installs lexicon, the client that every recipe here uses to write a
-DNS record.  It also applies four patches to lexicon and installs a shortcut
+DNS record.  It also applies five patches to lexicon and installs a shortcut
 for the domain.  One of the patches lets a C<CNAME> in a pdns zone name a
 target outside that zone, as the names in a zone of a registrar account need.
 Another lets the easydns provider take an C<MX> or C<SRV> record as the
 powerdns provider does, with its whole RDATA in the content, such as
 C<10 mail.example.com.>.  The provider sends the priority to easyDNS in a
-field of its own.
+field of its own.  And one lets the powerdns provider delete and update a
+record whose content holds a slash, as the base64 of a DKIM key does.
 
 You do not usually configure it yourself.  Each recipe that runs lexicon requires
 it.  L<Provisioner::Recipe::pdns> and L<Provisioner::Recipe::registrar> hold
@@ -72,7 +73,7 @@ sub enrich {
 
 =head2 %files = $recipe->template_files()
 
-Returns the shortcut template and the four patches, each mapped to the name
+Returns the shortcut template and the five patches, each mapped to the name
 of the file that it becomes.
 
 =cut
@@ -84,6 +85,7 @@ sub template_files {
         'patches/lexicon-arbitrary-record-types.patch' => 'lexicon-arbitrary-record-types.patch',
         'patches/lexicon-pdns-absolute-cname.patch'    => 'lexicon-pdns-absolute-cname.patch',
         'patches/lexicon-easydns-priority.patch'       => 'lexicon-easydns-priority.patch',
+        'patches/lexicon-pdns-identifier.patch'        => 'lexicon-pdns-identifier.patch',
     );
 }
 
