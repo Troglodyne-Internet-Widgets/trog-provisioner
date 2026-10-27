@@ -1495,6 +1495,26 @@ sub addressed_names {
     return;
 }
 
+=head3 @records = $recipe->dns_records(%opts)
+
+The records of this recipe in the zone of the domain, other than its names.
+Each is a hashref with C<type>, C<name>, the whole name, and C<content>, the
+whole data of the record, as lexicon takes it.  The content of an C<MX> starts with its
+priority, as in C<10 mail.DOMAIN.>.  A record that shares its name and type
+with records of other owners, such as the C<TXT> of SPF at the apex, also has
+C<match>, the start of the content that marks it as the record of this recipe.
+An empty C<match> marks every record of that type at that name as the record
+of this recipe.  Without C<match>, a record is the record of this recipe only
+where its content is the same.  See C<zone_records> in
+L<Provisioner::Recipe::registrar>.  None here.  It reads
+only C<$opts{domain}>.
+
+=cut
+
+sub dns_records {
+    return;
+}
+
 =head3 @aliases = $recipe->domain_aliases(%opts)
 
 Every name that this recipe answers for besides the domain itself: the aliases

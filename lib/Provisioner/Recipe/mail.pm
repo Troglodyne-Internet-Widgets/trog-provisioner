@@ -380,6 +380,31 @@ sub addressed_names {
     return "mail.$opts{domain}";
 }
 
+=head2 @records = $recipe->dns_records(%opts)
+
+The MX of the domain, which names C<mail.DOMAIN>, its SPF and DMARC policies,
+the records that point a mail client at its settings, and an SRV record for
+each port that a client sends or reads mail on.  See L<Provisioner::Recipe>.
+The SPF policy passes the address of the domain and of its MX, which is the
+address of a mail relay where the domain has one.
+
+=cut
+
+sub dns_records {
+    my ( $self, %opts ) = @_;
+    my $domain = $opts{domain};
+    my $mx     = "mail.$domain.";
+
+    my %srv = ( imaps => 993, pop3s => 995, submissions => 465, submission => 587, autodiscover => 80 );
+    return (
+        { type => 'MX',  name => $domain,          content => "10 $mx" },
+        { type => 'TXT', name => $domain,          content => 'v=spf1 +a +mx -all',                                            match => 'v=spf1' },
+        { type => 'TXT', name => "_dmarc.$domain", content => 'v=DMARC1; p=none',                                              match => 'v=DMARC1' },
+        { type => 'TXT', name => $domain,          content => "mailconf=https://autoconfig.$domain/autoconfig/autoconfig.xml", match => 'mailconf=' },
+        map { { type => 'SRV', name => "_$_._tcp.$domain", content => "0 0 $srv{$_} $mx", match => q{} } } sort keys %srv,
+    );
+}
+
 =head2 $bool = $recipe->sends_mail
 
 True.  See L<Provisioner::Recipe>.

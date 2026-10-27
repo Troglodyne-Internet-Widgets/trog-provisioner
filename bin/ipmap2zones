@@ -130,19 +130,17 @@ sub main {
         # public_names of nginx.
         my @hostnames = map { Provisioner::Cookbook->load($_)->served_names( %{ ref $configured->{$_} eq 'HASH' ? $configured->{$_} : {} }, domain => $domain ) } @recipes;
 
-        my %vars = (
+        my $registrar = Provisioner::Cookbook->load('registrar');
+        my %vars      = (
             domain         => $domain,
             ipmap          => $ip_conf,
-            domain_aliases => [ Provisioner::Cookbook->load('registrar')->zone_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames, modules => \@recipes ) ],
-            address_names  => [ Provisioner::Cookbook->load('registrar')->zone_address_names( domain => $domain, modules => \@recipes ) ],
+            domain_aliases => [ $registrar->zone_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames, modules => \@recipes ) ],
+            address_names  => [ $registrar->zone_address_names( domain => $domain, modules => \@recipes ) ],
+            zone_records   => [ $registrar->zone_records( domain => $domain, modules => \@recipes ) ],
             nameservers    => $ns_conf,
             admin_email    => $global_conf->{admin_email},
             serial         => int time,
             extra_records  => '',
-
-            # The zone needs this for more than the names: the mail records are
-            # written only where something answers on what they point at.
-            modules => \@recipes,
         );
 
         my $zone    = $tt->render( 'files/pdns.zone.tt', \%vars );

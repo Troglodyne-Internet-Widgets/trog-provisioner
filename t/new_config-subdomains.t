@@ -116,7 +116,8 @@ sub zone_names {
     my ( $dir, $domain ) = @_;
     my $makefile  = -f "$dir/Makefile" ? File::Slurper::read_text("$dir/Makefile") : q{};
     my $addressed = qr{(?:--addressed[ ]\S+[ ])*};
-    my ( $options, $names ) = $makefile =~ m{publish_dns_records[ ]($addressed)\Q$domain\E[ ]\S+[ ]([^\n]*)};
+    my $records   = qr{(?:--records[ ]\S+[ ])?};
+    my ( $options, $names ) = $makefile =~ m{publish_dns_records[ ]$records($addressed)\Q$domain\E[ ]\S+[ ]([^\n]*)};
     my @addressed = grep { $_ ne '--addressed' && $_ ne "ns1.$domain" } split ' ', $options // q{};
     return [ sort @addressed, split ' ', $names // q{} ];
 }

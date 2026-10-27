@@ -20,6 +20,7 @@ use Test::MockModule();
 use File::Temp qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
+use Cpanel::JSON::XS();
 
 use FindBin::libs;
 
@@ -438,7 +439,7 @@ subtest 'the target of an MX holds the address, and is no alias' => sub {
     is_deeply( $opts->{domain_aliases}, [ "alt.$PUBLIC", "www.$PUBLIC" ], 'and it is not among the aliases' );
     my $addressed = qr/--addressed[ ]mail[.]\Q$PUBLIC\E/;
     my $records   = qr/\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]alt[.]/;
-    like( $fragment, qr/publish_dns_records[ ]$addressed[ ]$records/, 'so the publisher gives it an A record at the address of the domain' );
+    like( $fragment, qr/publish_dns_records[ ]--records[ ]\S+[ ]$addressed[ ]$records/, 'so the publisher gives it an A record at the address of the domain' );
 
     my ($plain) = publishing( 'registrar', $REGISTRAR, %mail, modules => ['registrar'] );
     is_deeply( $plain->{address_names}, [], 'a guest that runs no mail has no such name' );
@@ -448,6 +449,33 @@ subtest 'the target of an MX holds the address, and is no alias' => sub {
     $mock->redefine( addressed_names => sub { return ( "mail.$PUBLIC", 'mx.customer.test' ) } );
     my ($outside) = publishing( 'registrar', { registrar => { type => 'easydns', accounts => \%ACCOUNTS } }, %mail );
     is_deeply( $outside->{address_names}, ["mail.$PUBLIC"], 'a name in a zone of an account is not written in the zone of the domain' );
+};
+
+subtest 'the records of mail go to the publisher in a file of their own' => sub {
+    my %mail = ( %ON_PUBLIC, hostnames => ["mail.$PUBLIC"], modules => [qw{registrar mail}] );
+    my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %mail );
+
+    my %by = map { ( "$_->{type} $_->{name}" . ( $_->{type} eq 'TXT' ? " $_->{match}" : q{} ) => $_ ) } @{ $opts->{zone_records} };
+    is( $by{"MX $PUBLIC"}{content},                    "10 mail.$PUBLIC.",      'the MX names the mail server, with its priority' );
+    is( $by{"TXT $PUBLIC v=spf1"}{content},            'v=spf1 +a +mx -all',    'the SPF policy is a record of mail, matched by its start' );
+    is( $by{"SRV _submissions._tcp.$PUBLIC"}{content}, "0 0 465 mail.$PUBLIC.", 'and each port of a mail client has its SRV' );
+
+    my $installed = qr{/etc/provisioner/records/\Q$PUBLIC\E[.]json};
+    like( $fragment, qr{^install[ ].*registrar-records[.]json[ ]$installed$}m, 'the fragment installs the file' );
+    like( $fragment, qr{publish_dns_records[ ]--records[ ]$installed[ ]},      'and hands it to the publisher' );
+
+    my $out      = tempdir( CLEANUP => 1 );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { return $REGISTRAR } );
+    $cookbook->redefine( host_of       => sub { return } );
+    my @written = fresh('registrar')->generate_files( $out, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/root/bin', %{ $REGISTRAR->{registrar} }, %mail );
+    ok( ( grep { $_ eq 'registrar-records.json' } @written ), 'generate_files says that it wrote the file' );
+    my $written = Cpanel::JSON::XS::decode_json( File::Slurper::read_binary("$out/registrar-records.json") );
+    is_deeply( $written, $opts->{zone_records}, 'which holds the records, as the publisher reads them' );
+
+    my ( $plain, $without ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, modules => ['registrar'] );
+    is_deeply( $plain->{zone_records}, [], 'a guest that runs no mail has no such records' );
+    unlike( $without, qr/--records/, 'and its publisher is handed no file' );
 };
 
 subtest 'each zone that an account lists gets the credentials of that account' => sub {

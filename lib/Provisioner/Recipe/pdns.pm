@@ -457,6 +457,7 @@ sub enrich {
     my $registrar = Provisioner::Cookbook->load('registrar');
     $opts{domain_aliases} = [ $registrar->zone_aliases(%opts) ];
     $opts{address_names}  = [ $registrar->zone_address_names(%opts) ];
+    $opts{zone_records}   = [ $registrar->zone_records(%opts) ];
 
     # The zones that an account of the registrar names this guest the authority
     # of, once for the guest and not again for a domain layered onto it.

@@ -25,4 +25,4 @@ export LEXICON_[% lexicon.type.upper() %]_[% lv.key %]="[% lv.value %]"
 COMMAND=$1;
 shift;
 
-lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %][% lexicon.type %] $COMMAND [% domain %] $@
+lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %][% lexicon.type %] $COMMAND [% domain %] "$@"

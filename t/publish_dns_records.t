@@ -437,6 +437,121 @@ subtest 'a name that holds a CNAME gets no other record, and one that holds an A
     );
 };
 
+# A records file, as Provisioner::Recipe::registrar writes it.
+sub records_file {
+    my (@records) = @_;
+    my $file = "$dir/records.json";
+    open my $out, '>', $file or BAIL_OUT("Cannot write $file: $!");
+    print {$out} Cpanel::JSON::XS->new->encode( \@records );
+    close $out or BAIL_OUT("Cannot close $file: $!");
+    return $file;
+}
+
+my %MX  = ( type => 'MX',  name => $DOMAIN, content => "10 mail.$DOMAIN." );
+my %SPF = ( type => 'TXT', name => $DOMAIN, content => 'v=spf1 +a +mx -all', match => 'v=spf1' );
+my %SRV = ( type => 'SRV', name => "_imaps._tcp.$DOMAIN", content => "0 0 993 mail.$DOMAIN.", match => q{} );
+
+subtest 'each record of the file goes up beside the names' => sub {
+    my $file = records_file( \%MX, \%SPF, \%SRV );
+    against(
+        holding(),
+        sub {
+            my ($ran) = @_;
+            my $rc;
+            capture { $rc = Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            is( $rc, 0, 'the run succeeds' );
+
+            my @made = sent( $ran, 'create' );
+            my $mx   = qr/--content='10[ ]mail[.]\Q$DOMAIN\E[.]'/;
+            ok( ( grep { m/[ ]create[ ]MX[ ]--name='\Q$DOMAIN\E'[ ]$mx/ } @made ),                  'the MX, with its priority in the content' ) or diag join "\n", @made;
+            ok( ( grep { m/[ ]create[ ]TXT[ ].*--content='v=spf1[ ][+]a[ ][+]mx[ ]-all'/ } @made ), 'the TXT, with its spaces in one argument' ) or diag join "\n", @made;
+            ok( ( grep { m/[ ]create[ ]SRV[ ]--name='_imaps[.]_tcp[.]/ } @made ),                   'and the SRV' )                              or diag join "\n", @made;
+            ok( ( grep { m/[ ]create[ ]A[ ]/ } @made ),                                             'and the A record of the domain still' );
+        }
+    );
+};
+
+subtest 'a TXT record with a match replaces only the record that it matches' => sub {
+    my $file = records_file( \%SPF );
+    my @apex = (
+        { name => $DOMAIN, type => 'TXT', content => 'google-site-verification=xyz', id => 'theirs' },
+        { name => $DOMAIN, type => 'TXT', content => '"v=spf1 -all"',                id => 'ours' },
+    );
+    against(
+        holding(@apex),
+        sub {
+            my ($ran) = @_;
+            capture { Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            my ($update) = grep { index( $_, ' TXT ' ) >= 0 } sent( $ran, 'update' );
+            like( $update // q{}, qr/--identifier='ours'/, 'the SPF that is there is updated, through its identifier' );
+            is( scalar grep( { index( $_, 'theirs' ) >= 0 } @{$ran} ),               0, 'and the other TXT record at the apex is left alone' );
+            is( scalar grep( { index( $_, ' TXT ' ) >= 0 } sent( $ran, 'create' ) ), 0, 'and no second SPF is created' );
+        }
+    );
+
+    against(
+        holding( { name => $DOMAIN, type => 'TXT', content => '"v=spf1 +a +mx -all"', id => 'ours' } ),
+        sub {
+            my ($ran)  = @_;
+            my ($said) = capture { Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            is( scalar grep( { index( $_, ' TXT ' ) >= 0 } sent( $ran, 'create' ), sent( $ran, 'update' ) ), 0, 'a record that is already right, in quotes, is not sent again' );
+            like( $said, qr/TXT[ ]\Q$DOMAIN\E[ ]is[ ]already/, 'and it says so' );
+        }
+    );
+};
+
+subtest 'a record without a match owns only the same content, and an empty match owns the name' => sub {
+    my $file = records_file( \%MX, \%SRV );
+    against(
+        holding(
+            { name => $DOMAIN,               type => 'MX',  content => "20 backup.$DOMAIN.",     id => 'backup' },
+            { name => "_imaps._tcp.$DOMAIN", type => 'SRV', content => "0 0 9993 mail.$DOMAIN.", id => 'old-srv' },
+        ),
+        sub {
+            my ($ran) = @_;
+            capture { Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            is( scalar grep( { index( $_, 'backup' ) >= 0 } @{$ran} ), 0, 'another MX of the domain is left alone' );
+            ok( ( grep { index( $_, ' create MX ' ) >= 0 } @{$ran} ), 'and ours is created beside it' );
+            like( ( grep { index( $_, ' SRV ' ) >= 0 } sent( $ran, 'update' ) )[0] // q{}, qr/--identifier='old-srv'/, 'the SRV of the name is updated in place' );
+        }
+    );
+};
+
+subtest 'a record at a name that holds a CNAME is refused' => sub {
+    my $file = records_file( { type => 'TXT', name => "_dmarc.$DOMAIN", content => 'v=DMARC1; p=none', match => 'v=DMARC1' } );
+    against(
+        holding( { name => "_dmarc.$DOMAIN", type => 'CNAME', content => 'elsewhere.test', id => 'c' } ),
+        sub {
+            my ($ran) = @_;
+            my $rc;
+            my ( undef, $said ) = capture { $rc = Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            is( $rc, 1, 'the run fails' );
+            like( $said, qr/Refusing[ ]to[ ]publish[ ]TXT[ ]_dmarc/, 'naming the record' );
+            is( scalar grep( { index( $_, ' TXT ' ) >= 0 } sent( $ran, 'create' ) ), 0, 'and sends nothing' );
+        }
+    );
+};
+
+subtest 'a records file that is not a list stops the run' => sub {
+    my $file = "$dir/broken.json";
+    open my $out, '>', $file or BAIL_OUT("Cannot write $file: $!");
+    print {$out} '{}';
+    close $out or BAIL_OUT("Cannot close $file: $!");
+    against(
+        holding(),
+        sub {
+            like(
+                exception {
+                    capture { Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) }
+                },
+                qr/holds[ ]no[ ]list/,
+                'naming the file'
+            );
+        }
+    );
+    like( exception { Trog::PublishDNSRecords::main( '--records', $file, '--delegate', '--shortcut', $shortcut, 'z.test', 'ns.z.test' ) }, qr/usage/, 'and a delegation takes no records' );
+};
+
 subtest 'without the shortcut there is no credential, and it says so' => sub {
     my $mock = Test::MockModule->new( 'Trog::PublishDNSRecords', no_auto => 1 );
     $mock->redefine( shortcut_for => sub { return "$dir/nothing-is-here" } );
