@@ -63,6 +63,10 @@ A guest that runs `roundcube` behind a relay needs no public name for webmail.
 `roundcube` adds `webmail.$domain` itself, and its login jail bans through the
 relay.  `perldoc Provisioner::Recipe::roundcube` has the details.
 
+A guest that runs `mail` behind a relay needs no public name for the settings
+of mail clients either.  `mail` adds `autodiscover.$domain` and
+`autoconfig.$domain` itself.
+
 The DNS record of a public name points at the address of the relay.  So for
 each domain behind the relay, set `registrar.address` to that address.
 

@@ -432,12 +432,12 @@ my %ACCOUNTS = (
 );
 
 subtest 'the target of an MX holds the address, and is no alias' => sub {
-    my %mail = ( %ON_PUBLIC, hostnames => [ "www.$PUBLIC", "mail.$PUBLIC" ], modules => [qw{registrar mail}] );
+    my %mail = ( %ON_PUBLIC, hostnames => [ "www.$PUBLIC", "mail.$PUBLIC", "autodiscover.$PUBLIC" ], modules => [qw{registrar mail}] );
     my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %mail );
 
-    is_deeply( $opts->{address_names},  ["mail.$PUBLIC"],                 'the name that the mail recipe says a record targets' );
-    is_deeply( $opts->{domain_aliases}, [ "alt.$PUBLIC", "www.$PUBLIC" ], 'and it is not among the aliases' );
-    my $addressed = qr/--addressed[ ]mail[.]\Q$PUBLIC\E/;
+    is_deeply( $opts->{address_names},  [ "autodiscover.$PUBLIC", "mail.$PUBLIC" ], 'the names that SRV and MX records of mail target' );
+    is_deeply( $opts->{domain_aliases}, [ "alt.$PUBLIC",          "www.$PUBLIC" ],  'and neither is among the aliases' );
+    my $addressed = join q{[ ]}, map { "--addressed[ ]\Q$_.$PUBLIC\E" } qw{autodiscover mail};
     my $records   = qr/\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]alt[.]/;
     like( $fragment, qr/publish_dns_records[ ]--records[ ]\S+[ ]$addressed[ ]$records/, 'so the publisher gives it an A record at the address of the domain' );
 

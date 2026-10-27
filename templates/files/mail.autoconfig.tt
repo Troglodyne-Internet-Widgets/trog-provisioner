@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The settings of a mail client, in the format of Mozilla autoconfig, which
+     Thunderbird fetches from autoconfig.<domain>/mail/config-v1.1.xml.  The
+     ports are those that take TLS at once.  The login is the whole address,
+     because the passwd-file userdb of dovecot is keyed by it. -->
+<clientConfig version="1.1">
+  <emailProvider id="[% domain %]">
+    <domain>[% domain %]</domain>
+    <displayName>[% domain %]</displayName>
+    <displayShortName>[% domain %]</displayShortName>
+    <incomingServer type="imap">
+      <hostname>mail.[% domain %]</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <incomingServer type="pop3">
+      <hostname>mail.[% domain %]</hostname>
+      <port>995</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>mail.[% domain %]</hostname>
+      <port>465</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>
