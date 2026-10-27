@@ -15,7 +15,7 @@
       <Protocol>
         <Type>SMTP</Type>
         <Server>[% domain %]</Server>
-        <Port>587</Port>
+        <Port>465</Port>
         <SPA>on</SPA>
         <SSL>on</SSL>
         <AuthRequired>on</AuthRequired>
