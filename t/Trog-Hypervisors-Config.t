@@ -38,6 +38,12 @@ subtest 'load' => sub {
     $fleet = Trog::Hypervisors::Config->load( fleet_of("[b]\nlibvirt_uri = qemu:///system\n\n[a]\nlibvirt_uri = qemu:///system\n") );
     is_deeply( [ $fleet->names ], [qw{b a}], 'a fleet is read in the order of the file, not sorted' );
 
+    # Measured on a dry run of bin/provision, which asked for the fleet inside
+    # a loop over two constants and was told that there was none.
+    my $path = fleet_of("[a]\nlibvirt_uri = qemu:///system\n");
+    my @read = map { [ Trog::Hypervisors::Config->load($path)->names ] } qw{secrets built};
+    is_deeply( \@read, [ ['a'], ['a'] ], 'a fleet loaded where $_ is a constant is still the fleet' );
+
     like(
         exception { Trog::Hypervisors::Config->load( fleet_of("libvirt_uri=qemu:///system\n") ) }, qr/names[ ]no[ ]hypervisors/,
         'a file with no blocks is an error, rather than silently finding nothing'
