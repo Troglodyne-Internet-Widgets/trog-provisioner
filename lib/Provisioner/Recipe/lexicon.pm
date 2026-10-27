@@ -22,9 +22,13 @@ use Provisioner::Cookbook();
 =head2 DESCRIPTION
 
 This recipe installs lexicon, the client that every recipe here uses to write a
-DNS record.  It also applies three patches to lexicon and installs a shortcut
+DNS record.  It also applies four patches to lexicon and installs a shortcut
 for the domain.  One of the patches lets a C<CNAME> in a pdns zone name a
 target outside that zone, as the names in a zone of a registrar account need.
+Another lets the easydns provider take an C<MX> or C<SRV> record as the
+powerdns provider does, with its whole RDATA in the content, such as
+C<10 mail.example.com.>.  The provider sends the priority to easyDNS in a
+field of its own.
 
 You do not usually configure it yourself.  Each recipe that runs lexicon requires
 it.  L<Provisioner::Recipe::pdns> and L<Provisioner::Recipe::registrar> hold
@@ -68,7 +72,7 @@ sub enrich {
 
 =head2 %files = $recipe->template_files()
 
-Returns the shortcut template and the three patches, each mapped to the name
+Returns the shortcut template and the four patches, each mapped to the name
 of the file that it becomes.
 
 =cut
@@ -79,6 +83,7 @@ sub template_files {
         'patches/lexicon-pdns-af-unix.patch'           => 'lexicon-pdns-af-unix.patch',
         'patches/lexicon-arbitrary-record-types.patch' => 'lexicon-arbitrary-record-types.patch',
         'patches/lexicon-pdns-absolute-cname.patch'    => 'lexicon-pdns-absolute-cname.patch',
+        'patches/lexicon-easydns-priority.patch'       => 'lexicon-easydns-priority.patch',
     );
 }
 
