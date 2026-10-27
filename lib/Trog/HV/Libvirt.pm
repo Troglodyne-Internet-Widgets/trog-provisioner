@@ -14,6 +14,7 @@ use Digest::SHA();
 use URI();
 use URI::Split();
 
+use List::Util();
 use Time::HiRes qw{sleep time};
 use Trog::Local();
 use File::Basename();
@@ -30,6 +31,10 @@ my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
 # The suffix that clone_guest_disk gives a copy, and that backup_volumes finds.
 my $BACKUP_SUFFIX = '.bak-qcow2';
+
+# Where distributions put the libvirt lease helper, which release_dhcp_lease
+# runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
+my @LEASE_HELPERS = qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
 
 =head1 NAME
 
@@ -641,13 +646,25 @@ sub release_dhcp_lease {
     return 0 unless $ip;
     $bridge //= $self->virbr_device;
 
-    my ($helper) = grep { $self->file_exists($_) } qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
+    my $helper = $self->lease_helper;
     unless ($helper) {
         warn "No libvirt lease helper found on the hypervisor, leaving the lease for $ip alone\n";
         return 0;
     }
 
     return $self->run_sudo( "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip ) == 0 ? 1 : 0;
+}
+
+=head2 $path = $hv->lease_helper()
+
+The path of the libvirt lease helper on the hypervisor, or undef when it has
+none.  Distributions put it in one of two places.
+
+=cut
+
+sub lease_helper {
+    my ($self) = @_;
+    return List::Util::first { $self->file_exists($_) } @LEASE_HELPERS;
 }
 
 =head2 eject_cdrom($domain, $target)
@@ -694,24 +711,7 @@ sub pool {
     $name //= $self->pool_name;
     return $self->{_pools}{$name} if $self->{_pools}{$name};
 
-    my $vmm  = $self->vmm;
-    my $pool = eval { $vmm->get_storage_pool_by_name($name) };
-
-    unless ($pool) {
-        my $path = $self->pool_path;
-        print "Defining storage pool $name at $path\n";
-
-        $pool = $vmm->define_storage_pool(<<"XML");
-<pool type='dir'>
-  <name>$name</name>
-  <target><path>$path</path></target>
-</pool>
-XML
-        eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ); 1 } or do {
-            die "Could not build the storage pool $name at $path: $@";
-        };
-        $pool->set_autostart(1);
-    }
+    my $pool = eval { $self->vmm->get_storage_pool_by_name($name) } // $self->define_pool( $name, $self->pool_path );
 
     if ( !$pool->is_active() ) {
         eval { $pool->create(); 1 } or do {
@@ -719,6 +719,40 @@ XML
         };
     }
     return $self->{_pools}{$name} = $pool;
+}
+
+=head2 $pool = $hv->define_pool($name, $path, %permissions)
+
+Defines a directory pool C<$name> at C<$path>, builds it and sets it to start
+with the host, and returns the pool object, which is not started.  Dies if
+libvirt cannot build it.
+
+C<%permissions> takes C<owner> and C<group>, as numeric ids, and C<mode>.
+libvirt applies them to the directory when it builds the pool, and again on
+every later build, so a C<chown> by hand does not last.  Without them, libvirt
+uses its defaults.
+
+=cut
+
+sub define_pool {
+    my ( $self, $name, $path, %permissions ) = @_;
+    print "Defining storage pool $name at $path\n";
+
+    my $permissions = join q{}, map { "<$_>$permissions{$_}</$_>" } grep { defined $permissions{$_} } qw{mode owner group};
+    $permissions = "<permissions>$permissions</permissions>" if $permissions;
+
+    my $pool = $self->vmm->define_storage_pool(<<"XML");
+<pool type='dir'>
+  <name>$name</name>
+  <target><path>$path</path>$permissions</target>
+</pool>
+XML
+    eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ); 1 } or do {
+        die "Could not build the storage pool $name at $path: $@";
+    };
+    $pool->set_autostart(1);
+
+    return $pool;
 }
 
 =head2 volume($name, $pool)
@@ -1337,16 +1371,29 @@ L</pool_takes_direct_io> decides the cache mode.
 
 sub pool_fstype {
     my ($self) = @_;
-    return $self->{pool_fstype} if defined $self->{pool_fstype};
+    return $self->{pool_fstype} //= $self->path_fstype( $self->pool_path );
+}
 
-    # capture_cmd takes a shell string, and the pool path can come from a
+=head2 $type = $hv->path_fstype($path)
+
+The type of the filesystem at C<$path> on the hypervisor, as C<stat -f> names
+it, or an empty string when C<stat> does not answer.  L</pool_fstype> asks it
+of the pool.  F<bin/runner_account> asks it of the directory that a new pool
+goes under, before the pool exists.
+
+=cut
+
+sub path_fstype {
+    my ( $self, $path ) = @_;
+
+    # capture_cmd takes a shell string, and the path can come from a
     # configuration file.
-    ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
+    ( my $quoted = $path ) =~ s/'/'\\''/g;
 
     my $type = $self->capture_cmd("stat -f -c %T '$quoted' 2>/dev/null") // '';
     chomp $type;
 
-    return $self->{pool_fstype} = $type;
+    return $type;
 }
 
 =head2 pool_takes_direct_io
@@ -2051,13 +2098,19 @@ lease helper.  Fails, with the commands that give the grant, when it has neither
 A grant for the lease helper alone is enough to build a guest.  The other root
 steps are the first install of F<virtiofs-better> and the C<qemu-img> calls for
 the C<trog-pristine> snapshot and its revert.  Without those, a guest builds,
-but a rebuild cannot keep its disk.  C<sudo -n true>
-fails for the narrow grant too, so this also asks C<sudo -n -l> about the lease
-helper.
+but a rebuild cannot keep its disk.  C<runner_sudoers> writes the narrow grant
+with all of them but the install.
+
+C<sudo -n true> fails for the narrow grant, so this also asks C<sudo -n -l>
+about the lease helper.  It asks with the arguments that
+C<release_dhcp_lease> passes, because a grant that pins the arguments does not
+match the helper alone.
 
 =cut
 
-my $LEASE_HELPER = '/usr/lib/libvirt/libvirt_leaseshelper';
+# An address of TEST-NET-1, which no lease has.  sudo -l only says whether the
+# command would be allowed, and runs nothing.
+my $PROBE_LEASE = '192.0.2.1';
 
 sub check_passwordless_sudo {
     my ($self) = @_;
@@ -2071,11 +2124,12 @@ sub check_passwordless_sudo {
     }
 
     # A narrow grant is correct for an account that builds guests unattended.
-    return $self->verdict( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
-A rebuild that keeps the disk of a guest will not work for this account, which
-is deliberate at this level.  Widen the grant if you need it.
+    my $helper = $self->lease_helper // $LEASE_HELPERS[0];
+    return $self->verdict( 1, "Passwordless sudo for $helper, which is what a provision needs", <<"FIX" )
+A rebuild that keeps the disk of a guest works only if the grant also names
+qemu-img on the volumes of the pool.  bin/runner_account writes that grant.
 FIX
-      if $self->run_cmd( qw{sudo -n -l}, $LEASE_HELPER ) == 0;
+      if $self->run_cmd( qw{sudo -n -l}, $helper, qw{del ip}, $PROBE_LEASE ) == 0;
 
     my $user   = $self->ssh_user // 'you';
     my $target = $self->is_local ? 'this machine' : $self->ssh_host;
@@ -2099,14 +2153,99 @@ want standing, make it, use it, and take it away again afterwards.
 
 There is a narrower one that is enough to build guests with.  Everything else
 a provision does is the libvirt API -- which wants group membership, not root
--- or a write into the storage pool:
+-- or a write into the storage pool.  For an account of its own, with a pool
+that has a quota, run this from the machine that provisions:
 
-    echo '$user ALL=(root) NOPASSWD: $LEASE_HELPER' | sudo tee /etc/sudoers.d/90-$user
-    sudo usermod -aG libvirt $user
+    bin/runner_account --hypervisor <name> --user <account> \\
+        --pool-name <pool> --pool-path <dir> --quota 500G
 
 That needs /usr/libexec/virtiofs-better already in place -- bin/provision
 installs it on first use, which is the one step that wants the wider grant.
 FIX
+}
+
+=head2 $text = Trog::HV::Libvirt->runner_sudoers(%args)
+
+The sudoers file for an account that builds guests on this hypervisor, and
+cannot do anything else as root.  C<%args> takes C<user>, C<pool_path>,
+C<lease_helper> and C<qemu_img>, the last two as full paths.  Dies if a value
+holds a character that sudoers or the patterns below would read as syntax.
+
+These are all of the commands that this tool runs as root on a hypervisor
+while it builds, rebuilds or destroys a guest:
+
+=over 4
+
+=item * C<VIR_BRIDGE_NAME=$bridge $lease_helper del ip $address>, from
+C<release_dhcp_lease>.  The file keeps C<VIR_BRIDGE_NAME> for that command
+only.  Without that line, sudo refuses the variable, and so the command.  The
+grant does not use C<SETENV>, because C<SETENV> lets the caller set
+C<LD_PRELOAD> too.
+
+=item * C<qemu-img info -U --output=json $volume>, C<qemu-img snapshot -c>,
+C<-a> and C<-l -U>, from C<disk_layout> and the snapshot methods, which a
+rebuild that keeps the disk of a guest uses.  They need root because libvirt
+gives a disk to C<libvirt-qemu> when the guest starts.
+
+=back
+
+Each argument list is a regular expression, which sudo 1.9.10 and later
+accept.  A volume must be a plain file name directly in C<pool_path>, and so
+cannot name the disk of a guest in another pool.  With a shell glob instead, a
+C<*> also matches C<../>, and the account could revert the disk of any guest.
+
+Three other commands run as root on a hypervisor, and this grant leaves them
+out on purpose.  The account cannot run them.
+
+=over 4
+
+=item * The first install of F</usr/libexec/virtiofs-better>, in
+C<prepare_host>.  It runs once on each hypervisor, and every later provision
+finds the file there.  Install it from an account with the wide grant first.
+
+=item * The address sweep of L<Provisioner::IPPool/ensure_seeded>, which runs
+C<sudo sh -c>.  That is root for any command, and cannot be narrowed.  Without
+it, the sweep finds nothing, and the pool of the runner starts empty.  A
+runner that takes DHCP addresses for its guests does not need it.
+
+=item * The libguestfs tools and the console log of F<bin/debug_boot>.  Those
+read the disk of any guest, which is the reason to run them.
+
+=back
+
+The account also needs the C<libvirt> group for the API.  On the system URI,
+that group can define a domain that mounts any file of the host, so it is
+root in all but name.  Only the polkit access driver of libvirt narrows it,
+and this file cannot.  See QUOTAS in L<Provisioner::Recipe::trogrunner>.
+
+=cut
+
+sub runner_sudoers {
+    my ( $class, %args ) = @_;
+
+    # sudoers reads , : = \ ! and space as syntax, and a pattern reads the
+    # rest of the punctuation.  None of them has a reason to be in these.
+    foreach my $key (qw{user pool_path lease_helper qemu_img}) {
+        my $value = $args{$key} // die "runner_sudoers needs $key\n";
+        my $ok    = $key eq 'user' ? qr/\A[[:lower:]_][[:lower:]\d_-]*\z/ : qr{\A(?:/[\w.-]+)+\z};
+        die "runner_sudoers: '$value' is not a $key that a sudoers file can hold as written\n" unless $value =~ $ok;
+    }
+    my ( $user, $lease, $qemu ) = @args{qw{user lease_helper qemu_img}};
+
+    # Escaped for the pattern.  The check above leaves only the dot to escape.
+    ( my $pool = $args{pool_path} ) =~ s/[.]/\\./g;
+    my $file = '[A-Za-z0-9_.-]+';
+
+    return <<"SUDOERS";
+# What trog-provisioner runs as root on this hypervisor for $user, and nothing
+# else.  Written by bin/runner_account.  runner_sudoers in Trog::HV::Libvirt
+# says why each line is here, and which commands are left out.
+Defaults!$lease env_keep += "VIR_BRIDGE_NAME"
+$user ALL=(root) NOPASSWD: $lease ^del ip [0-9.]+\$, \\
+    $qemu ^info -U --output=json $pool/$file\$, \\
+    $qemu ^snapshot -[ca] $file $pool/$file\$, \\
+    $qemu ^snapshot -l -U $pool/$file\$
+SUDOERS
 }
 
 =head2 $result = $hv->check_pool_writable()

@@ -221,6 +221,7 @@ cpan
 cpanm
 cpanmetadb
 cpm
+cpu
 cpuid
 cpus
 cron
@@ -290,6 +291,7 @@ influxd
 influxdb
 ingester
 init
+io
 iothreads
 ip
 ipmap
@@ -449,6 +451,7 @@ subnet
 substring
 subtest
 sudo
+sudoers
 symlink
 sysctl
 syslog
