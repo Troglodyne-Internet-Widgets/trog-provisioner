@@ -18,6 +18,7 @@ use Time::HiRes qw{sleep time};
 use Trog::Local();
 use File::Basename();
 use File::Slurper();
+use List::Util();
 use Cpanel::JSON::XS();
 use Provisioner::Cookbook();
 use Provisioner::Vars();
@@ -1889,9 +1890,14 @@ sub guest_volumes {
 The address that I<this machine> uses to SSH into a guest.
 
 On a local hypervisor, that is C<$lease_ip>, the libvirt NAT lease.  On a remote
-hypervisor, the NAT lease routes only from the hypervisor.  So the result is the
-first address in C<ips> in the configuration, the bridged static address of the
-guest.  Dies if C<ips> is not set.
+hypervisor, the NAT lease usually routes only from the hypervisor.  So the
+result is the first address in C<ips> in the configuration, the bridged static
+address of the guest.
+
+A guest with no C<ips> has only its lease, which
+L<Provisioner::IPPool/offers> explains.  This machine reaches that lease when
+it is a guest of the same hypervisor, on the same NAT network: see
+C<on_nat_network>.  Then the result is C<$lease_ip>.  Dies if neither is so.
 
 =cut
 
@@ -1900,9 +1906,49 @@ sub guest_ssh_ip {
     return $lease_ip if $self->is_local;
 
     my ($ip) = grep { $_ } $config->param('ips');
-    die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n" . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease (" . ( $lease_ip // 'none' ) . ") is only\nreachable from the hypervisor itself.\n"
-      unless $ip;
-    return $ip;
+    return $ip       if $ip;
+    return $lease_ip if $lease_ip && $self->on_nat_network;
+
+    die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n" . "routable address: set 'ips' in provision.conf, or run this from a guest of that hypervisor on its NAT network.\n" . "The libvirt NAT lease (" . ( $lease_ip // 'none' ) . ") is reachable only from the hypervisor and from its other guests.\n";
+}
+
+=head2 $bool = on_nat_network()
+
+Whether this machine is on the NAT network of the hypervisor, so that it reaches
+the lease of a guest there directly.
+
+It is, when the hypervisor leased it one of the addresses that it holds.  That
+is the case of a runner that is itself a guest of the hypervisor.  The subnet
+alone does not answer this.  The C<default> network of libvirt has the same
+block on every host that does not change it, so a machine on that network of one
+hypervisor is in the subnet of the others too, and reaches none of their guests.
+
+Always true on a local hypervisor.  It asks once, and remembers the answer.
+
+=cut
+
+sub on_nat_network {
+    my ($self) = @_;
+    return 1 if $self->is_local;
+
+    $self->{on_nat_network} //= ( List::Util::any { Trog::Local->holds_address($_) } $self->lease_ips('default') ) ? 1 : 0;
+    return $self->{on_nat_network};
+}
+
+=head2 $address = nat_address($domain)
+
+The NAT lease of the guest of C<$domain>, when this machine reaches it, as
+C<on_nat_network> says.  Undef when the guest holds no lease, or when this
+machine cannot reach it.
+
+A guest that got no address from the pool has no other address, and this is how
+C<bin/new_config> finds it again to salvage it before a rebuild.
+
+=cut
+
+sub nat_address {
+    my ( $self, $domain ) = @_;
+    return $self->on_nat_network ? $self->inspection_address($domain) : undef;
 }
 
 =head2 image_for_distro($distro, $release)

@@ -530,6 +530,28 @@ sub refresh_via {
     return scalar keys %clients;
 }
 
+=head2 $bool = offers($pool, $bin)
+
+Whether C<$bin> of C<$pool> has an address to give out, free or not.  C<$bin>
+defaults to C<guests>.  False for a pool that names no addresses and no blocks,
+and for a pool that has none at all.
+
+A guest of a configuration whose C<guests> bin offers nothing gets no address
+from the pool.  It takes a lease on the NAT network of its hypervisor, and its
+bridged interface stays unconfigured.  That is the case of a runner that builds
+throwaway guests, which nothing outside the hypervisor has to reach.  So the
+callers ask this, and not C<assign>, which dies on such a bin.
+
+=cut
+
+sub offers {
+    my ( $pool, $bin ) = @_;
+
+    my %bins   = bins( $pool                      // {} );
+    my @blocks = blocks( $bins{ $bin // $GUESTS } // {} );
+    return @blocks ? 1 : 0;
+}
+
 =head2 assign($domain, $pool, $bin)
 
 Returns the address of C<$domain> in C<$bin> of C<$pool>.  C<$bin> defaults to

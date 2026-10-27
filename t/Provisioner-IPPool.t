@@ -145,6 +145,16 @@ subtest 'assign: dies when no pool is configured' => sub {
     like( exception { Provisioner::IPPool::assign( 'a.test', {} ) }, qr/No[ ]\[ip_pool\][ ]section/, 'says so' );
 };
 
+subtest 'offers: whether a bin has an address to give out' => sub {
+    ok( Provisioner::IPPool::offers( { cidr => '192.0.2.0/30' } ),                              'a block' );
+    ok( Provisioner::IPPool::offers( { addresses => '192.0.2.7' } ),                            'one address' );
+    ok( !Provisioner::IPPool::offers( {} ),                                                     'no pool at all' );
+    ok( !Provisioner::IPPool::offers( { addresses => [], cidr => [] } ),                        'a pool that names nothing' );
+    ok( !Provisioner::IPPool::offers( { addresses => q{}, cidr => q{ } } ),                     'or names nothing in a string' );
+    ok( !Provisioner::IPPool::offers( { bins => { vpn => { cidr => '10.8.0.0/30' } } } ),       'another bin is not the guests' );
+    ok( Provisioner::IPPool::offers( { bins => { vpn => { cidr => '10.8.0.0/30' } } }, 'vpn' ), 'unless that is the bin asked about' );
+};
+
 subtest 'release: gives it back, and only for a guest' => sub {
     fresh_db();
     my $pool = { addresses => '10.9.9.10 10.9.9.11' };

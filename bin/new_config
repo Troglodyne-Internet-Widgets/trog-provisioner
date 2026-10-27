@@ -557,10 +557,10 @@ sub transfer_to {
 
 # A Trog::Guest for the guest that is about to be rebuilt, as $admin_user: the
 # same object for the same three arguments, for the life of the process.
-my sub salvage_guest ( $static_ip, $admin_user, $cfg_dir ) {
+my sub salvage_guest ( $address, $admin_user, $cfg_dir ) {
 
     # Without a CIDR suffix.
-    ( my $host = $static_ip ) =~ s{/\N*\z}{};
+    ( my $host = $address ) =~ s{/\N*\z}{};
 
     # One connection for each guest, not one for each call, because both
     # callers ask inside the loop over the modules.
@@ -683,12 +683,22 @@ sub handle_domain {
     # address from the pool stays reserved for a guest that never uses it.
     my ( $static_ip, $ip_conf ) = ( undef, {} );
     if ( !$hv->manages_addresses ) {
-        Provisioner::IPPool::ensure_seeded( $pool_conf, $gateway );
+        if ( Provisioner::IPPool::offers($pool_conf) ) {
+            Provisioner::IPPool::ensure_seeded( $pool_conf, $gateway );
 
-        # One transaction, so that two provisions cannot get the same address.
-        # A domain that you provision again keeps its address.
-        $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
-        $ip_conf   = Provisioner::IPPool::assignments();
+            # One transaction, so that two provisions cannot get the same
+            # address.  A domain that you provision again keeps its address.
+            $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
+        }
+        else {
+            die "The ip pool offers no addresses, so $fqdn would have only a lease on the NAT network of " . $hv->describe . ",\n" . "and this machine is not on that network to reach it.  Give ip_pool addresses in _global, or run this from a guest of that hypervisor.\n"
+              unless $hv->on_nat_network;
+            print "The ip pool offers no addresses, so $fqdn takes a lease on the NAT network of " . $hv->describe . ", and its bridged interface stays unconfigured.\n";
+        }
+
+        # Also for a guest with no address, because the templates name the
+        # other guests by what they hold.
+        $ip_conf = Provisioner::IPPool::assignments();
 
         # A single label must not go into a zone file without a warning.
         my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
@@ -855,14 +865,18 @@ sub handle_domain {
     $global_config->{packager_up_invocation}     = $distro->packager_up_invocation;
     $global_config->{packager_remove_invocation} = $distro->packager_remove_invocation;
 
+    # Where the guest is, to salvage it: its address in the pool, or the lease
+    # of a guest that has none.  Not asked with --skip_ssh.
+    my $guest_ip = $static_ip // ( $skip_ssh || $hv->manages_addresses ? undef : $hv->nat_address($fqdn) );
+
     # Whether the guest is up.  The connection is only the probe: the fetch
     # goes through salvage_guest.  A guest without an address yet is not
     # built, so it has nothing to salvage.
     my $target_is_up = 0;
-    if ( !$skip_ssh && $static_ip ) {
+    if ( !$skip_ssh && $guest_ip ) {
 
         # Without a CIDR suffix.
-        ( my $host = $static_ip ) =~ s{/\N*\z}{};
+        ( my $host = $guest_ip ) =~ s{/\N*\z}{};
 
         # From the store, or from the disk for a domain that was never sealed.
         # The domain is the last part of $cfg_dir.
@@ -1016,7 +1030,7 @@ sub handle_domain {
 
             # Before the fetch, so that it gets the current state.
             refresh_salvage(
-                static_ip  => $static_ip,
+                address    => $guest_ip,
                 admin_user => $admin_user,
                 cfg_dir    => $cfg_dir,
                 module     => $module,
@@ -1027,7 +1041,7 @@ sub handle_domain {
                 print "Fetching $to_fetch into $data_dir/$tg{$to_fetch}\n";
 
                 my $gap = salvage_path(
-                    guest       => salvage_guest( $static_ip, $admin_user, $cfg_dir ),
+                    guest       => salvage_guest( $guest_ip, $admin_user, $cfg_dir ),
                     recipe      => $module,
                     host        => $fqdn,
                     user        => $admin_user,
@@ -1309,7 +1323,7 @@ my sub salvage_mtimes ( $guest, $watched ) {
 Runs the C<commands> from the C<remote_prepare> of a recipe as root on the
 guest.  Then the state is up to date when it is salvaged.  Returns 1.
 
-C<static_ip>, C<admin_user> and C<cfg_dir> tell which guest to connect to.
+C<address>, C<admin_user> and C<cfg_dir> tell which guest to connect to.
 C<module> names the recipe.  C<watched> lists the paths that are about to come
 down.
 
@@ -1322,12 +1336,12 @@ fetched.
 =cut
 
 sub refresh_salvage (%args) {
-    my ( $static_ip, $admin_user, $cfg_dir, $module, $commands, $watched ) = @args{qw{static_ip admin_user cfg_dir module commands watched}};
+    my ( $address, $admin_user, $cfg_dir, $module, $commands, $watched ) = @args{qw{address admin_user cfg_dir module commands watched}};
 
     return unless @$commands;
     $watched //= [];
 
-    my $guest = salvage_guest( $static_ip, $admin_user, $cfg_dir );
+    my $guest = salvage_guest( $address, $admin_user, $cfg_dir );
     my $host  = $guest->name;
 
     my %seen = salvage_mtimes( $guest, $watched );

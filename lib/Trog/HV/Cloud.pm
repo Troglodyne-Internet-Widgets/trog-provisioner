@@ -324,7 +324,7 @@ service, and keeps the rest:
 
     sub refusals ($self) { return ( $self->SUPER::refusals, create_disk => 'a disk is a Cinder volume' ) }
 
-=for Pod::Coverage define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image create_disk lease_ip release_dhcp_lease guest_mac nic_slots nic_names has_tpm
+=for Pod::Coverage define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image create_disk lease_ip nat_address on_nat_network release_dhcp_lease guest_mac nic_slots nic_names has_tpm
 
 =cut
 
@@ -338,6 +338,8 @@ sub refusals {
         base_image         => 'a root disk comes from an image of the cloud, not a downloaded file',
         create_disk        => 'a disk is the cloud\'s to make, not a file in a pool',
         lease_ip           => 'the cloud assigns addresses; there is no lease table',
+        nat_address        => 'the cloud assigns addresses; there is no NAT network to reach a guest on',
+        on_nat_network     => 'the cloud assigns addresses; there is no NAT network to be on',
         release_dhcp_lease => 'the cloud assigns addresses; there is no lease to release',
         guest_mac          => 'the cloud assigns the MAC, so it cannot be derived from the name',
         nic_slots          => 'there is no PCI topology to pin an interface to',
@@ -361,6 +363,8 @@ sub pool_target        ( $self, @ ) { return refuse( $self, 'pool_target' ) }
 sub base_image         ( $self, @ ) { return refuse( $self, 'base_image' ) }
 sub create_disk        ( $self, @ ) { return refuse( $self, 'create_disk' ) }
 sub lease_ip           ( $self, @ ) { return refuse( $self, 'lease_ip' ) }
+sub nat_address        ( $self, @ ) { return refuse( $self, 'nat_address' ) }
+sub on_nat_network     ( $self, @ ) { return refuse( $self, 'on_nat_network' ) }
 sub release_dhcp_lease ( $self, @ ) { return refuse( $self, 'release_dhcp_lease' ) }
 sub guest_mac          ( $self, @ ) { return refuse( $self, 'guest_mac' ) }
 sub nic_slots          ( $self, @ ) { return refuse( $self, 'nic_slots' ) }

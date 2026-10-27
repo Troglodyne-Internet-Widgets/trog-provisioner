@@ -50,7 +50,7 @@ sub guest_that {
 sub refresh {
     my ( $commands, $watched ) = @_;
     return Trog::Provisioner::Config::Generator::refresh_salvage(
-        static_ip  => '192.0.2.9',
+        address    => '192.0.2.9',
         admin_user => 'admin',
         cfg_dir    => '/nonexistent',
         module     => 'mariadb',
@@ -75,9 +75,9 @@ subtest 'one connection per guest, however many times a run asks for one' => sub
     );
     $mock->redefine( run_sudo => sub { my ($guest) = @_; push @asked, $guest; return 0 } );
 
-    my sub refresh_on ($static_ip) {
+    my sub refresh_on ($address) {
         return Trog::Provisioner::Config::Generator::refresh_salvage(
-            static_ip  => $static_ip,
+            address    => $address,
             admin_user => 'admin',
             cfg_dir    => '/nonexistent',
             module     => 'mariadb',

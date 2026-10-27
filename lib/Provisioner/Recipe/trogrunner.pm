@@ -40,7 +40,8 @@ use Trog::Utils();
                 resolvers: ["192.0.2.254", "1.1.1.1"]
 
                 # The pool that the runner takes addresses from.  Without
-                # these, every guest it builds stops on "cannot auto-assign IP".
+                # these, each guest it builds has only a lease on the NAT
+                # network of its hypervisor: see offers in Provisioner::IPPool.
                 addresses: "192.0.2.180-192.0.2.199"
                 cidr:      "192.0.2.0/24"
 

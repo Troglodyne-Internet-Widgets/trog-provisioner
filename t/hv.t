@@ -132,7 +132,7 @@ subtest 'pool and domain paths default the way they always did' => sub {
 subtest 'a backend that leaves something out is told what' => sub {
     my @owed = qw{
       build config_keys capacity client_module
-      domain_exists annihilate_domain guest_names guest_ssh_ip
+      domain_exists annihilate_domain guest_names guest_ssh_ip nat_address on_nat_network
       snapshot_names snapshot_current_name create_snapshot revert_snapshot
       prepare_host release_seed guest_volumes uri
       define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image
@@ -282,9 +282,36 @@ subtest 'guest_ssh_ip' => sub {
         'a remote hypervisor uses the bridged static IP, which we can actually route to'
     );
 
+    # Whether this machine is on the NAT network of the hypervisor is whether
+    # the hypervisor leased it an address there.
+    my $mock   = Test::MockModule->new('Trog::HV::Libvirt');
+    my $local_ = Test::MockModule->new('Trog::Local');
+    $mock->redefine( lease_ips => sub { return qw{192.168.122.251 192.168.122.50} } );
+    $local_->redefine( holds_address => sub ( $, $address ) { return $address eq '192.168.122.251' ? 1 : 0 } );
+
+    $remote = fresh( uri => 'qemu+ssh://hv1/system' );
+    is( $remote->guest_ssh_ip( $conf_without, '192.168.122.50' ), '192.168.122.50', 'a remote hypervisor that leased this machine an address on its NAT network uses the lease' );
+    is( $remote->guest_ssh_ip( $conf_with,    '192.168.122.50' ), '203.0.113.10',   'but a static address still comes first' );
+
+    $local_->redefine( holds_address => sub { return 0 } );
+    $remote = fresh( uri => 'qemu+ssh://hv1/system' );
     my $err = exception { $remote->guest_ssh_ip( $conf_without, '192.168.122.50' ) };
-    like( $err, qr/requires[ ]the[ ]guest[ ]to[ ]have[ ]a/, 'and says so when there is none' );
+    like( $err, qr/requires[ ]the[ ]guest[ ]to[ ]have[ ]a/, 'and says so when there is none, and this machine is not on that network' );
     like( $err, qr/\bips\b/,                                'naming the config key to set' );
+    like( $err, qr/NAT[ ]network/,                          'and the other way to reach it' );
+};
+
+subtest 'nat_address: the lease of a guest, when this machine can reach it' => sub {
+    my $mock   = Test::MockModule->new('Trog::HV::Libvirt');
+    my $local_ = Test::MockModule->new('Trog::Local');
+    $mock->redefine( lease_ips => sub ( $, $network, %opts ) { return defined $opts{mac} ? ('192.168.122.50') : qw{192.168.122.251 192.168.122.50} } );
+
+    $local_->redefine( holds_address => sub ( $, $address ) { return $address eq '192.168.122.251' ? 1 : 0 } );
+    is( fresh( uri => 'qemu+ssh://hv1/system' )->nat_address('vm.test'), '192.168.122.50', 'from a machine on the NAT network of the hypervisor' );
+    is( fresh()->nat_address('vm.test'),                                 '192.168.122.50', 'and from the hypervisor itself' );
+
+    $local_->redefine( holds_address => sub { return 0 } );
+    is( fresh( uri => 'qemu+ssh://hv1/system' )->nat_address('vm.test'), undef, 'and not from anywhere else' );
 };
 
 # --- The URI terraform gets is not always the one Sys::Virt gets -------------

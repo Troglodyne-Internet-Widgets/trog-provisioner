@@ -386,7 +386,9 @@ L<Provisioner::Cookbook> tells which hypervisors get the key.  This sub does
 nothing and returns 0 for a domain that does not run C<trogrunner>, or that
 keeps the default C<hypervisor_access> of C<none>.  It gives a warning and
 returns 0 for a domain that asks for access and names no hypervisor.  It
-returns 1 when it added the key.
+returns 1 when it added the key.  It also warns when the key is to be restricted
+to the address of the domain, and the domain holds none in the pool, because then
+the key goes in unrestricted.
 
 It writes the public half beside the domain as F<hypervisor-key.pub>.  The file
 is public, and F<bin/destroy> reads it to remove the key without the password
@@ -443,6 +445,7 @@ sub authorize_runner_key {
     if ( $grant{restrict} ) {
         my $ip = eval { Provisioner::IPPool::held_by($domain) };
         $line = qq{from="$ip" $pubkey} if $ip;
+        warn "$domain holds no address in the ip pool, so its key on the hypervisors is not restricted to an address.  A lease can change.\n" unless $ip;
     }
 
     foreach my $name ( sort keys %$hypervisors ) {
