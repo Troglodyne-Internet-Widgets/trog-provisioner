@@ -145,8 +145,9 @@ subtest 'a record points only at a name that domain has' => sub {
 
     # And the name it points at is one the zone actually carries, which is the
     # whole of why these two travel together.
-    like( $with, qr/^mail[.]post[.]test\.\s+IN\s+CNAME\s+\@/m, 'and mail. is a name in the zone, not a dangling target' )
+    like( $with, qr/^mail[.]post[.]test\.\s+IN\s+A\s+192\.0\.2\.62$/m, 'and mail. is a name in the zone, at the address of the domain, not a dangling target' )
       or diag $with;
+    unlike( $with, qr/^mail[.]post[.]test\.\s+IN\s+CNAME/m, 'and not a CNAME, which the target of an MX must not be' ) or diag $with;
 };
 
 subtest 'a domain the pool has no address for is refused' => sub {

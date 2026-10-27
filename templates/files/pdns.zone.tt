@@ -31,9 +31,15 @@ ns1     IN A    [% public_address // ipmap.$subdo %]
 [% alias %]. IN CNAME @
 [% END -%]
 
+[%# The target of an MX or an SRV must not be a CNAME.  See addressed_names in
+    Provisioner::Recipe. -%]
+[% FOREACH name IN address_names %]
+[% name %]. IN A [% ipmap.$domain %]
+[% END -%]
+
 [%# Only where the guest serves mail: every record below names mail.<domain> or
     autoconfig.<domain>, which Provisioner::Recipe::mail declares and the
-    aliases above carry.  The names existing is a separate question from these
+    names above carry.  The names existing is a separate question from these
     records pointing at them. -%]
 [% IF modules.grep('mail').size() %]
 ; Mail

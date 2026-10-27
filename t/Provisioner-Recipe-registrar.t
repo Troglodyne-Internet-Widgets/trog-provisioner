@@ -156,7 +156,7 @@ subtest 'what a guest that names an authority sets up' => sub {
     like( $fragment, qr{^\Q$dropin\E$}m,                                               'the fragment routes those names to the authority' );
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'and delegates its zone to the authority first in the postrun, before the fetcher of letsencrypt' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records there' );
-    unlike( $fragment, qr/--nameserver/, 'and publishes no ns1, because the authority is its nameserver' );
+    unlike( $fragment, qr/--addressed[ ]ns1/, 'and publishes no ns1, because the authority is its nameserver' );
 
     my $resolved = fresh('registrar')->render_file( 'files/registrar.resolved.tt', %common, authority => 'ns.example.net', type => 'easydns' );
     like( $resolved, qr/^DNS=192[.]0[.]2[.]53$/m,                     'the drop-in names the authority' );
@@ -187,7 +187,7 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     my $fragment = fresh('registrar')->render(%common);
     my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'the zone above names its ns1 first in the postrun, with the address of ns1 as glue, because ns1 is inside the zone' );
-    my $records = "publish_dns_records --nameserver ns1.$name $name 192.0.2.6";
+    my $records = "publish_dns_records --addressed ns1.$name $name 192.0.2.6";
     like( $fragment, qr{\Q$records\E$}m, 'its own records include ns1, at the address of the domain' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, $records ), 'and go up after the delegation' );
 
@@ -195,7 +195,7 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     # resolver follows to its nameserver must give that one.
     my $natted = fresh('registrar')->render( %common, address => '198.51.100.6' );
     like( $natted, qr{\Q$name\E[ ]ns1[.]\Q$name\E[ ]198[.]51[.]100[.]6$}m, 'the glue is the address that its A record publishes' );
-    my $own_ns1 = "--nameserver ns1.$name $name 198.51.100.6";
+    my $own_ns1 = "--addressed ns1.$name $name 198.51.100.6";
     like( $natted, qr{\Q$own_ns1\E$}m, 'and so is the record of ns1 in its own zone' );
 
     my %untyped = %common;
@@ -398,7 +398,7 @@ subtest 'the registrar publishes the records of the domain' => sub {
     my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]/;
     like( $fragment, qr/${queued}\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]/, 'in the postrun, with the address the guest was built with' );
     like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E$/m, 'and each name: the configured aliases and the names that recipes handed over, sorted' );
-    unlike( $fragment, qr/--nameserver/, 'and no nameserver, because the registrar has its own' );
+    unlike( $fragment, qr/--addressed[ ]ns1/, 'and no nameserver, because the registrar has its own' );
 
     # Through the shortcut, which points at the pdns of the guest, and not at
     # the registrar that the guest inherits.
@@ -429,6 +429,26 @@ my %ACCOUNTS = (
     deep     => { type => 'easydns', key  => 'deep-key',   zones => ['deep.customer.test'] },
     unused   => { type => 'easydns', key  => 'unused-key', zones => ['unused.test'] },
 );
+
+subtest 'the target of an MX holds the address, and is no alias' => sub {
+    my %mail = ( %ON_PUBLIC, hostnames => [ "www.$PUBLIC", "mail.$PUBLIC" ], modules => [qw{registrar mail}] );
+    my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %mail );
+
+    is_deeply( $opts->{address_names},  ["mail.$PUBLIC"],                 'the name that the mail recipe says a record targets' );
+    is_deeply( $opts->{domain_aliases}, [ "alt.$PUBLIC", "www.$PUBLIC" ], 'and it is not among the aliases' );
+    my $addressed = qr/--addressed[ ]mail[.]\Q$PUBLIC\E/;
+    my $records   = qr/\Q$PUBLIC\E[ ]192[.]0[.]2[.]50[ ]alt[.]/;
+    like( $fragment, qr/publish_dns_records[ ]$addressed[ ]$records/, 'so the publisher gives it an A record at the address of the domain' );
+
+    my ($plain) = publishing( 'registrar', $REGISTRAR, %mail, modules => ['registrar'] );
+    is_deeply( $plain->{address_names}, [], 'a guest that runs no mail has no such name' );
+    ok( ( grep { $_ eq "mail.$PUBLIC" } @{ $plain->{domain_aliases} } ), 'and the same name, handed over by another recipe, stays an alias' );
+
+    my $mock = Test::MockModule->new('Provisioner::Recipe::mail');
+    $mock->redefine( addressed_names => sub { return ( "mail.$PUBLIC", 'mx.customer.test' ) } );
+    my ($outside) = publishing( 'registrar', { registrar => { type => 'easydns', accounts => \%ACCOUNTS } }, %mail );
+    is_deeply( $outside->{address_names}, ["mail.$PUBLIC"], 'a name in a zone of an account is not written in the zone of the domain' );
+};
 
 subtest 'each zone that an account lists gets the credentials of that account' => sub {
     my $registrar = Provisioner::Cookbook->load('registrar');

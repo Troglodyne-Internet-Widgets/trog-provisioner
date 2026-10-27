@@ -368,6 +368,18 @@ sub subdomains {
     return qw{mail autodiscover autoconfig};
 }
 
+=head2 @names = $recipe->addressed_names(%opts)
+
+C<mail.DOMAIN>, which the MX and the SRV records of F<pdns.zone.tt> name.  See
+L<Provisioner::Recipe>.
+
+=cut
+
+sub addressed_names {
+    my ( $self, %opts ) = @_;
+    return "mail.$opts{domain}";
+}
+
 =head2 $bool = $recipe->sends_mail
 
 True.  See L<Provisioner::Recipe>.

@@ -201,24 +201,86 @@ subtest 'each alias becomes a CNAME at the name that holds the address' => sub {
     );
 };
 
-subtest 'a named nameserver gets the address of the domain, as an A record' => sub {
+subtest 'each addressed name gets the address of the domain, as an A record' => sub {
     against(
         holding(),
         sub {
             my ($ran) = @_;
 
             my $rc;
-            capture { $rc = Trog::PublishDNSRecords::main( '--nameserver', "ns1.$DOMAIN", $DOMAIN, $ADDRESS, "www.$DOMAIN" ) };
+            capture { $rc = Trog::PublishDNSRecords::main( '--addressed', "ns1.$DOMAIN", '--addressed', "mail.$DOMAIN", $DOMAIN, $ADDRESS, "www.$DOMAIN" ) };
             is( $rc, 0, 'the run succeeds' );
 
-            my ($ns1) = grep { index( $_, "--name='ns1.$DOMAIN'" ) >= 0 } sent( $ran, 'create' );
-            ok( $ns1, 'ns1 is created' ) or diag join "\n", @{$ran};
-            like( $ns1 // q{}, qr/[ ]A[ ]/,                  'as an A record, because the target of an NS must not be a CNAME' );
-            like( $ns1 // q{}, qr/--content='\Q$ADDRESS\E'/, 'at the address of the domain' );
+            foreach my $name ( "ns1.$DOMAIN", "mail.$DOMAIN" ) {
+                my ($made) = grep { index( $_, "--name='$name'" ) >= 0 } sent( $ran, 'create' );
+                ok( $made, "$name is created" ) or diag join "\n", @{$ran};
+                like( $made // q{}, qr/[ ]A[ ]/,                  'as an A record, because the target of an NS, an MX or an SRV must not be a CNAME' );
+                like( $made // q{}, qr/--content='\Q$ADDRESS\E'/, 'at the address of the domain' );
+            }
         }
     );
 
-    like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, '--nameserver', "ns1.$DOMAIN", $DOMAIN, "ns1.$DOMAIN" ) }, qr/usage/, 'a delegation names its nameserver as an argument, not with the option' );
+    like( exception { Trog::PublishDNSRecords::main( '--delegate', '--shortcut', $shortcut, '--addressed', "ns1.$DOMAIN", $DOMAIN, "ns1.$DOMAIN" ) }, qr/usage/, 'a delegation names its nameserver as an argument, not with the option' );
+};
+
+subtest 'an alias of the domain at an addressed name is replaced by the address' => sub {
+    my @alias = ( { name => "mail.$DOMAIN", type => 'CNAME', content => "$DOMAIN.", id => 'the-alias' } );
+    against(
+        holding(@alias),
+        sub {
+            my ($ran) = @_;
+
+            my $rc;
+            capture { $rc = Trog::PublishDNSRecords::main( '--addressed', "mail.$DOMAIN", $DOMAIN, $ADDRESS ) };
+            is( $rc, 0, 'the run succeeds' );
+
+            my $delete = first_sent( $ran, 'delete' );
+            like( $delete // q{}, qr/[ ]delete[ ]CNAME[ ]--name='mail[.]\Q$DOMAIN\E'/, 'the CNAME that an earlier build published is deleted' );
+            like( $delete // q{}, qr/--identifier='the-alias'/,                        'through the identifier that the provider gave it' );
+            my ($made) = grep { index( $_, "--name='mail.$DOMAIN'" ) >= 0 } sent( $ran, 'create' );
+            like( $made // q{}, qr/[ ]create[ ]A[ ]/, 'and the A record is created' ) or diag join "\n", @{$ran};
+            my $order = List::Util::first { index( $ran->[$_], ' delete ' ) >= 0 || index( $ran->[$_], "create A --name='mail." ) >= 0 } 0 .. $#{$ran};
+            like( $ran->[ $order // 0 ], qr/[ ]delete[ ]/, 'after the CNAME is gone, because a name with a CNAME holds no other record' );
+        }
+    );
+
+    against(
+        holding(@alias),
+        sub {
+            my ($ran) = @_;
+            capture { Trog::PublishDNSRecords::main( '--dryrun', '--addressed', "mail.$DOMAIN", $DOMAIN, $ADDRESS ) };
+            is( scalar sent( $ran, 'delete' ), 0, 'a dry run deletes nothing' );
+        }
+    );
+
+    against(
+        sub {
+            my ($command) = @_;
+            return holding(@alias)->($command) if index( $command, ' list ' ) >= 0;
+            return ( 'refused', 0 ) if index( $command, ' delete ' ) >= 0;
+            return ( q{}, 1 );
+        },
+        sub {
+            my ($ran) = @_;
+            my $rc;
+            my ( undef, $said ) = capture { $rc = Trog::PublishDNSRecords::main( '--addressed', "mail.$DOMAIN", $DOMAIN, $ADDRESS ) };
+            is( $rc, 1, 'a delete that the provider refuses fails the run' );
+            like( $said, qr/Could[ ]not[ ]delete[ ]CNAME[ ]mail/, 'and says so' );
+            is( scalar grep( { index( $_, "--name='mail." ) >= 0 } sent( $ran, 'create' ) ), 0, 'and no A record is sent beside the CNAME' );
+        }
+    );
+
+    against(
+        holding( { name => "mail.$DOMAIN", type => 'CNAME', content => 'elsewhere.test', id => 'theirs' } ),
+        sub {
+            my ($ran) = @_;
+            my $rc;
+            my ( undef, $said ) = capture { $rc = Trog::PublishDNSRecords::main( '--addressed', "mail.$DOMAIN", $DOMAIN, $ADDRESS ) };
+            is( $rc, 1, 'a CNAME of another name is refused' );
+            like( $said, qr/Refusing[ ]to[ ]publish[ ]A[ ]mail/, 'and named' );
+            is( scalar sent( $ran, 'delete' ), 0, 'and kept' );
+        }
+    );
 };
 
 subtest 'a provider that cannot be asked stops the run rather than publishing over it' => sub {

@@ -479,7 +479,8 @@ over.  Most of them are under the domain.  A public name of
 L<Provisioner::Recipe::nginx> in a zone that an account lists is not.  It
 belongs to that zone, and C<publication> gives it an C<A> record there,
 through the shortcut of that zone.  So this returns C<domain_aliases> less
-each name that C<zone_of> places in a zone of an account.
+each name that C<zone_of> places in a zone of an account, and less each name
+of C<zone_address_names>, which holds an C<A> record.
 
 Each writer of the zone of the domain asks this, so that none of them writes
 such a name there: C<publication>, the zone file of
@@ -493,8 +494,27 @@ Otherwise this reads it for the domain from L<Provisioner::Cookbook>.
 =cut
 
 sub zone_aliases ( $self, %opts ) {
+    my $zones     = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
+    my %addressed = map { $_ => 1 } $self->zone_address_names( %opts, zones => $zones );
+    return grep { !$addressed{$_} && !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
+}
+
+=head2 @names = $recipe->zone_address_names(%opts)
+
+The names that the zone of C<$opts{domain}> holds as C<A> records at the
+address of the domain, and not as C<CNAME> records: the C<addressed_names> of
+each recipe in C<$opts{modules}>, as L<Provisioner::Recipe> says, less each
+name that C<zone_of> places in a zone of an account.  Sorted.
+
+The writers of the zone that ask C<zone_aliases> ask this too.
+C<$opts{zones}> is as C<zone_aliases> says.
+
+=cut
+
+sub zone_address_names ( $self, %opts ) {
     my $zones = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
-    return grep { !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
+    my @names = map { Provisioner::Cookbook->load($_)->addressed_names( domain => $opts{domain} ) } @{ $opts{modules} // [] };
+    return grep { !defined $self->zone_of( $_, $opts{domain}, $zones ) } sort( uniq(@names) );
 }
 
 =head2 $guest = $recipe->authority_of($domain)
@@ -653,9 +673,9 @@ sub grant_terms {
 =head2 %publication = $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
-C<address>, C<domain_aliases>, C<own_nameserver>, C<zone_cnames>,
-C<zone_apexes>, C<zone_access>, and C<publish_records>, which is true when
-there is an address to publish.
+C<address>, C<domain_aliases>, C<address_names>, C<own_nameserver>,
+C<zone_cnames>, C<zone_apexes>, C<zone_access>, and C<publish_records>, which
+is true when there is an address to publish.
 
 These three are for the served names in a zone of an account.  C<zone_cnames>
 maps each such zone to its names other than its apex, and each gets a C<CNAME>
@@ -667,13 +687,16 @@ hold>.  C<$opts{own_zone}> is true where the domain holds its own zone.
 
 The records are an C<A> record of the domain at C<address>, and a C<CNAME> for
 each name in C<domain_aliases>: the aliases that the operator configured and
-the C<hostnames> that the recipes handed over.  Where the domain holds its own
+the C<hostnames> that the recipes handed over.  The exceptions are the names
+of C<address_names>, which C<zone_address_names> gives, such as the target of
+an C<MX>.  Each gets an C<A> record at the address.  Where the domain holds its own
 zone, they also include an C<A> record of C<own_nameserver>, which is C<ns1> of
 the domain, at the same address.  The target of an C<NS> record must not be a
-C<CNAME>.  F<scripts/publish_dns_records> writes them through the lexicon
-shortcut of the domain, in the postrun.  It never deletes a record, and changes
-only a record of ours that has the wrong content, so a rebuild from the same
-configuration sends nothing.
+C<CNAME> either.  F<scripts/publish_dns_records> writes them through the lexicon
+shortcut of the domain, in the postrun.  It changes only a record of ours that
+has the wrong content, so a rebuild from the same configuration sends nothing.
+It deletes one kind of record only: a C<CNAME> of the domain at a name that
+now holds an C<A> record.
 
 The address goes up as it is, an RFC 1918 address of a fleet behind NAT
 included: a zone that holds internal addresses for internal names is ordinary,
@@ -706,6 +729,7 @@ sub publication {
     return (
         address         => $address,
         domain_aliases  => [ $self->zone_aliases( %opts, zones => $zones ) ],
+        address_names   => [ $self->zone_address_names( %opts, zones => $zones ) ],
         zone_cnames     => \%zone_cnames,
         zone_apexes     => [ sort keys %zone_apexes ],
         zone_access     => \%zone_access,

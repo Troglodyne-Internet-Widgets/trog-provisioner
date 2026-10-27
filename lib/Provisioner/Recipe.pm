@@ -1480,6 +1480,21 @@ sub served_names {
     return map { "$_.$opts{domain}" } $self->subdomains;
 }
 
+=head3 @names = $recipe->addressed_names(%opts)
+
+The names of this recipe that a record of another type names as its target,
+such as an C<MX> or an C<SRV>.  RFC 2181 and RFC 2782 forbid such a target to
+be a C<CNAME>, so the zone of the domain holds each of these as an C<A> record
+at the address of the domain.  See C<zone_address_names> in
+L<Provisioner::Recipe::registrar>.  None here.  It reads only
+C<$opts{domain}>.
+
+=cut
+
+sub addressed_names {
+    return;
+}
+
 =head3 @aliases = $recipe->domain_aliases(%opts)
 
 Every name that this recipe answers for besides the domain itself: the aliases
