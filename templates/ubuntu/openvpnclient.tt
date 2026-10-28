@@ -18,6 +18,12 @@ chown root:root /etc/openvpn/client/[% domain %]/client.key /etc/openvpn/client/
 cp client.conf /etc/openvpn/client/[% domain %].conf
 chown root:root /etc/openvpn/client/[% domain %].conf
 chmod 0640 /etc/openvpn/client/[% domain %].conf
+[% IF issue_from -%]
+# The guests of this installation, which it reaches through the tunnel.  Replaced,
+# not added to, so that a rebuild does not add them twice
+sed -i '/^# BEGIN trog openvpnclient [% domain %]$$/,/^# END trog openvpnclient [% domain %]$$/d' /etc/hosts
+cat vpn.hosts >> /etc/hosts
+[% END -%]
 [%# Nothing is salvaged off this guest.  Provisioner::Recipe::openvpnclient
     says why. -%]
 # Start the tunnel now, so it is up for the targets that run after this one

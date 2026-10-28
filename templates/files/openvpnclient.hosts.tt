@@ -1,0 +1,10 @@
+[%# The guests of this installation, as the ip pool assigns them, for a guest
+    that reaches them through the VPN.  Provisioner::Recipe::openvpnclient has
+    the whole account. -%]
+# BEGIN trog openvpnclient [% domain %]
+[% FOR name IN ipmap.keys().sort() -%]
+[% IF name != domain -%]
+[% ipmap.$name %] [% name %]
+[% END -%]
+[% END -%]
+# END trog openvpnclient [% domain %]
