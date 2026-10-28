@@ -166,7 +166,7 @@ subtest 'domain_config folds _base into the domain, the way a provision reads it
     is_deeply( $conf->{'one.test'}{ntp}, { iburst => 1 }, 'the configuration it was handed is not written into' );
 
     is_deeply(
-        Provisioner::Cookbook->domain_config( undef, $conf )->{ntp}, { pool => 'base.pool' },
+        Provisioner::Cookbook->base_config($conf)->{ntp}, { pool => 'base.pool' },
         'with no domain it is what _base says, which is what a domain gets by default'
     );
     is_deeply(
@@ -267,6 +267,31 @@ subtest 'configures says whether a name is a domain of this installation' => sub
     is( Provisioner::Cookbook->configures( 'outside.test', $conf ), 0, 'a host that it does not name is outside' );
     is( Provisioner::Cookbook->configures( '_base',        $conf ), 0, 'and a section of the configuration is no domain' );
     is( Provisioner::Cookbook->configures( undef,          $conf ), 0, 'and nor is no name' );
+};
+
+subtest 'asking about a domain does not configure it' => sub {
+    my $conf = { _base => { _global => { cache => 'cache.test' } }, 'cache.test' => { fetchcache => {} } };
+
+    is_deeply( Provisioner::Cookbook->global_config( 'outside.test', $conf ), { cache => 'cache.test' }, 'a domain with no configuration gets the _global of _base' );
+    Provisioner::Cookbook->upstream_cycle( 'outside.test', $conf );
+    Provisioner::Cookbook->upstream_domains( 'outside.test', $conf );
+    Provisioner::Cookbook->named_guests( 'outside.test', $conf );
+
+    is( Provisioner::Cookbook->configures( 'outside.test', $conf ), 0, 'and afterwards it is still not a domain of the configuration, so bin/new_config still refuses it' );
+    is_deeply( Provisioner::Cookbook->domain_config( 'outside.test', $conf ), {}, 'and domain_config gives it _base without _global' );
+    is( Provisioner::Cookbook->configures( 'outside.test', $conf ), 0, 'which leaves it out of the configuration too' );
+};
+
+subtest 'a domain is required, and _base has subs of its own' => sub {
+    my $conf = { _base => { _global => { cache => 'cache.test' }, ntp => { pool => 'base.pool' } } };
+
+    foreach my $sub (qw{domain_config global_config globals}) {
+        like( exception { Provisioner::Cookbook->$sub( undef, $conf ) }, qr/\A$sub[ ]needs[ ]a[ ]domain[.][ ]+base_\w+[ ]returns/, "$sub dies with no domain, and names the sub for _base" );
+    }
+    is_deeply( Provisioner::Cookbook->base_config($conf), { ntp => { pool => 'base.pool' } }, 'base_config is _base without its _global' );
+    is_deeply( Provisioner::Cookbook->base_global($conf), { cache => 'cache.test' },          'base_global is the _global of _base' );
+    is_deeply( Provisioner::Cookbook->base_config( {} ),  {},                                 'and both are empty when there is no _base' );
+    is_deeply( Provisioner::Cookbook->base_global( {} ),  {},                                 'the second as well' );
 };
 
 subtest 'helo_name_of is one name for the machine, whatever domain asks' => sub {
@@ -1199,7 +1224,7 @@ subtest 'the settings of an installation are validated in one place' => sub {
         'own.test.test' => { _global => { admin_user => 'somebody', resolvers => [ '8.8.8.8', '1.1.1.1' ] } },
     );
 
-    my $base = Provisioner::Cookbook->globals( undef, \%said );
+    my $base = Provisioner::Cookbook->base_globals( \%said );
     is_deeply( $base->{resolvers}, ['192.0.2.254'], 'one resolver written as a scalar comes back as the list every reader wants' );
     is( $base->{admin_user}, 'someadmin', 'and the rest of _base is what it says' );
 
@@ -1210,7 +1235,7 @@ subtest 'the settings of an installation are validated in one place' => sub {
 
     # Six hand-written refusals, each naming one setting, in the order the
     # script happened to read them: an operator fixed one and ran it again.
-    my $err = exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { basedir => '/bogus' } } } ) };
+    my $err = exception { Provisioner::Cookbook->base_globals( { _base => { _global => { basedir => '/bogus' } } } ) };
     like( $err, qr/admin_user/,    'a missing setting is refused' );
     like( $err, qr/admin_gecos/,   'with every other missing one named in the same breath' );
     like( $err, qr/admin_email/,   'so one run says all of it' );
@@ -1244,9 +1269,9 @@ subtest 'a setting that nothing declares is refused' => sub {
     ok( $declared{skel},    'and what a recipe declares' );
     ok( !$declared{wibble}, 'but not a key that nothing declares' );
 
-    ok( Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, cpus => 2, libdir => ['/bogus'] } } } ), 'a key a recipe owns passes, and so does libdir' );
+    ok( Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, cpus => 2, libdir => ['/bogus'] } } } ), 'a key a recipe owns passes, and so does libdir' );
 
-    my $err = exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, wibble => 1, wobble => 2 } } } ) };
+    my $err = exception { Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, wibble => 1, wobble => 2 } } } ) };
     like( $err, qr{/wibble:[ ]Nothing[ ]declares}, 'a key nothing declares is refused' );
     like( $err, qr{/wobble:},                      'every one of them, in the same refusal' );
 
@@ -1260,15 +1285,15 @@ subtest 'distro is a setting of _global' => sub {
     my %declared = map { $_ => 1 } Provisioner::Cookbook->declared_globals;
     ok( $declared{distro}, 'distro is declared' );
 
-    my $said = Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, distro => 'ubuntu' } } } );
+    my $said = Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, distro => 'ubuntu' } } } );
     is( $said->{distro}, 'ubuntu', 'a distribution that has recipes passes' );
 
-    $said = Provisioner::Cookbook->globals( undef, { _base => { _global => \%BASE_GLOBAL } } );
+    $said = Provisioner::Cookbook->base_globals( { _base => { _global => \%BASE_GLOBAL } } );
     is( $said->{distro}, 'ubuntu', 'and one that names none gets ubuntu, which every guest ran before it could be named' );
 
     # A typing error that fell back to the generic recipes would build a guest
     # with no packages.
-    like( exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { %BASE_GLOBAL, distro => 'unbuntu' } } } ) }, qr{/distro:}, 'and one that has no recipes is refused' );
+    like( exception { Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, distro => 'unbuntu' } } } ) }, qr{/distro:}, 'and one that has no recipes is refused' );
 };
 
 # A YAML scalar is a string, and a list of one written as a scalar is what an

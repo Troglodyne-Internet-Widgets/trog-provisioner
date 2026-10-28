@@ -92,7 +92,7 @@ sub main {
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
-    my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
+    my $globals = Provisioner::Cookbook->base_globals( Provisioner::Cookbook->configuration($rfile) );
     my $pool    = $globals->{ip_pool} // {};
 
     my $db     = Provisioner::IPPool::dbh();

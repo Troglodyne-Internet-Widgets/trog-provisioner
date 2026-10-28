@@ -1143,9 +1143,9 @@ sub check_transfer_route {
 
     # Unvalidated, so that a _global that check_config refuses still says
     # where guests fetch from.
-    my $global = eval { Provisioner::Cookbook->global_config(undef) } // {};
-    my $ip     = $self->configured_transfer_ip                        // $global->{transfer_ip};
-    my $port   = $self->configured_transfer_port                      // $global->{transfer_port} // $here->sshd_port;
+    my $global = eval { Provisioner::Cookbook->base_global() } // {};
+    my $ip     = $self->configured_transfer_ip                 // $global->{transfer_ip};
+    my $port   = $self->configured_transfer_port               // $global->{transfer_port} // $here->sshd_port;
 
     return $self->verdict( 1, 'Guests here reach us across our own network, which the routing table settles', q{} )
       unless $self->manages_addresses;
@@ -1348,7 +1348,8 @@ sub check_config {
     if ( !@missing ) {
         my $said = eval {
             my $conf = Provisioner::Cookbook->configuration();
-            Provisioner::Cookbook->globals( $_, $conf ) foreach ( undef, grep { !m/\A_/ } sort keys %$conf );
+            Provisioner::Cookbook->base_globals($conf);
+            Provisioner::Cookbook->globals( $_, $conf ) foreach ( grep { !m/\A_/ } sort keys %$conf );
             1;
         };
         return $self->verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;

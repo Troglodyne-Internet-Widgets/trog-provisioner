@@ -627,7 +627,7 @@ subtest 'a refused _global still says where guests fetch from' => sub {
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    transfer_ip: 192.0.2.10\n    wibble: 1\n" );
     Provisioner::Cookbook->forget();
 
-    ok( exception { Provisioner::Cookbook->globals(undef) }, 'globals refuses this _global' );
+    ok( exception { Provisioner::Cookbook->base_globals() }, 'globals refuses this _global' );
 
     my $local = Test::MockModule->new('Trog::Local');
     $local->redefine( sshd_port     => sub { 22 } );

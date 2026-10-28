@@ -85,7 +85,7 @@ sub main {
     die "Output directory $output_dir does not exist\n" unless -d $output_dir;
 
     my $rconf       = Provisioner::Cookbook->configuration($rfile);
-    my $global_conf = Provisioner::Cookbook->globals( undef, $rconf );
+    my $global_conf = Provisioner::Cookbook->base_globals($rconf);
     my $ip_conf     = Provisioner::IPPool::assignments();
     my $alias_conf  = Provisioner::Cookbook->alias_map($rconf);
     my $ns_conf     = $global_conf->{nameservers} // {};
