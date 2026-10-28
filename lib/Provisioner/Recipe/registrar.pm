@@ -732,8 +732,11 @@ resolver that asks the zone itself for its nameserver gets the address that
 the glue gave it.  A zone that a registrar or another guest holds has
 nameservers of its own, and gets no C<ns1>.
 
-There is nothing to publish where the hypervisor allocates the address, and
-leaves C<main_ip> empty when the makefile is written.
+On a hypervisor that allocates the address, C<bin/provision> reserves the
+guest first, so C<main_ip> is that address when the makefile is written.  See
+C<reserve_guest> in L<Trog::HV>.  There is nothing to publish where the guest
+has no address yet, as on a backend that cannot reserve, or in a run of
+F<bin/new_config> without C<--reserve>.
 
 =cut
 

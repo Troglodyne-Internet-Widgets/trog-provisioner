@@ -847,7 +847,10 @@ and the rest of this program uses the same one.  C<hvconf> and C<hypervisor> go
 to the generator as C<--hvconf> and C<--hypervisor>.  C<domain_dir_given>, the
 C<--domaindir> of the command line, goes as C<--domaindir>.  C<domain_dir> is
 not passed, because it holds a default, and a default must not override the
-directory that a hypervisor in the fleet names.
+directory that a hypervisor in the fleet names.  A build passes C<--reserve>,
+and a dry run C<--dryrun>.  So on a hypervisor that gives its guests their
+addresses, the generator makes a new guest empty first, and its configuration
+names the address of the guest.
 
 It dies if the generator fails, and through C<refuse_on_salvage_gaps> if the
 salvage left a gap.
@@ -877,8 +880,9 @@ sub generate_config {
     push( @flags, '--domaindir',  $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};
 
     # For the generator, this only keeps the key of a guest that is up.  See
-    # DRY RUNS in bin/new_config.
-    push( @flags, '--dryrun' ) if $opts->{dryrun};
+    # DRY RUNS in bin/new_config.  A build reserves a guest on a hypervisor
+    # that gives it its address, so that the configuration can name it.
+    push( @flags, $opts->{dryrun} ? '--dryrun' : '--reserve' );
 
     my $result = Trog::Provisioner::Config::Generator::main( @flags, $domain );
 
