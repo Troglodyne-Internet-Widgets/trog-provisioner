@@ -2030,4 +2030,18 @@ subtest 'runner_sudoers pins each command to the pool' => sub {
     like( exception { Trog::HV::Libvirt->runner_sudoers( %args, user      => 'ALL' ) },             qr/sudoers[ ]file[ ]can[ ]hold/, 'and a user that is a keyword' );
 };
 
+subtest 'configured_gateway and guest_pool: the network of a block of hypervisors.conf' => sub {
+    my $hv = sub { my (%block) = @_; return Trog::HV->new( Trog::HV->options_from_block( { libvirt_uri => 'qemu:///system', %block } ) ) };
+
+    is( $hv->( gateway => '192.0.2.1' )->configured_gateway, '192.0.2.1', 'the gateway that the block names' );
+    is( $hv->()->configured_gateway,                         undef,       'and none when it names none' );
+    like( exception { $hv->( gateway => 'gw.test.test' )->configured_gateway }, qr/'gw[.]test[.]test',[ ]which[ ]is[ ]not[ ]an[ ]IPv4[ ]address/, 'a name in place of an address is refused' );
+    like( exception { $hv->( gateway => '192.0.2.0/24' )->configured_gateway }, qr/not[ ]an[ ]IPv4[ ]address/,                                    'and so is a network' );
+    like( exception { $hv->( gateway => '2001:db8::1' )->configured_gateway },  qr/not[ ]an[ ]IPv4[ ]address/,                                    'and so is IPv6' );
+
+    is_deeply( $hv->( pool_cidr => '192.0.2.0/26, 192.0.2.128/27', pool_addresses => '192.0.2.200 192.0.2.201' )->guest_pool, { cidr => [qw{192.0.2.0/26 192.0.2.128/27}], addresses => [qw{192.0.2.200 192.0.2.201}] }, 'the bin of the guests, each key a list, whether commas or spaces separate it' );
+    is_deeply( $hv->( pool_cidr => [qw{192.0.2.0/26 192.0.2.128/27}] )->guest_pool,                                           { cidr => [qw{192.0.2.0/26 192.0.2.128/27}] },                                             'from the list that Config::Simple makes of one, without a key the block does not name' );
+    is_deeply( $hv->()->guest_pool, {}, 'and empty when the block names no pool' );
+};
+
 done_testing;

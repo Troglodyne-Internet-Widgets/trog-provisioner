@@ -48,10 +48,13 @@ $hv_mock->redefine( sshd_port => sub { 22 } );
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
-# The resolvers that the block of the hypervisor names, which the local
-# hypervisor of a test has no block for.  See Trog::HV/configured_resolvers.
-my $hv_resolvers = Test::MockModule->new('Trog::HV');
-$hv_resolvers->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+# The resolvers, the gateway and the pool that the block of the hypervisor
+# names, which the local hypervisor of a test has no block for.  See
+# Trog::HV/configured_resolvers and Trog::HV/guest_pool.
+my $hv_network = Test::MockModule->new('Trog::HV');
+$hv_network->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+$hv_network->redefine( configured_gateway   => sub { return '192.0.2.254' } );
+$hv_network->redefine( guest_pool           => sub { return { addresses => ['192.0.2.100'] } } );
 
 # A vendor libdir laid out as this checkout is: a recipe, its version for one
 # distribution, and a template.  vendor_global is a _global setting that only
@@ -118,9 +121,7 @@ sub generate {
                 admin_user    => 'someadmin',
                 admin_email   => 'bogus@test.test',
                 admin_gecos   => 'Test Test',
-                gateway       => '192.0.2.254',
-                ip_pool       => { addresses => '192.0.2.100' },
-                nameservers   => { ns1       => 'ns1.test.test' },
+                nameservers   => { ns1 => 'ns1.test.test' },
                 libdir        => [$VENDOR],
                 %global_extra,
             },

@@ -25,6 +25,7 @@ use YAML::XS();
 use FindBin;
 use FindBin::libs;
 
+use Trog::Hypervisors();
 use Trog::Hypervisors::Config();
 use Trog::Secrets();
 
@@ -55,8 +56,6 @@ sub installation {
                         admin_user  => 'operator',
                         admin_gecos => 'The Operator',
                         admin_email => 'operator@test.test',
-                        gateway     => '192.0.2.254',
-                        ip_pool     => { cidr => '192.0.2.0/26' },
                         %extra,
                     },
                     letsencrypt => {},
@@ -122,9 +121,7 @@ subtest 'a scratch guest is configured as a real one is' => sub {
     my ($recipes) = scratch();
     my $global = $recipes->{_base}{_global};
 
-    is( $global->{admin_user}, 'operator',    'the administrator of the installation administers a scratch guest too' );
-    is( $global->{gateway},    '192.0.2.254', 'it reaches the network the same way' );
-    is_deeply( $global->{ip_pool}, { cidr => '192.0.2.0/26' }, 'and draws from the same pool, so it cannot take an address a real guest has' );
+    is( $global->{admin_user}, 'operator', 'the administrator of the installation administers a scratch guest too' );
 };
 
 subtest 'nothing it cannot hold a credential for comes with it' => sub {
@@ -258,6 +255,9 @@ subtest 'a hypervisor that needs a credential is left out, unless it is kept' =>
     File::Slurper::Temp::write_text( "$source/hypervisors.conf", <<'CONF' );
 [local]
 libvirt_uri = qemu+ssh://somebody@local.test.test/system
+resolvers   = 192.0.2.254
+gateway     = 192.0.2.254
+pool_cidr   = 192.0.2.0/26
 
 [node1]
 solusvm       = node.test.test
@@ -277,6 +277,10 @@ CONF
     my $fleet = Trog::Hypervisors::Config->load("$dir/hypervisors.conf");
     is_deeply( [ $fleet->names ],             [qw{local spare}], 'the others are still there, in their order' );
     is_deeply( [ $fleet->secret_references ], [],                'and the scratch fleet names no secret' );
+
+    my $local = Trog::Hypervisors->load("$dir/hypervisors.conf")->hypervisor('local');
+    is( $local->configured_gateway, '192.0.2.254', 'a scratch guest reaches the network the same way' );
+    is_deeply( $local->guest_pool, { cidr => ['192.0.2.0/26'] }, 'and draws from the same pool, so it cannot take an address a real guest has' );
     ok( !-e "$source/secrets.kdbx", 'the installation has no store here, so nothing could have opened one' );
 };
 

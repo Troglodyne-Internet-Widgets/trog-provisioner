@@ -44,7 +44,6 @@ my $SETTINGS = <<"SETTINGS";
     admin_user: someadmin
     admin_gecos: Some Admin
     admin_email: someadmin\@test.test
-    gateway: 192.0.2.254
 SETTINGS
 
 File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "---\n_base:\n  _global:\n$SETTINGS" );

@@ -74,12 +74,17 @@ subtest 'every block lands where the reader of it now looks' => sub {
     is( $global->{basedir},     '/opt/domains',        'the globals become the _global of _base' );
     is( $global->{admin_email}, 'someadmin@test.test', 'key for key' );
 
-    # The block of each hypervisor names its resolvers now.
+    # The block of each hypervisor names its resolvers, its gateway and its
+    # pool now.
     ok( !exists $global->{resolvers}, 'resolvers stay behind' );
     like( $said, qr/\[global\][ ]resolvers/, 'and the report names them' );
+    ok( !exists $global->{gateway}, 'and so does the gateway' );
+    like( $said, qr/\[global\][ ]gateway/, 'and the report names it' );
+    ok( !exists $global->{ip_pool}, 'and so does the pool' );
+    like( $said, qr/\[ip_pool\],[ ]which[ ]is[ ]pool_addresses[ ]and[ ]pool_cidr/, 'and the report says what it is now' );
+    like( $said, qr/in[ ]the[ ]block[ ]of[ ]each[ ]hypervisor/,                    'and where' );
 
-    is_deeply( $global->{ip_pool},     { addresses => [ '192.0.2.100', '192.0.2.101' ], cidr => '192.0.2.0/24' }, 'the pool becomes one key' );
-    is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                          'and the nameservers another' );
+    is_deeply( $global->{nameservers}, { ns1 => 'ns1.test.test' }, 'the nameservers become one key' );
 
     # An alias belongs to the domain that answers to it, which is where
     # Provisioner::Cookbook/alias_map reads it from.
@@ -91,8 +96,9 @@ subtest 'every block lands where the reader of it now looks' => sub {
     # globals refuses a key that nothing declares, so moving one would write a
     # configuration that the next command refuses.
     ok( !exists $global->{dhcp_devname}, 'a setting that nothing reads stays behind' );
-    like( $said, qr/nothing[ ]reads[ ]it:\s+\[global\][ ]dhcp_devname/, 'and the report names it' );
-    like( $said, qr/\[global\][ ]basedir/,                              'the report says what moved' );
+    my ( undef, $left_out ) = split( /does[ ]not[ ]take[ ]it:/, $said, 2 );
+    like( $left_out // q{}, qr/\[global\][ ]dhcp_devname/, 'and the report names it' );
+    like( $said,            qr/\[global\][ ]basedir/,      'the report says what moved' );
 };
 
 subtest 'what recipes.yaml already says is left alone, and said so' => sub {
@@ -108,7 +114,7 @@ subtest 'what recipes.yaml already says is left alone, and said so' => sub {
     is( $conf->{_base}{_global}{admin_user},  'somebody',       'a setting already written is not overwritten' );
     is( $conf->{_base}{_global}{admin_email}, 'kept@test.test', 'nor another one' );
     is_deeply( $conf->{'one.test.test'}{_global}{aliases}, ['kept.test.test'], 'nor the aliases of a domain' );
-    is( $conf->{_base}{_global}{gateway}, '192.0.2.254', 'while the rest still moves across' );
+    is( $conf->{_base}{_global}{basedir}, '/opt/domains', 'while the rest still moves across' );
 
     like( $said, qr/_base\._global\.admin_user/, 'and the report names what it left' );
 };

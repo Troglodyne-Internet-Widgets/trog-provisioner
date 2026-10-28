@@ -81,7 +81,6 @@ sub generate ( $hv, @flags ) {
                         admin_user    => 'someadmin',
                         admin_email   => 'bogus@test.test',
                         admin_gecos   => 'Test Test',
-                        gateway       => '192.0.2.254',
                         linode_type   => 'g6-nanode-1',
                     },
                 },

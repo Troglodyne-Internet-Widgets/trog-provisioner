@@ -8,8 +8,9 @@ use re '/aasx';
 
 =head1 NAME
 
-t/list_ip_pool.t - bin/list_ip_pool: a bin with via shows what its server gave
-out by hand, and warns when the server cannot be asked
+t/list_ip_pool.t - bin/list_ip_pool: a guests bin for each network, and a bin
+with via shows what its server gave out by hand, and warns when the server
+cannot be asked
 
 =cut
 
@@ -34,8 +35,7 @@ my %GLOBAL = (
     admin_user  => 'someadmin',
     admin_gecos => 'Some Admin',
     admin_email => 'someadmin@test.test',
-    gateway     => '192.0.2.254',
-    ip_pool     => { addresses => '192.0.2.10', bins => { vpnclients => { cidr => '10.8.0.128/30', via => 'vpn.test.test' } } },
+    ip_pool     => { bins => { vpnclients => { cidr => '10.8.0.128/30', via => 'vpn.test.test' } } },
 );
 
 my $script = "$FindBin::Bin/../bin/list_ip_pool";
@@ -46,6 +46,19 @@ Provisioner::Cookbook->forget();
 
 my $pool = Test::MockModule->new('Provisioner::IPPool');
 $pool->redefine( ensure_seeded => sub { return 0 } );
+
+# Two hypervisors on one network, and one on another.
+$pool->redefine( guest_pools => sub { return ( hv1 => { addresses => ['192.0.2.10'] }, hv2 => { addresses => ['192.0.2.10'] }, far => { cidr => ['198.51.100.0/30'] } ) } );
+
+subtest 'each network has a guests bin, named for the hypervisors on it' => sub {
+    $pool->redefine( via_clients => sub { return () } );
+
+    my ( $out, $err, $rc ) = capture { Provisioner::Bin::list_ip_pool::main() };
+    is( $rc, 0, 'it exits 0' ) or diag $err;
+    like( $out, qr/^Bin[ ]guests:hv1,hv2:[ ]+1[ ]total/m, 'the hypervisors that share a pool share its bin' )           or diag $out;
+    like( $out, qr/^Bin[ ]guests:far:[ ]+2[ ]total/m,     'and the other network has its own, with its own addresses' ) or diag $out;
+    like( $out, qr/^Bin[ ]vpnclients:/m,                  'beside the bins of _global' );
+};
 
 subtest 'the server of a bin with via is asked what it gave out' => sub {
     my @asked;

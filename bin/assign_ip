@@ -17,17 +17,22 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
 use Trog::Config();
+use Trog::Hypervisors();
 use Provisioner::IPPool();
 
 =head1 USAGE
 
-    assign_ip [--recipes=file] [--bin=NAME] DOMAIN
+    assign_ip [--recipes=file] --hypervisor=NAME DOMAIN
+    assign_ip [--recipes=file] --bin=NAME DOMAIN
 
 Print the static address that C<DOMAIN> holds.  If it holds none, assign it
 the first free address in the pool and print that.
 
 C<--bin> names the bin of the pool, which is C<guests> unless you say
-otherwise.  L<Provisioner::IPPool/BINS> says what a bin is.
+otherwise.  L<Provisioner::IPPool/BINS> says what a bin is.  The C<guests> bin
+is on the network of a hypervisor, so C<--hypervisor> names the block of
+F<hypervisors.conf> whose pool the address comes from.  It is required for
+that bin, and refused for the others, which belong to no hypervisor.
 
 A static address is on the subnet of the primary bridge of the hypervisor, the
 network that it shares with other machines.  It is not an address on the NAT
@@ -36,11 +41,11 @@ network of libvirt.  F<docs/NETWORK.md> describes the network model.
 If the domain already holds an address, this prints it and writes nothing.  So
 a script can call this when it does not know if the domain was provisioned.
 
-    $ bin/assign_ip staging.example.net
+    $ bin/assign_ip --hypervisor=hv1 staging.example.net
     192.0.2.48
 
-This dies when F<recipes.yaml> cannot be read, when it has no C<ip_pool>, or when
-the pool has no free address.  It also dies if a hypervisor does not answer
+This dies when F<recipes.yaml> cannot be read, when the bin has no addresses,
+or when the bin has no free address.  It also dies if a hypervisor does not answer
 before the database has a record of its guests.
 
 C<bin/new_config> calls the same code, so a provision assigns its own address.
@@ -58,8 +63,8 @@ sub main {
     my @args = @_;
 
     my $rfile = Trog::Config->path('recipes.yaml');
-    my ( $bin, $help );
-    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'bin=s' => \$bin, 'help' => \$help )
+    my ( $bin, $hv_name, $help );
+    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'bin=s' => \$bin, 'hypervisor=s' => \$hv_name, 'help' => \$help )
       or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
@@ -68,12 +73,21 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
+    my $guests = ( $bin // $Provisioner::IPPool::GUESTS ) eq $Provisioner::IPPool::GUESTS;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => "The $Provisioner::IPPool::GUESTS bin is on the network of a hypervisor, so name it with --hypervisor" )
+      if $guests && !$hv_name;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => "The bin $bin belongs to no hypervisor, so --hypervisor names nothing for it" )
+      if !$guests && $hv_name;
+
     my $globals = Provisioner::Cookbook->base_globals( Provisioner::Cookbook->configuration($rfile) );
-    my $pool    = $globals->{ip_pool} // {};
+    my $pool =
+      $guests
+      ? Provisioner::IPPool::pool_of( Trog::Hypervisors->load( Trog::Hypervisors->default_path() )->hypervisor($hv_name), $globals->{ip_pool} )
+      : { bins => $globals->{ip_pool}{bins} // {} };
 
     # Seed from the hypervisors first, so a new database does not give out an
     # address that a guest already uses.
-    Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
+    Provisioner::IPPool::ensure_seeded();
 
     print Provisioner::IPPool::assign( $domain, $pool, $bin ) . "\n";
     return 0;

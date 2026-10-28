@@ -1723,13 +1723,12 @@ sub global_schema {
     my ($class) = @_;
     return (
         type       => 'object',
-        required   => [qw{basedir admin_user admin_gecos admin_email gateway}],
+        required   => [qw{basedir admin_user admin_gecos admin_email}],
         properties => {
             basedir     => { type => 'string', description => 'Where the generated configuration of each domain is written on this machine.' },
             admin_user  => { type => 'string', description => 'The account that administers every guest.  Recipes set ownership to it, and the provisioner reaches a guest as it.' },
             admin_gecos => { type => 'string', description => 'The real name of that account, as the guest records it.' },
             admin_email => { type => 'string', description => 'Where mail for the administrator of a guest goes.' },
-            gateway     => { type => 'string', format      => 'ipv4', description => 'The default route of a guest on the bridged network.' },
 
             hypervisor       => { type => 'string',             description => 'The hypervisor of hypervisors.conf, by the name of its block, that this guest is built on, whichever one is cheapest or roomiest.  A guest that is up stays where it is, and --hypervisor names another for one run.' },
             linode_type      => { type => 'string',             description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
@@ -1750,15 +1749,14 @@ sub global_schema {
             transfer_ip   => { type => 'string',  format      => 'ipv4', description => 'The address of ours that a guest fetches from, for a machine with several routes to the guest.' },
 
             ip_pool => {
-                type        => 'object',
-                description => 'The addresses this installation hands out, and the network they are on.  bin/assign_ip takes one from here and records it in ips.db.  The addresses and cidr at the top are the bin named guests.',
-                properties  => {
-                    addresses => { type => [qw{array string}], items => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
-                    cidr      => { type => 'string', description => 'The network the addresses are on, as a prefix.' },
-                    bins      => {
+                type                 => 'object',
+                description          => 'The bins of addresses that belong to no hypervisor, such as the clients of a VPN.  bin/assign_ip takes one from here and records it in ips.db.  The block of each hypervisor in hypervisors.conf names the bin named guests, with its gateway: see guest_pool in Trog::HV.',
+                additionalProperties => 0,
+                properties           => {
+                    bins => {
                         type                 => 'object',
-                        description          => 'Other parts of the pool, by name, such as vpnclients.  Each hands out only its own addresses, so one cannot use up another.  Only a guest, out of the bin named guests, gets an A record.',
-                        propertyNames        => { pattern => '^[a-z][a-z0-9_-]*$' },
+                        description          => 'The parts of the pool, by name, such as vpnclients.  Each hands out only its own addresses, so one cannot use up another.  Only a guest, out of the bin named guests, gets an A record.',
+                        propertyNames        => { pattern => '^[a-z][a-z0-9_-]*$', not => { const => 'guests' } },
                         additionalProperties => {
                             type       => 'object',
                             properties => {

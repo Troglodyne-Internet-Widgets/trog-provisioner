@@ -368,11 +368,13 @@ subtest 'a database from before bins keeps every row, in the guests bin' => sub 
     # A stand-in hypervisor, which is also its own libvirt connection.  The
     # sweep is the command that pings, and the other command lists the guests.
     package FakeHV;
-    sub new ( $class, %said ) { return bless {%said}, $class }
-    sub manages_addresses     { return 0 }
-    sub bridge_device ($self)         { return $self->{bridge} // die "no bridge\n" }
-    sub capture_cmd   ( $self, $cmd ) { return $cmd =~ m/ping/ ? $self->{sweep} : $self->{guests} }
-    sub vmm           ($self)         { return $self }
+    sub new                ( $class, %said ) { return bless {%said}, $class }
+    sub manages_addresses  ($self)           { return $self->{cloud} // 0 }
+    sub guest_pool         ($self)           { return $self->{pool}  // {} }
+    sub configured_gateway ($self)           { return $self->{gateway} }
+    sub bridge_device      ($self)           { return $self->{bridge} // die "no bridge\n" }
+    sub capture_cmd        ( $self, $cmd )   { return $cmd =~ m/ping/ ? $self->{sweep} : $self->{guests} }
+    sub vmm                ($self)           { return $self }
 
     sub list_all_domains ($self) {
         return map { FakeDomain->new($_) } @{ $self->{names} };
@@ -391,11 +393,12 @@ subtest 'a database from before bins keeps every row, in the guests bin' => sub 
     sub hypervisor ( $self, $n ) { return $self->{$n} }
 }
 
-# Seeds from one stand-in hypervisor named hv1, and returns what seed returned.
+# Seeds from one stand-in hypervisor named hv1 with the pool $pool and the
+# gateway $gateway, and returns what seed returned.
 sub seed_from ( $pool, $gateway, %said ) {
     my $mock = Test::MockModule->new('Trog::Hypervisors');
-    $mock->redefine( load => sub { return FakeFleet->new( hv1 => FakeHV->new(%said) ) } );
-    return Provisioner::IPPool::seed( $pool, $gateway );
+    $mock->redefine( load => sub { return FakeFleet->new( hv1 => FakeHV->new( pool => $pool, gateway => $gateway, %said ) ) } );
+    return Provisioner::IPPool::seed();
 }
 
 subtest 'seed: what is answering on the wire' => sub {
@@ -454,21 +457,52 @@ SAID
     is_deeply( Provisioner::IPPool::dbh()->selectall_arrayref('SELECT source FROM seeded'), [ ['hv:hv1'] ], 'the hypervisor is marked as seeded' );
 };
 
-subtest 'seed: only the guests bin is on the wire of the hypervisor' => sub {
+subtest 'seed: each hypervisor is seeded from its own pool, with its own gateway' => sub {
     fresh_db();
 
-    # The clients of a VPN are behind the tunnel, so a sweep from the bridge
-    # says nothing about them, and a guest cannot hold one of their addresses.
-    seed_from(
-        { cidr => '192.0.2.32/30', bins => { vpnclients => { addresses => '10.8.0.130' } } },
-        undef,
-        bridge => 'br0',
-        names  => ['guest.test'],
-        guests => "guest.test\t10.8.0.130\n",
-        sweep  => "LIVE 192.0.2.34\nLIVE 10.8.0.130\n",
+    # Two networks.  A guest of hv2 that reports an address on the network of
+    # hv1 is not on that network, so the address of hv1 stays free.
+    my %common = ( bridge => 'br0', sweep => q{} );
+    my $mock   = Test::MockModule->new('Trog::Hypervisors');
+    $mock->redefine(
+        load => sub {
+            return FakeFleet->new(
+                hv1   => FakeHV->new( %common, pool => { cidr => ['192.0.2.0/28'] },    gateway => '192.0.2.1',    names => ['one.test'], guests => "one.test\t192.0.2.5\n" ),
+                hv2   => FakeHV->new( %common, pool => { cidr => ['198.51.100.0/28'] }, gateway => '198.51.100.1', names => ['two.test'], guests => "two.test\t198.51.100.5\ntwo.test\t192.0.2.6\n" ),
+                cloud => FakeHV->new( cloud => 1, gateway => '203.0.113.1' ),
+            );
+        }
     );
+    Provisioner::IPPool::seed();
 
-    is_deeply( Provisioner::IPPool::taken(), { '192.0.2.34' => 'insitu:unknown' }, 'nothing in the clients bin is recorded or reserved' );
+    is_deeply(
+        Provisioner::IPPool::taken(),
+        { '192.0.2.1' => 'gateway:192.0.2.1', '192.0.2.5' => 'one.test', '198.51.100.1' => 'gateway:198.51.100.1', '198.51.100.5' => 'two.test' },
+        'each gateway is reserved and each guest recorded in the pool of its own hypervisor, and a cloud adds nothing'
+    );
+};
+
+subtest 'pool_of: the pool of a guest is the pool of its hypervisor and the bins of _global' => sub {
+    my %bins = ( vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test' } );
+    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new( pool => { cidr => ['192.0.2.0/28'] } ),             { bins => \%bins } ), { cidr => ['192.0.2.0/28'], bins => \%bins }, 'the guests bin at the top, beside the other bins' );
+    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new( cloud => 1, pool => { cidr => ['192.0.2.0/28'] } ), { bins => \%bins } ), { bins => \%bins },                           'and no guests bin on a hypervisor that gives its guests their addresses' );
+    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new(),                                                   undef ),              { bins => {} },                               'and nothing at all when nothing names a pool' );
+};
+
+subtest 'guest_pools: two networks cannot share an address' => sub {
+    my $fleet = sub (%pools) {
+        return FakeFleet->new( map { $_ => FakeHV->new( pool => $pools{$_} ) } keys %pools );
+    };
+
+    my %one = ( cidr => ['192.0.2.0/28'] );
+    is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => {%one}, hv3 => {} ) ) }, { hv1 => \%one, hv2 => \%one }, 'two hypervisors on one network share its pool, and one with none is left out' );
+    is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { cidr => ['192.0.2.16/28'] } ) ) }, { hv1 => \%one, hv2 => { cidr => ['192.0.2.16/28'] } }, 'and two networks that do not overlap have one each' );
+
+    my $err = ( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { addresses => ['192.0.2.9'] } ) ) } ) // q{};
+    like( $err,                                                                                              qr/hv1 .* 192[.]0[.]2[.]0\/28/, 'an address inside the pool of another network is refused, naming the one block' );
+    like( $err,                                                                                              qr/hv2 .* 192[.]0[.]2[.]9\/32/, 'and the other' );
+    like( $err,                                                                                              qr/which[ ]overlap/,            'and saying why' );
+    like( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => { cidr => ['192.0.2.0/33'] } ) ) }, qr/Invalid[ ]CIDR .* hv1/,      'and so is a block that is not one, by its hypervisor' );
 };
 
 subtest 'seed: a hypervisor with no bridge is not swept' => sub {

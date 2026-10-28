@@ -85,8 +85,9 @@ of the installation answers a client with no route back to the VPN subnet.  The
 C<A> records of the installation already hold the addresses of the guests, so
 a name that resolves anywhere is reachable through the tunnel.
 
-Without C<routes>, the recipe routes the C<ip_pool> in the C<_global> of the
-installation, the pool that F<ips.db> hands addresses out of.  Each C<cidr>
+Without C<routes>, the recipe routes the C<ip_pool> of the guest, the pool that
+F<ips.db> hands addresses out of: the pool of its hypervisor, and the bins of
+the C<_global> of the installation.  Each C<cidr>
 block of each bin goes as its two halves, and each item of C<addresses> goes as
 a C</32>.  A bin inside C<subnet> is not routed, because its addresses are the
 clients of this server.  Without any, the server pushes no route.

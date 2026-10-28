@@ -1217,7 +1217,6 @@ subtest 'the settings of an installation are validated in one place' => sub {
                 admin_user  => 'someadmin',
                 admin_gecos => 'Some Admin',
                 admin_email => 'someadmin@test.test',
-                gateway     => '192.0.2.254',
             },
         },
         'own.test.test' => { _global => { admin_user => 'somebody' } },
@@ -1230,8 +1229,16 @@ subtest 'the settings of an installation are validated in one place' => sub {
     is( $own->{admin_user},  'somebody',            'a domain overrides a setting of _base' );
     is( $own->{admin_email}, 'someadmin@test.test', 'and inherits the ones it says nothing about' );
 
-    # The block of the hypervisor names them, see Trog::HV/configured_resolvers.
-    like( exception { Provisioner::Cookbook->globals( 'own.test.test', { %said, 'own.test.test' => { _global => { resolvers => ['8.8.8.8'] } } } ) }, qr{/resolvers:[ ]The[ ]build[ ]works[ ]this[ ]out}, 'and resolvers are not a setting of _global' );
+    # The block of the hypervisor names them, see Trog::HV/configured_resolvers,
+    # Trog::HV/configured_gateway and Trog::HV/guest_pool.
+    my $own_global = sub (%global) {
+        return exception { Provisioner::Cookbook->globals( 'own.test.test', { %said, 'own.test.test' => { _global => \%global } } ) }
+    };
+    like( $own_global->( resolvers => ['8.8.8.8'] ),                                          qr{/resolvers:[ ]The[ ]build[ ]works[ ]this[ ]out}, 'and resolvers are not a setting of _global' );
+    like( $own_global->( gateway   => '192.0.2.254' ),                                        qr{/gateway:[ ]The[ ]build[ ]works[ ]this[ ]out},   'nor is the gateway' );
+    like( $own_global->( ip_pool   => { cidr => '192.0.2.0/24' } ),                           qr{/ip_pool:[ ]Properties[ ]not[ ]allowed:[ ]cidr}, 'nor the pool of the guests, as the top of ip_pool' );
+    like( $own_global->( ip_pool   => { bins => { guests => { cidr => '192.0.2.0/24' } } } ), qr{/ip_pool/bins:[ ]/propertyName/guests},          'nor as a bin named guests' );
+    is( $own_global->( ip_pool => { bins => { vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } } } ), undef, 'while the other bins are' );
 
     # Six hand-written refusals, each naming one setting, in the order the
     # script happened to read them: an operator fixed one and ran it again.
@@ -1239,11 +1246,10 @@ subtest 'the settings of an installation are validated in one place' => sub {
     like( $err, qr/admin_user/,    'a missing setting is refused' );
     like( $err, qr/admin_gecos/,   'with every other missing one named in the same breath' );
     like( $err, qr/admin_email/,   'so one run says all of it' );
-    like( $err, qr/gateway/,       'including the gateway' );
     like( $err, qr/recipes\.yaml/, 'and the refusal says which file to write them in' );
 
     like(
-        exception { Provisioner::Cookbook->globals( 'own.test.test', { 'own.test.test' => { _global => { gateway => 'not-an-address' } } } ) },
+        exception { Provisioner::Cookbook->globals( 'own.test.test', { 'own.test.test' => { _global => { transfer_ip => 'not-an-address' } } } ) },
         qr/own\.test\.test/,
         'and a refusal for one domain names the domain'
     );
@@ -1255,7 +1261,6 @@ my %BASE_GLOBAL = (
     admin_user  => 'someadmin',
     admin_gecos => 'Some Admin',
     admin_email => 'someadmin@test.test',
-    gateway     => '192.0.2.254',
 );
 
 # A recipe receives only the keys of _global that its schema names, so a key

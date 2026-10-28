@@ -37,7 +37,6 @@ my %GUEST   = (
     admin_user  => 'admin',
     admin_email => 'admin@test.test',
     admin_keys  => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey admin'],
-    gateway     => '192.0.2.254',
     main_ip     => '192.0.2.50',
 );
 
