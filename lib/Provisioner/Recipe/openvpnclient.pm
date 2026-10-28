@@ -74,6 +74,15 @@ guest issues is one line.  The fragment splits it into the four files that a
 C<cert_dir> holds.  The port, the protocol and the cipher of this recipe must
 still match the server.
 
+Such a client also gets the guests of this installation by name.  The fragment
+writes each guest that the ip pool assigns an address to into F</etc/hosts>,
+with that address, in one block that names this domain.  A rebuild replaces
+the block.  So the client finds the guests that it reaches through the tunnel
+with no DNS server that knows them, wherever it is built.  A guest added after
+this one is not in the block until this one is rebuilt.  A client with
+C<cert_dir> connects to a server that this installation does not run, so it
+gets no block.
+
 C<bin/destroy> revokes the certificate on the server, which frees the address.
 A rebuild gets the same certificate again, because the server keeps it.
 
@@ -227,6 +236,7 @@ sub template_files {
 
     return (
         'openvpnclient.client.conf.tt' => 'client.conf',
+        'openvpnclient.hosts.tt'       => 'vpn.hosts',
     );
 }
 

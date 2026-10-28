@@ -34,6 +34,24 @@ my $in = sub {
 ok($address && grep({ $in->($_) } @blocks), 'the tunnel has the static address that [% issue_from %] gave this domain')
     or diag 'address: ' . ($address // 'none') . ", bin: @blocks";
 
+# The guests of this installation by name, without a DNS server that knows them.
+my $hosts = do { local (@ARGV, $/) = '/etc/hosts'; <> } // q{};
+my $marked = () = $hosts =~ m/^# BEGIN trog openvpnclient \Q[% domain %]\E$/gm;
+is($marked, 1, '/etc/hosts has one block of the guests that the tunnel reaches');
+my %pool = (
+[% FOR name IN ipmap.keys().sort() -%]
+[% IF name != domain -%]
+    '[% name %]' => '[% ipmap.$name %]',
+[% END -%]
+[% END -%]
+);
+my ($name) = sort keys %pool;
+SKIP: {
+    skip 'the ip pool assigns no other guest', 1 unless defined $name;
+    my ($found) = `getent hosts $name` =~ m/^(\S+)/;
+    is($found, $pool{$name}, "$name resolves to its address in the ip pool");
+}
+
 [% END -%]
 # Nothing is salvaged off this guest.  Provisioner::Recipe::openvpnclient says why.
 

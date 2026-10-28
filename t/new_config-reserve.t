@@ -65,7 +65,7 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 
 # Runs the generator for vm.test.test with @flags, on $hv, as far as the
 # address of the guest.  Returns what it printed, the main_ip of the
-# configuration, and what it died with past that point.
+# configuration, what it died with past that point, and the ipmap.
 sub generate ( $hv, @flags ) {
     File::Slurper::Temp::write_text(
         $RECIPES,
@@ -90,18 +90,21 @@ sub generate ( $hv, @flags ) {
     );
 
     my $main_ip;
+    my $ipmap;
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( assignments => sub { return { 'cache.test.test' => '192.0.2.10' } } );
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
     $fleet->redefine( choose => sub { return $hv } );
     my $generator = Test::MockModule->new( 'Trog::Provisioner::Config::Generator', no_auto => 1 );
     $generator->redefine( transfer_to           => sub { return ( ['198.51.100.1'], 22, 'someadmin' ) } );
-    $generator->redefine( apply_global_defaults => sub ( $distro, $global ) { $main_ip = $global->{main_ip}; die "far enough\n" } );
+    $generator->redefine( apply_global_defaults => sub ( $distro, $global ) { $main_ip = $global->{main_ip}; $ipmap = $global->{ipmap}; die "far enough\n" } );
 
     Provisioner::Cookbook->forget();
     my $died;
     my $said = capture_stdout {
         $died = exception { Trog::Provisioner::Config::Generator::main( '--recipes', $RECIPES, '--skip_ssh', @flags, 'vm.test.test' ) }
     };
-    return ( $said, $main_ip, $died // q{} );
+    return ( $said, $main_ip, $died // q{}, $ipmap );
 }
 
 subtest 'a build reserves a guest that does not exist, and names its address' => sub {
@@ -125,9 +128,10 @@ subtest 'nothing is reserved without the option, or on a dry run' => sub {
 
 subtest 'a guest that exists is not reserved again, and its address is the main_ip' => sub {
     my $hv = CloudProbe::HV->new( exists => 1 );
-    my ( undef, $main_ip ) = generate( $hv, '--reserve' );
+    my ( undef, $main_ip, undef, $ipmap ) = generate( $hv, '--reserve' );
     is_deeply( $hv->{reserved}, [], 'no second reservation' );
     is( $main_ip, '203.0.113.5', 'the address that the hypervisor gave it' );
+    is_deeply( $ipmap, { 'cache.test.test' => '192.0.2.10' }, 'and the guests of the pool are in its ipmap, which a VPN client reaches' );
 };
 
 done_testing;

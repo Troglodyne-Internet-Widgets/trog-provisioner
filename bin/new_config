@@ -722,16 +722,16 @@ sub handle_domain {
               unless $hv->on_nat_network;
             print "The ip pool offers no addresses, so $fqdn takes a lease on the NAT network of " . $hv->describe . ", and its bridged interface stays unconfigured.\n";
         }
-
-        # Also for a guest with no address, because the templates name the
-        # other guests by what they hold.
-        $ip_conf = Provisioner::IPPool::assignments();
-
-        # A single label must not go into a zone file without a warning.
-        my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
-        die "These domains in " . Provisioner::IPPool::db_path() . " are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
-          if @unqualified;
     }
+
+    # Also for a guest with no address of the pool, because the templates name
+    # the other guests by what they hold, and a VPN client reaches them.
+    $ip_conf = Provisioner::IPPool::assignments();
+
+    # A single label must not go into a zone file without a warning.
+    my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
+    die "These domains in " . Provisioner::IPPool::db_path() . " are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
+      if @unqualified;
 
     # A hypervisor that gives its guests their addresses gives one only to a
     # guest that exists.  So bin/provision has the guest reserved first, empty,
