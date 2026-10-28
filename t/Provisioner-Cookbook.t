@@ -269,6 +269,17 @@ subtest 'configures says whether a name is a domain of this installation' => sub
     is( Provisioner::Cookbook->configures( undef,          $conf ), 0, 'and nor is no name' );
 };
 
+subtest 'asking about a domain does not configure it' => sub {
+    my $conf = { _base => { _global => { cache => 'cache.test' } }, 'cache.test' => { fetchcache => {} } };
+
+    is_deeply( Provisioner::Cookbook->global_config( 'outside.test', $conf ), { cache => 'cache.test' }, 'a domain with no configuration gets the _global of _base' );
+    Provisioner::Cookbook->upstream_cycle( 'outside.test', $conf );
+    Provisioner::Cookbook->upstream_domains( 'outside.test', $conf );
+    Provisioner::Cookbook->named_guests( 'outside.test', $conf );
+
+    is( Provisioner::Cookbook->configures( 'outside.test', $conf ), 0, 'and afterwards it is still not a domain of the configuration, so bin/new_config still refuses it' );
+};
+
 subtest 'helo_name_of is one name for the machine, whatever domain asks' => sub {
     my $conf = { 'mx.test' => { mail => {} } };
     is( Provisioner::Cookbook->helo_name_of( 'mx.test', $conf ), 'mail.mx.test', 'a guest of its own that runs mail announces the mail name of its domain' );
