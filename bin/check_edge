@@ -1,0 +1,376 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::check_edge;
+
+#ABSTRACT: Check from end to end that an edge guest serves the internet for a guest behind it.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Crypt::PRNG();
+use Getopt::Long qw{GetOptionsFromArray};
+use IO::Socket::IP();
+use IO::Socket::SSL();
+use MIME::Base64();
+use Pod::Usage qw{pod2usage};
+use Time::HiRes();
+
+use Provisioner::Cookbook();
+use Trog::Config();
+use Trog::Credentials();
+use Trog::Hypervisors();
+
+=head1 USAGE
+
+    check_edge [--credentials] [--recipes=file] EDGE GUEST NAME
+
+Checks, from this machine and from the edge, that EDGE serves the internet for
+GUEST.  EDGE runs C<openvpnclient> and C<nginxrelay>.  GUEST runs C<nginx> with
+C<relay> set to EDGE, and NAME is one of the names that GUEST serves through
+the edge.  It prints one line for each check, C<ok> or C<not ok>, and the
+reason under a check that fails.  It exits 0 when every check passes, and 1
+when one fails.
+
+It reads the keys of EDGE and GUEST from the store, so it asks for the password
+of the store.  With B<--credentials>, it reads the password from standard
+input, as C<bin/provision> does.  See L<Trog::Credentials>.
+
+=head2 What it checks
+
+=over 4
+
+=item * The tunnel.  EDGE routes the address of GUEST through its tunnel, and
+GUEST answers a ping there.
+
+=item * The nameservers.  Each of the C<nameservers> of C<_global> answers a
+query from EDGE.  EDGE is outside the network of the fleet, so this is the path
+that a resolver on the internet takes, through the port forwards of the
+network.  A port forward that a gateway lost fails here.
+
+=item * HTTPS.  A connection from this machine to port 443 of EDGE, with NAME
+in SNI, gets a certificate that is valid for NAME, and an HTTP answer.  EDGE
+passes TLS through, so that certificate is the certificate of GUEST.
+
+=item * HTTP.  A request to port 80 of EDGE, for NAME, gets an HTTP answer.
+
+=item * The address of the client.  The access log of GUEST shows the request
+of the HTTPS check from the address that EDGE sees this machine at, and not
+from the address of EDGE.  That is the PROXY protocol at work.
+
+=item * A ban.  A ban of a documentation address in a jail of GUEST that bans
+through EDGE puts the address in the ipset of EDGE.  Lifting the ban takes it out
+again.
+
+=back
+
+Mail through the edge is not checked yet.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--credentials>
+
+Read the password of the store from standard input.  See L<Trog::Credentials>.
+
+=item B<--recipes> FILE
+
+The F<recipes.yaml> to read.  The default is the one of the installation.
+
+=back
+
+=cut
+
+# How long a ban may take to reach the edge, and an unban to leave it, in seconds.
+our $BAN_WAIT = 30;
+
+# The set where nginxrelay keeps its bans.  See Provisioner::RelayRecipe/ban_set.
+our $BAN_SET = 'nginxrelay-bans';
+
+sub main {
+    my @args = @_;
+
+    my $rfile = Trog::Config->path('recipes.yaml');
+    my ( $credentials, $help );
+    GetOptionsFromArray(
+        \@args,
+        'credentials' => \$credentials,
+        'recipes=s'   => \$rfile,
+        'help'        => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Name the edge, the guest and a name that the guest serves' ) unless @args == 3;
+    my ( $edge_domain, $guest_domain, $name ) = @args;
+
+    Trog::Credentials->load() if $credentials;
+    my $conf  = Provisioner::Cookbook->configuration($rfile);
+    my $edge  = machine($edge_domain);
+    my $guest = machine($guest_domain);
+    my $token = 'check-edge-' . Crypt::PRNG::random_string_from( join( q{}, 'a' .. 'z', 0 .. 9 ), 12 );
+
+    my @results = (
+        check_tunnel( $edge, $guest ),
+        check_nameservers( $edge, values %{ Provisioner::Cookbook->base_global($conf)->{nameservers} // {} } ),
+        check_https( $edge->host, $name, $token ),
+        check_http( $edge->host, $name ),
+        check_client_address( $guest, $token, client_address($edge), $edge->host ),
+        check_ban( $guest, $edge, $guest_domain ),
+    );
+
+    my $n      = 0;
+    my $failed = 0;
+    foreach my $result (@results) {
+        my ( $ok, $label, $why ) = @$result;
+        $n++;
+        print( ( $ok ? 'ok' : 'not ok' ) . " $n - $label\n" );
+        next if $ok;
+        $failed = 1;
+        print map { "#   $_\n" } split( m/\n/, $why // q{} );
+    }
+    print "1..$n\n";
+    return $failed;
+}
+
+=head1 SUBROUTINES
+
+=head2 $machine = machine($domain)
+
+The guest of C<$domain>, as L<Trog::Hypervisors/guest_of> finds it.  Dies when
+no hypervisor of the fleet runs it at an address.
+
+=cut
+
+sub machine {
+    my ($domain) = @_;
+    return Trog::Hypervisors->guest_of($domain) // die "No hypervisor in the fleet runs $domain at an address, so there is nothing to check.\n";
+}
+
+=head2 ($output, $status) = as_root($machine, $command)
+
+Runs the shell C<$command> as root on C<$machine>, and returns what it printed
+and its exit status.  The status is undef when the command printed no status,
+for example because the connection failed.
+
+=cut
+
+sub as_root {
+    my ( $machine, $command ) = @_;
+    ( my $quoted = $command ) =~ s/'/'\\''/g;
+    my $out    = $machine->capture_cmd("sudo sh -c '$quoted; echo \"check-edge-status=\$?\"'") // q{};
+    my $status = $out =~ s/check-edge-status=(\d+)\s*\z//s ? $1 : undef;
+    return ( $out, $status );
+}
+
+=head2 [$ok, $label, $why] = check_tunnel($edge, $guest)
+
+Whether the edge routes the address of the guest through a tunnel, and the
+guest answers a ping there.
+
+=cut
+
+sub check_tunnel {
+    my ( $edge, $guest ) = @_;
+    my $address = $guest->host;
+    my $label   = "the edge reaches the guest at $address through its tunnel";
+
+    my ($route) = as_root( $edge, "ip -4 -o route get $address" );
+    return [ 0, $label, "The edge routes $address outside a tunnel:\n$route" ] unless $route =~ m/\bdev\s+tun/;
+
+    my ( $ping, $status ) = as_root( $edge, "ping -c 1 -W 3 $address" );
+    return [ 0, $label, "The route is through a tunnel, but $address does not answer a ping:\n$ping" ] unless defined $status && $status == 0;
+    return [ 1, $label ];
+}
+
+=head2 @results = check_nameservers($edge, @nameservers)
+
+One result for each nameserver: whether it answers a query for its own name
+from the edge.  The edge has no C<dig>, so a short python3 script sends the
+query, and python3 is on every guest.  The script goes in base64, because it
+has quotes of its own inside the quotes of C<as_root>.
+
+=cut
+
+our $DNS_QUERY = <<'PYTHON';
+import socket, struct, sys
+name = sys.argv[1]
+query = struct.pack('>HHHHHH', 0x7e57, 0x0100, 1, 0, 0, 0) + b''.join(bytes([len(p)]) + p.encode() for p in name.rstrip('.').split('.')) + b'\0' + struct.pack('>HH', 1, 1)
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(3)
+try:
+    address = socket.gethostbyname(name)
+    s.sendto(query, (address, 53))
+    reply = s.recv(512)
+except Exception as e:
+    print('no answer from ' + name + ': ' + str(e))
+    sys.exit(1)
+if reply[:2] != query[:2] or reply[3] & 15 != 0:
+    print(name + ' at ' + address + ' answered with an error')
+    sys.exit(1)
+print(name + ' at ' + address + ' answered')
+PYTHON
+
+sub check_nameservers {
+    my ( $edge, @nameservers ) = @_;
+    my @results;
+    foreach my $ns ( sort @nameservers ) {
+        my $label = "the nameserver $ns answers from the internet";
+        my ( $said, $status ) = as_root( $edge, 'echo ' . MIME::Base64::encode_base64( $DNS_QUERY, q{} ) . " | base64 -d | python3 -I - $ns" );
+        push( @results, defined $status && $status == 0 ? [ 1, $label ] : [ 0, $label, $said ] );
+    }
+    return @results;
+}
+
+=head2 [$ok, $label, $why] = check_https($address, $name, $token)
+
+Connects to port 443 at C<$address> with C<$name> in SNI, requires a
+certificate that is valid for C<$name>, and asks for the path C</$token>.  Any
+HTTP status passes, because the path is there only to find the request in the
+access log.
+
+=cut
+
+sub check_https {
+    my ( $address, $name, $token ) = @_;
+    my $label  = "port 443 of the edge passes TLS for $name through to the guest";
+    my $socket = IO::Socket::SSL->new(
+        PeerHost            => $address,
+        PeerPort            => 443,
+        SSL_hostname        => $name,
+        SSL_verify_mode     => IO::Socket::SSL::SSL_VERIFY_PEER(),
+        SSL_verifycn_name   => $name,
+        SSL_verifycn_scheme => 'http',
+        Timeout             => 10,
+    ) or return [ 0, $label, "No verified TLS connection to $address for $name: " . ( IO::Socket::SSL::errstr() // $! ) ];
+
+    my $status = http_status( $socket, $name, "/$token" );
+    return [ 0, $label, "The TLS connection was verified, but no HTTP answer came" ] unless $status;
+    return [ 1, "$label, with a certificate for it, and HTTP $status" ];
+}
+
+=head2 [$ok, $label, $why] = check_http($address, $name)
+
+Asks port 80 at C<$address> for C</> of C<$name>.  Any HTTP status passes.
+
+=cut
+
+sub check_http {
+    my ( $address, $name ) = @_;
+    my $label  = "port 80 of the edge passes HTTP for $name through to the guest";
+    my $socket = IO::Socket::IP->new( PeerHost => $address, PeerPort => 80, Timeout => 10 )
+      or return [ 0, $label, "No connection to $address on port 80: $!" ];
+
+    my $status = http_status( $socket, $name, q{/} );
+    return [ 0, $label, 'The connection opened, but no HTTP answer came' ] unless $status;
+    return [ 1, "$label, with HTTP $status" ];
+}
+
+=head2 $status = http_status($socket, $name, $path)
+
+Sends a GET of C<$path> for the host C<$name> on C<$socket>, and returns the
+status code of the answer, or undef when there is no status line.
+
+=cut
+
+sub http_status {
+    my ( $socket, $name, $path ) = @_;
+    print {$socket} "GET $path HTTP/1.1\r\nHost: $name\r\nUser-Agent: check_edge\r\nConnection: close\r\n\r\n";
+    my $line = <$socket> // return;
+    my ($status) = $line =~ m{\AHTTP/\d(?:[.]\d)?\s+(\d{3})\b} or return;
+    return $status;
+}
+
+=head2 $address = client_address($edge)
+
+The address that the edge sees this machine at, from C<SSH_CONNECTION> of the
+connection that asks it.  That is also where the request of C<check_https>
+comes from, because both leave this machine the same way.
+
+=cut
+
+sub client_address {
+    my ($edge)    = @_;
+    my $said      = $edge->capture_cmd('echo "$SSH_CONNECTION"') // q{};
+    my ($address) = $said =~ m/\A\s*(\S+)/;
+    return $address;
+}
+
+=head2 [$ok, $label, $why] = check_client_address($guest, $token, $client, $edge_address)
+
+Whether the access log of the guest shows the request for C</$token> from
+C<$client>, and not from the edge.
+
+=cut
+
+sub check_client_address {
+    my ( $guest, $token, $client, $edge_address ) = @_;
+    my $label = 'the guest logs the address of the client, and not the address of the edge';
+    return [ 0, $label, 'The edge did not say which address it sees this machine at' ] unless defined $client;
+
+    my ($log)  = as_root( $guest, "journalctl -t nginx_access --since '-15 min' --no-pager -o cat | grep -F '/$token' | tail -n 1" );
+    my ($from) = $log =~ m/\A\s*(\S+)/ or return [ 0, $label, "The access log of the guest has no request for /$token" ];
+    return [ 1, "$label ($client)" ] if $from eq $client;
+    return [ 0, $label, "The request came from $from, which is " . ( $from eq $edge_address ? 'the edge' : 'neither the edge nor this machine' ) . ".  This machine is $client to the edge.\n$log" ];
+}
+
+=head2 [$ok, $label, $why] = check_ban($guest, $edge, $guest_domain)
+
+Bans an address of TEST-NET-3 in a jail of the guest that bans through the
+edge, waits for it in the ipset of the edge, lifts the ban, and waits for it to
+leave.  The ban is lifted whatever the wait found, so the check leaves no ban
+behind.
+
+=cut
+
+sub check_ban {
+    my ( $guest, $edge, $guest_domain ) = @_;
+    my $label  = 'a ban in a jail of the guest reaches the edge, and the unban leaves it';
+    my $action = "nginxrelay-$guest_domain";
+
+    my ($status) = as_root( $guest, 'fail2ban-client status' );
+    my ($list)   = $status =~ m/Jail\s+list:\s*(\N*)/;
+    my @jails    = grep { $_ ne q{} } split( m/[\s,]+/, $list // q{} );
+    my $jail;
+    foreach my $candidate (@jails) {
+        my ($actions) = as_root( $guest, "fail2ban-client get $candidate actions" );
+        next unless $actions =~ m/\b\Q$action\E\b/;
+        $jail = $candidate;
+        last;
+    }
+    return [ 0, $label, "No jail of the guest bans through the action $action.  Its jails: @jails" ] unless defined $jail;
+
+    my $ip = '203.0.113.' . ( 1 + Crypt::PRNG::irand() % 254 );
+    as_root( $guest, "fail2ban-client set $jail banip $ip" );
+    my $arrived = wait_for( sub { ( as_root( $edge, "ipset -quiet test $BAN_SET $ip" ) )[1] // 1 }, 0 );
+    as_root( $guest, "fail2ban-client set $jail unbanip $ip" );
+    my $left = wait_for( sub { ( as_root( $edge, "ipset -quiet test $BAN_SET $ip" ) )[1] // 0 }, 1 );
+
+    return [ 0, $label, "The ban of $ip in $jail did not reach $BAN_SET on the edge within $BAN_WAIT seconds" ]                     unless $arrived;
+    return [ 0, $label, "The ban of $ip reached the edge, but the unban did not take it out of $BAN_SET within $BAN_WAIT seconds" ] unless $left;
+    return [ 1, "$label ($jail)" ];
+}
+
+=head2 $bool = wait_for($probe, $want)
+
+Calls C<$probe> once a second until it returns C<$want>, for at most
+C<$BAN_WAIT> seconds.  Returns true when it did.
+
+=cut
+
+sub wait_for {
+    my ( $probe, $want ) = @_;
+    my $until = Time::HiRes::time() + $BAN_WAIT;
+    while ( $probe->() != $want ) {
+        return 0 if Time::HiRes::time() >= $until;
+        Time::HiRes::sleep(1);
+    }
+    return 1;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
