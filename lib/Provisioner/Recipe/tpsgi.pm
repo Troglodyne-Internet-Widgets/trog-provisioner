@@ -51,8 +51,8 @@ sub required_recipes {
             my (%opts) = @_;
             return (
                 cpan_deps => [
-                    { install     => ['Starman'] },
-                    { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
+                    { install => ['Starman'] },
+                    { dzil    => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
                 ],
             );
         },
