@@ -334,6 +334,21 @@ sub dns_name {
     return lc( $name // q{} ) =~ s/[.]+\z//r;
 }
 
+=head3 in_zone($name, $zone)
+
+Whether the zone C<$zone> holds C<$name>: the name is the zone, or a name under
+it.  The test is at a label boundary, so C<customer.test> holds
+C<web.customer.test> and not C<web.xcustomer.test>.  Both compare as
+C<dns_name> gives them, so case and a trailing dot do not matter.
+
+=cut
+
+sub in_zone {
+    my ( $name, $zone ) = @_;
+    my ( $n,    $z )    = ( dns_name($name), dns_name($zone) );
+    return $n eq $z || $n =~ m/[.]\Q$z\E\z/;
+}
+
 =head3 write_pem($path, $pem, $mode)
 
 Writes a PEM to C<$path> and sets its mode.  The PEM is a certificate, a key,

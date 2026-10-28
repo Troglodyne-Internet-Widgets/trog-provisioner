@@ -375,7 +375,7 @@ count.  Returns an empty list when no account lists such a zone.
 sub account_for ( $self, $domain, $conf, %how ) {
     my %zones  = $self->account_zones(%$conf);
     my $name   = Provisioner::Utils::dns_name($domain);
-    my @holds  = grep { ( !$how{above} && $name eq $_ ) || $name =~ m/[.]\Q$_\E\z/ } keys %zones;
+    my @holds  = grep { my $zone = $_; Provisioner::Utils::in_zone( $name, $zone ) && !( $how{above} && $name eq $zone ) } keys %zones;
     my ($zone) = $self->longest_first(@holds) or return;
     return ( $zone, $zones{$zone} );
 }
@@ -458,11 +458,10 @@ L<Provisioner::Cookbook>, as C<configured_zones> does.
 =cut
 
 sub zone_of ( $self, $name, $domain, $zones = undef ) {
-    my $in = sub ($zone) { return lc $name eq lc $zone || $name =~ m/[.]\Q$zone\E\z/i };
-    return if $in->($domain);
+    return if Provisioner::Utils::in_zone( $name, $domain );
 
     $zones //= { $self->configured_zones($domain) };
-    my ($zone) = $self->longest_first( grep { $in->($_) } keys %$zones );
+    my ($zone) = $self->longest_first( grep { Provisioner::Utils::in_zone( $name, $_ ) } keys %$zones );
     return $zone;
 }
 
@@ -886,7 +885,7 @@ sub enrich {
     # The guest itself answers at the address that its A record publishes.
     my $nameserver = $holder eq $server ? "ns1.$server"         : $holder;
     my $glue       = $holder eq $server ? $publication{address} : $address;
-    my $in_zone    = $nameserver eq $domain || $nameserver =~ m/[.]\Q$domain\E\z/;
+    my $in_zone    = Provisioner::Utils::in_zone( $nameserver, $domain );
     die "$domain is delegated to $nameserver, which is inside its zone, and the installation gave $holder no address to publish for it.  Give it an address of the pool.\n"
       if $in_zone && !$glue;
 
