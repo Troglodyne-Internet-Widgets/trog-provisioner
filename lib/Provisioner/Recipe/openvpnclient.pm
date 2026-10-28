@@ -88,10 +88,11 @@ A rebuild gets the same certificate again, because the server keeps it.
 
 =head3 A client on the same network as its server
 
-You can build a client on the same network as the VPN server, for example on
-a hypervisor beside it.  You add nothing to the configuration for this.  The
-client reaches the other guests directly on that network.  It still gets its
-address on the tunnel, and the other clients of the server reach it there.
+A guest on the same network as the VPN server can be a client of it too.  It
+then talks to the other clients of the server, for example a laptop or a
+guest on a cloud, and they reach it at its address on the tunnel.  You add
+nothing to the configuration for this.  The client still reaches the other
+guests on its own network directly, and not through the tunnel.
 
 C<bin/new_config> decides this when it builds the guest.  It asks the
 hypervisors which network the guest and the server are on.  If the guest
