@@ -47,9 +47,16 @@ my %pool = (
 );
 my ($name) = sort keys %pool;
 SKIP: {
-    skip 'the ip pool assigns no other guest', 1 unless defined $name;
+    skip 'the ip pool assigns no other guest', 2 unless defined $name;
     my ($found) = `getent hosts $name` =~ m/^(\S+)/;
     is($found, $pool{$name}, "$name resolves to its address in the ip pool");
+
+    my $route = `ip -4 route get $pool{$name} 2>&1`;
+[% IF on_server_network -%]
+    unlike($route, qr/\bdev\s+\Q[% device %]\E\b/, "$name is on the network of this guest, so it is reached there and not through the tunnel") or diag $route;
+[% ELSE -%]
+    like($route, qr/\bdev\s+\Q[% device %]\E\b/, "$name is reached through the tunnel") or diag $route;
+[% END -%]
 }
 
 [% END -%]

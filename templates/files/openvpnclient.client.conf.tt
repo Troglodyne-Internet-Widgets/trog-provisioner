@@ -23,5 +23,11 @@ tls-version-min 1.2
 cipher [% cipher %]
 auth SHA256
 
+[% IF on_server_network -%]
+[%# This guest is on the network of its server, and reaches the guests there
+    directly.  Provisioner::Recipe::openvpnclient has the whole account. -%]
+pull-filter ignore "route "
+
+[% END -%]
 verb 3
 log-append /var/log/openvpn/openvpn-client-[% domain %].log

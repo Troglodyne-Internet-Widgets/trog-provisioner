@@ -102,6 +102,10 @@ numbers.  Its traffic for those addresses goes into the tunnel too.  If that
 matters for a client, give C<routes> a C</32> for each guest, which takes only
 those addresses away from the home network.
 
+A guest of this installation on the network of this server reaches the
+guests directly, so it ignores these routes.  See
+L<Provisioner::Recipe::openvpnclient/A client on the network of its server>.
+
 =head3 The PKI is the part that cannot be made again
 
 The recipe can make everything else again when it needs to.  A new CA is not

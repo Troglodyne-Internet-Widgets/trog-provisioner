@@ -86,6 +86,21 @@ gets no block.
 C<bin/destroy> revokes the certificate on the server, which frees the address.
 A rebuild gets the same certificate again, because the server keeps it.
 
+=head3 A client on the network of its server
+
+The server pushes routes to the networks of the guests, and on a laptop they
+must win over a home network with the same numbers.  So they are longer than
+that network.  See L<Provisioner::Recipe::openvpn/The networks that a client
+reaches>.  On a guest that is on the network of its server, those routes win
+over its own network as well, and it sends its traffic for the other guests
+and for this machine into the tunnel.
+
+So such a guest ignores every route that the server pushes, and it reaches
+those guests directly.  It still gets its address on the tunnel, and the
+clients of the server reach it there.  C<bin/new_config> decides this when it
+builds the guest, from the hypervisors that run the guest and the server.  A
+guest that moves to another network gets the routes when it is built again.
+
 =head3 Several tunnels on one guest
 
 A guest can hold two domains that connect to two different VPNs, and openvpn
@@ -167,6 +182,10 @@ With C<issue_from>, it also sets C<address_blocks>, the networks of the bin
 that the address of this domain comes from.  Dies unless one bin of C<ip_pool>
 names C<issue_from> in C<via>.
 
+It sets C<on_server_network> when the guest of C<issue_from> or of C<server>
+is up on the network of this guest, as C<network_peers> says.  See
+L</A client on the network of its server>.
+
 =cut
 
 sub enrich {
@@ -178,6 +197,9 @@ sub enrich {
         my ( undef, $bin ) = bin_of( $opts{ip_pool}, $opts{issue_from} );
         $opts{address_blocks} = [ Provisioner::IPPool::blocks($bin) ];
     }
+
+    my %peer = map { $_ => 1 } @{ $opts{network_peers} // [] };
+    $opts{on_server_network} = ( List::Util::any { $peer{$_} } $self->joins_network_of(%opts) ) ? 1 : 0;
 
     return %opts;
 }

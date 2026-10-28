@@ -122,6 +122,20 @@ subtest 'an issued configuration comes from the bin that the server routes' => s
     unlike( $fragment, qr/rsync/, 'and fetches nothing from this machine' );
 };
 
+subtest 'a client on the network of its server leaves the routes of the server alone' => sub {
+    my %on = fresh()->validate( %ISSUED, domain => 'first.test', network_peers => ['vpn.test.test'] );
+    is( $on{on_server_network}, 1, 'the server is up on the network of this guest' );
+
+    my %other = fresh()->validate( %ISSUED, domain => 'first.test', network_peers => ['logs.test.test'] );
+    is( $other{on_server_network}, 0, 'another guest on its network is not the server' );
+
+    my %away = fresh()->validate( %ISSUED, domain => 'first.test', network_peers => [] );
+    is( $away{on_server_network}, 0, 'and a client away from the server takes its routes' );
+
+    my %by_name = fresh()->validate( %BASE, domain => 'first.test', network_peers => ['vpn.test.test'] );
+    is( $by_name{on_server_network}, 1, 'a client with cert_dir goes by the server that it connects to' );
+};
+
 subtest 'the fragment splits the issued configuration into the four files' => sub {
     my $fragment = fresh()->render( %ISSUED, domain => 'first.test' );
     my ($line) = $fragment =~ m{^(\s*umask[ ]077[ ]\N+)$}m or return fail('no line that decodes the configuration');

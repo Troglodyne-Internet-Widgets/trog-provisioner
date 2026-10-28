@@ -166,6 +166,7 @@ my %G = (
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
     modules                    => [],
     ipmap                      => { test => '192.0.2.100' },
+    network_peers              => [],
     ip_pool                    => { cidr => '192.0.2.0/24' },
     nameservers                => {},
     packager_invocation        => 'apt-get install -y',
