@@ -80,7 +80,7 @@ sub main {
     # Without --assigned or --available, show both.
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;
 
-    my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
+    my $globals = Provisioner::Cookbook->base_globals( Provisioner::Cookbook->configuration($rfile) );
     my $pool    = $globals->{ip_pool} // {};
 
     unless ( keys %$pool ) {

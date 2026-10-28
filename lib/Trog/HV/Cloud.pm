@@ -265,7 +265,7 @@ sub check_transfer_ip {
     my ($self) = @_;
 
     my $rfile = Trog::Config->path('recipes.yaml');
-    my $named = $self->configured_transfer_ip // eval { Provisioner::Cookbook->global_config(undef)->{transfer_ip} };
+    my $named = $self->configured_transfer_ip // eval { Provisioner::Cookbook->base_global()->{transfer_ip} };
 
     return $self->verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
 

@@ -1195,8 +1195,8 @@ sub remember {
 
 Returns everything that one domain is configured with, as a hash reference: its
 own entry with the C<_base> entry merged in.  Recipes read their options from
-this.  With no C<$domain>, returns C<_base> alone, which is what a domain gets
-when it says nothing itself.
+this.  A domain that the configuration does not name gets C<_base> alone.
+Dies with no C<$domain>.  For C<_base> alone, ask C<base_config>.
 
 C<$conf> is the configuration to work from, and defaults to C<configuration()>.
 A caller that already changed one passes it, for example after it resolved the
@@ -1219,16 +1219,32 @@ takes.  See C<global_config>.
 
 sub domain_config {
     my ( $class, $domain, $conf ) = @_;
+    die "domain_config needs a domain.  base_config returns _base alone.\n" unless defined $domain;
     $conf //= $class->configuration();
 
-    my $base = clone( $conf->{_base}                                 // {} );
-    my $own  = clone( ( defined $domain ? $conf->{$domain} : undef ) // {} );
-    delete $base->{_global};
+    my $own = clone( ( exists $conf->{$domain} ? $conf->{$domain} : {} ) || {} );
     delete $own->{_global};
 
     # An object, so that a Hash::Merge behavior set elsewhere cannot change it.
     state $merger = Hash::Merge->new('RIGHT_PRECEDENT');
-    return $merger->merge( $base, $own );
+    return $merger->merge( $class->base_config($conf), $own );
+}
+
+=head2 base_config($conf)
+
+Returns the C<_base> entry without its C<_global>, as a new hash reference.
+That is what C<domain_config> gives a domain that says nothing itself.
+C<$conf> is as in C<domain_config>.
+
+=cut
+
+sub base_config {
+    my ( $class, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my $base = clone( $conf->{_base} || {} );
+    delete $base->{_global};
+    return $base;
 }
 
 =head2 host_of($domain, $conf)
@@ -1607,7 +1623,9 @@ sub named_guests {
 
 Returns the C<_global> block that a domain is built with, as a new hash
 reference.  It is the C<_global> block of C<_base> with the keys of the domain
-on top, merged one level deep.  C<$conf> is as in C<domain_config>.
+on top, merged one level deep.  C<$conf> is as in C<domain_config>.  Dies
+with no C<$domain>.  For the C<_global> of C<_base> alone, ask
+C<base_global>.
 
 C<_global> holds what several recipes share, not what one recipe owns.  So it
 merges apart from the recipes, and C<domain_config> leaves it out.
@@ -1616,16 +1634,29 @@ merges apart from the recipes, and C<domain_config> leaves it out.
 
 sub global_config {
     my ( $class, $domain, $conf ) = @_;
+    die "global_config needs a domain.  base_global returns the _global of _base alone.\n" unless defined $domain;
     $conf //= $class->configuration();
 
     # exists, because $conf->{$domain}{_global} would add $domain to $conf,
-    # which is the remembered configuration that every caller shares.  defined
-    # first, because exists dies on an undef key under fatal warnings.
-    my $mine = defined $domain && exists $conf->{$domain} ? $conf->{$domain} : {};
-    my $base = clone( $conf->{_base}{_global} || {} );
-    my $own  = clone( $mine->{_global}        || {} );
+    # which is the remembered configuration that every caller shares.
+    my $mine = exists $conf->{$domain} ? $conf->{$domain} : {};
+    my $own  = clone( ( $mine || {} )->{_global} || {} );
 
-    return { %$base, %$own };
+    return { %{ $class->base_global($conf) }, %$own };
+}
+
+=head2 base_global($conf)
+
+Returns the C<_global> block of C<_base>, as a new hash reference.  That is
+what C<global_config> gives a domain that says nothing itself.  C<$conf> is as
+in C<domain_config>.
+
+=cut
+
+sub base_global {
+    my ( $class, $conf ) = @_;
+    $conf //= $class->configuration();
+    return clone( ( $conf->{_base} || {} )->{_global} || {} );
 }
 
 =head2 record_global($domain, $key, $value)
@@ -1777,7 +1808,8 @@ my sub global_keys ($class) {
 =head2 globals($domain, $conf)
 
 The settings that C<global_schema> declares, for a domain, validated, with the defaults
-filled in.  C<$conf> is as in C<domain_config>.
+filled in.  C<$conf> is as in C<domain_config>.  Dies with no C<$domain>.  For
+the settings of C<_base> alone, ask C<base_globals>.
 
 Dies naming every setting that is missing or wrong, and the file to fix, rather
 than leaving a recipe to interpolate an undef into a path.  That is one refusal
@@ -1792,8 +1824,32 @@ says which.
 
 sub globals {
     my ( $class, $domain, $conf ) = @_;
+    die "globals needs a domain.  base_globals returns the settings of _base alone.\n" unless defined $domain;
+    return validated_globals( $class, $class->global_config( $domain, $conf ), " for $domain" );
+}
 
-    my $said = $class->global_config( $domain, $conf );
+=head2 base_globals($conf)
+
+The settings of the C<_global> of C<_base>, validated as C<globals> validates
+the settings of a domain.  C<$conf> is as in C<domain_config>.
+
+=cut
+
+sub base_globals {
+    my ( $class, $conf ) = @_;
+    return validated_globals( $class, $class->base_global($conf), q{} );
+}
+
+=head2 validated_globals($class, \%said, $where)
+
+The check that C<globals> and C<base_globals> share, on the C<_global> block
+C<%said>.  Returns it validated, or dies as C<globals> says.  C<$where> goes
+into the message after "not valid", for example C< for $domain>.
+
+=cut
+
+sub validated_globals {
+    my ( $class, $said, $where ) = @_;
 
     # Coerced here rather than in the schema, because one address written as a
     # string is what an operator writes, and every reader wants a list.
@@ -1811,7 +1867,7 @@ sub globals {
         push( @errors, $computed->{$key} ? "/$key: The build works this out, so _global cannot set it." : "/$key: Nothing declares this setting, so nothing reads it." );
     }
 
-    die "The settings of this installation are not valid" . ( defined $domain ? " for $domain" : q{} ) . ":\n" . join( "\n", map { "  $_" } @errors ) . "\nThey are the _global of _base in recipes.yaml, and a domain overrides one in its own _global.\n"
+    die "The settings of this installation are not valid" . $where . ":\n" . join( "\n", map { "  $_" } @errors ) . "\nThey are the _global of _base in recipes.yaml, and a domain overrides one in its own _global.\n"
       if @errors;
 
     return $said;
@@ -1902,6 +1958,19 @@ sub data_source {
     return $said if $said;
 
     return undef;
+}
+
+=head2 base_data_source($conf)
+
+The data source that the C<_global> of C<_base> names, or undef, as for
+C<data_source>.  It is for a sweep of the whole installation, which has no
+domain to ask about.
+
+=cut
+
+sub base_data_source {
+    my ( $class, $conf ) = @_;
+    return $class->base_global($conf)->{data_source} || undef;
 }
 
 =head2 data_dir($domain, $conf)

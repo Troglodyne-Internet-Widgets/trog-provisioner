@@ -122,7 +122,7 @@ sub expected {
     my %zones     = Provisioner::Cookbook->load('registrar')->account_zones( %{ $conf->{_base}{registrar} // {} } );
     my $authority = ( $zones{$zone} // {} )->{authority} // die "No account of the registrar in _base names an authority for $zone, so no guest of this installation holds it.\n";
 
-    my $global   = Provisioner::Cookbook->global_config( undef, $conf );
+    my $global   = Provisioner::Cookbook->base_global($conf);
     my @expected = sort( uniq( map { Provisioner::Utils::dns_name($_) } 'ns1.' . Provisioner::Utils::dns_name($authority), values %{ $global->{nameservers} // {} } ) );
     return @expected;
 }

@@ -68,7 +68,7 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
+    my $globals = Provisioner::Cookbook->base_globals( Provisioner::Cookbook->configuration($rfile) );
     my $pool    = $globals->{ip_pool} // {};
 
     # Seed from the hypervisors first, so a new database does not give out an

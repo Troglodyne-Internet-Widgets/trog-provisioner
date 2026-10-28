@@ -218,9 +218,9 @@ between here and the build says so.
 
 sub base_config {
     my $conf = Provisioner::Cookbook->configuration();
-    my $base = Provisioner::Cookbook->domain_config( undef, $conf );
+    my $base = Provisioner::Cookbook->base_config($conf);
 
-    $base->{_global} = Provisioner::Cookbook->globals( undef, $conf );
+    $base->{_global} = Provisioner::Cookbook->base_globals($conf);
     return $base;
 }
 

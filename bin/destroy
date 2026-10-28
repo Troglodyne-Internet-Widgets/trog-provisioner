@@ -681,7 +681,7 @@ guests into them.
 sub sweep_roots {
     my (@hvs) = @_;
 
-    my $data = Provisioner::Cookbook->data_source();
+    my $data = Provisioner::Cookbook->base_data_source();
     warn 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so only the domain directories are swept.\n"
       unless $data;
 
