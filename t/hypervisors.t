@@ -301,6 +301,10 @@ subtest 'provision.conf can pin a guest to a hypervisor' => sub {
     my $conf = guest_conf( memory => 4096, cpus => 2, size => 40 * $GB, hypervisor => 'hv2' );
     my $hv   = $fleet->select_for( 'vm.example.test', $conf );
     is( $hv->name, 'hv2', 'pinned where it was told' );
+
+    # As bin/new_config hands it over: the _global of the domain.
+    my $global = { memory => 4096, cpus => 2, size => 40 * $GB, hypervisor => 'hv2' };
+    is( $fleet->select_for( 'vm.example.test', $global )->name, 'hv2', 'and so can the _global of the domain' );
 };
 
 subtest 'a pin to a hypervisor that cannot take it is an error' => sub {

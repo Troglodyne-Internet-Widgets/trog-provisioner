@@ -411,6 +411,10 @@ anywhere.  It is the network of the hypervisor that has each guest that
 C<$domain> names, see L<Provisioner::Cookbook/direct_upstream_domains>, because
 a guest reaches only the guests on its own network.  See L<Trog::HV/network>.
 
+A guest on a network that a recipe of C<$domain> joins does not limit the
+choice, see L<Provisioner::Recipe/joins_network_of>, and this says so.  A VPN client
+reaches the guests on the network of its server from anywhere.
+
 A guest that is not up does not limit the choice, and this says so.
 F<bin/provision> builds it first, so it is up when the domain is placed, except
 on a dry run.  Nothing limits a fleet that is not configured, which has one
@@ -429,11 +433,26 @@ sub required_network {
     my $fleet = Trog::Hypervisors->load( $fleet_file // Trog::Hypervisors->default_path );
     return () unless $fleet->configured;
 
+    # The networks that a recipe of the domain brings the guest onto, such as
+    # that of its VPN server.  See Provisioner::Recipe/joins_network_of.
+    my $config = Provisioner::Cookbook->domain_config( $domain, $rconf );
+    my %joined;
+    foreach my $recipe ( sort grep { Provisioner::Cookbook->has($_) } keys %$config ) {
+        foreach my $peer ( Provisioner::Cookbook->load($recipe)->joins_network_of( %{ $config->{$recipe} // {} } ) ) {
+            my $hv = $fleet->hosting($peer) or next;
+            $joined{ $hv->network } //= "$recipe connects it to $peer";
+        }
+    }
+
     my %on;
     foreach my $upstream (@upstream) {
         my $hv = $fleet->hosting($upstream);
         unless ($hv) {
             print "$upstream is not up, so it does not limit where $domain goes.\n";
+            next;
+        }
+        if ( my $how = $joined{ $hv->network } ) {
+            print "$upstream does not limit where $domain goes, because $how, and so to the network of " . $hv->name . ".\n";
             next;
         }
         push( @{ $on{ $hv->network } }, "$upstream, which is on " . $hv->name );

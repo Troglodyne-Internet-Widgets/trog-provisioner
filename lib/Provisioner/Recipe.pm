@@ -1319,6 +1319,20 @@ sub grants {
     return ();
 }
 
+=head3 @domains = $recipe->joins_network_of(%opts)
+
+The guests whose network this recipe brings the guest onto, such as the VPN
+server of a VPN client.  The guest reaches every guest on the network of each
+of them, wherever it is placed, so those guests do not limit where it goes.
+C<%opts> is the configuration of this recipe on the domain, as the file holds
+it.  Nothing here.
+
+=cut
+
+sub joins_network_of {
+    return ();
+}
+
 =head3 %terms = $recipe->grant_terms($grant, %opts)
 
 What the issue of C<$grant> needs that the grant does not say, such as an
