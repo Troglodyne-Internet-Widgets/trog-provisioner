@@ -71,7 +71,9 @@ Know two keys before you need them.  C<pool_name> beside C<pool_path> gives a
 hypervisor a storage pool of its own.  On a filesystem with a quota, that pool
 is the only limit a guest can be held to.  C<partition> puts every guest built
 here in one systemd slice.  That slice is the only place to cap CPU and I/O for
-all of them together.  Neither key sets a limit by itself.
+all of them together.  Neither key sets a limit by itself.  With a
+C<partition>, C<max_guests> and C<cpu_overcommit> are about the guests of the
+partition, not about every guest on the hypervisor.
 
 If the file does not exist, there is no fleet.  The hypervisor is then whatever
 the C<libvirt_uri> of F<provision.conf> names, which for most people is this
