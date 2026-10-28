@@ -136,6 +136,21 @@ subtest 'a client on the same network as its server leaves the routes of the ser
     is( $by_name{same_network_as_server}, 1, 'a client with cert_dir goes by the server that it connects to' );
 };
 
+subtest 'the names in /etc/hosts leave the server out, away from its network' => sub {
+    my %ipmap = ( 'first.test' => '192.0.2.10', 'vpn.test.test' => '192.0.2.3', 'logs.test.test' => '192.0.2.2' );
+
+    my %away = fresh()->validate( %ISSUED, domain => 'first.test', ipmap => \%ipmap, network_peers => [] );
+    is_deeply( $away{pool_hosts}, { 'logs.test.test' => '192.0.2.2' }, 'away from the network of the server, the server resolves through DNS, so that the tunnel can come up' );
+
+    my %on = fresh()->validate( %ISSUED, domain => 'first.test', ipmap => \%ipmap, network_peers => ['vpn.test.test'] );
+    is_deeply( $on{pool_hosts}, { 'logs.test.test' => '192.0.2.2', 'vpn.test.test' => '192.0.2.3' }, 'on its network, the server is in the block, at the address that the client reaches there' );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    fresh()->generate_files( $dir, %ISSUED, domain => 'first.test', ipmap => \%ipmap, network_peers => [] );
+    my %block = map { reverse split m/\s+/ } grep { m/\A\d/ } split m/\n/, File::Slurper::read_text("$dir/vpn.hosts");
+    is_deeply( \%block, { 'logs.test.test' => '192.0.2.2' }, 'and the file that goes into /etc/hosts says the same' );
+};
+
 subtest 'the fragment splits the issued configuration into the four files' => sub {
     my $fragment = fresh()->render( %ISSUED, domain => 'first.test' );
     my ($line) = $fragment =~ m{^(\s*umask[ ]077[ ]\N+)$}m or return fail('no line that decodes the configuration');

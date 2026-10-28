@@ -2,9 +2,7 @@
     that reaches them through the VPN.  Provisioner::Recipe::openvpnclient has
     the whole account. -%]
 # BEGIN trog openvpnclient [% domain %]
-[% FOR name IN ipmap.keys().sort() -%]
-[% IF name != domain -%]
-[% ipmap.$name %] [% name %]
-[% END -%]
+[% FOR name IN pool_hosts.keys().sort() -%]
+[% pool_hosts.$name %] [% name %]
 [% END -%]
 # END trog openvpnclient [% domain %]
