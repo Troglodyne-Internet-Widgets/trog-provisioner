@@ -78,7 +78,9 @@ Such a client also gets the guests of this installation by name.  The fragment
 writes each guest that the ip pool assigns an address to into F</etc/hosts>,
 with that address, in one block that names this domain.  A rebuild replaces
 the block.  So the client finds the guests that it reaches through the tunnel
-with no DNS server that knows them, wherever it is built.  A guest added after
+with no DNS server that knows them, wherever it is built.  Away from the
+network of the server, the block leaves the server out, because the client
+connects to its name before the tunnel is up.  A guest added after
 this one is not in the block until this one is rebuilt.  A client with
 C<cert_dir> connects to a server that this installation does not run, so it
 gets no block.
@@ -191,6 +193,12 @@ It sets C<same_network_as_server> when the server, the guest of C<issue_from>
 or of C<server>, is in C<network_peers>.  See L</A client on the same network
 as its server>.
 
+It sets C<pool_hosts>, the names and addresses of C<ipmap> that go into
+F</etc/hosts>: every guest but this domain.  Away from the network of the
+server, C<server> is left out too.  The client connects to that name before
+the tunnel is up, so there it must resolve through DNS to the address that
+the internet reaches the server at, and not to its address in the ip pool.
+
 =cut
 
 sub enrich {
@@ -205,6 +213,10 @@ sub enrich {
 
     my %peer = map { $_ => 1 } @{ $opts{network_peers} // [] };
     $opts{same_network_as_server} = ( List::Util::any { $peer{$_} } $self->joins_network_of(%opts) ) ? 1 : 0;
+
+    my %left_out = map { $_ => 1 } grep { defined } $opts{domain}, ( $opts{same_network_as_server} ? () : $opts{server} );
+    my $ipmap    = $opts{ipmap} // {};
+    $opts{pool_hosts} = { map { $_ => $ipmap->{$_} } grep { !$left_out{$_} } keys %$ipmap };
 
     return %opts;
 }
