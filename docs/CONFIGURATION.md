@@ -626,16 +626,19 @@ is one of these:
 An address, an email address, a `secret:` reference, a path and a host outside
 this installation name nothing. So does a setting that names the domain itself.
 In practice the settings that name guests are `cache` and `mirror` in `_global`,
-the `host` of `logshipper`, the `ldap_uri` of `sssd`, and the `hosts` of
-`backupdestination`. A new recipe whose setting names a guest takes part with no
-extra code.
+the `host` of `logshipper`, the `ldap_uri` of `sssd`, the `hosts` of
+`backupdestination`, and the `via` of a bin in `ip_pool`. A new recipe whose
+setting names a guest takes part with no extra code.
 
-Before it builds anything, `bin/provision` prints each setting that it found,
-for example:
+Before it builds anything, `bin/provision` prints each setting that names a
+guest that it is about to build, for example:
 
 ```
 web.example.test names logs.example.test in logshipper.host, so it is built after that guest when it can be, and uses it once it is up.
 ```
+
+It names the guests that are up and that it leaves alone in one line, without
+their settings.
 
 `bin/provision` builds each of those guests first when no hypervisor has it,
 and each guest that they name in turn, in order, and then the domain you asked
@@ -654,10 +657,12 @@ The cache guest names itself there too, and does not wait for itself.
 Each of those settings is weak. A weak setting names a guest that a build can go
 on without. A guest downloads from upstream while the cache is down, installs
 from the archive while the mirror is down, and queues its logs while the
-collector is down. SSSD starts offline while the directory is down. A backup
-destination pulls from its hosts at night, so it needs none of them to build.
-They are built first all the same, and `--rebuild-upstream-guests` on the
-destination rebuilds each of them. The schema of a recipe marks a weak field
+collector is down. SSSD starts offline while the directory is down. A guest
+writes the route to a bin through the address of its `via`, which the pool
+gives, and the route works once that guest is up. A backup destination pulls
+from its hosts at night, so it needs none of them to build. They are built
+first all the same, and `--rebuild-upstream-guests` on the destination rebuilds
+each of them. The schema of a recipe marks a weak field
 with `'x-weak' => 1`. A setting that nothing marks is strong: a build waits for
 the guest that it names.
 

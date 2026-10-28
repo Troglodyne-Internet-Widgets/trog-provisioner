@@ -1447,6 +1447,13 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     $run->('web.test');
     is_deeply( [ map { $_->{domain} } @built ], [qw{logs.test web.test}], 'a guest that is up is left alone, wherever it is' );
 
+    %up   = ( 'cache.test' => 'hv9', 'logs.test' => 'hv8' );
+    $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
+    my @lines = grep { m/cache[.]test|logs[.]test/ } split( m/\n/, $said );
+    is( scalar @lines, 1, 'the guests that are left up are said in one line, without the settings that name them' ) or diag $said;
+    like( $lines[0] // q{}, qr/cache[.]test[ ]on[ ]hv9,[ ]logs[.]test[ ]on[ ]hv8/, 'with the hypervisor of each' );
+    %up = ( 'cache.test' => 'hv9' );
+
     $run->(qw{--rebuild-upstream-guests web.test});
     is_deeply( [ map { $_->{domain} } @built ], [qw{cache.test logs.test web.test}], 'and --rebuild-upstream-guests rebuilds it' );
     %up = ();

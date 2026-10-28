@@ -484,9 +484,9 @@ sub global_args {
                         additionalProperties => {
                             type       => 'object',
                             properties => {
-                                addresses => { type => [qw{array string}], items => { type => 'string' } },
-                                cidr      => { type => [qw{array string}], items => { type => 'string' } },
-                                via       => { type => 'string' },
+                                addresses => { type => [qw{array string}], items    => { type => 'string' } },
+                                cidr      => { type => [qw{array string}], items    => { type => 'string' } },
+                                via       => { type => 'string',           'x-weak' => 1 },
                             },
                         },
                     },
