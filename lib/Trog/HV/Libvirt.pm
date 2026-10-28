@@ -2871,9 +2871,24 @@ sub provision_guest {
     }
     die "\n$domain never asked for a lease!\n" unless $address;
 
-    print "\nDefined and started; $domain should come up at $address\n";
+    print "\n" . address_report( $domain, $address, $config->param('ips') );
 
     return $address;
+}
+
+=head2 $text = address_report($domain, $lease, @ips)
+
+The lines that say where a guest that just started is: its NAT lease, and
+each static address from C<ips> in F<provision.conf>, each named for what it
+is.  C<guest_ssh_ip> decides which of them C<bin/provision> connects to.
+
+=cut
+
+sub address_report {
+    my ( $domain, $lease, @ips ) = @_;
+    my $report = "Defined and started $domain.\n" . "  NAT lease:      $lease, which only the hypervisor and its guests reach\n";
+    $report .= "  static address: $_, from ips in provision.conf\n" for grep { $_ } @ips;
+    return $report;
 }
 
 =head2 $hv->would_provision($config, %opts)
