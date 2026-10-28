@@ -48,6 +48,16 @@ subtest 'dns_name' => sub {
     is( Provisioner::Utils::dns_name('Lab.Example.NET.'), 'lab.example.net', 'a name compares in lower case without its dot' );
 };
 
+subtest 'in_zone: the zone is the name or holds it, at a label boundary' => sub {
+    ok( Provisioner::Utils::in_zone( 'customer.test',       'customer.test' ),     'the apex is in its zone' );
+    ok( Provisioner::Utils::in_zone( 'web.customer.test',   'customer.test' ),     'and so is a name under it' );
+    ok( Provisioner::Utils::in_zone( 'a.b.customer.test',   'customer.test' ),     'at any depth' );
+    ok( !Provisioner::Utils::in_zone( 'web.xcustomer.test', 'customer.test' ),     'and not a name that ends with the same letters' );
+    ok( !Provisioner::Utils::in_zone( 'customer.test',      'web.customer.test' ), 'nor a zone above the one asked for' );
+    ok( Provisioner::Utils::in_zone( 'Web.Customer.TEST.',  'customer.test' ),     'whatever the case, and with a trailing dot' );
+    ok( !Provisioner::Utils::in_zone( 'web.customerxtest',  'customer.test' ),     'and the dots of the zone are dots, not any character' );
+};
+
 subtest 'tld_of is the last label, and nothing when there is none' => sub {
     is( Provisioner::Utils::tld_of('guest.test.test'),  'test',    'a name under a reserved TLD' );
     is( Provisioner::Utils::tld_of('host.example.net'), 'net',     'and under a public one' );

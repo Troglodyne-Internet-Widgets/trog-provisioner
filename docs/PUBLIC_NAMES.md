@@ -85,6 +85,10 @@ _base:
                 zones: [ ours.example, other.example ]
 ```
 
+The same list gives a guest whose own domain is in one of these zones the
+credentials of that account.  So a guest needs no `registrar` block of its
+own, also where each zone has a token of its own.
+
 The provider must take a token and a user name, as easydns does.  Issue #425
 has what other providers, such as route53, need.
 

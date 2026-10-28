@@ -505,6 +505,32 @@ subtest 'the zone of a name, among the zones of the registrar' => sub {
     is( $registrar->zone_of( $_, $PUBLIC, \%zones ), $of{$_}, "$_: " . ( $of{$_} // 'none' ) ) foreach sort keys %of;
 };
 
+subtest 'a domain in a zone of an account writes its own zone with that account' => sub {
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my %conf      = ( accounts    => \%ACCOUNTS );
+    my %top       = ( %conf, type => 'easydns', key => 'top-key' );
+    my $key       = sub { my ( $sub, %opts ) = @_; return { $registrar->$sub(%opts) }->{key} };
+
+    is_deeply(
+        { $registrar->domain_credentials( %conf, domain => 'web.customer.test' ) },
+        { type => 'route53', user => 'zone-user', key => 'zone-key', opts => q{}, extra => [] },
+        'a domain under a zone of an account gets that account, with no type of its own'
+    );
+    is( $key->( domain_credentials => %conf, domain => 'customer.test' ),        'zone-key', 'and so does the apex of the zone' );
+    is( $key->( domain_credentials => %conf, domain => 'a.deep.customer.test' ), 'deep-key', 'where two zones hold it, the longer one does' );
+    is( $key->( domain_credentials => %top,  domain => 'web.customer.test' ),    'zone-key', 'the account comes before the type of the registrar' );
+    is( $key->( domain_credentials => %top,  domain => 'web.xcustomer.test' ),   'top-key',  'which a domain in no listed zone uses' );
+    like( exception { $registrar->domain_credentials( %conf, domain => 'web.xcustomer.test' ) }, qr/List[ ]its[ ]zone[ ]under[ ]an[ ]account/, 'and with neither, the refusal says how to give it one' );
+
+    is( $key->( parent_credentials => %conf, domain => 'lab.deep.customer.test' ), 'deep-key', 'the zone above a delegated domain is the zone of the account that holds it' );
+    is( $key->( parent_credentials => %top,  domain => 'deep.customer.test' ),     'zone-key', 'and not a zone that is the domain itself' );
+
+    # Outside a reserved TLD, where a guest with no authority holds no zone of its own.
+    my %public = ( %ACCOUNTS, ours => { type => 'easydns', key => 'ours-key', zones => ['example.net'] } );
+    my %opts   = fresh('registrar')->validate( domain => $PUBLIC, accounts => \%public, install_dir => '/bogus', admin_user => 'someadmin' );
+    is( $opts{domain}, $PUBLIC, 'the registrar builds a domain that has only accounts' );
+};
+
 subtest 'a name in a zone of an account is published there, and not as an alias of the domain' => sub {
     my $hostnames = [ "www.$PUBLIC", qw{shop.customer.test customer.test a.deep.customer.test xcustomer.test} ];
     my ( $opts, $fragment ) = publishing( 'registrar', { registrar => { type => 'easydns', accounts => \%ACCOUNTS } }, %ON_PUBLIC, hostnames => $hostnames );

@@ -10,6 +10,7 @@ use re '/aasx';
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use Provisioner::Utils();
 use List::Util();
 
 use parent qw{Provisioner::Recipe};
@@ -277,14 +278,10 @@ my sub public_names_by_vhost (%opts) {
     return %by_vhost;
 }
 
-my sub in_zone ( $name, $domain ) {
-    return $name =~ m/(?:\A|[.])\Q$domain\E\z/i;
-}
-
 # Whether a DNS-01 challenge can answer for $name: it is in the zone of the
 # domain, or in a zone that an account of the registrar lists.
 my sub certifiable ( $name, $domain ) {
-    return in_zone( $name, $domain ) || defined Provisioner::Cookbook->load('registrar')->zone_of( $name, $domain );
+    return Provisioner::Utils::in_zone( $name, $domain ) || defined Provisioner::Cookbook->load('registrar')->zone_of( $name, $domain );
 }
 
 # Each vhost that a public name names, mapped to every name that it answers
@@ -443,7 +440,7 @@ sub enrich {
             die "nginx: public_names points $names at $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n"
               unless $listed{$vhost};
             die "nginx: public_names points $names at $vhost, but $vhost is outside the zone of $opts{domain}, so public.$vhost cannot be certified.\n"
-              unless in_zone( $vhost, $opts{domain} );
+              unless Provisioner::Utils::in_zone( $vhost, $opts{domain} );
             my @taken = grep { $listed{$_} && vhost_of( $_, %opts ) ne $vhost } @{ $by_vhost{$vhost} };
             die "nginx: public_names points " . join( ', ', @taken ) . " at $vhost, but each is a name that another vhost lists in sites.\n"
               if @taken;

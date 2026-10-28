@@ -109,7 +109,7 @@ outside a reserved TLD.
 =head2 Accounts, and the zones that they hold
 
 C<accounts> names each registrar account of this installation once, with the
-C<type>, C<user> and C<key> of its registrar, and lists the other zones that it
+C<type>, C<user> and C<key> of its registrar, and lists the zones that it
 holds:
 
     _base:
@@ -125,6 +125,14 @@ holds:
                     key:  "secret:registrar/customer/token"
                     zones: [ customer.example ]
 
+A domain in one of these zones writes its own records with that account: the
+domain is the zone, or a name under it.  So an installation whose zones are at
+several accounts, or behind tokens scoped to one domain each, lists each zone
+once here, and a domain needs no C<type>, C<user> or C<key> of its own.  The
+account comes before the C<type>, C<user> and C<key> of the registrar, which
+are for a domain in a zone that no account lists.  Where two listed zones hold
+the domain, the longer one does.
+
 A served name in one of these zones, such as a public name of
 L<Provisioner::Recipe::nginx>, is published and certified like a name of the
 domain.  The guest publishes it in its zone as a C<CNAME> of the domain, as it
@@ -137,8 +145,9 @@ F</opt/lexicon/zones/ZONE>, only for each zone that one of its names is in.  So
 a guest holds no credential of a zone that it does not use.
 
 A name in the zone of the domain is the business of the domain, even where an
-account lists a zone that holds it as well.  Where two zones hold a name, the
-longer one does.  A zone is at one registrar, so the recipe refuses a zone that
+account lists a zone that holds it as well.  It goes through the shortcut of the
+domain, with the credentials of the domain, which can be those of that account.
+Where two zones hold a name, the longer one does.  A zone is at one registrar, so the recipe refuses a zone that
 two accounts list.
 
 =head2 Zones that a pdns guest holds
@@ -299,14 +308,14 @@ Where the guest holds the zone, it returns what
 L<Provisioner::Recipe::pdns/socket_credentials> returns for the pdns of the
 guest.  Where another guest does, it returns what
 L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
-Otherwise it returns C<configured_credentials>.
+Otherwise it returns C<domain_credentials>.
 
 A registrar needs only a credential.  lexicon already knows where each of its
 providers is, so there is no endpoint.  There are no flags, because the domain
 is its own zone here.  C<--resolve-zone-name> spends live queries to find a
 zone that is already known.
 
-Dies as C<configured_credentials> does.
+Dies as C<domain_credentials> does.
 
 =cut
 
@@ -321,7 +330,54 @@ sub lexicon_credentials {
     my $guest = $self->delegated_to($domain);
     return $pdns->client_credentials( $guest, $domain ) if defined $guest;
 
+    return $self->domain_credentials(%opts);
+}
+
+=head2 %credentials = $recipe->domain_credentials(%opts)
+
+The credentials with which C<$opts{domain}> writes its own zone at a
+registrar.  They are those of the account whose zone is the domain or holds
+it, as C<account_for> finds it.  Where no account lists such a zone, they are
+C<configured_credentials>.  Dies as C<configured_credentials> does.
+
+=cut
+
+sub domain_credentials ( $self, %opts ) {
+    my ( $zone, $account ) = $self->account_for( $opts{domain}, \%opts );
+    return $self->zone_credentials( $zone, $account ) if defined $zone;
     return $self->configured_credentials(%opts);
+}
+
+=head2 %credentials = $recipe->parent_credentials(%opts)
+
+The credentials with which C<$opts{domain}> writes the zone above its own,
+where the C<NS> record that delegates it goes.  They are those of the account
+whose zone holds the domain and is not the domain itself.  Where no account
+lists such a zone, they are C<configured_credentials>.
+
+=cut
+
+sub parent_credentials ( $self, %opts ) {
+    my ( $zone, $account ) = $self->account_for( $opts{domain}, \%opts, above => 1 );
+    return $self->zone_credentials( $zone, $account ) if defined $zone;
+    return $self->configured_credentials(%opts);
+}
+
+=head2 ($zone, \%account) = $recipe->account_for($domain, \%conf, above => $bool)
+
+The zone of C<$conf{accounts}> that is C<$domain> or holds it, and what
+C<account_zones> maps that zone to.  Where two zones hold the domain, the longer
+one does.  With C<above> true, a zone that is the domain itself does not
+count.  Returns an empty list when no account lists such a zone.
+
+=cut
+
+sub account_for ( $self, $domain, $conf, %how ) {
+    my %zones  = $self->account_zones(%$conf);
+    my $name   = Provisioner::Utils::dns_name($domain);
+    my @holds  = grep { my $zone = $_; Provisioner::Utils::in_zone( $name, $zone ) && !( $how{above} && $name eq $zone ) } keys %zones;
+    my ($zone) = $self->longest_first(@holds) or return;
+    return ( $zone, $zones{$zone} );
 }
 
 =head2 %credentials = $recipe->credentials_for(%opts)
@@ -361,15 +417,15 @@ Returns C<type>, C<user> and C<key> as the operator configured them, with an
 empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
 an empty list.  Dies when there is no C<type>.
 
-C<enrich> asks this for the registrar of the zone above, where the C<NS>
-record of a domain with an C<authority> goes.
+C<domain_credentials> and C<parent_credentials> fall back to this, where no
+account lists the zone.
 
 =cut
 
 sub configured_credentials {
     my ( $self, %opts ) = @_;
 
-    die "registrar has no type for $opts{domain}, and no server of this installation holds its zone.  Name the provider that holds the zone, as lexicon calls it, or name an authority.\n"
+    die "registrar has no type for $opts{domain}, and no server of this installation holds its zone.  List its zone under an account of accounts, name the provider that holds the zone, as lexicon calls it, or name an authority.\n"
       unless $opts{type};
 
     return (
@@ -402,11 +458,10 @@ L<Provisioner::Cookbook>, as C<configured_zones> does.
 =cut
 
 sub zone_of ( $self, $name, $domain, $zones = undef ) {
-    my $in = sub ($zone) { return lc $name eq lc $zone || $name =~ m/[.]\Q$zone\E\z/i };
-    return if $in->($domain);
+    return if Provisioner::Utils::in_zone( $name, $domain );
 
     $zones //= { $self->configured_zones($domain) };
-    my ($zone) = $self->longest_first( grep { $in->($_) } keys %$zones );
+    my ($zone) = $self->longest_first( grep { Provisioner::Utils::in_zone( $name, $_ ) } keys %$zones );
     return $zone;
 }
 
@@ -805,7 +860,7 @@ sub enrich {
     my $holder = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->authority_of($domain);
     delete $opts{authority};
     unless ( defined $holder ) {
-        $self->configured_credentials(%opts);
+        $self->domain_credentials(%opts);
         return ( %opts, $self->publication(%opts) );
     }
 
@@ -830,11 +885,11 @@ sub enrich {
     # The guest itself answers at the address that its A record publishes.
     my $nameserver = $holder eq $server ? "ns1.$server"         : $holder;
     my $glue       = $holder eq $server ? $publication{address} : $address;
-    my $in_zone    = $nameserver eq $domain || $nameserver =~ m/[.]\Q$domain\E\z/;
+    my $in_zone    = Provisioner::Utils::in_zone( $nameserver, $domain );
     die "$domain is delegated to $nameserver, which is inside its zone, and the installation gave $holder no address to publish for it.  Give it an address of the pool.\n"
       if $in_zone && !$glue;
 
-    $opts{upstream}   = { $self->configured_credentials( %opts, domain => $domain ) };
+    $opts{upstream}   = { $self->parent_credentials( %opts, domain => $domain ) };
     $opts{parent}     = $domain =~ s/\A[^.]+[.]//r;
     $opts{nameserver} = $nameserver;
     $opts{glue}       = $in_zone ? $glue : undef;
