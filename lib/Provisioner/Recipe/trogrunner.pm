@@ -59,6 +59,7 @@ use Trog::Utils();
                     # limits.  See ACCOUNTS.
                     account:
                         quota: 500G
+                        cores: 4
 
             hypervisor_access: least
 
@@ -146,8 +147,9 @@ finds a pool by name.  If the name is of a pool that already exists elsewhere,
 libvirt ignores the path, and every volume goes into the existing pool.
 
 =item * C<partition> puts every guest that the runner builds into one systemd
-slice.  The operator then sets one cap on it with C<systemctl set-property
-machine-runner.slice CPUQuota=400%>.
+slice, where one cap holds all of them.  With an C<account>, C<cores> sets
+that cap: see ACCOUNTS.  Without one, the operator sets it with C<systemctl
+set-property machine-runner.slice CPUQuota=400%>, which is 4 cores.
 
 Cap CPU and I/O there, not memory.  A C<MemoryMax> on a slice of virtual
 machines kills one of them, and does not refuse the next.  The per-domain
@@ -162,7 +164,7 @@ binds a runner that cooperates, as the next paragraph says.
 
 With a C<partition>, the runner counts only its own guests.  C<max_guests>
 caps how many the partition holds, and C<cpu_overcommit> is the vCPUs for each
-core of the C<CPUQuota> of the slice.  The runner still refuses a guest when
+of the cores that the slice gets.  The runner still refuses a guest when
 the whole hypervisor has no vCPUs left after C<reserve_cpus>, so it cannot take
 the room of the guests outside its partition.  Give the hypervisor block the
 C<reserve_memory>, C<reserve_cpus> and C<cpu_overcommit> of the block in the
@@ -330,8 +332,12 @@ sub args {
                             type       => 'object',
                             required   => [qw{quota}],
                             properties => {
-                                quota     => { type => 'string' },
-                                cpu_quota => { type => 'string' },
+                                quota => { type => 'string' },
+
+                                # Of the host, which the vCPUs of guests are
+                                # not.  See ACCOUNTS.
+                                cores     => { type => 'number', exclusiveMinimum => 0 },
+                                cpu_quota => { type => 'string', deprecated => 1, description => 'Deprecated: write cores, 4 for "400%".' },
                                 io_weight => { type => 'integer' },
                             },
                             additionalProperties => 0,
@@ -495,6 +501,8 @@ sub enrich {
           unless $block->{pool_name} && $block->{pool_path};
         die "trogrunner: hypervisor '$name' asks for an account for the user in its libvirt_uri, and $block->{libvirt_uri} names no user\n"
           unless $block->{ssh_user};
+        die "trogrunner: hypervisor '$name' gives both cores and cpu_quota for its account, which say the same thing.  Give cores only.\n"
+          if defined $block->{account}{cores} && defined $block->{account}{cpu_quota};
     }
 
     warn "trogrunner: hypervisor_access is $opts{hypervisor_access}, and no hypervisor is named, so no hypervisor lets the runner in\n"
@@ -671,12 +679,18 @@ slice are its C<pool_name>, C<pool_path> and C<partition>:
             partition:   "/machine/runner"
             account:
                 quota:     500G      # required: of the ZFS dataset of the pool
-                cpu_quota: "400%"    # CPUQuota of the slice
+                cores:     4         # CPU of the slice, as CPUQuota=400%
                 io_weight: 50        # IOWeight of the slice
 
 The parent of C<pool_path> must be where a ZFS dataset is mounted, because the
-quota is a quota of a child dataset.  C<cpu_quota> and C<io_weight> need a
-C<partition>.  C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
+quota is a quota of a child dataset.  C<cores> and C<io_weight> need a
+C<partition>.
+
+C<cores> is how much of the CPU of the host the guests of the runner get
+together, in cores: 16, or 0.5 for half of one.  It is not the C<cpus> of a
+guest, which are vCPUs, and which C<cpu_overcommit> lets add up to more.
+C<cpu_quota>, the same limit written as the percentage that systemd takes, is
+still read, with a warning.  A block cannot give both.  C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
 values when F<bin/provision> builds the runner, before its makefile starts.
 F<bin/runner_account> makes the same account by hand.
 
