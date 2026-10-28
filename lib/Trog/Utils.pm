@@ -8,6 +8,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use IO::Prompter();
+use Symbol qw{qualify_to_ref};
 
 =head1 NAME
 
@@ -33,13 +34,43 @@ dies with C<Can't open *ARGV> in a program that has arguments, such as a domain.
 This sub makes C<*ARGV> C<local> to the call, so C<@ARGV> is the same again when
 it returns.
 
+If standard input is a terminal and the output is not, for example under
+C<&E<gt> file>, the question is asked at F</dev/tty>.  The answer is still read
+from standard input.  Without that, L<IO::Prompter> shows neither the question
+nor the masked echo, and the program waits with nothing on the screen.  A
+C<-out> from the caller is used as given.
+
 =cut
+
+# Where a question goes when the output is redirected.  A test points it at a file.
+our $TERMINAL = '/dev/tty';
 
 sub prompt {
     my ( $message, %opts ) = @_;
 
+    # Closed below, after the answer, as $tty: the policy follows only $fh.
+    my $tty;
+    if ( !exists $opts{-out} && output_is_redirected() && open( my $fh, '>>', $TERMINAL ) ) {    ## no critic (InputOutput::RequireBriefOpen)
+        $tty = $opts{-out} = $fh;
+    }
+
     local *ARGV = join ' ', @ARGV;
-    return IO::Prompter::prompt( $message, %opts );
+    my $answer = IO::Prompter::prompt( $message, %opts );
+    close($tty) or die "Cannot close $TERMINAL: $!\n" if $tty;
+    return $answer;
+}
+
+=head2 output_is_redirected()
+
+Returns true if standard input is a terminal and the selected output handle is
+not.  Then a person can type an answer but cannot see the question.
+
+=cut
+
+sub output_is_redirected {
+
+    # is_interactive asks whether both are terminals, and this needs each one.
+    return -t *STDIN && !-t qualify_to_ref(select);    ## no critic (InputOutput::ProhibitInteractiveTest)
 }
 
 =head2 @slots = slots_in(\$root, $path)
