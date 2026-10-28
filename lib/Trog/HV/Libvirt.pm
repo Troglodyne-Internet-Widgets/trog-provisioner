@@ -3024,15 +3024,12 @@ C<quota>, C<partition>, C<cores> and C<io_weight>.  The plan has those,
 and C<slice>, the unit name of the partition, or undef.
 
 C<cores> is the CPU time that the guests of the partition get together, in
-cores of the host: 16, or 0.5 for half of one.  The slice gets it as
-C<CPUQuota>, 100% for each core.  C<cpu_quota>, that percentage as systemd
-writes it, is still taken in its place.  It warns once in a process, and the
-plan has the cores.
+whole cores of the host, such as 16.  The slice gets it as C<CPUQuota>, 100%
+for each core.
 
 C<quota> is required to make an account, and not to take one away, so this
 does not require it.  Dies on a value that a step would write into a file or a
-command as syntax, on C<cores> or C<io_weight> without a C<partition>, and on
-C<cores> with C<cpu_quota>.
+command as syntax, and on C<cores> or C<io_weight> without a C<partition>.
 
 =cut
 
@@ -3057,27 +3054,16 @@ sub runner_account_plan {
           unless $args{partition} =~ m{\A/machine/[[:lower:]\d_]+\z};
         $slice = partition_slice( $args{partition} );
     }
-    die "cores and cpu_quota both give the CPU of the slice.  Give cores only.\n" if defined $args{cores} && defined $args{cpu_quota};
-    my $cores = $args{cores};
-    if ( defined $args{cpu_quota} ) {
-        state $warned;
-        die "cpu_quota '$args{cpu_quota}' is not a percentage, such as 400%\n" unless $args{cpu_quota} =~ m/\A\d+(?:[.]\d+)?%\z/;
-        $cores = substr( $args{cpu_quota}, 0, -1 ) / 100;
-        warn "cpu_quota is deprecated: write cores: $cores in place of cpu_quota: \"$args{cpu_quota}\"\n" unless $warned++;
-    }
-
     die "cores and io_weight are limits of the slice, and need a partition\n"
-      if !$slice && ( defined $cores || defined $args{io_weight} );
+      if !$slice && ( defined $args{cores} || defined $args{io_weight} );
 
-    # systemd reads a CPUQuota to a hundredth of a percent.
-    die "cores '$cores' has to be a number of cores above 0, such as 16 or 0.5, to four places at most\n"
-      if defined $cores && ( $cores !~ m/\A\d+(?:[.]\d{1,4})?\z/ || $cores <= 0 );
+    die "cores '$args{cores}' has to be a whole number of cores, 1 or more, such as 16\n"
+      if defined $args{cores} && ( $args{cores} !~ m/\A\d+\z/ || $args{cores} < 1 );
     die "io_weight '$args{io_weight}' has to be from 1 to 10000\n"
       if defined $args{io_weight} && ( $args{io_weight} !~ m/\A\d+\z/ || $args{io_weight} < 1 || $args{io_weight} > 10_000 );
 
     return {
-        ( map { $_ => $args{$_} } qw{user pool_name pool_path quota partition io_weight} ),
-        cores => $cores,
+        ( map { $_ => $args{$_} } qw{user pool_name pool_path quota partition cores io_weight} ),
         slice => $slice,
     };
 }
@@ -3153,8 +3139,8 @@ sub runner_account_steps {
     if ( $plan->{slice} ) {
         my $unit = "/etc/systemd/system/$plan->{slice}";
         my $text = join "\n", "[Unit]", "Description=Guests that the trog-provisioner runner $user builds", "Before=slices.target", q{}, "[Slice]",
-          ( defined $plan->{cores}     ? 'CPUQuota=' . ( sprintf( '%.2f', $plan->{cores} * 100 ) =~ s/[.]?0+\z//r ) . '%' : () ),
-          ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}"                                                    : () );
+          ( defined $plan->{cores}     ? sprintf( 'CPUQuota=%d%%', $plan->{cores} * 100 ) : () ),
+          ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}"                    : () );
         @slice = {
             what => "write $unit" . ( $plan->{cores} || $plan->{io_weight} ? q{} : ' with no limits in it' ),
             done => sub { root_reads( $hv, $unit ) eq $text },

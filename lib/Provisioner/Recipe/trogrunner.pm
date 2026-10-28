@@ -336,8 +336,7 @@ sub args {
 
                                 # Of the host, which the vCPUs of guests are
                                 # not.  See ACCOUNTS.
-                                cores     => { type => 'number', exclusiveMinimum => 0 },
-                                cpu_quota => { type => 'string', deprecated => 1, description => 'Deprecated: write cores, 4 for "400%".' },
+                                cores     => { type => 'integer', minimum => 1 },
                                 io_weight => { type => 'integer' },
                             },
                             additionalProperties => 0,
@@ -501,8 +500,6 @@ sub enrich {
           unless $block->{pool_name} && $block->{pool_path};
         die "trogrunner: hypervisor '$name' asks for an account for the user in its libvirt_uri, and $block->{libvirt_uri} names no user\n"
           unless $block->{ssh_user};
-        die "trogrunner: hypervisor '$name' gives both cores and cpu_quota for its account, which say the same thing.  Give cores only.\n"
-          if defined $block->{account}{cores} && defined $block->{account}{cpu_quota};
     }
 
     warn "trogrunner: hypervisor_access is $opts{hypervisor_access}, and no hypervisor is named, so no hypervisor lets the runner in\n"
@@ -687,10 +684,9 @@ quota is a quota of a child dataset.  C<cores> and C<io_weight> need a
 C<partition>.
 
 C<cores> is how much of the CPU of the host the guests of the runner get
-together, in cores: 16, or 0.5 for half of one.  It is not the C<cpus> of a
+together, in whole cores, such as 16.  It is not the C<cpus> of a
 guest, which are vCPUs, and which C<cpu_overcommit> lets add up to more.
-C<cpu_quota>, the same limit written as the percentage that systemd takes, is
-still read, with a warning.  A block cannot give both.  C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
+C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
 values when F<bin/provision> builds the runner, before its makefile starts.
 F<bin/runner_account> makes the same account by hand.
 

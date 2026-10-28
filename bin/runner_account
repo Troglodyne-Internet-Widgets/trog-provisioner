@@ -118,14 +118,9 @@ Optional.
 =item B<--cores> N, B<--io-weight> WEIGHT
 
 The CPU and I/O limits of the slice.  C<--cores> is the CPU of the host that the
-guests get together, in cores, such as 16 or 0.5, and the slice gets it as
+guests get together, in whole cores, such as 16, and the slice gets it as
 C<CPUQuota>.  C<--io-weight> is C<IOWeight> as systemd reads it.  Only with
 C<--partition>.
-
-=item B<--cpu-quota> PERCENT
-
-Deprecated.  The same limit as C<--cores>, as the percentage of C<CPUQuota>:
-C<400%> is 4 cores.  It warns, and cannot be given with C<--cores>.
 
 =item B<--authorize> FILE
 
@@ -155,14 +150,14 @@ sub main {
     my %opt = ( authorize => [] );
     GetOptionsFromArray(
         \@args, \%opt,
-        qw{hypervisor=s user=s pool-name=s pool-path=s quota=s partition=s cores=s cpu-quota=s io-weight=s authorize=s@ remove dryrun hvconf=s help},
+        qw{hypervisor=s user=s pool-name=s pool-path=s quota=s partition=s cores=i io-weight=s authorize=s@ remove dryrun hvconf=s help},
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
 
     my @missing = grep { !defined $opt{$_} } ( qw{hypervisor user pool-name pool-path}, $opt{remove} ? () : 'quota' );
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Missing: ' . join( ', ', map { "--$_" } @missing ) ) if @missing;
 
-    my $plan = Trog::HV::Libvirt->runner_account_plan( map { (tr/-/_/r) => $opt{$_} } grep { defined $opt{$_} } qw{user pool-name pool-path quota partition cores cpu-quota io-weight} );
+    my $plan = Trog::HV::Libvirt->runner_account_plan( map { (tr/-/_/r) => $opt{$_} } grep { defined $opt{$_} } qw{user pool-name pool-path quota partition cores io-weight} );
     my @keys = keys_in( @{ $opt{authorize} } );
 
     my $fleet = Trog::Hypervisors->load( $opt{hvconf} // Trog::Hypervisors->default_path() );

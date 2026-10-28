@@ -579,11 +579,11 @@ subtest 'an account that cannot be made is refused when the configuration is wri
     my $with  = sub (%changed) { return ( hypervisor_access => 'least', hypervisors => { hv1 => { %entry, account => { quota => '1T' }, %changed } } ) };
 
     like( exception { built( $with->(), hypervisor_access => 'none' ) }, qr/hypervisor_access[ ]is[ ]none/, 'an account with no access to make it' );
-    like( exception { built( $with->( pool_name   => q{} ) ) },                                                qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
-    like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/system' ) ) },                  qr/names[ ]no[ ]user/,                   'an account for nobody' );
-    like( exception { built( $with->( account     => {} ) ) },                                                 qr/not[ ]valid/,                         'and an account with no quota' );
-    like( exception { built( $with->( account     => { quota => '1T', cores => 0 } ) ) },                      qr/not[ ]valid/,                         'an account with no CPU at all' );
-    like( exception { built( $with->( account     => { quota => '1T', cores => 4, cpu_quota => '400%' } ) ) }, qr/Give[ ]cores[ ]only/,                 'an account that gives its CPU twice' );
+    like( exception { built( $with->( pool_name   => q{} ) ) },                               qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
+    like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/system' ) ) }, qr/names[ ]no[ ]user/,                   'an account for nobody' );
+    like( exception { built( $with->( account     => {} ) ) },                                qr/not[ ]valid/,                         'and an account with no quota' );
+    like( exception { built( $with->( account     => { quota => '1T', cores => 0 } ) ) },     qr/not[ ]valid/,                         'an account with no CPU at all' );
+    like( exception { built( $with->( account     => { quota => '1T', cores => 0.5 } ) ) },   qr/not[ ]valid/,                         'an account with a part of a core' );
 
     my %unpartitioned = %entry;
     delete $unpartitioned{partition};

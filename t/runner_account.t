@@ -219,37 +219,22 @@ subtest 'the plan refuses what a step would read as syntax' => sub {
     like( exception { $plan->( quota     => 'lots' ) },          qr/not[ ]a[ ]size/,                   'a quota zfs cannot read' );
     like( exception { $plan->( partition => '/runner' ) },       qr{has[ ]to[ ]be[ ]/machine/NAME},    'a partition outside /machine' );
     like( exception { $plan->( cores     => 4 ) },               qr/need[ ]a[ ]partition/,             'a slice limit with no slice' );
-    like( exception { $plan->( partition => '/machine/r', cores => 0 ) },                      qr/above[ ]0/,             'no CPU at all' );
-    like( exception { $plan->( partition => '/machine/r', cores => '4c' ) },                   qr/number[ ]of[ ]cores/,   'cores that are not a number' );
-    like( exception { $plan->( partition => '/machine/r', cores => 4, cpu_quota => '400%' ) }, qr/Give[ ]cores[ ]only/,   'and the CPU twice' );
-    like( exception { $plan->( partition => '/machine/r', io_weight => 0 ) },                  qr/from[ ]1[ ]to[ ]10000/, 'an IOWeight systemd refuses' );
-    like( exception { $plan->( pool_name => undef ) },                                         qr/needs[ ]a[ ]pool_name/, 'and an account with no pool' );
+    like( exception { $plan->( partition => '/machine/r', cores => 0 ) },    qr/1[ ]or[ ]more/,       'no CPU at all' );
+    like( exception { $plan->( partition => '/machine/r', cores => '4c' ) }, qr/number[ ]of[ ]cores/, 'cores that are not a number' );
+    like( exception { $plan->( partition => '/machine/r', cores => 0.5 ) },  qr/whole[ ]number/,      'a part of a core' );
+    is( $plan->( partition => '/machine/r', cores => 1 )->{cores}, 1, 'and one core is the least' );
+    like( exception { $plan->( partition => '/machine/r', io_weight => 0 ) }, qr/from[ ]1[ ]to[ ]10000/, 'an IOWeight systemd refuses' );
+    like( exception { $plan->( pool_name => undef ) },                        qr/needs[ ]a[ ]pool_name/, 'and an account with no pool' );
 
     is( $plan->( partition => '/machine/runner' )->{slice}, 'machine-runner.slice', 'the partition names the slice that libvirt puts the guests in' );
 };
 
-subtest 'cores is what the slice gets, and cpu_quota still says the same, with a warning' => sub {
-
-    # The slice that a run writes when it is told the CPU with @cpu.
-    my $slice_of = sub (@cpu) {
-        my $state = fresh_state();
-        run_tool( $state, ( grep { $_ ne '--cores' && $_ ne '4' } @create ), @cpu );
-        return $state->{files}{'/etc/systemd/system/machine-runner.slice'} // q{};
-    };
-    my $quota_of = sub (@cpu) { my ($quota) = $slice_of->(@cpu) =~ m/^CPUQuota=(\S+)$/m; return $quota };
-
-    is( $quota_of->( '--cores', 32 ),  '3200%', '32 cores of the host' );
-    is( $quota_of->( '--cores', 0.5 ), '50%',   'half of one' );
-    my $finest = $slice_of->( '--cores', 1.0625 );
-    like( $finest, qr/^CPUQuota=106[.]25%$/m, 'to the hundredth of a percent' );
-    reads_as_a_slice($finest);
-
-    my @warned;
-    local $SIG{__WARN__} = sub { push @warned, @_ };
-    is( $quota_of->( '--cpu-quota', '400%' ), '400%', 'a cpu_quota writes the same slice as its cores' );
-    $quota_of->( '--cpu-quota', '400%' );
-    is( scalar @warned, 1, 'and warns once, however often it is read' );
-    like( $warned[0] // q{}, qr/write[ ]cores:[ ]4[ ]in[ ]place[ ]of[ ]cpu_quota:[ ]"400%"/, 'with what to write instead' );
+subtest 'cores is what the slice gets' => sub {
+    my $state = fresh_state();
+    run_tool( $state, ( grep { $_ ne '--cores' && $_ ne '4' } @create ), '--cores', 32 );
+    my $slice = $state->{files}{'/etc/systemd/system/machine-runner.slice'} // q{};
+    like( $slice, qr/^CPUQuota=3200%$/m, '32 cores of the host' );
+    reads_as_a_slice($slice);
 };
 
 subtest 'a dry run asks, says, and changes nothing' => sub {
