@@ -8,7 +8,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use IO::Prompter();
-use Symbol qw{qualify_to_ref};
+use IO::Interactive::Tiny();
 
 =head1 NAME
 
@@ -68,9 +68,7 @@ not.  Then a person can type an answer but cannot see the question.
 =cut
 
 sub output_is_redirected {
-
-    # is_interactive asks whether both are terminals, and this needs each one.
-    return -t *STDIN && !-t qualify_to_ref(select);    ## no critic (InputOutput::ProhibitInteractiveTest)
+    return IO::Interactive::Tiny::is_interactive(*STDIN) && !IO::Interactive::Tiny::is_interactive();
 }
 
 =head2 @slots = slots_in(\$root, $path)
