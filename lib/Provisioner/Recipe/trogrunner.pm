@@ -53,6 +53,7 @@ use Trog::Utils();
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     partition:   "/machine/runner"
+                    max_memory:  65536
 
                     # bin/provision makes the account above, with these
                     # limits.  See ACCOUNTS.
@@ -153,7 +154,11 @@ machines kills one of them, and does not refuse the next.  The per-domain
 equivalent is worse.  The libvirt documentation warns that
 C<< <memtune><hard_limit> >> gets guests OOM-killed.  C<reserve_memory> in
 F<hypervisors.conf> is what refuses a guest when memory is short, and it
-already exists.
+already exists.  For a budget of the partition, give C<max_memory> in MB.  The
+runner then refuses a guest whose memory does not fit in what the guests of the
+partition already hold, running or not.  It still refuses one that does not fit
+on the host after C<reserve_memory>.  The kernel holds no guest to it, so it
+binds a runner that cooperates, as the next paragraph says.
 
 With a C<partition>, the runner counts only its own guests.  C<max_guests>
 caps how many the partition holds, and C<cpu_overcommit> is the vCPUs for each
@@ -163,7 +168,8 @@ the room of the guests outside its partition.  Give the hypervisor block the
 C<reserve_memory>, C<reserve_cpus> and C<cpu_overcommit> of the block in the
 F<hypervisors.conf> of the operator, because the runner gets no other copy of
 them.  Without a C<partition>, every limit counts every guest on the
-hypervisor, so a C<max_guests> of a few refuses every build on a busy one.
+hypervisor, so a C<max_guests> of a few refuses every build on a busy one.  A
+C<max_memory> without a C<partition> is refused.
 
 =back
 
@@ -314,6 +320,7 @@ sub args {
                         reserve_disk   => { type => 'integer' },
                         cpu_overcommit => { type => 'integer' },
                         max_guests     => { type => 'integer' },
+                        max_memory     => { type => 'integer', minimum => 1 },
 
                         # The account of the runner on this hypervisor, which
                         # bin/provision makes and bin/destroy takes away.  See
@@ -472,6 +479,11 @@ sub enrich {
         # not on the guest.
         die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$block->{ssh_host}/system\n"
           if $block->{ssh_host} && $transport ne 'ssh';
+
+        # OpenAPIv3 cannot make one key need another, and Trog::HV::Libvirt
+        # would refuse this only on the runner.
+        die "trogrunner: hypervisor '$name' gives max_memory and no partition, and a budget of memory is that of a partition.  reserve_memory already caps the host.\n"
+          if $block->{max_memory} && !$block->{partition};
 
         next unless $block->{account};
 

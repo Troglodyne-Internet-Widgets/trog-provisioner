@@ -32,6 +32,7 @@ use YAML::XS();
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
+use Trog::Hypervisors();
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
 # wrote itself, full of dots and slashes that would otherwise need escaping one
@@ -156,6 +157,11 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     like( $conf, qr/^pool_path\s+=[ ]\/srv\/vm-disks\/runner$/m, 'the pool it is confined to' );
     like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,            'named as well as pathed, or libvirt ignores the path' );
     like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,       'and the slice its guests land in' );
+
+    # Read back as the runner reads it, so the key is one the runner takes.
+    my ($budgeted) = built( hypervisors => { hv1 => { %{ $HYPERVISORS{hv1} }, max_memory => 131_072 } }, hypervisor_access => 'least' );
+    my $runner_hv = Trog::Hypervisors->load("$budgeted/trogrunner.hypervisors.conf")->hypervisor('hv1');
+    is( $runner_hv->max_memory, 131_072, 'the memory budget of the partition reaches the hypervisor of the runner' );
 
     # Not for the fleet file -- for ssh-keyscan.  libvirt's qemu+ssh transport
     # verifies host keys where Net::OpenSSH::More does not, so an unseeded
@@ -576,6 +582,10 @@ subtest 'an account that cannot be made is refused when the configuration is wri
     like( exception { built( $with->( pool_name   => q{} ) ) },                               qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
     like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/system' ) ) }, qr/names[ ]no[ ]user/,                   'an account for nobody' );
     like( exception { built( $with->( account     => {} ) ) },                                qr/not[ ]valid/,                         'and an account with no quota' );
+
+    my %unpartitioned = %entry;
+    delete $unpartitioned{partition};
+    like( exception { built( hypervisors => { hv1 => { %unpartitioned, max_memory => 4096 } } ) }, qr/partition/, 'a memory budget with no partition to be the budget of' );
 
     my @warned;
     local $SIG{__WARN__} = sub { push @warned, @_ };
