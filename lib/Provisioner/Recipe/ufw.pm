@@ -31,6 +31,11 @@ installed packages.
 Limits the rate of new connections to ssh and to each port that a recipe
 listens on.  The networks in C<admin_networks> are exempt from these limits.
 
+Allows the guest to connect out to C<transfer_ip> on C<transfer_port>, where
+it fetches its files from this machine.  The default denies outgoing traffic,
+and the OpenSSH profile allows only port 22, so a hypervisor that names another
+port, such as one forwarded to this machine, needs the rule.
+
 Forwards the ports in C<port_forwards>, if you give any.
 
 Refuses a configuration in which two recipes bind one address on one port,
