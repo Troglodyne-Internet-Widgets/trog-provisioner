@@ -11,6 +11,7 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use Digest::SHA();
+use List::Util();
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
@@ -186,6 +187,20 @@ sub grants {
     return () unless defined $issuer;
 
     return { recipe => 'openvpn', guest => $issuer, client => $domain };
+}
+
+=head2 @domains = $recipe->joins_network_of(%opts)
+
+The guest of C<issue_from> and of C<server>, as C<joins_network_of> in
+L<Provisioner::Recipe> says.  The server routes its clients to the network that
+it is on, and the client reaches the server by its public name.  So a guest
+behind it can go on a hypervisor of another network.
+
+=cut
+
+sub joins_network_of {
+    my ( $self, %opts ) = @_;
+    return List::Util::uniq( grep { defined && $_ ne q{} } @opts{qw{issue_from server}} );
 }
 
 =head2 %terms = $recipe->grant_terms($grant, %opts)

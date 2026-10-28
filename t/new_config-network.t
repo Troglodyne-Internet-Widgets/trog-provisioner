@@ -76,6 +76,21 @@ $err //= q{};
 like( $err, qr/needs[ ]guests[ ]that[ ]are[ ]on[ ]different[ ]networks/,      'guests on two networks are refused' );
 like( $err, qr/network[ ]'cloud':[ ]logs[.]test,[ ]which[ ]is[ ]on[ ]linode/, 'naming each' );
 
+# A VPN client reaches the network of its server from anywhere.
+$conf{'vpn.test'}  = { openvpn       => {} };
+$conf{'edge.test'} = { openvpnclient => { server => 'vpn.test', issue_from => 'vpn.test' } };
+%where             = ( 'cache.test' => $home, 'logs.test' => $home2, 'vpn.test' => $home );
+my ( $edge, $edge_said ) = required('edge.test');
+is_deeply( $edge, {}, 'a VPN client may go anywhere, when what it needs is on the network of its server' );
+like( $edge_said, qr/cache[.]test[ ]does[ ]not[ ]limit/,               'and says which guest no longer limits it' );
+like( $edge_said, qr/openvpnclient[ ]connects[ ]it[ ]to[ ]vpn[.]test/, 'and why' );
+
+%where = ( 'cache.test' => $home, 'logs.test' => $cloud, 'vpn.test' => $home );
+is( ( required('edge.test') )[0]{network}, 'cloud', 'but a guest that it needs on another network still limits it' );
+
+%where = ( 'cache.test' => $home, 'logs.test' => $home2 );
+is( ( required('edge.test') )[0]{network}, 'home', 'and a server that is not up brings it onto no network' );
+
 $configured = 0;
 is_deeply( ( required('web.test') )[0], {}, 'and with no fleet there is one hypervisor, and nothing to choose' );
 

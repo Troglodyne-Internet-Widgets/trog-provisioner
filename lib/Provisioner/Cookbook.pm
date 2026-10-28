@@ -1703,6 +1703,7 @@ sub global_schema {
                 description => 'The nameservers a guest asks, in order.  A loopback address belongs to a guest that runs its own, and nostubresolver puts that one in front.',
             },
 
+            hypervisor       => { type => 'string',             description => 'The hypervisor of hypervisors.conf, by the name of its block, that this guest is built on, whichever one is cheapest or roomiest.  A guest that is up stays where it is, and --hypervisor names another for one run.' },
             linode_type      => { type => 'string',             description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
             openstack_flavor => { type => 'string',             description => 'What this guest is on an OpenStack cloud: a flavor, by name or id.  A guest that names none is not built on one.  `openstack flavor list` lists them.' },
             solusvm_plan     => { type => [qw{string integer}], description => 'What this guest is on a SolusVM node: a plan, by name or id.  A guest that names none is not built on one.  bin/preflight says how many plans the node offers the project.' },

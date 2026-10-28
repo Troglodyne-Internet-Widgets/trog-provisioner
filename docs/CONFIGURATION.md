@@ -233,6 +233,20 @@ that costs a month, and where. Accept it and the size is written into
 the terminal -- cron, CI, the reprovision button -- never waits for an answer.
 It fails, with the offer and the line to add in the error.
 
+Placement takes the cheapest hypervisor that has room, so a guest that names
+`linode_type` still goes on a machine of ours when one has room. To build a
+guest on one hypervisor every time, name its block in `hypervisors.conf`:
+
+```yaml
+edge.example.test:
+    _global:
+        hypervisor: linode
+        linode_type: g6-nanode-1
+```
+
+A guest that is up stays where it is, and `--hypervisor` names another
+hypervisor for one run.
+
 `machine` is the libvirt machine type, and it is `q35` by default: a guest gets
 a PCIe topology, which is what an assigned PCIe device needs.  `pc` asks for the
 older i440fx instead.  It decides the PCI topology the guest knows, so changing
@@ -604,9 +618,11 @@ that it needs is, and places it only on a hypervisor of that guest's network:
 
 - A guest that is up on a hypervisor of another network is refused, because it
   cannot move, and so is a guest pinned to one, with `--hypervisor` or
-  `hypervisor=` in `provision.conf`.
+  `hypervisor` in `_global`.
 - A guest that needs guests on two networks is refused, because no hypervisor
   reaches both.
+- A guest on the network of the VPN server of an `openvpnclient` limits
+  nothing, because the client reaches that network from anywhere.
 - A guest that it needs and that is not up yet limits nothing, and it says so.
   `bin/provision` builds that guest first, so it is up by the time the guest
   that needs it is placed.
