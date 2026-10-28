@@ -1397,6 +1397,68 @@ sub revocations {
     return map { +{ guest => $_->{guest}, Provisioner::Cookbook->load( $_->{recipe} )->revoke_grant($_) } } $self->grants( $domain, %opts );
 }
 
+=head3 @steps = $recipe->outside_steps($domain, %opts)
+
+What this recipe needs done on a machine that is not the guest of C<$domain>,
+such as an account on a hypervisor, or a key in an F<authorized_keys> there.
+F<bin/provision> does each step, and F<bin/destroy> undoes it, through
+L<Trog::Steps>.  A makefile cannot do this, because it runs on the guest.
+
+A grant is the special case of this where another I<guest> issues something,
+and its product is a file on the guest of C<$domain>.  Use C<grants> for that,
+because it puts the file in place before the makefile runs.  Use this when the
+product is a change to the other machine, and the guest gets nothing.
+
+Each step is a hash:
+
+    {
+        id      => 'trogrunner:key:hv1',        # optional
+        machine => { hypervisor => 'hv1' },     # see Trog::Steps
+        when    => 'secrets',                   # or 'built'
+        apply   => sub ( $machine, %context ) { return @actions },
+        revert  => sub ( $machine, %context ) { return @actions },   # optional
+    }
+
+Either code reference can be left out.  A step with only a C<revert> takes
+back what a provision made under an earlier configuration, such as a key that
+a hypervisor still trusts after the configuration took the access away.
+
+C<when> is the moment in F<bin/provision>.  C<secrets> is after the secrets of
+the guest are on it and before its makefile starts, so the makefile can use
+what the step made.  C<built> is after the makefile succeeded.  Two steps with
+one C<id> run once, so that two recipes that ask for the same change get it
+once.
+
+An action is C<< { what => $sentence, done => sub {...}, do => sub {...} } >>.
+C<done> asks the machine whether the change is there, and C<do> makes it.  So a
+second provision changes nothing, and a dry run can say what would change.
+C<what> starts with a verb, because the runner prints it after "now", "would"
+or "ok".  C<do> dies when the change failed and the guest needs it.  When the
+guest works without it, C<do> warns and returns instead.
+
+C<%context> has C<domain>, C<domain_dir> (the directory of the domain on this
+machine), C<dryrun>, C<secrets> and C<address>.  C<secrets> maps each C<ref> of
+C<guest_secrets> to its value, from the one time that F<bin/provision> opens
+the store.  It is empty on a dry run and in a C<revert>, because neither opens
+the store.  So C<revert> must find what it needs elsewhere, such as in a public
+file that C<apply> left in C<domain_dir>.  C<address> is the address of the
+guest, and only C<built> has it.
+
+C<%opts> is the configuration of this recipe as the file holds it, as for
+C<grants>, and this must have no side effects, because F<bin/destroy> calls it.
+Do the work in the code references.
+
+Nothing here, because most recipes need nothing outside their guest.  The
+reverse DNS of a guest that C<sends_mail> is not a step of this method, so an
+override cannot lose it.  C<of> in L<Trog::Steps> adds that step for each
+recipe that sends mail.
+
+=cut
+
+sub outside_steps {
+    return ();
+}
+
 =head3 $hv = $recipe->hv()
 
 Returns the hypervisor that this guest is built for, as given to the
@@ -1453,7 +1515,8 @@ sub subdomains {
 True when this recipe runs a mail server that delivers mail to other servers.
 A receiver checks that the reverse DNS of the address of the sender gives the
 name that the sender announces, so F<bin/provision> sets the reverse DNS of a
-guest that runs such a recipe.  The name is C<helo_name_of> in
+guest that runs such a recipe, with C<reverse_dns_step> in L<Trog::Steps>.
+Overriding C<outside_steps> does not change that.  The name is C<helo_name_of> in
 L<Provisioner::Cookbook>, and the recipe puts the same name in its
 configuration of postfix.  False here, because most recipes send no mail.
 

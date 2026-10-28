@@ -52,6 +52,10 @@ sub load {
     my $self = bless { path => $path, order => [], blocks => {} }, $class;
     return $self unless defined $path;
 
+    # Config::Simple reads the file into $_ without a local of its own.  Inside
+    # a loop over constants, $_ is a constant, the read dies, and the eval
+    # turns the fleet into no fleet.
+    local $_;
     my $config = eval { Config::Simple->new($path) } or return $self;
 
     # Config::Simple returns "block.key" pairs in a hash and cannot list the

@@ -33,7 +33,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 # Loaded so Test::MockModule has a package to attach to.
-use Trog::HV::Libvirt();                                                                             ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();
 
 my $script = "$FindBin::Bin/../bin/runner_account";
 require_ok($script) or BAIL_OUT("$script does not load");
@@ -43,7 +43,10 @@ my $hvconf = "$dir/hypervisors.conf";
 File::Slurper::Temp::write_text( $hvconf, "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv.test.test/system\n" );
 
 my $keyfile = "$dir/operator.pub";
-File::Slurper::Temp::write_text( $keyfile, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogus operator\@test.test\n" );
+
+# As long as a real ed25519 key, because a line is matched on its key, and a
+# short key is refused for matching half of a file.
+File::Slurper::Temp::write_text( $keyfile, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusBogusBogusBogusBogusBogusBogusBogus operator\@test.test\n" );
 
 my @create = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --quota 500G}, qw{--partition /machine/runner --cpu-quota 400% --io-weight 50}, '--authorize', $keyfile );
 my @remove = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --partition /machine/runner --remove} );
@@ -79,11 +82,11 @@ my @ANSWERS = (
     [ 'zfs list -H -o name'            => sub ( $s, $arg ) { index( $arg, q{/} ) == 0 ? dataset_holding( $s, $arg ) : exists $s->{datasets}{$arg} ? $arg : undef } ],
     [ 'zfs get -H -o value mountpoint' => sub ( $s, $arg ) { $s->{datasets}{$arg}{mountpoint} } ],
     [ 'zfs get -H -o value quota'      => sub ( $s, $arg ) { $s->{datasets}{$arg}{quota} } ],
-    [ 'getent passwd'                  => sub ( $s, $arg ) { $s->{users}{$arg} ? "/home/$arg"                                       : undef } ],
-    [ 'id -nG'                         => sub ( $s, $arg ) { $s->{users}{$arg} ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
-    [ 'id -u'                          => sub ( $s, $arg ) { $s->{users}{$arg} ? 1001                                               : undef } ],
-    [ 'id -g'                          => sub ( $s, $arg ) { $s->{users}{$arg} ? 1001                                               : undef } ],
-    [ 'sudo -n cat'                    => sub ( $s, $arg ) { $s->{files}{$arg} } ],
+    [ 'getent passwd'                  => sub ( $s, $arg ) { $s->{users}{$arg}      ? "/home/$arg"                                       : undef } ],
+    [ 'id -nG'                         => sub ( $s, $arg ) { $s->{users}{$arg}      ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
+    [ 'id -u'                          => sub ( $s, $arg ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
+    [ 'id -g'                          => sub ( $s, $arg ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
+    [ 'sudo -n cat'                    => sub ( $s, $arg ) { $s->{unreadable}{$arg} ? undef                                              : $s->{files}{$arg} } ],
     [ 'sudo -n find'                   => sub ( $s, $arg ) { $s->{dirs}{$arg} } ],
 );
 
@@ -92,7 +95,7 @@ my @ANSWERS = (
 my @ROOT = (
     [ 'useradd'     => sub ( $s, @a ) { $s->{users}{ $a[-1] } = { groups => [] };           0 } ],
     [ 'usermod'     => sub ( $s, @a ) { push @{ $s->{users}{ $a[-1] }{groups} }, 'libvirt'; 0 } ],
-    [ 'sh'          => sub ( $s, @a ) { $s->{files}{ $a[-2] } .= "$a[-3]\n";                0 } ],
+    [ 'chown'       => sub ( $s, @a ) { 0 } ],
     [ 'zfs create'  => sub ( $s, @a ) { $s->{datasets}{ $a[-1] } = { mountpoint => '/bogus/vm-disks/runner', quota => substr( $a[-2], length 'quota=' ) }; 0 } ],
     [ 'zfs set'     => sub ( $s, @a ) { $s->{datasets}{ $a[-1] }{quota} = substr( $a[-2], length 'quota=' ); 0 } ],
     [ 'zfs destroy' => sub ( $s, @a ) { delete $s->{datasets}{ $a[-1] }; 0 } ],
@@ -131,8 +134,10 @@ sub with_hypervisor ( $state, $code ) {
     );
     $mock->redefine(
         run_cmd => sub ( $hv, @argv ) {
-            die "the fake hypervisor was not expecting: @argv\n" unless "@argv[0..4]" eq 'sudo -n test ! -e';
-            return exists $state->{files}{ $argv[-1] } ? 1 : 0;
+            my $file = $state->{files}{ $argv[-1] };
+            return defined $file           ? 1 : 0 if "@argv[0..4]" eq 'sudo -n test ! -e';
+            return ( $file // q{} ) ne q{} ? 0 : 1 if "@argv[0..3]" eq 'sudo -n test -s';
+            die "the fake hypervisor was not expecting: @argv\n";
         }
     );
     $mock->redefine(
@@ -143,7 +148,9 @@ sub with_hypervisor ( $state, $code ) {
     );
     $mock->redefine( file_exists => sub ( $hv, $path ) { exists $state->{files}{$path} ? 1 : 0 } );
     $mock->redefine( remove      => sub ( $hv, $path ) { delete $state->{files}{$path}; 1 } );
-    $mock->redefine( pool_target => sub ( $hv, $name ) { $state->{pools}{$name}{path} } );
+
+    # Without autovivification, so that asking for a pool does not make one.
+    $mock->redefine( pool_target => sub ( $hv, $name ) { my $pool = $state->{pools}{$name}; $pool ? $pool->{path} : undef } );
     $mock->redefine(
         define_pool => sub ( $hv, $name, $path, %perm ) {
             $state->{pools}{$name} = { path => $path, %perm, volumes => [] };
@@ -202,19 +209,20 @@ sub run_tool ( $state, @args ) {
     return ( $rc, $said );
 }
 
-subtest 'plan refuses what a step would read as syntax' => sub {
-    my %ok = ( user => 'runner', 'pool-name' => 'runner_disks', 'pool-path' => '/bogus/vm-disks/runner', quota => '500G', authorize => [] );
+subtest 'the plan refuses what a step would read as syntax' => sub {
+    my %ok   = ( user => 'runner', pool_name => 'runner_disks', pool_path => '/bogus/vm-disks/runner', quota => '500G' );
+    my $plan = sub (%args) { Trog::HV::Libvirt->runner_account_plan( %ok, %args ) };
 
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, user        => 'Run ner' ) },       qr/not[ ]a[ ]name[ ]useradd[ ]takes/, 'a user useradd would refuse' );
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, 'pool-path' => '/bogus/../etc' ) }, qr/absolute[ ]path/,                  'a pool path that climbs out' );
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, 'pool-path' => 'relative/dir' ) },  qr/absolute[ ]path/,                  'a relative pool path' );
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, quota       => 'lots' ) },          qr/not[ ]a[ ]size/,                   'a quota zfs cannot read' );
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, partition   => '/runner' ) },       qr{has[ ]to[ ]be[ ]/machine/NAME},    'a partition outside /machine' );
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, 'cpu-quota' => '400%' ) },          qr/need[ ]--partition/,               'a slice limit with no slice' );
-    like( exception { Trog::Bin::RunnerAccount::plan( %ok, partition => '/machine/r', 'io-weight' => 0 ) }, qr/from[ ]1[ ]to[ ]10000/, 'an IOWeight systemd refuses' );
+    like( exception { $plan->( user      => 'Run ner' ) },                    qr/not[ ]a[ ]name[ ]useradd[ ]takes/, 'a user useradd would refuse' );
+    like( exception { $plan->( pool_path => '/bogus/../etc' ) },              qr/absolute[ ]path/,                  'a pool path that climbs out' );
+    like( exception { $plan->( pool_path => 'relative/dir' ) },               qr/absolute[ ]path/,                  'a relative pool path' );
+    like( exception { $plan->( quota     => 'lots' ) },                       qr/not[ ]a[ ]size/,                   'a quota zfs cannot read' );
+    like( exception { $plan->( partition => '/runner' ) },                    qr{has[ ]to[ ]be[ ]/machine/NAME},    'a partition outside /machine' );
+    like( exception { $plan->( cpu_quota => '400%' ) },                       qr/need[ ]a[ ]partition/,             'a slice limit with no slice' );
+    like( exception { $plan->( partition => '/machine/r', io_weight => 0 ) }, qr/from[ ]1[ ]to[ ]10000/,            'an IOWeight systemd refuses' );
+    like( exception { $plan->( pool_name => undef ) },                        qr/needs[ ]a[ ]pool_name/,            'and an account with no pool' );
 
-    my $plan = Trog::Bin::RunnerAccount::plan( %ok, partition => '/machine/runner' );
-    is( $plan->{slice}, 'machine-runner.slice', 'the partition names the slice that libvirt puts the guests in' );
+    is( $plan->( partition => '/machine/runner' )->{slice}, 'machine-runner.slice', 'the partition names the slice that libvirt puts the guests in' );
 };
 
 subtest 'a dry run asks, says, and changes nothing' => sub {
@@ -237,7 +245,7 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
         $state->{users}{runner}{groups},
         ['libvirt'], 'the user exists, in the libvirt group',
     );
-    like( $state->{files}{'/home/runner/.ssh/authorized_keys'}, qr/operator\@test[.]test/, 'the operator can log in as it, so bin/provision can add the key of the runner' );
+    like( $state->{files}{'/home/runner/.ssh/authorized_keys'}, qr/operator\@test[.]test/, 'the key of --authorize can log in as it' );
     is( $state->{datasets}{'tank/vm-disks/runner'}{quota}, '500G', 'the dataset has the quota' );
     is_deeply( [ @{ $state->{pools}{runner_disks} }{qw{path owner group}} ], [ '/bogus/vm-disks/runner', 1001, 1001 ], 'the pool is on it, owned by the user' );
     my $slice = $state->{files}{'/etc/systemd/system/machine-runner.slice'};
@@ -257,6 +265,8 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     is_deeply( $state->{root}, [], 'the second run runs nothing as root' );
     like( $said, qr/Done:[ ]0[ ]step/,                                           'and says so' );
     like( $said, qr{libvirt_uri:[ ]qemu\+ssh://runner\@hv[.]test[.]test/system}, 'it prints the hypervisors entry, with the account in the URI' );
+    my ($account) = $said =~ m/^([ ]+account:\n(?:[ ]+\w+:[^\n]*\n)+)/m;
+    is( $account // q{}, qq{            account:\n                quota: 500G\n                cpu_quota: "400%"\n                io_weight: 50\n}, 'and the account block that makes bin/provision keep it so' );
 
     # A changed quota is one step, not a rebuild.
     $state->{root} = [];
@@ -304,8 +314,9 @@ subtest 'remove takes it all away, and not the disks of guests' => sub {
     run_tool( $state, @create );
 
     push @{ $state->{pools}{runner_disks}{volumes} }, 'vm.test.test.qcow2';
+    $state->{root} = [];
     like( exception { run_tool( $state, @remove ) }, qr/still[ ]holds[ ]vm[.]test[.]test[.]qcow2/, 'a pool with a volume in it stops the removal' );
-    ok( exists $state->{datasets}{'tank/vm-disks/runner'}, 'and the dataset is still there' );
+    is_deeply( $state->{root}, [], 'before it changes anything, so the account stays whole, with its grant and its slice' );
 
     $state->{pools}{runner_disks}{volumes} = [];
     $state->{dirs}{'/bogus/vm-disks/runner'} = '/bogus/vm-disks/runner/left-behind.qcow2';
@@ -330,6 +341,50 @@ subtest 'remove takes it all away, and not the disks of guests' => sub {
     $state->{root} = [];
     run_tool( $state, @remove );
     is_deeply( $state->{root}, [], 'and a second removal has nothing to do' );
+};
+
+subtest 'the key of a runner replaces its old line, and comes out again' => sub {
+    my $state = fresh_state();
+    run_tool( $state, @create );
+
+    my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIRunnerRunnerRunnerRunnerRunnerRunnerRunner';
+    my $file     = '/home/runner/.ssh/authorized_keys';
+
+    # The fake keeps a file without its last newline, as write_text gets it.
+    $state->{files}{$file} .= "\nssh-ed25519 $material trog-provisioner runner vm.test.test";
+
+    my $hv   = Trog::Hypervisors->load($hvconf)->hypervisor('hv1');
+    my $line = qq{from="192.0.2.9" ssh-ed25519 $material trog-provisioner runner vm.test.test};
+    with_hypervisor(
+        $state,
+        sub {
+            my ($let_in) = $hv->runner_key_steps( 'runner', $line );
+            ok( !$let_in->{done}->(), 'a line of the key without the from= of this provision is not the line' );
+            $let_in->{do}->();
+            ok( $let_in->{done}->(), 'and after the action it is' );
+        }
+    );
+    my @lines = grep { index( $_, $material ) >= 0 } split m/\n/, $state->{files}{$file};
+    is_deeply( \@lines, [$line], 'one line with the key, the new one, because sshd takes the first that matches' );
+    like( $state->{files}{$file}, qr/operator\@test[.]test/, 'and the other keys stay' );
+
+    with_hypervisor( $state, sub { $_->{do}->() for $hv->runner_key_removal_steps( 'runner', $material ) } );
+    unlike( $state->{files}{$file}, qr/\Q$material\E/, 'the removal takes it out' );
+    like( $state->{files}{$file}, qr/operator\@test[.]test/, 'and only it' );
+
+    like( exception { $hv->runner_key_removal_steps( 'runner', 'short' ) }, qr/does[ ]not[ ]look[ ]like[ ]a[ ]key/, 'a short key, which matches half a file, is refused' );
+
+    # A read that comes back empty from a file with keys in it.
+    my $before = $state->{files}{$file};
+    $state->{unreadable}{$file} = 1;
+    like(
+        exception {
+            with_hypervisor( $state, sub { $_->{do}->() for $hv->runner_key_steps( 'runner', $line ) } )
+        },
+        qr/refusing[ ]to[ ]rewrite[ ]it[ ]blind/,
+        'a file that could not be read is not rewritten'
+    );
+    is( $state->{files}{$file}, $before, 'and keeps every key in it' );
 };
 
 done_testing();

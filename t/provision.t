@@ -33,7 +33,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
-use Provisioner::Cookbook();
+use Provisioner::Cookbook();                                                                         ## no critic (ProhibitUnusedImports) -- loaded so that Test::MockModule has a package to attach to
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
@@ -1114,9 +1114,15 @@ subtest 'the marker that setup.sh waits for is written after every secret' => su
     my $credentials = Test::MockModule->new('Trog::Credentials');
     $credentials->redefine( prompt => sub { 'throwaway' } );
 
-    my @did;
-    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
-    $bin->redefine( authorize_runner_key => sub { push( @did, 'runner key' ); return 0 } );
+    my ( @did, %given );
+    my $steps = Test::MockModule->new('Trog::Steps');
+    $steps->redefine(
+        apply => sub ( $class, $for, %opts ) {
+            push( @did, "$opts{when} steps" );
+            $given{$for} = $opts{secrets};
+            return 0;
+        }
+    );
 
     my $written = 1;
     no warnings 'once';
@@ -1126,9 +1132,12 @@ subtest 'the marker that setup.sh waits for is written after every secret' => su
     my $guest = bless {}, 'SecretsProbe';
 
     is( quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, $domain ) } ), 1, 'the secrets are placed' );
-    is_deeply( \@did, [ '/bogus/signing.key', 'runner key', Trog::Guest->secrets_marker($domain) ], 'the files, then the runner key, and the marker last' );
+    is_deeply( \@did,           [ '/bogus/signing.key', 'secrets steps', Trog::Guest->secrets_marker($domain) ], 'the files, then the steps on other machines, and the marker last' );
+    is_deeply( $given{$domain}, { 'secret:g/signing/key' => 'the key' },                                         'and the steps get each secret by its reference in the store, so that the store is opened once' );
 
+    @did = ();
     is( exception { Trog::Bin::Provisioner::place_guest_secrets( undef, 'none.test.test' ) }, undef, 'a domain with no manifest writes no marker, and touches no guest' );
+    is_deeply( \@did, ['secrets steps'], 'and still gets its steps, with no secrets' );
 
     mkdir "$dir/third.test.test";
     File::Slurper::Temp::write_text( "$dir/third.test.test/guest-secrets.yaml", $manifest );
@@ -1166,8 +1175,8 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
     use warnings;
 
     my @issuers;
-    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
-    $bin->redefine( authorize_runner_key => sub { return 0 } );
+    my $steps = Test::MockModule->new('Trog::Steps');
+    $steps->redefine( apply => sub { return 0 } );
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
     $fleet->redefine( guest_of => sub { push( @issuers, $_[1] ); return bless {}, 'IssuerProbe' } );
 
@@ -1183,144 +1192,6 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
 
     $fleet->redefine( guest_of => sub { return } );
     like( exception { Trog::Bin::Provisioner::issue_secret( $domain, '/bogus/web.token', $issue ) }, qr/ns[.]test[.]test[ ]is[ ]not[ ]up/, 'and a guest that is not up is named' );
-};
-
-# --- Letting a runner in to a hypervisor --------------------------------------
-#
-# A change to a machine that is not the guest, and the reason this lives here
-# rather than in the recipe that declares the key.  It is done where the key has
-# already come out of the store, because doing it anywhere else means asking for
-# the store password twice.
-subtest 'a runner is authorized on each hypervisor it was configured for' => sub {
-    my $dir    = tempdir( CLEANUP => 1 );
-    my $domain = 'runner.test.test';
-    mkdir "$dir/$domain";
-
-    Trog::HV->forget();
-    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
-
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine(
-        domain_config => sub {
-            return {
-                trogrunner => {
-                    hypervisor_access  => 'least',
-                    restrict_key_to_ip => 0,
-                    hypervisors        => {
-                        one => { libvirt_uri => 'qemu+ssh://runner@one.test.test/system' },
-                        two => { libvirt_uri => 'qemu+ssh://runner@two.test.test/system' },
-                    },
-                },
-            };
-        }
-    );
-
-    my %appended;
-    my $hv = Test::MockModule->new('Trog::HV');
-    $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
-    $hv->redefine( append_line     => sub { push @{ $appended{ $_[1] } }, $_[2]; return 1 } );
-
-    # The recipe's own generator, rather than a key made some other way here.  A
-    # made-up string would only prove that CryptX rejects made-up strings, and a
-    # key from ssh-keygen would not exercise the thing that actually goes in the
-    # store -- which has a rewrap in it precisely because the two do not agree by
-    # default.
-    my %secrets = Provisioner::Cookbook->load('trogrunner')->guest_secrets( '/bogus/domains', 'runner.test.test' );
-    my ($entry) = values %secrets;
-    my %values  = ( "/opt/domains/$domain/.ssh/id_ed25519" => $entry->{generate}->() );
-
-    quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
-
-    is_deeply( [ sort keys %appended ], [qw{one.test.test two.test.test}], 'one line per hypervisor, and no others' );
-    like( $appended{'one.test.test'}[0], qr/\Assh-ed25519[ ]/, 'the public half, derived rather than stored' );
-    is( scalar @{ $appended{'one.test.test'} }, 1, 'once each' );
-
-    # A derived public key is the key and nothing else, so an unnamed line is
-    # one nobody reading that hypervisor's authorized_keys can attribute.
-    like( $appended{'one.test.test'}[0], qr/\Qtrog-provisioner runner runner.test.test\E\z/, 'and it says whose it is' );
-
-    # bin/destroy reads this rather than the store, so that taking the grant
-    # away never stops to ask for a passphrase.
-    my $written = File::Slurper::read_text("$dir/$domain/hypervisor-key.pub");
-    chomp $written;
-    is( $written, $appended{'one.test.test'}[0], 'and written beside the domain for the revoke' );
-};
-
-subtest 'a guest that is not a runner, or one that asked for nothing' => sub {
-    my $touched = 0;
-    my $hv      = Test::MockModule->new('Trog::HV');
-    $hv->redefine( append_line => sub { $touched++; return 1 } );
-
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( domain_config => sub { {} } );
-    is( Trog::Bin::Provisioner::authorize_runner_key( 'plain.test.test', {} ), 0, 'not a runner: nothing to do' );
-
-    # none is the default, and it is the whole of what turns the grant off:
-    # the recipe declares the key whether or not anybody trusts it.
-    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
-    is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {} ), 0, 'a runner with the default access: still nothing' );
-
-    is( $touched, 0, 'neither of them reached a hypervisor' );
-};
-
-subtest 'the reverse DNS of a guest is set to the name its mail announces' => sub {
-    Trog::HV->forget();
-    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => tempdir( CLEANUP => 1 ) );
-
-    my ( %config, %host );
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return { %{ $config{$domain} // {} } } } );
-    $cookbook->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
-
-    my ( @asked, $answer );
-    my $hv = Test::MockModule->new('Trog::HV');
-    $hv->redefine( set_reverse_dns => sub { my ( undef, @args ) = @_; push @asked, \@args; return $answer->() } );
-
-    # What it printed, what it warned, and what it returned.
-    my $point = sub ( $address, $domain = 'mx.test.test' ) {
-        my ( $out, $err, $result ) = capture( sub { Trog::Bin::Provisioner::point_reverse_dns( $domain, $address ) } );
-        return ( $out, $err, $result );
-    };
-
-    %config = ( 'mx.test.test' => { nginx => {} } );
-    $answer = sub { return '9.9.9.9' };
-    is( ( $point->('9.9.9.9') )[2], 0, 'a guest that sends no mail gets no reverse DNS' );
-    is( scalar @asked,              0, 'and its hypervisor is not asked' );
-
-    %config = ( 'mx.test.test' => { mail => {}, nginx => {}, _shared => {} } );
-    my ( $out, $err, $result ) = $point->('9.9.9.9');
-    is( $result, 1, 'a mail guest gets it' );
-    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'set to the name that its postfix announces' );
-    like( $out, qr/\QThe reverse DNS of 9.9.9.9 is now mail.mx.test.test\E/, 'and it says so' );
-
-    # A domain built onto a host that runs no mail of its own.
-    @asked  = ();
-    %host   = ( 'tenant.test.test' => 'mx.test.test' );
-    %config = ( 'mx.test.test'     => { nginx => {} }, 'tenant.test.test' => { mail => {} } );
-    ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
-    is( $result, 1, 'a tenant that sends mail gets it' );
-    is_deeply( \@asked, [ [ 'mx.test.test', 'mx.test.test' ] ], 'on the guest of its host, set to the name of that guest' );
-
-    @asked = ();
-    $config{'mx.test.test'}{mail} = {};
-    ( $out, $err, $result ) = $point->( '9.9.9.9', 'tenant.test.test' );
-    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'and to the mail name of the host, when the host runs mail' );
-    %host = ();
-
-    %config = ( 'mx.test.test' => { mailrelay => {} } );
-    $answer = sub { die "Linode refused put-ip: 403 not authorized\n" };
-    ( $out, $err, $result ) = $point->('9.9.9.9');
-    is( $result, 0, 'a refusal of the hypervisor does not stop the run' );
-    like( $err, qr/\QCould not set the reverse DNS of mx.test.test to mx.test.test\E/, 'and it says what it could not set' );
-    like( $err, qr/\Q403 not authorized\E/,                                            'and what the hypervisor said' );
-
-    $answer = sub { return };
-    ( $out, $err, $result ) = $point->('9.9.9.9');
-    is( $result, 0, 'a hypervisor that offers no way sets nothing' );
-    like( $out, qr/\QSet the reverse DNS of 9.9.9.9 to mx.test.test\E/, 'and the operator is told what to set, for a public address' );
-
-    ( $out, $err, $result ) = $point->('192.168.1.20');
-    is( $out . $err, q{}, 'but not for a private one, which no receiver sees' );
 };
 
 # The generator places the guest, so it has to place it in the fleet that

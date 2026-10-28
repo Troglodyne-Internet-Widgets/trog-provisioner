@@ -16,6 +16,7 @@ use Trog::Credentials();
 use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
+use Trog::Steps();
 use File::Basename();
 use File::Glob();
 use File::Path();
@@ -134,9 +135,13 @@ Say what destroy will remove, and remove nothing.
 =head1 DESCRIPTION
 
 destroy undoes what C<provision> did.  It stops and undefines the VM, destroys
-its disks, and removes the authorized keys that were added for it.  Then it
-returns the address of the domain to the pool.  It does not touch the shared
-resources, which are the base image and the storage pool.
+its disks, and removes the authorized keys that were added for it.  It undoes
+what the recipes of the domain changed on other machines, last change first,
+through L<Trog::Steps>.  For a runner, that is its key and its account on each
+hypervisor.  A change that cannot be undone gets a warning that says what
+stays, and the rest goes on.  Then it returns the address of the domain to the
+pool.  It does not touch the shared resources, which are the base image and the
+storage pool.
 
 =cut
 
@@ -230,7 +235,10 @@ sub main {
         # 3. Remove its keys from authorized_keys, here and on the hypervisors
         remove_authorized_key( $domain, $dryrun );
         remove_rsync_modules( $domain, $dryrun );
-        remove_runner_key( $domain, $dryrun );
+
+        # And what its recipes changed on other machines, such as the key and
+        # the account of a runner on its hypervisors, without the store.
+        Trog::Steps->revert( $domain, dryrun => $dryrun, hvconf => $hvconf );
 
         # 3a. Take back what other guests issued it: a zone and its tokens, a
         # VPN certificate, public names on a relay.  Before release_ip, because
@@ -384,75 +392,6 @@ sub remove_rsync_modules {
         print( ( $dryrun ? "Would remove" : "Removing" ) . " the rsync modules of $domain in $part\n" );
         unlink $part or die "Could not remove $part: $!\n" unless $dryrun;
     }
-    return;
-}
-
-=head2 remove_runner_key($domain, $dryrun)
-
-Remove the key of a runner from each hypervisor that authorized it.  Returns
-nothing.  Dies if the public key beside the domain does not look like a key, or
-if an F<authorized_keys> file that exists is empty or cannot be read.
-
-This is the counterpart of C<authorize_runner_key> in F<bin/provision>.  It
-reads the public half from the domain directory, not from the store, so it
-needs no passphrase.  A destroy that stops to ask for a passphrase is a destroy
-that nobody runs.
-
-C<Provisioner::Cookbook> says which hypervisors to clean.
-
-It removes every line that has the key material in it, not only the line that
-C<bin/provision> wrote.  The key is generated per domain and kept in the store,
-so no other grant can have it.  A match on the whole line fails if somebody
-edited the C<from=> restriction or the comment on the hypervisor.  The check on
-the key prevents a short or empty string that matches half the file.
-
-=cut
-
-sub remove_runner_key {
-    my ( $domain, $dryrun ) = @_;
-
-    my $domain_dir = Trog::HV->new()->domain_dir;
-    my $pubkey     = eval { File::Slurper::read_text("$domain_dir/$domain/hypervisor-key.pub") };
-    return unless defined $pubkey;
-    chomp $pubkey;
-
-    # The key material, not the whole line.  The POD above tells why.
-    my ($material) = ( split( q{ }, $pubkey ) )[1];
-    die "The public key beside $domain does not look like one; refusing to match on it\n"
-      if !defined $material || length($material) <= 32;
-
-    my $config      = eval { Provisioner::Cookbook->domain_config($domain) } // {};
-    my $hypervisors = ( $config->{trogrunner} // {} )->{hypervisors}         // {};
-    return unless ref $hypervisors eq 'HASH' && %$hypervisors;
-
-    foreach my $name ( sort keys %$hypervisors ) {
-        my $uri     = $hypervisors->{$name}{libvirt_uri}          or next;
-        my $machine = eval { Trog::HV->candidate( uri => $uri ) } or next;
-
-        my $ak = eval { $machine->authorized_keys } or next;
-        next unless $machine->file_exists($ak);
-
-        my $contents = $machine->read_text($ak);
-        die "Could not read $ak on $name; refusing to rewrite it blind\n"
-          unless $contents;
-
-        my @before = split( m/\n/, $contents );
-        my @after  = grep { index( $_, $material ) < 0 } @before;
-        my $going  = scalar(@before) - scalar(@after);
-
-        unless ($going) {
-            print "$domain's key is not in $ak on $name, skipping.\n";
-            next;
-        }
-
-        # More than one line means that a provision wrote the line differently
-        # at some time.  All of them go.
-        print "Removing $going line(s) carrying $domain's key from $ak on $name\n";
-        next if $dryrun;
-
-        $machine->write_text( $ak, join( "\n", @after ) . "\n" );
-    }
-
     return;
 }
 

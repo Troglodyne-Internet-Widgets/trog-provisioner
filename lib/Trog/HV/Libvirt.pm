@@ -2164,90 +2164,6 @@ installs it on first use, which is the one step that wants the wider grant.
 FIX
 }
 
-=head2 $text = Trog::HV::Libvirt->runner_sudoers(%args)
-
-The sudoers file for an account that builds guests on this hypervisor, and
-cannot do anything else as root.  C<%args> takes C<user>, C<pool_path>,
-C<lease_helper> and C<qemu_img>, the last two as full paths.  Dies if a value
-holds a character that sudoers or the patterns below would read as syntax.
-
-These are all of the commands that this tool runs as root on a hypervisor
-while it builds, rebuilds or destroys a guest:
-
-=over 4
-
-=item * C<VIR_BRIDGE_NAME=$bridge $lease_helper del ip $address>, from
-C<release_dhcp_lease>.  The file keeps C<VIR_BRIDGE_NAME> for that command
-only.  Without that line, sudo refuses the variable, and so the command.  The
-grant does not use C<SETENV>, because C<SETENV> lets the caller set
-C<LD_PRELOAD> too.
-
-=item * C<qemu-img info -U --output=json $volume>, C<qemu-img snapshot -c>,
-C<-a> and C<-l -U>, from C<disk_layout> and the snapshot methods, which a
-rebuild that keeps the disk of a guest uses.  They need root because libvirt
-gives a disk to C<libvirt-qemu> when the guest starts.
-
-=back
-
-Each argument list is a regular expression, which sudo 1.9.10 and later
-accept.  A volume must be a plain file name directly in C<pool_path>, and so
-cannot name the disk of a guest in another pool.  With a shell glob instead, a
-C<*> also matches C<../>, and the account could revert the disk of any guest.
-
-Three other commands run as root on a hypervisor, and this grant leaves them
-out on purpose.  The account cannot run them.
-
-=over 4
-
-=item * The first install of F</usr/libexec/virtiofs-better>, in
-C<prepare_host>.  It runs once on each hypervisor, and every later provision
-finds the file there.  Install it from an account with the wide grant first.
-
-=item * The address sweep of L<Provisioner::IPPool/ensure_seeded>, which runs
-C<sudo sh -c>.  That is root for any command, and cannot be narrowed.  Without
-it, the sweep finds nothing, and the pool of the runner starts empty.  A
-runner that takes DHCP addresses for its guests does not need it.
-
-=item * The libguestfs tools and the console log of F<bin/debug_boot>.  Those
-read the disk of any guest, which is the reason to run them.
-
-=back
-
-The account also needs the C<libvirt> group for the API.  On the system URI,
-that group can define a domain that mounts any file of the host, so it is
-root in all but name.  Only the polkit access driver of libvirt narrows it,
-and this file cannot.  See QUOTAS in L<Provisioner::Recipe::trogrunner>.
-
-=cut
-
-sub runner_sudoers {
-    my ( $class, %args ) = @_;
-
-    # sudoers reads , : = \ ! and space as syntax, and a pattern reads the
-    # rest of the punctuation.  None of them has a reason to be in these.
-    foreach my $key (qw{user pool_path lease_helper qemu_img}) {
-        my $value = $args{$key} // die "runner_sudoers needs $key\n";
-        my $ok    = $key eq 'user' ? qr/\A[[:lower:]_][[:lower:]\d_-]*\z/ : qr{\A(?:/[\w.-]+)+\z};
-        die "runner_sudoers: '$value' is not a $key that a sudoers file can hold as written\n" unless $value =~ $ok;
-    }
-    my ( $user, $lease, $qemu ) = @args{qw{user lease_helper qemu_img}};
-
-    # Escaped for the pattern.  The check above leaves only the dot to escape.
-    ( my $pool = $args{pool_path} ) =~ s/[.]/\\./g;
-    my $file = '[A-Za-z0-9_.-]+';
-
-    return <<"SUDOERS";
-# What trog-provisioner runs as root on this hypervisor for $user, and nothing
-# else.  Written by bin/runner_account.  runner_sudoers in Trog::HV::Libvirt
-# says why each line is here, and which commands are left out.
-Defaults!$lease env_keep += "VIR_BRIDGE_NAME"
-$user ALL=(root) NOPASSWD: $lease ^del ip [0-9.]+\$, \\
-    $qemu ^info -U --output=json $pool/$file\$, \\
-    $qemu ^snapshot -[ca] $file $pool/$file\$, \\
-    $qemu ^snapshot -l -U $pool/$file\$
-SUDOERS
-}
-
 =head2 $result = $hv->check_pool_writable()
 
 Passes when the ssh user can write a file to the storage pool directory.
@@ -2840,6 +2756,464 @@ sub would_provision {
     print $plan;
 
     return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) ) // 'bogus';
+}
+
+=head1 RUNNER ACCOUNTS
+
+A runner is a guest that builds guests: see L<Provisioner::Recipe::trogrunner>.
+It can have an account of its own on a hypervisor, with a pool that has a quota
+and sudo for only what a build runs.  The methods here make that account and
+take it away.  Each returns actions for L<Trog::Steps/run>, so each change asks
+first whether it is there, and a second run changes nothing.
+
+They run as the account of this object, which needs sudo for everything.  That
+is the account of the block in F<hypervisors.conf>, not the account that they
+make.  F<bin/provision> runs them for a trogrunner block that asks for an
+C<account>, and F<bin/runner_account> runs them by hand.
+
+=cut
+
+# A string for a shell on the hypervisor, quoted.
+my sub q1 ($value) { return q{'} . ( $value =~ s/'/'\\''/gr ) . q{'} }
+
+# What a command printed, without its last newline, or an empty string.
+my sub said ( $hv, $cmd ) {
+    my $out = $hv->capture_cmd("$cmd 2>/dev/null") // q{};
+    chomp $out;
+    return $out;
+}
+
+# Dies unless a root command on the hypervisor succeeds.
+my sub as_root ( $hv, @argv ) {
+    $hv->run_sudo(@argv) == 0 or die 'Could not run ' . join( ' ', @argv ) . ' on ' . $hv->describe . "\n";
+    return 1;
+}
+
+# The home directory of $user, or an empty string when there is no such user.
+my sub home_of ( $hv, $user ) { return said( $hv, 'getent passwd ' . q1($user) . ' | cut -d: -f6' ) }
+
+# What root reads in $file, or an empty string.
+my sub root_reads ( $hv, $file ) { return said( $hv, 'sudo -n cat ' . q1($file) ) }
+
+=head2 $text = Trog::HV::Libvirt->runner_sudoers(%args)
+
+The sudoers file for an account that builds guests on this hypervisor, and
+cannot do anything else as root.  C<%args> takes C<user>, C<pool_path>,
+C<lease_helper> and C<qemu_img>, the last two as full paths.  Dies if a value
+holds a character that sudoers or the patterns below would read as syntax.
+
+These are all of the commands that this tool runs as root on a hypervisor
+while it builds, rebuilds or destroys a guest:
+
+=over 4
+
+=item * C<VIR_BRIDGE_NAME=$bridge $lease_helper del ip $address>, from
+C<release_dhcp_lease>.  The file keeps C<VIR_BRIDGE_NAME> for that command
+only.  Without that line, sudo refuses the variable, and so the command.  The
+grant does not use C<SETENV>, because C<SETENV> lets the caller set
+C<LD_PRELOAD> too.
+
+=item * C<qemu-img info -U --output=json $volume>, C<qemu-img snapshot -c>,
+C<-a> and C<-l -U>, from C<disk_layout> and the snapshot methods, which a
+rebuild that keeps the disk of a guest uses.  They need root because libvirt
+gives a disk to C<libvirt-qemu> when the guest starts.
+
+=back
+
+Each argument list is a regular expression, which sudo 1.9.10 and later
+accept.  A volume must be a plain file name directly in C<pool_path>, and so
+cannot name the disk of a guest in another pool.  With a shell glob instead, a
+C<*> also matches C<../>, and the account could revert the disk of any guest.
+
+Three other commands run as root on a hypervisor, and this grant leaves them
+out on purpose.  The account cannot run them.
+
+=over 4
+
+=item * The first install of F</usr/libexec/virtiofs-better>, in
+C<prepare_host>.  It runs once on each hypervisor, and every later provision
+finds the file there.  Install it from an account with the wide grant first.
+
+=item * The address sweep of L<Provisioner::IPPool/ensure_seeded>, which runs
+C<sudo sh -c>.  That is root for any command, and cannot be narrowed.  Without
+it, the sweep finds nothing, and the pool of the runner starts empty.  A
+runner that takes DHCP addresses for its guests does not need it.
+
+=item * The libguestfs tools and the console log of F<bin/debug_boot>.  Those
+read the disk of any guest, which is the reason to run them.
+
+=back
+
+The account also needs the C<libvirt> group for the API.  On the system URI,
+that group can define a domain that mounts any file of the host, so it is
+root in all but name.  Only the polkit access driver of libvirt narrows it,
+and this file cannot.  See QUOTAS in L<Provisioner::Recipe::trogrunner>.
+
+=cut
+
+sub runner_sudoers {
+    my ( $class, %args ) = @_;
+
+    # sudoers reads , : = \ ! and space as syntax, and a pattern reads the
+    # rest of the punctuation.  None of them has a reason to be in these.
+    foreach my $key (qw{user pool_path lease_helper qemu_img}) {
+        my $value = $args{$key} // die "runner_sudoers needs $key\n";
+        my $ok    = $key eq 'user' ? qr/\A[[:lower:]_][[:lower:]\d_-]*\z/ : qr{\A(?:/[\w.-]+)+\z};
+        die "runner_sudoers: '$value' is not a $key that a sudoers file can hold as written\n" unless $value =~ $ok;
+    }
+    my ( $user, $lease, $qemu ) = @args{qw{user lease_helper qemu_img}};
+
+    # Escaped for the pattern.  The check above leaves only the dot to escape.
+    ( my $pool = $args{pool_path} ) =~ s/[.]/\\./g;
+    my $file = '[A-Za-z0-9_.-]+';
+
+    return <<"SUDOERS";
+# What trog-provisioner runs as root on this hypervisor for $user, and nothing
+# else.  Written by runner_account_steps.  runner_sudoers in Trog::HV::Libvirt
+# says why each line is here, and which commands are left out.
+Defaults!$lease env_keep += "VIR_BRIDGE_NAME"
+$user ALL=(root) NOPASSWD: $lease ^del ip [0-9.]+\$, \\
+    $qemu ^info -U --output=json $pool/$file\$, \\
+    $qemu ^snapshot -[ca] $file $pool/$file\$, \\
+    $qemu ^snapshot -l -U $pool/$file\$
+SUDOERS
+}
+
+=head2 \%plan = Trog::HV::Libvirt->runner_account_plan(%args)
+
+Checks what an account is to be, and returns what the methods below need.
+C<%args> takes C<user>, C<pool_name> and C<pool_path>, which are required, and
+C<quota>, C<partition>, C<cpu_quota> and C<io_weight>.  The plan has those,
+and C<slice>, the unit name of the partition, or undef.
+
+C<quota> is required to make an account, and not to take one away, so this
+does not require it.  Dies on a value that a step would write into a file or a
+command as syntax, and on C<cpu_quota> or C<io_weight> without a C<partition>.
+
+=cut
+
+sub runner_account_plan {
+    my ( $class, %args ) = @_;
+
+    foreach my $key (qw{user pool_name pool_path}) {
+        die "An account for a runner needs a $key\n" if ( $args{$key} // q{} ) eq q{};
+    }
+
+    # The match is ASCII under /aa, so \w and \d mean what useradd, zfs and
+    # systemd accept.
+    die "user '$args{user}' is not a name useradd takes\n"                  unless $args{user}      =~ m/\A[[:lower:]_][[:lower:]\d_-]{0,31}\z/;
+    die "pool_name '$args{pool_name}' has to be letters, digits, _ and -\n" unless $args{pool_name} =~ m/\A[\w-]+\z/;
+    die "pool_path '$args{pool_path}' has to be an absolute path of letters, digits, _ . and -\n"
+      if $args{pool_path} !~ m{\A(?:/[\w.-]+)+\z} || $args{pool_path} =~ m{/[.]{1,2}(?:/|\z)};
+    die "quota '$args{quota}' is not a size zfs reads, such as 500G\n" if defined $args{quota} && $args{quota} !~ m/\A\d+[KMGTP]?\z/;
+
+    my $slice;
+    if ( defined $args{partition} ) {
+        die "partition '$args{partition}' has to be /machine/NAME: libvirt makes NAME a slice under machine.slice\n"
+          unless $args{partition} =~ m{\A/machine/[[:lower:]\d_]+\z};
+        $slice = 'machine-' . File::Basename::basename( $args{partition} ) . '.slice';
+    }
+    die "cpu_quota and io_weight are limits of the slice, and need a partition\n"
+      if !$slice && ( defined $args{cpu_quota} || defined $args{io_weight} );
+    die "cpu_quota '$args{cpu_quota}' is not a percentage, such as 400%\n" if defined $args{cpu_quota} && $args{cpu_quota} !~ m/\A\d+%\z/;
+    die "io_weight '$args{io_weight}' has to be from 1 to 10000\n"
+      if defined $args{io_weight} && ( $args{io_weight} !~ m/\A\d+\z/ || $args{io_weight} < 1 || $args{io_weight} > 10_000 );
+
+    return {
+        ( map { $_ => $args{$_} } qw{user pool_name pool_path quota partition cpu_quota io_weight} ),
+        slice => $slice,
+    };
+}
+
+=head2 @actions = $hv->runner_account_steps(\%plan)
+
+The actions that make the account of C<\%plan>, in order:
+
+=over 4
+
+=item 1. A system user with no password, a shell and a home, in the C<libvirt>
+group.  The group is what the libvirt API on the system URI asks for.
+
+=item 2. A ZFS dataset at C<pool_path>, with C<quota> set to the C<quota> of the
+plan.  Its parent is the dataset mounted on the parent directory of
+C<pool_path>.
+
+=item 3. A libvirt storage pool C<pool_name> on that directory, owned by the
+user and started with the host.  The pool owns the permissions of the
+directory, so a later build of the pool keeps them.
+
+=item 4. With C<partition>, the systemd slice for it, with C<CPUQuota> and
+C<IOWeight> from C<cpu_quota> and C<io_weight>.  There is no limit for memory,
+because C<MemoryMax> on a slice kills a guest rather than refusing the next
+one.  See QUOTAS in L<Provisioner::Recipe::trogrunner>.
+
+=item 5. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
+C<runner_sudoers> writes.  C<visudo -c> checks it before it is installed.
+
+=back
+
+Before the first, it checks what every step needs from the hypervisor, and dies
+with the reason if one is missing: a quota in the plan, sudo 1.9.10 or later for
+the patterns of the grant, the lease helper, qemu-img,
+F</usr/libexec/virtiofs-better>, and ZFS under the parent of the pool.  On a
+filesystem other than ZFS, the message says how to put a quota there, which is
+the advice of C<note_pool_quota>.
+
+The account cannot install F</usr/libexec/virtiofs-better>, so the file must be
+on the hypervisor first.  A provision from the account of the block in
+F<hypervisors.conf> installs it.
+
+=cut
+
+sub runner_account_steps {
+    my ( $hv, $plan ) = @_;
+    my ( $user, $path, $name ) = @{$plan}{qw{user pool_path pool_name}};
+
+    die "An account for a runner needs a quota for its pool, or the pool can fill the disk of the hypervisor\n" unless defined $plan->{quota};
+
+    my ($version) = said( $hv, 'sudo -V' ) =~ m/version\s+(\d+)[.](\d+)[.](\d+)/ ? ( sprintf '%d.%03d%03d', $1, $2, $3 ) : (0);
+    die "sudo on " . $hv->describe . " is older than 1.9.10, which is the first that takes the patterns the grant needs\n" if $version < 1.009010;
+
+    my $lease = $hv->lease_helper                  or die 'There is no libvirt lease helper on ' . $hv->describe . "\n";
+    my $qemu  = said( $hv, 'command -v qemu-img' ) or die 'There is no qemu-img on ' . $hv->describe . "\n";
+    $hv->file_exists('/usr/libexec/virtiofs-better')
+      or die "/usr/libexec/virtiofs-better is not on " . $hv->describe . ", and the account will not be able to install it.\n" . "Provision one guest there from the account that hypervisors.conf has, which installs it, and run this again.\n";
+
+    my $parent = File::Basename::dirname($path);
+    my $fstype = $hv->path_fstype($parent);
+    die "The parent of $path is on '$fstype', and a pool of a runner can have a quota here only on ZFS.\n" . pool_quota_advice( $fstype, $name, { path => $path, mount => $parent, source => $parent } )
+      unless $fstype eq 'zfs';
+
+    my $parent_set = said( $hv, 'zfs list -H -o name ' . q1($parent) );
+    my $mounted_at = said( $hv, 'zfs get -H -o value mountpoint ' . q1($parent_set) );
+    die "$parent is not where a ZFS dataset is mounted (it is inside $parent_set, mounted at $mounted_at), so a child dataset would not mount at $path\n"
+      unless $parent_set && $mounted_at eq $parent;
+    my $dataset = "$parent_set/" . File::Basename::basename($path);
+
+    # The unit file of the slice, and the action that installs it.
+    my @slice;
+    if ( $plan->{slice} ) {
+        my $unit = "/etc/systemd/system/$plan->{slice}";
+        my $text = join "\n", "[Unit]", "Description=Guests that the trog-provisioner runner $user builds", "Before=slices.target", q{}, "[Slice]",
+          ( defined $plan->{cpu_quota} ? "CPUQuota=$plan->{cpu_quota}" : () ),
+          ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}" : () );
+        @slice = {
+            what => "write $unit" . ( $plan->{cpu_quota} || $plan->{io_weight} ? q{} : ' with no limits in it' ),
+            done => sub { root_reads( $hv, $unit ) eq $text },
+            do   => sub {
+                $hv->write_text( $unit, "$text\n", sudo => 1, mode => '0644' ) or die "Could not write $unit\n";
+                as_root( $hv, qw{systemctl daemon-reload} );
+            },
+        };
+    }
+
+    my $sudoers = "/etc/sudoers.d/90-trog-runner-$user";
+    my $grant   = Trog::HV::Libvirt->runner_sudoers( user => $user, pool_path => $path, lease_helper => $lease, qemu_img => $qemu );
+    my $id_of   = sub ($flag) { said( $hv, "id $flag " . q1($user) ) };
+
+    my @steps = (
+        {
+            what => "make the user $user, with no password",
+            done => sub { $id_of->('-u') ne q{} },
+            do   => sub { as_root( $hv, qw{useradd --system --create-home --shell /bin/bash}, $user ) },
+        },
+        {
+            what => "put $user in the libvirt group",
+            done => sub {
+                grep { $_ eq 'libvirt' } split q{ }, $id_of->('-nG');
+            },
+            do => sub { as_root( $hv, qw{usermod -aG libvirt}, $user ) },
+        },
+        {
+            what => "make the ZFS dataset $dataset at $path",
+            done => sub { said( $hv, 'zfs list -H -o name ' . q1($dataset) ) eq $dataset },
+            do   => sub { as_root( $hv, qw{zfs create -o}, "quota=$plan->{quota}", $dataset ) },
+        },
+        {
+            what => "set the quota of $dataset to $plan->{quota}",
+            done => sub { uc said( $hv, 'zfs get -H -o value quota ' . q1($dataset) ) eq uc $plan->{quota} },
+            do   => sub { as_root( $hv, qw{zfs set}, "quota=$plan->{quota}", $dataset ) },
+        },
+        {
+            what => "define the storage pool $name at $path, owned by $user",
+            done => sub {
+                my $target = $hv->pool_target($name) // return 0;
+                die "libvirt already has a pool $name at $target, and finds a pool by its name: pick another pool_name, or remove that pool\n" if $target ne $path;
+                return 1;
+            },
+            do => sub {
+                my $pool = $hv->define_pool( $name, $path, owner => $id_of->('-u'), group => $id_of->('-g'), mode => '0755' );
+                $pool->create() unless $pool->is_active();
+            },
+        },
+        @slice,
+        {
+            what => "grant $user sudo for what a build runs, in $sudoers",
+            done => sub { chomp( my $wanted = $grant ); root_reads( $hv, $sudoers ) eq $wanted },
+            do   => sub {
+                my $staged = said( $hv, 'mktemp' ) or die 'Could not make a temporary file on ' . $hv->describe . "\n";
+                $hv->write_text( $staged, $grant ) or die "Could not stage the sudoers file\n";
+                my $checked = $hv->run_sudo( qw{visudo -c -f}, $staged ) == 0;
+                $checked &&= as_root( $hv, qw{install -o root -g root -m 0440}, $staged, $sudoers );
+                $hv->remove($staged);
+                die "visudo refused the sudoers file for $user, so it was not installed\n" unless $checked;
+            },
+        },
+    );
+    return @steps;
+}
+
+=head2 @actions = $hv->runner_removal_steps(\%plan)
+
+The actions that take the account of C<\%plan> away, in the other order from
+C<runner_account_steps>.  The user goes with its home, and the keys in it.  The
+dataset goes with C<zfs destroy>, without C<-r>, so a snapshot or a child
+dataset stops it.
+
+It refuses to start, and dies, while the pool holds a volume, or while the
+directory of the pool holds a file, because each is a disk of a guest.  Destroy
+the guests of the runner first.  So a refusal leaves the whole account, and not
+an account without its sudo or its slice.
+
+=cut
+
+sub runner_removal_steps {
+    my ( $hv, $plan ) = @_;
+    my ( $user, $path, $name ) = @{$plan}{qw{user pool_path pool_name}};
+
+    my $sudoers = "/etc/sudoers.d/90-trog-runner-$user";
+    my $absent  = sub ($file) { $hv->run_cmd( qw{sudo -n test ! -e}, $file ) == 0 };
+    my $dataset = sub { said( $hv, 'zfs list -H -o name ' . q1($path) ) };
+
+    # A pool that is not running cannot list its volumes, and the disks of its
+    # guests are files in the directory.  So the directory is asked as well.
+    my $refuse_if_full = sub {
+        if ( defined $hv->pool_target($name) ) {
+            my $pool    = $hv->vmm->get_storage_pool_by_name($name);
+            my @volumes = $pool->is_active() ? map { $_->get_name() } $pool->list_all_volumes() : ();
+            die "The pool $name still holds " . join( ', ', @volumes ) . ", so the account $user stays.  Destroy those guests first.\n" if @volumes;
+        }
+        my $first = said( $hv, 'sudo -n find ' . q1($path) . ' -mindepth 1 -print -quit' );
+        die "$path still holds $first, and maybe more, so the account $user stays.  Destroy the guests of the runner first.\n" if $first ne q{};
+    };
+    $refuse_if_full->();
+
+    return (
+        {
+            what => "remove $sudoers",
+            done => sub { $absent->($sudoers) },
+            do   => sub { as_root( $hv, qw{rm -f}, $sudoers ) },
+        },
+        (
+            $plan->{slice}
+            ? {
+                what => "remove /etc/systemd/system/$plan->{slice}",
+                done => sub { $absent->("/etc/systemd/system/$plan->{slice}") },
+                do   => sub { as_root( $hv, qw{rm -f}, "/etc/systemd/system/$plan->{slice}" ); as_root( $hv, qw{systemctl daemon-reload} ) },
+              }
+            : ()
+        ),
+        {
+            what => "remove the storage pool $name",
+            done => sub { !defined $hv->pool_target($name) },
+            do   => sub {
+                $refuse_if_full->();
+                my $pool = $hv->vmm->get_storage_pool_by_name($name);
+                $pool->destroy() if $pool->is_active();
+                $pool->undefine();
+            },
+        },
+        {
+            what => "destroy the ZFS dataset at $path",
+            done => sub { my $set = $dataset->(); !$set || said( $hv, 'zfs get -H -o value mountpoint ' . q1($set) ) ne $path },
+            do   => sub { $refuse_if_full->();    as_root( $hv, qw{zfs destroy}, $dataset->() ) },
+        },
+        {
+            what => "remove the user $user and its home",
+            done => sub { said( $hv, 'id -u ' . q1($user) ) eq q{} },
+            do   => sub { as_root( $hv, qw{userdel --remove}, $user ) },
+        },
+    );
+}
+
+# Writes $path, an authorized_keys file, as root, without the lines that hold
+# $material and with @add after them.  Dies rather than write a file that has
+# keys in it from an empty read, which would lock out every other key.
+my sub rewrite_keys ( $hv, $path, $material, @add ) {
+    my $text = root_reads( $hv, $path );
+    die "Could not read $path on " . $hv->describe . "; refusing to rewrite it blind\n"
+      if $text eq q{} && $hv->run_cmd( qw{sudo -n test -s}, $path ) == 0;
+
+    my @lines = ( ( grep { index( $_, $material ) < 0 } split m/\n/, $text ), @add );
+    $hv->write_text( $path, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0600' )
+      or die "Could not write $path on " . $hv->describe . "\n";
+    return 1;
+}
+
+=head2 @actions = $hv->runner_key_steps($user, $line)
+
+The action that lets the key of C<$line>, a line of F<authorized_keys>, log in
+as C<$user>.  It writes as root, so the account of this object needs no login
+as C<$user>.  So the key of the operator never has to go into an account that is
+meant to be narrow.
+
+The key is the second field of the line after its options, such as C<from=>.  The
+line replaces every line with that key, so a new C<from=> restriction does not
+leave the old line beside it.  sshd takes the first line that matches.
+
+=cut
+
+sub runner_key_steps {
+    my ( $hv, $user, $line ) = @_;
+
+    # The field after the type, with any options in front of the type skipped.
+    my @fields     = split q{ }, $line;
+    my ($type)     = grep { $fields[$_] =~ m/\A(?:ssh|ecdsa|sk)-/ } 0 .. $#fields;
+    my ($material) = defined $type ? $fields[ $type + 1 ] : undef;
+    die "'$line' is not a line of authorized_keys with a key in it\n" if length( $material // q{} ) <= 32;
+    my ($comment) = $line =~ m/\Q$material\E\s*(.*)\z/;
+
+    return {
+        what => 'let ' . ( $comment || 'a key' ) . " log in as $user",
+        done => sub {
+            my @lines = grep { index( $_, $material ) >= 0 } split m/\n/, root_reads( $hv, home_of( $hv, $user ) . '/.ssh/authorized_keys' );
+            @lines == 1 && $lines[0] eq $line;
+        },
+        do => sub {
+            my $home = home_of( $hv, $user ) or die "There is no user $user on " . $hv->describe . " to let a key in as\n";
+            as_root( $hv, qw{install -d -m 0700 -o}, $user, '-g', $user, "$home/.ssh" );
+            rewrite_keys( $hv, "$home/.ssh/authorized_keys", $material, $line );
+            as_root( $hv, 'chown', "$user:", "$home/.ssh/authorized_keys" );
+        },
+    };
+}
+
+=head2 @actions = $hv->runner_key_removal_steps($user, $material)
+
+The action that takes every line with the key C<$material> out of the
+F<authorized_keys> of C<$user>, as root.  It has nothing to do when the user or
+the file is not there.  Dies on a C<$material> that is too short to be a key,
+because a short string can match half the file.
+
+=cut
+
+sub runner_key_removal_steps {
+    my ( $hv, $user, $material ) = @_;
+    die "'" . ( $material // q{} ) . "' does not look like a key; refusing to match on it\n" if length( $material // q{} ) <= 32;
+
+    my $file = sub { my $home = home_of( $hv, $user ); $home ? "$home/.ssh/authorized_keys" : undef };
+    return {
+        what => "take the key ..." . substr( $material, -12 ) . " away from $user",
+        done => sub {
+            my $path = $file->() // return 1;
+            index( root_reads( $hv, $path ), $material ) < 0;
+        },
+        do => sub {
+            my $path = $file->();
+            rewrite_keys( $hv, $path, $material );
+            as_root( $hv, 'chown', "$user:", $path );
+        },
+    };
 }
 
 =head1 SEE ALSO
