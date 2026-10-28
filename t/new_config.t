@@ -57,6 +57,11 @@ use Test::MockFile();
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
+# The resolvers that the block of the hypervisor names, which the local
+# hypervisor of a test has no block for.  See Trog::HV/configured_resolvers.
+my $hv_resolvers = Test::MockModule->new('Trog::HV');
+$hv_resolvers->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+
 # Provisioner::Cookbook reads the recipes, which are the program rather than its
 # data: has stats a .pm, and globals lists the directory to learn which _global
 # keys a recipe declares.  Strict mode has to be told which real trees the SUT
@@ -86,7 +91,6 @@ _base:
     admin_gecos: Test User
     admin_email: test\@test.test
     gateway: 192.0.2.254
-    resolvers: [8.8.8.8]
     transfer_user: provision
   adminconfig:
     pkgs:
@@ -120,12 +124,13 @@ RECIPES
 
 };
 
-# Loopback answers on a guest running its own DNS and nowhere else.  Named for
-# the installation it reaches every guest, most of which have nothing listening
+# Loopback answers on a guest running its own DNS and nowhere else.  Named by
+# a hypervisor it reaches every guest there, most of which have nothing listening
 # there -- which is what had the fetch cache stripping it back out of the list
 # it hands nginx, and every few lookups was a refused connection.
 #
-subtest 'an installation that names loopback as a resolver is refused' => sub {
+subtest 'a hypervisor that names loopback as a resolver is refused' => sub {
+    $hv_resolvers->redefine( configured_resolvers => sub { return ( '127.0.0.1', '192.0.2.254' ) } );
 
     # Its own directory, because Provisioner::Cookbook keeps one configuration
     # per path and the subtest above has already read the one at $basedir.
@@ -140,7 +145,6 @@ _base:
     admin_gecos: Test User
     admin_email: test\@test.test
     gateway: 192.0.2.254
-    resolvers: [127.0.0.1, 192.0.2.254]
     transfer_user: provision
   adminconfig:
     pkgs:
@@ -166,6 +170,7 @@ RECIPES
     like( $result, qr/127[.]0[.]0[.]1/,                 'the refusal names the address' );
     like( $result, qr/runs[ ]its[ ]own[ ]DNS[ ]server/, 'and says where it would answer' );
     like( $result, qr/nostubresolver/,                  'and which recipe puts it in front for such a guest' );
+    $hv_resolvers->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
 };
 
 # Plain open, not File::Slurper: loading that here would put it in memory ahead
@@ -193,7 +198,6 @@ _base:
     admin_gecos: Test User
     admin_email: test\@test.test
     gateway: 192.0.2.254
-    resolvers: [8.8.8.8]
     transfer_user: provision
     ip_pool:
       cidr: 192.0.2.0/30

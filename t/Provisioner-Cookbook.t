@@ -1218,20 +1218,20 @@ subtest 'the settings of an installation are validated in one place' => sub {
                 admin_gecos => 'Some Admin',
                 admin_email => 'someadmin@test.test',
                 gateway     => '192.0.2.254',
-                resolvers   => '192.0.2.254',
             },
         },
-        'own.test.test' => { _global => { admin_user => 'somebody', resolvers => [ '8.8.8.8', '1.1.1.1' ] } },
+        'own.test.test' => { _global => { admin_user => 'somebody' } },
     );
 
     my $base = Provisioner::Cookbook->base_globals( \%said );
-    is_deeply( $base->{resolvers}, ['192.0.2.254'], 'one resolver written as a scalar comes back as the list every reader wants' );
-    is( $base->{admin_user}, 'someadmin', 'and the rest of _base is what it says' );
+    is( $base->{admin_user}, 'someadmin', 'the settings of _base are what it says' );
 
     my $own = Provisioner::Cookbook->globals( 'own.test.test', \%said );
     is( $own->{admin_user},  'somebody',            'a domain overrides a setting of _base' );
     is( $own->{admin_email}, 'someadmin@test.test', 'and inherits the ones it says nothing about' );
-    is_deeply( $own->{resolvers}, [ '8.8.8.8', '1.1.1.1' ], 'a list it writes as a list is left alone' );
+
+    # The block of the hypervisor names them, see Trog::HV/configured_resolvers.
+    like( exception { Provisioner::Cookbook->globals( 'own.test.test', { %said, 'own.test.test' => { _global => { resolvers => ['8.8.8.8'] } } } ) }, qr{/resolvers:[ ]The[ ]build[ ]works[ ]this[ ]out}, 'and resolvers are not a setting of _global' );
 
     # Six hand-written refusals, each naming one setting, in the order the
     # script happened to read them: an operator fixed one and ran it again.
@@ -1240,7 +1240,6 @@ subtest 'the settings of an installation are validated in one place' => sub {
     like( $err, qr/admin_gecos/,   'with every other missing one named in the same breath' );
     like( $err, qr/admin_email/,   'so one run says all of it' );
     like( $err, qr/gateway/,       'including the gateway' );
-    like( $err, qr/resolvers/,     'and the resolvers' );
     like( $err, qr/recipes\.yaml/, 'and the refusal says which file to write them in' );
 
     like(
@@ -1257,7 +1256,6 @@ my %BASE_GLOBAL = (
     admin_gecos => 'Some Admin',
     admin_email => 'someadmin@test.test',
     gateway     => '192.0.2.254',
-    resolvers   => ['192.0.2.254'],
 );
 
 # A recipe receives only the keys of _global that its schema names, so a key

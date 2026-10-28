@@ -52,7 +52,6 @@ File::Slurper::Temp::write_text(
                     admin_email   => 'bogus@test.test',
                     admin_gecos   => 'Test Test',
                     gateway       => '192.0.2.254',
-                    resolvers     => '192.0.2.254',
                 },
             },
             _shared            => { 'host.test.test' => ['tenant.test.test'] },

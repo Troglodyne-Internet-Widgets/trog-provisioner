@@ -56,7 +56,6 @@ sub installation {
                         admin_gecos => 'The Operator',
                         admin_email => 'operator@test.test',
                         gateway     => '192.0.2.254',
-                        resolvers   => ['192.0.2.254'],
                         ip_pool     => { cidr => '192.0.2.0/26' },
                         %extra,
                     },

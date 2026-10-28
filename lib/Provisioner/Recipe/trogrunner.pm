@@ -39,7 +39,6 @@ use Trog::Utils();
             config:
                 # If unset, admin_user, admin_email, admin_keys and gateway
                 # come from the configuration of this guest.
-                resolvers: ["192.0.2.254", "1.1.1.1"]
 
                 # The pool that the runner takes addresses from.  Without
                 # these, each guest it builds has only a lease on the NAT
@@ -50,6 +49,7 @@ use Trog::Utils();
             hypervisors:
                 hv1:
                     libvirt_uri: "qemu+ssh://runner@hv1.test.test/system"
+                    resolvers:   ["192.0.2.254", "1.1.1.1"]
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     partition:   "/machine/runner"
@@ -291,7 +291,6 @@ sub args {
                     admin_gecos   => { type => 'string', default => 'Administrator' },
                     admin_keys    => { type => 'array',  items   => { type => 'string' }, default => [] },
                     gateway       => { type => 'string', default => q{} },
-                    resolvers     => { type => 'array',  items   => { type => 'string' }, default => [qw{1.1.1.1 8.8.8.8}] },
                     transfer_user => { type => 'string', default => q{} },
                     transfer_ip   => { type => 'string', default => q{} },
                     transfer_port => { type => 'string', default => q{} },
@@ -308,9 +307,14 @@ sub args {
                 default              => {},
                 additionalProperties => {
                     type       => 'object',
-                    required   => [qw{libvirt_uri}],
+                    required   => [qw{libvirt_uri resolvers}],
                     properties => {
-                        libvirt_uri    => { type => 'string' },
+                        libvirt_uri => { type => 'string' },
+
+                        # What a guest of this hypervisor asks.  The runner
+                        # writes them into the block of its hypervisors.conf,
+                        # see configured_resolvers in Trog::HV.
+                        resolvers      => { type => 'array', items => { type => 'string' }, minItems => 1 },
                         pool_path      => { type => 'string' },
                         pool_name      => { type => 'string' },
                         partition      => { type => 'string' },
@@ -432,8 +436,8 @@ sub enrich {
     # that built this guest.
     #
     # bin/new_config refuses to generate anything without admin_user,
-    # admin_gecos, admin_email, gateway and resolvers, or without keys in
-    # admin_authorized_keys.  A runner with any of them empty cannot build a
+    # admin_gecos, admin_email and gateway, or without keys in
+    # admin_authorized_keys.  The resolvers are in hypervisors.conf instead.  A runner with any of them empty cannot build a
     # guest.
     $opts{config}{admin_user}  //= $opts{admin_user};
     $opts{config}{admin_email} //= $opts{admin_email};

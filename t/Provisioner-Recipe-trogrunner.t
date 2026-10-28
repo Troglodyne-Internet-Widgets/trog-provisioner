@@ -62,6 +62,7 @@ sub built {
         admin_keys  => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey someadmin'],
         gateway     => '192.0.2.254',
         main_ip     => '192.0.2.50',
+        resolvers   => [ '192.0.2.53', '1.1.1.1' ],
         %extra,
     );
 
@@ -74,6 +75,7 @@ sub slurp { my ( $dir, $file ) = @_; return File::Slurper::read_text("$dir/$file
 my %HYPERVISORS = (
     hv1 => {
         libvirt_uri => 'qemu+ssh://runner@hv1.test.test:2222/system',
+        resolvers   => [ '192.0.2.254', '9.9.9.9' ],
         pool_path   => '/srv/vm-disks/runner',
         pool_name   => 'runner_disks',
         partition   => '/machine/runner',
@@ -112,7 +114,7 @@ subtest 'a runner told nothing at all can still build a guest' => sub {
     my ($dir) = built();
     my $global = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) )->{_base}{_global};
 
-    foreach my $required (qw{basedir admin_user admin_gecos admin_email gateway resolvers}) {
+    foreach my $required (qw{basedir admin_user admin_gecos admin_email gateway}) {
         ok( defined $global->{$required} && $global->{$required} ne q{}, "$required is not empty" )
           or diag 'bin/new_config on the runner would refuse it: the settings of this installation are not valid';
     }
@@ -153,7 +155,8 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     my ( $dir, $recipe, $vars ) = built( hypervisors => \%HYPERVISORS, hypervisor_access => 'least' );
     my $conf = slurp( $dir, 'trogrunner.hypervisors.conf' );
 
-    like( $conf, qr/^\[hv1\]$/m,                                 'one block per hypervisor' );
+    like( $conf, qr/^\[hv1\]$/m, 'one block per hypervisor' );
+    is_deeply( [ Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1')->configured_resolvers ], [ '192.0.2.254', '9.9.9.9' ], 'with the resolvers that the runner reads back' );
     like( $conf, qr/^pool_path\s+=[ ]\/srv\/vm-disks\/runner$/m, 'the pool it is confined to' );
     like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,            'named as well as pathed, or libvirt ignores the path' );
     like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,       'and the slice its guests land in' );
@@ -188,21 +191,23 @@ subtest 'a hypervisor we could not get a shell on is refused here, not on the gu
     # somebody is reading the output than an hour into a build.
     like(
         exception {
-            built( hypervisors => { far => { libvirt_uri => 'qemu+tcp://far.test.test/system' } } );
+            built( hypervisors => { far => { libvirt_uri => 'qemu+tcp://far.test.test/system', resolvers => ['192.0.2.254'] } } );
         },
         qr/needs[ ]an[ ]ssh[ ]transport/,
         'named, with the URI it should have had'
     );
 };
 
-subtest 'no fleet is a legitimate answer' => sub {
+subtest 'no fleet is a legitimate answer, and the runner is its own hypervisor' => sub {
     my ( $dir, $recipe, $vars ) = built();
 
-    # It means "this machine", which is what libvirt does when nothing says
-    # otherwise, and what a runner that is its own hypervisor wants.  Rendered
-    # anyway; the fragment is what declines to install it.
-    is( slurp( $dir, 'trogrunner.hypervisors.conf' ), q{}, 'the file renders empty' );
-    unlike( $recipe->render(%$vars), qr/hypervisors\.conf/, 'and nothing installs it' );
+    # It means "this machine", which a runner that is its own hypervisor wants.
+    # A block must name the resolvers of its guests, so this machine gets one.
+    my $local = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('local');
+    ok( $local, 'the runner gets a block for its own libvirt' ) or return;
+    is( $local->uri, 'qemu:///system', 'which is this machine' );
+    is_deeply( [ $local->configured_resolvers ], [ '192.0.2.53', '1.1.1.1' ], 'with the resolvers of the runner, which its guests reach through its NAT' );
+    like( $recipe->render(%$vars), qr/hypervisors\.conf/, 'and the fragment installs it' );
 };
 
 # What it hands the perl recipe, as that recipe's target will install it: each

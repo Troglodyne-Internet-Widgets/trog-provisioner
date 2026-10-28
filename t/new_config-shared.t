@@ -55,6 +55,11 @@ $hv_mock->redefine( sshd_port => sub { 22 } );
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
+# The resolvers that the block of the hypervisor names, which the local
+# hypervisor of a test has no block for.  See Trog::HV/configured_resolvers.
+my $hv_resolvers = Test::MockModule->new('Trog::HV');
+$hv_resolvers->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+
 my $HOST   = 'host.test.test';
 my $TENANT = 'tenant.test.test';
 
@@ -85,7 +90,6 @@ sub generate {
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
         gateway       => '192.0.2.254',
-        resolvers     => '192.0.2.254',
         ip_pool       => { addresses => $pool },
         nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );

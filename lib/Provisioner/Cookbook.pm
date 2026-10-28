@@ -1723,20 +1723,13 @@ sub global_schema {
     my ($class) = @_;
     return (
         type       => 'object',
-        required   => [qw{basedir admin_user admin_gecos admin_email gateway resolvers}],
+        required   => [qw{basedir admin_user admin_gecos admin_email gateway}],
         properties => {
             basedir     => { type => 'string', description => 'Where the generated configuration of each domain is written on this machine.' },
             admin_user  => { type => 'string', description => 'The account that administers every guest.  Recipes set ownership to it, and the provisioner reaches a guest as it.' },
             admin_gecos => { type => 'string', description => 'The real name of that account, as the guest records it.' },
             admin_email => { type => 'string', description => 'Where mail for the administrator of a guest goes.' },
             gateway     => { type => 'string', format      => 'ipv4', description => 'The default route of a guest on the bridged network.' },
-
-            resolvers => {
-                type        => 'array',
-                items       => { type => 'string' },
-                minItems    => 1,
-                description => 'The nameservers a guest asks, in order.  A loopback address belongs to a guest that runs its own, and nostubresolver puts that one in front.',
-            },
 
             hypervisor       => { type => 'string',             description => 'The hypervisor of hypervisors.conf, by the name of its block, that this guest is built on, whichever one is cheapest or roomiest.  A guest that is up stays where it is, and --hypervisor names another for one run.' },
             linode_type      => { type => 'string',             description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
@@ -1850,11 +1843,6 @@ into the message after "not valid", for example C< for $domain>.
 
 sub validated_globals {
     my ( $class, $said, $where ) = @_;
-
-    # Coerced here rather than in the schema, because one address written as a
-    # string is what an operator writes, and every reader wants a list.
-    $said->{resolvers} = Provisioner::Utils::coerce_arrayref( $said->{resolvers} )
-      if exists $said->{resolvers};
 
     my %schema    = $class->global_schema;
     my $validator = JSON::Validator::Schema::Troglodyne->new;

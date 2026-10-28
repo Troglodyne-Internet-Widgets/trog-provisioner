@@ -26,12 +26,9 @@ ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisio
 
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
-[% IF hypervisors.keys().size() %]
-# Installed only if the domain names a fleet.  No file means "this machine",
-# which a runner that is its own hypervisor wants.  An empty file means the
-# same, but less clearly.
+# Always, because every block names the resolvers of its guests, and a runner
+# that is its own hypervisor gets a block for this guest.
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.hypervisors.conf '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf'
-[% END %]
 [% IF store %]
 # The secret store of the runner, from the data directory of this domain.
 # Nothing generates it, because a new keepass database has new passwords.

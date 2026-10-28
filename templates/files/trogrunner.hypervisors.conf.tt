@@ -1,7 +1,9 @@
 [%# The fleet of hypervisors on which the runner builds guests.
 
-    Always rendered, and installed only if there is a hypervisor to name.  See
-    templates/ubuntu/trogrunner.tt.
+    Always rendered and installed.  A runner that names no hypervisor is its own,
+    and gets one block for the libvirt of this guest, with the resolvers of this
+    guest, which its guests reach through its NAT.  A block must name the
+    resolvers of its guests, see configured_resolvers in Trog::HV.
 
     pool_name with pool_path, and partition, are the only two limits on a
     guest.  See QUOTAS in Provisioner::Recipe::trogrunner. -%]
@@ -9,6 +11,7 @@
 [% SET hv = hypervisors.$name -%]
 [[% name %]]
 libvirt_uri    = [% hv.libvirt_uri %]
+resolvers      = [% hv.resolvers.join(', ') %]
 [% IF hv.pool_path %]pool_path      = [% hv.pool_path %]
 [% END -%]
 [% IF hv.pool_name %]pool_name      = [% hv.pool_name %]
@@ -34,4 +37,9 @@ libvirt_uri    = [% hv.libvirt_uri %]
 [% IF hv.max_memory %]max_memory     = [% hv.max_memory %]
 [% END -%]
 
+[% END -%]
+[% IF !hypervisors.keys().size() -%]
+[local]
+libvirt_uri    = qemu:///system
+resolvers      = [% resolvers.join(', ') %]
 [% END -%]
