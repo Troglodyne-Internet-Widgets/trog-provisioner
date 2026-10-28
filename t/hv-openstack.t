@@ -181,6 +181,7 @@ subtest 'a cloud has to be named' => sub {
     is ref $hv,       'Trog::HV::OpenStack',           'a cloud block gets the cloud backend';
     is $hv->cloud,    'testcloud',                     'and remembers which';
     is $hv->describe, 'the OpenStack cloud testcloud', 'and says so when a diagnostic asks';
+    is_deeply [ $hv->guest_disks ], ['vd*'], 'and its guests name their disks as virtio-blk does';
 
     ok $hv->isa('Trog::HV'),      'it is a hypervisor';
     ok $hv->isa('Trog::Machine'), 'and a machine, which is what makes the local file operations work';

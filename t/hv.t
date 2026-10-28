@@ -135,7 +135,7 @@ subtest 'a backend that leaves something out is told what' => sub {
       build config_keys capacity client_module
       domain_exists annihilate_domain guest_names guest_ssh_ip nat_address on_nat_network
       snapshot_names snapshot_current_name create_snapshot revert_snapshot
-      prepare_host release_seed guest_volumes uri
+      prepare_host release_seed guest_volumes uri guest_disks
       define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image
       create_disk lease_ip release_dhcp_lease guest_mac nic_slots nic_names has_tpm
     };
@@ -1581,7 +1581,8 @@ subtest 'a guest MAC is derived from its name and does not move' => sub {
 subtest 'what a guest will call its interfaces is the hypervisor to say' => sub {
     my $hv = fresh();
 
-    is_deeply( [ $hv->nic_names ], [qw{ens3 ens4}], 'the prefix and the pinned slots, NAT first' );
+    is_deeply( [ $hv->nic_names ],   [qw{ens3 ens4}], 'the prefix and the pinned slots, NAT first' );
+    is_deeply( [ $hv->guest_disks ], ['vd*'],         'and its disks are on virtio, so not sda, which is the seed' );
 
     # 'ens' is systemd's answer for a PCI NIC on the i440fx the domain XML asks
     # for.  Another machine type names them another way -- enp0s3 is the common

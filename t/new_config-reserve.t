@@ -50,6 +50,7 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
     sub manages_addresses { return 1 }
     sub size_key          { return 'linode_type' }
     sub describe          { return 'cloud1' }
+    sub guest_disks       { return ('sd*') }
     sub name              { return 'cloud1' }
     sub domain_exists     { my ($self) = @_; return $self->{exists} }
     sub is_reservation    { my ($self) = @_; return $self->{reservation} }

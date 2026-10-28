@@ -1148,6 +1148,16 @@ sub guest_mac {
 sub nic_slots  { return ( 3, 4 ) }
 sub nic_prefix { return 'ens' }
 
+=head2 guest_disks
+
+C<vd*>.  The domain XML puts each disk of a guest on the C<virtio> bus, which
+names it C<vdN>.  The seed is a CD-ROM on SATA, C<sda>, so C<sd*> is not one of
+the disks.
+
+=cut
+
+sub guest_disks { return ('vd*') }
+
 sub nic_names {
     my ($self) = @_;
     my $prefix = $self->nic_prefix;

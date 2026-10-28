@@ -144,6 +144,17 @@ Return what to call this node in a message, and the address of its API.
 sub describe ($self) { return 'the SolusVM node ' . $self->{solusvm} }
 sub uri      ($self) { return 'https://' . $self->{solusvm} . '/api/v1' }
 
+=head2 guest_disks
+
+C<vd*>, the name that KVM gives a virtio-blk disk, which is its usual bus.  No
+guest of SolusVM has checked it here.  If its guests name their disks
+otherwise, the guest test of L<Provisioner::Recipe::diskqueue> fails and says
+so.
+
+=cut
+
+sub guest_disks { return ('vd*') }
+
 # Every page of a listing.  The project's plans run to three pages on a node of
 # any size, and a plan missed because it was on page two is a build that fails
 # saying the plan does not exist.

@@ -654,6 +654,14 @@ guest is gone.  Never the base image, because every other guest is built on it.
 
 =cut
 
+=head2 @globs = $hv->guest_disks()
+
+The names that a guest here gives its disks, as udev C<KERNEL> globs, such as
+C<vd*>.  The bus of a disk is a choice of the hypervisor, so the name is too.
+L<Provisioner::Recipe::diskqueue> sets the queue of the disks that these
+globs name.  A glob must not name a device that is not a disk of the guest,
+such as the CD-ROM of a seed.
+
 =head2 uri
 
 The address of the hypervisor, as a message names it: a libvirt connection
@@ -713,6 +721,7 @@ sub console_capture       ( $self, @ ) { return abstract( $self, 'console_captur
 sub console_output        ( $self, @ ) { return abstract( $self, 'console_output' ) }
 sub vnc_access            ( $self, @ ) { return abstract( $self, 'vnc_access' ) }
 sub uri                   ( $self, @ ) { return abstract( $self, 'uri' ) }
+sub guest_disks           ( $self, @ ) { return abstract( $self, 'guest_disks' ) }
 sub define_domain         ( $self, @ ) { return abstract( $self, 'define_domain' ) }
 sub cloudinit_iso         ( $self, @ ) { return abstract( $self, 'cloudinit_iso' ) }
 sub eject_cdrom           ( $self, @ ) { return abstract( $self, 'eject_cdrom' ) }

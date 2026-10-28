@@ -304,6 +304,7 @@ subtest 'build' => sub {
     like( exception { Trog::HV::Linode->build( linode_token => 'abc123' ) },  qr/has[ ]to[ ]be[ ]a[ ]secret:[ ]reference/, 'and never with the token written out' );
     isa_ok( linode_hv(), 'Trog::HV::Cloud', 'a Linode hypervisor' );
     is( linode_hv()->describe, 'Linode in us-east', 'described by where it builds' );
+    is_deeply( [ linode_hv()->guest_disks ], ['sd*'], 'and its guests name their disks sdN' );
 };
 
 subtest 'backend_for' => sub {

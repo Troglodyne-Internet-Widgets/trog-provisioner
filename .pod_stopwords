@@ -25,6 +25,7 @@ CryptX
 DCV
 DDL
 DHCP
+diskqueue
 DKIM
 DLNA
 DMARC
@@ -58,6 +59,7 @@ JSON
 KDBX
 KeePass
 KiB
+KVM
 LDA
 LDAP
 LDAPS
@@ -112,6 +114,7 @@ RSA
 Readahead
 Roundcube
 RTK
+SATA
 SHA
 SIGALRM
 SIGILLs
