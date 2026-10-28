@@ -48,6 +48,12 @@ my %STEPS;
 
     package Test::Recipe::Outside;
     sub outside_steps ( $, $, %opts ) { return @{ $STEPS{ $opts{name} } // [] } }
+    sub sends_mail                    { return 0 }
+
+    # A recipe that sends mail, and has steps of its own as well.
+    package Test::Recipe::Mailer;
+    use parent -norequire, 'Test::Recipe::Outside';
+    sub sends_mail { return 1 }
 }
 
 my $dir = tempdir( CLEANUP => 1 );
@@ -58,8 +64,8 @@ Trog::HV->new( uri => 'qemu+ssh://root@hv.test.test/system', domain_dir => $dir 
 # block, which is how a real recipe reads its configuration.
 my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
 $cookbook->redefine( domain_config => sub { return { b => { name => 'b' }, a => { name => 'a' }, _global => {} } } );
-$cookbook->redefine( has           => sub { my ( undef, $name ) = @_; return $name ne '_global' } );
-$cookbook->redefine( load          => sub { return 'Test::Recipe::Outside' } );
+$cookbook->redefine( has  => sub { my ( undef, $name ) = @_; return $name ne '_global' } );
+$cookbook->redefine( load => sub { my ( undef, $name ) = @_; return $name =~ m/\Amail/ ? 'Test::Recipe::Mailer' : 'Test::Recipe::Outside' } );
 
 subtest 'the steps of a domain are those of its recipes, and one id is one step' => sub {
     %STEPS = (
@@ -182,6 +188,68 @@ subtest 'a step names a hypervisor of the fleet, as the account of its block' =>
         qr/there[ ]is[ ]no[ ]such[ ]file/,
         'a hypervisor by name with no fleet to find it in is refused, rather than taken to be this machine'
     );
+};
+
+# --- The reverse DNS of a guest that sends mail ---
+
+subtest 'a recipe that sends mail gets the reverse DNS, whatever steps of its own it has' => sub {
+    %STEPS = ( mail => [ { id => 'own', machine => 'hypervisor', when => 'secrets', apply => sub { action('its own') } } ] );
+    my $config = Test::MockModule->new('Provisioner::Cookbook');
+    $config->redefine( domain_config => sub { return { mail => { name => 'mail' }, mailrelay => { name => 'mailrelay' }, nginx => { name => 'nginx' } } } );
+
+    my @steps = Trog::Steps->of('mx.test.test');
+    is_deeply( [ map { $_->{id} } @steps ], [qw{own reverse_dns}], 'its own step, and the reverse DNS once, for two recipes that send mail' );
+    is( $steps[1]{when}, 'built', 'after the build, because the build publishes the name' );
+
+    $config->redefine( domain_config => sub { return { nginx => { name => 'nginx' } } } );
+    is_deeply( [ Trog::Steps->of('mx.test.test') ], [], 'and a guest that sends no mail gets none' );
+};
+
+subtest 'the reverse DNS of a guest is set to the name its mail announces' => sub {
+    %STEPS = ();
+    my ( %host, $answer, @asked );
+    my $config = Test::MockModule->new('Provisioner::Cookbook');
+    $config->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $domain eq 'mx.test.test' ? { mail => { name => 'mail' } } : { mailrelay => { name => 'mailrelay' } } } );
+    $config->redefine( host_of       => sub { my ( undef, $domain ) = @_; return $host{$domain} } );
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( set_reverse_dns => sub { my ( undef, @args ) = @_; push @asked, \@args; return $answer->() } );
+
+    # What the step printed and warned, after the build of $domain at $address.
+    # A warning is caught by name, because Test::NoWarnings takes it before
+    # it reaches stderr.
+    my $point = sub ( $address, $domain = 'mx.test.test' ) {
+        @asked = ();
+        my $err = q{};
+        local $SIG{__WARN__} = sub { $err .= $_[0] };
+        my $out = capture_stdout { Trog::Steps->apply( $domain, when => 'built', address => $address ) };
+        $out =~ s/^[ ]+now[ ][^\n]*\n//m;
+        return ( $out, $err );
+    };
+
+    $answer = sub { '9.9.9.9' };
+    my ( $out, $err ) = $point->('9.9.9.9');
+    is_deeply( \@asked, [ [ 'mx.test.test', 'mail.mx.test.test' ] ], 'set to the name that its postfix announces' );
+    is( $out, "The reverse DNS of 9.9.9.9 is now mail.mx.test.test\n", 'and it says so' );
+
+    %host = ( 'tenant.test.test' => 'mx.test.test' );
+    $point->( '9.9.9.9', 'tenant.test.test' );
+    is( $asked[0][0], 'mx.test.test', 'a tenant that sends mail gets it on the guest of its host' );
+    %host = ();
+
+    $answer = sub { die "the hypervisor refused: 403 not authorized\n" };
+    ( $out, $err ) = $point->( '9.9.9.9', 'relay.test.test' );
+    is( $err, "Could not set the reverse DNS of relay.test.test to relay.test.test, so receivers can reject its mail.\nthe hypervisor refused: 403 not authorized\n", 'a refusal is a warning with what the hypervisor said, and does not stop the run' );
+
+    $answer = sub { return };
+    ( $out, $err ) = $point->( '9.9.9.9', 'relay.test.test' );
+    is(
+        $out,
+        "Set the reverse DNS of 9.9.9.9 to relay.test.test where the address is held.  " . Trog::HV->new()->describe . " offers no way to do it from here, and until it is set, receivers can reject the mail of relay.test.test.\n",
+        'a hypervisor that offers no way has the operator told what to set, for a public address'
+    );
+
+    ( $out, $err ) = $point->( '192.168.1.20', 'relay.test.test' );
+    is( $out . $err, q{}, 'but not for a private one, which no receiver sees' );
 };
 
 had_no_warnings();

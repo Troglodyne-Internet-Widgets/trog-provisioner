@@ -19,7 +19,6 @@ use File::Slurper::Temp();
 
 use JSON::Validator::Schema::Troglodyne;
 use Mojo::JSON::Pointer();
-use Net::IP();
 use Provisioner::Cookbook();
 
 =head1 NAME
@@ -1449,50 +1448,15 @@ C<%opts> is the configuration of this recipe as the file holds it, as for
 C<grants>, and this must have no side effects, because F<bin/destroy> calls it.
 Do the work in the code references.
 
-The default sets the reverse DNS of the guest when the recipe C<sends_mail>, to
-C<helo_name_of> the domain in L<Provisioner::Cookbook>.  A recipe that sends
-mail and overrides this must return these steps as well.
+Nothing here, because most recipes need nothing outside their guest.  The
+reverse DNS of a guest that C<sends_mail> is not a step of this method, so an
+override cannot lose it.  C<of> in L<Trog::Steps> adds that step for each
+recipe that sends mail.
 
 =cut
 
 sub outside_steps {
-    my ( $class, $domain ) = @_;
-    return () unless $class->sends_mail;
-
-    return {
-        id      => 'reverse_dns',
-        machine => 'hypervisor',
-        when    => 'built',
-        apply   => sub ( $hv, %context ) {
-            my $machine = Provisioner::Cookbook->machine_of($domain);
-            my $name    = Provisioner::Cookbook->helo_name_of($domain);
-            return {
-                what => "point the reverse DNS of $machine at $name",
-                done => sub { 0 },
-                do   => sub {
-
-                    # A refusal is a warning, because the guest works, and
-                    # only its mail out suffers.
-                    my $set = eval { $hv->set_reverse_dns( $machine, $name ) };
-                    if ( my $error = $@ ) {
-                        warn "Could not set the reverse DNS of $domain to $name, so receivers can reject its mail.\n$error";
-                        return;
-                    }
-                    if ($set) {
-                        print "The reverse DNS of $set is now $name\n";
-                        return;
-                    }
-
-                    # Only a public address is one that a receiver of mail
-                    # connects from.
-                    my $ip = defined $context{address} ? Net::IP->new( $context{address} ) : undef;
-                    print "Set the reverse DNS of $context{address} to $name where the address is held.  " . $hv->describe . " offers no way to do it from here, and until it is set, receivers can reject the mail of $domain.\n"
-                      if $ip && $ip->iptype eq 'PUBLIC';
-                    return;
-                },
-            };
-        },
-    };
+    return ();
 }
 
 =head3 $hv = $recipe->hv()
@@ -1551,7 +1515,8 @@ sub subdomains {
 True when this recipe runs a mail server that delivers mail to other servers.
 A receiver checks that the reverse DNS of the address of the sender gives the
 name that the sender announces, so F<bin/provision> sets the reverse DNS of a
-guest that runs such a recipe.  The name is C<helo_name_of> in
+guest that runs such a recipe, with C<reverse_dns_step> in L<Trog::Steps>.
+Overriding C<outside_steps> does not change that.  The name is C<helo_name_of> in
 L<Provisioner::Cookbook>, and the recipe puts the same name in its
 configuration of postfix.  False here, because most recipes send no mail.
 

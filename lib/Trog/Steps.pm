@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use List::Util();
+use Net::IP();
 use Provisioner::Cookbook();
 use Trog::HV();
 use Trog::Hypervisors();
@@ -103,8 +104,11 @@ my sub context ( $domain, %opts ) {
 =head2 @steps = Trog::Steps->of($domain)
 
 The steps of every recipe of C<$domain>, in the order of the recipe names, from
-the configuration of C<$domain> as written.  Two steps with one C<id> are one
-step, the first.  A recipe that dies on the configuration dies here.
+the configuration of C<$domain> as written.  After the steps of a recipe that
+C<sends_mail> comes C<reverse_dns_step>, which no recipe can leave out, since
+it is not one of its C<outside_steps>.  Two steps with one C<id> are one step,
+the first, so a guest with two recipes that send mail gets one.  A recipe that
+dies on the configuration dies here.
 
 =cut
 
@@ -115,10 +119,61 @@ sub of {
 
     my ( %seen, @steps );
     foreach my $name ( sort grep { Provisioner::Cookbook->has($_) } keys %$config ) {
-        my %opts = ref $config->{$name} eq 'HASH' ? %{ $config->{$name} } : ();
-        push @steps, grep { !defined $_->{id} || !$seen{ $_->{id} }++ } Provisioner::Cookbook->load($name)->outside_steps( $domain, %opts );
+        my %opts   = ref $config->{$name} eq 'HASH' ? %{ $config->{$name} } : ();
+        my $recipe = Provisioner::Cookbook->load($name);
+        my @own    = ( $recipe->outside_steps( $domain, %opts ), $recipe->sends_mail ? $class->reverse_dns_step($domain) : () );
+        push @steps, grep { !defined $_->{id} || !$seen{ $_->{id} }++ } @own;
     }
     return @steps;
+}
+
+=head2 $step = Trog::Steps->reverse_dns_step($domain)
+
+The step that sets the reverse DNS of the guest of C<$domain>, after its build,
+to C<helo_name_of> the domain in L<Provisioner::Cookbook>, through the
+C<set_reverse_dns> of the hypervisor of the run.  The guest is C<machine_of>
+the domain, so a tenant sets the reverse DNS of the guest of its host.  Its
+C<id> is C<reverse_dns>, and it has no revert.
+
+A refusal of the hypervisor is a warning, because the guest works, and only its
+mail out suffers.  When the hypervisor offers no way and the address of the
+guest is public, the step says what the operator must set, and where.  A
+private address gets neither, because no receiver of mail connects from it.
+
+=cut
+
+sub reverse_dns_step {
+    my ( $class, $domain ) = @_;
+
+    return {
+        id      => 'reverse_dns',
+        machine => 'hypervisor',
+        when    => 'built',
+        apply   => sub ( $hv, %context ) {
+            my $machine = Provisioner::Cookbook->machine_of($domain);
+            my $name    = Provisioner::Cookbook->helo_name_of($domain);
+            return {
+                what => "point the reverse DNS of $machine at $name",
+                done => sub { 0 },
+                do   => sub {
+                    my $set = eval { $hv->set_reverse_dns( $machine, $name ) };
+                    if ( my $error = $@ ) {
+                        warn "Could not set the reverse DNS of $domain to $name, so receivers can reject its mail.\n$error";
+                        return;
+                    }
+                    if ($set) {
+                        print "The reverse DNS of $set is now $name\n";
+                        return;
+                    }
+
+                    my $ip = defined $context{address} ? Net::IP->new( $context{address} ) : undef;
+                    print "Set the reverse DNS of $context{address} to $name where the address is held.  " . $hv->describe . " offers no way to do it from here, and until it is set, receivers can reject the mail of $domain.\n"
+                      if $ip && $ip->iptype eq 'PUBLIC';
+                    return;
+                },
+            };
+        },
+    };
 }
 
 =head2 $count = Trog::Steps->apply($domain, %opts)
