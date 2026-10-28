@@ -101,4 +101,10 @@ like($chain, qr/^ACCEPT\s+\S+\s+--\s+0\.0\.0\.0\/0\s+0\.0\.0\.0\/0\s*$/m,
 my $loopback = system('timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/22" 2>/dev/null');
 is($loopback, 0, 'a loopback connection to an open port is not dropped');
 
+
+# The guest fetches its files from this machine after ufw is up.  The default
+# denies outgoing traffic, so a port other than 22 needs a rule of its own.
+my $fetch = system('timeout 5 bash -c "echo > /dev/tcp/[% transfer_ip %]/[% transfer_port %]" 2>/dev/null');
+is($fetch, 0, 'the guest reaches [% transfer_ip %] on port [% transfer_port %], where it fetches its files');
+
 done_testing();
