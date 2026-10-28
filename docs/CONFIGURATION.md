@@ -39,7 +39,6 @@ _base:
     admin_gecos: Testy Testerson
     admin_email: test@test.test
     gateway: 192.0.2.254
-    resolvers: [192.0.2.254, 8.8.8.8]
     nameservers:
       ns1: ns1.test.test
       ns2: ns2.test.test
@@ -64,17 +63,18 @@ machine**, one directory per fully qualified name. It is easy to confuse with
 the `data` recipe's `to`, which is where things land **on the guest**; they are
 frequently both `/opt/domains`, and they are not the same directory.
 
-`gateway` and `resolvers` are required, and every guest is built with them:
-`resolvers` becomes the nameservers in its network configuration and the list
-its resolver is pointed at.
+`gateway` is required, and every guest is built with it.  The resolvers of a
+guest are not here.  What a guest can reach depends on where it is, so the
+block of its hypervisor in `hypervisors.conf` names them.  See
+[Networks](#networks).  `_global` cannot set them.
 
 **Do not put a loopback address in `resolvers`.** It answers only on a guest
 running its own DNS server, and for that guest
 `Provisioner::Recipe::nostubresolver` puts `127.0.0.1` in front by itself. Named
-here it reaches every guest, and on the rest nothing is listening there — a
-wasted lookup each time, and `Provisioner::Recipe::fetchcache` strips it back
-out of the list it hands nginx. `bin/new_config` refuses one rather than
-letting it through.
+for a hypervisor, it reaches every guest there, and on the rest nothing is
+listening there.  That wastes a lookup each time, and
+`Provisioner::Recipe::fetchcache` strips it back out of the list it hands nginx.
+`bin/new_config` refuses one rather than letting it through.
 
 Three optional settings say how a guest reaches back here for its payload, and
 none is normally needed:
@@ -486,13 +486,13 @@ runner.example.test:
             - /srv/code/trog-provisioner
 
         config:
-            resolvers: "192.0.2.254, 1.1.1.1"
             addresses: 192.0.2.180-192.0.2.199
             cidr:      192.0.2.0/24
 
         hypervisors:
             hv1:
                 libvirt_uri: qemu+ssh://runner@hv1.example.test/system
+                resolvers:   [192.0.2.254, 1.1.1.1]
                 pool_path:   /srv/vm-disks/runner
                 pool_name:   runner_disks
                 partition:   /machine/runner
@@ -627,7 +627,7 @@ that it needs is, and places it only on a hypervisor of that guest's network:
   `bin/provision` builds that guest first, so it is up by the time the guest
   that needs it is placed.
 
-A block can also name the resolvers that its guests use:
+A block also names the resolvers that its guests use:
 
 ```ini
 [linode]
@@ -637,11 +637,15 @@ network      = linode-us-east
 resolvers    = 1.1.1.1, 8.8.8.8
 ```
 
-A guest of that hypervisor gets these resolvers in place of the `resolvers` of
-`_global`.  The resolvers of `_global` are those of the network of the
-installation, and its gateway is often the first of them.  A guest on a cloud
-cannot reach that gateway, so it waits for each lookup to time out there.  A
-block that names no resolvers gives its guests those of `_global`.
+A guest of that hypervisor gets these resolvers, and the block of every
+hypervisor must name some.  `bin/new_config` refuses a guest of a hypervisor
+whose block names none.  An installation with no `hypervisors.conf` needs one
+block for its own hypervisor, with its resolvers.
+
+The resolvers differ from one hypervisor to the next.  A hypervisor on the
+network of the installation can name its gateway.  A guest on a cloud cannot
+reach that gateway, and each of its lookups waits for the gateway to time out.
+So a block for a cloud names resolvers that a guest there reaches.
 
 ## Upstream guests
 

@@ -35,7 +35,6 @@ my %GLOBAL = (
     admin_gecos => 'Some Admin',
     admin_email => 'someadmin@test.test',
     gateway     => '192.0.2.254',
-    resolvers   => ['192.0.2.254'],
     ip_pool     => { addresses => '192.0.2.10', bins => { vpnclients => { cidr => '10.8.0.128/30', via => 'vpn.test.test' } } },
 );
 

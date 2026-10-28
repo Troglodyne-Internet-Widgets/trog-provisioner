@@ -64,10 +64,9 @@ It reads these blocks:
 
 =over 4
 
-=item * C<[global]> becomes the C<_global> of C<_base>, key for key.
-C<resolvers> becomes a list, because C<Config::Simple> writes a list as one
-comma-separated string.  A key that nothing declares stays behind, and the
-report names it.  See L<Provisioner::Cookbook/declared_globals>.
+=item * C<[global]> becomes the C<_global> of C<_base>, key for key.  A key that
+nothing declares stays behind, and the report names it.  C<resolvers> is one:
+the block of each hypervisor in F<hypervisors.conf> names its resolvers now.  See L<Provisioner::Cookbook/declared_globals>.
 
 =item * C<[ip_pool]> becomes C<ip_pool> in that same block.
 
@@ -171,7 +170,7 @@ sub move_into {
             next;
         }
 
-        $global->{$key} = $key eq 'resolvers' ? Provisioner::Utils::coerce_arrayref( $said->{$key} ) : $said->{$key};
+        $global->{$key} = $said->{$key};
         push( @moved, "[global] $key -> _base._global.$key" );
     }
 

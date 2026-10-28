@@ -55,6 +55,11 @@ $apt_mock->redefine( fetch => sub { { success => 1, status => 200, content => "-
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
+# The resolvers that the block of the hypervisor names, which the local
+# hypervisor of a test has no block for.  See Trog::HV/configured_resolvers.
+my $hv_resolvers = Test::MockModule->new('Trog::HV');
+$hv_resolvers->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+
 # Reserved, so the guest holds its own zone; public, so somebody else does.
 my $LOCAL  = 'local.test';
 my $REMOTE = 'remote.example.net';
@@ -81,7 +86,6 @@ sub generate {
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
         gateway       => '192.0.2.254',
-        resolvers     => '192.0.2.254',
         ip_pool       => { addresses => $pool },
         nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
@@ -156,7 +160,6 @@ subtest 'a credential written as a secret reference reaches the hook resolved' =
                         admin_email   => 'bogus@test.test',
                         admin_gecos   => 'Test Test',
                         gateway       => '192.0.2.254',
-                        resolvers     => '192.0.2.254',
                         ip_pool       => { addresses => $pool },
                         nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
                     },

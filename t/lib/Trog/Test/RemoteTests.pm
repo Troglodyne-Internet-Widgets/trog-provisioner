@@ -103,6 +103,10 @@ sub run {
     $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
     $hv_mock->redefine( sshd_port => sub { 22 } );
 
+    # The resolvers that the block of the hypervisor names, which the local
+    # hypervisor of these tests has no block for.
+    $hv_mock->redefine( configured_resolvers => sub { return qw{192.0.2.254 8.8.8.8 1.1.1.1} } );
+
     # garage, matrix and trogrunner each keep a file for the guest in the secret
     # store, so new_config opens it.  That needs a store, and its password handed
     # in up front, as Trog::Credentials documents for a run with nobody at a
@@ -144,7 +148,6 @@ sub run {
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
         gateway       => '192.0.2.254',
-        resolvers     => [qw{192.0.2.254 8.8.8.8 1.1.1.1}],
         ip_pool       => { addresses => $pool },
         nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );

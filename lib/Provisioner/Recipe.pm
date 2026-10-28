@@ -474,7 +474,7 @@ sub global_args {
 
             cache_ip => { type => 'string', description => 'The fetch cache, as an address, or empty for none.' },
 
-            resolvers => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
+            resolvers => { type => 'array', items => { type => 'string' }, readOnly    => 1, description => 'The nameservers that the guest asks, in order: those that the block of its hypervisor in hypervisors.conf names.  bin/new_config writes it, so _global cannot set it.' },
             modules   => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
 
             ipmap         => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },

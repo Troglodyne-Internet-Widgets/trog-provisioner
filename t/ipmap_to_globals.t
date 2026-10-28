@@ -74,9 +74,9 @@ subtest 'every block lands where the reader of it now looks' => sub {
     is( $global->{basedir},     '/opt/domains',        'the globals become the _global of _base' );
     is( $global->{admin_email}, 'someadmin@test.test', 'key for key' );
 
-    # Config::Simple writes a list as one comma-separated string, and every
-    # reader of resolvers wants a list.
-    is_deeply( $global->{resolvers}, [ '192.0.2.254', '8.8.8.8' ], 'resolvers become the list they are read as' );
+    # The block of each hypervisor names its resolvers now.
+    ok( !exists $global->{resolvers}, 'resolvers stay behind' );
+    like( $said, qr/\[global\][ ]resolvers/, 'and the report names them' );
 
     is_deeply( $global->{ip_pool},     { addresses => [ '192.0.2.100', '192.0.2.101' ], cidr => '192.0.2.0/24' }, 'the pool becomes one key' );
     is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                          'and the nameservers another' );
@@ -98,15 +98,15 @@ subtest 'every block lands where the reader of it now looks' => sub {
 subtest 'what recipes.yaml already says is left alone, and said so' => sub {
     my $dir = installation(
         {
-            _base           => { _global => { admin_user => 'somebody', resolvers => ['1.1.1.1'] } },
+            _base           => { _global => { admin_user => 'somebody', admin_email => 'kept@test.test' } },
             'one.test.test' => { _global => { aliases    => ['kept.test.test'] }, ntp => undef },
         }
     );
 
     my ( $conf, $said ) = moved($dir);
 
-    is( $conf->{_base}{_global}{admin_user}, 'somebody', 'a setting already written is not overwritten' );
-    is_deeply( $conf->{_base}{_global}{resolvers},         ['1.1.1.1'],        'nor one already written as a list' );
+    is( $conf->{_base}{_global}{admin_user},  'somebody',       'a setting already written is not overwritten' );
+    is( $conf->{_base}{_global}{admin_email}, 'kept@test.test', 'nor another one' );
     is_deeply( $conf->{'one.test.test'}{_global}{aliases}, ['kept.test.test'], 'nor the aliases of a domain' );
     is( $conf->{_base}{_global}{gateway}, '192.0.2.254', 'while the rest still moves across' );
 

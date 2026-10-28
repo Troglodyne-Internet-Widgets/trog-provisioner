@@ -653,26 +653,26 @@ my sub salvage_guest ( $address, $admin_user, $cfg_dir ) {
 
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
 
-=head2 @resolvers = guest_resolvers($hv, @global)
+=head2 @resolvers = guest_resolvers($hv)
 
 The resolvers of a guest of C<$hv>: those that its block of F<hypervisors.conf>
-names, see L<Trog::HV/configured_resolvers>, or else C<@global>, the
-C<resolvers> of C<_global>.  The hypervisor answers first, as it does for
-C<transfer_ip>, because what a guest can reach depends on where it is.
+names, see L<Trog::HV/configured_resolvers>.  They are the hypervisor's to name,
+because what a guest can reach depends on where it is.
 
-Dies on a loopback address.  A loopback resolver answers only on a guest that
+Dies when the block names none.  Dies on a loopback address.  A loopback resolver answers only on a guest that
 runs its own DNS server, and L<Provisioner::Recipe::nostubresolver> adds it for
 that guest.
 
 =cut
 
 sub guest_resolvers {
-    my ( $hv, @global ) = @_;
+    my ($hv) = @_;
     my @resolvers = $hv->configured_resolvers;
-    @resolvers = @global unless @resolvers;
+    die "The block of " . ( $hv->name // $hv->describe ) . " in hypervisors.conf names no resolvers, so its guests have none to ask.\n" . "Name the resolvers that a guest there can reach, for example:  resolvers = 1.1.1.1, 8.8.8.8\n"
+      unless @resolvers;
 
     my @loopback = grep { m/\A127[.]/ || $_ eq '::1' } @resolvers;
-    die "The resolvers of this installation name @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out of the _global in recipes.yaml, or of the block of the hypervisor in hypervisors.conf: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
+    die "The resolvers of " . ( $hv->name // $hv->describe ) . " name @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out of the block of the hypervisor in hypervisors.conf: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
       if @loopback;
     return @resolvers;
 }
@@ -732,7 +732,6 @@ sub handle_domain {
     my $admin_gecos = $global_config->{admin_gecos};
     my $admin_email = $global_config->{admin_email};
     my $gateway     = $global_config->{gateway};
-    my $resolvers   = $global_config->{resolvers};
     my $ns_conf     = $global_config->{nameservers};
     my $pool_conf   = $global_config->{ip_pool} // {};
 
@@ -771,7 +770,7 @@ sub handle_domain {
     );
     my @network_peers = network_peers( $domain, $rconf, $hvconf, $hv );
 
-    $resolvers = [ guest_resolvers( $hv, @$resolvers ) ];
+    my $resolvers = [ guest_resolvers($hv) ];
 
     # No pool when the hypervisor gives its guests their addresses, because an
     # address from the pool stays reserved for a guest that never uses it.

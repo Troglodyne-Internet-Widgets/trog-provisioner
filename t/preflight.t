@@ -426,7 +426,7 @@ subtest 'the configuration it copies from has to be there' => sub {
     like( $result->{what}, qr/settings[ ]every[ ]guest/, 'which it says' );
     like( $result->{fix},  qr/ipmap_to_globals/,         'and how an older installation brings them across' );
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: someadmin\n    admin_gecos: Some Admin\n    admin_email: someadmin\@test.test\n    gateway: 192.0.2.254\n    resolvers: [192.0.2.254]\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: someadmin\n    admin_gecos: Some Admin\n    admin_email: someadmin\@test.test\n    gateway: 192.0.2.254\n" );
     Provisioner::Cookbook->forget();
 
     ($result) = quietly( sub { Trog::HV->new()->check_config } );
@@ -434,7 +434,7 @@ subtest 'the configuration it copies from has to be there' => sub {
 
     # bin/new_config validates the _global of each domain, so a key in one
     # domain that nothing reads stops that domain, and is refused here first.
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: someadmin\n    admin_gecos: Some Admin\n    admin_email: someadmin\@test.test\n    gateway: 192.0.2.254\n    resolvers: [192.0.2.254]\none.test.test:\n  _global:\n    wibble: 1\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: someadmin\n    admin_gecos: Some Admin\n    admin_email: someadmin\@test.test\n    gateway: 192.0.2.254\none.test.test:\n  _global:\n    wibble: 1\n" );
     Provisioner::Cookbook->forget();
 
     ($result) = quietly( sub { Trog::HV->new()->check_config } );

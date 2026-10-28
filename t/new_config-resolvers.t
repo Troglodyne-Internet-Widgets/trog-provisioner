@@ -30,17 +30,19 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
 {
 
     package ResolverProbe::HV;
-    sub new { my ( $class, @r ) = @_; return bless [@r], $class }
+    sub new                  { my ( $class, @r ) = @_; return bless [@r], $class }
     sub configured_resolvers { my ($self) = @_; return @$self }
+    sub name                 { return 'hv1' }
 }
 
-subtest 'guest_resolvers: the hypervisor answers first' => sub {
-    my @global = qw{192.168.1.254 8.8.8.8};
-    is_deeply( [ Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new(qw{1.1.1.1 9.9.9.9}), @global ) ], [qw{1.1.1.1 9.9.9.9}], 'a block that names resolvers gives its guests those, and not the gateway of the installation' );
-    is_deeply( [ Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new(),                    @global ) ], \@global,              'and a block that names none gives them those of _global' );
+subtest 'guest_resolvers: the hypervisor names the resolvers of its guests' => sub {
+    is_deeply( [ Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new(qw{1.1.1.1 9.9.9.9}) ) ], [qw{1.1.1.1 9.9.9.9}], 'a guest gets those that the block of its hypervisor names' );
 
-    like( exception { Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new('127.0.0.1'), @global ) }, qr/127[.]0[.]0[.]1.*hypervisors[.]conf/s, 'a loopback resolver in a block is refused, and the refusal names the file' );
-    like( exception { Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new(),            '::1' ) },   qr/::1/,                                  'and so is one in _global' );
+    my $none = exception { Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new() ) };
+    like( $none, qr/hv1[ ]in[ ]hypervisors[.]conf[ ]names[ ]no[ ]resolvers/, 'and a block that names none is refused, by the name of the hypervisor' );
+    like( $none, qr/resolvers[ ]=[ ]1[.]1[.]1[.]1/,                          'with the line that would fix it' );
+
+    like( exception { Trog::Provisioner::Config::Generator::guest_resolvers( ResolverProbe::HV->new('127.0.0.1') ) }, qr/127[.]0[.]0[.]1.*hypervisors[.]conf/s, 'a loopback resolver is refused, and the refusal names the file' );
 };
 
 subtest 'configured_resolvers: the resolvers of a block of hypervisors.conf' => sub {

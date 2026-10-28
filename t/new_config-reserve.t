@@ -46,7 +46,7 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 {
 
     package CloudProbe::HV;
-    sub configured_resolvers { return }
+    sub configured_resolvers { return ('192.0.2.254') }
     sub new                  { my ( $class, %o ) = @_; return bless { reserved => [], %o }, $class }
     sub manages_addresses    { return 1 }
     sub size_key             { return 'linode_type' }
@@ -82,7 +82,6 @@ sub generate ( $hv, @flags ) {
                         admin_email   => 'bogus@test.test',
                         admin_gecos   => 'Test Test',
                         gateway       => '192.0.2.254',
-                        resolvers     => '192.0.2.254',
                         linode_type   => 'g6-nanode-1',
                     },
                 },
