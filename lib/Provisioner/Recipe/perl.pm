@@ -61,8 +61,8 @@ starts its service, and what its checkout says it needs:
         my (%opts) = @_;
         return (
             cpan_deps => [
-                { install     => ['Starman'] },
-                { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
+                { install => ['Starman'] },
+                { dzil    => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
             ],
         );
     },
