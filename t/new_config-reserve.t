@@ -46,15 +46,16 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 {
 
     package CloudProbe::HV;
-    sub new               { my ( $class, %o ) = @_; return bless { reserved => [], %o }, $class }
-    sub manages_addresses { return 1 }
-    sub size_key          { return 'linode_type' }
-    sub describe          { return 'cloud1' }
-    sub guest_disks       { return ('sd*') }
-    sub name              { return 'cloud1' }
-    sub domain_exists     { my ($self) = @_; return $self->{exists} }
-    sub is_reservation    { my ($self) = @_; return $self->{reservation} }
-    sub guest_ssh_ip      { return '203.0.113.5' }
+    sub configured_resolvers { return }
+    sub new                  { my ( $class, %o ) = @_; return bless { reserved => [], %o }, $class }
+    sub manages_addresses    { return 1 }
+    sub size_key             { return 'linode_type' }
+    sub describe             { return 'cloud1' }
+    sub guest_disks          { return ('sd*') }
+    sub name                 { return 'cloud1' }
+    sub domain_exists        { my ($self) = @_; return $self->{exists} }
+    sub is_reservation       { my ($self) = @_; return $self->{reservation} }
+    sub guest_ssh_ip         { return '203.0.113.5' }
 
     sub reserve_guest {
         my ( $self, %spec ) = @_;

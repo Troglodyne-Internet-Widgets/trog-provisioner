@@ -627,6 +627,22 @@ that it needs is, and places it only on a hypervisor of that guest's network:
   `bin/provision` builds that guest first, so it is up by the time the guest
   that needs it is placed.
 
+A block can also name the resolvers that its guests use:
+
+```ini
+[linode]
+linode_token = secret:linode/api/password
+region       = us-east
+network      = linode-us-east
+resolvers    = 1.1.1.1, 8.8.8.8
+```
+
+A guest of that hypervisor gets these resolvers in place of the `resolvers` of
+`_global`.  The resolvers of `_global` are those of the network of the
+installation, and its gateway is often the first of them.  A guest on a cloud
+cannot reach that gateway, so it waits for each lookup to time out there.  A
+block that names no resolvers gives its guests those of `_global`.
+
 ## Upstream guests
 
 A guest needs every other guest of this installation that one of its settings

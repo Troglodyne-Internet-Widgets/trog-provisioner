@@ -45,11 +45,12 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 {
 
     package PoolProbe::HV;
-    sub new               { my ( $class, %o ) = @_; return bless {%o}, $class }
-    sub manages_addresses { return 0 }
-    sub on_nat_network    { my ($self) = @_; return $self->{on_nat_network} }
-    sub describe          { return 'hv1' }
-    sub virbr_ip          { die "far enough\n" }
+    sub configured_resolvers { return }
+    sub new                  { my ( $class, %o ) = @_; return bless {%o}, $class }
+    sub manages_addresses    { return 0 }
+    sub on_nat_network       { my ($self) = @_; return $self->{on_nat_network} }
+    sub describe             { return 'hv1' }
+    sub virbr_ip             { die "far enough\n" }
 }
 
 # Runs the generator for vm.test.test with $pool as the ip_pool of _global, on
