@@ -1383,7 +1383,11 @@ C<bin/new_config> places them beside what C<guest_secrets> places.
 sub granted_secrets {
     my ( $self, $domain, %opts ) = @_;
 
-    return map { Provisioner::Cookbook->load( $_->{recipe} )->issue_grant( $_, $self->grant_terms( $_, %opts ) ) } $self->grants( $domain, %opts );
+    # A lexical, because grant_terms can reach code that writes $_.
+    return map {
+        my $grant = $_;
+        Provisioner::Cookbook->load( $grant->{recipe} )->issue_grant( $grant, $self->grant_terms( $grant, %opts ) )
+    } $self->grants( $domain, %opts );
 }
 
 =head3 @revocations = $recipe->revocations($domain)

@@ -164,6 +164,11 @@ subtest 'granted_secrets asks the server for the configuration, with an address 
     );
 
     is_deeply( { fresh()->granted_secrets( 'first.test', %BASE ) }, {}, 'a domain with a cert_dir asks for nothing' );
+
+    # Config::Simple, under the assign of a real pool, reads a file into $_.
+    $pool->redefine( assign => sub { $_ = '        distro=ubuntu'; return '10.8.0.129' } );
+    %secrets = fresh()->granted_secrets( 'first.test', %ISSUED );
+    is( $secrets{'/etc/openvpn/client/first.test/issued.ovpn.b64'}{issue}{guest}, 'vpn.test.test', 'and the grant survives an address that is found by code that writes $_' );
 };
 
 subtest 'bin/destroy knows where to revoke' => sub {

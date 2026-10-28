@@ -475,6 +475,32 @@ subtest 'find' => sub {
     like( $err, qr/Looked[ ]on:[ ]hv1,[ ]hv2/,                      'saying where we looked' );
 };
 
+# --- guest_of -----------------------------------------------------------------
+subtest 'guest_of leaves $_ to its caller' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir("$dir/vm.example.test") or die "mkdir: $!";
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/provision.conf", "        distro=ubuntu\n        admin_user=someadmin\n" );
+
+    my $fleet    = Test::MockModule->new('Trog::Hypervisors');
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $guest    = Test::MockModule->new('Trog::Guest');
+    my $hv       = Test::MockModule->new('Trog::HV');
+    $fleet->redefine( load => sub { return bless {}, 'GuestOfFleet' } );
+    $cookbook->redefine( machine_of => sub { return $_[1] } );
+    $guest->redefine( key_path => sub { return '/bogus/key.rsa' } );
+    $hv->redefine( new => sub { return bless {}, 'GuestOfHV' } );
+    no warnings 'once';
+    local *GuestOfFleet::configured      = sub { 0 };
+    local *GuestOfHV::inspection_address = sub { '192.0.2.7' };
+    local *GuestOfHV::domain_dir         = sub { $dir };
+    use warnings;
+
+    # As in a map over grants, where $_ is the grant.
+    my @said = map { my $found = Trog::Hypervisors->guest_of('vm.example.test'); [ $_, $found->{user} ] } ('the grant');
+    is( $said[0][0], 'the grant', 'the caller still has its $_ after the provision.conf is read' );
+    is( $said[0][1], 'someadmin', 'and the guest gets the admin of the provision.conf' );
+};
+
 # --- choose -------------------------------------------------------------------
 subtest 'choose' => sub {
     my $path = fleet_file();

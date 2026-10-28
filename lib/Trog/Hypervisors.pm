@@ -346,6 +346,9 @@ sub guest_of {
 
     my $host = $hv->inspection_address($machine) or return;
 
+    # Config::Simple reads into $_ without a local of its own, and a caller
+    # can be inside a map.  Trog::Hypervisors::Config has the same guard.
+    local $_;
     my $cfg_dir = $hv->domain_dir . "/$machine";
     my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
     my $key     = Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" )
