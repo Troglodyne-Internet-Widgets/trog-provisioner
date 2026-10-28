@@ -1416,6 +1416,16 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
     my ($host) = grep { $_->{setting} eq '_global.host' } Provisioner::Cookbook->named_guests( 'web.test', \%conf );
     is( $host->{weak}, 0, 'a key of _global that one recipe marks weak and another does not is strong' );
     delete $conf{'web.test'}{_global}{host};
+
+    # The route to a bin needs only the address of the guest it goes through.
+    $conf{'web.test'}{_global}{ip_pool} = { bins => { vpnclients => { via => 'logs.test', note => 'logs.test' } } };
+    my %pool = map { $_->{setting} => $_->{weak} } grep { $_->{setting} =~ m/ip_pool/ } Provisioner::Cookbook->named_guests( 'web.test', \%conf );
+    is_deeply(
+        \%pool,
+        { '_global.ip_pool.bins.vpnclients.via' => 1, '_global.ip_pool.bins.vpnclients.note' => 0 },
+        'a field that is marked below a key of _global is weak, and one beside it that nothing declares is strong'
+    );
+    delete $conf{'web.test'}{_global}{ip_pool};
     is_deeply( [ Provisioner::Cookbook->direct_upstream_domains( 'web.test', \%conf ) ], [qw{cache.test logs.test}], 'each guest once' );
     is_deeply(
         [ map { $_->{by} } Provisioner::Cookbook->named_guests( 'tenant.test', \%conf ) ],

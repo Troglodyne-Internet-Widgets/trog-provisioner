@@ -412,6 +412,37 @@ subtest 'a field named like a secret is marked x-secret' => sub {
     }
 };
 
+# A mark on a field covers each field below it, and nothing can mark one of
+# those strong again.  So only a field that holds names, and no field of its
+# own, carries the mark.  See Provisioner::Recipe/args.
+subtest 'only a field that holds names is marked x-weak' => sub {
+    my $walk;
+    $walk = sub {
+        my ( $schema, $path ) = @_;
+        return () if ref $schema ne 'HASH';
+
+        my @containers;
+        if ( $schema->{'x-weak'} ) {
+            my $items = ref $schema->{items} eq 'HASH' ? $schema->{items} : {};
+            push( @containers, $path ) if $items->{items} || any { $_->{properties} || ref $_->{additionalProperties} eq 'HASH' } $schema, $items;
+        }
+
+        push( @containers, $walk->( $schema->{properties}{$_},       $path eq q{} ? $_ : "$path.$_" ) ) for sort keys %{ $schema->{properties} // {} };
+        push( @containers, $walk->( $schema->{additionalProperties}, "$path.*" ) )  if ref $schema->{additionalProperties} eq 'HASH';
+        push( @containers, $walk->( $schema->{items},                "$path\[]" ) ) if ref $schema->{items} eq 'HASH';
+        return @containers;
+    };
+
+    my %global     = Provisioner::Cookbook->global_schema;
+    my @containers = $walk->( \%global, '_global' );
+    ok( !@containers, 'the global schema marks no field that holds fields' ) or diag join( "\n", @containers );
+    foreach my $recipe (@available) {
+        my %schema = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->schema();
+        @containers = $walk->( \%schema, q{} );
+        ok( !@containers, "$recipe marks no field that holds fields" ) or diag join( "\n", @containers );
+    }
+};
+
 # An @ quiets a command only at its start.  On a continued line, the shell gets
 # it as part of a word, and @test is a command that bash cannot find.
 subtest 'an @ starts a command, and never a line that continues one' => sub {

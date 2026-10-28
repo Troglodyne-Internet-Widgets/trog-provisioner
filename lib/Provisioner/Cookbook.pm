@@ -1389,45 +1389,42 @@ my sub references ( $class, $domain, $conf ) {
     return @named;
 }
 
+# Whether a field on @path below $node, or one above it, such as a list of
+# hosts, is marked weak.  A step that the schema does not declare ends the
+# walk.
+my sub marked_weak ( $node, @path ) {
+    my $weak = $node->{'x-weak'};
+    foreach my $step (@path) {
+        my $props = ref $node->{properties} eq 'HASH' ? $node->{properties} : {};
+        my $next =
+            $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH' ? $node->{items}
+          : ref $props->{$step} eq 'HASH'                       ? $props->{$step}
+          : ref $node->{additionalProperties} eq 'HASH'         ? $node->{additionalProperties}
+          :                                                       last;
+        $node = $next;
+        $weak ||= $node->{'x-weak'};
+    }
+    return $weak ? 1 : 0;
+}
+
 # Sets weak on each reference that has none yet, from the field that holds the
 # setting.  A recipe block asks the schema of that recipe alone.  A key of
 # _global asks every schema that can declare it, so that walk happens once, and
 # only when a reference is in _global.
 my sub weigh ( $class, @named ) {
-    my %weak_global;
-    my $globals_read;
+    my $declared;
     foreach my $ref ( grep { !defined $_->{weak} } @named ) {
-        my ( $block, @path ) = Trog::Utils::slot_steps( $ref->{setting} );
+        my ( $block, $key, @path ) = Trog::Utils::slot_steps( $ref->{setting} );
 
         if ( $block eq '_global' ) {
-            if ( !$globals_read++ ) {
-                my $declared = global_properties($class);
-                %weak_global = map { $_ => 1 } grep {
-                    List::Util::all { $_->{'x-weak'} }
-                    @{ $declared->{$_} }
-                } keys %$declared;
-            }
-            $ref->{weak} = $weak_global{ $path[0] } ? 1 : 0;
+            $declared //= global_properties($class);
+            my @fields = @{ $declared->{$key} // [] };
+            $ref->{weak} = ( @fields && List::Util::all { marked_weak( $_, @path ) } @fields ) ? 1 : 0;
             next;
         }
 
-        # Down the schema by the path of the setting.  The field that is
-        # marked, or one above it, such as a list of hosts, makes it weak.  A
-        # step that the schema does not declare ends the walk, strong.
         my %schema = $class->load($block)->schema;
-        my $node   = \%schema;
-        my $weak   = 0;
-        foreach my $step (@path) {
-            my $props = ref $node->{properties} eq 'HASH' ? $node->{properties} : {};
-            my $next =
-                $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH' ? $node->{items}
-              : ref $props->{$step} eq 'HASH'                       ? $props->{$step}
-              : ref $node->{additionalProperties} eq 'HASH'         ? $node->{additionalProperties}
-              :                                                       last;
-            $node = $next;
-            $weak ||= $node->{'x-weak'};
-        }
-        $ref->{weak} = $weak ? 1 : 0;
+        $ref->{weak} = marked_weak( \%schema, $key, @path );
     }
     return;
 }
@@ -1583,8 +1580,9 @@ C<weak> is true when the schema marks the setting C<'x-weak' =E<gt> 1>: the
 guest uses the named guest when it is up, and builds without it when it is not,
 as it does through a fetch cache that does not answer.  A reference is strong
 otherwise, because a setting that nothing marks can be one that a build needs.
-A key of C<_global> reaches each recipe that declares it, so it is weak only
-when every field that declares it is marked.
+A key of C<_global> reaches each recipe that declares it, so a setting under it
+is weak only when every schema that declares the key marks the setting, or a
+field above it on its path.
 
 It reads every setting of the C<_global> of the domain and of each of its
 recipes.  A value names a guest when it is that domain, the domain with a port,
@@ -1735,9 +1733,9 @@ sub global_schema {
                         additionalProperties => {
                             type       => 'object',
                             properties => {
-                                addresses => { type => [qw{array string}], items => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
-                                cidr      => { type => [qw{array string}], items => { type => 'string' }, description => 'The networks of the bin, as prefixes.' },
-                                via       => { type => 'string', description => 'The guest that routes to the bin, such as the openvpn server whose clients have its addresses.  Every other guest gets a route to the bin through that guest.' },
+                                addresses => { type => [qw{array string}], items    => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
+                                cidr      => { type => [qw{array string}], items    => { type => 'string' }, description => 'The networks of the bin, as prefixes.' },
+                                via       => { type => 'string',           'x-weak' => 1, description => 'The guest that routes to the bin, such as the openvpn server whose clients have its addresses.  Every other guest gets a route to the bin through that guest.  A guest builds while that guest is down, because the route needs only its address.' },
                             },
                         },
                     },

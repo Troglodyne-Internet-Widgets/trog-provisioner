@@ -370,6 +370,10 @@ ignores a loop of guests that has such a field in it, because the loop resolves
 itself once all of them are up.  Leave it off a field whose guest a build needs,
 such as a repository to clone, and off one that the guest reads only when it is
 built, which would need a rebuild to take effect.
+A mark covers each field below the one that carries it, and nothing marks one
+of those strong again.  So put it on a field that holds a name or a list of
+names, never on an object, and mark each weak member of an object instead.
+F<t/recipes.t> refuses a mark on a field that holds fields.
 
 =cut
 
@@ -485,9 +489,9 @@ sub global_args {
                         additionalProperties => {
                             type       => 'object',
                             properties => {
-                                addresses => { type => [qw{array string}], items => { type => 'string' } },
-                                cidr      => { type => [qw{array string}], items => { type => 'string' } },
-                                via       => { type => 'string' },
+                                addresses => { type => [qw{array string}], items    => { type => 'string' } },
+                                cidr      => { type => [qw{array string}], items    => { type => 'string' } },
+                                via       => { type => 'string',           'x-weak' => 1 },
                             },
                         },
                     },

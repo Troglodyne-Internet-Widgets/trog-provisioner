@@ -206,7 +206,8 @@ names, such as the fetch cache that C<cache> names or the host of
 C<logshipper>.  L<Provisioner::Cookbook/named_guests> says what names a guest,
 and L<Provisioner::Cookbook/upstream_domains> works out which guests DOMAIN
 needs, and each guest that they need, in order.  Before anything is built,
-provision prints each setting that names a guest.  F<docs/CONFIGURATION.md> has
+provision prints each setting that names a guest that it is about to build,
+and one line that names every guest that it leaves up.  F<docs/CONFIGURATION.md> has
 the whole of it.
 
 Before it builds DOMAIN, provision builds each of them that no hypervisor of
@@ -482,16 +483,25 @@ sub main {
     my $conf     = Provisioner::Cookbook->configuration($recipes);
     my %there    = $rebuild_upstream ? () : cycles_left_up( $domain, $conf, %build );
     my @upstream = Provisioner::Cookbook->upstream_domains( $domain, $conf, keys %there );
-    foreach my $named ( map { Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
+
+    # The settings are said only for a guest that this run builds, and the
+    # guests left up get one line between them.
+    my %left;
+    if ( !$rebuild_upstream ) {
+        foreach my $upstream (@upstream) {
+            my $there = $there{$upstream} // guest_is_up( $upstream, %build ) or next;
+            $left{$upstream} = $there;
+        }
+    }
+    foreach my $named ( grep { !$left{ $_->{domain} } } map { Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
         print $named->{weak}
           ? "$named->{by} names $named->{domain} in $named->{setting}, so it is built after that guest when it can be, and uses it once it is up.\n"
           : "$named->{by} names $named->{domain} in $named->{setting}, so it needs that guest up first.\n";
     }
-    foreach my $upstream (@upstream) {
-        if ( !$rebuild_upstream && ( my $there = $there{$upstream} // guest_is_up( $upstream, %build ) ) ) {
-            print "$upstream is up on $there, so it is left as it is.  --rebuild-upstream-guests rebuilds it.\n";
-            next;
-        }
+    if ( my @left = grep { $left{$_} } @upstream ) {
+        print "$domain needs these guests, and they are up, so they are left as they are: " . join( ', ', map { "$_ on $left{$_}" } @left ) . ".  --rebuild-upstream-guests rebuilds them.\n";
+    }
+    foreach my $upstream ( grep { !$left{$_} } @upstream ) {
         print "$domain needs $upstream up first.\n";
         eval { build_guest( %build, domain => $upstream ); 1 }
           or die "The build of $upstream, which $domain needs up first, failed, so $domain was not built.\n$@";

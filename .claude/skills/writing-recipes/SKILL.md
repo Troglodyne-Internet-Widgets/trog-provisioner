@@ -49,7 +49,9 @@ a guest builds.  The second half matters: a loop of weak fields is ignored
 because it resolves itself once every guest in it is up.  `bin/provision` still builds the
 named guest first when it can, but it ignores a loop of guests that has a weak
 field in it.  Leave the marker off a field whose guest the build needs, such as
-a repository to clone, because an unmarked field is strong.
+a repository to clone, because an unmarked field is strong.  Put the marker on
+the field that holds the name, never on an object above it.  A marked object
+makes each field in it weak, and `t/recipes.t` refuses one.
 
 ## Put a default at the level of the thing it defaults
 
