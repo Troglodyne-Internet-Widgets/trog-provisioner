@@ -52,7 +52,7 @@ SKIP: {
     is($found, $pool{$name}, "$name resolves to its address in the ip pool");
 
     my $route = `ip -4 route get $pool{$name} 2>&1`;
-[% IF on_server_network -%]
+[% IF same_network_as_server -%]
     unlike($route, qr/\bdev\s+\Q[% device %]\E\b/, "$name is on the network of this guest, so it is reached there and not through the tunnel") or diag $route;
 [% ELSE -%]
     like($route, qr/\bdev\s+\Q[% device %]\E\b/, "$name is reached through the tunnel") or diag $route;

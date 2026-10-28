@@ -23,8 +23,8 @@ tls-version-min 1.2
 cipher [% cipher %]
 auth SHA256
 
-[% IF on_server_network -%]
-[%# This guest is on the network of its server, and reaches the guests there
+[% IF same_network_as_server -%]
+[%# This guest is on the same network as its server, and reaches the guests there
     directly.  Provisioner::Recipe::openvpnclient has the whole account. -%]
 pull-filter ignore "route "
 
