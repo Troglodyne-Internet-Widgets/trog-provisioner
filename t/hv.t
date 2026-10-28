@@ -302,6 +302,16 @@ subtest 'guest_ssh_ip' => sub {
     like( $err, qr/NAT[ ]network/,                          'and the other way to reach it' );
 };
 
+subtest 'address_report names each address of a new guest, and what it is' => sub {
+    my $both = Trog::HV::Libvirt::address_report(qw{web.test 192.168.122.50 203.0.113.10});
+    like( $both, qr/NAT[ ]lease:\s+192[.]168[.]122[.]50,/m,    'the lease, as the NAT lease' );
+    like( $both, qr/only[ ]the[ ]hypervisor[ ]and[ ]its/m,     'which only the hypervisor and its guests reach' );
+    like( $both, qr/static[ ]address:\s+203[.]0[.]113[.]10,/m, 'and the address from ips, as the static one' );
+
+    my $lease_only = Trog::HV::Libvirt::address_report( 'web.test', '192.168.122.50' );
+    unlike( $lease_only, qr/static/, 'a guest with no ips has only its lease' );
+};
+
 subtest 'nat_address: the lease of a guest, when this machine can reach it' => sub {
     my $mock   = Test::MockModule->new('Trog::HV::Libvirt');
     my $local_ = Test::MockModule->new('Trog::Local');
