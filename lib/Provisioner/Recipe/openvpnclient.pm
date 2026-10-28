@@ -86,6 +86,26 @@ gets no block.
 C<bin/destroy> revokes the certificate on the server, which frees the address.
 A rebuild gets the same certificate again, because the server keeps it.
 
+=head3 A client on the same network as its server
+
+A guest on the same network as the VPN server can be a client of it too.  It
+then talks to the other clients of the server, for example a laptop or a
+guest on a cloud, and they reach it at its address on the tunnel.  You add
+nothing to the configuration for this.  The client still reaches the other
+guests on its own network directly, and not through the tunnel.
+
+C<bin/new_config> decides this when it builds the guest.  It asks the
+hypervisors which network the guest and the server are on.  If the guest
+moves to another network, build it again, and it then sends its traffic for
+the guests through the tunnel.
+
+The reason is the routes that the server pushes.  They must win over a home
+network with the same numbers on a laptop, so they are longer than that
+network.  See L<Provisioner::Recipe::openvpn/The networks that a client
+reaches>.  On the network of the server, they also win over the route of the
+guest to its own network.  So a client there ignores every route that the
+server pushes.
+
 =head3 Several tunnels on one guest
 
 A guest can hold two domains that connect to two different VPNs, and openvpn
@@ -167,6 +187,10 @@ With C<issue_from>, it also sets C<address_blocks>, the networks of the bin
 that the address of this domain comes from.  Dies unless one bin of C<ip_pool>
 names C<issue_from> in C<via>.
 
+It sets C<same_network_as_server> when the server, the guest of C<issue_from>
+or of C<server>, is in C<network_peers>.  See L</A client on the same network
+as its server>.
+
 =cut
 
 sub enrich {
@@ -178,6 +202,9 @@ sub enrich {
         my ( undef, $bin ) = bin_of( $opts{ip_pool}, $opts{issue_from} );
         $opts{address_blocks} = [ Provisioner::IPPool::blocks($bin) ];
     }
+
+    my %peer = map { $_ => 1 } @{ $opts{network_peers} // [] };
+    $opts{same_network_as_server} = ( List::Util::any { $peer{$_} } $self->joins_network_of(%opts) ) ? 1 : 0;
 
     return %opts;
 }

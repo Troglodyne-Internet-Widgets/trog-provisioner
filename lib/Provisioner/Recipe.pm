@@ -477,8 +477,9 @@ sub global_args {
             resolvers => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
             modules   => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
 
-            ipmap   => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
-            ip_pool => {
+            ipmap         => { type => 'object', additionalProperties => { type => 'string' }, description => 'Every domain this installation assigns an address to, and its address.' },
+            network_peers => { type => 'array',  items                => { type => 'string' }, description => 'The guests whose network a recipe of this domain joins, see joins_network_of, and that are up on the network of this guest.' },
+            ip_pool       => {
                 type        => 'object',
                 description => 'The addresses this installation hands out, and the networks they are on.  The addresses and cidr at the top are the bin named guests.  See Provisioner::IPPool.',
                 properties  => {

@@ -403,6 +403,53 @@ sub placement_lines {
     return @lines ? "\n" . join( "\n", @lines ) . "\n" : q{};
 }
 
+=head2 %how = joined_peers($domain, $rconf)
+
+Each guest whose network a recipe of C<$domain> joins, see
+L<Provisioner::Recipe/joins_network_of>, and the reason, as a phrase for a
+message.
+
+=cut
+
+sub joined_peers {
+    my ( $domain, $rconf ) = @_;
+
+    my $config = Provisioner::Cookbook->domain_config( $domain, $rconf );
+    my %how;
+    foreach my $recipe ( sort grep { Provisioner::Cookbook->has($_) } keys %$config ) {
+        foreach my $peer ( Provisioner::Cookbook->load($recipe)->joins_network_of( %{ $config->{$recipe} // {} } ) ) {
+            $how{$peer} //= "$recipe connects it to $peer";
+        }
+    }
+    return %how;
+}
+
+=head2 @peers = network_peers($domain, $rconf, $hvconf, $hv)
+
+The guests of C<joined_peers> that are up on the network of C<$hv>, the
+hypervisor of C<$domain>, sorted.  The guest of C<$domain> reaches those
+guests and their network without the network that it joins.  A fleet that is
+not configured is one network, so there it is each of them that this
+installation configures, and this asks no hypervisor.
+
+=cut
+
+sub network_peers {
+    my ( $domain, $rconf, $fleet_file, $hv ) = @_;
+
+    my %how = joined_peers( $domain, $rconf );
+    return () unless %how;
+    my $fleet = Trog::Hypervisors->load( $fleet_file // Trog::Hypervisors->default_path );
+    return grep { exists $rconf->{$_} } sort keys %how unless $fleet->configured;
+
+    my @peers;
+    foreach my $peer ( sort keys %how ) {
+        my $on = $fleet->hosting($peer) or next;
+        push @peers, $peer if $on->network eq $hv->network;
+    }
+    return @peers;
+}
+
 =head2 %network = required_network($domain, $rconf, $hvconf)
 
 The network that the guest of C<$domain> must be on, as C<network> and
@@ -434,14 +481,12 @@ sub required_network {
     return () unless $fleet->configured;
 
     # The networks that a recipe of the domain brings the guest onto, such as
-    # that of its VPN server.  See Provisioner::Recipe/joins_network_of.
-    my $config = Provisioner::Cookbook->domain_config( $domain, $rconf );
+    # that of its VPN server.
+    my %how = joined_peers( $domain, $rconf );
     my %joined;
-    foreach my $recipe ( sort grep { Provisioner::Cookbook->has($_) } keys %$config ) {
-        foreach my $peer ( Provisioner::Cookbook->load($recipe)->joins_network_of( %{ $config->{$recipe} // {} } ) ) {
-            my $hv = $fleet->hosting($peer) or next;
-            $joined{ $hv->network } //= "$recipe connects it to $peer";
-        }
+    foreach my $peer ( sort keys %how ) {
+        my $hv = $fleet->hosting($peer) or next;
+        $joined{ $hv->network } //= $how{$peer};
     }
 
     my %on;
@@ -705,6 +750,7 @@ sub handle_domain {
         host_config => defined $depends_on ? Provisioner::Cookbook->global_config( $depends_on, $rconf ) : undef,
         required_network( $domain, $rconf, $hvconf ),
     );
+    my @network_peers = network_peers( $domain, $rconf, $hvconf, $hv );
 
     # No pool when the hypervisor gives its guests their addresses, because an
     # address from the pool stays reserved for a guest that never uses it.
@@ -872,6 +918,7 @@ sub handle_domain {
     $global_config->{gateway}       = $gateway;
     $global_config->{domain}        = $fqdn;
     $global_config->{ipmap}         = $ip_conf;
+    $global_config->{network_peers} = \@network_peers;
     $global_config->{aliases}       = $alias_conf;
     $global_config->{nameservers}   = $ns_conf;
     $global_config->{main_ip}       = $static_ip // $cloud_ip;

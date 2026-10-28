@@ -91,8 +91,25 @@ is( ( required('edge.test') )[0]{network}, 'cloud', 'but a guest that it needs o
 %where = ( 'cache.test' => $home, 'logs.test' => $home2 );
 is( ( required('edge.test') )[0]{network}, 'home', 'and a server that is not up brings it onto no network' );
 
+sub peers {
+    my ( $domain, $hv ) = @_;
+    return [ Trog::Provisioner::Config::Generator::network_peers( $domain, \%conf, '/bogus/hypervisors.conf', $hv ) ];
+}
+
+%where = ( 'vpn.test' => $home2 );
+is_deeply( peers( 'edge.test', $home ),  ['vpn.test'], 'a VPN client on the network of its server, on another hypervisor there, is its peer' );
+is_deeply( peers( 'edge.test', $cloud ), [],           'and a client on another network is not' );
+is_deeply( peers( 'web.test',  $home ),  [],           'a guest that joins no network has no peers' );
+
+%where = ();
+is_deeply( peers( 'edge.test', $home ), [], 'and a server that is not up is not a peer' );
+
 $configured = 0;
 is_deeply( ( required('web.test') )[0], {}, 'and with no fleet there is one hypervisor, and nothing to choose' );
+
+is_deeply( peers( 'edge.test', $home ), ['vpn.test'], 'with no fleet, a server that this installation configures is a peer' );
+$conf{'away.test'} = { openvpnclient => { server => 'vpn.vendor.test', cert_dir => '/bogus' } };
+is_deeply( peers( 'away.test', $home ), [], 'and a server of somebody else is not' );
 
 had_no_warnings();
 done_testing();
