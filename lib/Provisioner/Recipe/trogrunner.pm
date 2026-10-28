@@ -53,11 +53,13 @@ use Trog::Utils();
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     partition:   "/machine/runner"
+                    max_memory:  65536
 
                     # bin/provision makes the account above, with these
                     # limits.  See ACCOUNTS.
                     account:
                         quota: 500G
+                        cores: 4
 
             hypervisor_access: least
 
@@ -145,25 +147,31 @@ finds a pool by name.  If the name is of a pool that already exists elsewhere,
 libvirt ignores the path, and every volume goes into the existing pool.
 
 =item * C<partition> puts every guest that the runner builds into one systemd
-slice.  The operator then sets one cap on it with C<systemctl set-property
-machine-runner.slice CPUQuota=400%>.
+slice, where one cap holds all of them.  With an C<account>, C<cores> sets
+that cap: see ACCOUNTS.  Without one, the operator sets it with C<systemctl
+set-property machine-runner.slice CPUQuota=400%>, which is 4 cores.
 
 Cap CPU and I/O there, not memory.  A C<MemoryMax> on a slice of virtual
 machines kills one of them, and does not refuse the next.  The per-domain
 equivalent is worse.  The libvirt documentation warns that
 C<< <memtune><hard_limit> >> gets guests OOM-killed.  C<reserve_memory> in
 F<hypervisors.conf> is what refuses a guest when memory is short, and it
-already exists.
+already exists.  For a budget of the partition, give C<max_memory> in MB.  The
+runner then refuses a guest whose memory does not fit in what the guests of the
+partition already hold, running or not.  It still refuses one that does not fit
+on the host after C<reserve_memory>.  The kernel holds no guest to it, so it
+binds a runner that cooperates, as the next paragraph says.
 
 With a C<partition>, the runner counts only its own guests.  C<max_guests>
 caps how many the partition holds, and C<cpu_overcommit> is the vCPUs for each
-core of the C<CPUQuota> of the slice.  The runner still refuses a guest when
+of the cores that the slice gets.  The runner still refuses a guest when
 the whole hypervisor has no vCPUs left after C<reserve_cpus>, so it cannot take
 the room of the guests outside its partition.  Give the hypervisor block the
 C<reserve_memory>, C<reserve_cpus> and C<cpu_overcommit> of the block in the
 F<hypervisors.conf> of the operator, because the runner gets no other copy of
 them.  Without a C<partition>, every limit counts every guest on the
-hypervisor, so a C<max_guests> of a few refuses every build on a busy one.
+hypervisor, so a C<max_guests> of a few refuses every build on a busy one.  A
+C<max_memory> without a C<partition> is refused.
 
 =back
 
@@ -314,6 +322,7 @@ sub args {
                         reserve_disk   => { type => 'integer' },
                         cpu_overcommit => { type => 'integer' },
                         max_guests     => { type => 'integer' },
+                        max_memory     => { type => 'integer', minimum => 1 },
 
                         # The account of the runner on this hypervisor, which
                         # bin/provision makes and bin/destroy takes away.  See
@@ -323,8 +332,11 @@ sub args {
                             type       => 'object',
                             required   => [qw{quota}],
                             properties => {
-                                quota     => { type => 'string' },
-                                cpu_quota => { type => 'string' },
+                                quota => { type => 'string' },
+
+                                # Of the host, which the vCPUs of guests are
+                                # not.  See ACCOUNTS.
+                                cores     => { type => 'integer', minimum => 1 },
                                 io_weight => { type => 'integer' },
                             },
                             additionalProperties => 0,
@@ -472,6 +484,11 @@ sub enrich {
         # not on the guest.
         die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$block->{ssh_host}/system\n"
           if $block->{ssh_host} && $transport ne 'ssh';
+
+        # OpenAPIv3 cannot make one key need another, and Trog::HV::Libvirt
+        # would refuse this only on the runner.
+        die "trogrunner: hypervisor '$name' gives max_memory and no partition, and a budget of memory is that of a partition.  reserve_memory already caps the host.\n"
+          if $block->{max_memory} && !$block->{partition};
 
         next unless $block->{account};
 
@@ -659,12 +676,17 @@ slice are its C<pool_name>, C<pool_path> and C<partition>:
             partition:   "/machine/runner"
             account:
                 quota:     500G      # required: of the ZFS dataset of the pool
-                cpu_quota: "400%"    # CPUQuota of the slice
+                cores:     4         # CPU of the slice, as CPUQuota=400%
                 io_weight: 50        # IOWeight of the slice
 
 The parent of C<pool_path> must be where a ZFS dataset is mounted, because the
-quota is a quota of a child dataset.  C<cpu_quota> and C<io_weight> need a
-C<partition>.  C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
+quota is a quota of a child dataset.  C<cores> and C<io_weight> need a
+C<partition>.
+
+C<cores> is how much of the CPU of the host the guests of the runner get
+together, in whole cores, such as 16.  It is not the C<cpus> of a
+guest, which are vCPUs, and which C<cpu_overcommit> lets add up to more.
+C<runner_account_plan> in L<Trog::HV::Libvirt> checks the
 values when F<bin/provision> builds the runner, before its makefile starts.
 F<bin/runner_account> makes the same account by hand.
 

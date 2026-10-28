@@ -32,6 +32,7 @@ use YAML::XS();
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
+use Trog::Hypervisors();
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
 # wrote itself, full of dots and slashes that would otherwise need escaping one
@@ -156,6 +157,11 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     like( $conf, qr/^pool_path\s+=[ ]\/srv\/vm-disks\/runner$/m, 'the pool it is confined to' );
     like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,            'named as well as pathed, or libvirt ignores the path' );
     like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,       'and the slice its guests land in' );
+
+    # Read back as the runner reads it, so the key is one the runner takes.
+    my ($budgeted) = built( hypervisors => { hv1 => { %{ $HYPERVISORS{hv1} }, max_memory => 131_072 } }, hypervisor_access => 'least' );
+    my $runner_hv = Trog::Hypervisors->load("$budgeted/trogrunner.hypervisors.conf")->hypervisor('hv1');
+    is( $runner_hv->max_memory, 131_072, 'the memory budget of the partition reaches the hypervisor of the runner' );
 
     # Not for the fleet file -- for ssh-keyscan.  libvirt's qemu+ssh transport
     # verifies host keys where Net::OpenSSH::More does not, so an unseeded
@@ -535,7 +541,7 @@ subtest 'a dry run has no store, and says what it would let in' => sub {
 
 subtest 'a runner with an account has it made, and its key put in as root' => sub {
     my $dir     = tempdir( CLEANUP => 1 );
-    my %blocks  = ( hv1 => { %{ $HYPERVISORS{hv1} }, account => { quota => '500G', cpu_quota => '400%' } } );
+    my %blocks  = ( hv1 => { %{ $HYPERVISORS{hv1} }, account => { quota => '500G', cores => 32 } } );
     my @steps   = Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least', restrict_key_to_ip => 0, hypervisors => \%blocks );
     my %context = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 0, secrets => runner_secrets() );
 
@@ -547,7 +553,7 @@ subtest 'a runner with an account has it made, and its key put in as root' => su
     my ( $plan, $account, $key ) = @{ $admin->{asked} };
     is_deeply(
         $plan->[1],
-        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', partition => '/machine/runner', quota => '500G', cpu_quota => '400%' },
+        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', partition => '/machine/runner', quota => '500G', cores => 32 },
         'the plan is the user of the URI, the pool and the slice of the entry, and the limits of the account'
     );
     is( $account->[0], 'account', 'and the account is made from it' );
@@ -576,6 +582,12 @@ subtest 'an account that cannot be made is refused when the configuration is wri
     like( exception { built( $with->( pool_name   => q{} ) ) },                               qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
     like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/system' ) ) }, qr/names[ ]no[ ]user/,                   'an account for nobody' );
     like( exception { built( $with->( account     => {} ) ) },                                qr/not[ ]valid/,                         'and an account with no quota' );
+    like( exception { built( $with->( account     => { quota => '1T', cores => 0 } ) ) },     qr/not[ ]valid/,                         'an account with no CPU at all' );
+    like( exception { built( $with->( account     => { quota => '1T', cores => 0.5 } ) ) },   qr/not[ ]valid/,                         'an account with a part of a core' );
+
+    my %unpartitioned = %entry;
+    delete $unpartitioned{partition};
+    like( exception { built( hypervisors => { hv1 => { %unpartitioned, max_memory => 4096 } } ) }, qr/partition/, 'a memory budget with no partition to be the budget of' );
 
     my @warned;
     local $SIG{__WARN__} = sub { push @warned, @_ };

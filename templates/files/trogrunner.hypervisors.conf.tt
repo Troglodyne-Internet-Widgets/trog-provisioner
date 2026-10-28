@@ -31,5 +31,7 @@ libvirt_uri    = [% hv.libvirt_uri %]
 [% END -%]
 [% IF hv.max_guests %]max_guests     = [% hv.max_guests %]
 [% END -%]
+[% IF hv.max_memory %]max_memory     = [% hv.max_memory %]
+[% END -%]
 
 [% END -%]

@@ -48,7 +48,7 @@ my $keyfile = "$dir/operator.pub";
 # short key is refused for matching half of a file.
 File::Slurper::Temp::write_text( $keyfile, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusBogusBogusBogusBogusBogusBogusBogus operator\@test.test\n" );
 
-my @create = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --quota 500G}, qw{--partition /machine/runner --cpu-quota 400% --io-weight 50}, '--authorize', $keyfile );
+my @create = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --quota 500G}, qw{--partition /machine/runner --cores 4 --io-weight 50}, '--authorize', $keyfile );
 my @remove = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --partition /machine/runner --remove} );
 
 # What the fake hypervisor has.  Each test starts from a fresh one.
@@ -213,16 +213,28 @@ subtest 'the plan refuses what a step would read as syntax' => sub {
     my %ok   = ( user => 'runner', pool_name => 'runner_disks', pool_path => '/bogus/vm-disks/runner', quota => '500G' );
     my $plan = sub (%args) { Trog::HV::Libvirt->runner_account_plan( %ok, %args ) };
 
-    like( exception { $plan->( user      => 'Run ner' ) },                    qr/not[ ]a[ ]name[ ]useradd[ ]takes/, 'a user useradd would refuse' );
-    like( exception { $plan->( pool_path => '/bogus/../etc' ) },              qr/absolute[ ]path/,                  'a pool path that climbs out' );
-    like( exception { $plan->( pool_path => 'relative/dir' ) },               qr/absolute[ ]path/,                  'a relative pool path' );
-    like( exception { $plan->( quota     => 'lots' ) },                       qr/not[ ]a[ ]size/,                   'a quota zfs cannot read' );
-    like( exception { $plan->( partition => '/runner' ) },                    qr{has[ ]to[ ]be[ ]/machine/NAME},    'a partition outside /machine' );
-    like( exception { $plan->( cpu_quota => '400%' ) },                       qr/need[ ]a[ ]partition/,             'a slice limit with no slice' );
-    like( exception { $plan->( partition => '/machine/r', io_weight => 0 ) }, qr/from[ ]1[ ]to[ ]10000/,            'an IOWeight systemd refuses' );
-    like( exception { $plan->( pool_name => undef ) },                        qr/needs[ ]a[ ]pool_name/,            'and an account with no pool' );
+    like( exception { $plan->( user      => 'Run ner' ) },       qr/not[ ]a[ ]name[ ]useradd[ ]takes/, 'a user useradd would refuse' );
+    like( exception { $plan->( pool_path => '/bogus/../etc' ) }, qr/absolute[ ]path/,                  'a pool path that climbs out' );
+    like( exception { $plan->( pool_path => 'relative/dir' ) },  qr/absolute[ ]path/,                  'a relative pool path' );
+    like( exception { $plan->( quota     => 'lots' ) },          qr/not[ ]a[ ]size/,                   'a quota zfs cannot read' );
+    like( exception { $plan->( partition => '/runner' ) },       qr{has[ ]to[ ]be[ ]/machine/NAME},    'a partition outside /machine' );
+    like( exception { $plan->( cores     => 4 ) },               qr/need[ ]a[ ]partition/,             'a slice limit with no slice' );
+    like( exception { $plan->( partition => '/machine/r', cores => 0 ) },    qr/1[ ]or[ ]more/,       'no CPU at all' );
+    like( exception { $plan->( partition => '/machine/r', cores => '4c' ) }, qr/number[ ]of[ ]cores/, 'cores that are not a number' );
+    like( exception { $plan->( partition => '/machine/r', cores => 0.5 ) },  qr/whole[ ]number/,      'a part of a core' );
+    is( $plan->( partition => '/machine/r', cores => 1 )->{cores}, 1, 'and one core is the least' );
+    like( exception { $plan->( partition => '/machine/r', io_weight => 0 ) }, qr/from[ ]1[ ]to[ ]10000/, 'an IOWeight systemd refuses' );
+    like( exception { $plan->( pool_name => undef ) },                        qr/needs[ ]a[ ]pool_name/, 'and an account with no pool' );
 
     is( $plan->( partition => '/machine/runner' )->{slice}, 'machine-runner.slice', 'the partition names the slice that libvirt puts the guests in' );
+};
+
+subtest 'cores is what the slice gets' => sub {
+    my $state = fresh_state();
+    run_tool( $state, ( grep { $_ ne '--cores' && $_ ne '4' } @create ), '--cores', 32 );
+    my $slice = $state->{files}{'/etc/systemd/system/machine-runner.slice'} // q{};
+    like( $slice, qr/^CPUQuota=3200%$/m, '32 cores of the host' );
+    reads_as_a_slice($slice);
 };
 
 subtest 'a dry run asks, says, and changes nothing' => sub {
@@ -266,7 +278,7 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     like( $said, qr/Done:[ ]0[ ]step/,                                           'and says so' );
     like( $said, qr{libvirt_uri:[ ]qemu\+ssh://runner\@hv[.]test[.]test/system}, 'it prints the hypervisors entry, with the account in the URI' );
     my ($account) = $said =~ m/^([ ]+account:\n(?:[ ]+\w+:[^\n]*\n)+)/m;
-    is( $account // q{}, qq{            account:\n                quota: 500G\n                cpu_quota: "400%"\n                io_weight: 50\n}, 'and the account block that makes bin/provision keep it so' );
+    is( $account // q{}, qq{            account:\n                quota: 500G\n                cores: 4\n                io_weight: 50\n}, 'and the account block that makes bin/provision keep it so' );
 
     # A changed quota is one step, not a rebuild.
     $state->{root} = [];

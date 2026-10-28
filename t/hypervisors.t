@@ -584,7 +584,8 @@ subtest 'shortfalls and headroom' => sub {
 
 # Two guests of the runner, one of them shut off, and the guests outside its
 # partition: by default one that names /machine, and one that names none.
-my sub partitioned_hv ( $mock, $quota, @outside ) {
+# $more is more of the block, such as a max_memory.
+my sub partitioned_hv ( $mock, $quota, $more = {}, @outside ) {
     my $mb = 4096 * $Provisioner::Vars::KB;
     @outside = (
         FakeDomain->new( maxMem => $mb, nrVirtCpu => 4, active => 1, partition => '/machine' ),
@@ -604,6 +605,7 @@ my sub partitioned_hv ( $mock, $quota, @outside ) {
     return Trog::HV->candidate(
         uri            => 'qemu+ssh://hv/system', name         => 'hv1', partition  => '/machine/runner',
         reserve_memory => 2048,                   reserve_cpus => 2,     max_guests => 3,
+        %$more,
     );
 }
 
@@ -636,7 +638,7 @@ subtest 'a partition counts its own guests and vCPUs, and the host is counted to
 
 subtest 'a partition cannot take the vCPUs of the guests outside it' => sub {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    my $hv   = partitioned_hv( $mock, 2, FakeDomain->new( maxMem => 1024 * $Provisioner::Vars::KB, nrVirtCpu => 30, active => 1 ) );
+    my $hv   = partitioned_hv( $mock, 2, {}, FakeDomain->new( maxMem => 1024 * $Provisioner::Vars::KB, nrVirtCpu => 30, active => 1 ) );
 
     is_deeply(
         [ $hv->shortfalls( memory_mb => 1024, cpus => 2, disk_bytes => $GB ) ],
@@ -661,6 +663,50 @@ subtest 'the guests of a full partition are counted against max_guests, and said
         ['already has 2 guests in the partition /machine/runner, and max_guests is 2'],
         'two of two'
     );
+};
+
+subtest 'a partition with a memory budget holds its guests to it, and to the host' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my $hv   = partitioned_hv( $mock, 2, { max_memory => 10_240 } );
+
+    my $have = $hv->capacity;
+    is( $have->{memory_mb},        10_240, 'the budget' );
+    is( $have->{memory_committed}, 8192,   'the memory of its guests, running or not' );
+    is( $have->{memory_free},      2048,   'with no reserve, which is for the host' );
+    is_deeply(
+        [ @{ $have->{host} }{qw{memory_mb memory_committed memory_free}} ],
+        [ 32_768, 16_384, 14_336 ],
+        'and the memory of the whole hypervisor, after the reserve'
+    );
+
+    is_deeply( [ $hv->shortfalls( memory_mb => 2048, cpus => 1, disk_bytes => $GB ) ], [], 'a guest that fits in what is left of the budget' );
+    is_deeply(
+        [ $hv->shortfalls( memory_mb => 3072, cpus => 1, disk_bytes => $GB ) ],
+        ['needs 3072MB of memory, 2048MB free in the partition /machine/runner (10240MB for it, 8192MB committed there)'],
+        'a guest over the budget is refused in the name of the partition, with room on the host'
+    );
+
+    my $full = partitioned_hv( $mock, 2, { max_memory => 30_000 }, FakeDomain->new( maxMem => 20_480 * $Provisioner::Vars::KB, nrVirtCpu => 1, active => 1 ) );
+    is_deeply(
+        [ $full->shortfalls( memory_mb => 3072, cpus => 1, disk_bytes => $GB ) ],
+        ['needs 3072MB of memory, 2048MB free on the host (32768MB physical, 28672MB committed, 2048MB reserved)'],
+        'room in the budget is not room on a full host, and the reason names the host'
+    );
+    is( $full->headroom( memory_mb => 3072, cpus => 1, disk_bytes => $GB ), 0, 'and it has no headroom either' );
+
+    is( partitioned_hv( $mock, 2, { max_memory => 99_999 } )->capacity->{memory_mb}, 32_768, 'a budget above the host is the host' );
+};
+
+subtest 'a memory budget belongs to a partition' => sub {
+    Trog::HV->forget();
+    like(
+        exception { Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1', max_memory => 4096 ) },
+        qr/names[ ]no[ ]partition/,
+        'without one, reserve_memory is the cap, and a second name for it is refused'
+    );
+
+    my %opts = Trog::HV->options_from_block( { libvirt_uri => 'qemu+ssh://hv/system', partition => '/machine/runner', max_memory => 4096 } );
+    is( $opts{max_memory}, 4096, 'a block of hypervisors.conf hands it to the hypervisor' );
 };
 
 subtest 'the CPUQuota of a slice, from what systemctl says' => sub {

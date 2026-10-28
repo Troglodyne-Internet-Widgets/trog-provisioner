@@ -77,6 +77,12 @@ cpu_overcommit = 4
 ; vCPUs that the guests outside it need.
 max_guests     = 20
 
+; With a partition only: the MB of memory its guests may hold together, running
+; or not.  It refuses the next guest rather than killing one, which is what a
+; MemoryMax would do.  The host is still checked as well, with reserve_memory.
+; Without a partition it is refused, since reserve_memory already caps the host.
+;max_memory     = 65536
+
 [hv2]
 libvirt_uri    = qemu+ssh://root@hv2.example.net/system
 reserve_memory = 8192

@@ -106,7 +106,7 @@ sub client_module { return 'Sys::Virt' }
 sub config_keys {
     return (
         uri => 'libvirt_uri',
-        map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device partition},
+        map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device partition max_memory},
     );
 }
 
@@ -119,7 +119,8 @@ C<uri> defaults to C<qemu:///system>.  See L</explicit> for what the default
 changes.
 
 Dies if the URI does not parse.  Also dies if the hypervisor is remote and the
-transport gives no shell, because files and bridge detection need one.
+transport gives no shell, because files and bridge detection need one.  Also
+dies if it gets a L</max_memory> and no L</partition>.
 
 =cut
 
@@ -152,6 +153,11 @@ sub build {
         port      => $server                      ? $server->port : undef,
         path      => $path,
     }, $class;
+
+    # reserve_memory already caps the memory of the whole host.  A budget with
+    # no partition would be a second name for that, and the two could disagree.
+    die "max_memory is a budget for the guests of a partition, and the hypervisor at $uri names no partition.\n" . "To cap the memory of every guest on it, raise reserve_memory instead.\n"
+      if $given{max_memory} && !defined $given{partition};
 
     # Fail now, not three minutes into a provision.
     die "The hypervisor at $uri is remote, but its transport gives us no shell.\n" . "Use an ssh transport instead, e.g. qemu+ssh://root\@" . ( $self->{host} // 'hypervisor' ) . "/system, so we can reach its filesystem.\n"
@@ -241,6 +247,17 @@ When it is set, L</capacity> counts the guests and the vCPUs of this partition
 only, so that C<max_guests> and C<cpu_overcommit> are limits on it and not on
 the whole hypervisor.
 
+=head2 max_memory
+
+The MB of memory that the guests of the L</partition> may hold together, or 0
+for no budget, which is the default.  A guest counts with all of its memory,
+running or not, as it does on the host.  This limits what a build may promise,
+not what a guest uses.  The kernel enforces nothing here, because a
+C<MemoryMax> on the slice kills a guest and does not refuse the next one.
+
+L</build(%given)> refuses it without a partition, because C<reserve_memory> already
+caps the memory of the whole host.
+
 =head2 $unit = Trog::HV::Libvirt::partition_slice($partition)
 
 The systemd unit of the slice that libvirt makes for C<$partition>: the path
@@ -257,8 +274,9 @@ C<$unit> is not the name of a slice, because it goes into a shell command.
 
 =cut
 
-sub pool_name ($self) { return $self->setting('pool_name') // 'tf_disks' }
-sub partition ($self) { return $self->setting('partition') }
+sub pool_name  ($self) { return $self->setting('pool_name') // 'tf_disks' }
+sub partition  ($self) { return $self->setting('partition') }
+sub max_memory ($self) { return $self->setting('max_memory') // 0 }
 
 sub partition_slice ($partition) { return ( $partition =~ s{\A/}{}r =~ tr{/}{-}r ) . '.slice' }
 
@@ -1890,9 +1908,20 @@ The reserve is for the host, so only C<host> takes it off.  The quota is what
 the guests of the partition can use, so it is what their vCPUs overcommit.
 L<Trog::HV/shortfalls(%needs)> refuses a guest when either the partition or the
 host has no room.  So a runner with a partition of its own cannot fill the
-hypervisor for the guests outside it.  Memory and disk stay as they are,
-because the memory of the host is shared whoever holds it, and the disk is
+hypervisor for the guests outside it.  The disk stays as it is, because it is
 already that of the pool.
+
+Memory stays that of the host, unless the block gives the partition a
+L</max_memory>.  Then the memory keys are those of the partition, and C<host>
+has the memory keys of the whole hypervisor as well:
+
+    memory_mb        max_memory, or the physical memory, whichever is less
+    memory_committed committed to guests of the partition, running or not
+    memory_free      max_memory less committed, with no reserve
+
+So a guest must fit in the budget of the partition and in the memory of the
+host, after its reserve.  The memory of the host is shared whoever holds it, so
+a partition with no budget is held to the host alone.
 
 Dies if libvirt does not answer, because a guest must not go on a hypervisor
 that cannot give these values.
@@ -1908,7 +1937,7 @@ sub capacity {
 
     my $partition = $self->partition;
 
-    my ( $memory_committed, $cpus_committed, $ours, $our_cpus ) = ( 0, 0, 0, 0 );
+    my ( $memory_committed, $cpus_committed, $ours, $our_cpus, $our_memory ) = ( 0, 0, 0, 0, 0 );
     foreach my $domain (@domains) {
         my $info = eval { $domain->get_info() } or next;
 
@@ -1916,14 +1945,16 @@ sub capacity {
         $cpus_committed += $vcpus;
 
         # maxMem is the most memory the guest can use, so it counts in full.
-        $memory_committed += ( $info->{maxMem} // 0 ) / $Provisioner::Vars::KB;
+        my $memory = ( $info->{maxMem} // 0 ) / $Provisioner::Vars::KB;
+        $memory_committed += $memory;
 
         next unless defined $partition;
         my $xml = eval { $domain->get_xml_description() } // q{};
         my ($in) = $xml =~ m{<partition>\s*([^<\s]+)\s*</partition>};
         next unless ( $in // '/machine' ) eq $partition;
         $ours++;
-        $our_cpus += $vcpus;
+        $our_cpus   += $vcpus;
+        $our_memory += $memory;
     }
 
     my $memory_mb        = ( $node->{memory} // 0 ) / $Provisioner::Vars::KB;
@@ -1937,9 +1968,24 @@ sub capacity {
         cpus_free        => $cpus_allocatable - $cpus_committed - $self->reserve_cpus,
         guests           => scalar @domains,
     );
+    my %memory = (
+        memory_mb        => $memory_mb,
+        memory_committed => $memory_committed,
+        memory_free      => $memory_mb - $memory_committed - $self->reserve_memory,
+    );
 
     my %cpus = %host;
     if ( defined $partition ) {
+        if ( $self->max_memory ) {
+            my $budget = $self->max_memory < $memory_mb ? $self->max_memory : $memory_mb;
+            %host   = ( %host, %memory );
+            %memory = (
+                memory_mb        => $budget,
+                memory_committed => $our_memory,
+                memory_free      => $budget - $our_memory,
+            );
+        }
+
         my $quota = $self->slice_cpu_quota( partition_slice($partition) );
         my $share = defined $quota && $quota < $cpus ? $quota : $cpus;
         my $total = int( $share * $self->cpu_overcommit );
@@ -1955,10 +2001,8 @@ sub capacity {
     }
 
     return $self->{capacity} = {
-        memory_mb        => $memory_mb,
-        memory_committed => $memory_committed,
-        memory_free      => $memory_mb - $memory_committed - $self->reserve_memory,
-        disk_free        => $self->pool_free() - $self->reserve_disk,
+        %memory,
+        disk_free => $self->pool_free() - $self->reserve_disk,
         %cpus,
     };
 }
@@ -2976,12 +3020,16 @@ SUDOERS
 
 Checks what an account is to be, and returns what the methods below need.
 C<%args> takes C<user>, C<pool_name> and C<pool_path>, which are required, and
-C<quota>, C<partition>, C<cpu_quota> and C<io_weight>.  The plan has those,
+C<quota>, C<partition>, C<cores> and C<io_weight>.  The plan has those,
 and C<slice>, the unit name of the partition, or undef.
+
+C<cores> is the CPU time that the guests of the partition get together, in
+whole cores of the host, such as 16.  The slice gets it as C<CPUQuota>, 100%
+for each core.
 
 C<quota> is required to make an account, and not to take one away, so this
 does not require it.  Dies on a value that a step would write into a file or a
-command as syntax, and on C<cpu_quota> or C<io_weight> without a C<partition>.
+command as syntax, and on C<cores> or C<io_weight> without a C<partition>.
 
 =cut
 
@@ -3006,14 +3054,16 @@ sub runner_account_plan {
           unless $args{partition} =~ m{\A/machine/[[:lower:]\d_]+\z};
         $slice = partition_slice( $args{partition} );
     }
-    die "cpu_quota and io_weight are limits of the slice, and need a partition\n"
-      if !$slice && ( defined $args{cpu_quota} || defined $args{io_weight} );
-    die "cpu_quota '$args{cpu_quota}' is not a percentage, such as 400%\n" if defined $args{cpu_quota} && $args{cpu_quota} !~ m/\A\d+%\z/;
+    die "cores and io_weight are limits of the slice, and need a partition\n"
+      if !$slice && ( defined $args{cores} || defined $args{io_weight} );
+
+    die "cores '$args{cores}' has to be a whole number of cores, 1 or more, such as 16\n"
+      if defined $args{cores} && ( $args{cores} !~ m/\A\d+\z/ || $args{cores} < 1 );
     die "io_weight '$args{io_weight}' has to be from 1 to 10000\n"
       if defined $args{io_weight} && ( $args{io_weight} !~ m/\A\d+\z/ || $args{io_weight} < 1 || $args{io_weight} > 10_000 );
 
     return {
-        ( map { $_ => $args{$_} } qw{user pool_name pool_path quota partition cpu_quota io_weight} ),
+        ( map { $_ => $args{$_} } qw{user pool_name pool_path quota partition cores io_weight} ),
         slice => $slice,
     };
 }
@@ -3036,9 +3086,10 @@ user and started with the host.  The pool owns the permissions of the
 directory, so a later build of the pool keeps them.
 
 =item 4. With C<partition>, the systemd slice for it, with C<CPUQuota> and
-C<IOWeight> from C<cpu_quota> and C<io_weight>.  There is no limit for memory,
+C<IOWeight> from C<cores> and C<io_weight>.  There is no limit for memory,
 because C<MemoryMax> on a slice kills a guest rather than refusing the next
-one.  See QUOTAS in L<Provisioner::Recipe::trogrunner>.
+one.  C<max_memory> is the budget that refuses it instead.  See QUOTAS in
+L<Provisioner::Recipe::trogrunner>.
 
 =item 5. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
 C<runner_sudoers> writes.  C<visudo -c> checks it before it is installed.
@@ -3088,10 +3139,10 @@ sub runner_account_steps {
     if ( $plan->{slice} ) {
         my $unit = "/etc/systemd/system/$plan->{slice}";
         my $text = join "\n", "[Unit]", "Description=Guests that the trog-provisioner runner $user builds", "Before=slices.target", q{}, "[Slice]",
-          ( defined $plan->{cpu_quota} ? "CPUQuota=$plan->{cpu_quota}" : () ),
-          ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}" : () );
+          ( defined $plan->{cores}     ? sprintf( 'CPUQuota=%d%%', $plan->{cores} * 100 ) : () ),
+          ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}"                    : () );
         @slice = {
-            what => "write $unit" . ( $plan->{cpu_quota} || $plan->{io_weight} ? q{} : ' with no limits in it' ),
+            what => "write $unit" . ( $plan->{cores} || $plan->{io_weight} ? q{} : ' with no limits in it' ),
             done => sub { root_reads( $hv, $unit ) eq $text },
             do   => sub {
                 $hv->write_text( $unit, "$text\n", sudo => 1, mode => '0644' ) or die "Could not write $unit\n";

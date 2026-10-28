@@ -83,8 +83,10 @@ C<memory_committed>, C<cpus>, C<cpus_allocatable>, C<cpus_committed>,
 C<cpus_free>, C<disk_free> and C<guests>.  A backend that holds the guests
 of one block apart from the rest of the hypervisor, as a libvirt
 C<partition> does, gives the CPU keys and C<guests> of that share, its name
-as C<partition>, and the same keys for the whole hypervisor as C<host>.  A
-guest must then fit in both.
+as C<partition>, and the same keys for the whole hypervisor as C<host>.  If
+the share has a budget of memory, its memory keys are those of the share too,
+and C<host> has the memory keys of the whole hypervisor.  A guest must then
+fit in both.
 
 =item * C<monthly_cost>, if a guest costs money there.  See
 L</monthly_cost(%needs)>.
@@ -818,8 +820,9 @@ is the bytes to keep free in the pool.  C<max_guests> caps the domain count, and
 0 means no cap.  C<cpu_overcommit> is the acceptable number of vCPUs for each
 physical CPU.  When the block names a C<partition>, C<max_guests> counts the
 domains of that partition, and C<cpu_overcommit> applies to the CPUs of its
-quota as well as to the host.  See L<Trog::HV::Libvirt/capacity>.  The defaults
-are 2048MB, 1 CPU, 10GB, no cap, and 4.
+quota as well as to the host.  A partition can also have a budget of memory,
+C<max_memory> in L<Trog::HV::Libvirt>.  See L<Trog::HV::Libvirt/capacity>.  The
+defaults are 2048MB, 1 CPU, 10GB, no cap, and 4.
 
 =cut
 
@@ -905,18 +908,28 @@ sub shortfalls {
     my $have = $self->capacity(%needs);
     my @reasons;
 
+    # A partition has room of its own, and the host that it is on must have
+    # room as well.  Its memory is its own only when it has a budget, and then
+    # host has the memory of the whole hypervisor.  See capacity in
+    # Trog::HV::Libvirt.
+    my $host     = $have->{host};
+    my $budgeted = $host && defined $host->{memory_free};
+    push @reasons, sprintf(
+        'needs %dMB of memory, %dMB free in the partition %s (%dMB for it, %dMB committed there)',
+        $needs{memory_mb},  $have->{memory_free}, $have->{partition},
+        $have->{memory_mb}, $have->{memory_committed}
+    ) if $budgeted && ( $needs{memory_mb} // 0 ) > $have->{memory_free};
+
     # An undefined free is no limit rather than no room.  A quota can be
     # unlimited, and a hypervisor says so by leaving the number undef, because
     # the -1 a cloud reports for it is not an amount to do arithmetic on.
+    my $memory = $budgeted ? $host : $have;
     push @reasons, sprintf(
-        'needs %dMB of memory, %dMB free (%dMB physical, %dMB committed, %dMB reserved)',
-        $needs{memory_mb},  $have->{memory_free},
-        $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory
-    ) if defined $have->{memory_free} && ( $needs{memory_mb} // 0 ) > $have->{memory_free};
+        'needs %dMB of memory, %dMB free%s (%dMB physical, %dMB committed, %dMB reserved)',
+        $needs{memory_mb},    $memory->{memory_free}, ( $host ? ' on the host' : q{} ),
+        $memory->{memory_mb}, $memory->{memory_committed}, $self->reserve_memory
+    ) if defined $memory->{memory_free} && ( $needs{memory_mb} // 0 ) > $memory->{memory_free};
 
-    # A partition has room of its own, and the host that it is on must have
-    # room as well.  See capacity in Trog::HV::Libvirt.
-    my $host = $have->{host};
     push @reasons, sprintf(
         'needs %d vCPUs, %d free in the partition %s (%s CPUs for it x%d overcommit, %d committed there)',
         $needs{cpus},  $have->{cpus_free},    $have->{partition},
@@ -972,7 +985,8 @@ sub headroom {
     push @fractions, fraction( $have->{disk_free},   defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
 
     # A partition is as roomy as the host that it is on, at most.
-    push @fractions, fraction( $have->{host}{cpus_free}, $have->{host}{cpus_allocatable}, $needs{cpus} ) if $have->{host};
+    push @fractions, fraction( $have->{host}{cpus_free},   $have->{host}{cpus_allocatable}, $needs{cpus} )      if $have->{host};
+    push @fractions, fraction( $have->{host}{memory_free}, $have->{host}{memory_mb},        $needs{memory_mb} ) if $have->{host} && defined $have->{host}{memory_free};
 
     my ($tightest) = sort { $a <=> $b } @fractions;
     return $tightest;
