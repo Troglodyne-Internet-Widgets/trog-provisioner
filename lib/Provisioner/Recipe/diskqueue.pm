@@ -25,7 +25,7 @@ use parent qw{Provisioner::Recipe};
 =head2 DESCRIPTION
 
 Writes a udev rule that sets the I/O scheduler and the readahead window on the
-virtio disks of the guest.  The recipe applies the rule to the disks that are
+disks of the guest.  The recipe applies the rule to the disks that are
 already attached, and reads back the values that the kernel actually took.
 
 =head3 Why a guest must not schedule at all
@@ -128,8 +128,11 @@ The readahead window, in KiB.  Defaults to 128, the default of the kernel.
 =item devices
 
 The disks that the rule applies to, as udev C<KERNEL> globs.  Defaults to
-C<vd*>, which is every virtio-blk disk, and so every disk that L<Trog::HV> gives
-a guest.
+the names that the hypervisor gives the disks of its guests, such as C<vd*> on
+libvirt and C<sd*> on Linode.  See C<guest_disks> in L<Trog::HV>.  The default
+comes from the hypervisor, and not from this schema, because the bus of a disk
+is a choice of the hypervisor.  A glob that names no disk of the guest makes
+the rule apply to nothing, and the guest test fails.
 
 =back
 
@@ -161,12 +164,24 @@ sub args {
                 default => 128,
             },
             devices => {
-                type    => 'array',
-                items   => { type => 'string' },
-                default => ['vd*'],
+                type        => 'array',
+                items       => { type => 'string' },
+                description => 'The disks that the rule applies to, as udev KERNEL globs.  The default is disk_devices, the names that the hypervisor gives the disks of its guests.',
             },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Sets C<devices> to C<disk_devices> when the domain names no devices of its own.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    $opts{devices} //= [ @{ $opts{disk_devices} // [] } ];
+    return %opts;
 }
 
 sub template_files {

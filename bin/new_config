@@ -919,6 +919,7 @@ sub handle_domain {
     $global_config->{domain}        = $fqdn;
     $global_config->{ipmap}         = $ip_conf;
     $global_config->{network_peers} = \@network_peers;
+    $global_config->{disk_devices}  = [ $hv->guest_disks ];
     $global_config->{aliases}       = $alias_conf;
     $global_config->{nameservers}   = $ns_conf;
     $global_config->{main_ip}       = $static_ip // $cloud_ip;

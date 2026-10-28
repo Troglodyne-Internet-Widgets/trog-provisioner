@@ -26,7 +26,8 @@ else {
 my @queues = grep { -e "$_/scheduler" } glob('[% FOR device IN devices %]/sys/block/[% device %]/queue [% END %]');
 
 unless (@queues) {
-    fail('the guest has virtio disks for this to have applied to');
+    fail('the guest has a disk that [% devices.join(", ") %] names, for the rule to apply to');
+    diag `lsblk -d -o NAME,TYPE 2>&1`;
     done_testing();
     exit 0;
 }

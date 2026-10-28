@@ -226,6 +226,7 @@ subtest 'which kind of thing it is' => sub {
 
     is $hv->describe, 'the SolusVM node solus.example.test', 'it says where it builds';
     is $hv->uri,      'https://solus.example.test/api/v1',   'and where that is';
+    is_deeply [ $hv->guest_disks ], ['vd*'], 'and its guests name their disks as virtio-blk does';
 
     like exception { $hv->cloudinit_iso }, qr/has[ ]no[ ]cloudinit_iso/, 'the libvirt nouns are refused, by Trog::HV::Cloud rather than here';
 };

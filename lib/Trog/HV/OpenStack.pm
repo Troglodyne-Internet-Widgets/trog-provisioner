@@ -261,6 +261,17 @@ sub cloud ($self) { return $self->setting('cloud') }
 # a secret: reference resolved to.
 sub describe ($self) { return 'the OpenStack cloud ' . $self->{cloud} }
 
+=head2 guest_disks
+
+C<vd*>, the name that KVM gives a virtio-blk disk, which is the usual bus of
+Nova.  An image can ask for another bus with C<hw_disk_bus>.  No guest of
+OpenStack has checked it here.  If its guests name their disks otherwise, the
+guest test of L<Provisioner::Recipe::diskqueue> fails and says so.
+
+=cut
+
+sub guest_disks { return ('vd*') }
+
 =head2 uri
 
 Returns the Keystone endpoint, so that a message about where a guest is built

@@ -146,6 +146,15 @@ has a correct value to show.
 sub describe ($self) { return 'Linode' . ( $self->{region} ? " in $self->{region}" : q{} ) }
 sub uri              { return $API_URL }
 
+=head2 guest_disks
+
+C<sd*>.  A guest of Linode names its root disk C<sda>, and its swap disk
+C<sdb>.
+
+=cut
+
+sub guest_disks { return ('sd*') }
+
 =head2 region, firewall_id, private_ip, monthly_budget
 
 Return the values that F<hypervisors.conf> set.  C<region> has no default,

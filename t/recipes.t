@@ -167,6 +167,7 @@ my %G = (
     modules                    => [],
     ipmap                      => { test => '192.0.2.100' },
     network_peers              => [],
+    disk_devices               => ['vd*'],
     ip_pool                    => { cidr => '192.0.2.0/24' },
     nameservers                => {},
     packager_invocation        => 'apt-get install -y',
