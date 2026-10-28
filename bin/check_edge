@@ -16,7 +16,6 @@ use Crypt::PRNG();
 use Getopt::Long qw{GetOptionsFromArray};
 use IO::Socket::IP();
 use IO::Socket::SSL();
-use MIME::Base64();
 use Pod::Usage qw{pod2usage};
 use Time::HiRes();
 
@@ -47,8 +46,11 @@ input, as C<bin/provision> does.  See L<Trog::Credentials>.
 =item * The tunnel.  EDGE routes the address of GUEST through its tunnel, and
 GUEST answers a ping there.
 
+=item * The resolvers.  EDGE resolves NAME through its own resolvers, and each
+of them answers.
+
 =item * The nameservers.  Each of the C<nameservers> of C<_global> answers a
-query from EDGE.  EDGE is outside the network of the fleet, so this is the path
+query from EDGE, with authority.  EDGE is outside the network of the fleet, so this is the path
 that a resolver on the internet takes, through the port forwards of the
 network.  A port forward that a gateway lost fails here.
 
@@ -115,6 +117,7 @@ sub main {
 
     my @results = (
         check_tunnel( $edge, $guest ),
+        check_resolvers( $edge, $name ),
         check_nameservers( $edge, values %{ Provisioner::Cookbook->base_global($conf)->{nameservers} // {} } ),
         check_https( $edge->host, $name, $token ),
         check_http( $edge->host, $name ),
@@ -186,41 +189,39 @@ sub check_tunnel {
     return [ 1, $label ];
 }
 
-=head2 @results = check_nameservers($edge, @nameservers)
+=head2 [$ok, $label, $why] = check_resolvers($edge, $name)
 
-One result for each nameserver: whether it answers a query for its own name
-from the edge.  The edge has no C<dig>, so a short python3 script sends the
-query, and python3 is on every guest.  The script goes in base64, because it
-has quotes of its own inside the quotes of C<as_root>.
+Whether the edge resolves C<$name> through its own resolvers, and each of them
+answers.  A resolver that the edge cannot reach, such as the gateway of the
+network of the installation, fails here even when another one answers,
+because every lookup waits for it first.
 
 =cut
 
-our $DNS_QUERY = <<'PYTHON';
-import socket, struct, sys
-name = sys.argv[1]
-query = struct.pack('>HHHHHH', 0x7e57, 0x0100, 1, 0, 0, 0) + b''.join(bytes([len(p)]) + p.encode() for p in name.rstrip('.').split('.')) + b'\0' + struct.pack('>HH', 1, 1)
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.settimeout(3)
-try:
-    address = socket.gethostbyname(name)
-    s.sendto(query, (address, 53))
-    reply = s.recv(512)
-except Exception as e:
-    print('no answer from ' + name + ': ' + str(e))
-    sys.exit(1)
-if reply[:2] != query[:2] or reply[3] & 15 != 0:
-    print(name + ' at ' + address + ' answered with an error')
-    sys.exit(1)
-print(name + ' at ' + address + ' answered')
-PYTHON
+sub check_resolvers {
+    my ( $edge, $name ) = @_;
+    my $label = "the edge resolves $name through its own resolvers";
+    my ( $said, $status ) = as_root( $edge, "dig +time=3 +tries=1 $name A" );
+    return [ 0, $label, $said ] unless defined $status && $status == 0 && $said               =~ m/status:\s*NOERROR/;
+    return [ 0, $label, "One of the resolvers of the edge does not answer:\n$said" ] if $said =~ m/communications[ ]error/;
+    return [ 1, $label ];
+}
+
+=head2 @results = check_nameservers($edge, @nameservers)
+
+One result for each nameserver: whether it answers a query for its own name,
+from the edge, with authority and without recursion.  The edge is outside the
+network of the installation, so this is the path through its port forwards.
+
+=cut
 
 sub check_nameservers {
     my ( $edge, @nameservers ) = @_;
     my @results;
     foreach my $ns ( sort @nameservers ) {
-        my $label = "the nameserver $ns answers from the internet";
-        my ( $said, $status ) = as_root( $edge, 'echo ' . MIME::Base64::encode_base64( $DNS_QUERY, q{} ) . " | base64 -d | python3 -I - $ns" );
-        push( @results, defined $status && $status == 0 ? [ 1, $label ] : [ 0, $label, $said ] );
+        my $label = "the nameserver $ns answers from the internet, with authority";
+        my ( $said, $status ) = as_root( $edge, "dig +norecurse +time=3 +tries=1 \@$ns $ns A" );
+        push( @results, defined $status && $status == 0 && $said =~ m/flags:[^;]*\baa\b/ ? [ 1, $label ] : [ 0, $label, $said ] );
     }
     return @results;
 }
