@@ -1618,11 +1618,12 @@ sub global_config {
     my ( $class, $domain, $conf ) = @_;
     $conf //= $class->configuration();
 
-    # One level at a time: $conf->{$domain}{_global} would add $domain to
-    # $conf, which is the remembered configuration that every caller shares.
-    my $mine = defined $domain ? $conf->{$domain} : undef;
-    my $base = clone( $conf->{_base}{_global}    // {} );
-    my $own  = clone( ( $mine // {} )->{_global} // {} );
+    # exists, because $conf->{$domain}{_global} would add $domain to $conf,
+    # which is the remembered configuration that every caller shares.  defined
+    # first, because exists dies on an undef key under fatal warnings.
+    my $mine = defined $domain && exists $conf->{$domain} ? $conf->{$domain} : {};
+    my $base = clone( $conf->{_base}{_global} || {} );
+    my $own  = clone( $mine->{_global}        || {} );
 
     return { %$base, %$own };
 }

@@ -278,6 +278,7 @@ subtest 'asking about a domain does not configure it' => sub {
     Provisioner::Cookbook->named_guests( 'outside.test', $conf );
 
     is( Provisioner::Cookbook->configures( 'outside.test', $conf ), 0, 'and afterwards it is still not a domain of the configuration, so bin/new_config still refuses it' );
+    is_deeply( Provisioner::Cookbook->global_config( undef, $conf ), { cache => 'cache.test' }, 'and with no domain, as bin/check_delegation asks, it is the _global of _base' );
 };
 
 subtest 'helo_name_of is one name for the machine, whatever domain asks' => sub {
