@@ -69,6 +69,12 @@ reserve_disk   = 53687091200
 cpu_overcommit = 4
 
 ; Refuse to place beyond this many guests.  0, the default, means no cap.
+;
+; With a partition, both of these are about the partition.  max_guests counts
+; only the guests in it.  cpu_overcommit applies to the CPUQuota of its slice
+; (4 cores for 400%), or to every CPU when the slice has no quota.  The host
+; is still checked as well, with reserve_cpus, so a partition cannot take the
+; vCPUs that the guests outside it need.
 max_guests     = 20
 
 [hv2]

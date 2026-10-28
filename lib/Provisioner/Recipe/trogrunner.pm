@@ -155,6 +155,16 @@ C<< <memtune><hard_limit> >> gets guests OOM-killed.  C<reserve_memory> in
 F<hypervisors.conf> is what refuses a guest when memory is short, and it
 already exists.
 
+With a C<partition>, the runner counts only its own guests.  C<max_guests>
+caps how many the partition holds, and C<cpu_overcommit> is the vCPUs for each
+core of the C<CPUQuota> of the slice.  The runner still refuses a guest when
+the whole hypervisor has no vCPUs left after C<reserve_cpus>, so it cannot take
+the room of the guests outside its partition.  Give the hypervisor block the
+C<reserve_memory>, C<reserve_cpus> and C<cpu_overcommit> of the block in the
+F<hypervisors.conf> of the operator, because the runner gets no other copy of
+them.  Without a C<partition>, every limit counts every guest on the
+hypervisor, so a C<max_guests> of a few refuses every build on a busy one.
+
 =back
 
 A runner that cooperates respects both limits.  Neither stops a runner that

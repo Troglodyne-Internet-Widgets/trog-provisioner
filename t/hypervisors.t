@@ -33,7 +33,7 @@ use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
-use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Trog::Hypervisors();
 
@@ -582,15 +582,115 @@ subtest 'shortfalls and headroom' => sub {
     cmp_ok( $snug,  '>=', 0,     'and headroom never goes negative' );
 };
 
+# Two guests of the runner, one of them shut off, and the guests outside its
+# partition: by default one that names /machine, and one that names none.
+my sub partitioned_hv ( $mock, $quota, @outside ) {
+    my $mb = 4096 * $Provisioner::Vars::KB;
+    @outside = (
+        FakeDomain->new( maxMem => $mb, nrVirtCpu => 4, active => 1, partition => '/machine' ),
+        FakeDomain->new( maxMem => $mb, nrVirtCpu => 2, active => 1 ),
+    ) unless @outside;
+    my @domains = (
+        FakeDomain->new( maxMem => $mb, nrVirtCpu => 2, active => 1, partition => '/machine/runner' ),
+        FakeDomain->new( maxMem => $mb, nrVirtCpu => 8, active => 0, partition => '/machine/runner' ),
+        @outside,
+    );
+
+    $mock->redefine( vmm             => sub { FakeVMM->new(@domains) } );
+    $mock->redefine( pool_free       => sub { 200 * $GB } );
+    $mock->redefine( slice_cpu_quota => sub ( $, $unit ) { return $unit eq 'machine-runner.slice' ? $quota : undef } );
+
+    Trog::HV->forget();
+    return Trog::HV->candidate(
+        uri            => 'qemu+ssh://hv/system', name         => 'hv1', partition  => '/machine/runner',
+        reserve_memory => 2048,                   reserve_cpus => 2,     max_guests => 3,
+    );
+}
+
+subtest 'a partition counts its own guests and vCPUs, and the host is counted too' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my $hv   = partitioned_hv( $mock, 2 );
+
+    my $have = $hv->capacity;
+    is( $have->{partition},        '/machine/runner', 'it says whose share it is' );
+    is( $have->{guests},           2,                 'the domains of the partition, running or not' );
+    is( $have->{cpus},             2,                 'the CPUQuota of its slice, in cores' );
+    is( $have->{cpus_allocatable}, 8,                 'times the overcommit ratio' );
+    is( $have->{cpus_committed},   2,                 'vCPUs of its running guests only' );
+    is( $have->{cpus_free},        6,                 'with no reserve, which is for the host' );
+    is_deeply(
+        $have->{host},
+        { cpus => 8, cpus_allocatable => 32, cpus_committed => 8, cpus_free => 22, guests => 4 },
+        'and the whole hypervisor, after the reserve'
+    );
+    is( $have->{memory_free}, 14_336, 'memory is that of the host, whoever holds it' );
+
+    is_deeply( [ $hv->shortfalls( memory_mb => 1024, cpus => 2, disk_bytes => $GB ) ], [], 'a fourth guest on a busy host fits under max_guests 3, because two are ours' );
+
+    is_deeply(
+        [ $hv->shortfalls( memory_mb => 1024, cpus => 7, disk_bytes => $GB ) ],
+        ['needs 7 vCPUs, 6 free in the partition /machine/runner (2 CPUs for it x4 overcommit, 2 committed there)'],
+        'a guest too big for the quota is refused in the name of the partition'
+    );
+};
+
+subtest 'a partition cannot take the vCPUs of the guests outside it' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my $hv   = partitioned_hv( $mock, 2, FakeDomain->new( maxMem => 1024 * $Provisioner::Vars::KB, nrVirtCpu => 30, active => 1 ) );
+
+    is_deeply(
+        [ $hv->shortfalls( memory_mb => 1024, cpus => 2, disk_bytes => $GB ) ],
+        ['needs 2 vCPUs, -2 free on the host (8 CPUs x4 overcommit, 32 committed, 2 reserved)'],
+        'room in the partition is not room on a full host, and the reason names the host'
+    );
+    is( $hv->headroom( memory_mb => 1024, cpus => 2, disk_bytes => $GB ), 0, 'and it has no headroom either' );
+};
+
+subtest 'a partition gets every CPU when its slice has no quota, and no more than every CPU' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    is( partitioned_hv( $mock, undef )->capacity->{cpus_allocatable}, 32, 'no quota is the CPUs of the host' );
+    is( partitioned_hv( $mock, 64 )->capacity->{cpus},                8,  'a quota above the host is the host' );
+};
+
+subtest 'the guests of a full partition are counted against max_guests, and said to be its' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my $hv   = partitioned_hv( $mock, 2 );
+    $mock->redefine( max_guests => sub { 2 } );
+    is_deeply(
+        [ $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => $GB ) ],
+        ['already has 2 guests in the partition /machine/runner, and max_guests is 2'],
+        'two of two'
+    );
+};
+
+subtest 'the CPUQuota of a slice, from what systemctl says' => sub {
+    Trog::HV->forget();
+    my $hv   = Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1' );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+
+    my %said = ( '4s' => 4, '500ms' => 0.5, '1.500000s' => 1.5, '1s 500ms' => 1.5, 'infinity' => undef, q{} => undef );
+    foreach my $span ( sort keys %said ) {
+        $mock->redefine( capture_cmd => sub { return "$span\n" } );
+        is( $hv->slice_cpu_quota('machine-runner.slice'), $said{$span}, "'$span' is " . ( $said{$span} // 'no quota' ) );
+    }
+
+    like( exception { $hv->slice_cpu_quota(q{x'; reboot; '.slice}) }, qr/not[ ]the[ ]name[ ]of[ ]a[ ]slice/, 'a unit name that is not one never reaches the shell' );
+    is( Trog::HV::Libvirt::partition_slice('/machine/runner'),   'machine-runner.slice',   'a partition is the slice that libvirt makes for it' );
+    is( Trog::HV::Libvirt::partition_slice('/machine/a/runner'), 'machine-a-runner.slice', 'and a deeper one too' );
+};
+
 # A stand-in for a libvirt connection.
 {
 
     package FakeVMM;
 
-    sub new           { return bless {}, shift }
+    # Takes the domains to list.  Without them, the three of the capacity test.
+    sub new           { my ( $class, @domains ) = @_; return bless { domains => \@domains }, $class }
     sub get_node_info { return { memory => 32768 * $Provisioner::Vars::KB, cpus => 8, model => 'x86_64' } }
 
     sub list_all_domains {
+        my ($self) = @_;
+        return @{ $self->{domains} } if @{ $self->{domains} };
         return (
             FakeDomain->new( maxMem => 4096 * $Provisioner::Vars::KB, nrVirtCpu => 2, active => 1 ),
             FakeDomain->new( maxMem => 4096 * $Provisioner::Vars::KB, nrVirtCpu => 4, active => 1 ),
@@ -608,6 +708,11 @@ subtest 'shortfalls and headroom' => sub {
     sub new               { my ( $class, %o ) = @_; return bless {%o}, $class }
     sub get_info          { my ($s) = @_; return { maxMem => $s->{maxMem}, nrVirtCpu => $s->{nrVirtCpu} } }
     sub is_active ($self) { return $self->{active} }
+
+    # As libvirt writes the partition of a domain that names one.
+    sub get_xml_description ($self) {
+        return "<domain type='kvm'>\n  <name>guest</name>\n" . ( $self->{partition} ? "  <resource>\n    <partition>$self->{partition}</partition>\n  </resource>\n" : q{} ) . "</domain>\n";
+    }
 }
 
 subtest 'file order is the file\'s order, not the alphabet\'s' => sub {

@@ -237,10 +237,51 @@ The cgroup partition for the guests on this hypervisor, or undef for the libvirt
 default of C</machine>.  It sets no limit.  It puts every guest built here in
 one systemd slice, where an operator can limit CPU and I/O for all of them.
 
+When it is set, L</capacity> counts the guests and the vCPUs of this partition
+only, so that C<max_guests> and C<cpu_overcommit> are limits on it and not on
+the whole hypervisor.
+
+=head2 $unit = Trog::HV::Libvirt::partition_slice($partition)
+
+The systemd unit of the slice that libvirt makes for C<$partition>: the path
+without its first slash, with each other slash a dash, and C<.slice> after it.
+So C</machine/runner> is F<machine-runner.slice>.
+
+=head2 $cores = $hv->slice_cpu_quota($unit)
+
+The C<CPUQuota> of the slice C<$unit> on this hypervisor, in cores: 4 for
+C<400%>.  Undef when the slice has no quota, or when C<systemctl> does not
+answer.  systemd answers for a slice that is not running yet, from its unit
+file, so a runner that has no running guest still gets its quota.  Dies when
+C<$unit> is not the name of a slice, because it goes into a shell command.
+
 =cut
 
 sub pool_name ($self) { return $self->setting('pool_name') // 'tf_disks' }
 sub partition ($self) { return $self->setting('partition') }
+
+sub partition_slice ($partition) { return ( $partition =~ s{\A/}{}r =~ tr{/}{-}r ) . '.slice' }
+
+# The units that systemd writes a time span in, in seconds.
+my %SPAN_UNIT = ( us => 1e-6, ms => 1e-3, s => 1, min => 60 );
+
+sub slice_cpu_quota ( $self, $unit ) {
+
+    die "'$unit' is not the name of a slice\n" unless $unit =~ m{\A[\w.-]+[.]slice\z};
+
+    # libvirt does not manage the slice of a partition, so systemd is asked.
+    # CPUQuotaPerSecUSec is the CPU time that the slice gets in each second,
+    # such as 4s for 400% or 500ms for 50%.  A long fraction is written as
+    # 1.500000s, and a mix of units as 1s 500ms, so each part adds up.
+    my $span = $self->capture_cmd("systemctl show -p CPUQuotaPerSecUSec --value $unit") // q{};
+    chomp $span;
+
+    my $seconds = 0;
+    while ( $span =~ m{(\d+(?:[.]\d+)?)(us|ms|s|min)\b}g ) {
+        $seconds += $1 * $SPAN_UNIT{$2};
+    }
+    return $seconds > 0 ? $seconds : undef;
+}
 
 sub pool_path {
     my ($self) = @_;
@@ -1832,6 +1873,27 @@ calls return the same one:
     disk_free        free bytes in the storage pool, after the reserve
     guests           how many domains it knows about
 
+With a L</partition>, the CPU keys and C<guests> are those of the partition, and
+C<partition> names it.  A domain is in the partition that its definition names
+in C<< <resource><partition> >>, and a domain that names none is in
+C</machine>, the default of libvirt.  Then:
+
+    cpus             the CPUQuota of the slice of the partition in cores,
+                     or the physical CPUs when it has none, whichever is less
+    cpus_allocatable cpus * cpu_overcommit
+    cpus_committed   vCPUs handed to running guests of the partition
+    cpus_free        allocatable less committed, with no reserve
+    guests           how many domains of the partition it knows about
+    host             the CPU keys and guests above, for the whole hypervisor
+
+The reserve is for the host, so only C<host> takes it off.  The quota is what
+the guests of the partition can use, so it is what their vCPUs overcommit.
+L<Trog::HV/shortfalls(%needs)> refuses a guest when either the partition or the
+host has no room.  So a runner with a partition of its own cannot fill the
+hypervisor for the guests outside it.  Memory and disk stay as they are,
+because the memory of the host is shared whoever holds it, and the disk is
+already that of the pool.
+
 Dies if libvirt does not answer, because a guest must not go on a hypervisor
 that cannot give these values.
 
@@ -1844,29 +1906,60 @@ sub capacity {
     my $node    = $self->vmm->get_node_info();
     my @domains = $self->vmm->list_all_domains();
 
-    my ( $memory_committed, $cpus_committed ) = ( 0, 0 );
+    my $partition = $self->partition;
+
+    my ( $memory_committed, $cpus_committed, $ours, $our_cpus ) = ( 0, 0, 0, 0 );
     foreach my $domain (@domains) {
         my $info = eval { $domain->get_info() } or next;
 
+        my $vcpus = eval { $domain->is_active() } ? $info->{nrVirtCpu} // 0 : 0;
+        $cpus_committed += $vcpus;
+
         # maxMem is the most memory the guest can use, so it counts in full.
-        $memory_committed += ( $info->{maxMem}    // 0 ) / $Provisioner::Vars::KB;
-        $cpus_committed   += ( $info->{nrVirtCpu} // 0 ) if eval { $domain->is_active() };
+        $memory_committed += ( $info->{maxMem} // 0 ) / $Provisioner::Vars::KB;
+
+        next unless defined $partition;
+        my $xml = eval { $domain->get_xml_description() } // q{};
+        my ($in) = $xml =~ m{<partition>\s*([^<\s]+)\s*</partition>};
+        next unless ( $in // '/machine' ) eq $partition;
+        $ours++;
+        $our_cpus += $vcpus;
     }
 
     my $memory_mb        = ( $node->{memory} // 0 ) / $Provisioner::Vars::KB;
     my $cpus             = $node->{cpus} // 0;
     my $cpus_allocatable = $cpus * $self->cpu_overcommit;
 
-    return $self->{capacity} = {
-        memory_mb        => $memory_mb,
-        memory_committed => $memory_committed,
-        memory_free      => $memory_mb - $memory_committed - $self->reserve_memory,
+    my %host = (
         cpus             => $cpus,
         cpus_allocatable => $cpus_allocatable,
         cpus_committed   => $cpus_committed,
         cpus_free        => $cpus_allocatable - $cpus_committed - $self->reserve_cpus,
-        disk_free        => $self->pool_free() - $self->reserve_disk,
         guests           => scalar @domains,
+    );
+
+    my %cpus = %host;
+    if ( defined $partition ) {
+        my $quota = $self->slice_cpu_quota( partition_slice($partition) );
+        my $share = defined $quota && $quota < $cpus ? $quota : $cpus;
+        my $total = int( $share * $self->cpu_overcommit );
+        %cpus = (
+            cpus             => $share,
+            cpus_allocatable => $total,
+            cpus_committed   => $our_cpus,
+            cpus_free        => $total - $our_cpus,
+            guests           => $ours,
+            partition        => $partition,
+            host             => \%host,
+        );
+    }
+
+    return $self->{capacity} = {
+        memory_mb        => $memory_mb,
+        memory_committed => $memory_committed,
+        memory_free      => $memory_mb - $memory_committed - $self->reserve_memory,
+        disk_free        => $self->pool_free() - $self->reserve_disk,
+        %cpus,
     };
 }
 
@@ -2911,7 +3004,7 @@ sub runner_account_plan {
     if ( defined $args{partition} ) {
         die "partition '$args{partition}' has to be /machine/NAME: libvirt makes NAME a slice under machine.slice\n"
           unless $args{partition} =~ m{\A/machine/[[:lower:]\d_]+\z};
-        $slice = 'machine-' . File::Basename::basename( $args{partition} ) . '.slice';
+        $slice = partition_slice( $args{partition} );
     }
     die "cpu_quota and io_weight are limits of the slice, and need a partition\n"
       if !$slice && ( defined $args{cpu_quota} || defined $args{io_weight} );

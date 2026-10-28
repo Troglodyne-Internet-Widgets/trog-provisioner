@@ -80,7 +80,11 @@ through, and the version of it that matters.  See L</$module = $hv-E<gt>require_
 =item * C<capacity>, in the form that L</shortfalls(%needs)> and
 L</headroom(%needs)> read: a hash with C<memory_mb>, C<memory_free>,
 C<memory_committed>, C<cpus>, C<cpus_allocatable>, C<cpus_committed>,
-C<cpus_free>, C<disk_free> and C<guests>.
+C<cpus_free>, C<disk_free> and C<guests>.  A backend that holds the guests
+of one block apart from the rest of the hypervisor, as a libvirt
+C<partition> does, gives the CPU keys and C<guests> of that share, its name
+as C<partition>, and the same keys for the whole hypervisor as C<host>.  A
+guest must then fit in both.
 
 =item * C<monthly_cost>, if a guest costs money there.  See
 L</monthly_cost(%needs)>.
@@ -812,7 +816,10 @@ The limits from F<hypervisors.conf>.  C<reserve_memory> is the MB to keep for
 the host, and C<reserve_cpus> is the CPUs to keep for the host.  C<reserve_disk>
 is the bytes to keep free in the pool.  C<max_guests> caps the domain count, and
 0 means no cap.  C<cpu_overcommit> is the acceptable number of vCPUs for each
-physical CPU.  The defaults are 2048MB, 1 CPU, 10GB, no cap, and 4.
+physical CPU.  When the block names a C<partition>, C<max_guests> counts the
+domains of that partition, and C<cpu_overcommit> applies to the CPUs of its
+quota as well as to the host.  See L<Trog::HV::Libvirt/capacity>.  The defaults
+are 2048MB, 1 CPU, 10GB, no cap, and 4.
 
 =cut
 
@@ -907,18 +914,28 @@ sub shortfalls {
         $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory
     ) if defined $have->{memory_free} && ( $needs{memory_mb} // 0 ) > $have->{memory_free};
 
+    # A partition has room of its own, and the host that it is on must have
+    # room as well.  See capacity in Trog::HV::Libvirt.
+    my $host = $have->{host};
     push @reasons, sprintf(
-        'needs %d vCPUs, %d free (%d CPUs x%d overcommit, %d committed, %d reserved)',
-        $needs{cpus},  $have->{cpus_free},
-        $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}, $self->reserve_cpus
-    ) if defined $have->{cpus_free} && ( $needs{cpus} // 0 ) > $have->{cpus_free};
+        'needs %d vCPUs, %d free in the partition %s (%s CPUs for it x%d overcommit, %d committed there)',
+        $needs{cpus},  $have->{cpus_free},    $have->{partition},
+        $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}
+    ) if $host && defined $have->{cpus_free} && ( $needs{cpus} // 0 ) > $have->{cpus_free};
+
+    my $whole = $host // $have;
+    push @reasons, sprintf(
+        'needs %d vCPUs, %d free%s (%d CPUs x%d overcommit, %d committed, %d reserved)',
+        $needs{cpus},   $whole->{cpus_free}, ( $host ? ' on the host' : q{} ),
+        $whole->{cpus}, $self->cpu_overcommit, $whole->{cpus_committed}, $self->reserve_cpus
+    ) if defined $whole->{cpus_free} && ( $needs{cpus} // 0 ) > $whole->{cpus_free};
 
     push @reasons, sprintf(
         'needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
         gb( $needs{disk_bytes} ), gb( $have->{disk_free} ), gb( $self->reserve_disk )
     ) if defined $have->{disk_free} && ( $needs{disk_bytes} // 0 ) > $have->{disk_free};
 
-    push @reasons, sprintf( 'already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests )
+    push @reasons, sprintf( 'already has %d guests%s, and max_guests is %d', $have->{guests}, ( $host ? " in the partition $have->{partition}" : q{} ), $self->max_guests )
       if $self->max_guests && $have->{guests} >= $self->max_guests;
 
     return @reasons;
@@ -953,6 +970,9 @@ sub headroom {
     push @fractions, fraction( $have->{memory_free}, $have->{memory_mb},                                                                    $needs{memory_mb} );
     push @fractions, fraction( $have->{cpus_free},   $have->{cpus_allocatable},                                                             $needs{cpus} );
     push @fractions, fraction( $have->{disk_free},   defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
+
+    # A partition is as roomy as the host that it is on, at most.
+    push @fractions, fraction( $have->{host}{cpus_free}, $have->{host}{cpus_allocatable}, $needs{cpus} ) if $have->{host};
 
     my ($tightest) = sort { $a <=> $b } @fractions;
     return $tightest;
