@@ -12,6 +12,7 @@ like($which, qr/\S/, 'lexicon is installed') or diag 'no lexicon on PATH';
 my $help = `lexicon --help 2>&1`;
 is($?, 0, 'and it starts') or diag $help;
 
+[% UNLESS unmanaged -%]
 # The shortcut that an operator uses.  It contains the credentials.
 my $shortcut = '/opt/lexicon/[% domain %]';
 
@@ -25,6 +26,7 @@ ok(!-d $shortcut, 'as a file, and not a directory of per-provider shortcuts');
 my @st = stat $shortcut;
 is($st[4] // -1, 0, 'owned by root, since it carries the credentials') if @st;
 is(($st[2] // 0) & 07777, 0700, 'and readable by nobody else') if @st;
+[% END -%]
 
 # The easydns provider against a fake API, which records what it sends.  The
 # patch lexicon-easydns-priority moves the priority of an MX out of the
@@ -58,6 +60,7 @@ is($types, "easydns refuses TLSA\npowerdns takes TLSA\n", 'powerdns takes any ty
 my $identifier = `python3 -I -c 'from lexicon._private.providers.powerdns import Provider; c = "v=DKIM1; p=ab/cd+ef/gh=="; print(Provider._parse_identifier(None, Provider._make_identifier(None, "TXT", "x.zone.test.", c))[2])' 2>&1`;
 is($identifier, "v=DKIM1; p=ab/cd+ef/gh==\n", 'the powerdns provider reads back the content of a record that holds a slash, so it can delete it') or diag $identifier;
 
+[% UNLESS unmanaged -%]
 # An argument with spaces in it, such as the content of an SPF record, reaches
 # lexicon whole.  A fake lexicon early on PATH prints the last argument that
 # arrives.
@@ -76,5 +79,6 @@ is($identifier, "v=DKIM1; p=ab/cd+ef/gh==\n", 'the powerdns provider reads back 
 
 my $text = do { local (@ARGV, $/) = $shortcut; <> } // '';
 like($text, qr/^export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN=/m, 'carrying the token lexicon reads');
+[% END -%]
 
 done_testing();

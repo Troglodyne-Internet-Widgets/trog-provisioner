@@ -108,6 +108,13 @@ subtest 'output_is_redirected: no person to answer, so no question to show' => s
     close($null) or die "Cannot close /dev/null: $!";
 };
 
+subtest 'interactive: nobody to ask without a terminal at standard input' => sub {
+    open( my $null, '<', '/dev/null' ) or die "Cannot open /dev/null: $!";
+    local *STDIN = $null;
+    is( Trog::Utils::interactive(), 0, 'standard input that is not a terminal is nobody who can answer' );
+    close($null) or die "Cannot close /dev/null: $!";
+};
+
 subtest 'slots_in: every place in a structure, with its path' => sub {
     my $config = { nginx => { listen => [ { port => 80 }, 443 ] }, bare => undef, empty => {} };
     my @slots  = Trog::Utils::slots_in( \$config );

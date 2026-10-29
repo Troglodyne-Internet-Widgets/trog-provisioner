@@ -340,7 +340,6 @@ CONF
     $linode->redefine( shortfalls   => sub { my ( undef, %needs ) = @_; return $needs{linode_type} ? () : 'names no linode_type, so it is not built on Linode' } );
     $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
 
-    my $local = Test::MockModule->new('Trog::Local');
     my ( $asked, $answer );
     my $utils = Test::MockModule->new('Trog::Utils');
     $utils->redefine( prompt => sub { $asked = shift; return $answer } );
@@ -350,7 +349,7 @@ CONF
     $cookbook->redefine( record_global => sub { my ( undef, @args ) = @_; $written = \@args; return '/bogus/recipes.d/vm.test.test.yaml' } );
 
     # Nobody to answer: the offer is the error, so a cron or a button gets it.
-    $local->redefine( interactive => sub { 0 } );
+    $utils->redefine( interactive => sub { 0 } );
     my $config = { memory => 8192, cpus => 2, size => 40 * $GB };
     my $err    = exception { $fleet->select_for( 'vm.test.test', $config ) };
     like $err, qr/Nothing[ ]in[ ]\N*has[ ]room[ ]for[ ]vm[.]test[.]test/, 'it says nothing had room';
@@ -370,7 +369,7 @@ CONF
     $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
 
     # Somebody to answer, who says no.
-    $local->redefine( interactive => sub { 1 } );
+    $utils->redefine( interactive => sub { 1 } );
     $answer = 'n';
     $err    = exception {
         quietly( sub { $fleet->select_for( 'vm.test.test', $config ) } )
@@ -405,10 +404,9 @@ CONF
     $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
     $linode->redefine( shortfalls   => sub { return 'a g6-standard-2 costs more than the account has left' } );
 
-    my $local = Test::MockModule->new('Trog::Local');
-    $local->redefine( interactive => sub { 1 } );
     my $utils = Test::MockModule->new('Trog::Utils');
-    $utils->redefine( prompt => sub { return 'y' } );
+    $utils->redefine( interactive => sub { 1 } );
+    $utils->redefine( prompt      => sub { return 'y' } );
 
     my $written;
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
@@ -427,8 +425,8 @@ subtest 'an offer nobody can make is the shortfall, not an offer' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
     my $room  = with_capacity( hv1 => capacity( memory_free => 512 ), hv2 => capacity( memory_free => 512 ) );
 
-    my $local = Test::MockModule->new('Trog::Local');
-    $local->redefine( interactive => sub { 1 } );
+    my $utils = Test::MockModule->new('Trog::Utils');
+    $utils->redefine( interactive => sub { 1 } );
 
     my $err = exception { $fleet->select_for( 'vm.test.test', { memory => 8192, cpus => 2, size => 40 * $GB } ) };
     like $err,   qr/Nowhere[ ]to[ ]put[ ]vm\.test\.test/, 'a fleet of machines alone says what it always said';

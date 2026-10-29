@@ -23,7 +23,9 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use File::Temp();
+use File::Slurper();
 use File::Slurper::Temp();
+use YAML::XS();
 
 use Provisioner::Cookbook();
 use Trog::Utils();
@@ -1182,6 +1184,29 @@ subtest 'configured_fetch_hosts: what the domains this installation has will act
 
     is_deeply( [@configured], [ sort @configured ], 'sorted' );
     is( scalar( grep { $_ eq 'github.com' } @configured ), 1, 'and once each, however many domains name it' );
+};
+
+subtest 'record_setting writes one setting into the file of the domain' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml",                  "_base:\n  _global:\n    distro: ubuntu\nset.test:\n  registrar:\n    unmanaged: 0\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.d/somewhere.test.yaml", "somewhere.test:\n  _global:\n    memory: 2048\n  registrar:\n" );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    my $path = Provisioner::Cookbook->record_setting( 'somewhere.test', 'registrar', unmanaged => 1 );
+    is( $path, "$dir/recipes.d/somewhere.test.yaml", 'the file of the domain' );
+    is_deeply(
+        YAML::XS::Load( File::Slurper::read_binary($path) ),
+        { 'somewhere.test' => { _global => { memory => 2048 }, registrar => { unmanaged => 1 } } },
+        'holds the setting in its block, and everything that it held before'
+    );
+    is( Provisioner::Cookbook->domain_config('somewhere.test')->{registrar}{unmanaged}, 1, 'and the configuration that this process reads has it' );
+
+    Provisioner::Cookbook->record_setting( 'new.test', 'registrar', unmanaged => 1 );
+    is_deeply( YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.d/new.test.yaml") ), { 'new.test' => { registrar => { unmanaged => 1 } } }, 'a domain with no file gets one' );
+
+    like( exception { Provisioner::Cookbook->record_setting( 'set.test', 'registrar', unmanaged => 1 ) }, qr/already[ ]sets[ ]registrar[.]unmanaged[ ]for[ ]set[.]test/, 'and a setting that recipes.yaml makes is not written where it would not take effect' );
+    Provisioner::Cookbook->forget();
 };
 
 subtest 'configured_fetch_hosts copes with a configuration that is not there' => sub {

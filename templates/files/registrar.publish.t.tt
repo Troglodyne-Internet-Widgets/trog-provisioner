@@ -2,6 +2,11 @@
     included in its guest test.  Asked of the provider rather than of
     a resolver, because a resolver answers out of its cache. -%]
 [% IF publish_records -%]
+[% IF unmanaged -%]
+# Nothing writes the zone of this domain.  See unmanaged in
+# Provisioner::Recipe::registrar.
+pass('this recipe publishes nothing in the zone of this domain');
+[% ELSE -%]
 subtest 'the records of the domain are published to the zone that holds it' => sub {
     my $shortcut = '/opt/lexicon/[% domain %]';
     ok(-x $shortcut, 'the lexicon shortcut, which holds the credential, is installed') or return;
@@ -59,6 +64,7 @@ subtest 'the records of the domain are published to the zone that holds it' => s
     }
 [% END -%]
 };
+[% END -%]
 [% FOREACH zone IN zone_access.keys().sort() -%]
 
 subtest 'the names in [% zone %] are published there, through its own shortcut' => sub {

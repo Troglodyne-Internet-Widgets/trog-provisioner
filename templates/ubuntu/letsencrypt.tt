@@ -1,3 +1,8 @@
+[%# Nothing for a domain whose zone nothing here writes, which keeps its
+    self-signed certificate.  See Provisioner::Recipe::letsencrypt. -%]
+[% IF unmanaged -%]
+rm -f dehydrated.domain domains.txt domain.hook get_cert
+[% ELSE -%]
 mv dehydrated.domain /etc/dehydrated/domains.d/[% domain %].conf
 mv domains.txt /etc/dehydrated/sans/[% domain %].txt
 mv domain.hook /etc/dehydrated/hooks/[% domain %].sh
@@ -16,3 +21,4 @@ chmod +x /etc/letsencrypt/fetchers/[% domain %]
 [%# The script reloads the services that read the certificate.  See
     Provisioner::Recipe::letsencrypt. -%]
 [% script_dir %]/queue_postrun_task /etc/letsencrypt/fetchers/[% domain %]
+[% END -%]

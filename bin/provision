@@ -546,7 +546,7 @@ sub cycles_left_up {
         last if scalar( keys %found ) < scalar(@guests);
 
         print "These guests are up, and each one needs the next one to be up first:\n" . join( q{}, map { "    $_->{by} names $_->{domain} in $_->{setting}\n" } @cycle ) . "This run leaves them as they are, but none of them can be rebuilt until one of these settings changes.\n";
-        die "There is no terminal to ask whether to go on, so $domain was not built.\n" unless Trog::Local->interactive;
+        die "There is no terminal to ask whether to go on, so $domain was not built.\n" unless Trog::Utils::interactive();
         my $answer = Trog::Utils::prompt("Build $domain anyway? [y/N]:") // q{};
         die "$domain was not built.\n" unless "$answer" =~ m/\A\s*y/i;
 
@@ -1008,7 +1008,7 @@ sub provision_domain (%args) {
 
         # With no terminal, stop.  A prompt that nobody answers hangs the run,
         # and make and agents run this.
-        $behavior = Trog::Local->interactive ? ask_about_nonreusable($domain) : $NONREUSABLE{stop}
+        $behavior = Trog::Utils::interactive() ? ask_about_nonreusable($domain) : $NONREUSABLE{stop}
           if $behavior == $NONREUSABLE{ask};
 
         die "Refusing to rebuild $domain: it is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding would destroy the guest and everything on it.\n" . "Pass --clone-on-nonreusable to copy the disk aside first, or --destroy-on-nonreusable to do it anyway.\n"

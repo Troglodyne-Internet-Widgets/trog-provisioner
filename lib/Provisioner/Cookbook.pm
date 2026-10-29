@@ -1661,13 +1661,28 @@ sub base_global {
 
 =head2 record_global($domain, $key, $value)
 
-Writes one C<_global> setting of a domain into its own file,
-F<recipes.d/$domain.yaml>, making the file when there is none, and leaving
-everything else in it as it was.  Returns the path it wrote.
+C<record_setting> for the C<_global> of the domain.
 
 It is for a setting that a person agreed to rather than typed: the size an
 operator accepted for a guest that fitted nowhere else.  See
 L<Trog::Hypervisors/select_for($domain, $config)>.
+
+=cut
+
+sub record_global {
+    my ( $class, $domain, $key, $value ) = @_;
+    return $class->record_setting( $domain, '_global', $key, $value );
+}
+
+=head2 record_setting($domain, $block, $key, $value)
+
+Writes one setting of the block C<$block> of a domain, such as a recipe or
+C<_global>, into the own file of the domain, F<recipes.d/$domain.yaml>.  It
+makes the file when there is none, and leaves everything else in it as it was.
+Returns the path it wrote.
+
+It is for a setting that a person agreed to at a prompt, so that the next run
+does not ask again.  See L<Provisioner::Recipe::registrar/zone_unmanaged>.
 
 A file of a domain adds to F<recipes.yaml> and does not override it, so a value
 in F<recipes.yaml> would win over what this writes.  It refuses rather than
@@ -1675,18 +1690,18 @@ writing something that would not take effect, and says which file to edit.
 
 =cut
 
-sub record_global {
-    my ( $class, $domain, $key, $value ) = @_;
+sub record_setting {
+    my ( $class, $domain, $block, $key, $value ) = @_;
 
     my $main = Trog::Config->path('recipes.yaml');
     my $held = eval { YAML::XS::Load( File::Slurper::read_binary($main) ) } // {};
-    die "$main already sets $key for $domain, and a domain's own file does not override it.\n" . "Change it there.\n"
-      if defined $held->{$domain}{_global}{$key};
+    die "$main already sets $block.$key for $domain, and a domain's own file does not override it.\n" . "Change it there.\n"
+      if defined $held->{$domain}{$block}{$key};
 
     my $path = Trog::Config->path("recipes.d/$domain.yaml");
     my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($path) ) } // {};
 
-    $conf->{$domain}{_global}{$key} = $value;
+    $conf->{$domain}{$block}{$key} = $value;
     File::Slurper::Temp::write_binary( $path, YAML::XS::Dump($conf) );
 
     # What is on disk has changed under the copy this process read.

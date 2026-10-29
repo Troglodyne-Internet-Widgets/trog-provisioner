@@ -61,12 +61,18 @@ L<Provisioner::Recipe::registrar/credentials_for> returns for the domain.  It
 dies when C<credentials_for> dies, for example when no server of this
 installation holds the zone and the registrar names no provider.
 
+It also adds C<unmanaged>, as L<Provisioner::Recipe::registrar/unmanaged>
+answers it.  Where that is true, C<lexicon> is empty, and the guest gets no
+shortcut for the domain.
+
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{lexicon} = { Provisioner::Cookbook->load('registrar')->credentials_for(%opts) };
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    $opts{unmanaged} = $registrar->unmanaged( $opts{domain} );
+    $opts{lexicon}   = $opts{unmanaged} ? {} : { $registrar->credentials_for(%opts) };
 
     return %opts;
 }

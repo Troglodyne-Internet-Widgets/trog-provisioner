@@ -403,6 +403,30 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
     );
 };
 
+subtest 'a domain whose zone nothing here writes keeps its self-signed certificate' => sub {
+    my %on    = ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin', admin_email => 'someadmin@test.test', script_dir => '/root/bin', modules => [qw{cron registrar lexicon letsencrypt}] );
+    my $built = sub ($name) {
+        my $recipe = Provisioner::Cookbook->load( $name, distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => tempdir( CLEANUP => 1 ), distro => 'ubuntu' );
+        return $name eq 'cron' ? $recipe->render_file( 'files/cron.root.domain.tt', %on ) : $recipe->render(%on);
+    };
+    my %sign = (
+        letsencrypt => qr{queue_postrun_task[ ]/etc/letsencrypt/fetchers/\Q$PUBLIC\E$}m,
+        lexicon     => qr{^mv[ ]lexicon[.]sh[ ]/opt/lexicon/\Q$PUBLIC\E$}m,
+        cron        => qr{[ ]--config[ ]/etc/dehydrated/domains[.]d/\Q$PUBLIC\E[.]conf[ ]},
+    );
+    my %what = ( letsencrypt => 'the fetcher of the certificate', lexicon => 'the lexicon shortcut of the domain', cron => 'the nightly renewal' );
+
+    {
+        my $managed = with_registrar();
+        like( $built->($_), $sign{$_}, "$what{$_} is set up where a provider holds the zone" ) foreach qw{letsencrypt lexicon cron};
+    }
+
+    my $unmanaged = with_registrar( registrar => { unmanaged => 1 } );
+    unlike( $built->($_), $sign{$_}, "$what{$_} is left out where nothing here writes the zone" ) foreach qw{letsencrypt lexicon cron};
+    my %opts = fresh()->enrich(%on);
+    is_deeply( $opts{lexicon}, {}, 'and the hook gets no credential' );
+};
+
 subtest 'a public guest that holds its own zone answers its own challenge' => sub {
 
     # A public name whose zone this fleet serves: the registrar of _base is

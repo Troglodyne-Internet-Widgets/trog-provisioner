@@ -11,7 +11,6 @@ use List::Util qw{any reduce};
 use Config::Simple();
 use Trog::Guest();
 use Trog::HV();
-use Trog::Local();
 use Trog::Utils();
 use Provisioner::Cookbook();
 use Provisioner::Vars();
@@ -539,7 +538,7 @@ sub offer {
     my $what = sprintf( "Nothing in %s has room for %s.\n%s would build it as a %s, at %.2f a month%s.\n", $self->{path}, $domain, $best->{hv}->name, $best->{value}, $best->{monthly_cost}, $rate );
 
     die $why . "\n" . $what . "To build it there, put this in the _global of $domain:\n\n    $line\n"
-      unless Trog::Local->interactive;
+      unless Trog::Utils::interactive();
 
     print $what;
     my $answer = Trog::Utils::prompt("Build $domain there? [y/N]:");
