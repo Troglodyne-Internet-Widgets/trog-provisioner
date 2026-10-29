@@ -499,8 +499,7 @@ sub global_args {
                     },
                 },
             },
-            nameservers => { type => 'object', additionalProperties => { type => 'string' },                               description => 'The public nameservers for the zones this fleet serves.' },
-            aliases     => { type => 'object', additionalProperties => { type => 'array', items => { type => 'string' } }, description => 'Every domain in the map, and the names that also answer for it.' },
+            aliases => { type => 'object', additionalProperties => { type => 'array', items => { type => 'string' } }, description => 'Every domain in the map, and the names that also answer for it.' },
 
             users => {
                 type        => 'array',

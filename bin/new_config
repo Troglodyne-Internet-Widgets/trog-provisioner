@@ -735,7 +735,6 @@ sub handle_domain {
     my $admin_user  = $global_config->{admin_user};
     my $admin_gecos = $global_config->{admin_gecos};
     my $admin_email = $global_config->{admin_email};
-    my $ns_conf     = $global_config->{nameservers};
 
     # From a file, not from GitHub at first boot, so that a provision does not
     # wait on GitHub.  A file also takes a raw public key.
@@ -951,7 +950,6 @@ sub handle_domain {
     $global_config->{network_peers} = \@network_peers;
     $global_config->{disk_devices}  = [ $hv->guest_disks ];
     $global_config->{aliases}       = $alias_conf;
-    $global_config->{nameservers}   = $ns_conf;
     $global_config->{main_ip}       = $static_ip // $cloud_ip;
     $global_config->{tld_ip}        = $tld_ip;
     $global_config->{transfer_user} = $transfer_user;

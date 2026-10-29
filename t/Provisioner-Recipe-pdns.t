@@ -49,7 +49,6 @@ my %VARS = (
     admin_email => 'someadmin@zone.test',
     ipmap       => { $DOMAIN => '192.0.2.50' },
     aliases     => { $DOMAIN => [ "www.$DOMAIN", "mail.$DOMAIN" ] },
-    nameservers => {},
     modules     => [],
     install_dir => '/opt/domains',
     admin_user  => 'someadmin',
@@ -312,7 +311,7 @@ subtest 'a zone that an account names this guest the authority of is built here,
             distro        => 'ubuntu',
         );
     };
-    my %opts = ( %VARS, nameservers => { ns2 => 'ns2.zone.test' }, api_key => 'a-key' );
+    my %opts = ( %VARS, api_key => 'a-key' );
 
     is_deeply( { $recipe->()->validate(%opts) }->{held_zones}, [qw{customer.test other.test}], 'the zones of the accounts that name it, and of no other' );
 
@@ -320,7 +319,6 @@ subtest 'a zone that an account names this guest the authority of is built here,
     like( $script, qr{^\$ORIGIN[ ]customer[.]test[.]$}m,             'each zone gets a zone file' );
     like( $script, qr{^\@\s+IN\s+SOA\s+ns1[.]\Q$DOMAIN\E[.][ ]}m,    'whose SOA names this guest' );
     like( $script, qr{^\@[ ]300[ ]IN[ ]NS[ ]ns1[.]\Q$DOMAIN\E[.]$}m, 'and so does an NS record' );
-    like( $script, qr{^\@[ ]300[ ]IN[ ]NS[ ]ns2[.]zone[.]test[.]$}m, 'beside the other nameservers of the installation' );
     my $asks = qr{sqlite3[ ]\S+zones[.]db[ ]"SELECT[ ].*};
     $asks = qr{${asks}name='customer[.]test'"};
     like( $script, qr{^$asks[ ][|][ ]grep[ ]-q[ ][.][ ][|][|][ ]}m, 'loaded only where the database does not hold it yet' );

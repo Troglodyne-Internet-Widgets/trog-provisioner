@@ -84,7 +84,6 @@ sub testdeps_target {
         admin_user    => 'someadmin',
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
-        nameservers   => { ns1 => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
 
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";

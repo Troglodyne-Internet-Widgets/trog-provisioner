@@ -39,7 +39,6 @@ File::Slurper::Temp::write_text(
     YAML::XS::Dump(
         {
             _base => {
-                _global   => { nameservers => { ns2 => 'NS2.other.test.' } },
                 registrar => {
                     accounts => {
                         ours   => { authority => 'ns.ours.test', zones => [$ZONE] },
@@ -77,25 +76,22 @@ sub check_against {
 }
 
 my %public = (
-    "$ZONE NS"           => { answer => [ "$ZONE NS ns1.ns.ours.test.", "$ZONE NS ns2.other.test." ] },
+    "$ZONE NS"           => { answer => ["$ZONE NS NS1.ns.ours.test."] },
     'ns1.ns.ours.test A' => { answer => ['ns1.ns.ours.test A 192.0.2.53'] },
-    'ns2.other.test A'   => { answer => ['ns2.other.test A 198.51.100.53'] },
 );
-my $soa = { answer => ["$ZONE SOA ns1.ns.ours.test. hostmaster.ours.test. 1 300 300 1209600 10800"], aa => 1 };
+my $soa  = { answer => ["$ZONE SOA ns1.ns.ours.test. hostmaster.ours.test. 1 300 300 1209600 10800"], aa => 1 };
+my %held = ( '192.0.2.53' => { "$ZONE SOA" => $soa } );
 
-subtest 'a zone delegated to exactly the nameservers that hold it here passes' => sub {
-    my %held = ( '192.0.2.53' => { "$ZONE SOA" => $soa }, '198.51.100.53' => { "$ZONE SOA" => $soa } );
+subtest 'a zone delegated to exactly the nameserver that holds it here passes' => sub {
     my ( $rc, $out ) = check_against( { '1.1.1.1' => \%public, %held }, $ZONE );
     is( $rc, 0, 'it exits 0' ) or diag $out;
-    like( $out, qr/^[ ]{4}ns1[.]ns[.]ours[.]test$/m,           'it expects ns1 of the authority' );
-    like( $out, qr/^[ ]{4}ns2[.]other[.]test$/m,               'and the nameservers of _global, in the form that DNS compares' );
-    like( $out, qr/ns1[.]ns[.]ours[.]test[ ]answers[ ]for[ ]/, 'and it asked each of them' );
+    like( $out, qr/^[ ]{4}ns1[.]ns[.]ours[.]test$/m,           'it expects ns1 of the authority, in the form that DNS compares' );
+    like( $out, qr/ns1[.]ns[.]ours[.]test[ ]answers[ ]for[ ]/, 'and it asked it' );
     like( $out, qr/\Q$ZONE\E[ ]is[ ]delegated[ ]here[.]/,      'and says so' );
 };
 
 subtest 'a delegation that names another nameserver, or none, fails and says what it found' => sub {
-    my %stray = ( %public, "$ZONE NS" => { answer => [ "$ZONE NS ns1.ns.ours.test.", "$ZONE NS ns2.other.test.", "$ZONE NS dns1.registrar.test." ] } );
-    my %held  = ( '192.0.2.53' => { "$ZONE SOA" => $soa }, '198.51.100.53' => { "$ZONE SOA" => $soa } );
+    my %stray = ( %public, "$ZONE NS" => { answer => [ "$ZONE NS ns1.ns.ours.test.", "$ZONE NS dns1.registrar.test." ] } );
     my ( $rc, $out ) = check_against( { '1.1.1.1' => \%stray, %held }, $ZONE );
     is( $rc, 1, 'a stray nameserver fails' );
     like( $out, qr/^[ ]{4}dns1[.]registrar[.]test$/m,       'and is named' );
@@ -109,11 +105,15 @@ subtest 'a delegation that names another nameserver, or none, fails and says wha
 };
 
 subtest 'a nameserver that does not hold the zone fails, with the reason' => sub {
-    my ( $rc, $out ) = check_against( { '1.1.1.1' => \%public, '192.0.2.53' => { "$ZONE SOA" => { %$soa, aa => 0 } }, '198.51.100.53' => {} }, $ZONE );
+    my ( $rc, $out ) = check_against( { '1.1.1.1' => \%public, '192.0.2.53' => { "$ZONE SOA" => { %$soa, aa => 0 } } }, $ZONE );
     is( $rc, 1, 'it fails' );
-    like( $out, qr/ns1[.]ns[.]ours[.]test[ ]at[ ]192[.]0[.]2[.]53[ ]/,            'an answer' );
-    like( $out, qr/but[ ]without[ ]authority/,                                    'without authority is no delegation' );
-    like( $out, qr/ns2[.]other[.]test[ ]at[ ]198[.]51[.]100[.]53[ ]did[ ]not[ ]/, 'and nor is no answer' );
+    my $at = qr/ns1[.]ns[.]ours[.]test[ ]at[ ]192[.]0[.]2[.]53[ ]/;
+    like( $out, $at,                           'an answer' );
+    like( $out, qr/but[ ]without[ ]authority/, 'without authority is no delegation' );
+
+    ( $rc, $out ) = check_against( { '1.1.1.1' => \%public, '192.0.2.53' => {} }, $ZONE );
+    is( $rc, 1, 'and so does a nameserver that does not answer' );
+    like( $out, qr/${at}did[ ]not[ ]/, 'which it says' );
 };
 
 subtest 'a zone that no account with an authority lists is refused' => sub {

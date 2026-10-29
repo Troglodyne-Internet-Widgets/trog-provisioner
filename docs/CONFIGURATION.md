@@ -38,9 +38,6 @@ _base:
     admin_user: test
     admin_gecos: Testy Testerson
     admin_email: test@test.test
-    nameservers:
-      ns1: ns1.test.test
-      ns2: ns2.test.test
 
 tickle.test.test:
   _global:

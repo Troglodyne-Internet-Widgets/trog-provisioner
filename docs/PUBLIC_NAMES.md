@@ -110,13 +110,13 @@ pdns guest of this installation holds the zone.
                    zones: [ customer.example ]
    ```
 
-2. Rebuild the pdns guest.  It builds the zone, with an `SOA` record and `NS`
-   records for `ns1` of the guest and for each of the `nameservers` of
-   `_global`.  A zone that its database holds already stays as it is.
+2. Rebuild the pdns guest.  It builds the zone, with an `SOA` record and an `NS`
+   record for `ns1` of the guest, which is the one nameserver of the zone.  A
+   zone that its database holds already stays as it is.
 
-3. Run `bin/check_delegation customer.example`.  It prints the nameservers
-   that the zone must be delegated to.  Give them to the owner, who sets them
-   as the `NS` records of the zone at their registrar.  The owner removes
+3. Run `bin/check_delegation customer.example`.  It prints the nameserver
+   that the zone must be delegated to.  Give it to the owner, who sets it as
+   the `NS` record of the zone at their registrar.  The owner removes
    every other `NS` record, because the CA can ask any of them for a
    challenge.
 

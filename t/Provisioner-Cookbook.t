@@ -1239,6 +1239,7 @@ subtest 'the settings of an installation are validated in one place' => sub {
     like( $own_global->( ip_pool   => { cidr => '192.0.2.0/24' } ),                           qr{/ip_pool:[ ]Properties[ ]not[ ]allowed:[ ]cidr}, 'nor the pool of the guests, as the top of ip_pool' );
     like( $own_global->( ip_pool   => { bins => { guests => { cidr => '192.0.2.0/24' } } } ), qr{/ip_pool/bins:[ ]/propertyName/guests},          'nor as a bin named guests' );
     is( $own_global->( ip_pool => { bins => { vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } } } ), undef, 'while the other bins are' );
+    like( $own_global->( nameservers => { ns2 => 'ns2.test.test' } ), qr{/nameservers:[ ]Nothing[ ]declares[ ]this[ ]setting}, 'and a zone names only the ns1 of the guest that holds it, so there are no nameservers to set' );
 
     # Six hand-written refusals, each naming one setting, in the order the
     # script happened to read them: an operator fixed one and ran it again.

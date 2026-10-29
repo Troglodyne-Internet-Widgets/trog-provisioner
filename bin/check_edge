@@ -19,14 +19,12 @@ use IO::Socket::SSL();
 use Pod::Usage qw{pod2usage};
 use Time::HiRes();
 
-use Provisioner::Cookbook();
-use Trog::Config();
 use Trog::Credentials();
 use Trog::Hypervisors();
 
 =head1 USAGE
 
-    check_edge [--credentials] [--recipes=file] EDGE GUEST NAME
+    check_edge [--credentials] EDGE GUEST NAME
 
 Checks, from this machine and from the edge, that EDGE serves the internet for
 GUEST.  EDGE runs C<openvpnclient> and C<nginxrelay>.  GUEST runs C<nginx> with
@@ -48,11 +46,6 @@ GUEST answers a ping there.
 
 =item * The resolvers.  EDGE resolves NAME through its own resolvers, and each
 of them answers.
-
-=item * The nameservers.  Each of the C<nameservers> of C<_global> answers a
-query from EDGE, with authority.  EDGE is outside the network of the fleet, so this is the path
-that a resolver on the internet takes, through the port forwards of the
-network.  A port forward that a gateway lost fails here.
 
 =item * HTTPS.  A connection from this machine to port 443 of EDGE, with NAME
 in SNI, gets a certificate that is valid for NAME, and an HTTP answer.  EDGE
@@ -80,10 +73,6 @@ Mail through the edge is not checked yet.
 
 Read the password of the store from standard input.  See L<Trog::Credentials>.
 
-=item B<--recipes> FILE
-
-The F<recipes.yaml> to read.  The default is the one of the installation.
-
 =back
 
 =cut
@@ -97,12 +86,10 @@ our $BAN_SET = 'nginxrelay-bans';
 sub main {
     my @args = @_;
 
-    my $rfile = Trog::Config->path('recipes.yaml');
     my ( $credentials, $help );
     GetOptionsFromArray(
         \@args,
         'credentials' => \$credentials,
-        'recipes=s'   => \$rfile,
         'help'        => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
@@ -110,7 +97,6 @@ sub main {
     my ( $edge_domain, $guest_domain, $name ) = @args;
 
     Trog::Credentials->load() if $credentials;
-    my $conf  = Provisioner::Cookbook->configuration($rfile);
     my $edge  = machine($edge_domain);
     my $guest = machine($guest_domain);
     my $token = 'check-edge-' . Crypt::PRNG::random_string_from( join( q{}, 'a' .. 'z', 0 .. 9 ), 12 );
@@ -118,7 +104,6 @@ sub main {
     my @results = (
         check_tunnel( $edge, $guest ),
         check_resolvers( $edge, $name ),
-        check_nameservers( $edge, values %{ Provisioner::Cookbook->base_global($conf)->{nameservers} // {} } ),
         check_https( $edge->host, $name, $token ),
         check_http( $edge->host, $name ),
         check_client_address( $guest, $token, client_address($edge), $edge->host ),
@@ -205,25 +190,6 @@ sub check_resolvers {
     return [ 0, $label, $said ] unless defined $status && $status == 0 && $said               =~ m/status:\s*NOERROR/;
     return [ 0, $label, "One of the resolvers of the edge does not answer:\n$said" ] if $said =~ m/communications[ ]error/;
     return [ 1, $label ];
-}
-
-=head2 @results = check_nameservers($edge, @nameservers)
-
-One result for each nameserver: whether it answers a query for its own name,
-from the edge, with authority and without recursion.  The edge is outside the
-network of the installation, so this is the path through its port forwards.
-
-=cut
-
-sub check_nameservers {
-    my ( $edge, @nameservers ) = @_;
-    my @results;
-    foreach my $ns ( sort @nameservers ) {
-        my $label = "the nameserver $ns answers from the internet, with authority";
-        my ( $said, $status ) = as_root( $edge, "dig +norecurse +time=3 +tries=1 \@$ns $ns A" );
-        push( @results, defined $status && $status == 0 && $said =~ m/flags:[^;]*\baa\b/ ? [ 1, $label ] : [ 0, $label, $said ] );
-    }
-    return @results;
 }
 
 =head2 [$ok, $label, $why] = check_https($address, $name, $token)

@@ -4,8 +4,8 @@ Herein lie some examples of trog-provisioner usage.
 
 ## Deploy a tCMS site
 
-With the following data in the noted files/dirs, you should be able to provision
-a tCMS site hosted by tPSGI correctly at test.test.test:
+With the following data in the noted files and directories, you can provision
+a tCMS site hosted by tPSGI at test.test.test:
 
 ### recipes.yaml, the settings every guest shares
 
@@ -17,13 +17,6 @@ _base:
         admin_user: you                # The account that administers the guests
         admin_email: test@test.test    # MAILTO for most crons
         admin_gecos: Testy McTester    # Who to blame
-        gateway: 1.1.1.1               # The gateway of the guests
-        resolvers: [1.1.1.1, 8.8.8.8]  # What the guests resolve with
-        ip_pool:
-            cidr: 192.0.2.0/26         # The static addresses a guest can get
-        nameservers:
-            ns1: ns1.test.test
-            ns2: ns2.test.test
 
 test.test.test:
     _global:
@@ -32,6 +25,20 @@ test.test.test:
 
 The administrator's public keys are not in here.  They are one per line in
 `admin_authorized_keys` beside it, and `bin/preflight` offers to seed that file.
+
+### hypervisors.conf, what the network of each hypervisor gives its guests
+
+```ini
+[hv1]
+libvirt_uri = qemu+ssh://hv1.test.test/system
+resolvers   = 192.0.2.254, 1.1.1.1
+gateway     = 192.0.2.254
+pool_cidr   = 192.0.2.0/26
+```
+
+The guests of `hv1` resolve names through `resolvers`, route through `gateway`,
+and get their static addresses from `pool_cidr`.  `docs/CONFIGURATION.md` has
+the rest of the keys of a block.
 
 ### recipes.yaml, what the guests are made of
 

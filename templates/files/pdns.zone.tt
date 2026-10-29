@@ -11,11 +11,6 @@ $TTL    300
 ; This guest is the nameserver that the zone is delegated to.
 @ 300 IN NS ns1.[% domain %].
 
-; The other nameservers in the cluster, if there are any.
-[% FOREACH ns IN nameservers.values().sort() %]
-@        300      IN NS   [% ns %].
-[% END -%]
-
 [% FOREACH subdo IN ipmap.keys().sort() %]
 [% NEXT IF subdo != domain %]
 @       IN A    [% ipmap.$subdo %]

@@ -35,8 +35,8 @@ holds>, and F<docs/PUBLIC_NAMES.md> for the whole procedure.
 
 =head2 What it asks
 
-The expected nameservers are C<ns1> of the authority, and each of the
-C<nameservers> of C<_global>, as the authority writes them into the zone.
+The expected nameserver is C<ns1> of the authority, which is the one
+nameserver that the authority writes into the zone.
 
 It asks a public resolver for the C<NS> records of ZONE, because a resolver
 here can answer from the zone that the authority holds, delegated or not.  The
@@ -110,9 +110,9 @@ sub main {
 
 =head2 @nameservers = expected($zone, $conf)
 
-The nameservers that ZONE is delegated to, sorted, in lower case: C<ns1> of
-the authority of the account that lists it, and the C<nameservers> of
-C<_global>.  Dies when no account of C<_base> with an C<authority> lists it.
+The nameservers that ZONE is delegated to, in lower case: C<ns1> of the
+authority of the account that lists it.  Dies when no account of C<_base>
+with an C<authority> lists it.
 
 =cut
 
@@ -122,9 +122,7 @@ sub expected {
     my %zones     = Provisioner::Cookbook->load('registrar')->account_zones( %{ $conf->{_base}{registrar} // {} } );
     my $authority = ( $zones{$zone} // {} )->{authority} // die "No account of the registrar in _base names an authority for $zone, so no guest of this installation holds it.\n";
 
-    my $global   = Provisioner::Cookbook->base_global($conf);
-    my @expected = sort( uniq( map { Provisioner::Utils::dns_name($_) } 'ns1.' . Provisioner::Utils::dns_name($authority), values %{ $global->{nameservers} // {} } ) );
-    return @expected;
+    return Provisioner::Utils::dns_name("ns1.$authority");
 }
 
 =head2 @nameservers = ns_of($resolver, $zone)
