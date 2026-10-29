@@ -36,8 +36,8 @@ ipmap2zones - write a zone file for each guest you name
 
 Generates BIND-style zone files, one file for each domain that you name.  The
 addresses come from the address database of L<Provisioner::IPPool>.  The
-administrator's email, the aliases and the name servers come from the
-C<_global> of F<recipes.yaml>.
+administrator's email and the aliases come from the C<_global> of
+F<recipes.yaml>.
 
 It writes each file as C<domain.zone> in the current directory, or in the
 directory that --output-dir names.
@@ -88,7 +88,6 @@ sub main {
     my $global_conf = Provisioner::Cookbook->base_globals($rconf);
     my $ip_conf     = Provisioner::IPPool::assignments();
     my $alias_conf  = Provisioner::Cookbook->alias_map($rconf);
-    my $ns_conf     = $global_conf->{nameservers} // {};
 
     my @domains = @args;
     die "Name at least one domain to generate a zone for.  See ipmap2zones --help.\n" unless @domains;
@@ -137,7 +136,6 @@ sub main {
             domain_aliases => [ $registrar->zone_aliases( domain => $domain, aliases => $alias_conf, hostnames => \@hostnames, modules => \@recipes ) ],
             address_names  => [ $registrar->zone_address_names( domain => $domain, modules => \@recipes ) ],
             zone_records   => [ $registrar->zone_records( domain => $domain, modules => \@recipes ) ],
-            nameservers    => $ns_conf,
             admin_email    => $global_conf->{admin_email},
             serial         => int time,
             extra_records  => '',

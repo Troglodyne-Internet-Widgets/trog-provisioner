@@ -84,7 +84,9 @@ subtest 'every block lands where the reader of it now looks' => sub {
     like( $said, qr/\[ip_pool\],[ ]which[ ]is[ ]pool_addresses[ ]and[ ]pool_cidr/, 'and the report says what it is now' );
     like( $said, qr/in[ ]the[ ]block[ ]of[ ]each[ ]hypervisor/,                    'and where' );
 
-    is_deeply( $global->{nameservers}, { ns1 => 'ns1.test.test' }, 'the nameservers become one key' );
+    ok( !exists $global->{nameservers}, 'the nameservers stay behind' );
+    like( $said, qr/\[nameservers\],[ ]because/,           'and the report names them' );
+    like( $said, qr/zone[ ]of[ ]a[ ]pdns[ ]guest[ ]names/, 'and says why' );
 
     # An alias belongs to the domain that answers to it, which is where
     # Provisioner::Cookbook/alias_map reads it from.

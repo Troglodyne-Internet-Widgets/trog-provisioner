@@ -15,9 +15,6 @@ $ORIGIN [% zone %].
 $TTL    300
 @       IN      SOA     [% held_nameserver %]. [% admin_email | email_for_dns %]. ( [% serial %] 300 300 1209600 10800 )
 @ 300 IN NS [% held_nameserver %].
-[% FOREACH ns IN nameservers.values().sort() -%]
-@ 300 IN NS [% ns %].
-[% END -%]
 ZONE
 zone2sql --gsqlite --zone=/var/spool/powerdns/[% zone %]/bind.zone --zone-name=[% zone %] > /var/spool/powerdns/[% zone %]/zone.sql
 sqlite3 /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% zone %]'" | grep -q . || sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% zone %]/zone.sql

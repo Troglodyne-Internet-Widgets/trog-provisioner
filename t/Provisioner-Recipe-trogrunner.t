@@ -85,14 +85,14 @@ my %HYPERVISORS = (
 
 subtest 'what the runner configures its own guests with' => sub {
     my ($dir) = built(
-        config  => { nameservers   => { ns1     => 'ns1.test.test' } },
+        config  => { transfer_user => 'fetcher' },
         recipes => { 'g.test.test' => { _global => { aliases => ['www.test.test'] } } },
     );
     my $said   = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) );
     my $global = $said->{_base}{_global};
 
-    is_deeply( $global->{nameservers},                   { ns1 => 'ns1.test.test' }, 'the nameservers' );
-    is_deeply( $said->{'g.test.test'}{_global}{aliases}, ['www.test.test'],          'and a domain of the runner keeps the aliases it was written with' );
+    is( $global->{transfer_user}, 'fetcher', 'the account that the guests fetch as' );
+    is_deeply( $said->{'g.test.test'}{_global}{aliases}, ['www.test.test'], 'and a domain of the runner keeps the aliases it was written with' );
 
     # The runner administers what it builds as whoever administers it, which is
     # what _global already says about this guest -- so nobody has to write it

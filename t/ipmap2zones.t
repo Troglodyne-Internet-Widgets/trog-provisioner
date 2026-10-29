@@ -36,13 +36,12 @@ use Provisioner::Cookbook();
 use Provisioner::IPPool();
 
 # What every domain of this installation is configured with.  The script wants
-# the administrator's address out of it, and the nameservers.
+# the administrator's address out of it.
 my %GLOBAL = (
     basedir     => '/bogus',
     admin_user  => 'someadmin',
     admin_gecos => 'Some Admin',
     admin_email => 'someadmin@test.test',
-    nameservers => { ns1 => 'ns1.test.test' },
 );
 
 my $script = "$FindBin::Bin/../bin/ipmap2zones";

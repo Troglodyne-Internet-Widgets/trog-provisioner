@@ -165,9 +165,8 @@ answers for them:
                     zones: [ customer.example ]
 
 The authority builds each of these zones, with an C<SOA> record and an C<NS>
-record that name its C<ns1>, and an C<NS> record for each of the
-C<nameservers> of C<_global>.  A rebuild keeps a zone that its database holds
-already.  See L<Provisioner::Recipe::pdns/Zones that it holds for accounts>.
+record that name its C<ns1>, which is the one nameserver of the zone.  A
+rebuild keeps a zone that its database holds already.  See L<Provisioner::Recipe::pdns/Zones that it holds for accounts>.
 
 A guest that serves a name in such a zone writes it as it writes a name of any
 account, through F</opt/lexicon/zones/ZONE>.  The shortcut reaches the API

@@ -92,16 +92,6 @@ subtest 'check_resolvers: the edge resolves a name through its own resolvers, an
     is( $nx->[0], 0, 'and when the name does not resolve' );
 };
 
-subtest 'check_nameservers: one result for each nameserver, answered with authority' => sub {
-    my $aa      = ";; flags: qr aa; QUERY: 1, ANSWER: 1\nns1.test.test. 300 IN A 198.51.100.1\n";
-    my $edge    = machine( [ qr/\@ns1[.]test[.]test/ => [ $aa, 0 ] ], [ qr/\@ns2[.]test[.]test/ => [ ";; communications error to 198.51.100.2#53: timed out\n", 9 ] ], [ qr/\@ns3[.]test[.]test/ => [ ";; flags: qr rd ra; QUERY: 1\n", 0 ] ] );
-    my @results = Provisioner::Bin::check_edge::check_nameservers( $edge, qw{ns3.test.test ns2.test.test ns1.test.test} );
-    is_deeply( [ map { $_->[0] } @results ], [ 1, 0, 0 ], 'in the order of their names: one with authority passes, one that does not answer fails, and so does one without authority' );
-    like( $results[1][2],    qr/timed[ ]out/,                                 'with what dig said' );
-    like( $edge->{asked}[0], qr/dig[ ][+]norecurse[ ]/,                       'asked without recursion' );
-    like( $edge->{asked}[0], qr/\@ns1[.]test[.]test[ ]ns1[.]test[.]test[ ]A/, 'of the nameserver itself, for its own name' );
-};
-
 subtest 'check_client_address: the request in the log of the guest, from the client' => sub {
     my $token = 'check-edge-abc';
     my $line  = sub { my ($from) = @_; return machine( [ qr/journalctl/ => [ qq{$from - - [28/Oct/2026:19:00:00 +0000] "GET /$token HTTP/1.1" 404 0 "-" "check_edge"\n}, 0 ] ] ) };
@@ -197,18 +187,9 @@ subtest 'check_https and check_http: a connection and an HTTP answer' => sub {
 
 subtest 'main: a line for each check, and the exit status' => sub {
     my $mock = Test::MockModule->new( 'Provisioner::Bin::check_edge', no_auto => 1 );
-    my $cook = Test::MockModule->new('Provisioner::Cookbook');
-    $cook->redefine( configuration   => sub { return {} } );
-    $cook->redefine( base_global     => sub { return { nameservers => { 1 => 'ns1.test.test' } } } );
-    $mock->redefine( machine         => sub { return FakeMachine->new( host => $_[0] ) } );
-    $mock->redefine( check_tunnel    => sub { return [ 1, 'tunnel' ] } );
-    $mock->redefine( check_resolvers => sub { return [ 1, 'resolvers' ] } );
-    $mock->redefine(
-        check_nameservers => sub {
-            shift;
-            return map { [ 1, "ns $_" ] } @_;
-        }
-    );
+    $mock->redefine( machine              => sub { return FakeMachine->new( host => $_[0] ) } );
+    $mock->redefine( check_tunnel         => sub { return [ 1, 'tunnel' ] } );
+    $mock->redefine( check_resolvers      => sub { return [ 1, 'resolvers' ] } );
     $mock->redefine( check_https          => sub { return [ 1, 'https' ] } );
     $mock->redefine( check_http           => sub { return [ 0, 'http', "first line\nsecond line" ] } );
     $mock->redefine( client_address       => sub { return '203.0.113.7' } );
@@ -218,10 +199,9 @@ subtest 'main: a line for each check, and the exit status' => sub {
     my $status;
     my $out = capture_stdout { $status = Provisioner::Bin::check_edge::main(qw{edge.test guest.test name.test}) };
     like( $out, qr/^ok[ ]1[ ]-[ ]tunnel$/m,                     'a line for each check, numbered' );
-    like( $out, qr/^ok[ ]3[ ]-[ ]ns[ ]ns1[.]test[.]test$/m,     'one for each nameserver of _global' );
-    like( $out, qr/^not[ ]ok[ ]5[ ]-[ ]http$/m,                 'a failure as not ok' );
+    like( $out, qr/^not[ ]ok[ ]4[ ]-[ ]http$/m,                 'a failure as not ok' );
     like( $out, qr/^\#[ ]+first[ ]line\n\#[ ]+second[ ]line$/m, 'with each line of its reason under it' );
-    like( $out, qr/^1[.][.]7$/m,                                'and the count of checks at the end' );
+    like( $out, qr/^1[.][.]6$/m,                                'and the count of checks at the end' );
     is( $status, 1, 'and it returns 1 when a check failed' );
 
     $mock->redefine( check_http => sub { return [ 1, 'http' ] } );

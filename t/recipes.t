@@ -169,7 +169,6 @@ my %G = (
     network_peers              => [],
     disk_devices               => ['vd*'],
     ip_pool                    => { cidr => '192.0.2.0/24' },
-    nameservers                => {},
     packager_invocation        => 'apt-get install -y',
     packager_up_invocation     => 'apt-get upgrade -y',
     packager_remove_invocation => 'apt-get remove -y',

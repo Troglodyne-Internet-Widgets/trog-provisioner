@@ -73,7 +73,8 @@ them now.  See L<Provisioner::Cookbook/declared_globals>.
 the guests of a network, and the block of each hypervisor on that network names
 it now, as C<pool_addresses> and C<pool_cidr>.  See L<Trog::HV/guest_pool>.
 
-=item * C<[nameservers]> becomes C<nameservers> there.
+=item * C<[nameservers]> stays behind, and the report names it.  A zone that a
+pdns guest holds names only the C<ns1> of that guest.
 
 =item * C<[aliases]> is per domain: each name becomes C<aliases> in the
 C<_global> of that domain.
@@ -180,15 +181,8 @@ sub move_into {
     push( @dropped, '[ip_pool], which is pool_addresses and pool_cidr in the block of each hypervisor in hypervisors.conf' )
       if %{ $from->param( -block => 'ip_pool' ) // {} };
 
-    # A block of its own, and one key of the globals now.
-    my $nameservers = $from->param( -block => 'nameservers' ) // {};
-    if ( %$nameservers && exists $global->{nameservers} ) {
-        push( @kept, '_base._global.nameservers' );
-    }
-    elsif (%$nameservers) {
-        $global->{nameservers} = $nameservers;
-        push( @moved, '[nameservers] -> _base._global.nameservers' );
-    }
+    push( @dropped, '[nameservers], because a zone of a pdns guest names only its own ns1' )
+      if %{ $from->param( -block => 'nameservers' ) // {} };
 
     my $aliases = $from->param( -block => 'aliases' ) // {};
     foreach my $domain ( sort keys %$aliases ) {

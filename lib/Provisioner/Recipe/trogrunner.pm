@@ -295,7 +295,6 @@ sub args {
                     transfer_user => { type => 'string', default => q{} },
                     transfer_ip   => { type => 'string', default => q{} },
                     transfer_port => { type => 'string', default => q{} },
-                    nameservers   => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
                 },
             },
 

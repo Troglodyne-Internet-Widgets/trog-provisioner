@@ -1769,12 +1769,6 @@ sub global_schema {
                 },
             },
 
-            nameservers => {
-                type                 => 'object',
-                description          => 'The names of the nameservers that serve the zones of this installation.  bin/ipmap2zones writes them into each zone.',
-                additionalProperties => { type => 'string' },
-            },
-
             aliases => {
                 type        => 'array',
                 items       => { type => 'string' },

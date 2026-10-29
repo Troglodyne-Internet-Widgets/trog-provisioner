@@ -152,7 +152,6 @@ sub run {
         admin_user    => 'someadmin',
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
-        nameservers   => { ns1 => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
 
     # Each domain has its own recipe, and the recipes that `modules` names
