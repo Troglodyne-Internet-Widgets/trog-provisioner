@@ -466,12 +466,11 @@ A guest on a network that a recipe of C<$domain> joins does not limit the
 choice, see L<Provisioner::Recipe/joins_network_of>, and this says so.  A VPN client
 reaches the guests on the network of its server from anywhere.
 
-For the same reason, a guest that C<$domain> names is on each network that a
-recipe of that guest joins, as well as on the network of its hypervisor.  So a
-VPN client on another network limits the choice to the networks that it
-reaches, such as the network of its server.  When more than one network
-reaches every guest that C<$domain> names, this takes the network where the
-hypervisors of most of them are, and the first by name of those that tie.
+The other way round, the guests reach a VPN client at its address in the
+tunnel, and so on the network of its server, not on the network of its
+hypervisor.  See L<Provisioner::IPPool/reached_through>.  So a guest that
+C<$domain> names and that is such a client limits the choice to the network of
+its server.
 
 A guest that is not up does not limit the choice, and this says so.
 F<bin/provision> builds it first, so it is up when the domain is placed, except
@@ -500,39 +499,37 @@ sub required_network {
         $joined{ $hv->network } //= $how{$peer};
     }
 
-    my ( %on, %lives, $limits );
-  UPSTREAM: foreach my $upstream (@upstream) {
+    my %on;
+    foreach my $upstream (@upstream) {
         my $hv = $fleet->hosting($upstream);
         unless ($hv) {
             print "$upstream is not up, so it does not limit where $domain goes.\n";
             next;
         }
+        my $where = "$upstream, which is on " . $hv->name;
 
-        # The networks of the guests whose network the upstream joins too.
-        my %reaches = ( $hv->network => "$upstream, which is on " . $hv->name );
-        my %its     = joined_peers( $upstream, $rconf );
-        foreach my $peer ( sort keys %its ) {
-            my $peer_hv = $fleet->hosting($peer) or next;
-            $reaches{ $peer_hv->network } //= "$upstream, where $its{$peer} on " . $peer_hv->name;
+        my $through = Provisioner::IPPool::reached_through( $upstream, Provisioner::Cookbook->global_config( $upstream, $rconf )->{ip_pool} );
+        if ( defined $through ) {
+            $hv = $fleet->hosting($through);
+            unless ($hv) {
+                print "$upstream is reached through $through, which is not up, so it does not limit where $domain goes.\n";
+                next;
+            }
+            $where = "$upstream, which is reached through $through on " . $hv->name;
         }
 
-        foreach my $network ( sort keys %reaches ) {
-            my $how = $joined{$network} or next;
-            print "$upstream does not limit where $domain goes, because $how, and so to the network where it reaches $reaches{$network}.\n";
-            next UPSTREAM;
+        if ( my $how = $joined{ $hv->network } ) {
+            print "$upstream does not limit where $domain goes, because $how, and so to the network of " . $hv->name . ".\n";
+            next;
         }
-        $limits++;
-        $lives{ $hv->network }++;
-        push( @{ $on{$_} }, $reaches{$_} ) foreach keys %reaches;
+        push( @{ $on{ $hv->network } }, $where );
     }
-    return () unless $limits;
+    return () unless %on;
 
-    my @common = grep { @{ $on{$_} } == $limits } sort keys %on;
     die "$domain needs guests that are on different networks, and no hypervisor reaches all of them:\n" . join( q{}, map { "  network '$_': " . join( ', ', @{ $on{$_} } ) . "\n" } sort keys %on ) . "Give it a configuration that needs guests on one network only.\n"
-      unless @common;
+      if keys %on > 1;
 
-    # Where most of them are, when more than one network reaches them all.
-    my $network = List::Util::reduce { ( $lives{$b} // 0 ) > ( $lives{$a} // 0 ) ? $b : $a } @common;
+    my ($network) = keys %on;
     return ( network => $network, network_why => "it needs " . join( ' and ', @{ $on{$network} } ) );
 }
 

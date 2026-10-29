@@ -120,6 +120,25 @@ subtest 'reachable_address: the guests reach a guest through its tunnel when it 
     like( exception { Provisioner::IPPool::reachable_address('relay.test') }, qr/relay[.]test[ ]has[ ]no[ ]address/, 'and a guest with no address stops the build' );
 };
 
+subtest 'reached_through: the guest that routes the tunnel of a guest' => sub {
+    my %held;
+    my $mock = Test::MockModule->new('Provisioner::IPPool');
+    $mock->redefine( holdings => sub { return {%held} } );
+    my $pool = { bins => { guests => { cidr => '192.0.2.0/25' }, vpnclients => { cidr => '198.51.100.0/25', via => 'vpn.test' }, plain => { cidr => '203.0.113.0/25' } } };
+
+    %held = ( guests => '192.0.2.5', vpnclients => '198.51.100.5' );
+    is( Provisioner::IPPool::reached_through( 'relay.test', $pool ), 'vpn.test', 'a client of the VPN, through the via of its bin' );
+
+    %held = ( guests => '192.0.2.5' );
+    is( Provisioner::IPPool::reached_through( 'relay.test', $pool ), undef, 'a guest on the LAN, through nothing' );
+
+    %held = ( plain => '203.0.113.5' );
+    is( Provisioner::IPPool::reached_through( 'relay.test', $pool ), undef, 'and a guest in a bin that names no via' );
+
+    %held = ( vpnclients => '198.51.100.5', plain => '203.0.113.5' );
+    like( exception { Provisioner::IPPool::reached_through( 'relay.test', $pool ) }, qr/an[ ]address[ ]in[ ]each[ ]of[ ]plain,[ ]vpnclients/, 'two tunnels are refused, as reachable_address refuses them' );
+};
+
 subtest 'assign: reservations are not handed out' => sub {
     fresh_db();
     my $pool = { addresses => '10.9.9.10 10.9.9.11' };
