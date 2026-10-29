@@ -466,6 +466,13 @@ A guest on a network that a recipe of C<$domain> joins does not limit the
 choice, see L<Provisioner::Recipe/joins_network_of>, and this says so.  A VPN client
 reaches the guests on the network of its server from anywhere.
 
+For the same reason, a guest that C<$domain> names is on each network that a
+recipe of that guest joins, as well as on the network of its hypervisor.  So a
+VPN client on another network limits the choice to the networks that it
+reaches, such as the network of its server.  When more than one network
+reaches every guest that C<$domain> names, this takes the network where the
+hypervisors of most of them are, and the first by name of those that tie.
+
 A guest that is not up does not limit the choice, and this says so.
 F<bin/provision> builds it first, so it is up when the domain is placed, except
 on a dry run.  Nothing limits a fleet that is not configured, which has one
@@ -493,25 +500,39 @@ sub required_network {
         $joined{ $hv->network } //= $how{$peer};
     }
 
-    my %on;
-    foreach my $upstream (@upstream) {
+    my ( %on, %lives, $limits );
+  UPSTREAM: foreach my $upstream (@upstream) {
         my $hv = $fleet->hosting($upstream);
         unless ($hv) {
             print "$upstream is not up, so it does not limit where $domain goes.\n";
             next;
         }
-        if ( my $how = $joined{ $hv->network } ) {
-            print "$upstream does not limit where $domain goes, because $how, and so to the network of " . $hv->name . ".\n";
-            next;
+
+        # The networks of the guests whose network the upstream joins too.
+        my %reaches = ( $hv->network => "$upstream, which is on " . $hv->name );
+        my %its     = joined_peers( $upstream, $rconf );
+        foreach my $peer ( sort keys %its ) {
+            my $peer_hv = $fleet->hosting($peer) or next;
+            $reaches{ $peer_hv->network } //= "$upstream, where $its{$peer} on " . $peer_hv->name;
         }
-        push( @{ $on{ $hv->network } }, "$upstream, which is on " . $hv->name );
+
+        foreach my $network ( sort keys %reaches ) {
+            my $how = $joined{$network} or next;
+            print "$upstream does not limit where $domain goes, because $how, and so to the network where it reaches $reaches{$network}.\n";
+            next UPSTREAM;
+        }
+        $limits++;
+        $lives{ $hv->network }++;
+        push( @{ $on{$_} }, $reaches{$_} ) foreach keys %reaches;
     }
-    return () unless %on;
+    return () unless $limits;
 
+    my @common = grep { @{ $on{$_} } == $limits } sort keys %on;
     die "$domain needs guests that are on different networks, and no hypervisor reaches all of them:\n" . join( q{}, map { "  network '$_': " . join( ', ', @{ $on{$_} } ) . "\n" } sort keys %on ) . "Give it a configuration that needs guests on one network only.\n"
-      if keys %on > 1;
+      unless @common;
 
-    my ($network) = keys %on;
+    # Where most of them are, when more than one network reaches them all.
+    my $network = List::Util::reduce { ( $lives{$b} // 0 ) > ( $lives{$a} // 0 ) ? $b : $a } @common;
     return ( network => $network, network_why => "it needs " . join( ' and ', @{ $on{$network} } ) );
 }
 

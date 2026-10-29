@@ -91,6 +91,20 @@ is( ( required('edge.test') )[0]{network}, 'cloud', 'but a guest that it needs o
 %where = ( 'cache.test' => $home, 'logs.test' => $home2 );
 is( ( required('edge.test') )[0]{network}, 'home', 'and a server that is not up brings it onto no network' );
 
+# A guest reaches a VPN client on another network through the network of its
+# server.
+$conf{'relayed.test'} = { logshipper => { host  => 'edge.test' } };
+$conf{'alone.test'}   = { _global    => { cache => q{} }, logshipper => { host => 'edge.test' } };
+%where                = ( 'cache.test' => $home, 'edge.test' => $cloud, 'vpn.test' => $home2 );
+my ($relayed) = required('relayed.test');
+is( $relayed->{network}, 'home', 'a VPN client on another network is reached on the network of its server' );
+my $joins = qr/openvpnclient[ ]connects[ ]it[ ]to[ ]vpn[.]test/;
+like( $relayed->{network_why}, qr/edge[.]test,[ ]where[ ]${joins}[ ]on[ ]hv2/, 'which it says' );
+is( ( required('alone.test') )[0]{network}, 'cloud', 'and with nothing else to reach, it goes where the client is' );
+
+%where = ( 'cache.test' => NetworkProbe::HV->new( name => 'hv3', network => 'office' ), 'edge.test' => $cloud, 'vpn.test' => $home );
+like( ( exception { required('relayed.test') } ) // q{}, qr/network[ ]'office':[ ]cache[.]test/, 'but a network that the client does not reach is still refused' );
+
 sub peers {
     my ( $domain, $hv ) = @_;
     return [ Trog::Provisioner::Config::Generator::network_peers( $domain, \%conf, '/bogus/hypervisors.conf', $hv ) ];
