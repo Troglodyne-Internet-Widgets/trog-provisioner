@@ -480,8 +480,8 @@ it.  This strips loopback from a list that was written elsewhere.  For example,
 a runner writes its own, and L<Provisioner::Recipe::trogrunner> defaults its
 resolvers to C<1.1.1.1> and C<8.8.8.8>.
 
-The stub of systemd-resolved fails over correctly, but this does not use it,
-because the C<nostubresolver> recipe turns it off on these guests.  IPv6 goes
+The stub of systemd-resolved fails over correctly, but nginx does not use it,
+because nginx asks the resolvers that it is told.  IPv6 goes
 because nginx is told C<ipv6=off>, as apt is told to use IPv4.
 
 =cut

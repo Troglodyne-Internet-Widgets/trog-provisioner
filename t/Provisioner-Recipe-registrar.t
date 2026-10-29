@@ -153,9 +153,8 @@ subtest 'what a guest that names an authority sets up' => sub {
     ok( !$opts{fleet_anchor}, 'and an authority under a public name needs no anchor' );
 
     my $fragment = fresh('registrar')->render( %common, authority => 'ns.example.net', type => 'easydns' );
-    my $dropin   = 'install -o root -g root -m 0644 registrar-resolved.conf /etc/systemd/resolved.conf.d/trog-authority.conf';
     my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns.example.net";
-    like( $fragment, qr{^\Q$dropin\E$}m,                                               'the fragment routes those names to the authority' );
+    is_deeply( { fresh('registrar')->resolver_files( %common, authority => 'ns.example.net', type => 'easydns' ) }, { 'registrar-resolved.conf' => 'trog-authority.conf' }, 'the resolver target routes those names to the authority' );
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'and delegates its zone to the authority first in the postrun, before the fetcher of letsencrypt' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records there' );
     unlike( $fragment, qr/--addressed[ ]ns1/, 'and publishes no ns1, because the authority is its nameserver' );
@@ -185,6 +184,7 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     is( $opts{upstream}{type}, 'easydns',         'the NS record of its zone goes to its registrar' );
     is( $opts{parent},         'lab.example.net', 'through a shortcut that names the zone above' );
     ok( !exists $opts{authority}, 'and it routes nothing to an authority, because it is its own' );
+    is_deeply( { fresh('registrar')->resolver_files(%common) }, {}, 'and gives the resolver target no drop-in' );
 
     my $fragment = fresh('registrar')->render(%common);
     my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";

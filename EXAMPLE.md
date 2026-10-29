@@ -66,8 +66,6 @@ _base:
         from: "/opt/data"
         to: "/opt/domains"
     nosnap:
-    nostubresolver:
-        order: 0
     auditd:
     ufw:
     fail2ban:
@@ -91,7 +89,6 @@ test:
         memory: 8092
     tcms:
         tcms_dir: 'tCMS'
-        order: 1
 ```
 
 Note that we didn' have to setup any of the things tCMS depends on in config.

@@ -58,6 +58,19 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
 	mkdir -p [% state_dir %]
 	touch $@
 
+[% IF resolver_files.keys().size() -%]
+[%# Every drop-in of systemd-resolved, and one restart, before any recipe
+    target.  A restart beside the other targets under make -j fails a lookup
+    that one of them makes.  See resolver_files in Provisioner::Recipe. -%]
+[% state_dir %]/resolver:
+	install -d -o root -g root -m 0755 /etc/systemd/resolved.conf.d
+[% FOR from IN resolver_files.keys().sort() -%]
+	install -o root -g root -m 0644 [% from %] /etc/systemd/resolved.conf.d/[% resolver_files.$from %]
+[% END -%]
+	systemctl restart systemd-resolved
+	touch $@
+
+[% END -%]
 [% state_dir %]/sysctl:
 	echo "net.ipv4.conf.all.arp_announce=1" > /etc/sysctl.d/10-arp-flux.conf
 	echo "net.ipv4.conf.all.arp_ignore=2" >> /etc/sysctl.d/10-arp-flux.conf

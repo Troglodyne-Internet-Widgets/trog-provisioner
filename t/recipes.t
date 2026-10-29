@@ -218,7 +218,8 @@ subtest 'no setting every recipe is handed carries a default' => sub {
 # something, and one that lost its fragment by accident would otherwise go on
 # passing here.
 my %NO_FRAGMENT = (
-    autoupdate => 'cron files, which the cron recipe installs',
+    autoupdate     => 'cron files, which the cron recipe installs',
+    nostubresolver => 'a drop-in, which the resolver target installs',
 );
 
 # Test that a recipe renders without error given %G merged with $extra.
@@ -1750,18 +1751,6 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
     # second render through the same one answers with the first one's options.
     my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G );
     like( $hook, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
-};
-
-subtest 'the resolver is live before anything reads a zone back through it' => sub {
-    my $out = Provisioner::Cookbook->load( 'nostubresolver', distro => $DISTRO )->new(%PROV)->render_global(%G);
-
-    # post_install runs its queue one task at a time and letsencrypt queues its
-    # fetcher first, so a restart deferred here happened after the thing that
-    # needed it.  Measured on a guest: the config was written during the
-    # makefile, the restart ran fourth in the postrun, the fetcher ran second
-    # through a stub that could not see the zone, and pdns was asked for
-    # zones/. and answered 404.
-    like( $out, qr{^systemctl[ ]restart[ ]systemd-resolved$}m, 'the resolver is restarted where it is configured' );
 };
 
 # A guest serving its own zone is the only thing that answers for it, and the

@@ -66,6 +66,7 @@ sub makefile {
                     modules    => $in{modules_ordered},
                     order_only => $in{order_only} // {},
                     ufw        => defined $in{ufw_fragment},
+                    resolver   => scalar %{ $in{resolver_files} // {} },
                 )
             ],
             vars                   => {},
@@ -216,6 +217,34 @@ subtest 'the sendmail target makes a certificate before it turns starttls on' =>
     ok( $widened > $made,  'the address cap is widened' ) or diag $sendmail;
     ok( $again > $widened, 'and the certificate retried once it is' )
       or diag "widened at $widened, last update_tls at $again";
+};
+
+# A restart of systemd-resolved beside the other targets fails a lookup that one
+# of them makes, so the drop-ins go in at the front of the line.  And not into
+# the postrun queue: letsencrypt queues its certificate fetcher first, and a
+# restart deferred there came after the fetcher that needed it.
+subtest 'the drop-ins of the resolver go in, and resolved restarts, before anything else' => sub {
+    my $dir   = File::Temp::tempdir( CLEANUP => 1 );
+    my %files = ( '10-disable-stub-resolver.conf' => '10-disable-stub-resolver.conf', 'registrar-resolved.conf' => 'trog-authority.conf' );
+    my $mf    = makefile( state_dir => $dir, resolver_files => \%files );
+
+    my %before;
+    while ( $mf =~ m/^(\S+):[ ][|]((?:[ ]\S+)+)$/mg ) {
+        $before{$1} = [ split q{ }, $2 ];
+    }
+    is_deeply( $before{"$STATE/resolver"},     ["$STATE/state"],    'the resolver waits only for the state directory' );
+    is_deeply( $before{"$STATE/service_user"}, ["$STATE/resolver"], 'and the next global target, and so everything after, waits for it' );
+
+    File::Slurper::Temp::write_text( "$dir/Makefile", $mf );
+    my $out = q{};
+    IPC::Run3::run3( [ qw{make -n -C}, $dir, "$dir/resolver" ], \undef, \$out, \$out );
+    my $restart   = qr{^systemctl[ ]restart[ ]systemd-resolved$}m;
+    my $dropins   = qr{/etc/systemd/resolved[.]conf[.]d};
+    my $authority = qr{registrar-resolved[.]conf[ ]$dropins/trog-authority[.]conf};
+    like( $out, qr{^install[ ].*[ ]$authority$}m, 'it installs each drop-in under its own name' ) or diag $out;
+    like( $out, $restart,                         'and restarts resolved itself, not through the queue' );
+
+    unlike( makefile(), qr{/resolver:}, 'a guest whose recipes name no drop-in has no resolver target' );
 };
 
 # The packages target is the upgrade, and runs before every recipe.  make runs

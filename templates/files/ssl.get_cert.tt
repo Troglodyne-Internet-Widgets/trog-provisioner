@@ -3,9 +3,9 @@
 [% IF lexicon_socket -%]
 # Wait for the server that answers the challenge before asking for one.
 #
-# This is a backstop.  pdns starts in its own target, and nostubresolver
-# restarts the resolver in its own target.  So the loop usually ends on the
-# first pass.
+# This is a backstop.  pdns starts in its own target, and the resolver
+# target restarts the resolver before any recipe.  So the loop usually ends on
+# the first pass.
 #
 # The socket and the SOA from @127.0.0.1 say that the server is up and holds
 # the zone.  The bare SOA says that the system resolver can see the zone.

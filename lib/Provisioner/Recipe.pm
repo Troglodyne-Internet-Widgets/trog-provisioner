@@ -1745,7 +1745,8 @@ file with no variables in it.  The method gets the loaded recipes, so a recipe
 that generates something per service can generate only what this guest needs.
 The application profiles of ufw are an example.
 
-The fragment must install every file named here.  A file that nothing installs
+The fragment must install every file named here, except a drop-in that
+C<resolver_files> names, which the C<resolver> target installs.  A file that nothing installs
 is dead.  Either it must be installed and is not, or it must be removed.
 Rendering it only leaves a file on the hypervisor that nothing reads.
 
@@ -1753,6 +1754,26 @@ Rendering it only leaves a file on the hypervisor that nothing reads.
 
 sub template_files {
     my ( $self, @recipes ) = @_;
+    return ();
+}
+
+=head3 %files = $recipe->resolver_files(%opts)
+
+The drop-ins of systemd-resolved that this recipe generates, as a map from a
+file of C<template_files>, as it is named in the configuration directory, to its
+name in F</etc/systemd/resolved.conf.d>.  C<%opts> is as for C<render_file>.
+Nothing here.
+
+A recipe that changes the resolver of the guest names its drop-in here, and its
+fragment neither installs it nor restarts systemd-resolved.  F<bin/new_config>
+puts every drop-in into the C<resolver> target, which installs them and
+restarts systemd-resolved one time, before any recipe target runs.  A restart
+in a recipe target runs beside the other targets under C<make -j>, and a lookup
+that one of them makes in that moment fails.
+
+=cut
+
+sub resolver_files {
     return ();
 }
 

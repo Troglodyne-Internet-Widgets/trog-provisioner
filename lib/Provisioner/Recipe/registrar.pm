@@ -1023,6 +1023,20 @@ sub template_files {
     );
 }
 
+=head2 %files = $recipe->resolver_files(%opts)
+
+The drop-in that sends the names of the zone of the authority to it, when the
+registrar names an authority.  The C<resolver> target installs it before any
+recipe target.  See L<Provisioner::Recipe/resolver_files>.
+
+=cut
+
+sub resolver_files {
+    my ( $self, %opts ) = @_;
+    my %v = $self->validated(%opts);
+    return $v{authority} ? ( 'registrar-resolved.conf' => 'trog-authority.conf' ) : ();
+}
+
 sub tests {
     return qw{registrar.tt};
 }

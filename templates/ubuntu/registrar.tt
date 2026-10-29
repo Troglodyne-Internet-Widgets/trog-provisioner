@@ -1,9 +1,8 @@
 [%# A guest whose registrar names an authority.  See the POD of
     Provisioner::Recipe::registrar. -%]
+[%# The resolver target installs the drop-in for the authority.  See
+    resolver_files in Provisioner::Recipe. -%]
 [% IF authority -%]
-install -d -o root -g root -m 0755 /etc/systemd/resolved.conf.d
-install -o root -g root -m 0644 registrar-resolved.conf /etc/systemd/resolved.conf.d/trog-authority.conf
-systemctl restart systemd-resolved
 [% IF fleet_anchor -%]
 [%# The authority that the API of the pdns guest chains to, at the path where
     acmeca installs the same one. -%]
