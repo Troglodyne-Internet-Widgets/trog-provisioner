@@ -466,6 +466,12 @@ A guest on a network that a recipe of C<$domain> joins does not limit the
 choice, see L<Provisioner::Recipe/joins_network_of>, and this says so.  A VPN client
 reaches the guests on the network of its server from anywhere.
 
+The other way round, the guests reach a VPN client at its address in the
+tunnel, and so on the network of its server, not on the network of its
+hypervisor.  See L<Provisioner::IPPool/reached_through>.  So a guest that
+C<$domain> names and that is such a client limits the choice to the network of
+its server.
+
 A guest that is not up does not limit the choice, and this says so.
 F<bin/provision> builds it first, so it is up when the domain is placed, except
 on a dry run.  Nothing limits a fleet that is not configured, which has one
@@ -500,11 +506,23 @@ sub required_network {
             print "$upstream is not up, so it does not limit where $domain goes.\n";
             next;
         }
+        my $where = "$upstream, which is on " . $hv->name;
+
+        my $through = Provisioner::IPPool::reached_through( $upstream, Provisioner::Cookbook->global_config( $upstream, $rconf )->{ip_pool} );
+        if ( defined $through ) {
+            $hv = $fleet->hosting($through);
+            unless ($hv) {
+                print "$upstream is reached through $through, which is not up, so it does not limit where $domain goes.\n";
+                next;
+            }
+            $where = "$upstream, which is reached through $through on " . $hv->name;
+        }
+
         if ( my $how = $joined{ $hv->network } ) {
             print "$upstream does not limit where $domain goes, because $how, and so to the network of " . $hv->name . ".\n";
             next;
         }
-        push( @{ $on{ $hv->network } }, "$upstream, which is on " . $hv->name );
+        push( @{ $on{ $hv->network } }, $where );
     }
     return () unless %on;
 

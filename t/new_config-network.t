@@ -39,6 +39,11 @@ my $configured = 1;
 my $load = Test::MockModule->new('Trog::Hypervisors');
 $load->redefine( load => sub { return bless {}, 'NetworkProbe::Fleet' } );
 
+# The guest that routes the address of each guest that has a tunnel.
+my %through;
+my $ippool = Test::MockModule->new('Provisioner::IPPool');
+$ippool->redefine( reached_through => sub { my ($domain) = @_; return $through{$domain} } );
+
 my %conf = (
     _base        => { _global      => { cache => 'cache.test' }, logshipper => { host => 'logs.test' } },
     'cache.test' => { fetchcache   => {} },
@@ -90,6 +95,27 @@ is( ( required('edge.test') )[0]{network}, 'cloud', 'but a guest that it needs o
 
 %where = ( 'cache.test' => $home, 'logs.test' => $home2 );
 is( ( required('edge.test') )[0]{network}, 'home', 'and a server that is not up brings it onto no network' );
+
+# The guests reach a VPN client at its address in the tunnel, so only on the
+# network of its server.
+$through{'edge.test'} = 'vpn.test';
+$conf{'relayed.test'} = { logshipper => { host  => 'edge.test' } };
+$conf{'alone.test'}   = { _global    => { cache => q{} }, logshipper => { host => 'edge.test' } };
+%where                = ( 'cache.test' => $home, 'edge.test' => $cloud, 'vpn.test' => $home2 );
+my ($relayed) = required('relayed.test');
+is( $relayed->{network}, 'home', 'a VPN client on another network is reached on the network of its server' );
+my $reached = qr/which[ ]is[ ]reached[ ]through[ ]vpn[.]test/;
+like( $relayed->{network_why}, qr/edge[.]test,[ ]${reached}[ ]on[ ]hv2/, 'which it says' );
+is( ( required('alone.test') )[0]{network}, 'home', 'also with nothing else to reach, and not the network of the hypervisor of the client' );
+
+%where = ( 'cache.test' => NetworkProbe::HV->new( name => 'hv3', network => 'office' ), 'edge.test' => $cloud, 'vpn.test' => $home );
+like( ( exception { required('relayed.test') } ) // q{}, qr/network[ ]'home':[ ]edge[.]test/, 'a network that the client is not reached on is refused' );
+
+%where = ( 'edge.test' => $cloud );
+my ( $unreached, $unreached_said ) = required('alone.test');
+is_deeply( $unreached, {}, 'and a client whose server is not up limits nothing' );
+like( $unreached_said, qr/reached[ ]through[ ]vpn[.]test,[ ]which[ ]is[ ]not[ ]up/, 'which it says' );
+delete $through{'edge.test'};
 
 sub peers {
     my ( $domain, $hv ) = @_;

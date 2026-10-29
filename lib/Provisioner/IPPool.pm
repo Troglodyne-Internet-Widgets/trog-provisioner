@@ -290,15 +290,39 @@ has neither, or more than one of the first kind.
 
 =cut
 
+# The bin of the tunnel of $domain among the bins that it $held, or undef.
+my sub tunnel_bin ( $domain, $held ) {
+    my @vpn = grep { $_ ne $GUESTS } sort keys %$held;
+    die "$domain has an address in each of " . join( ', ', @vpn ) . ", so the guests that use it cannot tell which one reaches it.\n" if @vpn > 1;
+    return $vpn[0];
+}
+
 sub reachable_address {
     my ($domain) = @_;
     my $held     = holdings($domain);
-    my @vpn      = grep { $_ ne $GUESTS } sort keys %$held;
+    my $tunnel   = tunnel_bin( $domain, $held );
 
-    die "$domain has an address in each of " . join( ', ', @vpn ) . ", so the guests that use it cannot tell which one reaches it.\n" if @vpn > 1;
-    my $address = @vpn ? $held->{ $vpn[0] } : $held->{$GUESTS};
+    my $address = $held->{ $tunnel // $GUESTS };
     die "$domain has no address in " . db_path() . ", so the guests that use it cannot reach it.\n" unless defined $address;
     return $address;
+}
+
+=head2 $guest = reached_through($domain, $pool)
+
+The guest that routes the address of C<reachable_address> to the other guests:
+the C<via> of the bin of that address in C<$pool>.  The other guests reach
+C<$domain> only on the network of that guest, see L<Trog::HV/network>.  Undef
+when C<$domain> has no address in a bin with a C<via>, because then the other
+guests reach it on its own network.  Dies as C<reachable_address> does when
+C<$domain> has an address in two tunnels.
+
+=cut
+
+sub reached_through {
+    my ( $domain, $pool ) = @_;
+    my $tunnel = tunnel_bin( $domain, holdings($domain) ) // return undef;
+    my %bins   = bins($pool);
+    return $bins{$tunnel} ? $bins{$tunnel}{via} : undef;
 }
 
 =head2 reserve($ip, $name)
