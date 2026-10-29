@@ -20,6 +20,16 @@ my $status = `systemctl is-active systemd-resolved 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'systemd-resolved is still running');
 
+# The resolver target restarts systemd-resolved before any recipe target, and
+# nothing may restart it after: a lookup of another target fails in that moment.
+# See resolver_files in Provisioner::Recipe.
+my $stamp = (stat '/etc/provisioner/state/[% domain %]/resolver')[9];
+my $started = `systemctl show systemd-resolved -p ActiveEnterTimestamp --value 2>/dev/null`;
+chomp $started;
+chomp(my $since = `date -d '$started' +%s 2>/dev/null`);
+ok($stamp && $since && $since <= $stamp, 'systemd-resolved has not restarted since the resolver target')
+    or diag "started $started, the resolver target finished at " . ($stamp ? scalar localtime $stamp : 'never');
+
 # Names must still resolve, because turning the stub off is safe only when
 # something else answers.
 my $resolved = `getent hosts localhost 2>/dev/null`;

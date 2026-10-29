@@ -78,6 +78,18 @@ sub enrich {
     return %opts;
 }
 
+=head2 %files = $recipe->resolver_files(%opts)
+
+The drop-in that turns the stub off and names the resolvers, which the
+C<resolver> target installs before any recipe target.  See
+L<Provisioner::Recipe/resolver_files>.
+
+=cut
+
+sub resolver_files {
+    return ( '10-disable-stub-resolver.conf' => '10-disable-stub-resolver.conf' );
+}
+
 sub tests {
     return qw{nostubresolver.tt};
 }
