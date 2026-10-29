@@ -439,22 +439,17 @@ sub datadirs {
 =head2 %path_map = $recipe->remote_files($install_dir, $domain)
 
 Returns what to copy back from the guest into the data directory, so that the
-next build keeps it: C<instance/>, C<logs/>, C<workspace/>, C<projects.yaml>
-and the Claude Code state in F<.claude.json>.
+next build keeps it: C<instance/>, C<logs/> and C<workspace/>.  The C<claude>
+recipe salvages F<.claude.json>.
 
 =cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        "$install_dir/$domain/koan/instance/"     => 'koan/instance/',
-        "$install_dir/$domain/koan/logs/"         => 'koan/logs/',
-        "$install_dir/$domain/koan/workspace/"    => 'koan/workspace/',
-        "$install_dir/$domain/koan/projects.yaml" => 'koan/projects.yaml',
-
-        # Claude writes its account and session state here on first use.
-        # Without it, the next build must log in again by hand.
-        "$install_dir/$domain/.claude.json" => '.claude.json',
+        "$install_dir/$domain/koan/instance/"  => 'koan/instance/',
+        "$install_dir/$domain/koan/logs/"      => 'koan/logs/',
+        "$install_dir/$domain/koan/workspace/" => 'koan/workspace/',
     );
 }
 
