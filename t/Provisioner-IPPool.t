@@ -499,10 +499,15 @@ subtest 'guest_pools: two networks cannot share an address' => sub {
     is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { cidr => ['192.0.2.16/28'] } ) ) }, { hv1 => \%one, hv2 => { cidr => ['192.0.2.16/28'] } }, 'and two networks that do not overlap have one each' );
 
     my $err = ( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { addresses => ['192.0.2.9'] } ) ) } ) // q{};
-    like( $err,                                                                                              qr/hv1 .* 192[.]0[.]2[.]0\/28/, 'an address inside the pool of another network is refused, naming the one block' );
-    like( $err,                                                                                              qr/hv2 .* 192[.]0[.]2[.]9\/32/, 'and the other' );
-    like( $err,                                                                                              qr/which[ ]overlap/,            'and saying why' );
-    like( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => { cidr => ['192.0.2.0/33'] } ) ) }, qr/Invalid[ ]CIDR .* hv1/,      'and so is a block that is not one, by its hypervisor' );
+    like( $err, qr/hv1 .* 192[.]0[.]2[.]0\/28/, 'an address inside the pool of another network is refused, naming the one block' );
+    like( $err, qr/hv2 .* 192[.]0[.]2[.]9\/32/, 'and the other' );
+    like( $err, qr/which[ ]overlap/,            'and saying why' );
+    like(
+        exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => {%one}, hv3 => { cidr => ['192.0.2.0/24'] } ) ) },
+        qr/pool[ ]of[ ]hv1,[ ]hv2[ ]/,
+        'and a pool that holds the pool of a shared network is refused, naming every hypervisor on that network'
+    );
+    like( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => { cidr => ['192.0.2.0/33'] } ) ) }, qr/Invalid[ ]CIDR .* hv1/, 'and so is a block that is not one, by its hypervisor' );
 };
 
 subtest 'seed: a hypervisor with no bridge is not swept' => sub {

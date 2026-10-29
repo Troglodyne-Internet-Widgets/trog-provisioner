@@ -11,7 +11,8 @@ use re '/aasx';
 use Cwd();
 use File::Basename();
 use List::Util qw{first};
-use Net::IP;
+use Net::CIDR();
+use Net::IP();
 use Socket();
 
 use Provisioner::Cookbook();
@@ -386,14 +387,12 @@ sub bins {
     my @seen;
     foreach my $name ( sort keys %bins ) {
         foreach my $block ( blocks( $bins{$name} ) ) {
-            my $net = Net::IP->new($block)
+            Net::IP->new($block)
               or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
-            foreach my $other ( grep { $_->{bin} ne $name } @seen ) {
-                my $overlap = $net->overlaps( $other->{net} ) // $IP_NO_OVERLAP;
-                die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
-                  if $overlap != $IP_NO_OVERLAP;
-            }
-            push @seen, { bin => $name, block => $block, net => $net };
+            my $other = first { $_->{bin} ne $name && Net::CIDR::cidrlookup( $block, $_->{block} ) } @seen;
+            die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
+              if $other;
+            push @seen, { bin => $name, block => $block };
         }
     }
 
@@ -466,24 +465,20 @@ sub guest_pools {
         my $hv = $fleet->hypervisor($name);
         next if $hv->manages_addresses;
         my $pool   = $hv->guest_pool;
-        my @blocks = blocks($pool);
-        $pools{$name} = $pool if @blocks;
+        my @blocks = blocks($pool) or next;
+        Net::IP->new($_) // die "Invalid CIDR '$_' in the pool of $name in hypervisors.conf: " . Net::IP::Error() . "\n" foreach @blocks;
+        $pools{$name} = $pool;
     }
 
-    my %nets = map {
-        my $name = $_;
-        $name => [ map { Net::IP->new($_) // die "Invalid CIDR '$_' in the pool of $name in hypervisors.conf: " . Net::IP::Error() . "\n" } blocks( $pools{$name} ) ]
-    } keys %pools;
-    my @names = sort keys %pools;
-    foreach my $i ( 0 .. $#names ) {
-        foreach my $j ( $i + 1 .. $#names ) {
-            my ( $one, $two ) = @names[ $i, $j ];
-            next if network_of( $pools{$one} ) eq network_of( $pools{$two} );
-            foreach my $net ( @{ $nets{$one} } ) {
-                my $other = first { ( $net->overlaps($_) // $IP_NO_OVERLAP ) != $IP_NO_OVERLAP } @{ $nets{$two} } or next;
-                die "The pool of $one in hypervisors.conf has " . $net->print . " and the pool of $two has " . $other->print . ", which overlap.\n" . "Hypervisors on one network name the same pool_cidr and pool_addresses, and hypervisors on two networks name pools that do not overlap.\n";
-            }
-        }
+    my %by_network;
+    push @{ $by_network{ network_of( $pools{$_} ) } }, $_ foreach sort keys %pools;
+    my @claims = map {
+        my $names = join( q{, }, @{ $by_network{$_} } );
+        map { +{ block => $_, names => $names } } blocks( $pools{ $by_network{$_}[0] } )
+    } sort keys %by_network;
+    foreach my $claim (@claims) {
+        my $other = first { $_->{names} ne $claim->{names} && Net::CIDR::cidrlookup( $claim->{block}, $_->{block} ) } @claims or next;
+        die "The pool of $claim->{names} in hypervisors.conf has $claim->{block} and the pool of $other->{names} has $other->{block}, which overlap.\n" . "Hypervisors on one network name the same pool_cidr and pool_addresses, and hypervisors on two networks name pools that do not overlap.\n";
     }
 
     return %pools;
