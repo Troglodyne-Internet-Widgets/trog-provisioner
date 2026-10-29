@@ -1,0 +1,7 @@
+[%# Outbound, to the server.  setup-ufw-rules issues "allow out" for every
+    profile.  One for each domain, because two tunnels on one guest can use two
+    ports.  Provisioner::Recipe::openvpnclient has the whole account. -%]
+[openvpnclient-[% domain %]]
+title=OpenVPN client of [% domain %]
+description=Outbound OpenVPN to [% server %], the server of this tunnel
+ports=[% port %]/[% proto %]

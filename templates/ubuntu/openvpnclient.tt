@@ -18,6 +18,9 @@ chown root:root /etc/openvpn/client/[% domain %]/client.key /etc/openvpn/client/
 cp client.conf /etc/openvpn/client/[% domain %].conf
 chown root:root /etc/openvpn/client/[% domain %].conf
 chmod 0640 /etc/openvpn/client/[% domain %].conf
+[%# The outbound hole to the server.  ufw waits for this target, and
+    setup-ufw-rules issues an allow out for every profile it finds. -%]
+install -o root -g root -m 0644 openvpnclient_ufw.conf /etc/ufw/applications.d/openvpnclient-[% domain %]
 [% IF issue_from -%]
 # The guests of this installation, which it reaches through the tunnel.  Replaced,
 # not added to, so that a rebuild does not add them twice
