@@ -11,6 +11,7 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use File::Path qw{rmtree};
+use List::Util();
 
 =head1 Provisioner::Recipe::ufw
 
@@ -200,6 +201,12 @@ Returns the application profiles to render, as a map from template to output
 path.  The C<ufw.http.tt> profile is always in the map.  Each recipe in
 C<@recipes> that has a profile for fixed ports adds its own.
 
+Without C<ntp> in C<@recipes>, the map also has C<ufw.timesyncd.tt>, which
+opens 123/udp outbound for the C<systemd-timesyncd> of the image.  The default
+denies outgoing traffic, so without it a guest cannot set its clock, and
+nothing outside the kernel log says so.  C<ntp> ships its own profile for
+chrony.
+
 =cut
 
 sub template_files {
@@ -211,6 +218,7 @@ sub template_files {
     mkdir $dir;
 
     my %ret = ( 'ufw.http.tt' => 'ufw/http', 'ufw.after.init.tt' => 'ufw.after.init' );
+    $ret{'ufw.timesyncd.tt'} = 'ufw/timesyncd' unless List::Util::any { $_ eq 'ntp' } @recipes;
 
     return %ret unless @recipes;
 

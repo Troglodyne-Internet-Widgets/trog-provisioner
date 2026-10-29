@@ -1,0 +1,9 @@
+[%# The ufw recipe sets `default deny outgoing`, so systemd-timesyncd, which the
+    image runs, needs this profile to reach 123/udp.  Only a guest without the
+    ntp recipe gets it, because that recipe ships its own profile for chrony.
+    ntp.ufw.conf.tt says why it is a profile and not a rule, and why the name
+    is not ntp. -%]
+[timesyncd]
+title=systemd-timesyncd
+description=Outbound time sync for the timesyncd of the image
+ports=123/udp

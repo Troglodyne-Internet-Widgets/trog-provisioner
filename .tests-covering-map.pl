@@ -149,8 +149,9 @@ return sub {
                         output_dir => $scratch,
                     );
 
-                    # Every recipe, so that ufw names the profile of each.
-                    my %files         = $recipe->template_files(@names);
+                    # Every recipe, so that ufw names the profile of each, and
+                    # none, so that it names the profile it drops for one.
+                    my %files         = ( $recipe->template_files(), $recipe->template_files(@names) );
                     my @names_in_dirs = ( @{$recipe}{qw{template global_template}}, map { "files/$_" } keys %files );
 
                     # The recipe and its distribution's subclass, if it has one.
