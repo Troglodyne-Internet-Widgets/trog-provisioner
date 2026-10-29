@@ -119,6 +119,22 @@ the certificate directory, the log and the interface.  Two domains share only
 the openvpn package.  That is why this recipe can share a machine with another
 instance of itself, when most recipes cannot.
 
+=head3 It needs the firewall opened outwards
+
+A guest that this tool builds denies outgoing traffic by default.
+C<scripts/setup-ufw-rules> issues an C<allow out> for every profile in
+F</etc/ufw/applications.d>.  So this recipe installs a profile for each domain,
+F<openvpnclient-DOMAIN>, with the port and the protocol of its server.  The
+C<ufw> target waits for this one, so the profile is there when ufw reads them.
+The profile also opens the port inbound, where nothing listens.
+
+Without the profile, the tunnel fails later, not in the build.  The fragment
+starts the tunnel before ufw loads its rules, and ufw lets a flow that it
+already tracks go on.  A new flow is refused, so the tunnel does not come back
+after a reboot, or after the server is away long enough for the flow to expire.
+So the guest test restarts the tunnel, and then asks the server for a
+connection to ssh through it.
+
 =head3 Why nothing here is salvaged
 
 C<cert_dir> on the machine that runs this tool keeps these certificates, or the
@@ -276,6 +292,7 @@ sub template_files {
     return (
         'openvpnclient.client.conf.tt' => 'client.conf',
         'openvpnclient.hosts.tt'       => 'vpn.hosts',
+        'openvpnclient.ufw.conf.tt'    => 'openvpnclient_ufw.conf',
     );
 }
 

@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use IO::Socket::INET;
 
 # The unit, the configuration and the certificates are named for the domain,
 # because a guest can hold two of these tunnels.
@@ -19,6 +20,21 @@ is((stat('/etc/openvpn/client/[% domain %]/client.key'))[2] & 07777, 0600, 'and 
 # The interface that the recipe waits for, checked here apart from that wait.
 my $link = `ip link show [% device %] 2>&1`;
 like($link, qr/\Q[% device %]\E/, 'the tunnel interface is up under the name this domain was given') or diag $link;
+
+# A new flow, as after a boot, because ufw lets a flow from before its rules go
+# on.  ssh, because ufw drops a ping.  Provisioner::Recipe::openvpnclient has
+# the whole account.
+system(qw{systemctl restart}, 'openvpn-client@[% domain %]');
+my ($gateway, $ssh);
+foreach my $try (1 .. 30) {
+    my $log = do { local (@ARGV, $/) = '/var/log/openvpn/openvpn-client-[% domain %].log'; <> } // q{};
+    ($gateway) = ($log =~ m/route-gateway\s+(\d+(?:\.\d+){3})/g)[-1];
+    $ssh = $gateway && IO::Socket::INET->new(PeerAddr => $gateway, PeerPort => 22, Proto => 'tcp', Timeout => 5);
+    last if $ssh;
+    sleep 1;
+}
+ok($ssh, 'the server answers through the tunnel after it restarts')
+    or diag $gateway ? "ssh on $gateway: $@" : 'the server pushed no route-gateway into the log of this tunnel';
 
 [% IF issue_from -%]
 # The address comes from the bin of ip_pool that [% issue_from %] routes, and
