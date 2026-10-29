@@ -3,6 +3,21 @@ use strict;
 use warnings;
 use Test::More;
 
+[% UNLESS modules.grep('^ntp$').size -%]
+# Without the ntp recipe, the timesyncd of the image sets the clock.  The kernel
+# keeps the synchronized flag of a sync from before ufw came up, so restart it,
+# which clears its last reply, and wait for a new one.
+system(qw{systemctl restart systemd-timesyncd});
+my $reply = q{};
+foreach my $try (1 .. 60) {
+    ($reply) = `timedatectl show-timesync -p NTPMessage --value 2>&1` =~ m/(\S.*)/;
+    last if ($reply // q{}) =~ m/Mode=4/;
+    sleep 1;
+}
+like($reply // q{}, qr/Mode=4/, 'timesyncd gets an answer from a time server through ufw')
+    or diag `timedatectl show-timesync 2>&1`;
+
+[% END -%]
 my $ufw_status = `ufw status 2>/dev/null | head -1`;
 chomp $ufw_status;
 like($ufw_status, qr/active/i, 'ufw is active');

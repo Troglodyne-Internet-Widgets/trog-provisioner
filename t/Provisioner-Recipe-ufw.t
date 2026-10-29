@@ -52,6 +52,14 @@ sub listeners_of {
     return $domain_conf{ufw} // {};
 }
 
+subtest 'template_files: the timesyncd of the image gets 123/udp out unless ntp brings chrony' => sub {
+    my %without = recipe('ufw')->template_files(qw{ufw cron});
+    is( $without{'ufw.timesyncd.tt'}, 'ufw/timesyncd', 'a guest without ntp gets the profile for timesyncd' );
+
+    my %with = recipe('ufw')->template_files(qw{ufw ntp});
+    ok( !exists $with{'ufw.timesyncd.tt'}, 'and a guest with ntp gets only the profile of chrony' );
+};
+
 subtest 'an address that two recipes claim is refused, and names them' => sub {
     my $ufw = recipe('ufw');
 
