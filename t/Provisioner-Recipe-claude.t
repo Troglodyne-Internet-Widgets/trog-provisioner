@@ -198,7 +198,7 @@ subtest 'only the memories are staged for the salvage' => sub {
     }
 
     my @commands = recipe()->remote_prepare( $install_dir, 'agent.test.test' );
-    is( scalar @commands, 1, 'one command' );
+    is( scalar @commands, 2, 'one command for the memories, and one for .claude.json' );
     my ( $rc, $err ) = run_sh( $commands[0] );
     is( $rc, 0, 'which succeeds' ) or diag "$commands[0]\n$err";
 
@@ -221,6 +221,8 @@ subtest 'only the memories are staged for the salvage' => sub {
 
     my %remote = recipe()->remote_files( $install_dir, 'agent.test.test' );
     is( $remote{"$home/.claude-memory-salvage/"}, 'claude/memory/', 'the staged copy is what comes down' );
+    is( $remote{"$home/.claude-state-salvage/"},  'claude/state/',  'and the staged .claude.json' );
+    is_deeply( [ grep { !m{/\z} } sort keys %remote ], [], 'every path that comes down is a directory, as remote_files requires' );
 
     my $empty = tempdir( CLEANUP => 1 );
     File::Path::make_path("$empty/agent.test.test/.claude");
@@ -229,13 +231,47 @@ subtest 'only the memories are staged for the salvage' => sub {
     ok( !-e "$empty/agent.test.test/.claude-memory-salvage/projects", 'and stages nothing' );
 };
 
+subtest '.claude.json is staged in a directory of its own for the salvage' => sub {
+    my $install_dir = tempdir( CLEANUP => 1 );
+    my $home        = "$install_dir/agent.test.test";
+    File::Path::make_path($home);
+    my $staged = "$home/.claude-state-salvage/.claude.json";
+
+    my ( undef, $command ) = recipe()->remote_prepare( $install_dir, 'agent.test.test' );
+
+    is( ( run_sh($command) )[0], 0, 'a guest with no .claude.json is not a failure' );
+    ok( !-e $staged, 'and stages nothing' );
+
+    open( my $fh, '>', "$home/.claude.json" ) or die "Cannot write $home/.claude.json: $!";
+    print {$fh} qq{{"hasCompletedOnboarding":true}\n};
+    close($fh) or die "Cannot close $home/.claude.json: $!";
+
+    my ( $rc, $err ) = run_sh($command);
+    is( $rc, 0, 'which succeeds' )                                  or diag "$command\n$err";
+    ok( -s $staged && !-d $staged, 'the file is staged as a file' ) or return;
+    open( my $in, '<', $staged )                                    or die "Cannot read $staged: $!";
+    my $copy = do { local $/; <$in> };
+    close($in) or die "Cannot close $staged: $!";
+    is( $copy, qq{{"hasCompletedOnboarding":true}\n}, 'with what the guest has' );
+
+    unlink "$home/.claude.json" or die "Cannot unlink: $!";
+    is( ( run_sh($command) )[0], 0, 'a .claude.json that is gone is not a failure' );
+    ok( !-e $staged, 'and the copy staged before goes with it' );
+};
+
 subtest 'the memories go back where the agent reads them' => sub {
     my %restores = recipe()->restores(%G);
     is_deeply(
         \%restores,
-        { '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects', owner => 'someadmin:someadmin' } },
-        'into .claude/projects of the domain, for the admin'
+        {
+            '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects',    owner => 'someadmin:someadmin' },
+            '/opt/domains/agent.test.test/.claude.json'     => { from => '/opt/domains/agent.test.test/claude/state/.claude.json', owner => 'agent:someadmin', mode => '0600' },
+        },
+        'into .claude/projects of the domain, for the admin, and .claude.json, for the service user alone'
     );
+    my %no_user = %G;
+    delete $no_user{user};
+    is( { recipe()->restores(%no_user) }->{'/opt/domains/agent.test.test/.claude.json'}{owner}, 'someadmin:someadmin', 'with no service user, .claude.json belongs to the admin' );
 };
 
 my %BOT = ( github_user => 'bot', github_token => 'ghp_x', git_email => 'bot@test.test' );

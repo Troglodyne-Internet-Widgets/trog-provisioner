@@ -243,10 +243,15 @@ its tools: hundreds of megabytes, and whatever passed through a session, secrets
 included.  It names what to keep, because a salvage can only exclude, and an
 exclude list lets through whatever Claude Code starts to keep there next.
 
-The command is rsync and not an installed script, so that it also runs on a
+It also copies F<.claude.json> into F<.claude-state-salvage>, because
+C<remote_files> salvages directories, not files.
+
+The commands are rsync and not an installed script, so that it also runs on a
 guest built before this recipe salvaged memories.  Every guest has rsync,
 because the salvage itself runs it there.  On a guest with no
-F<.claude/projects>, it stages nothing and succeeds.
+F<.claude/projects>, it stages nothing and succeeds, and the same goes for a
+guest with no F<.claude.json>.  A staged copy of either that is gone from the
+guest goes from the staging directory too.
 
 =cut
 
@@ -258,30 +263,39 @@ sub remote_prepare {
     # source that names a file or directory, not the contents of one.  The
     # include of /projects itself, because rsync takes a missing source for a
     # file, and the exclude of everything else would keep its copy.
-    return ("rsync -a --delete --delete-missing-args --prune-empty-dirs --include='/projects' --include='*/' --include='/projects/*/memory/***' --exclude='*' '$home/.claude/projects' '$home/.claude-memory-salvage/'");
+    return (
+        "rsync -a --delete --delete-missing-args --prune-empty-dirs --include='/projects' --include='*/' --include='/projects/*/memory/***' --exclude='*' '$home/.claude/projects' '$home/.claude-memory-salvage/'",
+        "rsync -a --delete-missing-args '$home/.claude.json' '$home/.claude-state-salvage/'",
+    );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        "$install_dir/$domain/.claude.json"            => '.claude.json',
         "$install_dir/$domain/.claude-memory-salvage/" => 'claude/memory/',
+        "$install_dir/$domain/.claude-state-salvage/"  => 'claude/state/',
     );
 }
 
 =head2 %restores = $recipe->restores(%opts)
 
 The salvaged memories go back to F<.claude/projects>, owned by the admin, whose
-C<HOME> the directory of the domain is.  On a guest that already has memories,
-C<restore_state> keeps them.
+C<HOME> the directory of the domain is.  F<.claude.json> goes back to the
+directory of the domain, owned by the service C<user> with mode 0600, because
+it holds the account state of whoever runs Claude Code there.  On a guest that
+already has either, C<restore_state> keeps it.
 
 =cut
 
 sub restores {
     my ( $self, %opts ) = @_;
     my ( $install_dir, $domain, $admin_user ) = @opts{qw{install_dir domain admin_user}};
+    my $user = $opts{user} // $admin_user;
 
-    return ( "$install_dir/$domain/.claude/projects" => { from => "$install_dir/$domain/claude/memory/projects", owner => "$admin_user:$admin_user" } );
+    return (
+        "$install_dir/$domain/.claude/projects" => { from => "$install_dir/$domain/claude/memory/projects",    owner => "$admin_user:$admin_user" },
+        "$install_dir/$domain/.claude.json"     => { from => "$install_dir/$domain/claude/state/.claude.json", owner => "$user:$admin_user", mode => '0600' },
+    );
 }
 
 sub tests {

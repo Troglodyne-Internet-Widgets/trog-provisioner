@@ -43,7 +43,8 @@ runuser -u '[% user %]' -- '[% install_dir %]/[% domain %]/.venv/bin/pip' instal
 # Seed ~/.claude.json so that Claude Code skips its onboarding.  The
 # CLAUDE_CODE_OAUTH_TOKEN in .env does the authentication.  Without
 # hasCompletedOnboarding, Claude tries a browser login that a service cannot do.
-# Keep a file that is there, because remote_files restores the full account state.
+# Keep a file that is there, because the claude recipe restores the full account
+# state.
 if [ ! -f '[% install_dir %]/[% domain %]/.claude.json' ]; then \
     printf '{"hasCompletedOnboarding":true}\n' > '[% install_dir %]/[% domain %]/.claude.json'; \
     chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.claude.json'; \
