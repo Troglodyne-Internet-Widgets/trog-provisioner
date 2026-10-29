@@ -66,11 +66,9 @@ pool, so it cannot be handed one that is already spoken for.
 =item F<ips.db>
 
 B<Not> copied.  A link to the database of the installation, so that a scratch
-guest and a real one take their addresses in one transaction.  A copy knew only
-the guests that were up when it was made.  So a real guest built afterwards was
-given an address that a scratch guest held, and the two answered for one
-address on one network.  A scratch guest has a row in the database of the
-installation until its teardown releases it.  If a run ends without a teardown,
+guest and a real one take their addresses in one transaction, and neither gets
+an address that the other holds.  A scratch guest has a row in the database of
+the installation until its teardown releases it.  If a run ends without a teardown,
 C<bin/reseed_ips --prune> releases the row of a guest that no hypervisor runs.
 
 The recipes of that C<_base> are left behind, which is the next item.
