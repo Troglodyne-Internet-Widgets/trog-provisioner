@@ -21,6 +21,7 @@ use File::Temp qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use Cpanel::JSON::XS();
+use Capture::Tiny qw{capture_stdout};
 
 use FindBin::libs;
 
@@ -362,6 +363,66 @@ subtest 'a domain that no server holds is refused' => sub {
     );
 };
 
+subtest 'a domain that nothing holds can be built at a terminal, with its zone left to the operator' => sub {
+    my $configured = {};
+    my $conf       = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return $configured } );
+    $conf->redefine( host_of       => sub { return } );
+    my @recorded;
+    $conf->redefine( record_setting => sub { my ( undef, @args ) = @_; @recorded = @args; $configured = { registrar => { unmanaged => 1 } }; return '/bogus/recipes.d/a.example.net.yaml' } );
+
+    my $utils = Test::MockModule->new('Trog::Utils');
+    my ( $asked, $answer );
+    $utils->redefine( prompt => sub { $asked = shift; return $answer } );
+
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my $unmanaged = sub {
+        my ( undef, $got ) = capture_stdout { $registrar->unmanaged('a.example.net') };
+        return $got;
+    };
+
+    $utils->redefine( interactive => sub { 0 } );
+    like( exception { $unmanaged->() }, qr/set[ ]unmanaged[ ]in[ ]the[ ]registrar[ ]block/, 'with nobody to ask, the refusal says how to build it anyway' );
+    is( $asked, undef, 'and asks nothing' );
+
+    $utils->redefine( interactive => sub { 1 } );
+    $answer = 'n';
+    like( exception { $unmanaged->() }, qr/a[.]example[.]net[ ]was[ ]not[ ]built/,         'at a terminal, it asks, and a no stops the build' );
+    like( $asked,                       qr/Build[ ]a[.]example[.]net[ ]with[ ]its[ ]zone/, 'naming the domain in the question' );
+    is_deeply( \@recorded, [], 'and writes nothing' );
+
+    $answer = 'y';
+    is( $unmanaged->(), 1, 'a yes builds it unmanaged' );
+    is_deeply( \@recorded, [qw{a.example.net registrar unmanaged 1}], 'and writes that into the file of the domain' );
+
+    $asked = undef;
+    is( $unmanaged->(), 1,     'so the next caller gets the same answer' );
+    is( $asked,         undef, 'without a second question' );
+};
+
+subtest 'a domain that something holds is not asked about' => sub {
+    my $configured;
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return $configured } );
+    $conf->redefine( host_of       => sub { return } );
+
+    my $utils = Test::MockModule->new('Trog::Utils');
+    $utils->redefine( interactive => sub { 1 } );
+    $utils->redefine( prompt      => sub { die "asked\n" } );
+
+    my $registrar = Provisioner::Cookbook->load('registrar');
+    my %held_by   = (
+        'a provider'   => { registrar => { type      => 'easydns' } },
+        'an account'   => { registrar => { accounts  => { ours => { type => 'easydns', zones => ['example.net'] } } } },
+        'an authority' => { registrar => { authority => 'ns.example.net' } },
+        'its own pdns' => { registrar => { authority => 'a.example.net' }, pdns => {} },
+    );
+    foreach my $by ( sort keys %held_by ) {
+        $configured = $held_by{$by};
+        is( $registrar->unmanaged('a.example.net'), 0, "where $by holds the zone" );
+    }
+};
+
 subtest 'each recipe that is handed the names declares them' => sub {
     foreach my $recipe (qw{registrar letsencrypt}) {
         my %schema = Provisioner::Cookbook->load($recipe)->schema;
@@ -548,6 +609,30 @@ subtest 'a name in a zone of an account is published there, and not as an alias 
     like( $fragment, qr{${\ $zone->('deep.customer.test')}--alias-of[ ]\Q$PUBLIC\E[ ]a[.]deep[.]customer[.]test$}m, 'and so does a name of the deeper zone' );
     unlike( $fragment, qr{(?:${\ $zone->('deep.customer.test')})[^-]}m, 'which gets no A record, its apex not being served' );
     like( $fragment, qr/[ ]alt[.]\Q$PUBLIC\E[ ]www[.]\Q$PUBLIC\E[ ]xcustomer[.]test$/m, 'and the domain publishes the rest as its aliases' );
+};
+
+subtest 'an unmanaged domain publishes only its names in the zones of accounts' => sub {
+    my $hostnames = [ "www.$PUBLIC", 'shop.customer.test' ];
+    my ( $opts, $fragment ) = publishing( 'registrar', { registrar => { unmanaged => 1, accounts => \%ACCOUNTS } }, %ON_PUBLIC, hostnames => $hostnames, modules => [qw{registrar mail}] );
+
+    is( $opts->{unmanaged}, 1, 'it builds with no provider for its own zone' );
+    my $queued = qr/queue_postrun_task[ ]\S+publish_dns_records[ ]/;
+    my $zone   = qr{--shortcut[ ]/opt/lexicon/zones/customer[.]test[ ]};
+    like( $fragment, qr{${queued}${zone}--alias-of[ ]\Q$PUBLIC\E[ ]shop[.]customer[.]test$}m, 'a name in the zone of an account is still published there' );
+    my @own = grep { m/${queued}(?!--shortcut)/ } split( m/\n/, $fragment );
+    is_deeply( \@own, [], 'and nothing is queued for the zone of the domain' );
+    ok(
+        !grep( { $_ eq 'registrar-records.json' } fresh('registrar')->generate_files( tempdir( CLEANUP => 1 ), %ON_PUBLIC, domain => $PUBLIC, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/root/bin', unmanaged => 1, modules => [qw{registrar mail}] ) ),
+        'nor are its records written for a publisher'
+    );
+
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    authority_conf( $conf, 'web.lab.example.net', 'ns.example.net' );
+    like(
+        exception { fresh('registrar')->validate( domain => 'web.lab.example.net', install_dir => '/bogus', admin_user => 'someadmin', ipmap => { 'ns.example.net' => '192.0.2.53' }, authority => 'ns.example.net', unmanaged => 1 ) },
+        qr/but[ ]ns[.]example[.]net[ ]holds[ ]its[ ]zone/,
+        'and unmanaged is refused where a server of the installation writes the zone'
+    );
 };
 
 subtest 'a zone of an account with an authority is written through that pdns guest, and only for the names that the guest serves' => sub {

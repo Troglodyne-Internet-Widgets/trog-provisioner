@@ -144,7 +144,7 @@ sub seed_admin_keys {
     my $path = Trog::Config->path('admin_authorized_keys');
     return 0 if -s $path;
 
-    return 0 unless Trog::Local->interactive;
+    return 0 unless Trog::Utils::interactive();
 
     # The services that ssh-import-id accepts.
     my %offered = map { $_ => 1 } qw{gh lp};

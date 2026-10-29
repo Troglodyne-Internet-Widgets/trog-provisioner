@@ -130,6 +130,15 @@ is the exception.  The hook writes its challenge through the shortcut of that zo
 F</opt/lexicon/zones/ZONE>, which the registrar installs.  See
 L<Provisioner::Recipe::registrar/Accounts, and the zones that they hold>.
 
+=head2 A domain whose zone nothing here writes
+
+dehydrated answers only a C<dns-01> challenge, and that needs a server that
+can write the zone of the domain.  So the recipe does not set up dehydrated for
+a domain that L<Provisioner::Recipe::registrar/unmanaged> says nothing here
+writes.  It renews nothing for that domain, and the guest keeps the self-signed
+certificate that the C<ssl> target makes.  See
+L<Provisioner::Recipe::registrar/A zone that nothing here can write>.
+
 =head2 What a guest served by our own CA can be issued for
 
 It can get certificates for names inside its own zone, and for nothing else.
@@ -225,7 +234,8 @@ sub enrich {
     # The same name and structure that the shortcut renders from, so the two
     # exports of one credential cannot drift apart.
     my $registrar = Provisioner::Cookbook->load('registrar');
-    $params{lexicon} = { $registrar->credentials_for(%params) };
+    $params{unmanaged} = $registrar->unmanaged( $params{domain} );
+    $params{lexicon}   = $params{unmanaged} ? {} : { $registrar->credentials_for(%params) };
 
     # The socket of the server on the guest, which get_cert waits for before it
     # asks for a challenge.  An authority is reached at a URL, not a socket.

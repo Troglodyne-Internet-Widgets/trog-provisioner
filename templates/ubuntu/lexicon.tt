@@ -3,9 +3,13 @@
     because the second of two recipes that write one file replaces what the
     first wrote. -%]
 mkdir -p /opt/lexicon; /bin/true
+[%# None for a domain whose zone nothing here writes.  See unmanaged in
+    Provisioner::Recipe::registrar. -%]
+[% UNLESS unmanaged -%]
 [%# On an older guest this path is a directory with one shortcut per provider.
     mv onto a directory puts the file inside it, so remove the directory first. -%]
 rm -rf /opt/lexicon/[% domain %]
 mv lexicon.sh /opt/lexicon/[% domain %]
 chmod 0700 /opt/lexicon/[% domain %]
 chown root:root /opt/lexicon/[% domain %]
+[% END -%]

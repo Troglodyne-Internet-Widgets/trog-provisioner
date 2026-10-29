@@ -17,6 +17,7 @@ use List::Util qw{uniq};
 
 use Provisioner::Cookbook();
 use Provisioner::Utils();
+use Trog::Utils();
 
 =head1 Provisioner::Recipe::registrar
 
@@ -185,6 +186,28 @@ procedure.
 Write these accounts in C<_base>.  The authority reads them from its own
 configuration, and a domain sees them in its own.
 
+=head2 A zone that nothing here can write
+
+Sometimes no server of this installation can write the zone of a domain.  You
+do not control the zone, or its provider has no API.  Set C<unmanaged> for such
+a domain:
+
+    web.example.org:
+        registrar:
+            unmanaged: 1
+
+Then the guest writes nothing into the zone of the domain.  It publishes none
+of the records of the domain, so you make them by hand.  It gets no lexicon
+shortcut for the domain, and L<Provisioner::Recipe::letsencrypt> does not set
+up dehydrated for it, because dehydrated answers only a C<dns-01> challenge.
+So the guest keeps the self-signed certificate that the C<ssl> target makes.
+A served name in a zone of an account is still published there.
+
+C<bin/new_config> offers to set it.  Where no server of this installation holds
+the zone, no account lists a zone that holds the domain, and the registrar
+names no C<type>, it asks at the terminal whether to build the domain anyway.
+A yes writes C<unmanaged> into the file of the domain.  See C<unmanaged>.
+
 =head2 It installs nothing, and publishes the records of the domain
 
 This recipe starts no service.  It supplies the credentials in
@@ -234,6 +257,11 @@ sub args {
                 type        => 'string',
                 default     => q{},
                 description => 'The account, where the provider wants one alongside the token.  Empty is normal: most of them authenticate with a token alone.',
+            },
+            unmanaged => {
+                type        => 'boolean',
+                default     => 0,
+                description => 'Nothing of this installation writes the zone of this domain, because you do not control the zone, or its provider has no API.  The guest publishes none of the records of the domain, so you make them by hand, and it keeps its self-signed certificate.  bin/new_config offers to set this where nothing holds the zone.  See "A zone that nothing here can write".',
             },
             accounts => {
                 type                 => 'object',
@@ -330,6 +358,63 @@ sub lexicon_credentials {
     return $pdns->client_credentials( $guest, $domain ) if defined $guest;
 
     return $self->domain_credentials(%opts);
+}
+
+=head2 $bool = $recipe->unmanaged($domain)
+
+Returns 1 where nothing of this installation writes the zone of C<$domain>, and
+0 where something does.  See L</A zone that nothing here can write>.  It is 0
+where a server of this installation holds the zone, as C<authority_of> says,
+and otherwise what C<zone_unmanaged> returns for the configuration that
+C<configuration_of> reads.
+
+L<Provisioner::Recipe::lexicon>, L<Provisioner::Recipe::letsencrypt> and
+L<Provisioner::Recipe::cron> ask this, so that the three agree with C<enrich>.
+
+=cut
+
+sub unmanaged ( $self, $domain ) {
+    return 0 if defined $self->authority_of($domain);
+    return $self->zone_unmanaged( %{ $self->configuration_of($domain) }, domain => $domain );
+}
+
+=head2 $bool = $recipe->zone_unmanaged(%opts)
+
+Whether nothing of this installation writes the zone of C<$opts{domain}>, where
+C<%opts> is the configuration of this recipe and no server of this
+installation holds the zone.
+
+The answer is 1 where C<%opts> sets C<unmanaged>.  It is 0 where an account
+lists a zone that holds the domain, or where C<%opts> names a C<type>.
+Otherwise it asks at the terminal whether to build the domain anyway.  A yes
+writes C<unmanaged> into the file of the domain with
+L<Provisioner::Cookbook/record_setting>.  So the next run, and every later
+caller in this run, gets 1 without a question, because the configuration that
+C<configuration_of> reads sets it now.
+
+Dies on a no, or where there is no terminal to ask at.
+
+=cut
+
+sub zone_unmanaged ( $self, %opts ) {
+    my $domain = $opts{domain};
+    return 1 if $opts{unmanaged};
+
+    my ($zone) = $self->account_for( $domain, \%opts );
+    return 0 if defined $zone || $opts{type};
+    return 1 if $self->configuration_of($domain)->{unmanaged};
+
+    my $why = "registrar has no type for $domain, and no server of this installation holds its zone.\n";
+    die $why . "List its zone under an account of accounts, name the provider that holds the zone, as lexicon calls it, or name an authority.  Where nothing here can write its zone, set unmanaged in the registrar block of $domain.\n"
+      unless Trog::Utils::interactive();
+
+    print $why . "It can be built anyway.  Then it publishes none of its records, so you make them by hand, and it keeps its self-signed certificate.\n";
+    my $answer = Trog::Utils::prompt("Build $domain with its zone left to you? [y/N]:") // q{};
+    die "$domain was not built, because nothing writes its zone.\n" unless "$answer" =~ m/\A\s*y/i;
+
+    my $path = Provisioner::Cookbook->record_setting( $domain, $self->recipe_name, unmanaged => 1 );
+    print "Wrote unmanaged: 1 into the registrar block of $domain in $path, so the next run does not ask.\n";
+    return 1;
 }
 
 =head2 %credentials = $recipe->domain_credentials(%opts)
@@ -842,10 +927,13 @@ server of the domain, which is the name that F<pdns.zone.tt> gives its own
 nameserver.  The address of C<ns1> is the address of the A record of the
 domain, as C<publication> says.
 
-Where the registrar of C<type> holds the zone, dies when there is no C<type>.
-Where a server of this installation holds the zone, dies when that server runs
-no pdns, as C<needs_recipe> in L<Provisioner::Cookbook> says, and outside a
-reserved TLD, when the domain has fewer than three labels.  Dies when the
+Where the registrar of C<type> holds the zone, it asks C<zone_unmanaged>.  Where
+that is true, it sets C<unmanaged>, and the guest publishes nothing in the zone
+of the domain.  Otherwise it dies when there is no C<type>.  Where a server of
+this installation holds the zone, it dies when C<unmanaged> is set, and when
+that server runs no pdns, as C<needs_recipe> in L<Provisioner::Cookbook> says.
+Outside a reserved TLD, it dies there when the domain has fewer than three
+labels.  Dies when the
 installation gave an address to neither another guest that holds the zone, nor
 a nameserver that needs glue.
 
@@ -859,9 +947,11 @@ sub enrich {
     my $holder = defined $opts{authority} ? Provisioner::Utils::dns_name( $opts{authority} ) : $self->authority_of($domain);
     delete $opts{authority};
     unless ( defined $holder ) {
-        $self->domain_credentials(%opts);
+        $opts{unmanaged} = $self->zone_unmanaged(%opts);
+        $self->domain_credentials(%opts) unless $opts{unmanaged};
         return ( %opts, $self->publication(%opts) );
     }
+    die "$domain sets unmanaged in its registrar block, but $holder holds its zone, and writes it.  Remove one of the two.\n" if $opts{unmanaged};
 
     my $delegated = !Provisioner::Utils::reserved_tld($domain);
     die "$domain names $holder as the authority of its registrar, but has fewer than three labels.  Its zone is delegated with an NS record in the zone of a registered domain, and a registered domain itself needs glue at the registry, which most registrars have no API for.\n"
@@ -899,8 +989,9 @@ sub enrich {
 =head2 @written = $recipe->generate_files($output_dir, %vars)
 
 Writes the templates, and the C<zone_records> as F<registrar-records.json>
-where there are records to publish.  Also the certificate of the fleet
-authority as F<registrar-anchor.crt> where C<enrich> sets C<fleet_anchor>.
+where there are records to publish in the zone of the domain.  Also the
+certificate of the fleet authority as F<registrar-anchor.crt> where C<enrich>
+sets C<fleet_anchor>.
 
 =cut
 
@@ -910,7 +1001,7 @@ sub generate_files {
     my @written = $self->SUPER::generate_files( $output_dir, %vars );
     my %opts    = $self->validated(%vars);
 
-    if ( $opts{publish_records} && @{ $opts{zone_records} } ) {
+    if ( $opts{publish_records} && !$opts{unmanaged} && @{ $opts{zone_records} } ) {
         my $encoder = Cpanel::JSON::XS->new->canonical->pretty;
         File::Slurper::Temp::write_binary( "$output_dir/registrar-records.json", $encoder->encode( $opts{zone_records} ) );
         push( @written, 'registrar-records.json' );

@@ -76,19 +76,6 @@ Returns the name for this machine in an error message.
 sub is_local { return 1 }
 sub describe { return 'this machine' }
 
-=head2 interactive
-
-Returns 1 if a person can answer a prompt, and 0 if not.  A prompt that nobody
-answers does not fail.  It stops the run until something else kills it.  So a
-caller asks this before it prompts.
-
-=cut
-
-sub interactive {
-    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether there is anybody to ask is exactly what this decides
-    return ( -t *STDIN && -t *STDOUT ) ? 1 : 0;
-}
-
 =head1 REACHABILITY
 
 =head2 transfer_ips(@towards)

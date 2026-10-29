@@ -60,6 +60,19 @@ sub prompt {
     return $answer;
 }
 
+=head2 interactive()
+
+Returns 1 if a person can answer a prompt, and 0 if not: standard input and the
+selected output handle are both terminals.  A prompt that nobody answers does
+not fail.  It stops the run until something else kills it.  So a caller asks
+this before it prompts.
+
+=cut
+
+sub interactive {
+    return IO::Interactive::Tiny::is_interactive() ? 1 : 0;
+}
+
 =head2 output_is_redirected()
 
 Returns true if standard input is a terminal and the selected output handle is

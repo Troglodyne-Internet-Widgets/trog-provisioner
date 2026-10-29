@@ -1376,10 +1376,9 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     like( $run->('web.test'), qr/no[ ]terminal/, 'a cycle of guests that are up stops the run with nobody to ask' );
     is_deeply( \@built, [], 'before anything is built' );
 
-    my $local = Test::MockModule->new('Trog::Local');
     my $utils = Test::MockModule->new('Trog::Utils');
     my $answer;
-    $local->redefine( interactive => sub { 1 } );
+    $utils->redefine( interactive => sub { 1 } );
     $utils->redefine( prompt      => sub { $answer } );
 
     $answer = 'n';

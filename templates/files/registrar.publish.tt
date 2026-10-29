@@ -6,6 +6,9 @@
     runs after this one.  The postrun runs after every target, so both are
     settled by the time this goes. -%]
 [% IF publish_records -%]
+[%# Nothing in the zone of an unmanaged domain.  See unmanaged in
+    Provisioner::Recipe::registrar. -%]
+[% UNLESS unmanaged -%]
 [%# The records other than names.  A file, because their content holds
     spaces, semicolons and quotes.  See zone_records in
     Provisioner::Recipe::registrar. -%]
@@ -14,6 +17,7 @@ install -d -o root -g root -m 0755 /etc/provisioner/records
 install -o root -g root -m 0644 registrar-records.json /etc/provisioner/records/[% domain %].json
 [% END -%]
 [% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% IF zone_records.size() %]--records /etc/provisioner/records/[% domain %].json [% END %][% IF own_nameserver %]--addressed [% own_nameserver %] [% END %][% FOREACH name IN address_names %]--addressed [% name %] [% END %][% domain %] [% address %][% FOREACH alias IN domain_aliases.sort() %] [% alias %][% END %]
+[% END -%]
 [%# A name in a zone of a registrar account is a CNAME of the domain, but the
     apex of that zone holds an A record.  See publication in
     Provisioner::Recipe::registrar. -%]

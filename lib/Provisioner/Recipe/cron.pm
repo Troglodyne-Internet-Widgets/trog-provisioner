@@ -10,6 +10,9 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util();
+
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::cron
@@ -63,7 +66,9 @@ The cron jobs of root run:
     * Log watchers (OOMs, SEGVs, root logins, new users, rsyslog drops,
       outgoing ufw blocks)
     * scan for writes to packaged files
-    * dehydrated, if the domain uses the letsencrypt recipe
+    * dehydrated, if the domain uses the letsencrypt recipe, and something
+      here writes the zone of the domain.  See
+      L<Provisioner::Recipe::letsencrypt/A domain whose zone nothing here writes>.
 
 They also run each configured C<root_scripts> entry, from a PATH that starts
 with C<script_dir>.  The service user runs each C<user_scripts> entry, from a
@@ -74,6 +79,9 @@ PATH that starts with the C<bin/> directory of the service install dir.
 =head3 %opts = $recipe->enrich(%opts)
 
 Sets what MAILFROM and each MAILTO say, and returns the options.
+
+It also sets C<renews_certificate>, which is true where the letsencrypt recipe
+set up dehydrated for the domain.
 
 A local part in C<from> or C<mailto>, for example C<from: cron>, gets this
 domain appended.  An address does not change, because a second domain gives
@@ -88,6 +96,9 @@ sub enrich {
     my ( $self, %opts ) = @_;
 
     $opts{from} = Provisioner::Utils::qualify_address( $opts{from}, $opts{domain} );
+
+    my $certified = List::Util::any { $_ eq 'letsencrypt' } @{ $opts{modules} // [] };
+    $opts{renews_certificate} = ( $certified && !Provisioner::Cookbook->load('registrar')->unmanaged( $opts{domain} ) ) ? 1 : 0;
 
     foreach my $key (qw{root_scripts user_scripts}) {
         next unless ref $opts{$key} eq 'ARRAY';
