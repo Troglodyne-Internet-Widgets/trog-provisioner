@@ -104,9 +104,9 @@ sub main {
     my @results = (
         check_tunnel( $edge, $guest ),
         check_resolvers( $edge, $name ),
-        check_https( $edge->host, $name, $token ),
-        check_http( $edge->host, $name ),
-        check_client_address( $guest, $token, client_address($edge), $edge->host ),
+        check_https( $edge->ssh_host, $name, $token ),
+        check_http( $edge->ssh_host, $name ),
+        check_client_address( $guest, $token, client_address($edge), $edge->ssh_host ),
         check_ban( $guest, $edge, $guest_domain ),
     );
 
@@ -163,7 +163,7 @@ guest answers a ping there.
 
 sub check_tunnel {
     my ( $edge, $guest ) = @_;
-    my $address = $guest->host;
+    my $address = $guest->ssh_host;
     my $label   = "the edge reaches the guest at $address through its tunnel";
 
     my ($route) = as_root( $edge, "ip -4 -o route get $address" );

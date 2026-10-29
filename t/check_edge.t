@@ -27,15 +27,16 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 my $script = "$FindBin::Bin/../bin/check_edge";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-# A machine that answers each command by the first rule whose pattern matches
+# A guest that answers each command by the first rule whose pattern matches
 # it.  A rule gives the output and the exit status, as a shell on the far side
 # would print them through as_root.  A command that no rule matches gets
-# nothing, as a connection that failed does.
+# nothing, as a connection that failed does.  A Trog::Guest, so that a method
+# the real one lacks fails here too.
 {
 
     package FakeMachine;
-    sub new { my ( $class, %o ) = @_; return bless { rules => [], asked => [], %o }, $class }
-    sub host { my ($self) = @_; return $self->{host} }
+    use parent 'Trog::Guest';
+    sub new { my ( $class, %o ) = @_; return $class->SUPER::new( rules => [], asked => [], %o ) }
 
     sub capture_cmd {
         my ( $self, $command ) = @_;
