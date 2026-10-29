@@ -463,7 +463,7 @@ sub global_args {
             # guards them on manages_addresses, and
             # Provisioner::Recipe::ubuntu wants a gateway only where there are
             # ips of ours to go with it.
-            gateway => { type => 'string', nullable => 1, description => 'The IPv4 gateway guests are built with, or nothing where the platform provides one.' },
+            gateway => { type => 'string', nullable => 1, readOnly    => 1, description => 'The IPv4 gateway of a guest with an address from the pool: the one that the block of its hypervisor in hypervisors.conf names.  Nothing where the platform provides one.  bin/new_config writes it, so _global cannot set it.' },
             main_ip => { type => 'string', nullable => 1, description => "The guest's static address: from the pool, or the one that a hypervisor that allocates addresses gave the guest.  Nothing where the guest has none yet." },
             tld_ip  => { type => 'string', nullable => 1, description => "The hypervisor's NAT bridge address, or nothing where it has none." },
 
@@ -482,7 +482,7 @@ sub global_args {
             disk_devices  => { type => 'array',  items                => { type => 'string' }, description => 'The names that the guest gives its disks, as udev KERNEL globs.  The hypervisor says, see guest_disks in Trog::HV.' },
             ip_pool       => {
                 type        => 'object',
-                description => 'The addresses this installation hands out, and the networks they are on.  The addresses and cidr at the top are the bin named guests.  See Provisioner::IPPool.',
+                description => 'The addresses that the guest and its neighbors take, and the networks they are on: the bins of the ip_pool of _global, and at the top, as the bin named guests, the pool of the hypervisor of the guest.  See pool_of in Provisioner::IPPool.',
                 properties  => {
                     addresses => { type => [qw{array string}], items => { type => 'string' } },
                     cidr      => { type => [qw{array string}], items => { type => 'string' } },

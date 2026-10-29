@@ -11,7 +11,8 @@ use re '/aasx';
 use Cwd();
 use File::Basename();
 use List::Util qw{first};
-use Net::IP;
+use Net::CIDR();
+use Net::IP();
 use Socket();
 
 use Provisioner::Cookbook();
@@ -35,22 +36,24 @@ Provisioner::IPPool - assign static IP addresses from a pool, and record which a
     my @ips = Provisioner::IPPool::pool_ips($pool_block);
     my $ip  = Provisioner::IPPool::assign( 'test.test', $pool_block );
 
-    # A pool with a second bin, for the clients of a VPN.
-    my $pool = { cidr => '192.0.2.0/24', bins => { vpnclients => { cidr => '10.8.0.128/25' } } };
+    # The pool of the guests of one hypervisor, with the bins of _global.
+    my $pool = Provisioner::IPPool::pool_of( $hv, $globals->{ip_pool} );
     my $vpn  = Provisioner::IPPool::assign( 'test.test', $pool, 'vpnclients' );
 
 The addresses of the C<guests> bin are on the subnet of the primary bridge of the
-hypervisor.  F<docs/NETWORK.md> says what that means.
+hypervisor, and its block of F<hypervisors.conf> names them.  See
+L<Trog::HV/guest_pool>.  F<docs/NETWORK.md> says what that means.
 
 =head1 BINS
 
 A bin is a named part of the pool.  Each bin hands out only its own addresses,
-so one kind of client cannot use up the addresses of another.  The
-C<addresses> and C<cidr> at the top of C<ip_pool> are the bin named C<guests>,
-which is where a guest gets its address.  C<bins> names the others:
+so one kind of client cannot use up the addresses of another.  The bin named
+C<guests> is where a guest gets its address.  It is on the network of a
+hypervisor, so the block of that hypervisor names it, and C<pool_of> puts it
+at the top of the pool, as C<addresses> and C<cidr>.  The C<bins> of the
+C<ip_pool> of C<_global> name the others:
 
     ip_pool:
-        cidr: 192.0.2.0/24
         bins:
             vpnclients:
                 cidr: 10.8.0.128/25
@@ -62,7 +65,6 @@ A bin that names a guest in C<via> holds addresses that only that guest can
 reach, such as the static addresses of the clients of a VPN:
 
     ip_pool:
-        cidr: 192.0.2.0/24
         bins:
             vpnclients:
                 cidr: 10.8.0.128/25
@@ -90,7 +92,7 @@ you cannot connect to one of them.
 
 So the assignments are in SQLite, and each assignment is one transaction.  The
 row goes in, or the address is already taken and C<assign> tries the next one.
-The C<ip_pool> of the C<_global> of C<_base> still gives the range of the pool.
+The configuration still gives the range of the pool.
 
 =head1 SUBROUTINES
 
@@ -104,8 +106,8 @@ our $GUESTS = 'guests';
 
 =head2 pool_ips($pool)
 
-C<$pool> is the C<ip_pool> of the C<_global> of C<_base>, as a hash reference,
-which L<Provisioner::Cookbook/globals> hands back with the rest of them.
+C<$pool> is one bin, as a hash reference, such as the C<guests> bin that
+L<Trog::HV/guest_pool> returns.
 C<addresses> is a list of addresses and C<cidr> is a list of CIDR blocks.
 Either may be written as a YAML list or as one string with whitespace between
 the items.
@@ -385,14 +387,12 @@ sub bins {
     my @seen;
     foreach my $name ( sort keys %bins ) {
         foreach my $block ( blocks( $bins{$name} ) ) {
-            my $net = Net::IP->new($block)
+            Net::IP->new($block)
               or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
-            foreach my $other ( grep { $_->{bin} ne $name } @seen ) {
-                my $overlap = $net->overlaps( $other->{net} ) // $IP_NO_OVERLAP;
-                die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
-                  if $overlap != $IP_NO_OVERLAP;
-            }
-            push @seen, { bin => $name, block => $block, net => $net };
+            my $other = first { $_->{bin} ne $name && Net::CIDR::cidrlookup( $block, $_->{block} ) } @seen;
+            die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
+              if $other;
+            push @seen, { bin => $name, block => $block };
         }
     }
 
@@ -413,6 +413,75 @@ sub bins_via {
 
     my %bins = bins($pool);
     return map { $_ => $bins{$_} } grep { defined $bins{$_}{via} && $bins{$_}{via} eq $guest } keys %bins;
+}
+
+=head2 $pool = pool_of($hv, $installation_pool)
+
+Returns the pool that a guest of the hypervisor C<$hv> takes its addresses
+from: the C<guests> bin of L<Trog::HV/guest_pool> at the top, as C<addresses>
+and C<cidr>, and the C<bins> of C<$installation_pool>, the C<ip_pool> of
+C<_global>.  A hypervisor that gives its guests their addresses has no
+C<guests> bin here, because its guests take none from the pool.
+
+=cut
+
+sub pool_of {
+    my ( $hv, $installation_pool ) = @_;
+    my $guests = $hv->manages_addresses ? {} : $hv->guest_pool;
+    return { %$guests, bins => { %{ ( $installation_pool // {} )->{bins} // {} } } };
+}
+
+=head2 $network = network_of($pool)
+
+The blocks of the bin C<$pool>, as C<blocks> gives them, sorted and joined
+into one string.  Two hypervisors on one network name the same blocks, so their
+pools have the same answer here.
+
+=cut
+
+sub network_of {
+    my ($pool) = @_;
+    return join( q{ }, sort( blocks($pool) ) );
+}
+
+=head2 %pools = guest_pools($fleet)
+
+Returns the C<guests> bin of each hypervisor of the L<Trog::Hypervisors>
+C<$fleet> that names one, by the name of its block, as
+L<Trog::HV/guest_pool> returns it.  A hypervisor that gives its guests their
+addresses is left out.
+
+Two hypervisors on one network name the same blocks, and share the addresses.
+Dies when the blocks of two hypervisors overlap and are not the same, because
+then one address belongs to two networks.
+
+=cut
+
+sub guest_pools {
+    my ($fleet) = @_;
+
+    my %pools;
+    foreach my $name ( $fleet->configured ? $fleet->names : () ) {
+        my $hv = $fleet->hypervisor($name);
+        next if $hv->manages_addresses;
+        my $pool   = $hv->guest_pool;
+        my @blocks = blocks($pool) or next;
+        Net::IP->new($_) // die "Invalid CIDR '$_' in the pool of $name in hypervisors.conf: " . Net::IP::Error() . "\n" foreach @blocks;
+        $pools{$name} = $pool;
+    }
+
+    my %by_network;
+    push @{ $by_network{ network_of( $pools{$_} ) } }, $_ foreach sort keys %pools;
+    my @claims = map {
+        my $names = join( q{, }, @{ $by_network{$_} } );
+        map { +{ block => $_, names => $names } } blocks( $pools{ $by_network{$_}[0] } )
+    } sort keys %by_network;
+    foreach my $claim (@claims) {
+        my $other = first { $_->{names} ne $claim->{names} && Net::CIDR::cidrlookup( $claim->{block}, $_->{block} ) } @claims or next;
+        die "The pool of $claim->{names} in hypervisors.conf has $claim->{block} and the pool of $other->{names} has $other->{block}, which overlap.\n" . "Hypervisors on one network name the same pool_cidr and pool_addresses, and hypervisors on two networks name pools that do not overlap.\n";
+    }
+
+    return %pools;
 }
 
 =head2 @blocks = blocks($bin)
@@ -657,7 +726,7 @@ sub clear_reservations {
     return $rows && $rows ne '0E0' ? $rows : 0;
 }
 
-=head2 ensure_seeded($pool, $gateway)
+=head2 ensure_seeded()
 
 Fills the database from the addresses that are already in use, once for each
 hypervisor.  Returns what C<seed> returns.
@@ -672,27 +741,25 @@ hypervisor as done, so the next run tries it again.
 =cut
 
 sub ensure_seeded {
-    my ( $pool, $gateway ) = @_;
-    return seed( $pool, $gateway );
+    return seed();
 }
 
-=head2 seed($pool, $gateway)
+=head2 seed()
 
 Records the address of each guest on each hypervisor.  It also reserves the
-addresses of the hypervisors, C<$gateway>, and other machines that answer.
-Returns the number of addresses it recorded.
-
-The caller passes the gateway rather than this reading it, because the
-configuration it comes out of is the one that caller was given, which is not
-always the one L<Trog::Config> names.
+addresses of the hypervisors, their gateways, and other machines that answer.
+Returns the number of addresses it recorded.  The pool and the gateway of each
+hypervisor come from its block, see C<guest_pools> and
+L<Trog::HV/configured_gateway>, and it dies as C<guest_pools> does.
 
 The list of guests comes from the hypervisors, not from the configuration.  A
 hypervisor reports what it runs, but somebody can edit a file.  The address
 of each guest comes from its own F<provision.conf>, which is what it was built
 with.
 
-It records an address only when it is in the C<guests> bin of the pool.  C<assign> cannot give out
-an address outside the pool, so a row for one is noise.
+It records an address only when it is in the C<guests> bin of the hypervisor
+that runs the guest.  C<assign> cannot give out an address outside the pool, so
+a row for one is noise.
 
 Another machine that answers is an address in the pool that answers a ping from
 the hypervisor, or that the neighbor table of its bridge holds as C<REACHABLE>,
@@ -705,31 +772,29 @@ swept.
 =cut
 
 sub seed {
-    my ( $pool, $gateway ) = @_;
-
     my $recorded = 0;
-    my %bins     = bins($pool);
-    my %in_pool  = map { $_ => 1 } pool_ips( $bins{$GUESTS} // {} );
-
-    # The gateway goes first, so that its row names it as the gateway and not
-    # as one more machine that answered.
-    $recorded += reserve( $gateway, "gateway:$gateway" ) if defined $gateway && $in_pool{$gateway};
-
-    my $db    = dbh();
-    my %done  = map { $_->[0] => 1 } @{ $db->selectall_arrayref('SELECT source FROM seeded') };
-    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $db       = dbh();
+    my %done     = map { $_->[0] => 1 } @{ $db->selectall_arrayref('SELECT source FROM seeded') };
+    my $fleet    = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my %pools    = guest_pools($fleet);
 
     foreach my $name ( $fleet->configured ? $fleet->names : () ) {
-
-        # Once per hypervisor.  The marker at the end of this loop is written
-        # only after the hypervisor answers everything, so a failure is retried.
-        next if $done{"hv:$name"};
-
         my $hv = $fleet->hypervisor($name);
 
         # A hypervisor that gives its guests their own addresses uses none from
         # this pool.  It is usually a cloud, which has no libvirt domain list.
         next if $hv->manages_addresses;
+
+        my %in_pool = map { $_ => 1 } pool_ips( $pools{$name} // {} );
+
+        # The gateway goes first, so that its row names it as the gateway and not
+        # as one more machine that answered.
+        my $gateway = $hv->configured_gateway;
+        $recorded += reserve( $gateway, "gateway:$gateway" ) if defined $gateway && $in_pool{$gateway};
+
+        # Once per hypervisor.  The marker at the end of this loop is written
+        # only after the hypervisor answers everything, so a failure is retried.
+        next if $done{"hv:$name"};
 
         # The sweep goes first, because it fills the neighbor table.  libvirt
         # knows the bridged address of a guest only if the host spoke to it

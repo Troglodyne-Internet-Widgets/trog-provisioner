@@ -106,6 +106,15 @@ sub run {
     # The resolvers that the block of the hypervisor names, which the local
     # hypervisor of these tests has no block for.
     $hv_mock->redefine( configured_resolvers => sub { return qw{192.0.2.254 8.8.8.8 1.1.1.1} } );
+    $hv_mock->redefine( configured_gateway   => sub { return '192.0.2.254' } );
+
+    # One address per domain out of the pool.  A hundred is more than there are
+    # recipes, and none is the gateway or the .50 that these settings say is us.
+    $hv_mock->redefine(
+        guest_pool => sub {
+            return { addresses => [ map { "192.0.2.$_" } 100 .. 199 ] };
+        }
+    );
 
     # garage, matrix and trogrunner each keep a file for the guest in the secret
     # store, so new_config opens it.  That needs a store, and its password handed
@@ -134,10 +143,6 @@ sub run {
 
     my @recipes = recipes();
 
-    # One address per domain out of the pool.  A hundred is more than there are
-    # recipes, and none is the gateway or the .50 that these settings say is us.
-    my $pool = join( ' ', map { "192.0.2.$_" } 100 .. 199 );
-
     my %global = (
         user          => 'test',
         data_source   => "$tmpdir/data",
@@ -147,9 +152,7 @@ sub run {
         admin_user    => 'someadmin',
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
-        gateway       => '192.0.2.254',
-        ip_pool       => { addresses => $pool },
-        nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
+        nameservers   => { ns1 => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
 
     # Each domain has its own recipe, and the recipes that `modules` names

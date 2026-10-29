@@ -170,22 +170,26 @@ protect, except the key that opens a guest that is up now.
 
 =head2 IP POOL
 
-The IP pool is the set of static addresses that new guests can get.  To use one,
-add an C<ip_pool> to the C<_global> of C<_base>:
+The IP pool is the set of static addresses that new guests can get.  The pool
+and its gateway are on the network of a hypervisor, so its block of
+F<hypervisors.conf> names them:
 
-    _base:
-      _global:
-        ip_pool:
-          # Every address of the static pool.
-          addresses: [192.0.2.10, 192.0.2.11, 192.0.2.12]
+    [hv1]
+    libvirt_uri    = qemu+ssh://hv1.test.test/system
+    resolvers      = 192.0.2.1, 1.1.1.1
+    gateway        = 192.0.2.1
 
-          # Or a CIDR block to expand.  Both keys may appear, and the
-          # addresses are merged.
-          cidr: 192.0.2.0/24
+    # Every address of the static pool.
+    pool_addresses = 192.0.2.10, 192.0.2.11, 192.0.2.12
 
-The two keys are the bin named C<guests>.  C<bins> can name other bins beside
-it, and a guest never gets an address out of those.  See
-L<Provisioner::IPPool/BINS>.
+    # Or a CIDR block to expand.  Both keys can appear, and the
+    # addresses are merged.
+    pool_cidr      = 192.0.2.0/24
+
+The two keys are the bin named C<guests>.  The C<bins> of the C<ip_pool> of
+C<_global> name other bins beside it, and a guest never gets an address out of
+those.  See L<Provisioner::IPPool/BINS>.  Hypervisors on one network name the
+same pool.  A block with a pool and no gateway is refused.
 
 new_config gives each domain an address from the pool, and records it in the
 address database of L<Provisioner::IPPool>.  A domain keeps its address when you
@@ -731,9 +735,7 @@ sub handle_domain {
     my $admin_user  = $global_config->{admin_user};
     my $admin_gecos = $global_config->{admin_gecos};
     my $admin_email = $global_config->{admin_email};
-    my $gateway     = $global_config->{gateway};
     my $ns_conf     = $global_config->{nameservers};
-    my $pool_conf   = $global_config->{ip_pool} // {};
 
     # From a file, not from GitHub at first boot, so that a provision does not
     # wait on GitHub.  A file also takes a raw public key.
@@ -772,19 +774,27 @@ sub handle_domain {
 
     my $resolvers = [ guest_resolvers($hv) ];
 
+    # The recipes get the pool of this hypervisor, because the addresses of
+    # the guests and their route are facts of the network that they are on.
+    my $pool_conf = Provisioner::IPPool::pool_of( $hv, $global_config->{ip_pool} );
+    my $gateway   = $hv->manages_addresses ? undef : $hv->configured_gateway;
+    $global_config->{ip_pool} = $pool_conf;
+
     # No pool when the hypervisor gives its guests their addresses, because an
     # address from the pool stays reserved for a guest that never uses it.
     my ( $static_ip, $ip_conf ) = ( undef, {} );
     if ( !$hv->manages_addresses ) {
         if ( Provisioner::IPPool::offers($pool_conf) ) {
-            Provisioner::IPPool::ensure_seeded( $pool_conf, $gateway );
+            die "The block of " . ( $hv->name // $hv->describe ) . " in hypervisors.conf names a pool but no gateway, so its guests have no route off their subnet.\n" . "Name the gateway of that subnet, for example:  gateway = 192.0.2.1\n"
+              unless defined $gateway;
+            Provisioner::IPPool::ensure_seeded();
 
             # One transaction, so that two provisions cannot get the same
             # address.  A domain that you provision again keeps its address.
             $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
         }
         else {
-            die "The ip pool offers no addresses, so $fqdn would have only a lease on the NAT network of " . $hv->describe . ",\n" . "and this machine is not on that network to reach it.  Give ip_pool addresses in _global, or run this from a guest of that hypervisor.\n"
+            die "The ip pool offers no addresses, so $fqdn would have only a lease on the NAT network of " . $hv->describe . ",\n" . "and this machine is not on that network to reach it.  Name pool_cidr or pool_addresses in its block of hypervisors.conf, or run this from a guest of that hypervisor.\n"
               unless $hv->on_nat_network;
             print "The ip pool offers no addresses, so $fqdn takes a lease on the NAT network of " . $hv->describe . ", and its bridged interface stays unconfigured.\n";
         }
@@ -1340,7 +1350,7 @@ sub handle_domain {
         contact_email=$admin_email
         ips=@{[ $static_ip // q{} ]}
         admin_user=$admin_user
-        gateway=$gateway
+        gateway=@{[ $gateway // q{} ]}
         resolvers=$r_text
         transfer_ip=$transfer_ip
         transfer_user=$transfer_user

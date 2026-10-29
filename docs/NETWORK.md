@@ -31,14 +31,19 @@ payload over it when this machine is the hypervisor.
 
 ## What the configuration names
 
+In the block of a hypervisor in `hypervisors.conf`:
+
+- `pool_addresses` and `pool_cidr` list the static addresses that its guests
+  can get.  They must be on the subnet of the primary bridge.  Keep them out of
+  any range that a DHCP server on that network hands out.  Hypervisors on one
+  network name the same pool.
+- `gateway` is the gateway of that subnet.
+
 In the `_global` of `_base` in `recipes.yaml`:
 
-- `ip_pool` lists the static addresses that guests can get.  They must be on
-  the subnet of the primary bridge.  Keep them out of any range that a DHCP
-  server on that network hands out.  Its `bins` name other parts of the pool,
-  such as the addresses of VPN clients.  Each bin hands out only its own
-  addresses: see `BINS` in `perldoc Provisioner::IPPool`.
-- `gateway` is the gateway of that subnet.
+- The `bins` of `ip_pool` name the other parts of the pool, such as the
+  addresses of VPN clients.  Each bin hands out only its own addresses: see
+  `BINS` in `perldoc Provisioner::IPPool`.
 - `transfer_ip` is the address of this machine that a guest fetches its payload
   from.  Set it only when this machine has more than one route to the guest, or
   when the guest has no address yet to route to.
@@ -53,15 +58,13 @@ through that guest, for example the clients of the openvpn server on it:
 
 ```yaml
 ip_pool:
-    cidr: 192.0.2.0/24
     bins:
         vpnclients:
             cidr: 10.8.0.128/25
             via: vpn.$domain
 ```
 
-Here `192.0.2.0/24` is the subnet of the primary bridge, which the guests get
-their static addresses from.  `10.8.0.0/24` is the tunnel subnet of the openvpn
+Here `10.8.0.0/24` is the tunnel subnet of the openvpn
 server, its default `subnet` and `netmask`, and the bin is its top half.
 
 A domain whose `openvpnclient` names `issue_from: vpn.$domain` gets an address

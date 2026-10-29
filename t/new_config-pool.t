@@ -41,11 +41,14 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
 my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 
 # A hypervisor that does not give its guests their addresses, as libvirt does
-# not, and that stops the run once the address of the guest is settled.
+# not, and that stops the run once the address of the guest is settled.  Its
+# pool and its gateway are what its block would name.
 {
 
     package PoolProbe::HV;
     sub configured_resolvers { return ('192.0.2.254') }
+    sub configured_gateway   { my ($self) = @_; return $self->{gateway} }
+    sub guest_pool           { my ($self) = @_; return $self->{pool} // {} }
     sub name                 { return 'hv1' }
     sub new                  { my ( $class, %o ) = @_; return bless {%o}, $class }
     sub manages_addresses    { return 0 }
@@ -54,9 +57,10 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
     sub virbr_ip             { die "far enough\n" }
 }
 
-# Runs the generator for vm.test.test with $pool as the ip_pool of _global, on
-# a hypervisor that is or is not on its NAT network.  Returns what it printed,
-# what it died with, and the domains that assign was asked about.
+# Runs the generator for vm.test.test on a hypervisor with the pool $pool and
+# the gateway $gateway, which is or is not on its NAT network, with $bins as
+# the bins of the ip_pool of _global.  Returns what it printed, what it died
+# with, and each domain that assign was asked about, with the pool it was given.
 sub generate (%args) {
     File::Slurper::Temp::write_text(
         $RECIPES,
@@ -69,8 +73,7 @@ sub generate (%args) {
                         admin_user    => 'someadmin',
                         admin_email   => 'bogus@test.test',
                         admin_gecos   => 'Test Test',
-                        gateway       => '192.0.2.254',
-                        ( $args{pool} ? ( ip_pool => $args{pool} ) : () ),
+                        ( $args{bins} ? ( ip_pool => { bins => $args{bins} } ) : () ),
                     },
                 },
                 'vm.test.test' => { ntp => undef },
@@ -80,10 +83,10 @@ sub generate (%args) {
 
     my @assigned;
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
-    $fleet->redefine( choose => sub { return PoolProbe::HV->new( on_nat_network => $args{on_nat_network} ) } );
+    $fleet->redefine( choose => sub { return PoolProbe::HV->new( on_nat_network => $args{on_nat_network}, pool => $args{pool}, gateway => exists $args{gateway} ? $args{gateway} : '192.0.2.254' ) } );
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( ensure_seeded => sub { return 0 } );
-    $pool->redefine( assign        => sub ( $domain, @ ) { push @assigned, $domain; return '192.0.2.10' } );
+    $pool->redefine( assign        => sub ( $domain, $from, @ ) { push @assigned, [ $domain, $from ]; return '192.0.2.10' } );
     $pool->redefine( assignments   => sub { return {} } );
 
     Provisioner::Cookbook->forget();
@@ -95,9 +98,18 @@ sub generate (%args) {
 }
 
 subtest 'a pool with addresses gives the guest one, as it always did' => sub {
-    my ( undef, $died, $assigned ) = generate( pool => { cidr => '192.0.2.0/24' }, on_nat_network => 0 );
+    my %vpn = ( vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } );
+    my ( undef, $died, $assigned ) = generate( pool => { cidr => ['192.0.2.0/24'] }, bins => \%vpn, on_nat_network => 0 );
     like( $died, qr/\Afar[ ]enough$/m, 'got past the address, on a hypervisor whose NAT network this machine is not on' );
-    is_deeply( $assigned, ['vm.test.test'], 'out of the pool' );
+    is_deeply( $assigned, [ [ 'vm.test.test', { cidr => ['192.0.2.0/24'], bins => \%vpn } ] ], 'out of the pool of its hypervisor, beside the bins of _global' );
+};
+
+subtest 'a pool with no gateway is refused' => sub {
+    my ( undef, $died, $assigned ) = generate( pool => { cidr => ['192.0.2.0/24'] }, gateway => undef, on_nat_network => 0 );
+    like( $died, qr/names[ ]a[ ]pool[ ]but[ ]no[ ]gateway/, 'it says what is missing' );
+    like( $died, qr/hv1[ ]in[ ]hypervisors[.]conf/,         'and names the block' );
+    like( $died, qr/gateway[ ]=[ ]/,                        'and the line to add' );
+    is_deeply( $assigned, [], 'before the pool is asked' );
 };
 
 subtest 'a pool with no addresses leaves the guest to its lease' => sub {
@@ -113,7 +125,7 @@ subtest 'a pool with no addresses leaves the guest to its lease' => sub {
 subtest 'unless this machine could not reach that lease' => sub {
     my ( undef, $died, $assigned ) = generate( pool => { addresses => [] }, on_nat_network => 0 );
     like( $died, qr/this[ ]machine[ ]is[ ]not[ ]on[ ]that[ ]network/, 'it is refused before anything is built' );
-    like( $died, qr/Give[ ]ip_pool[ ]addresses/,                      'naming the fix' );
+    like( $died, qr/Name[ ]pool_cidr[ ]or[ ]pool_addresses/,          'naming the fix' );
     is_deeply( $assigned, [], 'and the pool was not asked' );
 };
 

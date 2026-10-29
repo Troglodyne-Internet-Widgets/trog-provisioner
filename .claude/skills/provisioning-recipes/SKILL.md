@@ -137,7 +137,8 @@ Three things about it worth understanding:
   configuration gets its own database, seeded from what the hypervisors are
   actually running, so a throwaway guest cannot take an address a real one has.
 
-  `bin/assign_ip $DOMAIN` says what a domain holds, assigning one if it has none;
+  `bin/assign_ip --hypervisor $NAME $DOMAIN` says what a domain holds, assigning
+  one from the pool of that hypervisor if it has none;
   `bin/list_ip_pool` shows what is taken and what is free. Neither is something
   you have to run before provisioning.
 

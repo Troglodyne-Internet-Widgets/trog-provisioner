@@ -65,10 +65,13 @@ It reads these blocks:
 =over 4
 
 =item * C<[global]> becomes the C<_global> of C<_base>, key for key.  A key that
-nothing declares stays behind, and the report names it.  C<resolvers> is one:
-the block of each hypervisor in F<hypervisors.conf> names its resolvers now.  See L<Provisioner::Cookbook/declared_globals>.
+nothing declares stays behind, and the report names it.  C<resolvers> and
+C<gateway> are two: the block of each hypervisor in F<hypervisors.conf> names
+them now.  See L<Provisioner::Cookbook/declared_globals>.
 
-=item * C<[ip_pool]> becomes C<ip_pool> in that same block.
+=item * C<[ip_pool]> stays behind, and the report names it.  It is the pool of
+the guests of a network, and the block of each hypervisor on that network names
+it now, as C<pool_addresses> and C<pool_cidr>.  See L<Trog::HV/guest_pool>.
 
 =item * C<[nameservers]> becomes C<nameservers> there.
 
@@ -125,8 +128,8 @@ sub main {
     }
 
     my $report = "From $ipmap into $recipes:\n" . join( q{}, map { "  $_\n" } @$moved );
-    $report .= "\nLeft as $recipes already has it:\n" . join( q{}, map { "  $_\n" } @$kept )       if @$kept;
-    $report .= "\nLeft out, because nothing reads it:\n" . join( q{}, map { "  $_\n" } @$dropped ) if @$dropped;
+    $report .= "\nLeft as $recipes already has it:\n" . join( q{}, map { "  $_\n" } @$kept )                    if @$kept;
+    $report .= "\nLeft out, because recipes.yaml does not take it:\n" . join( q{}, map { "  $_\n" } @$dropped ) if @$dropped;
     print $report;
 
     if ($dryrun) {
@@ -147,7 +150,7 @@ sub main {
 Folds the blocks of C<$from>, a L<Config::Simple>, into C<$into>, the
 configuration as YAML gives it.  Changes C<$into> in place.  Returns what it
 moved, what it left because C<$into> already said it, and what it left because
-nothing reads it, all as lines to print.
+F<recipes.yaml> does not take it, all as lines to print.
 
 =cut
 
@@ -174,23 +177,17 @@ sub move_into {
         push( @moved, "[global] $key -> _base._global.$key" );
     }
 
-    # Each of these was a block of its own, and is one key of the globals now.
-    foreach my $name (qw{ip_pool nameservers}) {
-        my $block = $from->param( -block => $name ) // {};
-        next unless %$block;
+    push( @dropped, '[ip_pool], which is pool_addresses and pool_cidr in the block of each hypervisor in hypervisors.conf' )
+      if %{ $from->param( -block => 'ip_pool' ) // {} };
 
-        if ( exists $global->{$name} ) {
-            push( @kept, "_base._global.$name" );
-            next;
-        }
-
-        # Config::Simple puts whitespace between the addresses of a pool, which
-        # reads as one string; a list is what somebody writing YAML writes.
-        $block->{addresses} = [ grep { m/\S/ } map { split /\s+/ } @{ Provisioner::Utils::coerce_arrayref( $block->{addresses} ) } ]
-          if exists $block->{addresses};
-
-        $global->{$name} = $block;
-        push( @moved, "[$name] -> _base._global.$name" );
+    # A block of its own, and one key of the globals now.
+    my $nameservers = $from->param( -block => 'nameservers' ) // {};
+    if ( %$nameservers && exists $global->{nameservers} ) {
+        push( @kept, '_base._global.nameservers' );
+    }
+    elsif (%$nameservers) {
+        $global->{nameservers} = $nameservers;
+        push( @moved, '[nameservers] -> _base._global.nameservers' );
     }
 
     my $aliases = $from->param( -block => 'aliases' ) // {};

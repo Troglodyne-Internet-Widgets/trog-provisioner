@@ -356,8 +356,8 @@ which backend it describes.  So all keys must be read before that decision.
 Each backend names its own keys in C<config_keys>.  This class reads the
 placement limits, because placement belongs to this class, and C<transfer_ip>
 and C<transfer_port>, because every kind of hypervisor has guests that fetch
-from us.  It reads C<network> and C<resolvers>, because what a guest can reach
-depends on where it is.
+from us.  It reads C<network>, C<resolvers>, C<gateway>, C<pool_cidr> and
+C<pool_addresses>, because what a guest can reach depends on where it is.
 
 =cut
 
@@ -366,9 +366,10 @@ my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_over
 # Where a guest of this hypervisor reaches us, which is any backend's question.
 my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
-# Which guests and which resolvers the guests of this hypervisor can reach.
-# See network and configured_resolvers.
-my @NETWORK_KEYS = qw{network resolvers};
+# The network of the guests of this hypervisor: what they reach, and the
+# addresses and route they get there.  See network, configured_resolvers,
+# configured_gateway and guest_pool.
+my @NETWORK_KEYS = qw{network resolvers gateway pool_cidr pool_addresses};
 
 sub options_from_block {
     my ( $class, $block ) = @_;
@@ -513,13 +514,11 @@ sub network ($self) { return $self->setting('network') // q{} }
 
 The nameservers that a guest of this hypervisor uses, from C<resolvers> in its
 block of F<hypervisors.conf>, as a list of addresses.  The block separates them
-with commas.  Empty when the block names none: then a guest gets the
-C<resolvers> of C<_global>.
+with commas.  Empty when the block names none, and C<bin/new_config> refuses a
+guest of such a hypervisor.
 
-The resolvers of C<_global> are those of the network of the installation, such
-as its gateway.  A guest on a cloud cannot reach that gateway, so a block for a
-cloud region names resolvers that the guests there can reach.  Dies on a value
-that is not an address.
+Each block names its own, because a guest on a cloud cannot reach the gateway
+of a home network.  Dies on a value that is not an address.
 
 =cut
 
@@ -530,6 +529,48 @@ sub configured_resolvers ($self) {
         Net::IP->new($resolver) or die "resolvers for " . ( $self->name // $self->describe ) . " names '$resolver', which is not an address\n";
     }
     return @resolvers;
+}
+
+=head2 configured_gateway
+
+The default route of a guest of this hypervisor that has an address from
+C<guest_pool>, from C<gateway> in its block of F<hypervisors.conf>, or undef
+when the block names none.  A guest that a cloud addresses gets its route from
+the cloud, so a block for a cloud names none.  Dies on a value that is not an
+IPv4 address.
+
+=cut
+
+sub configured_gateway ($self) {
+    my $gateway = $self->setting('gateway') // return;
+    my $ip      = Net::IP->new($gateway);
+    die "gateway for " . ( $self->name // $self->describe ) . " is '$gateway', which is not an IPv4 address\n"
+      unless $ip && $ip->version == 4 && $ip->size == 1;
+    return $gateway;
+}
+
+=head2 guest_pool
+
+The addresses that the guests of this hypervisor get, on the subnet of its
+bridge, as the bin named C<guests> of L<Provisioner::IPPool/BINS>: a hash
+reference with C<cidr> from C<pool_cidr> and C<addresses> from
+C<pool_addresses> in its block of F<hypervisors.conf>, each a list.  A key the
+block does not name is left out, so the hash is empty for a block that names
+neither.  The block separates the items with commas or spaces.
+
+Hypervisors on one network name the same pool, and share its addresses in
+F<ips.db>.
+
+=cut
+
+sub guest_pool ($self) {
+    my %pool;
+    foreach my $key (qw{cidr addresses}) {
+        my $said  = $self->setting("pool_$key") // next;
+        my @items = grep { $_ ne q{} } map { split m/[\s,]+/ } ( ref $said eq 'ARRAY' ? @$said : $said );
+        $pool{$key} = \@items if @items;
+    }
+    return \%pool;
 }
 
 sub configured_transfer_port ($self) {

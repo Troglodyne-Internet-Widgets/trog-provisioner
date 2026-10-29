@@ -37,19 +37,21 @@ use Trog::Utils();
             libvirt_version: "10.0.0"
 
             config:
-                # If unset, admin_user, admin_email, admin_keys and gateway
-                # come from the configuration of this guest.
-
-                # The pool that the runner takes addresses from.  Without
-                # these, each guest it builds has only a lease on the NAT
-                # network of its hypervisor: see offers in Provisioner::IPPool.
-                addresses: "192.0.2.180-192.0.2.199"
-                cidr:      "192.0.2.0/24"
+                # If unset, admin_user, admin_email and admin_keys come from
+                # the configuration of this guest.
 
             hypervisors:
                 hv1:
                     libvirt_uri: "qemu+ssh://runner@hv1.test.test/system"
                     resolvers:   ["192.0.2.254", "1.1.1.1"]
+
+                    # The pool that the runner takes addresses from on hv1,
+                    # and their route.  Without a pool, each guest it builds
+                    # has only a lease on the NAT network of its hypervisor:
+                    # see offers in Provisioner::IPPool.
+                    gateway:        "192.0.2.254"
+                    pool_addresses: ["192.0.2.180", "192.0.2.181"]
+                    pool_cidr:      ["192.0.2.192/28"]
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     partition:   "/machine/runner"
@@ -290,12 +292,9 @@ sub args {
                     admin_email   => { type => 'string' },
                     admin_gecos   => { type => 'string', default => 'Administrator' },
                     admin_keys    => { type => 'array',  items   => { type => 'string' }, default => [] },
-                    gateway       => { type => 'string', default => q{} },
                     transfer_user => { type => 'string', default => q{} },
                     transfer_ip   => { type => 'string', default => q{} },
                     transfer_port => { type => 'string', default => q{} },
-                    addresses     => { type => 'string', default => q{} },
-                    cidr          => { type => 'string', default => q{} },
                     nameservers   => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
                 },
             },
@@ -314,7 +313,10 @@ sub args {
                         # What a guest of this hypervisor asks.  The runner
                         # writes them into the block of its hypervisors.conf,
                         # see configured_resolvers in Trog::HV.
-                        resolvers      => { type => 'array', items => { type => 'string' }, minItems => 1 },
+                        resolvers      => { type => 'array',  items  => { type => 'string' }, minItems => 1 },
+                        gateway        => { type => 'string', format => 'ipv4' },
+                        pool_cidr      => { type => 'array',  items  => { type => 'string' } },
+                        pool_addresses => { type => 'array',  items  => { type => 'string' } },
                         pool_path      => { type => 'string' },
                         pool_name      => { type => 'string' },
                         partition      => { type => 'string' },
@@ -393,9 +395,10 @@ sub formatters {
 
 Fills in the identity of the runner from the identity of the guest, and folds
 C<config> into the C<_global> of C<_base> in C<recipes>, which is where the
-runner reads it.  The pool is one key there, C<ip_pool>, rather than two, and a
-setting left empty is left out, so that the runner falls back to its own answer
-for it rather than to an empty string.
+runner reads it.  A setting left empty is left out, so that the runner falls
+back to its own answer for it rather than to an empty string.  The pool and the
+gateway are each hypervisor's, in its block of the F<hypervisors.conf> of the
+runner.
 
 Splits the URI of each hypervisor into the host, user and port that
 C<ssh-keyscan> needs.  Dies if C<checkout_dir> or C<store> is not a relative
@@ -436,15 +439,10 @@ sub enrich {
     # that built this guest.
     #
     # bin/new_config refuses to generate anything without admin_user,
-    # admin_gecos, admin_email and gateway, or without keys in
-    # admin_authorized_keys.  The resolvers are in hypervisors.conf instead.  A runner with any of them empty cannot build a
-    # guest.
+    # admin_gecos and admin_email, or without keys in admin_authorized_keys.
+    # A runner with any of them empty cannot build a guest.
     $opts{config}{admin_user}  //= $opts{admin_user};
     $opts{config}{admin_email} //= $opts{admin_email};
-
-    # ||=, not //=, because the schema defaults these two to an empty string,
-    # which //= keeps.
-    $opts{config}{gateway} ||= $opts{gateway};
 
     # A list, so an unset value is an empty list, not an empty string.
     $opts{config}{admin_keys} = $opts{admin_keys}
@@ -461,10 +459,7 @@ sub enrich {
         return scalar keys %$value if ref $value eq 'HASH';
         return $value ne q{};
     };
-    my %is_pool = map { $_ => 1 } qw{addresses cidr};
-    my %global  = map { $_ => $config->{$_} } grep { !$is_pool{$_} && $said->($_) } keys %$config;
-    my %pool    = map { $_ => $config->{$_} } grep { $said->($_) } keys %is_pool;
-    $global{ip_pool} = \%pool if %pool;
+    my %global = map { $_ => $config->{$_} } grep { $said->($_) } keys %$config;
     $opts{recipes}{_base}{_global} = { %global, %{ $opts{recipes}{_base}{_global} // {} } };
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"

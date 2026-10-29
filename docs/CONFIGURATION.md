@@ -38,7 +38,6 @@ _base:
     admin_user: test
     admin_gecos: Testy Testerson
     admin_email: test@test.test
-    gateway: 192.0.2.254
     nameservers:
       ns1: ns1.test.test
       ns2: ns2.test.test
@@ -63,10 +62,11 @@ machine**, one directory per fully qualified name. It is easy to confuse with
 the `data` recipe's `to`, which is where things land **on the guest**; they are
 frequently both `/opt/domains`, and they are not the same directory.
 
-`gateway` is required, and every guest is built with it.  The resolvers of a
-guest are not here.  What a guest can reach depends on where it is, so the
-block of its hypervisor in `hypervisors.conf` names them.  See
-[Networks](#networks).  `_global` cannot set them.
+The resolvers, the gateway and the address pool of a guest are not here.
+They are facts of the network that the guest is on, so the block of its
+hypervisor in `hypervisors.conf` names them.  See [Networks](#networks).
+`_global` cannot set them.  The `ip_pool` of `_global` names only the bins
+that belong to no hypervisor, such as the clients of a VPN.
 
 **Do not put a loopback address in `resolvers`.** It answers only on a guest
 running its own DNS server, and for that guest
@@ -485,14 +485,13 @@ runner.example.test:
         deps_from:
             - /srv/code/trog-provisioner
 
-        config:
-            addresses: 192.0.2.180-192.0.2.199
-            cidr:      192.0.2.0/24
-
         hypervisors:
             hv1:
-                libvirt_uri: qemu+ssh://runner@hv1.example.test/system
-                resolvers:   [192.0.2.254, 1.1.1.1]
+                libvirt_uri:    qemu+ssh://runner@hv1.example.test/system
+                resolvers:      [192.0.2.254, 1.1.1.1]
+                gateway:        192.0.2.254
+                pool_addresses: [192.0.2.180, 192.0.2.181]
+                pool_cidr:      [192.0.2.192/28]
                 pool_path:   /srv/vm-disks/runner
                 pool_name:   runner_disks
                 partition:   /machine/runner
@@ -505,11 +504,11 @@ runner.example.test:
                     install_dir: /opt/domains
 ```
 
-Nothing in it is required, and `config` inherits `admin_user`, `admin_email`,
-`admin_keys` and `gateway` from the guest's own -- a runner administers what it
-builds the way this installation administers it, unless told otherwise. Give it
-`addresses` and `cidr` when something other than the runner must reach its
-guests. Without an address pool, each guest that it builds takes a lease on the
+Nothing in it is required, and `config` inherits `admin_user`, `admin_email`
+and `admin_keys` from the guest's own -- a runner administers what it
+builds the way this installation administers it, unless told otherwise. Give a
+hypervisor `gateway`, `pool_addresses` and `pool_cidr` when something other
+than the runner must reach its guests there. Without an address pool, each guest that it builds takes a lease on the
 NAT network of its hypervisor, and its bridged interface stays unconfigured. The
 runner reaches it there, because the runner is itself a guest of that
 hypervisor. That is enough for throwaway guests.
@@ -646,6 +645,26 @@ The resolvers differ from one hypervisor to the next.  A hypervisor on the
 network of the installation can name its gateway.  A guest on a cloud cannot
 reach that gateway, and each of its lookups waits for the gateway to time out.
 So a block for a cloud names resolvers that a guest there reaches.
+
+A block for a hypervisor on a network of ours also names the static addresses
+of its guests, and their gateway:
+
+```ini
+[hv1]
+libvirt_uri    = qemu+ssh://hv1.test.test/system
+network        = office
+resolvers      = 192.0.2.254, 1.1.1.1
+gateway        = 192.0.2.254
+pool_addresses = 192.0.2.10, 192.0.2.11
+pool_cidr      = 192.0.2.64/26
+```
+
+These are the bin named `guests`, see `BINS` in `perldoc Provisioner::IPPool`.
+Hypervisors on one network name the same pool and share its addresses.  The
+pools of two networks must not overlap.  `bin/new_config` refuses a pool with
+no gateway.  A cloud gives its guests their addresses and their route, so a
+block for a cloud names neither.  `bin/assign_ip --hypervisor` takes an address
+from the pool of one block.
 
 ## Upstream guests
 

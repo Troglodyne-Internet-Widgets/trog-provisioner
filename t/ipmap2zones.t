@@ -42,7 +42,6 @@ my %GLOBAL = (
     admin_user  => 'someadmin',
     admin_gecos => 'Some Admin',
     admin_email => 'someadmin@test.test',
-    gateway     => '192.0.2.254',
     nameservers => { ns1 => 'ns1.test.test' },
 );
 

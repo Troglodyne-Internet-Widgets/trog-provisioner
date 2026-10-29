@@ -16,6 +16,7 @@ use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Trog::Config();
+use Trog::Hypervisors();
 use Cpanel::JSON::XS;
 use List::Util qw{any};
 
@@ -30,6 +31,10 @@ of each bin that are assigned and the IPs that are available.  With C<--json>,
 it prints one object, with a key for each bin.  L<Provisioner::IPPool/BINS> says
 what a bin is.
 
+Each network has a C<guests> bin of its own, which the blocks of its
+hypervisors in F<hypervisors.conf> name.  It shows as C<guests:> and the names
+of those blocks, for example C<guests:hv1,hv2>.
+
 For a bin with C<via>, it first asks that server which addresses it gave to its
 clients, because a client can get one by hand.  That needs the key of the
 server, so it can ask for the password of the store.  If the server cannot be
@@ -37,24 +42,29 @@ asked, it warns and shows that bin as the database has it.
 
 =head2 Where the pool is written
 
-Add an C<ip_pool> to the C<_global> of C<_base> in F<recipes.yaml>:
+The block of a hypervisor in F<hypervisors.conf> names the C<guests> bin of its
+network, with its gateway:
+
+    [hv1]
+    gateway        = 192.0.2.254
+
+    # Every address of the pool.
+    pool_addresses = 192.0.2.10, 192.0.2.11, 192.0.2.12
+
+    # Or one or more CIDR blocks.
+    pool_cidr      = 192.0.2.0/24, 10.0.0.0/28
+
+You can use both keys.  A bin is the addresses list and the addresses of each
+CIDR block together.  The other bins belong to no hypervisor, and the
+C<ip_pool> of the C<_global> of C<_base> in F<recipes.yaml> names them, each
+with the same two keys:
 
     _base:
       _global:
         ip_pool:
-          # Every address of the pool.
-          addresses: [192.0.2.10, 192.0.2.11, 192.0.2.12]
-
-          # Or one or more CIDR blocks, separated by spaces.
-          cidr: 192.0.2.0/24 10.0.0.0/28
-
-          # Other bins, each with the same two keys.
           bins:
             vpnclients:
               cidr: 10.8.0.128/25
-
-You can use both keys.  A bin is the addresses list and the addresses of each
-CIDR block together.  The two keys at the top are the bin named C<guests>.
 
 The assigned IPs come from the address database of L<Provisioner::IPPool>.  An
 IP in the pool that is not in the database is available for a new guest.
@@ -81,46 +91,44 @@ sub main {
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;
 
     my $globals = Provisioner::Cookbook->base_globals( Provisioner::Cookbook->configuration($rfile) );
-    my $pool    = $globals->{ip_pool} // {};
+    my $pool    = { bins => ( $globals->{ip_pool} // {} )->{bins} // {} };
+    my %bins    = ( guest_bins(), Provisioner::IPPool::bins($pool) );
 
-    unless ( keys %$pool ) {
+    unless (%bins) {
 
         # This tells the reader what to type, so a file and line number from
         # warn do not help them.
         ## no critic (ProhibitPrintSTDERR)
         print {*STDERR} <<"GUIDANCE";
-No ip_pool in the _global of _base in $rfile
-Add one like:
+No hypervisor in hypervisors.conf names a pool, and $rfile names no bins.
+Name the pool of a hypervisor in its block, like:
 
-  _base:
-    _global:
-      ip_pool:
-        addresses: [192.0.2.10, 192.0.2.11, 192.0.2.12]
+  [hv1]
+  gateway        = 192.0.2.254
+  pool_addresses = 192.0.2.10, 192.0.2.11, 192.0.2.12
 
   OR
 
-  _base:
-    _global:
-      ip_pool:
-        cidr: 192.0.2.0/24
+  [hv1]
+  gateway        = 192.0.2.254
+  pool_cidr      = 192.0.2.0/24
 
 GUIDANCE
         ## use critic
         return 1;
     }
 
-    my %bins = Provisioner::IPPool::bins($pool);
-    my %ips  = map { $_ => [ Provisioner::IPPool::pool_ips( $bins{$_} ) ] } keys %bins;
+    my %ips = map { $_ => [ Provisioner::IPPool::pool_ips( $bins{$_} ) ] } keys %bins;
 
     unless ( any { @$_ } values %ips ) {
-        print {*STDERR} "ip_pool section found but no IPs could be parsed.\n";    ## no critic (ProhibitPrintSTDERR)
+        print {*STDERR} "The pool names no address that could be parsed.\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }
 
     # The database is the record that bin/new_config assigns from.  The first
     # call fills it from the hypervisors, so an empty database does not show
     # every IP as available.
-    Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
+    Provisioner::IPPool::ensure_seeded();
     foreach my $bin ( grep { defined $bins{$_}{via} } sort keys %bins ) {
         eval { Provisioner::IPPool::refresh_via( $pool, $bin ); 1 }
           or warn "The bin $bin shows only what ips.db knows, which misses any address that its server gave out by hand: $@";
@@ -158,6 +166,25 @@ GUIDANCE
 
     # This is the exit status of the process, so it must be explicit.
     return 0;
+}
+
+=head2 %bins = guest_bins()
+
+The C<guests> bin of each network, as L<Provisioner::IPPool/guest_pools> finds
+them, by its label: C<guests:> and the names of the hypervisors that share it.
+
+=cut
+
+sub guest_bins {
+    my %pools = Provisioner::IPPool::guest_pools( Trog::Hypervisors->load( Trog::Hypervisors->default_path() ) );
+
+    my %by_network;
+    foreach my $name ( sort keys %pools ) {
+        my $network = Provisioner::IPPool::network_of( $pools{$name} );
+        push( @{ $by_network{$network}{names} }, $name );
+        $by_network{$network}{pool} = $pools{$name};
+    }
+    return map { "$Provisioner::IPPool::GUESTS:" . join( q{,}, @{ $_->{names} } ) => $_->{pool} } values %by_network;
 }
 
 exit main(@ARGV) unless caller;

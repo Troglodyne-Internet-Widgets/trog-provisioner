@@ -55,10 +55,17 @@ $hv_mock->redefine( sshd_port => sub { 22 } );
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
-# The resolvers that the block of the hypervisor names, which the local
-# hypervisor of a test has no block for.  See Trog::HV/configured_resolvers.
-my $hv_resolvers = Test::MockModule->new('Trog::HV');
-$hv_resolvers->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+# The resolvers, the gateway and the pool that the block of the hypervisor
+# names, which the local hypervisor of a test has no block for.  See
+# Trog::HV/configured_resolvers and Trog::HV/guest_pool.
+my $hv_network = Test::MockModule->new('Trog::HV');
+$hv_network->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
+$hv_network->redefine( configured_gateway   => sub { return '192.0.2.254' } );
+$hv_network->redefine(
+    guest_pool => sub {
+        return { addresses => [ map { "192.0.2.$_" } 100 .. 199 ] };
+    }
+);
 
 my $HOST   = 'host.test.test';
 my $TENANT = 'tenant.test.test';
@@ -76,8 +83,6 @@ sub generate {
     mkdir "$tmpdir/data";
     mkdir "$tmpdir/data/$_" for ( $HOST, $TENANT );
 
-    my $pool = join( ' ', map { "192.0.2.$_" } 100 .. 199 );
-
     # One resolver on purpose, written as a scalar rather than a list.  That is
     # what an operator writes, and bin/new_config dereferenced it raw when it
     # wrote provision.conf -- so generating from this is what catches it coming
@@ -89,9 +94,7 @@ sub generate {
         admin_user    => 'someadmin',
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
-        gateway       => '192.0.2.254',
-        ip_pool       => { addresses => $pool },
-        nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
+        nameservers   => { ns1 => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
 
     my %recipes = (
