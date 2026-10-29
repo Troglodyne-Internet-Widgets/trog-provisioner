@@ -134,8 +134,9 @@ Three things about it worth understanding:
   of the configuration, and `new_config` takes one in a transaction — so a
   fan-out of provisions cannot hand two guests the same address, and there is
   nothing to edit by hand. The scratch
-  configuration gets its own database, seeded from what the hypervisors are
-  actually running, so a throwaway guest cannot take an address a real one has.
+  configuration links the database of the installation rather than copying it,
+  so a throwaway guest and a real one built at the same time cannot get one
+  address. A scratch guest has a row there until its teardown releases it.
 
   `bin/assign_ip --hypervisor $NAME $DOMAIN` says what a domain holds, assigning
   one from the pool of that hypervisor if it has none;
