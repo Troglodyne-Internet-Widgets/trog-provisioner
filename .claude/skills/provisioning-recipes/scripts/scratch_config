@@ -13,6 +13,7 @@ use re '/aasx';
 use FindBin::libs;
 
 use Crypt::PRNG();
+use Cwd();
 use File::Copy qw{copy};
 use File::Path qw{make_path remove_tree};
 use File::Slurper();
@@ -60,9 +61,15 @@ Taken out of the C<_global> of C<_base> in the installation's F<recipes.yaml>,
 key for key, for every key that L<Provisioner::Cookbook/global_schema>
 declares.  That is who administers a guest, how it reaches the network, and the
 address pool it draws from: a guest built here gets an address out of the real
-pool, so it cannot be handed one that is already spoken for.  The assignment is
-written to the scratch F<ips.db>, so the installation does not grow a record for
-a guest that will not exist by lunchtime.
+pool, so it cannot be handed one that is already spoken for.
+
+=item F<ips.db>
+
+B<Not> copied.  A link to the database of the installation, so that a scratch
+guest and a real one take their addresses in one transaction, and neither gets
+an address that the other holds.  A scratch guest has a row in the database of
+the installation until its teardown releases it.  If a run ends without a teardown,
+C<bin/reseed_ips --prune> releases the row of a guest that no hypervisor runs.
 
 The recipes of that C<_base> are left behind, which is the next item.
 
@@ -316,6 +323,10 @@ sub build {
     make_path("$dir/recipes.d");
     make_path("$dir/data");
 
+    # The pool of the installation, not a copy of it.  See the POD.
+    my $pool = Cwd::abs_path($source) . '/ips.db';
+    symlink( $pool, "$dir/ips.db" ) or die "Could not link $pool into the scratch config: $!\n";
+
     # What says this is ours to delete later.
     File::Slurper::Temp::write_text( "$dir/$MARKER", "Built by scratch_config; safe to remove.\n" );
 
@@ -361,8 +372,8 @@ sub build {
     $global{cpan_notest} = 0            if $opts{cpan_tests};
     $global{cache}       = $opts{cache} if $opts{cache};
 
-    # The fleet's cache, by address, because the scratch ips.db does not hold
-    # the installation's guests.  Its authority comes too, or
+    # The fleet's cache, by the address that fleet_cache found.  Its authority
+    # comes too, or
     # Provisioner::Recipe::fetchcache->authority makes a new one here, and a
     # guest then refuses the certificate of the cache.
     if ( my $fleet = $opts{fleet} ) {

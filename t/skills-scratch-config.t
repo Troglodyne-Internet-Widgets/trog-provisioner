@@ -143,6 +143,26 @@ subtest 'its data source is its own' => sub {
     ok( -d "$dir/data", 'and the directory is there to be read' );
 };
 
+subtest 'its address pool is the one of the installation, so a real guest cannot take what a scratch one holds' => sub {
+    my $source = installation();
+    my ( undef, $dir ) = scratch( source => $source );
+    my $pool = { addresses => '192.0.2.10 192.0.2.11' };
+
+    my $scratch_address = do {
+        local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+        Provisioner::IPPool::assign( 'scratch.test', $pool );
+    };
+    my $real_address = do {
+        local $ENV{TROG_PROVISIONER_CONFIG} = $source;
+        Provisioner::IPPool::assign( 'real.test.test', $pool );
+    };
+    isnt( $real_address, $scratch_address, 'a real guest assigned after a scratch one gets another address' );
+
+    Trog::Skill::ScratchConfig::remove($dir);
+    local $ENV{TROG_PROVISIONER_CONFIG} = $source;
+    is( Provisioner::IPPool::held_by('real.test.test'), $real_address, 'and the removal of the scratch config leaves the pool of the installation' );
+};
+
 subtest 'the mirror is carried over, being the one thing that is not a credential' => sub {
     my ($recipes) = scratch();
     is( $recipes->{_base}{_global}{mirror}, 'http://mirror.test/ubuntu', 'so a scratch build is no slower than a real one' );
