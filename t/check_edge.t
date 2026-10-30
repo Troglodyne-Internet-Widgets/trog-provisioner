@@ -68,7 +68,7 @@ subtest 'check_tunnel: a route through a tunnel to the address of the guest in t
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( guest_address => sub { return ( $_[0], '192.168.1.48' ) } );
 
-    my $up = machine( [ qr/route[ ]get[ ]192[.]168[.]1[.]48\b/ => [ "192.168.1.48 dev tun-abc src 10.8.0.129\n", 0 ] ], [ qr/ping[ ].*[ ]192[.]168[.]1[.]48\b/ => [ "1 received\n", 0 ] ] );
+    my $up = machine( [ qr/route[ ]get[ ]192[.]168[.]1[.]48\b/ => [ "192.168.1.48 dev tun-abc src 10.8.0.129\n", 0 ] ], [ qr/nc[ ]-z[ ].*[ ]192[.]168[.]1[.]48[ ]8443;/ => [ q{}, 0 ] ] );
     my $ok = Provisioner::Bin::check_edge::check_tunnel( $up, 'guest.test' );
     is( $ok->[0], 1, 'passes when both hold' ) or diag explain $up->{asked};
     like( $ok->[1], qr/at[ ]192[.]168[.]1[.]48[ ]/, 'at the address in the pool, which is where the edge proxies to' );
@@ -78,8 +78,8 @@ subtest 'check_tunnel: a route through a tunnel to the address of the guest in t
     is( $off->[0], 0, 'fails on a route outside a tunnel' );
     like( $off->[2], qr/outside[ ]a[ ]tunnel/, 'and says so' );
 
-    my $mute = machine( [ qr/route[ ]get/ => [ "192.168.1.48 dev tun-abc\n", 0 ] ], [ qr/ping/ => [ "0 received\n", 1 ] ] );
-    like( Provisioner::Bin::check_edge::check_tunnel( $mute, 'guest.test' )->[2], qr/does[ ]not[ ]answer[ ]a[ ]ping/, 'and on a guest that does not answer' );
+    my $mute = machine( [ qr/route[ ]get/ => [ "192.168.1.48 dev tun-abc\n", 0 ] ], [ qr/nc[ ]-z/ => [ "nc: connect to 192.168.1.48 port 8443 (tcp) timed out\n", 1 ] ] );
+    like( Provisioner::Bin::check_edge::check_tunnel( $mute, 'guest.test' )->[2], qr/does[ ]not[ ]accept[ ]a[ ]connection[ ]on[ ]port[ ]8443/, q{and on a guest that does not accept one on the port where the edge sends HTTPS} );
 
     $pool->redefine( guest_address => sub { return ( 'host.test', undef ) } );
     my $none = Provisioner::Bin::check_edge::check_tunnel( $up, 'guest.test' );
