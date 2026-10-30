@@ -19,6 +19,7 @@ use IO::Socket::SSL();
 use Pod::Usage qw{pod2usage};
 use Time::HiRes();
 
+use Provisioner::IPPool();
 use Trog::Credentials();
 use Trog::Hypervisors();
 
@@ -41,8 +42,8 @@ input, as C<bin/provision> does.  See L<Trog::Credentials>.
 
 =over 4
 
-=item * The tunnel.  EDGE routes the address of GUEST through its tunnel, and
-GUEST answers a ping there.
+=item * The tunnel.  EDGE routes the address of GUEST in the address pool
+through its tunnel, and GUEST answers a ping there.
 
 =item * The resolvers.  EDGE resolves NAME through its own resolvers, and each
 of them answers.
@@ -102,11 +103,11 @@ sub main {
     my $token = 'check-edge-' . Crypt::PRNG::random_string_from( join( q{}, 'a' .. 'z', 0 .. 9 ), 12 );
 
     my @results = (
-        check_tunnel( $edge, $guest ),
+        check_tunnel( $edge, $guest_domain ),
         check_resolvers( $edge, $name ),
         check_https( $edge->ssh_host, $name, $token ),
         check_http( $edge->ssh_host, $name ),
-        check_client_address( $guest, $token, client_address($edge), $edge->ssh_host ),
+        check_client_address( $guest, $token, client_address($edge), edge_addresses( $edge, $edge_domain ) ),
         check_ban( $guest, $edge, $guest_domain ),
     );
 
@@ -154,17 +155,20 @@ sub as_root {
     return ( $out, $status );
 }
 
-=head2 [$ok, $label, $why] = check_tunnel($edge, $guest)
+=head2 [$ok, $label, $why] = check_tunnel($edge, $guest_domain)
 
-Whether the edge routes the address of the guest through a tunnel, and the
-guest answers a ping there.
+Whether the edge routes the address of the guest of C<$guest_domain> through a
+tunnel, and the guest answers a ping there.  That address is the one in
+L<Provisioner::IPPool/guest_address>, where the edge sends what it proxies.  It
+fails when the guest has none.
 
 =cut
 
 sub check_tunnel {
-    my ( $edge, $guest ) = @_;
-    my $address = $guest->ssh_host;
-    my $label   = "the edge reaches the guest at $address through its tunnel";
+    my ( $edge,  $guest_domain ) = @_;
+    my ( $guest, $address )      = Provisioner::IPPool::guest_address($guest_domain);
+    return [ 0, 'the edge reaches the guest through its tunnel', "$guest has no address in " . Provisioner::IPPool::db_path() . ", so the edge has none to reach it at" ] unless defined $address;
+    my $label = "the edge reaches the guest at $address through its tunnel";
 
     my ($route) = as_root( $edge, "ip -4 -o route get $address" );
     return [ 0, $label, "The edge routes $address outside a tunnel:\n$route" ] unless $route =~ m/\bdev\s+tun/;
@@ -266,22 +270,35 @@ sub client_address {
     return $address;
 }
 
-=head2 [$ok, $label, $why] = check_client_address($guest, $token, $client, $edge_address)
+=head2 @addresses = edge_addresses($edge, $edge_domain)
+
+The addresses that a request from the edge can come from: each address of
+C<$edge_domain> in the address pool, such as its tunnel, and the address that
+this machine reaches it at.
+
+=cut
+
+sub edge_addresses {
+    my ( $edge, $edge_domain ) = @_;
+    return ( sort( values %{ Provisioner::IPPool::holdings($edge_domain) } ), $edge->ssh_host );
+}
+
+=head2 [$ok, $label, $why] = check_client_address($guest, $token, $client, @edge_addresses)
 
 Whether the access log of the guest shows the request for C</$token> from
-C<$client>, and not from the edge.
+C<$client>, and not from the edge, which is at C<@edge_addresses>.
 
 =cut
 
 sub check_client_address {
-    my ( $guest, $token, $client, $edge_address ) = @_;
+    my ( $guest, $token, $client, @edge_addresses ) = @_;
     my $label = 'the guest logs the address of the client, and not the address of the edge';
     return [ 0, $label, 'The edge did not say which address it sees this machine at' ] unless defined $client;
 
     my ($log)  = as_root( $guest, "journalctl -t nginx_access --since '-15 min' --no-pager -o cat | grep -F '/$token' | tail -n 1" );
     my ($from) = $log =~ m/\A\s*(\S+)/ or return [ 0, $label, "The access log of the guest has no request for /$token" ];
     return [ 1, "$label ($client)" ] if $from eq $client;
-    return [ 0, $label, "The request came from $from, which is " . ( $from eq $edge_address ? 'the edge' : 'neither the edge nor this machine' ) . ".  This machine is $client to the edge.\n$log" ];
+    return [ 0, $label, "The request came from $from, which is " . ( ( grep { $_ eq $from } @edge_addresses ) ? 'the edge' : 'neither the edge nor this machine' ) . ".  This machine is $client to the edge.\n$log" ];
 }
 
 =head2 [$ok, $label, $why] = check_ban($guest, $edge, $guest_domain)

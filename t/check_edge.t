@@ -64,18 +64,34 @@ subtest 'as_root: the output and the exit status of a command on the far side' =
     like( $quoted, qr/'echo[ ]'\\''x'\\''/, 'with a single quote in the command kept inside the quotes of sh -c' );
 };
 
-subtest 'check_tunnel: a route through a tunnel, and an answer there' => sub {
-    my $guest = FakeMachine->new( host => '192.168.1.48' );
-    my $up    = machine( [ qr/route[ ]get/ => [ "192.168.1.48 dev tun-abc src 10.8.0.129\n", 0 ] ], [ qr/ping/ => [ "1 received\n", 0 ] ] );
-    is( Provisioner::Bin::check_edge::check_tunnel( $up, $guest )->[0], 1, 'passes when both hold' );
+subtest 'check_tunnel: a route through a tunnel to the address of the guest in the pool, and an answer there' => sub {
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( guest_address => sub { return ( $_[0], '192.168.1.48' ) } );
+
+    my $up = machine( [ qr/route[ ]get[ ]192[.]168[.]1[.]48\b/ => [ "192.168.1.48 dev tun-abc src 10.8.0.129\n", 0 ] ], [ qr/ping[ ].*[ ]192[.]168[.]1[.]48\b/ => [ "1 received\n", 0 ] ] );
+    my $ok = Provisioner::Bin::check_edge::check_tunnel( $up, 'guest.test' );
+    is( $ok->[0], 1, 'passes when both hold' ) or diag explain $up->{asked};
+    like( $ok->[1], qr/at[ ]192[.]168[.]1[.]48[ ]/, 'at the address in the pool, which is where the edge proxies to' );
 
     my $lan = machine( [ qr/route[ ]get/ => [ "192.168.1.48 dev eth0 src 192.168.1.9\n", 0 ] ] );
-    my $off = Provisioner::Bin::check_edge::check_tunnel( $lan, $guest );
+    my $off = Provisioner::Bin::check_edge::check_tunnel( $lan, 'guest.test' );
     is( $off->[0], 0, 'fails on a route outside a tunnel' );
     like( $off->[2], qr/outside[ ]a[ ]tunnel/, 'and says so' );
 
     my $mute = machine( [ qr/route[ ]get/ => [ "192.168.1.48 dev tun-abc\n", 0 ] ], [ qr/ping/ => [ "0 received\n", 1 ] ] );
-    like( Provisioner::Bin::check_edge::check_tunnel( $mute, $guest )->[2], qr/does[ ]not[ ]answer[ ]a[ ]ping/, 'and on a guest that does not answer' );
+    like( Provisioner::Bin::check_edge::check_tunnel( $mute, 'guest.test' )->[2], qr/does[ ]not[ ]answer[ ]a[ ]ping/, 'and on a guest that does not answer' );
+
+    $pool->redefine( guest_address => sub { return ( 'host.test', undef ) } );
+    my $none = Provisioner::Bin::check_edge::check_tunnel( $up, 'guest.test' );
+    is( $none->[0], 0, 'and when the guest has no address in the pool' );
+    like( $none->[2], qr/\Ahost[.]test[ ]has[ ]no[ ]address/, 'naming the guest that runs the domain' );
+};
+
+subtest 'edge_addresses: each address of the edge in the pool, then the one this machine reaches it at' => sub {
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( holdings => sub { return $_[0] eq 'edge.test' ? { vpnclients => '10.8.0.129', guests => '192.168.1.9' } : {} } );
+    is_deeply( [ Provisioner::Bin::check_edge::edge_addresses( machine(), 'edge.test' ) ],  [qw{10.8.0.129 192.168.1.9 192.0.2.10}], 'all of them' );
+    is_deeply( [ Provisioner::Bin::check_edge::edge_addresses( machine(), 'cloud.test' ) ], ['192.0.2.10'],                          'and only the last when the pool has none' );
 };
 
 subtest 'check_resolvers: the edge resolves a name through its own resolvers, and each answers' => sub {
@@ -99,9 +115,11 @@ subtest 'check_client_address: the request in the log of the guest, from the cli
 
     is( Provisioner::Bin::check_edge::check_client_address( $line->('203.0.113.7'), $token, '203.0.113.7', '198.51.100.9' )->[0], 1, 'passes when the guest logs the address of the client' );
 
-    my $edge = Provisioner::Bin::check_edge::check_client_address( $line->('10.8.0.129'), $token, '203.0.113.7', '10.8.0.129' );
+    my $edge = Provisioner::Bin::check_edge::check_client_address( $line->('10.8.0.129'), $token, qw{203.0.113.7 10.8.0.129 198.51.100.9} );
     is( $edge->[0], 0, 'fails when it logs the address of the edge' );
-    like( $edge->[2], qr/which[ ]is[ ]the[ ]edge/, 'and names it' );
+    like( $edge->[2], qr/which[ ]is[ ]the[ ]edge/, 'and names it, when it is the tunnel of the edge and not the address this machine reaches it at' );
+
+    like( Provisioner::Bin::check_edge::check_client_address( $line->('192.0.2.99'), $token, '203.0.113.7', '10.8.0.129' )->[2], qr/neither[ ]the[ ]edge/, 'and says when it is neither' );
 
     my $none = Provisioner::Bin::check_edge::check_client_address( machine( [ qr/journalctl/ => [ q{}, 1 ] ] ), $token, '203.0.113.7', '10.8.0.129' );
     like( $none->[2], qr/no[ ]request[ ]for[ ]\/\Q$token\E/, 'and when the log has no such request' );
@@ -188,8 +206,10 @@ subtest 'check_https and check_http: a connection and an HTTP answer' => sub {
 
 subtest 'main: a line for each check, and the exit status' => sub {
     my $mock = Test::MockModule->new( 'Provisioner::Bin::check_edge', no_auto => 1 );
-    $mock->redefine( machine              => sub { return FakeMachine->new( host => $_[0] ) } );
-    $mock->redefine( check_tunnel         => sub { return [ 1, 'tunnel' ] } );
+    $mock->redefine( machine => sub { return FakeMachine->new( host => $_[0] ) } );
+    my @tunnel;
+    $mock->redefine( check_tunnel         => sub { @tunnel = @_; return [ 1, 'tunnel' ] } );
+    $mock->redefine( edge_addresses       => sub { return '10.8.0.129' } );
     $mock->redefine( check_resolvers      => sub { return [ 1, 'resolvers' ] } );
     $mock->redefine( check_https          => sub { return [ 1, 'https' ] } );
     $mock->redefine( check_http           => sub { return [ 0, 'http', "first line\nsecond line" ] } );
@@ -199,6 +219,7 @@ subtest 'main: a line for each check, and the exit status' => sub {
 
     my $status;
     my $out = capture_stdout { $status = Provisioner::Bin::check_edge::main(qw{edge.test guest.test name.test}) };
+    is( $tunnel[1], 'guest.test', 'the tunnel is checked for the domain of the guest, whose address the pool has' );
     like( $out, qr/^ok[ ]1[ ]-[ ]tunnel$/m,                     'a line for each check, numbered' );
     like( $out, qr/^not[ ]ok[ ]4[ ]-[ ]http$/m,                 'a failure as not ok' );
     like( $out, qr/^\#[ ]+first[ ]line\n\#[ ]+second[ ]line$/m, 'with each line of its reason under it' );
