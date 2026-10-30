@@ -1,0 +1,30 @@
+[%# The health page of App::Clod, on the socket that nginxproxy serves.
+    Provisioner::Recipe::clod describes the layout. -%]
+[% home = install_dir _ '/' _ domain -%]
+[Unit]
+Description=App::Clod health page ([% domain %])
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=[% user %]
+Group=[% user %]
+WorkingDirectory=[% home %]/App-Clod
+EnvironmentFile=[% home %]/clod.env
+Environment=CLOD_CONFIG=[% home %]/clod.conf
+Environment=HOME=[% home %]
+Environment=MOJO_MODE=production
+Environment=MOJO_REVERSE_PROXY=1
+Environment=PATH=/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Group rw on the socket, which takes the www-data group of run/, so that
+# nginx can connect to it.
+UMask=0007
+# Mojo reads the path of a unix socket from the host of the URL, so each slash
+# is %2F, and systemd needs each % doubled.
+ExecStart=/opt/perl5/current/bin/perl -I[% home %]/App-Clod/lib [% home %]/App-Clod/script/clod daemon -l http+unix://[% (home _ '/run/clod.sock').replace('/', '%%2F') %]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,43 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $home = '[% install_dir %]/[% domain %]';
+
+foreach my $unit ('clod-[% domain %]', 'clod-worker-[% domain %]') {
+    my $status = `systemctl is-active '$unit' 2>/dev/null`;
+    chomp $status;
+    is($status, 'active', "$unit is running") or diag `journalctl -u '$unit' -n 30 --no-pager 2>&1`;
+}
+
+# nginx proxies to this socket.  If the service runs without it, every request
+# gets a 502.
+my $sock = "$home/run/clod.sock";
+ok(-S $sock, 'the socket of the health page is there') or diag "no socket at $sock";
+
+# The page is behind basic authentication, so a request without it is a 401
+# from the application itself, and not a 502 from nginx.
+my $code = `curl -s -o /dev/null -w '%{http_code}' --unix-socket '$sock' http://localhost/ 2>&1`;
+is($code, '401', 'the application answers on it, and asks who is there');
+
+my $vhost = do { local (@ARGV, $/) = '/etc/nginx/sites-enabled/[% domain %].conf'; <> } // '';
+like($vhost, qr{\Qserver unix:$sock\E}, 'and nginx has an upstream for it') or diag $vhost;
+
+# The service user reads its secrets and cannot change them.
+foreach my $file ("$home/clod.conf", "$home/clod.env") {
+    my @st = stat $file;
+    is(scalar getpwuid($st[4] // -1), 'root',       "$file is owned by root");
+    is(scalar getgrgid($st[5] // -1), '[% user %]', "and group [% user %]");
+    is(($st[2] // 0) & 07777, 0640,                 "and mode 0640");
+}
+
+# The configuration is perl, and App::Clod refuses one that it cannot use.
+my $checked = `cd '$home/App-Clod' && /opt/perl5/current/bin/perl -Ilib -MApp::Clod::Config -e 'my \$c = do \$ARGV[0] or die \$@ || \$!; App::Clod::Config::validate(\$c); print "ok\\n"' '$home/clod.conf' 2>&1`;
+is($checked, "ok\n", 'App::Clod accepts the configuration') or diag $checked;
+
+# The bot runs claude and git as [% user %], with HOME the directory of the domain.
+ok(qx{which claude}, 'claude is on the PATH');
+ok(-d "$home/clod-state" && (stat _)[4] == (getpwnam('[% user %]'))[2], 'the database directory belongs to [% user %]');
+
+done_testing();

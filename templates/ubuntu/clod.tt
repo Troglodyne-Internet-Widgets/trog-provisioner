@@ -1,0 +1,34 @@
+# App::Clod.  Provisioner::Recipe::clod describes the layout on the guest.
+
+# Clone or refresh the checkout.  Each command sets HOME, because atd starts
+# the makefile without one.
+if [ ! -d '[% install_dir %]/[% domain %]/App-Clod/.git' ]; then \
+    HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/App-Clod'; \
+else \
+    cd '[% install_dir %]/[% domain %]/App-Clod' \
+        && HOME='[% install_dir %]/[% domain %]' git fetch origin \
+        && HOME='[% install_dir %]/[% domain %]' git reset --hard 'origin/[% repo_branch %]'; \
+fi
+HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/App-Clod' \
+    || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/App-Clod'
+
+# The database and the workspace belong to the service user.  run/ is setgid
+# www-data, so the socket takes that group, and nginx can connect to it.
+install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/clod-state' '[% install_dir %]/[% domain %]/workspace'
+install -d -o '[% user %]' -g www-data -m 2750 '[% install_dir %]/[% domain %]/run'
+chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/App-Clod'
+chown '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/.gitconfig'
+
+# The service user reads its configuration and secrets, and cannot change them.
+install -o root -g '[% user %]' -m 0640 clod.conf '[% install_dir %]/[% domain %]/clod.conf'
+install -o root -g '[% user %]' -m 0640 clod.env  '[% install_dir %]/[% domain %]/clod.env'
+install -o root -g root -m 0700 clod-salvage.sh '[% install_dir %]/[% domain %]/clod-salvage.sh'
+
+install -o root -g root -m 0644 clod.service        '/etc/systemd/system/clod-[% domain %].service'
+install -o root -g root -m 0644 clod-worker.service '/etc/systemd/system/clod-worker-[% domain %].service'
+systemctl daemon-reload
+systemctl enable 'clod-[% domain %].service' 'clod-worker-[% domain %].service'
+
+# Start them after the perl target has installed what the checkout needs.
+# restart, so that a provision of a running guest loads the new checkout.
+[% script_dir %]/queue_postrun_task systemctl restart 'clod-[% domain %].service' 'clod-worker-[% domain %].service'

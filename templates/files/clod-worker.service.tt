@@ -1,0 +1,29 @@
+[%# The Minion worker of App::Clod, which does the work of the bot.
+    Provisioner::Recipe::clod describes the layout. -%]
+[% home = install_dir _ '/' _ domain -%]
+[Unit]
+Description=App::Clod worker ([% domain %])
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=[% user %]
+Group=[% user %]
+WorkingDirectory=[% home %]/App-Clod
+EnvironmentFile=[% home %]/clod.env
+Environment=CLOD_CONFIG=[% home %]/clod.conf
+# The HOME of every claude run, where the claude recipe put the settings.
+Environment=HOME=[% home %]
+Environment=MOJO_MODE=production
+# The git hooks of the spokes run perltidy and perlcritic from this perl.
+Environment=PATH=/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/perl5/current/bin/perl -I[% home %]/App-Clod/lib [% home %]/App-Clod/script/clod minion worker -j [% workers %]
+# On TERM the worker takes no new job and stops when its jobs finish.  A job
+# can be a claude run of up to an hour, and a job that is killed fails.
+TimeoutStopSec=3660
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
