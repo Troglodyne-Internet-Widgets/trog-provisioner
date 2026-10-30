@@ -29,19 +29,21 @@ is(($st[2] // 0) & 07777, 0700, 'and readable by nobody else') if @st;
 [% END -%]
 
 # The easydns provider against a fake API, which records what it sends.  The
-# patch lexicon-easydns-priority moves the priority of an MX out of the
-# content.
+# patch lexicon-easydns-priority sends the priority of an MX or SRV in prio,
+# and the rdata that the easyDNS console writes for each.
 my $easydns = <<'PYTHON';
 from lexicon.config import ConfigResolver
 from lexicon._private.providers import easydns
-conf = {"provider_name": "easydns", "domain": "zone.test", "type": "MX", "easydns": {"auth_username": "u", "auth_token": "t"}}
-p = easydns.Provider(ConfigResolver().with_dict(conf))
-p.domain_id = "zone.test"
-p._put = lambda url, data=None, **kw: print(data["prio"], data["rdata"]) or {}
-p.create_record("MX", "zone.test", "10 mail.zone.test.")
+for rtype, name, content in (("MX", "zone.test", "10 mail.zone.test."), ("SRV", "_imaps._tcp.zone.test", "10 20 993 mail.zone.test.")):
+    conf = {"provider_name": "easydns", "domain": "zone.test", "type": rtype, "easydns": {"auth_username": "u", "auth_token": "t"}}
+    p = easydns.Provider(ConfigResolver().with_dict(conf))
+    p.domain_id = "zone.test"
+    p._put = lambda url, data=None, **kw: print(data["prio"], "|", data["rdata"]) or {}
+    p.create_record(rtype, name, content)
 PYTHON
-my $sent = `python3 -I -c '$easydns' 2>&1`;
-is($sent, "10 mail.zone.test.\n", 'the easydns provider sends the priority of an MX apart from its target') or diag $sent;
+my @sent = split /\n/, `python3 -I -c '$easydns' 2>&1`;
+is($sent[0], '10 | mail.zone.test.', 'the easydns provider sends the priority of an MX apart from its target') or diag @sent;
+is($sent[1], '10 | 10 20 993 mail.zone.test.', 'and the whole RDATA of an SRV as its rdata, which easyDNS refuses to publish without its priority') or diag @sent;
 
 # The patch lexicon-arbitrary-record-types: powerdns takes any type, and the
 # other providers keep their own list, also once powerdns has loaded.

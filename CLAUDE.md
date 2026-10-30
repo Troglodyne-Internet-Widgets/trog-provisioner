@@ -157,6 +157,25 @@ different timeout fired, not the one that you set.  Find out which timeout
 fired before you conclude anything about the guest.  The
 `provisioning-recipes` skill lists the timeouts that caused trouble here.
 
+## When the records at a registrar do not appear
+
+Usually one bad record in the zone stops the provider from publishing any
+change to the zone.  The API accepts each record and lists it.  The console of
+the provider shows it.  But the nameservers serve none of the records created
+after it.  The content of the record that you are looking for is probably not
+the cause.
+
+Ask each nameserver of the zone for its SOA serial:
+
+    dig +short +norec @$nameserver $zone SOA
+
+If the serial does not change after a change to the zone, the publish failed.
+Look for the record that was created just before the publish stopped.  The
+easyDNS console does not flag such a record.  It took a ticket to easyDNS to
+learn which SRV record it was.  A list through lexicon can hide the fault,
+because the provider can rewrite the content on its way back.  Delete the bad
+record, and make sure that the serial moves.
+
 ## Commits and pull requests
 
 Make a branch.  Do not commit to `master`.
