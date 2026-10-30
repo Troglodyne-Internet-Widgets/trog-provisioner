@@ -20,6 +20,7 @@ use Pod::Usage qw{pod2usage};
 use Time::HiRes();
 
 use Provisioner::IPPool();
+use Provisioner::Cookbook();
 use Trog::Credentials();
 use Trog::Hypervisors();
 
@@ -43,7 +44,9 @@ input, as C<bin/provision> does.  See L<Trog::Credentials>.
 =over 4
 
 =item * The tunnel.  EDGE routes the address of GUEST in the address pool
-through its tunnel, and GUEST answers a ping there.
+through its tunnel, and GUEST accepts a TCP connection there on the port
+where EDGE sends HTTPS.  The firewall of EDGE lets that port out and not a ping,
+so a ping says nothing about the path.
 
 =item * The resolvers.  EDGE resolves NAME through its own resolvers, and each
 of them answers.
@@ -158,7 +161,8 @@ sub as_root {
 =head2 [$ok, $label, $why] = check_tunnel($edge, $guest_domain)
 
 Whether the edge routes the address of the guest of C<$guest_domain> through a
-tunnel, and the guest answers a ping there.  That address is the one in
+tunnel, and the guest accepts a connection there on the port of
+L<Provisioner::Recipe::nginx/proxy_ports> for 443.  That address is the one in
 L<Provisioner::IPPool/guest_address>, where the edge sends what it proxies.  It
 fails when the guest has none.
 
@@ -173,8 +177,10 @@ sub check_tunnel {
     my ($route) = as_root( $edge, "ip -4 -o route get $address" );
     return [ 0, $label, "The edge routes $address outside a tunnel:\n$route" ] unless $route =~ m/\bdev\s+tun/;
 
-    my ( $ping, $status ) = as_root( $edge, "ping -c 1 -W 3 $address" );
-    return [ 0, $label, "The route is through a tunnel, but $address does not answer a ping:\n$ping" ] unless defined $status && $status == 0;
+    my %ports = Provisioner::Cookbook->load('nginx')->proxy_ports();
+    my $port  = $ports{443};
+    my ( $said, $status ) = as_root( $edge, "nc -z -w 3 $address $port" );
+    return [ 0, $label, "The route is through a tunnel, but $address does not accept a connection on port $port:\n$said" ] unless defined $status && $status == 0;
     return [ 1, $label ];
 }
 
