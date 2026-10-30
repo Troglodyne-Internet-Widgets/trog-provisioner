@@ -170,9 +170,9 @@ Ask each nameserver of the zone for its SOA serial:
     dig +short +norec @$nameserver $zone SOA
 
 If the serial does not change after a change to the zone, the publish failed.
-Look for the record that was created just before the publish stopped.  The
-easyDNS console does not flag such a record.  It took a ticket to easyDNS to
-learn which SRV record it was.  A list through lexicon can hide the fault,
+Look for the record that was created just before the publish stopped.  Many
+registrars do not flag a bad edit.  To them the customer is always right, most
+of all a customer who is wrong.  A list through lexicon can hide the fault,
 because the provider can rewrite the content on its way back.  Delete the bad
 record, and make sure that the serial moves.
 
