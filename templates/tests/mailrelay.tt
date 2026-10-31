@@ -48,6 +48,16 @@ sub spf_policy {
     waitpid( $pid, 0 );
     return $answer;
 }
+
+# The SPF checks ask DNS, and the stub of systemd-resolved answers it.  It must
+# answer from the zone, not with the address that /etc/hosts gives this guest.
+my ($listed) = map { m/^\s*([^#\s]\S*)\s.*(?<!\S)\Q[% domain %]\E(?!\S)/ ? $1 : () } do { local @ARGV = '/etc/hosts'; <> };
+SKIP: {
+    skip( '/etc/hosts gives [% domain %] no address', 1 ) unless defined $listed;
+    my $answer = `resolvectl query --legend=no -4 [% domain %] 2>&1`;
+    unlike( $answer, qr/(?<![\d.])\Q$listed\E(?![\d.])/, "systemd-resolved answers for [% domain %] from DNS, not with $listed from /etc/hosts" ) or diag $answer;
+}
+
 my $none = spf_policy( '203.0.113.9', 'someone@nosuch.test.test' );
 unlike( $none, qr/^action=(?:prepend|5)/mi, 'a sender with no SPF record passes the SPF policy service, which adds no header' ) or diag $none;
 SKIP: {
