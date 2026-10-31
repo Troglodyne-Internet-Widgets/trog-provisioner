@@ -31,8 +31,9 @@ C<run> writes a configuration for a domain for every recipe, the way an
 installation has many, and runs F<bin/new_config> for the domain of C<$recipe>
 only.  Then it checks that the configuration package has what F<bin/provision>
 needs, every file that C<template_files> names, and every guest test that
-C<tests> names.  It does not provision a guest.  The hypervisor is mocked,
-because the recipe is what is under test.
+C<tests> names.  It does not provision a guest.  The hypervisor and the
+archives of vendors are mocked, because the recipe is what is under test.  So
+it reaches no network.
 
 It skips unless C<AUTHOR_TESTING> is set.
 
@@ -115,6 +116,13 @@ sub run {
             return { addresses => [ map { "192.0.2.$_" } 100 .. 199 ] };
         }
     );
+
+    # The archive of a vendor is not part of it either.  The generator fetches
+    # the key and asks for the suites of each one that a recipe names, and pdns
+    # names one for every domain here, because each holds its own zone.
+    require Provisioner::Packager::Deb;
+    my $apt_mock = Test::MockModule->new('Provisioner::Packager::Deb');
+    $apt_mock->redefine( fetch => sub { return { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
 
     # garage, matrix and trogrunner each keep a file for the guest in the secret
     # store, so new_config opens it.  That needs a store, and its password handed
