@@ -303,8 +303,10 @@ subtest 'opendmarc checks SPF for a message from outside' => sub {
     unlike( $stranger, qr/\bspf=pass\b/, 'and not a pass' );
 
     # The record that the zone of this domain publishes allows its own A record.
+    # That record comes from DNS without /etc/hosts, where cloud-init maps the
+    # name of this guest to 127.0.1.1, which opendmarc ignores.
     my $spf     = `dig +short TXT [% domain %] 2>/dev/null`;
-    my ($own)   = `dig +short A [% domain %] 2>/dev/null` =~ m/^(\d+\.\d+\.\d+\.\d+)$/m;
+    my ($own)   = `resolvectl query --synthesize=no --legend=no -4 [% domain %] 2>/dev/null` =~ m/:\s*(\d+\.\d+\.\d+\.\d+)\b/m;
     SKIP: {
         skip( 'the SPF record of [% domain %] does not allow its A record', 1 ) unless $own && $spf =~ m/v=spf1[^"]*[ +]a\b/;
         my $pass = $verdict->($own);
