@@ -1,0 +1,4 @@
+# visudo first, because sudo refuses to run at all while a file in
+# sudoers.d does not parse.
+visudo -cf servicesudo.sudoers
+install -m 0440 -o root -g root servicesudo.sudoers /etc/sudoers.d/servicesudo-[% user %]

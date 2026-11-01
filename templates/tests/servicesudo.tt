@@ -1,0 +1,68 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $user    = '[% user %]';
+my $sudoers = '/etc/sudoers.d/servicesudo-[% user %]';
+
+[%# A heredoc, because a command can hold any quote.  mark_raw, because
+    Xslate escapes for HTML.  The schema keeps newlines out of a command. -%]
+my @commands = grep { length } split /\n/, <<'COMMANDS';
+[% FOR command IN commands -%]
+[% command | mark_raw %]
+[% END -%]
+COMMANDS
+
+# Runs a command as the service user, with stderr in the output.  runuser,
+# because the account has no login shell.
+sub as_user {
+    my @cmd = @_;
+    my $pid = open( my $fh, '-|' ) // die "fork: $!";
+    if ( !$pid ) {
+        open( STDERR, '>&', \*STDOUT ) or die "dup: $!";
+        exec( 'runuser', '-u', $user, '--', @cmd ) or exit 127;
+    }
+    my $out = do { local $/; <$fh> } // '';
+    close $fh;
+    return ( $? >> 8, $out );
+}
+
+my $visudo = `visudo -c 2>&1`;
+is( $? >> 8, 0, 'sudo reads every file in sudoers.d' ) or diag $visudo;
+
+ok( -f $sudoers, "$sudoers is there" );
+is( ( stat $sudoers )[2] & 07777, 0440, 'with mode 0440' );
+
+# sudo -l with a command says whether the user may run it, and does not run
+# it.  A listed command can be anything, so this asks rather than runs.  A
+# trailing "" means no arguments, which is how the user then calls it.
+foreach my $command (@commands) {
+    my @words = split / /, $command;
+    pop @words if $words[-1] eq '""';
+    my ( $exit, $out ) = as_user( 'sudo', '-n', '-l', @words );
+    is( $exit, 0, "$user may run $command with sudo and no password" ) or diag $out;
+}
+
+# A command nobody listed, run for real: it must not run as root.  id is
+# harmless, and its output says whose it was.
+my %listed = map { ( split / /, $_ )[0] => 1 } @commands;
+my ($unlisted) = grep { !$listed{$_} } qw{/usr/bin/id /usr/bin/whoami /usr/bin/true};
+SKIP: {
+    skip 'every candidate for an unlisted command is listed', 2 unless $unlisted;
+    my ( $exit, $out ) = as_user( 'sudo', '-n', $unlisted );
+    isnt( $exit, 0, "$user may not run $unlisted with sudo" ) or diag $out;
+    like( $out, qr/password is required|not allowed|may not run/, 'and sudo says it refused' ) or diag $out;
+}
+
+# What sudo would let the user do at all.  None of it may be ALL.
+my ( $exit, $listing ) = as_user( 'sudo', '-n', '-l' );
+if (@commands) {
+    is( $exit, 0, "sudo lists what $user may run" ) or diag $listing;
+    unlike( $listing, qr/:\s*ALL\s*$/m, 'and none of it is ALL' ) or diag $listing;
+}
+else {
+    isnt( $exit, 0, "$user, with no commands listed, may not run sudo at all" ) or diag $listing;
+}
+
+done_testing();

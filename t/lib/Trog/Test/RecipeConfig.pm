@@ -154,7 +154,11 @@ sub required_config {
             data_source => "$dir/data",
         },
         postgres => { dumps => [], version => 16 },
-        sssd     => {
+
+        # A command with arguments and one that takes none, so that both forms
+        # reach the sudoers file and the guest test.
+        servicesudo => { commands => [ '/usr/bin/systemctl restart ssh', '/usr/bin/id ""' ] },
+        sssd        => {
             ldap_uri => 'ldaps://ldap.test.test.test',
             base_dn  => 'dc=test,dc=test',
         },
