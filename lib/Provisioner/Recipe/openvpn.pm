@@ -129,9 +129,9 @@ the guest as root, so it can read the real PKI.  Issue #98 decides whether the r
 The staged copy also keeps the copy that travels apart from the one that the
 running VPN uses.
 
-The staged copy belongs to the admin user and nobody else can read it.  The mail
-recipe makes the same trade to salvage its DKIM keys.  The admin account can
-read the CA private key.  The key travels into the data directory, and into any
+The staged copy belongs to root, and nobody else can read it: each directory is
+C<0700> and each file C<0600>.  The admin account cannot read the CA private
+key on the guest.  The key still travels into the data directory, and into any
 backup of that directory.  That is the cost of a VPN that survives the loss of
 its guest.
 

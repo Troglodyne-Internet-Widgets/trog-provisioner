@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use File::Find ();
 use File::Temp qw{tempdir};
 
 sub slurp {
@@ -48,19 +49,29 @@ like($subject, qr/\Q[% domain %]\E/, 'the CA is named for the domain') or diag $
 
 # The staged copy is what remote_files names, so a rebuilt guest keeps its CA.
 # It keeps what travels apart from what the running VPN uses.  It belongs to
-# [% admin_user %] and nobody else can read it.  Provisioner::Recipe::openvpn
-# has the whole account.
+# root and nobody else can read it.  Provisioner::Recipe::openvpn has the whole
+# account.
 my $stage = '/etc/openvpn/pki-salvage';
 ok(-d $stage, 'the pki was staged for the fetch');
 foreach my $file (qw{ca.crt private/ca.key issued/server.crt}) {
     ok(-s "$stage/$file", "the staged pki has $file");
 }
 
-my $uid = getpwnam('[% admin_user %]');
-is((stat($stage))[4], $uid, 'the staged pki belongs to [% admin_user %]');
-is((stat("$stage/private/ca.key"))[4], $uid, 'and so does the CA key inside it');
+is((stat($stage))[4], 0, 'the staged pki belongs to root');
+is((stat($stage))[2] & 07777, 0700, 'which alone can open it');
+is((stat("$stage/private/ca.key"))[4], 0, 'and so does the CA key inside it');
 is((stat("$stage/private/ca.key"))[2] & 07777, 0600, 'which nobody else can read');
 is(slurp("$stage/ca.crt"), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'the staged CA is the one in use');
+
+# Every entry, not only the two above, and the ccd as well.
+foreach my $staged ($stage, '/etc/openvpn/ccd-salvage') {
+    my @open;
+    File::Find::find({ no_chdir => 1, wanted => sub {
+        my @st = lstat $File::Find::name;
+        push @open, $File::Find::name if $st[4] != 0 || $st[5] != 0 || $st[2] & 077;
+    } }, $staged) if -d $staged;
+    is_deeply(\@open, [], "nothing in $staged belongs to anyone but root, or opens to anyone else");
+}
 
 # What the data target put down, if it is still here.  restore_state moves the
 # salvage when it restores it.  It declines when this guest already has a PKI,
