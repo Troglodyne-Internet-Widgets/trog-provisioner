@@ -66,7 +66,7 @@ MDB is a private on-disk format.  It is tied to the slapd that wrote it and to
 the architecture of that machine, and a rebuilt guest can have a different slapd.
 
 So the recipe exports the directory instead.  C<ldap-export.sh> runs each hour.
-It writes C<slapcat> output to C</var/backups/ldap>, which the admin user owns.
+It writes C<slapcat> output to C</var/backups/ldap>, which only root can read.
 C<remote_files> names that directory.  On the next guest, C<ldap-reload.sh>
 loads the data with C<slapadd> before the seed runs.  The seed then only adds
 what is missing.
@@ -294,12 +294,14 @@ sub remote_prepare {
 }
 
 sub restores {
-    my ( $self, %opts ) = @_;
-    my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
     # Into the export directory, not into slapd.  The export writes there and
     # the fetch reads there.  ldap-reload.sh loads it into slapd later.
-    return ( '/var/backups/ldap' => { from => "$install_dir/$domain/ldap", owner => "$admin:$admin" } );
+    # restore_state applies the mode recursively: X makes the directory 0700
+    # and leaves each LDIF 0600.
+    return ( '/var/backups/ldap' => { from => "$install_dir/$domain/ldap", owner => 'root:root', mode => 'u=rwX,go=' } );
 }
 
 sub remote_files {
