@@ -71,6 +71,37 @@ subtest 'clod.conf is perl that App::Clod reads' => sub {
     unlike( File::Slurper::read_text("$dir/clod.conf"), qr/ghp_x|sk-x/, 'and no token, which goes in clod.env' );
 };
 
+# The prompt is free text, so it holds whatever could end a perl string or
+# interpolate into one.  The HTML is there because Xslate escapes for HTML.
+subtest 'the spoke runs get their own tools, prompt and tool spokes' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $r      = recipe($dir);
+    my $smiley = chr 0x263a;
+    my $prompt = qq{Say "hi" and 'bye'.\nCost: \$5 \@list %h \\' C:\\path\\\n<b>&amp;</b> $smiley\n};
+    my @tools  = ( 'Bash(bin/provision:*)', 'Bash(make test >/dev/null & $HOME @x)' );
+    $r->generate_files( $dir, $r->validated( $r->takes(%GLOBALS), %BASE, extra_tools => \@tools, spoke_prompt => $prompt, tool_spokes => ['test-org/tool'] ) );
+    my $conf = do "$dir/clod.conf";
+    ok( ref $conf eq 'HASH', 'clod.conf still evaluates to a hash' ) or diag( $@, File::Slurper::read_text("$dir/clod.conf") );
+    is_deeply( $conf->{claude}, { extra_tools => \@tools }, 'with the extra tools in the claude section, where App::Clod reads them' );
+    is( $conf->{spoke_prompt}, $prompt, 'and the prompt, character for character' );
+    is_deeply( $conf->{tool_spokes}, ['test-org/tool'], 'and the tool spokes' );
+
+    my $plain = tempdir( CLEANUP => 1 );
+    my $none  = recipe($plain);
+    $none->generate_files( $plain, $none->validated( $none->takes(%GLOBALS), %BASE ) );
+    my $bare = do "$plain/clod.conf";
+    is_deeply( [ $bare->{claude}{extra_tools}, $bare->{tool_spokes}, exists $bare->{spoke_prompt} ], [ [], [], !!0 ], 'without them, no extra tools, no tool spokes and no prompt' ) or diag $@;
+};
+
+subtest 'an extra tool is one permission rule, on one line' => sub {
+    foreach my $bad ( "Bash(x)\n", q{Bash(it's)}, 'Bash("x")', "Bash(a\nb)", 'Bash(a\\b)', 'Bash()', 'Bash(x) y', '1Bash' ) {
+        my $r = recipe();
+        ok( exception { $r->validated( $r->takes(%GLOBALS), %BASE, extra_tools => [$bad] ) }, 'the recipe refuses ' . ( $bad =~ s/\n/\\n/gr ) );
+    }
+    my $r = recipe();
+    is( exception { $r->validated( $r->takes(%GLOBALS), %BASE, extra_tools => [ 'WebFetch', 'mcp__srv__tool', 'Bash(git push:*)' ] ) }, undef, 'and takes a tool, or a tool and its argument' );
+};
+
 subtest 'an organization can stand in for the list of spokes' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     my $r   = recipe($dir);

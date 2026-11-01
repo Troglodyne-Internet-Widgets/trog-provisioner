@@ -9,6 +9,12 @@ foreach my $unit ('clod-[% domain %]', 'clod-worker-[% domain %]') {
     my $status = `systemctl is-active '$unit' 2>/dev/null`;
     chomp $status;
     is($status, 'active', "$unit is running") or diag `journalctl -u '$unit' -n 30 --no-pager 2>&1`;
+
+    # Ask the process, not the unit file, which systemd may not have loaded.
+    my $pid = `systemctl show -p MainPID --value '$unit' 2>/dev/null`;
+    chomp $pid;
+    my @st = stat "/proc/$pid";
+    is(scalar getpwuid($st[4] // -1), '[% user %]', "and runs as [% user %]");
 }
 
 # nginx proxies to this socket.  If the service runs without it, every request

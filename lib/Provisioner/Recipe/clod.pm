@@ -10,6 +10,9 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use B();
+use Text::Xslate();
+
 use Provisioner::Utils();
 
 # One copy for args and fetch_hosts, so that two copies do not drift apart.
@@ -60,6 +63,21 @@ our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/App-Clod.git
             spoke_modules:
                 - "Test2::V0"
 
+            # Permission rules that the runs which change a repository get,
+            # beyond the defaults of App::Clod.  The triage run never does.
+            extra_tools:
+                - "Bash(bin/provision:*)"
+
+            # Told to every spoke run, and to triage, so that it knows how
+            # each spoke tests.
+            spoke_prompt: |
+                Run prove -lr t before you commit.
+
+            # Repositories of which every spoke run gets a fresh worktree of
+            # its own, such as a tool that the runs use.
+            tool_spokes:
+                - "yourorg/tool"
+
 =head2 DESCRIPTION
 
 Installs L<App::Clod|https://github.com/Troglodyne-Internet-Widgets/App-Clod>
@@ -91,9 +109,16 @@ that App::Clod does not, name them in C<spoke_modules>.
 L<Provisioner::Recipe::claude> installs the C<claude> program and the settings
 in the directory of the domain.  That directory is the C<HOME> of both
 services, so every C<claude> run of the bot uses those settings and the
-plugins that they enable.  The claude recipe gives F<.claude> to the admin.
-So leave C<user> unset, and the services run as the admin, who can write
-there.
+plugins that they enable.  Set C<user> for the domain, so that the bot runs as
+an account without the sudo of the admin.  The bot runs unattended, and a run
+that goes wrong can do whatever its account can.  The claude recipe gives
+F<.claude> to C<user> when the domain names one, and to the admin only when
+it does not.
+
+Those settings apply to every C<claude> run in that C<HOME>, and so to the
+triage run too, which only reads.  A permission for the runs that change a
+repository goes in C<extra_tools> instead, which App::Clod gives to those
+runs alone.
 
 The layout on the guest:
 
@@ -116,6 +141,11 @@ C<deps> is in L<Provisioner::Recipe::Ubuntu::clod>.
 # A word that goes into clod.conf between single quotes, and into a quoted
 # string of the guest test.  GitHub logins and repository names fit it.
 my %NAME = ( type => 'string', pattern => '^[A-Za-z0-9_.-]+$' );
+my %REPO = ( type => 'string', pattern => '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' );
+
+# A permission rule of Claude Code: a tool, or a tool and what it may do.
+# perl_string quotes it, so this only holds it to that shape, on one line.
+my $RULE = q{^[A-Za-z][A-Za-z0-9_]*(?:[(][^\n\r'"\\\\]+[)])?\z};
 
 sub args {
     return (
@@ -134,8 +164,14 @@ sub args {
             spokes => {
                 type        => 'array',
                 minItems    => 1,
-                items       => { type => 'string', pattern => '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' },
+                items       => {%REPO},
                 description => 'The repositories that the bot works on, as Owner/Name.',
+            },
+            tool_spokes => {
+                type        => 'array',
+                default     => [],
+                items       => {%REPO},
+                description => 'Repositories, as Owner/Name, of which every spoke run gets a fresh worktree of its own.',
             },
             spoke_orgs => {
                 type        => 'array',
@@ -152,6 +188,14 @@ sub args {
             workers       => { type => 'integer', default => 2,  minimum     => 1, description => 'How many jobs the worker runs at once.  Each job can be a claude run.' },
             poll_interval => { type => 'integer', minimum => 60, description => 'The least number of seconds between two reads of the inbox.  Unset is the default of App::Clod.' },
             spoke_modules => { type => 'array',   default => [], items       => { type => 'string' }, description => 'Modules that the tests of the spokes need, beyond what App::Clod needs.  The perl recipe installs them.' },
+
+            extra_tools => {
+                type        => 'array',
+                default     => [],
+                items       => { type => 'string', pattern => $RULE },
+                description => 'Claude Code permission rules, such as Bash(bin/provision:*), that App::Clod adds to its allowed_tools for the runs that change a repository, and never for triage.',
+            },
+            spoke_prompt => { type => 'string', minLength => 1, description => 'Text that App::Clod appends to the system prompt of every spoke run, and shows to triage, so that it knows how each spoke tests.' },
         },
     );
 }
@@ -221,6 +265,19 @@ sub restores {
     my ( $install_dir, $domain, $admin_user ) = @opts{qw{install_dir domain admin_user}};
     my $user = $opts{user} // $admin_user;
     return ( "$install_dir/$domain/clod-state/minion.db" => { from => "$install_dir/$domain/clod-salvage/minion.db", owner => "$user:$admin_user", mode => '0640' } );
+}
+
+=head2 %formatters = $recipe->formatters()
+
+C<perl_string>, which F<clod.conf.tt> quotes free text with.  L<B/perlstring>
+escapes every quote, C<$>, C<@>, backslash and control character, so no text
+can end the string or interpolate into it.  It is raw, so Xslate does not
+escape it for HTML on top.
+
+=cut
+
+sub formatters {
+    return ( perl_string => Text::Xslate::html_builder( sub ($text) { return B::perlstring($text) } ) );
 }
 
 sub template_files {
