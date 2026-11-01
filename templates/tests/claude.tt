@@ -31,6 +31,18 @@ SKIP: {
         or diag 'declared: ' . join(', ', sort keys %declared);
 }
 
+# The agent runs as the service user, so it must own what the recipe leaves in
+# its home, and the admin only where the domain names no service user.  A file
+# that the admin or root owns is one the agent cannot write.  .claude is always
+# there; npm and rtk leave the others only when they run.
+my $home = '[% install_dir %]/[% domain %]';
+ok(-d "$home/.claude", 'the agent has a .claude directory');
+foreach my $path (grep { -e } map { "$home/$_" } qw{.claude .npm .config/rtk .local/share/rtk}) {
+    my @strays = grep { length } split m/\n/, qx{find '$path' ! -user '[% user %]' -printf '%u %p\\n' 2>&1};
+    is_deeply(\@strays, [], "everything under $path belongs to [% user %]")
+        or diag join "\n", @strays;
+}
+
 # rtk filters the output of a shell command before the agent reads it.  A path
 # is not a program, so this runs it, and the version says the .deb of the
 # release is what is installed rather than whatever was on the guest before.
@@ -82,9 +94,9 @@ SKIP: {
 
     is($env{GH_CONFIG_DIR}, '[% gh_config_dir %]', 'the agent reads the login of the bot');
 
-    my $token = qx{runuser -u '[% admin_user %]' -- env GH_CONFIG_DIR='[% gh_config_dir %]' gh auth token 2>/dev/null};
+    my $token = qx{runuser -u '[% user %]' -- env GH_CONFIG_DIR='[% gh_config_dir %]' gh auth token 2>/dev/null};
     chomp $token;
-    ok(length $token, 'and gh finds a token there for the admin');
+    ok(length $token, 'and gh finds a token there for [% user %], who runs the agent');
 
     # In variables first, because an @ in an address interpolates in a regex.
     my ($bot, $email) = ('[% github_user %]', '[% git_email %]');

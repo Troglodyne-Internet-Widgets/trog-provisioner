@@ -89,8 +89,8 @@ as a bot of its own:
 =over 4
 
 =item * L<Provisioner::Recipe::github> writes the login of the bot into
-F<.claude/gh> in the directory of the domain, for the admin.  The login that the
-admin has in F<~/.config/gh> stays the login of the admin.
+F<.claude/gh> in the directory of the domain, for the service C<user>, who runs
+the agent.  The login that the account has in F<~/.config/gh> stays its own.
 
 =item * The settings give each command of the agent an C<env>.  C<GH_CONFIG_DIR>
 names that directory, the four C<GIT_AUTHOR_*> and C<GIT_COMMITTER_*> variables
@@ -151,7 +151,9 @@ sub args {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<github>, for the login of the bot, when the domain names one.
+C<github>, for the login of the bot, when the domain names one.  It names no
+C<account>, so the login goes to the account that C<github> defaults to: the
+service C<user>, or the admin on a domain that names none.
 
 =cut
 
@@ -163,7 +165,6 @@ sub required_recipes {
         github => sub {
             my (%given) = @_;
             return (
-                account      => $given{admin_user},
                 github_user  => $given{github_user},
                 github_token => $given{github_token},
                 config_dir   => $self->bot_config_dir(%given),
@@ -279,10 +280,11 @@ sub remote_files {
 
 =head2 %restores = $recipe->restores(%opts)
 
-The salvaged memories go back to F<.claude/projects>, owned by the admin, whose
-C<HOME> the directory of the domain is.  F<.claude.json> goes back to the
-directory of the domain, owned by the service C<user> with mode 0600, because
-it holds the account state of whoever runs Claude Code there.  On a guest that
+The salvaged memories go back to F<.claude/projects>, and F<.claude.json> to the
+directory of the domain with mode 0600, because it holds the account state of
+whoever runs Claude Code there.  Both belong to the service C<user>, whose
+C<HOME> the directory of the domain is, and to the group of the admin.  On a
+domain that names no service user, they belong to the admin.  On a guest that
 already has either, C<restore_state> keeps it.
 
 =cut
@@ -290,10 +292,13 @@ already has either, C<restore_state> keeps it.
 sub restores {
     my ( $self, %opts ) = @_;
     my ( $install_dir, $domain, $admin_user ) = @opts{qw{install_dir domain admin_user}};
+
+    # user falls back to admin_user as validate does, because required_recipes
+    # asks for this before validation.
     my $user = $opts{user} // $admin_user;
 
     return (
-        "$install_dir/$domain/.claude/projects" => { from => "$install_dir/$domain/claude/memory/projects",    owner => "$admin_user:$admin_user" },
+        "$install_dir/$domain/.claude/projects" => { from => "$install_dir/$domain/claude/memory/projects",    owner => "$user:$admin_user" },
         "$install_dir/$domain/.claude.json"     => { from => "$install_dir/$domain/claude/state/.claude.json", owner => "$user:$admin_user", mode => '0600' },
     );
 }
