@@ -74,27 +74,17 @@ subtest 'commands' => sub {
     }
 };
 
-# The boundary: what a sudoers line reads as one command, and nothing more.
-subtest 'a command that would grant more is refused' => sub {
+# The boundary: the obvious mistakes, and nothing that sudo reads for itself.
+subtest 'a command that is plainly wrong is refused' => sub {
     my %refused = (
         'ALL'                      => 'ALL',
         'usr/bin/id'               => 'a relative path',
-        '/usr/bin/'                => 'a directory, which sudo reads as all of it',
-        '/usr/bin//id'             => 'an empty component',
-        '/'                        => 'the root',
-        '/usr/bin/../../bin/sh'    => 'a .. component',
-        '/usr/bin/./id'            => 'a . component',
+        '!/usr/bin/id'             => 'a negation',
         "/usr/bin/id\n"            => 'a trailing newline',
         "/usr/bin/id\nsvc ALL=ALL" => 'a second line',
         '/usr/bin/id, /bin/sh'     => 'a comma, which starts a second command',
-        '/usr/bin/a:b'             => 'a colon, which ends a tag',
-        '/usr/bin/id x\y'          => 'a backslash',
-        '/usr/bin/a=b'             => 'an equals sign',
-        '/usr/bin/id #0'           => 'a hash, which starts a comment or a uid',
-        '/usr/bin/systemctl *'     => 'a wildcard',
-        '/usr/bin/id ^a$'          => 'a regular expression',
         '/usr/bin/id  x'           => 'two spaces, which is an empty argument',
-        '!/usr/bin/id'             => 'a negation',
+        '/usr/bin/id '             => 'a trailing space',
     );
     foreach my $command ( sort keys %refused ) {
         like( exception { recipe()->validate( %G, commands => [$command] ) }, qr{/commands/0:}, "$refused{$command} is refused" );
@@ -106,6 +96,7 @@ subtest 'a command that would grant more is refused' => sub {
         '/usr/bin/id ""'                 => 'a command with no arguments allowed',
         '/usr/bin/ls /var/..'            => 'a .. in an argument, which sudo matches as written',
         '/usr/bin/id'                    => 'a command alone',
+        '/usr/bin/systemctl restart *'   => 'a wildcard, which the operator can mean',
     );
     foreach my $command ( sort keys %taken ) {
         is( exception { recipe()->validate( %G, commands => [$command] ) }, undef, "$taken{$command} is taken" );

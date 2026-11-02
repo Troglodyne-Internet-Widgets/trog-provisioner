@@ -57,13 +57,14 @@ allows B<any> arguments, so C</usr/bin/systemctl> alone is root.  Write
 C</usr/bin/systemctl restart someservice> to allow that one call, and the
 path followed by C<""> alone to allow the program only with no arguments.
 
-The schema refuses what would make a line mean more than one command: a
-relative path, a path that ends in C</> (sudo reads that as every program in
-the directory), a C<.> or C<..> component, C<ALL>, and any newline, comma,
-colon, backslash, C<=>, C<#>, C<!>, double quote other than that C<"">,
-wildcard, C<^> or C<$>.  sudo reads
-wildcards and a C<^...$> argument as patterns, and a pattern allows more than
-the operator wrote.
+The schema refuses the obvious mistakes: a path that is not absolute, which
+includes C<ALL> and a negation, a newline, a comma, which starts a second
+command, and an empty argument.  It does not judge the rest of the sudoers
+syntax.  C<visudo -cf> on the guest refuses a file that sudo cannot read, and
+the guest test asks C<cvtsudoers> what sudo makes of the installed file.  So a
+file that grants other than C<commands> fails the build.  A wildcard or a
+C<^...$> argument is a pattern to sudo, and so allows more than the operator
+wrote.  The schema allows both, because the operator can mean them.
 
 =back
 
@@ -79,12 +80,6 @@ a domain that names the admin as its C<user>.
 
 =cut
 
-# An argument: nothing that sudoers reads as syntax, a pattern or a
-# separator.  A component of the path is the same without a slash, so that the
-# path cannot end in one.
-my $WORD      = q{[^\s,:=\\\\#*?\[\]!"^$]+};
-my $COMPONENT = q{[^\s,:=\\\\#*?\[\]!"^$/]+};
-
 sub args {
     return (
         type       => 'object',
@@ -95,8 +90,7 @@ sub args {
                 uniqueItems => 1,
                 items       => {
                     type    => 'string',
-                    not     => { enum => ['ALL'] },
-                    pattern => qq{^(?![^ ]*/[.][.]?(?:/| |\\z))(?:/$COMPONENT)+(?:(?: $WORD)+| "")?\\z},
+                    pattern => q{^/[^\s,]+(?: [^\s,]+)*\z},
                 },
                 description => 'Commands, in sudoers syntax, that the service user may run as root with sudo and no password.  An absolute path and its fixed arguments.  A command with no arguments allows any.',
             },

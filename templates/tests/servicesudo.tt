@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use JSON::PP();
 
 [% IF user == admin_user -%]
 plan skip_all => q{[% domain %] names no service user, and the admin has sudo for everything already};
@@ -37,6 +38,25 @@ is( $? >> 8, 0, 'sudo reads every file in sudoers.d' ) or diag $visudo;
 
 ok( -f $sudoers, "$sudoers is there" );
 is( ( stat $sudoers )[2] & 07777, 0440, 'with mode 0440' );
+
+# What sudo makes of the file, rather than what the file looks like: one rule
+# for each command, for the service user, as root, with no password.
+my $json = `cvtsudoers -f json $sudoers 2>&1`;
+is( $? >> 8, 0, 'cvtsudoers reads the file' ) or diag $json;
+my $parsed = eval { JSON::PP::decode_json($json) } // {};
+my @rules  = map {
+    my $spec = $_;
+    map {
+        {
+            users    => [ map { $_->{username} } @{ $spec->{User_List} } ],
+            runas    => [ map { $_->{username} } @{ $_->{runasusers} } ],
+            options  => $_->{Options} // [],
+            commands => [ map { $_->{negated} ? "!$_->{command}" : $_->{command} } @{ $_->{Commands} } ],
+        }
+    } @{ $spec->{Cmnd_Specs} }
+} @{ $parsed->{User_Specs} // [] };
+my @expect = map { { users => [$user], runas => ['root'], options => [ { authenticate => JSON::PP::false } ], commands => [$_] } } @commands;
+is_deeply( \@rules, \@expect, 'and finds one rule for each command, for the service user, as root, with no password, and nothing else' ) or diag $json;
 
 # sudo -l with a command says whether the user may run it, and does not run
 # it.  A listed command can be anything, so this asks rather than runs.  A
