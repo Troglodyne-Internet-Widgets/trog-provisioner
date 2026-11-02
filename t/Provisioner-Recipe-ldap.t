@@ -17,6 +17,10 @@ use Test::More;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use Cpanel::JSON::XS();
+use IPC::Run3();
+use File::Slurper::Temp();
+
+use FindBin;
 
 use FindBin::libs;
 
@@ -72,6 +76,28 @@ subtest 'with github' => sub {
     ok( index( $fragment, 'ldap-configure.sh' ) < index( $fragment, 'ldap-reload.sh' ), 'and adds the schema before the reload, which refuses an attribute it does not know' );
 
     ok( ( grep { $_ eq 'libio-socket-ssl-perl' } recipe()->deps(%opts) ), 'the sync gets https' );
+};
+
+subtest 'the salvaged export goes back to root alone' => sub {
+    my %restores = recipe()->restores( recipe()->validate(%G) );
+    my $restore  = $restores{'/var/backups/ldap'};
+    is( $restore->{from},  '/opt/domains/dir.test.test/ldap', 'from where the data target puts the salvage' );
+    is( $restore->{owner}, 'root:root',                       'owned by root, not by the admin user' );
+
+    # Put a salvage back the way the data target does, and look at the modes it
+    # leaves.  The chown needs root, and restore_state goes on without it.
+    my $tmp = tempdir( CLEANUP => 1 );
+    mkdir "$tmp/salvaged" or die "mkdir: $!";
+    File::Slurper::Temp::write_text( "$tmp/salvaged/data.ldif", "dn: dc=dir,dc=test,dc=test\n" );
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
+    chmod 0755, "$tmp/salvaged";
+    chmod 0644, "$tmp/salvaged/data.ldif";
+
+    my @args = ( "$tmp/salvaged", "$tmp/ldap", $restore->{owner}, $restore->{mode} // () );
+    IPC::Run3::run3( [ "$FindBin::Bin/../scripts/restore_state", @args ], \undef, \undef, \my $err );
+    is( $?,                                         0,    'restore_state takes what restores() says' ) or diag $err;
+    is( ( stat("$tmp/ldap") )[2] & 07777,           0700, 'the directory is 0700' );
+    is( ( stat("$tmp/ldap/data.ldif") )[2] & 07777, 0600, 'and each file in it 0600' );
 };
 
 subtest 'the schema refuses' => sub {

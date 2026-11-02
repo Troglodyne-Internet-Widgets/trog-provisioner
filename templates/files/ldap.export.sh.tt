@@ -6,21 +6,20 @@
 # tied to the slapd that wrote it, but any version of OpenLDAP reads LDIF.
 # Provisioner::Recipe::ldap, under SURVIVING A REBUILD, has the full account.
 #
-# Only the admin user can read the export, because it holds every password hash
-# in the directory.
+# Only root can read the export, because it holds every password hash in the
+# directory.  slapcat, the reload and the salvage all run as root.
 
 set -euo pipefail
 
 BASE_DN='[% base_dn %]'
 DEST=/var/backups/ldap
-OWNER='[% admin_user %]'
 
 # Dump to a staging directory, then move the files in.  A fetch can arrive
 # during a dump.  A rename is atomic, but a write into the destination is not.
 STAGING=$(mktemp -d /var/backups/.ldap-export.XXXXXX)
 trap 'rm -rf "$STAGING"' EXIT
 
-install -d -o "$OWNER" -g "$OWNER" -m 0700 "$DEST"
+install -d -o root -g root -m 0700 "$DEST"
 
 # slapcat reads the database files directly, so it needs no bind and no
 # password.  MDB gives it a consistent snapshot while slapd runs.
@@ -37,7 +36,6 @@ if [ ! -s "$STAGING/data.ldif" ]; then
     exit 1
 fi
 
-chown "$OWNER:$OWNER" "$STAGING"/*.ldif
 chmod 0600 "$STAGING"/*.ldif
 mv "$STAGING/config.ldif" "$DEST/config.ldif"
 mv "$STAGING/data.ldif" "$DEST/data.ldif"
