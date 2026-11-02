@@ -14,7 +14,19 @@ HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directo
 
 # The database and the workspace belong to the service user.  run/ is setgid
 # www-data, so the socket takes that group, and nginx can connect to it.
-install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/clod-state' '[% install_dir %]/[% domain %]/workspace'
+install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/clod-state'
+[% IF agent_user -%]
+[%# clod-share.sh shares the workspace with the agent account, in the postrun,
+    before the restart below.  The script says why it waits. -%]
+install -o root -g root -m 0700 clod-share.sh '[% install_dir %]/[% domain %]/clod-share.sh'
+[% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/clod-share.sh'
+[% ELSE -%]
+install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/workspace'
+[% END -%]
+# visudo first, because sudo refuses to run at all while a file in
+# sudoers.d does not parse.
+visudo -cf clod.sudoers
+install -m 0440 -o root -g root clod.sudoers '/etc/sudoers.d/clod-[% user %]'
 install -d -o '[% user %]' -g www-data -m 2750 '[% install_dir %]/[% domain %]/run'
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/App-Clod'
 chown '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/.gitconfig'

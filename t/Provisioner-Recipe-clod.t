@@ -16,6 +16,9 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Which();
+use IPC::Run3();
+use Cpanel::JSON::XS();
 
 use FindBin::libs;
 
@@ -129,6 +132,75 @@ subtest 'the database comes back where clod.conf says it is' => sub {
     is_deeply( [ keys %restores ], ['/bogus/bot.test.test/clod-state/minion.db'], 'one restore, to the database' );
     my ($salvaged) = values %{ { recipe()->remote_files( '/bogus', 'bot.test.test' ) } };
     is( $restores{'/bogus/bot.test.test/clod-state/minion.db'}{from}, "/bogus/bot.test.test/${salvaged}minion.db", 'from the salvage' );
+};
+
+# What cvtsudoers makes of a rendered sudoers file, rather than what the file
+# looks like.  /usr/bin by name, because it is not on the PATH of every user.
+my $cvtsudoers = File::Which::which('cvtsudoers') // File::Which::which('/usr/bin/cvtsudoers');
+
+# A file that grants nothing comes out as nothing at all.
+sub grants {
+    my ($file) = @_;
+    IPC::Run3::run3( [ $cvtsudoers, '-f', 'json', $file ], \undef, \my $out, \my $err );
+    return { error => $err || "cvtsudoers exited $?" } if $?;
+    return {}                                          if $out eq q{};
+    return eval { Cpanel::JSON::XS::decode_json($out) } // { error => "not JSON: $out" };
+}
+
+subtest 'claude runs as the agent account' => sub {
+    my %required = recipe()->required_recipes();
+    is_deeply( { $required{claude}->( %GLOBALS, agent_user => 'test-agent' ) }, { restricted_user => 'test-agent' }, 'the claude recipe makes the account' );
+    is_deeply( { $required{claude}->(%GLOBALS) },                               {},                                  'and makes none for a domain that names none' );
+
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $r      = recipe($dir);
+    my %got    = $r->validated( $r->takes( %GLOBALS, user => 'svc' ), %BASE, agent_user => 'test-agent' );
+    my $claude = Provisioner::Cookbook->load( 'claude', distro => 'ubuntu' );
+    is( $got{agent_home}, $claude->restricted_home( %GLOBALS, restricted_user => 'test-agent' ), 'in the home that the claude recipe gives it' );
+    $r->generate_files( $dir, %got );
+    my $conf = do "$dir/clod.conf";
+    is( $conf->{claude}{run_as}, 'test-agent', 'and App::Clod runs claude as it' ) or diag $@;
+
+    my $unit = File::Slurper::read_text("$dir/clod-worker.service");
+    like( $unit, qr/^UMask=0007$/m, 'with a umask that leaves the files of a worktree to the group' );
+    my $share = File::Slurper::read_text("$dir/clod-share.sh");
+    like( $share, qr/^usermod[ ]-a[ ]-G[ ]'test-agent'[ ]'svc'$/m, 'and the worker in the group of the agent' );
+    my $owners = qr{-o[ ]'svc'[ ]-g[ ]'test-agent'};
+    like( $share, qr{^install[ ]-d[ ]$owners[ ]-m[ ]2770[ ]"\$workspace"$}m, 'which owns the workspace' );
+    my $said   = $r->render(%got);
+    my $queued = index( $said, "/bogus/bin/queue_postrun_task '/bogus/bot.test.test/clod-share.sh'" );
+    ok( $queued >= 0 && $queued < index( $said, 'queue_postrun_task systemctl restart' ), 'in the postrun, after the claude recipe has made the account, and before the restart' );
+
+  SKIP: {
+        skip 'no cvtsudoers here', 2 unless $cvtsudoers;
+        my $grants = grants("$dir/clod.sudoers");
+        is_deeply(
+            $grants->{User_Specs},
+            [
+                {
+                    User_List  => [ { username   => 'svc' } ],
+                    Host_List  => [ { hostname   => 'ALL' } ],
+                    Cmnd_Specs => [ { runasusers => [ { username => 'test-agent' } ], Options => [ { authenticate => Cpanel::JSON::XS::false() }, { setenv => Cpanel::JSON::XS::true() } ], Commands => [ { command => 'ALL' } ] } ],
+                }
+            ],
+            'sudo lets the worker run anything as the agent, with no password, and with the environment that it names'
+        ) or diag explain $grants;
+        is_deeply( $grants->{Defaults}, [ { Binding => [ { username => 'test-agent' } ], Options => [ { umask => '0007' } ] } ], 'with the umask 0007' ) or diag explain $grants;
+    }
+
+    my $plain = tempdir( CLEANUP => 1 );
+    my $none  = recipe($plain);
+    my %bare  = $none->validated( $none->takes( %GLOBALS, user => 'svc' ), %BASE );
+    $none->generate_files( $plain, %bare );
+    ok( !exists +( do "$plain/clod.conf" )->{claude}{run_as}, 'a domain that names no agent runs claude as the worker' );
+  SKIP: {
+        skip 'no cvtsudoers here', 1 unless $cvtsudoers;
+        my $grants = grants("$plain/clod.sudoers");
+        is_deeply( [ @{$grants}{qw{User_Specs Defaults error}} ], [ undef, undef, undef ], 'and its sudoers file, which sudo reads, grants nothing' ) or diag explain $grants;
+    }
+
+    my $dotted = recipe();
+    like( exception { $dotted->validated( $dotted->takes( %GLOBALS, user => 'svc.dotted' ), %BASE ) }, qr/sudoers\.d/, 'a service user that would name a sudoers file that sudo skips is refused' );
 };
 
 Test::NoWarnings::had_no_warnings();

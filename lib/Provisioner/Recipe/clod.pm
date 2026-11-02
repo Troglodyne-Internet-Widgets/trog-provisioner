@@ -13,6 +13,7 @@ use parent qw{Provisioner::Recipe};
 use B();
 use Text::Xslate();
 
+use Provisioner::Recipe::claude();
 use Provisioner::Utils();
 
 # One copy for args and fetch_hosts, so that two copies do not drift apart.
@@ -78,6 +79,10 @@ our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/App-Clod.git
             tool_spokes:
                 - "yourorg/tool"
 
+            # The account that every claude run runs as, so that the agent
+            # cannot read the token of the bot.  See THE AGENT ACCOUNT.
+            agent_user: "clod-agent"
+
 =head2 DESCRIPTION
 
 Installs L<App::Clod|https://github.com/Troglodyne-Internet-Widgets/App-Clod>
@@ -133,6 +138,47 @@ The Minion database holds every job, the history on the health page, and the
 claims that stop the bot from taking one notification twice.  So it survives a
 rebuild of the guest.  See C<remote_prepare>.  The workspace does not, because
 the bot fetches the mirrors again.
+
+=head2 THE AGENT ACCOUNT
+
+Without C<agent_user>, every C<claude> run of the bot runs as C<user>, the
+account of the worker.  App::Clod keeps C<GH_TOKEN> out of the environment of
+claude, but a process can read F</proc/$pid/environ> of every process of its
+own account, and the worker has the token in its environment.  The default
+tools of a spoke run include C<Bash(perl:*)>, so the agent could read it.
+
+With C<agent_user>, the bot runs claude as that account instead, through
+sudo.  The account cannot read the environment of the worker, F<clod.env> or
+F<clod.conf>.  The recipe:
+
+=over 4
+
+=item * Hands the name to L<Provisioner::Recipe::claude> as C<restricted_user>.
+That recipe makes the account and its home, C<agent_home>, with the plugins
+and settings of the agent of the domain, but without its bot.  See
+L<Provisioner::Recipe::claude/A RESTRICTED AGENT>.
+
+=item * Lets C<user> run any command as C<agent_user>, with C<SETENV> and no
+password, in F</etc/sudoers.d/clod-E<lt>userE<gt>>.  The grant goes from the
+account of the worker down to an account that holds less, so it gives the
+worker nothing that it does not already have.  C<SETENV> lets App::Clod pass
+C<CLAUDE_CODE_OAUTH_TOKEN> through the environment, never through the argument
+list, which C<ps> shows to every account.  The file also sets the umask of a
+command that runs as C<agent_user> to C<0007>, because sudo combines its own
+umask with that of the worker.  Without C<agent_user>, the file holds no
+grant, so a provision takes back the grant of an earlier one.
+
+=item * Gives the workspace to the group of C<agent_user>, setgid, with mode
+C<2770>, and puts C<user> in that group.  The worker gets C<UMask=0007>.  So
+claude can commit in a work tree that the worker made, and the worker can push
+the commit and remove the work tree.  The group of C<user> stays the group of
+F<clod.env> and F<clod.conf>, and the agent is not in it.  F<clod-share.sh>
+does this in the postrun, before the services restart, because the target of
+the claude recipe runs after this one, and makes the account.
+
+=item * Writes C<run_as> into the C<claude> section of F<clod.conf>.
+
+=back
 
 C<deps> is in L<Provisioner::Recipe::Ubuntu::clod>.
 
@@ -195,7 +241,8 @@ sub args {
                 items       => { type => 'string', pattern => $RULE },
                 description => 'Claude Code permission rules, such as Bash(bin/provision:*), that App::Clod adds to its allowed_tools for the runs that change a repository, and never for triage.',
             },
-            spoke_prompt => { type => 'string', minLength => 1, description => 'Text that App::Clod appends to the system prompt of every spoke run, and shows to triage, so that it knows how each spoke tests.' },
+            spoke_prompt => { type => 'string', minLength => 1,                     description => 'Text that App::Clod appends to the system prompt of every spoke run, and shows to triage, so that it knows how each spoke tests.' },
+            agent_user   => { type => 'string', pattern   => '^[a-z_][a-z0-9_-]*$', description => 'The account that every claude run of the bot runs as, through sudo, so that the agent cannot read the token of the bot.  See THE AGENT ACCOUNT.' },
         },
     );
 }
@@ -204,7 +251,7 @@ sub args {
 
 C<perl>, which installs what the checkout needs and C<spoke_modules>.
 C<nginxproxy>, which serves the socket.  C<claude>, which installs the program
-that does the work.
+that does the work, and makes the C<agent_user> as its C<restricted_user>.
 
 =cut
 
@@ -224,8 +271,31 @@ sub required_recipes {
             );
         },
         nginxproxy => sub { return ( proxy_uri => 'run/clod.sock' ) },
-        claude     => sub { return () },
+        claude     => sub {
+            my (%opts) = @_;
+            return defined $opts{agent_user} ? ( restricted_user => $opts{agent_user} ) : ();
+        },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<agent_home>, the home that L<Provisioner::Recipe::claude> makes for
+C<agent_user>, when the domain names one.
+
+Dies when C<user> is not a plain account name.  It goes into a sudoers line
+and into the name of F</etc/sudoers.d/clod-E<lt>userE<gt>>, and sudo skips a
+file whose name has a dot in it.  C<user> is a global, which the schema of a
+recipe does not declare a second time, so the check is here.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    die "clod: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
+      unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
+    $opts{agent_home} = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
+    return %opts;
 }
 
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)
@@ -287,6 +357,8 @@ sub template_files {
         'clod.service.tt'        => 'clod.service',
         'clod-worker.service.tt' => 'clod-worker.service',
         'clod.salvage.sh.tt'     => 'clod-salvage.sh',
+        'clod.sudoers.tt'        => 'clod.sudoers',
+        'clod.share.sh.tt'       => 'clod-share.sh',
     );
 }
 
