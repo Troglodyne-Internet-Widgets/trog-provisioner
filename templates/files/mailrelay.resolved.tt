@@ -1,0 +1,5 @@
+[%# DNS answers from DNS, and not from /etc/hosts, so that the SPF checks of
+    this relay see the records of each zone.  See SPF in the POD of
+    Provisioner::Recipe::mailrelay. -%]
+[Resolve]
+ReadEtcHosts=no

@@ -21,16 +21,18 @@
         return 404;
     }
 [% END -%]
+[%# One server block for each name and port, because the listener for a proxy
+    is a file of each name, and two in one block listen twice. -%]
+[% FOREACH name IN ['autodiscover', 'autoconfig'] -%]
 server {
     listen 443 ssl;
 [% IF ipv6 %]    listen [::]:443 ssl;
 [% END -%]
 
-    server_name autodiscover.[% domain %] autoconfig.[% domain %];
+    server_name [% name %].[% domain %];
 [%# The listener for a proxy, when a public name names this vhost.  See
     Provisioner::Recipe::nginx. -%]
-    include /etc/nginx/proxied/autodiscover.[% domain %].443.conf*;
-    include /etc/nginx/proxied/autoconfig.[% domain %].443.conf*;
+    include /etc/nginx/proxied/[% name %].[% domain %].443.conf*;
     server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
@@ -44,10 +46,10 @@ server {
 [% IF ipv6 %]    listen [::]:80;
 [% END -%]
 
-    server_name autodiscover.[% domain %] autoconfig.[% domain %];
-    include /etc/nginx/proxied/autodiscover.[% domain %].80.conf*;
-    include /etc/nginx/proxied/autoconfig.[% domain %].80.conf*;
+    server_name [% name %].[% domain %];
+    include /etc/nginx/proxied/[% name %].[% domain %].80.conf*;
     server_tokens off;
 
 [% settings() -%]
 }
+[% END -%]

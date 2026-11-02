@@ -117,6 +117,14 @@ relay for DMARC.  It checks DKIM itself, which does not depend on the client.
 See L<Provisioner::Recipe::mail/Sending through a mail relay>.  The relay for
 the mail of the guests runs neither, because that mail is theirs.
 
+C<policyd-spf> and opendmarc look up the records of SPF with DNS.  The stub of
+systemd-resolved answers DNS from F</etc/hosts> first by default.  There
+cloud-init puts the name of this guest at C<127.0.1.1>, and
+L<Provisioner::Recipe::openvpnclient> puts each guest at its address in the
+pool.  Neither is the address that the zone publishes.  So a drop-in turns that
+off, and DNS answers come from DNS.  Programs that resolve a name through
+C<getaddrinfo>, such as ssh and apt, still read F</etc/hosts>.
+
 =cut
 
 sub args {
@@ -365,7 +373,20 @@ sub template_files {
         'mailrelay.opendkim.tt'       => 'mailrelay.opendkim.conf',
         'mailrelay.opendmarc.tt'      => 'mailrelay.opendmarc.conf',
         'mailrelay.ufw.conf.tt'       => 'mailrelay_ufw.conf',
+        'mailrelay.resolved.tt'       => 'mailrelay-resolved.conf',
     );
+}
+
+=head2 %files = $recipe->resolver_files(%opts)
+
+The drop-in that keeps F</etc/hosts> out of the answers of DNS.  The
+C<resolver> target installs it before any recipe target.  See L</SPF> and
+L<Provisioner::Recipe/resolver_files>.
+
+=cut
+
+sub resolver_files {
+    return ( 'mailrelay-resolved.conf' => 'trog-mailrelay.conf' );
 }
 
 sub tests {

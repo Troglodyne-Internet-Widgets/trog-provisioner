@@ -9,19 +9,17 @@
 
 set -euo pipefail
 
-OWNER='[% admin_user %]'
-
 # Made again each time, so that a certificate revoked since the last run does
 # not stay here and look current.  The static address of each client goes with
 # its certificate.
 stage() {
     local from="$1" to="$2"
     rm -rf "$to"
-    mkdir -p "$to"
+    mkdir -m 0700 -p "$to"
     if [ -d "$from" ]; then
         cp -a "$from/." "$to/"
     fi
-    chown -R "$OWNER:$OWNER" "$to"
+    chown -R root:root "$to"
     find "$to" -type d -exec chmod 0700 {} +
     find "$to" -type f -exec chmod 0600 {} +
 }
