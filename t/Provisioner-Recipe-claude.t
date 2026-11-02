@@ -42,6 +42,44 @@ my %G = (
 );
 
 sub recipe { return Provisioner::Cookbook->load( 'claude', distro => 'ubuntu' )->new(%PROV) }
+sub github { return Provisioner::Cookbook->load( 'github', distro => 'ubuntu' )->new(%PROV) }
+
+# The agent runs as the service user, whose HOME the directory of the domain
+# is.  The admin owns .claude only where the domain names no service user.
+subtest 'the service user owns .claude' => sub {
+    my $said    = recipe()->render(%G);
+    my $dir     = qr{/opt/domains/agent\.test\.test/\.claude\n};
+    my $install = qr{install[ ]-m[ ]0755[ ]};
+    like( $said, qr{$install-o[ ]agent[ ]-g[ ]someadmin[ ]-d[ ]$dir}, 'it makes the directory for the service user' );
+    unlike( $said, qr/someadmin:someadmin|-o[ ]someadmin/, 'and gives the admin nothing' );
+
+    my %no_user = %G;
+    delete $no_user{user};
+    like( recipe()->render(%no_user), qr{-o[ ]someadmin[ ]-g[ ]someadmin[ ]-d}, 'the admin owns it on a domain that names no service user' );
+};
+
+# Make runs as root, so npm and rtk leave root-owned state in the home of the
+# agent.  This runs the line that hands it over, against a fake home.
+subtest 'what npm and rtk leave in the home goes to the service user' => sub {
+    my $home   = tempdir( CLEANUP => 1 );
+    my ($line) = grep { m/\Afor[ ]p[ ]in[ ]/ } map { s/\A.*?&&[ ]//r } split m/\n/, recipe()->render(%G);
+    ok( $line, 'the fragment hands over the home' ) or return;
+    File::Path::make_path( "$home/.claude", "$home/.config/rtk", "$home/.local/share/rtk" );
+
+    # A chown that records its arguments, so this runs as any user.
+    my $bin = tempdir( CLEANUP => 1 );
+    open( my $fake, '>', "$bin/chown" ) or die "Cannot write the fake chown: $!";
+    print {$fake} qq{#!/bin/sh\necho "\$*" >> '$bin/log'\n};
+    close($fake)                or die "Cannot close the fake chown: $!";
+    chmod( 0755, "$bin/chown" ) or die "Cannot chmod the fake chown: $!";
+
+    $line =~ s/\$\$/\$/g;
+    my ( $status, $out ) = run_sh("cd '$home' && PATH='$bin':\$PATH; $line");
+    is( $status, 0, 'it succeeds where there is no .npm' ) or diag $out;
+    my @log = split m/\n/, do { local ( @ARGV, $/ ) = "$bin/log"; <> }
+      // '';
+    is_deeply( \@log, [ map { "-R agent:someadmin $_" } qw{.claude .config .local} ], 'and gives the service user everything else' );
+};
 
 subtest 'the rtk release it installs' => sub {
     my %got = recipe()->validated(%G);
@@ -264,14 +302,15 @@ subtest 'the memories go back where the agent reads them' => sub {
     is_deeply(
         \%restores,
         {
-            '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects',    owner => 'someadmin:someadmin' },
+            '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects',    owner => 'agent:someadmin' },
             '/opt/domains/agent.test.test/.claude.json'     => { from => '/opt/domains/agent.test.test/claude/state/.claude.json', owner => 'agent:someadmin', mode => '0600' },
         },
-        'into .claude/projects of the domain, for the admin, and .claude.json, for the service user alone'
+        'into .claude/projects of the domain, and .claude.json for the service user alone, both owned by the service user'
     );
     my %no_user = %G;
     delete $no_user{user};
-    is( { recipe()->restores(%no_user) }->{'/opt/domains/agent.test.test/.claude.json'}{owner}, 'someadmin:someadmin', 'with no service user, .claude.json belongs to the admin' );
+    my %fallback = recipe()->restores(%no_user);
+    is_deeply( [ map { $fallback{$_}{owner} } sort keys %fallback ], [ ('someadmin:someadmin') x 2 ], 'with no service user, both belong to the admin' );
 };
 
 my %BOT = ( github_user => 'bot', github_token => 'ghp_x', git_email => 'bot@test.test' );
@@ -281,9 +320,14 @@ subtest 'a bot that the agent acts as' => sub {
     ok( ref $required{github} eq 'CODE', 'it requires github' ) or return;
 
     my %asked = $required{github}->( %G, %BOT );
-    is( $asked{account},     'someadmin',                               'for the admin, who owns the settings' );
+    ok( !exists $asked{account}, 'for the account that github defaults to, and not for the admin' );
     is( $asked{github_user}, 'bot',                                     'logged in as the bot' );
-    is( $asked{config_dir},  '/opt/domains/agent.test.test/.claude/gh', 'in a directory of its own, beside the login of the admin' );
+    is( $asked{config_dir},  '/opt/domains/agent.test.test/.claude/gh', 'in a directory of its own, beside the login of the account' );
+
+    is( { github()->validated( %G, %asked ) }->{account}, 'agent', 'which is the service user' );
+    my %no_user = %G;
+    delete $no_user{user};
+    is( { github()->validated( %no_user, $required{github}->( %no_user, %BOT ) ) }->{account}, 'someadmin', 'or the admin, on a domain that names none' );
 
     my %plain = recipe()->required_recipes(%G);
     ok( !exists $plain{github}, 'and a domain with no bot does not require github' );
