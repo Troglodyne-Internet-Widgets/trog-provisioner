@@ -3,6 +3,10 @@ use strict;
 use warnings;
 use Test::More;
 
+[% IF user == admin_user -%]
+plan skip_all => q{[% domain %] names no service user, and the admin has sudo for everything already};
+[% END -%]
+
 my $user    = '[% user %]';
 my $sudoers = '/etc/sudoers.d/servicesudo-[% user %]';
 

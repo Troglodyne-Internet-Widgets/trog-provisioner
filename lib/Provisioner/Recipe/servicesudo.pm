@@ -70,17 +70,12 @@ the operator wrote.
 =head2 A domain with no service user
 
 If the domain names no C<user>, C<user> falls back to C<admin_user>, as
-L<Provisioner::Recipe/validate> says.  This recipe then refuses, and the
-configuration step of the build dies with the reason.
-
-It does not write nothing and go on, because the reason for the recipe is that
-the program runs under an account with less than root.  Without a service user
-the program runs as the admin, whom F<bin/new_config> gives sudo for
-everything.  A build
-that went on would look like it limited the program, and would not.  So the
-operator must name a service user, or remove the recipe.  The refusal comes
-with an empty C<commands> as well.  A domain that names the admin as its
-C<user> gets the same refusal, for the same reason.
+L<Provisioner::Recipe/validate> says.  This recipe then installs nothing, and
+its guest test skips.  The program runs as the admin, whom F<bin/new_config>
+gives sudo for everything, so a list of commands can add nothing to it.  A
+recipe that needs its service user to run a command as root can require this
+recipe, and a domain without a service user still builds.  The same holds for
+a domain that names the admin as its C<user>.
 
 =cut
 
@@ -111,20 +106,17 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Dies when C<user> is C<admin_user>.  See L</A domain with no service user>.
-
-Dies too when C<user> is not a plain account name.  It goes into a sudoers line
-and into the name of a file in F<sudoers.d>, and sudo skips a file whose name
-has a dot in it.  C<user> is a global, which the schema of a recipe does not
-declare a second time, so the check is here.
+Dies when C<user> is not C<admin_user> and is not a plain account name.  It
+goes into a sudoers line and into the name of a file in F<sudoers.d>, and sudo
+skips a file whose name has a dot in it.  C<user> is a global, which the schema
+of a recipe does not declare a second time, so the check is here.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    die "servicesudo: $opts{domain} names no service user, so its user is the admin, who has sudo for everything already.  Set user in the _global of the domain.\n"
-      if $opts{user} eq $opts{admin_user};
+    return %opts if $opts{user} eq $opts{admin_user};
     die "servicesudo: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
       unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
 

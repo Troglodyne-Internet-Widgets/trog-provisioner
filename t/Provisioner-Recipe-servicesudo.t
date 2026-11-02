@@ -117,9 +117,18 @@ subtest 'a command that would grant more is refused' => sub {
 subtest 'a domain with no service user' => sub {
     my %without = %G;
     delete $without{user};
-    like( exception { recipe()->validate( %without, commands => ['/usr/bin/id'] ) }, qr/\Q$G{domain}\E[ ]names[ ]no[ ]service[ ]user/, 'is refused, and not given to the admin' );
-    like( exception { recipe()->validate( %G,       user     => 'admin' ) },         qr/names[ ]no[ ]service[ ]user/,                  'and so is one whose user is the admin, with no commands' );
-    like( exception { recipe()->validate( %G,       user     => 'a.b' ) },           qr/not[ ]a[ ]name/,                               'and a user that sudo would skip the file of' );
+    my %opts = recipe()->validate( %without, commands => ['/usr/bin/id'] );
+    is( $opts{user}, $G{admin_user}, 'falls back to the admin' );
+    my $fragment = recipe()->render_file( 'ubuntu/servicesudo.tt', %opts );
+    unlike( $fragment, qr/\S/, 'and installs nothing, because the admin has sudo for everything already' ) or diag $fragment;
+    my $sudoers = recipe()->render_file( 'files/servicesudo.sudoers.tt', %opts );
+    unlike( $sudoers, qr/^[^#\n]/m, 'and its sudoers file grants nothing either' ) or diag $sudoers;
+    like( recipe()->render_file( 'ubuntu/servicesudo.tt', recipe()->validate(%G) ), qr{^install[ ].*/etc/sudoers[.]d/servicesudo-svc$}m, 'while a service user gets its file' );
+
+    my $test = recipe()->render_file( 'tests/servicesudo.tt', %opts );
+    like( $test, qr/^plan[ ]skip_all/m, 'and the guest test skips' );
+
+    like( exception { recipe()->validate( %G, user => 'a.b' ) }, qr/not[ ]a[ ]name/, 'a user that sudo would skip the file of is refused' );
 };
 
 done_testing();
