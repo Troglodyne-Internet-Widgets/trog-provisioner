@@ -382,6 +382,39 @@ subtest 'the settings make each command of the agent the bot' => sub {
     ok( !exists $plain->{env}, 'a domain with neither gets no environment' );
 };
 
+subtest 'a restricted agent' => sub {
+    my %got = recipe()->validated( %G, restricted_user => 'test-agent' );
+    is( $got{restricted_home}, '/opt/domains/agent.test.test/agents/test-agent', 'gets a home of its own in the directory of the domain' );
+    foreach my $taken (qw{agent someadmin}) {
+        like( exception { recipe()->validated( %G, restricted_user => $taken ) }, qr/account[ ]of[ ]its[ ]own/, "and is refused when it is $taken, who already runs things" );
+    }
+    like( exception { recipe()->validated( %G, restricted_user => 'Bad Name' ) }, qr/restricted_user/, 'or when it is no account name' );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    recipe()->generate_files( $dir, %G, modules => ['claude'], %BOT, pr_assignee => 'reviewer', restricted_user => 'test-agent' );
+    my %conf;
+    foreach my $file (qw{claude.settings.json claude.restricted.settings.json}) {
+        my $text = do { local ( @ARGV, $/ ) = "$dir/$file"; <> }
+          // q{};
+        $conf{$file} = eval { Cpanel::JSON::XS::decode_json($text) };
+    }
+    my $restricted = $conf{'claude.restricted.settings.json'};
+    ok( $restricted, 'its settings render as valid JSON' ) or return;
+    is_deeply( $restricted->{enabledPlugins}, $conf{'claude.settings.json'}{enabledPlugins}, 'with the plugins of the agent of the domain' );
+    ok( !exists $restricted->{env}, 'but none of the environment that makes that agent the bot' );
+
+    my $said    = recipe()->render( %G, restricted_user => 'test-agent' );
+    my $home    = '/opt/domains/agent.test.test/agents/test-agent';
+    my $useradd = qr{useradd[ ]--system[ ]--user-group};
+    my $nologin = qr{-s[ ]/usr/sbin/nologin};
+    like( $said, qr{$useradd[ ]$nologin[ ]-d[ ]'\Q$home\E'[ ]'test-agent'}, 'the account is made, with that home, and cannot log in' );
+    my $mv_at   = index( $said, "mv claude.restricted.settings.json '$home/.claude/settings.json'" );
+    my $init_at = index( $said, "HOME='$home' rtk init" );
+    ok( $mv_at >= 0 && $init_at > $mv_at,                                      'rtk goes into its settings after they are in place' );
+    ok( index( $said, "chown -R 'test-agent:test-agent' '$home'" ) > $init_at, 'and the account owns its home after rtk has written there' );
+    unlike( recipe()->render(%G), qr/useradd|agents/, 'a domain that names no restricted agent makes no account' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

@@ -1147,8 +1147,12 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         hostnames   => ['www.d.test'], modules     => ['perl'],
         vhosts      => {},             upstreams   => {},
         tcms_dir    => 'tCMS',         basedir     => 'code',
-        port        => 636,            users       => [],
-        tls_port    => 4443,
+
+        # The branches of a restricted agent, in claude and in clod.
+        restricted_user => 'agent', restricted_home => '/opt/domains/d.test/agents/agent',
+        agent_user      => 'agent', agent_home      => '/opt/domains/d.test/agents/agent',
+        port            => 636,     users           => [],
+        tls_port        => 4443,
 
         # The branches that only a guest behind a relay renders.
         mailrelay       => 'relay.d.test',

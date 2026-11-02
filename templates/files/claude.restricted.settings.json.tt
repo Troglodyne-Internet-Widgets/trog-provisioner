@@ -1,0 +1,3 @@
+[%# The settings of the home of restricted_user.  See A RESTRICTED AGENT in
+    Provisioner::Recipe::claude. -%]
+[% INCLUDE "files/claude.settings.json.tt" WITH restricted = 1 -%]

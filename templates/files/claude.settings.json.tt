@@ -39,7 +39,7 @@
       }
     }
   },
-[% IF github_user || pr_assignee %]
+[% IF ( github_user || pr_assignee ) && !restricted %]
   "env": {
 [% IF github_user %]
     "GH_CONFIG_DIR": "[% gh_config_dir %]",
