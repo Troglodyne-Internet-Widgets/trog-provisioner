@@ -54,11 +54,11 @@ sub install {
 
     local $Trog::Script::CpanInstall::PERL_ROOT = $case{perl_root} // $PERL_ROOT;
 
-    my ( @ran, @git_config );
+    my ( @ran, @git_config, @path );
 
     # no_auto: it was loaded from its path above, so there is no module file to load.
     my $cpan_install = Test::MockModule->new( 'Trog::Script::CpanInstall', no_auto => 1 );
-    $cpan_install->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; return $case{fails} && "@cmd" =~ $case{fails} ? 1 : 0 } );
+    $cpan_install->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; push @path, $ENV{PATH}; return $case{fails} && "@cmd" =~ $case{fails} ? 1 : 0 } );
     $cpan_install->redefine(
         capture_in => sub {
             my ( $dir, @cmd ) = @_;
@@ -74,7 +74,7 @@ sub install {
         $died = $@;
     };
     $err .= $died if $died;
-    return { rc => $rc, ran => \@ran, out => $out, err => $err, git_config => \@git_config };
+    return { rc => $rc, ran => \@ran, out => $out, err => $err, git_config => \@git_config, path => \@path };
 }
 
 subtest 'install: into the newest perl the recipe built' => sub {
@@ -86,6 +86,15 @@ subtest 'install: into the newest perl the recipe built' => sub {
         [ [ undef, $CPANM, qw{--notest Sys::Virt@10.0.0} ], [ undef, @CPM, 'Moo', 'Moo~>= 2.004' ] ],
         'the pin with that perl cpanm first, then the rest with its cpm, each spec handed on as one word'
     );
+};
+
+# A distribution that runs perl from PATH while it builds gets the perl that it
+# goes into.  FindBin::libs v5.1.5 runs its install tests that way.
+subtest 'every install has that perl first on PATH' => sub {
+    local $ENV{PATH} = '/bogus/system/bin';
+    my $r = install( args => [qw{install Moo Sys::Virt@10.0.0}] );
+    is_deeply( $r->{path}, [ ("$PERL/bin:/bogus/system/bin") x 2 ], 'for cpanm and for cpm' );
+    is( $ENV{PATH}, '/bogus/system/bin', 'and the PATH of the caller is as it was afterwards' );
 };
 
 subtest 'the test suites run unless told not to' => sub {
