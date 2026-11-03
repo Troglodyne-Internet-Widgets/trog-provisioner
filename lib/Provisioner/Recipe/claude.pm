@@ -107,6 +107,29 @@ assigned to the operator reaches the inbox of the operator.
 A domain that runs L<Provisioner::Recipe::koan> logs its own bot in through
 C<github>, so it names none here.
 
+=head2 A RESTRICTED AGENT
+
+A program that runs claude unattended, such as L<Provisioner::Recipe::clod>,
+can run it as an account of its own, so that the agent cannot read what the
+program holds: a process can read F</proc/$pid/environ> of every process of
+its own account.  With C<restricted_user>, the recipe makes that account, and
+a second home for it, C<restricted_home>: F<agents/E<lt>nameE<gt>> in the
+directory of the domain.
+
+The account is a system account with C<nologin> and a group of the same name.
+The data recipe makes the directory of the domain C<0750>, so an ACL lets the
+account pass through it, and it cannot list it.  Each path under it is then
+open to the account only as far as its own mode allows.
+Its home gets the same plugins and the same rtk hook, but none of the C<env> of
+L</A BOT FOR THE AGENT> and no auto mode.  Its agent does what the program that
+runs it allows, and it must not act as the bot.  Its git configuration sets
+C<safe.directory> to C<*>, because it works in checkouts that the program owns,
+and git refuses to work in a repository that another account owns.  The recipe
+salvages nothing of that home.
+
+The recipe grants the account nothing.  The program that runs claude as it
+needs a sudo rule for that, which the recipe of the program writes.
+
 =head2 RTK
 
 L<rtk|https://github.com/rtk-ai/rtk> filters the output of a shell command
@@ -145,6 +168,12 @@ sub args {
             github_token => { type => 'string', 'x-secret' => 1,                                description => 'A personal access token for that account.' },
             git_email    => { type => 'string', pattern    => q{^[^\\s"'\\\\]+@[^\\s"'\\\\]+$}, description => 'The address that the commits of the bot carry.  GitHub links a commit to the account that has this address.' },
             pr_assignee  => { type => 'string', pattern    => '^[A-Za-z0-9-]+$',                description => 'The login that each pull request of the agent is assigned to, as PERL_SLOP_ASSIGNEE.' },
+
+            restricted_user => {
+                type        => 'string',
+                pattern     => '^[a-z_][a-z0-9_-]*$',
+                description => 'An account to make, with a home and settings of its own, that a program runs claude as.  See A RESTRICTED AGENT.',
+            },
         },
     );
 }
@@ -184,11 +213,27 @@ sub bot_config_dir {
     return "$opts{install_dir}/$opts{domain}/.claude/gh";
 }
 
+=head2 $dir = $recipe->restricted_home(%opts)
+
+The home of C<restricted_user>: F<agents/E<lt>restricted_userE<gt>> in the
+directory of the domain.
+
+=cut
+
+sub restricted_home {
+    my ( $self, %opts ) = @_;
+    return "$opts{install_dir}/$opts{domain}/agents/$opts{restricted_user}";
+}
+
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<gh_config_dir>, the directory of C<bot_config_dir>, when the domain
 names a bot.  Dies when it names only some of C<github_user>, C<github_token>
 and C<git_email>.
+
+Adds C<restricted_home> when the domain names a C<restricted_user>.  Dies when
+that is the service C<user> or the admin, because the point of the account is
+that it is neither.
 
 =cut
 
@@ -200,6 +245,13 @@ sub enrich {
       if $given && $given != 3;
 
     $opts{gh_config_dir} = $self->bot_config_dir(%opts) if $given;
+
+    if ( defined $opts{restricted_user} ) {
+        my %taken = map { $_ => 1 } grep { defined } @opts{qw{user admin_user}};
+        die "claude: restricted_user $opts{restricted_user} is an account that already runs things here.  It must be an account of its own.\n"
+          if $taken{ $opts{restricted_user} };
+        $opts{restricted_home} = $self->restricted_home(%opts);
+    }
     return %opts;
 }
 
@@ -230,7 +282,8 @@ sub cache_classes {
 
 sub template_files {
     return (
-        'claude.settings.json.tt' => 'claude.settings.json',
+        'claude.settings.json.tt'            => 'claude.settings.json',
+        'claude.restricted.settings.json.tt' => 'claude.restricted.settings.json',
     );
 }
 

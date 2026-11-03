@@ -27,3 +27,16 @@ HOME='[% install_dir %]/[% domain %]' rtk init -g --auto-patch
     them, and the group of the admin can read them.  A path that is not there,
     such as .npm where claude was already installed, is skipped. -%]
 cd '[% install_dir %]/[% domain %]' && for p in .claude .npm .config .local; do test ! -e "$$p" || chown -R '[% user %]:[% admin_user %]' "$$p" || exit 1; done
+[% IF restricted_user -%]
+[%# The account that a program runs claude as, and its home.  See A
+    RESTRICTED AGENT in Provisioner::Recipe::claude.  rtk edits the settings,
+    so it runs after the mv, as above. -%]
+getent passwd '[% restricted_user %]' > /dev/null || useradd --system --user-group -s /usr/sbin/nologin -d '[% restricted_home %]' '[% restricted_user %]'
+install -d -o root -g root -m 0755 '[% install_dir %]/[% domain %]/agents'
+setfacl -m 'u:[% restricted_user %]:x' '[% install_dir %]/[% domain %]'
+install -d -o '[% restricted_user %]' -g '[% restricted_user %]' -m 0750 '[% restricted_home %]' '[% restricted_home %]/.claude'
+mv claude.restricted.settings.json '[% restricted_home %]/.claude/settings.json'
+HOME='[% restricted_home %]' rtk init -g --auto-patch
+HOME='[% restricted_home %]' git config --global --replace-all safe.directory '*'
+chown -R '[% restricted_user %]:[% restricted_user %]' '[% restricted_home %]'
+[% END -%]

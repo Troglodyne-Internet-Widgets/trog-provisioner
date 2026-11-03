@@ -563,6 +563,9 @@ rejects_missing(
     'matrix rejects missing admin_password'
 );
 
+rejects_missing( 'clod', { bot => 'b', github_token => 'x', claude_oauth_token => 'x', dashboard_password_sha256 => 'a' x 64 }, 'spokes' );
+rejects_missing( 'clod', { bot => 'b', github_token => 'x', claude_oauth_token => 'x', spokes                    => ['o/a'] },  'dashboard_password_sha256' );
+
 rejects_missing( 'ldap',  {},                                          'admin_password', 'ldap rejects missing admin_password' );
 rejects_missing( 'tpsgi', {},                                          'routers',        'tpsgi rejects missing routers' );
 rejects_missing( 'sssd',  { base_dn => 'dc=test,dc=test' },            'ldap_uri',       'sssd rejects missing ldap_uri' );
@@ -1144,8 +1147,12 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         hostnames   => ['www.d.test'], modules     => ['perl'],
         vhosts      => {},             upstreams   => {},
         tcms_dir    => 'tCMS',         basedir     => 'code',
-        port        => 636,            users       => [],
-        tls_port    => 4443,
+
+        # The branches of a restricted agent, in claude and in clod.
+        restricted_user => 'agent', restricted_home => '/opt/domains/d.test/agents/agent',
+        agent_user      => 'agent', agent_home      => '/opt/domains/d.test/agents/agent',
+        port            => 636,     users           => [],
+        tls_port        => 4443,
 
         # The branches that only a guest behind a relay renders.
         mailrelay       => 'relay.d.test',

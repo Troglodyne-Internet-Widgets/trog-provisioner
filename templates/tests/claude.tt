@@ -106,4 +106,35 @@ SKIP: {
 }
 [% END %]
 
+[% IF restricted_user %]
+# The account that a program runs claude as, and its home.  See A RESTRICTED
+# AGENT in Provisioner::Recipe::claude.
+{
+    my $restricted = '[% restricted_home %]';
+    my @account    = getpwnam '[% restricted_user %]';
+    is($account[7], $restricted, 'the restricted agent has a home of its own');
+    is($account[8], '/usr/sbin/nologin', 'and cannot log in');
+
+    my $text  = do { local (@ARGV, $/) = "$restricted/.claude/settings.json"; <> } // '';
+    my $rconf = eval { decode_json($text) };
+    ok($rconf, 'its settings are installed, as valid JSON') or diag $text;
+    SKIP: {
+        skip 'its settings did not parse', 3 unless $rconf;
+        ok($rconf->{enabledPlugins}{'perl-slop@troglodyne-marketplace'}, 'with the plugins');
+        ok(!exists $rconf->{env}, 'and none of the environment that makes the agent of the domain the bot');
+        my @commands = map { map { $_->{command} // '' } @{ $_->{hooks} // [] } }
+                       grep { ($_->{matcher} // '') eq 'Bash' } @{ $rconf->{hooks}{PreToolUse} // [] };
+        ok((grep { m/\brtk\b/ } @commands), 'and its Bash tool goes through rtk');
+    }
+
+    system('runuser', '-u', '[% restricted_user %]', '--', 'test', '-r', "$restricted/.claude/settings.json");
+    is($? >> 8, 0, '[% restricted_user %] reads its own settings, through the directory of the domain');
+    system('runuser', '-u', '[% restricted_user %]', '--', 'ls', '[% install_dir %]/[% domain %]');
+    isnt($? >> 8, 0, 'and cannot list that directory');
+
+    my @strays = grep { length } split m/\n/, qx{find '$restricted' ! -user '[% restricted_user %]' -printf '%u %p\\n' 2>&1};
+    is_deeply(\@strays, [], 'everything in its home belongs to [% restricted_user %]') or diag join "\n", @strays;
+}
+[% END %]
+
 done_testing();

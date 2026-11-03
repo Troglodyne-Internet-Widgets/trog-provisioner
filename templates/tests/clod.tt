@@ -1,0 +1,101 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $home = '[% install_dir %]/[% domain %]';
+
+foreach my $unit ('clod-[% domain %]', 'clod-worker-[% domain %]') {
+    my $status = `systemctl is-active '$unit' 2>/dev/null`;
+    chomp $status;
+    is($status, 'active', "$unit is running") or diag `journalctl -u '$unit' -n 30 --no-pager 2>&1`;
+
+    # Ask the process, not the unit file, which systemd may not have loaded.
+    my $pid = `systemctl show -p MainPID --value '$unit' 2>/dev/null`;
+    chomp $pid;
+    my @st = stat "/proc/$pid";
+    is(scalar getpwuid($st[4] // -1), '[% user %]', "and runs as [% user %]");
+}
+
+# nginx proxies to this socket.  If the service runs without it, every request
+# gets a 502.
+my $sock = "$home/run/clod.sock";
+ok(-S $sock, 'the socket of the health page is there') or diag "no socket at $sock";
+
+# The page is behind basic authentication, so a request without it is a 401
+# from the application itself, and not a 502 from nginx.
+my $code = `curl -s -o /dev/null -w '%{http_code}' --unix-socket '$sock' http://localhost/ 2>&1`;
+is($code, '401', 'the application answers on it, and asks who is there');
+
+my $vhost = do { local (@ARGV, $/) = '/etc/nginx/sites-enabled/[% domain %].conf'; <> } // '';
+like($vhost, qr{\Qserver unix:$sock\E}, 'and nginx has an upstream for it') or diag $vhost;
+
+# The service user reads its secrets and cannot change them.
+foreach my $file ("$home/clod.conf", "$home/clod.env") {
+    my @st = stat $file;
+    is(scalar getpwuid($st[4] // -1), 'root',       "$file is owned by root");
+    is(scalar getgrgid($st[5] // -1), '[% user %]', "and group [% user %]");
+    is(($st[2] // 0) & 07777, 0640,                 "and mode 0640");
+}
+
+# The configuration is perl, and App::Clod refuses one that it cannot use.
+my $checked = `cd '$home/App-Clod' && /opt/perl5/current/bin/perl -Ilib -MApp::Clod::Config -e 'my \$c = do \$ARGV[0] or die \$@ || \$!; App::Clod::Config::validate(\$c); print "ok\\n"' '$home/clod.conf' 2>&1`;
+is($checked, "ok\n", 'App::Clod accepts the configuration') or diag $checked;
+
+# The bot runs claude and git as [% user %], with HOME the directory of the domain.
+ok(qx{which claude}, 'claude is on the PATH');
+ok(-d "$home/clod-state" && (stat _)[4] == (getpwnam('[% user %]'))[2], 'the database directory belongs to [% user %]');
+
+[% IF agent_user %]
+# claude runs as [% agent_user %].  See THE AGENT ACCOUNT in
+# Provisioner::Recipe::clod.  Each check runs as the account that it is about.
+{
+    my $agent = '[% agent_user %]';
+    my $pid   = `systemctl show -p MainPID --value 'clod-worker-[% domain %]' 2>/dev/null`;
+    chomp $pid;
+
+    my ($groups) = (do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '') =~ m/^Groups:\s*([^\n]*)/m;
+    my $gid = (getgrnam $agent)[2] // -1;
+    ok((grep { $_ == $gid } split ' ', $groups // ''), "the worker is in the group of $agent") or diag "groups: ", $groups // 'none';
+
+    foreach my $secret ("$home/clod.env", "$home/clod.conf", "$home/clod-state/minion.db", "/proc/$pid/environ") {
+        system('runuser', '-u', $agent, '--', 'cat', $secret);
+        isnt($? >> 8, 0, "$agent cannot read $secret");
+    }
+
+    # Runs a command as the worker, or through sudo as the agent the way that
+    # App::Clod starts claude, with the umask of the worker and a and b on its
+    # input.  A list all the way down, so that nothing is quoted twice.
+    my $as = sub {
+        my ($who, @command) = @_;
+        my @sudo = $who eq 'agent' ? (qw{sudo -n -H -u}, $agent, '--preserve-env=CLOD_TEST_PASSED', '--') : ();
+        open(my $fh, '-|', 'runuser', '-u', '[% user %]', '--', 'sh', '-c', q{umask 0007; printf 'a\nb\n' | "$@" 2>&1}, 'sh', @sudo, @command)
+            or return (-1, "runuser: $!");
+        my $out = do { local $/; <$fh> } // '';
+        close $fh;
+        return ($? >> 8, $out);
+    };
+
+    # The input comes back byte for byte, so a pty, which writes CRLF, shows.
+    local $ENV{CLOD_TEST_PASSED} = 'passed';
+    my (undef, $said) = $as->('agent', '/usr/bin/env', 'PATH=/bogus/first:/usr/bin:/bin', 'sh', '-c', q{id -un; echo "$HOME"; echo "$CLOD_TEST_PASSED"; echo "$PATH"; umask; cat});
+    is($said, "$agent\n[% agent_home %]\npassed\n/bogus/first:/usr/bin:/bin\n0007\na\nb\n",
+        'the agent runs in its home, with what --preserve-env names, the PATH that it is given, the umask 0007 and a clean pipe');
+
+    # A repository that the worker makes in the workspace, a commit and new
+    # files of the agent in it, and the worker reads it and removes it.
+    my $repo = "$home/workspace/.clod-guest-test";
+    system('rm', '-rf', $repo);
+    my @made = $as->('worker', 'sh', '-c', "git init -q --shared=group -b main $repo && git -C $repo -c user.name=w -c user.email=w\@test.test commit -q --allow-empty -m one");
+    is($made[0], 0, 'the worker makes a repository in the workspace') or diag $made[1];
+    my @committed = $as->('agent', 'sh', '-c', "mkdir $repo/made && touch $repo/made/file && git -C $repo -c user.name=a -c user.email=a\@test.test commit -q --allow-empty -m two");
+    is($committed[0], 0, 'the agent commits in it, and makes files there') or diag $committed[1];
+    my @log = $as->('worker', 'git', '-C', $repo, 'log', '--format=%s');
+    is($log[1], "two\none\n", 'the worker reads the commit of the agent') or diag $log[1];
+    my @removed = $as->('worker', 'rm', '-r', $repo);
+    is($removed[0], 0, 'and removes what the agent made') or diag $removed[1];
+    system('rm', '-rf', $repo);
+}
+[% END %]
+
+done_testing();
