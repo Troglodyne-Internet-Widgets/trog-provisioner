@@ -65,6 +65,11 @@ this script for Module::Build and Dist::Zilla.
 
 The system perl runs this script, so the script is written for it.
 
+Every command that it runs has the F<bin> of that perl first on C<PATH>.  A
+distribution that runs C<perl> from C<PATH> while it builds or tests then gets
+the perl that it goes into, and not the system perl, which can be too old for
+it and has none of its dependencies.
+
 =head3 Which installer
 
 cpm installs everything it can, because it builds several distributions at
@@ -129,6 +134,9 @@ sub main {
     return usage() unless defined $verb;
 
     my $bin = perl_bin();
+
+    # See "Which perl".
+    local $ENV{PATH} = join ':', $bin, $ENV{PATH} // ();
 
     my $rc = 0;
     if ( $verb eq 'install' && @rest ) {
