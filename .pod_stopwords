@@ -253,6 +253,7 @@ domaindir
 dotfile
 dotfiles
 dryrun
+DUID
 dzil
 easyrsa
 env

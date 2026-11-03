@@ -262,34 +262,36 @@ subtest 'the documents a guest with no mirror is built from' => sub {
         loaded( $dir, 'network-config' ),
         {
             network => {
-                version => 1,
-                config  => [
-                    {
-                        type        => 'physical',
-                        name        => 'ens4',
-                        mac_address => Trog::HV::Libvirt->guest_mac( $DOMAIN, 1 ),
-                        gateway4    => '192.0.2.254',
+                version   => 2,
+                ethernets => {
+                    ens4 => {
+                        match       => { macaddress => Trog::HV::Libvirt->guest_mac( $DOMAIN, 1 ) },
+                        'set-name'  => 'ens4',
+                        addresses   => ['192.0.2.10/24'],
+                        routes      => [ { to => 'default', via => '192.0.2.254' } ],
                         nameservers => { search => [$DOMAIN], addresses => $RESOLVERS },
-                        subnets     => [
-                            {
-                                type            => 'static',
-                                address         => '192.0.2.10',
-                                gateway         => '192.0.2.254',
-                                dns_search      => [$DOMAIN],
-                                dns_nameservers => $RESOLVERS,
-                            }
-                        ],
                     },
-                    {
-                        type        => 'physical',
-                        name        => 'ens3',
-                        mac_address => Trog::HV::Libvirt->guest_mac( $DOMAIN, 0 ),
-                        subnets     => [ { type => 'dhcp' } ],
+
+                    # The MAC as the client identifier, so that a rebuilt guest,
+                    # which has a new machine-id and so a new DUID, asks dnsmasq
+                    # as the same client and gets back the lease it had.
+                    ens3 => {
+                        match             => { macaddress => Trog::HV::Libvirt->guest_mac( $DOMAIN, 0 ) },
+                        'set-name'        => 'ens3',
+                        dhcp4             => bool(1),
+                        'dhcp-identifier' => 'mac',
                     },
-                ],
+                },
             }
         },
         'network-config'
+    );
+
+    my ( $prefixed, undef ) = generated( ips => [ '192.0.2.10', '198.51.100.7/28' ] );
+    cmp_deeply(
+        loaded( $prefixed, 'network-config' )->{network}{ethernets}{ens4}{addresses},
+        [ '192.0.2.10/24', '198.51.100.7/28' ],
+        'an address with no prefix gets /24, as cloud-init gave one in the version 1 format, and a prefix that is given is kept'
     );
 
     my $user_data = loaded( $dir, 'user-data' );
@@ -395,8 +397,8 @@ subtest 'a MAC with no hex letters in it survives the trip to PyYAML' => sub {
     my ( $dir, undef ) = generated( nat_mac => '52:54:00:11:44:22', bridge_mac => '52:54:00:f8:83:fc' );
     my $config = File::Slurper::read_text("$dir/network-config");
 
-    like( $config, qr/^\s+mac_address:[ ]'52:54:00:11:44:22'$/m, 'an all-decimal MAC is quoted' );
-    like( $config, qr/^\s+mac_address:[ ]52:54:00:f8:83:fc$/m,   'and one with hex letters is left alone' );
+    like( $config, qr/^\s+macaddress:[ ]'52:54:00:11:44:22'$/m, 'an all-decimal MAC is quoted' );
+    like( $config, qr/^\s+macaddress:[ ]52:54:00:f8:83:fc$/m,   'and one with hex letters is left alone' );
 
     my %formatters = 'Provisioner::Recipe::ubuntu'->formatters();
     my $yaml       = sub ($value) { return q{} . $formatters{yaml}->($value) };
@@ -419,23 +421,23 @@ subtest 'a bin that another guest routes to gets a route through that guest, onc
         ipmap => { 'vpn.test.test' => '192.0.2.20' },
     );
 
+    my $routes = sub ($dir) { return loaded( $dir, 'network-config' )->{network}{ethernets}{ens4}{routes} };
     my ( $dir, undef ) = generated( %pool, ips => [ '192.0.2.10', '192.0.2.11' ] );
-    my $subnets = loaded( $dir, 'network-config' )->{network}{config}[0]{subnets};
     cmp_deeply(
-        $subnets->[0]{routes},
+        $routes->($dir),
         [
-            { network => '10.8.0.128', netmask => '255.255.255.128', gateway => '192.0.2.20' },
-            { network => '10.9.0.7',   netmask => '255.255.255.255', gateway => '192.0.2.20' },
+            { to => 'default',       via => '192.0.2.254' },
+            { to => '10.8.0.128/25', via => '192.0.2.20' },
+            { to => '10.9.0.7/32',   via => '192.0.2.20' },
         ],
-        'each network of the bin goes through the address of its via'
-    ) or diag explain $subnets;
-    ok( !exists $subnets->[1]{routes}, 'under the first address only, because netplan refuses a route twice' );
+        'each network of the bin goes through the address of its via, once for the interface, because netplan refuses a route twice'
+    ) or diag explain $routes->($dir);
 
     ( $dir, undef ) = generated( %pool, domain => 'vpn.test.test' );
-    ok( !exists loaded( $dir, 'network-config' )->{network}{config}[0]{subnets}[0]{routes}, 'and the guest that it names routes to the bin itself' );
+    cmp_deeply( $routes->($dir), [ { to => 'default', via => '192.0.2.254' } ], 'and the guest that it names routes to the bin itself' );
 
     ( $dir, undef ) = generated( %pool, ipmap => {} );
-    ok( !exists loaded( $dir, 'network-config' )->{network}{config}[0]{subnets}[0]{routes}, 'as does a guest that cannot know where its via is' );
+    cmp_deeply( $routes->($dir), [ { to => 'default', via => '192.0.2.254' } ], 'as does a guest that cannot know where its via is' );
 };
 
 subtest 'a guest with no addresses takes a lease on the NAT side, and leaves the bridge alone' => sub {
@@ -443,10 +445,10 @@ subtest 'a guest with no addresses takes a lease on the NAT side, and leaves the
         my $with = defined $gateway ? 'with the gateway of the fleet' : 'with no gateway';
         my ( $dir, undef ) = generated( ips => [], gateway => $gateway );
 
-        my $config = loaded( $dir, 'network-config' )->{network}{config};
-        ok( !exists $config->[0]{subnets},  "the bridge asks for no address, $with" );
-        ok( !exists $config->[0]{gateway4}, 'and claims no gateway, which it could not reach' );
-        cmp_deeply( $config->[1]{subnets}, [ { type => 'dhcp' } ], 'and the NAT side takes its lease, as it always does' );
+        my $config = loaded( $dir, 'network-config' )->{network}{ethernets};
+        ok( !exists $config->{ens4}{addresses}, "the bridge asks for no address, $with" );
+        ok( !exists $config->{ens4}{routes},    'and claims no gateway, which it could not reach' );
+        cmp_deeply( $config->{ens3}, superhashof( { dhcp4 => bool(1), 'dhcp-identifier' => 'mac' } ), 'and the NAT side takes its lease, as it always does' );
     }
 };
 
