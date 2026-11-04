@@ -35,6 +35,10 @@ the build fails at link time, and the error looks like a toolchain problem.
 and C<libsqlite3-dev> for C<DBD::SQLite>.  The address pool is a SQLite
 database.
 
+=item * C<acl> for C<setfacl>, which lets a C<provision_user> that is not the
+service user reach its key.  See L<Provisioner::Recipe::trogrunner/THE
+PROVISIONING ACCOUNT>.
+
 =back
 
 C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
@@ -54,6 +58,7 @@ sub deps {
       zlib1g-dev
       libexpat1-dev
       libsqlite3-dev
+      acl
     };
 }
 

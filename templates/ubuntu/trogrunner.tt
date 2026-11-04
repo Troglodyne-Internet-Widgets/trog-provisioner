@@ -40,49 +40,17 @@ install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/
 # Every login shell sources this, so each user gets the checkout on the PATH.
 install -o root -g root -m 0644 trogrunner.profile /etc/profile.d/trogrunner.sh
 
-# Net::OpenSSH::More does not start if the ssh config mode is wider than 0600.
-# It says "[FATAL] Permissions on ... are not correct: got=0775,
-# expected=0600".  This tool does all remote work through it.  The dotfiles
-# that adminconfig installs ship one with mode 0775.
-#
-# The fix is here, not in adminconfig, because this recipe needs the narrow
-# mode.  Only the mode changes.  The file content belongs to whoever wrote the
-# dotfiles.
-h="$$(getent passwd '[% user %]' | cut -d: -f6)"; if [ -z "$$h" ]; then echo 'trogrunner: no home directory for [% user %]' >&2; exit 1; fi; install -d -o '[% user %]' -g '[% user %]' -m 0700 "$$h/.ssh"; test -f "$$h/.ssh/config" && chmod 0600 "$$h/.ssh/config" || true
 [% IF hypervisor_access != 'none' %]
-# The key that a hypervisor is asked to trust.
-#
-# bin/provision put it here from the secret store before this makefile
-# started, owned by root, as guest_secrets says.  So this changes the owner and
-# does not install it.  The data target changes the modes in this tree, and ssh
-# refuses a key wider than 0600, so this sets the mode again.
+# Where bin/provision put the key that a hypervisor is asked to trust, before
+# this makefile started.  trogrunner-owner.sh gives the key to the account.
 install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.ssh'
-@test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || echo 'trogrunner: no hypervisor key was placed; bin/provision is what puts it here' >&2
-test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || true
-[% script_dir %]/queue_postrun_task "test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519'"
-
-# Also link it into the home directory, because ssh looks in ~/.ssh.  Nothing
-# in a libvirt qemu+ssh URI can point ssh elsewhere.
-#
-# The home comes from passwd.  The domain directory is the home only if the
-# domain names a service user, and a runner does not have to.  The key in the
-# domain directory is the main copy.  guest_secrets writes that path, and
-# remote_skip keeps it out of the salvage.  If the two directories are the
-# same, no link is made.
-h="$$(getent passwd '[% user %]' | cut -d: -f6)"; [ "$$h" = '[% install_dir %]/[% domain %]' ] || ln -sfn '[% install_dir %]/[% domain %]/.ssh/id_ed25519' "$$h/.ssh/id_ed25519"
-[% FOR name IN hypervisors.keys().sort() %]
-[% SET hv = hypervisors.$name %]
-[% IF hv.ssh_host %]
-# Host keys for [% name %].  The qemu+ssh transport verifies host keys, and
-# Net::OpenSSH::More does not.  With an empty known_hosts, the hypervisor
-# refuses on first contact, although plain ssh to it works.
-#
-# runuser, not root, and into the home, not the domain directory, for the
-# same reason as above.  ssh must read both files.
-h="$$(getent passwd '[% user %]' | cut -d: -f6)"; runuser -u '[% user %]' -- ssh-keygen -F '[% hv.ssh_host %]' >/dev/null 2>&1 || runuser -u '[% user %]' -- sh -c "ssh-keyscan -p '[% hv.ssh_port %]' '[% hv.ssh_host %]' >> '$$h/.ssh/known_hosts'"
 [% END %]
-[% END %]
-[% END %]
+# trogrunner-owner.sh gives the configuration, and the key, to the account that
+# runs bin/provision.  In the postrun, because a recipe whose target runs after
+# this one can make that account.  See THE PROVISIONING ACCOUNT in
+# Provisioner::Recipe::trogrunner.
+install -o root -g root -m 0700 trogrunner-owner.sh '[% install_dir %]/[% domain %]/trogrunner-owner.sh'
+[% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/trogrunner-owner.sh'
 [% IF checkout %]
 # The checkout, only if nothing is there.  A checkout salvaged from the
 # replaced guest holds work, and a clone over it loses that work.  koan.tt has

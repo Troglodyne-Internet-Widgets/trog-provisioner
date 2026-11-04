@@ -7,7 +7,7 @@ use Test::More;
     and a configuration.  These assertions make sure that it has them.
 
     No apostrophes in an Xslate comment. -%]
-my $user    = '[% user %]';
+my $user    = '[% provision_user %]';
 my $dir     = '[% install_dir %]/[% domain %]';
 my $confdir = "$dir/etc/trog-provisioner";
 
@@ -107,6 +107,9 @@ SKIP: {
     chomp( my $keyhome = `getent passwd $user | cut -d: -f6` );
     ok( -e "$keyhome/.ssh/id_ed25519", "and reachable at $keyhome/.ssh/id_ed25519, which is where ssh will look" );
 }
+[% IF provision_user != user %]
+isnt( system("runuser -u '[% user %]' -- test -r '$key'"), 0, '[% user %], which does not provision, cannot read the key' );
+[% END %]
 [% END %]
 
 # Net::OpenSSH::More does not start if the ssh config mode is wider than this,
