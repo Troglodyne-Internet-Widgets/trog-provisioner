@@ -353,8 +353,12 @@ That key is how this machine gets back in to run the makefile again.  It goes
 on the account that can sudo, not on root.  The makefile limits the root login
 to keys.
 
+C<addresses> are C<ips> with a prefix, for the network-config.  An address with
+none gets C</24>, which cloud-init gave it in the version 1 format.
+
 C<bin_routes> are the routes to each bin of C<ip_pool> that names another guest
-in C<via>, through the address of that guest in C<ipmap>.  A bin that names this
+in C<via>, through the address of that guest in C<ipmap>, each as C<to>, a
+CIDR, and C<gateway>.  A bin that names this
 guest, or a guest with no address, gets none.  See
 L<Provisioner::IPPool/BINS>.
 
@@ -411,6 +415,8 @@ sub enrich {
     die "MUST SET gateway in provision.conf when ips are set\n"
       if @{ $opts{ips} } && !$opts{gateway};
 
+    $opts{addresses} = [ map { index( $_, q{/} ) < 0 ? "$_/24" : $_ } @{ $opts{ips} } ];
+
     # Each bin that another guest routes to, through the address of that guest.
     my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
     $opts{bin_routes} = [];
@@ -421,7 +427,7 @@ sub enrich {
 
         foreach my $block ( Provisioner::IPPool::blocks( $bins{$name} ) ) {
             my $net = Net::IP->new($block) or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
-            push( @{ $opts{bin_routes} }, { network => $net->ip, netmask => $net->mask, gateway => $gateway } );
+            push( @{ $opts{bin_routes} }, { to => $net->ip . q{/} . $net->prefixlen, gateway => $gateway } );
         }
     }
 

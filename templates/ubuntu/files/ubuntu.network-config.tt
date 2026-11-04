@@ -1,5 +1,6 @@
-[%# cloud-init network-config v1 for a guest, rendered by
-    Provisioner::Recipe::ubuntu.
+[%# cloud-init network-config v2 for a guest, rendered by
+    Provisioner::Recipe::ubuntu.  cloud-init hands v2 to netplan nearly as
+    written.
 
     It has two interfaces.  The outbound bridge carries the addresses that
     reach this guest.  The libvirt NAT is how the hypervisor finds the guest
@@ -22,14 +23,12 @@ network:
   config: disabled
 [% ELSE -%]
 network:
-  version: 1
-  config:
-    - type: physical
-      name: [% bridge_devname | yaml %]
-      mac_address: [% bridge_mac | yaml %]
-[% IF ips.size() && gateway -%]
-      gateway4: [% gateway | yaml %]
-[% END -%]
+  version: 2
+  ethernets:
+    [% bridge_devname | yaml %]:
+      match:
+        macaddress: [% bridge_mac | yaml %]
+      set-name: [% bridge_devname | yaml %]
       nameservers:
         search:
           - [% domain | yaml %]
@@ -37,37 +36,34 @@ network:
 [% FOR resolver IN resolvers -%]
           - [% resolver | yaml %]
 [% END -%]
-[% IF ips.size() -%]
-      subnets:
-[% FOR ip IN ips -%]
-        - type: static
-          address: [% ip | yaml %]
-          gateway: [% gateway | yaml %]
-[% IF loop.first && bin_routes.size() -%]
+[% IF addresses.size() -%]
+      addresses:
+[% FOR address IN addresses -%]
+        - [% address | yaml %]
+[% END -%]
 [%# The bins of ip_pool that another guest routes to, such as the static
-    addresses of VPN clients.  See Provisioner::IPPool.  Under the first
-    address only, because netplan refuses the same route twice. -%]
-          routes:
+    addresses of VPN clients.  See Provisioner::IPPool.  Once for the interface,
+    because netplan refuses the same route twice. -%]
+      routes:
+        - to: default
+          via: [% gateway | yaml %]
 [% FOR r IN bin_routes -%]
-            - network: [% r.network | yaml %]
-              netmask: [% r.netmask | yaml %]
-              gateway: [% r.gateway | yaml %]
+        - to: [% r.to | yaml %]
+          via: [% r.gateway | yaml %]
 [% END -%]
 [% END -%]
-          dns_search:
-            - [% domain | yaml %]
-          dns_nameservers:
-[% FOR resolver IN resolvers -%]
-            - [% resolver | yaml %]
-[% END -%]
-[% END -%]
-[% END -%]
-[%# With no ips, the bridge gets no subnets and no gateway, so it comes up with
+[%# With no ips, the bridge gets no addresses and no routes, so it comes up with
     no address.  The guest takes its lease and its default route on the NAT
-    side.  See offers in Provisioner::IPPool. -%]
-    - type: physical
-      name: [% dhcp_devname | yaml %]
-      mac_address: [% nat_mac | yaml %]
-      subnets:
-        - type: dhcp
+    side.  See offers in Provisioner::IPPool.
+
+    The NAT side sends its MAC as the DHCP client identifier.  The default is
+    a DUID made from the machine-id, which every rebuild makes new, so dnsmasq
+    took a rebuilt guest for a new client and leased it a new address.  With the
+    MAC, which comes from the name of the domain, it gets back the lease it had. -%]
+    [% dhcp_devname | yaml %]:
+      match:
+        macaddress: [% nat_mac | yaml %]
+      set-name: [% dhcp_devname | yaml %]
+      dhcp4: true
+      dhcp-identifier: mac
 [% END -%]

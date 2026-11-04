@@ -2784,10 +2784,16 @@ The new disk is a new overlay, so the new guest does not get the old filesystem.
 
 In both cases, it deletes the seed ISO and releases each lease of the NAT MAC.
 
-A rebuilt guest keeps its MAC, which comes from its name.  But it is a new DHCP
-client, so dnsmasq gives it a new address and keeps the old lease.  Without the
-release, each rebuild holds one more address in the NAT range.  Also, the wait
-in C<provision_guest> finds the old lease and stops before the new guest asks.
+A rebuilt guest keeps its MAC, which comes from its name.  The network-config
+of L<Provisioner::Recipe::ubuntu> sends that MAC as the DHCP client identifier,
+so dnsmasq takes the rebuilt guest for the same client, and gives it back the
+lease that it had.  A guest that sends a DUID instead is a new client after each
+rebuild, because the DUID comes from the machine-id, which the rebuild makes
+new.  Every guest built before that network-config sends one, and so does a
+distribution whose network-config does not set the identifier.  dnsmasq gives
+such a guest a new address and keeps the old lease.  Without the release, each
+rebuild of it holds one more address in the NAT range.  Also, the wait in
+C<provision_guest> finds the old lease and stops before the new guest asks.
 
 =cut
 
