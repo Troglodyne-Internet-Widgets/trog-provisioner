@@ -40,7 +40,7 @@ require_ok($script) or BAIL_OUT("$script does not load");
 
 my $dir    = tempdir( CLEANUP => 1 );
 my $hvconf = "$dir/hypervisors.conf";
-File::Slurper::Temp::write_text( $hvconf, "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv.test.test/system\n" );
+File::Slurper::Temp::write_text( $hvconf, "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv.test.test/system\nbridge_device = br0\nvirbr_device = virbr0\n" );
 
 my $keyfile = "$dir/operator.pub";
 
@@ -48,20 +48,33 @@ my $keyfile = "$dir/operator.pub";
 # short key is refused for matching half of a file.
 File::Slurper::Temp::write_text( $keyfile, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusBogusBogusBogusBogusBogusBogusBogus operator\@test.test\n" );
 
-my @create = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --quota 500G}, qw{--partition /machine/runner --cores 4 --io-weight 50}, '--authorize', $keyfile );
-my @remove = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --partition /machine/runner --remove} );
+my @create = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --quota 500G}, qw{--cores 4 --io-weight 50}, '--authorize', $keyfile );
+my @remove = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-name runner_disks --pool-path /bogus/vm-disks/runner --remove} );
+
+# Where the steps put the limits of the user slice, the bridges and the hook.
+my $DROPIN   = '/etc/systemd/system/user-1001.slice.d/50-trog-runner.conf';
+my $HELPER   = '/usr/lib/qemu/qemu-bridge-helper';
+my $ACL      = '/etc/qemu/trog-runner-runner.conf';
+my $BRIDGES  = '/etc/qemu/bridge.conf';
+my $APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
+my $LINGER   = '/var/lib/systemd/linger/runner';
 
 # What the fake hypervisor has.  Each test starts from a fresh one.
 sub fresh_state {
     return {
-        sudo     => 'Sudo version 1.9.15p5',
-        fstype   => { '/bogus/vm-disks'              => 'zfs' },
-        datasets => { 'tank/vm-disks'                => { mountpoint => '/bogus/vm-disks' } },
-        files    => { '/usr/libexec/virtiofs-better' => q{}, '/usr/lib/libvirt/libvirt_leaseshelper' => q{} },
-        users    => {},
-        pools    => {},
-        dirs     => {},
-        root     => [],
+        sudo          => 'Sudo version 1.9.15p5',
+        fstype        => { '/bogus/vm-disks' => 'zfs' },
+        datasets      => { 'tank/vm-disks'   => { mountpoint => '/bogus/vm-disks' } },
+        files         => { $HELPER           => q{}, '/usr/lib/libvirt/libvirt_leaseshelper' => q{} },
+        users         => {},
+        pools         => {},
+        dirs          => {},
+        owners        => {},
+        caps          => {},
+        session_pools => {},
+        kvm           => 1,
+        apt           => 1,
+        root          => [],
     };
 }
 
@@ -75,31 +88,69 @@ sub dataset_holding ( $state, $path ) {
 # What the fake answers to each command it is asked, by the first words of the
 # command.  Each answer gets the state and the first quoted argument.
 my @ANSWERS = (
-    [ 'sudo -V'                        => sub ( $s, $arg ) { $s->{sudo} } ],
-    [ 'command -v qemu-img'            => sub ( $s, $arg ) { '/usr/bin/qemu-img' } ],
-    [ 'mktemp'                         => sub ( $s, $arg ) { '/tmp/staged' } ],
-    [ 'stat -f'                        => sub ( $s, $arg ) { $s->{fstype}{$arg} } ],
-    [ 'zfs list -H -o name'            => sub ( $s, $arg ) { index( $arg, q{/} ) == 0 ? dataset_holding( $s, $arg ) : exists $s->{datasets}{$arg} ? $arg : undef } ],
-    [ 'zfs get -H -o value mountpoint' => sub ( $s, $arg ) { $s->{datasets}{$arg}{mountpoint} } ],
-    [ 'zfs get -H -o value quota'      => sub ( $s, $arg ) { $s->{datasets}{$arg}{quota} } ],
-    [ 'getent passwd'                  => sub ( $s, $arg ) { $s->{users}{$arg}      ? "/home/$arg"                                       : undef } ],
-    [ 'id -nG'                         => sub ( $s, $arg ) { $s->{users}{$arg}      ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
-    [ 'id -u'                          => sub ( $s, $arg ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
-    [ 'id -g'                          => sub ( $s, $arg ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
-    [ 'sudo -n cat'                    => sub ( $s, $arg ) { $s->{unreadable}{$arg} ? undef                                              : $s->{files}{$arg} } ],
-    [ 'sudo -n find'                   => sub ( $s, $arg ) { $s->{dirs}{$arg} } ],
+    [ 'sudo -V'                        => sub ( $s, $arg, @ ) { $s->{sudo} } ],
+    [ 'command -v qemu-img'            => sub ( $s, $arg, @ ) { '/usr/bin/qemu-img' } ],
+    [ 'mktemp'                         => sub ( $s, $arg, @ ) { '/tmp/staged' } ],
+    [ 'stat -f'                        => sub ( $s, $arg, @ ) { $s->{fstype}{$arg} } ],
+    [ 'zfs list -H -o name'            => sub ( $s, $arg, @ ) { index( $arg, q{/} ) == 0 ? dataset_holding( $s, $arg ) : exists $s->{datasets}{$arg} ? $arg : undef } ],
+    [ 'zfs get -H -o value mountpoint' => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{mountpoint} } ],
+    [ 'zfs get -H -o value quota'      => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{quota} } ],
+    [ 'getent passwd'                  => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? "/home/$arg"                                       : undef } ],
+    [ 'id -nG'                         => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
+    [ 'id -u'                          => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
+    [ 'id -g'                          => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
+    [ 'sudo -n cat'                    => sub ( $s, $arg, @ ) { $s->{unreadable}{$arg} ? undef                                              : $s->{files}{$arg} } ],
+    [
+        'sudo -n find' => sub ( $s, $arg, $cmd ) {
+            my $images = index( $cmd, q{! -name 'baseimage-*'} ) < 0;
+            ( grep { $images || !m{/baseimage-[^/]*\z} } @{ $s->{dirs}{$arg} // [] } )[0];
+        }
+    ],
+    [ 'stat -c %U:%a' => sub ( $s, $arg, @ ) { my $o = $s->{owners}{$arg} // return undef; join q{:}, $o->{user} // 'root', $o->{mode} // 755 } ],
+    [ 'getcap'        => sub ( $s, $arg, @ ) { $s->{caps}{$arg} ? "$arg cap_net_admin=ep" : undef } ],
+    [
+        'sudo -n systemd-run' => sub ( $s, $arg, $cmd ) {
+            my $pool = $s->{session_pools}{$arg} // return undef;
+            return "<pool type='dir'><target><path>$pool->{path}</path></target></pool>" if $cmd =~ m/[ ]pool-dumpxml[ ]/;
+            return sprintf "Name:           %s\nState:          %s\nAutostart:      %s\n", $arg, $pool->{running} ? 'running' : 'inactive', $pool->{autostart} ? 'yes' : 'no';
+        }
+    ],
+    [ 'systemctl is-active' => sub ( $s, $arg, $cmd ) { my ($unit) = $cmd =~ m/(\S+)\z/; $s->{users}{runner} && !$s->{stopped}{$unit} ? 'active' : 'inactive' } ],
+    [
+        'ls -1' => sub ( $s, $arg, @ ) {
+            join "\n", map { m{\A\Q$arg\E/([^/]+)\z} ? $1 : () } sort keys %{ $s->{files} };
+        }
+    ],
 );
 
 # What each root command does to the state, by its first words.  Each gets the
 # state and the arguments, and returns the exit status.
 my @ROOT = (
-    [ 'useradd'     => sub ( $s, @a ) { $s->{users}{ $a[-1] } = { groups => [] };           0 } ],
-    [ 'usermod'     => sub ( $s, @a ) { push @{ $s->{users}{ $a[-1] }{groups} }, 'libvirt'; 0 } ],
-    [ 'chown'       => sub ( $s, @a ) { 0 } ],
-    [ 'zfs create'  => sub ( $s, @a ) { $s->{datasets}{ $a[-1] } = { mountpoint => '/bogus/vm-disks/runner', quota => substr( $a[-2], length 'quota=' ) }; 0 } ],
-    [ 'zfs set'     => sub ( $s, @a ) { $s->{datasets}{ $a[-1] }{quota} = substr( $a[-2], length 'quota=' ); 0 } ],
+    [ 'useradd'                 => sub ( $s, @a ) { $s->{users}{ $a[-1] } = { groups => [] };        0 } ],
+    [ 'usermod'                 => sub ( $s, @a ) { push @{ $s->{users}{ $a[-1] }{groups} }, $a[-2]; 0 } ],
+    [ 'chown'                   => sub ( $s, @a ) { $s->{owners}{ $a[-1] }{user} = $a[-2] =~ s/:\z//r; 0 } ],
+    [ 'chmod'                   => sub ( $s, @a ) { $s->{owners}{ $a[-1] }{mode} = $a[-2] =~ s/\A0//r; 0 } ],
+    [ 'loginctl enable-linger'  => sub ( $s, @a ) { $s->{files}{$LINGER}         = q{}; 0 } ],
+    [ 'loginctl disable-linger' => sub ( $s, @a ) { delete $s->{files}{$LINGER}; 0 } ],
+    [ 'systemctl stop'          => sub ( $s, @a ) { $s->{stopped}{ $a[-1] } = 1; 0 } ],
+    [
+        'systemd-run' => sub ( $s, @a ) {
+            my ($verb) = grep { m/\Apool-/ } @a;
+            return 1                                                           if $verb eq 'pool-build';
+            return ( $s->{session_pools}{ $a[-4] } = { path => $a[-1] } ) && 0 if $verb eq 'pool-define-as';
+            my $pool = $s->{session_pools}{ $a[-1] } // return 1;
+            return 1               if $verb eq 'pool-start' && $pool->{running}++;
+            $pool->{autostart} = 1 if $verb eq 'pool-autostart';
+            return 0;
+        }
+    ],
+    [ 'setcap -r'   => sub ( $s, @a ) { delete $s->{caps}{ $a[-1] }; 0 } ],
+    [ 'setcap'      => sub ( $s, @a ) { $s->{caps}{ $a[-1] }            = 1;                                                                                      0 } ],
+    [ 'zfs create'  => sub ( $s, @a ) { $s->{datasets}{ $a[-1] }        = { mountpoint => '/bogus/vm-disks/runner', quota => substr( $a[-2], length 'quota=' ) }; 0 } ],
+    [ 'zfs set'     => sub ( $s, @a ) { $s->{datasets}{ $a[-1] }{quota} = substr( $a[-2], length 'quota=' );                                                      0 } ],
     [ 'zfs destroy' => sub ( $s, @a ) { delete $s->{datasets}{ $a[-1] }; 0 } ],
     [ 'visudo'      => sub ( $s, @a ) { $s->{visudo_refuses} ? 1 : 0 } ],
+    [ 'rmdir'       => sub ( $s, @a ) { $s->{rmdir}{ $a[-1] } = 1; 0 } ],
     [ 'install -d'  => sub ( $s, @a ) { 0 } ],
     [ 'install'     => sub ( $s, @a ) { $s->{files}{ $a[-1] } = $s->{files}{ $a[-2] }; 0 } ],
     [ 'rm -f'       => sub ( $s, @a ) { delete $s->{files}{ $a[-1] };                  0 } ],
@@ -123,7 +174,7 @@ sub with_hypervisor ( $state, $code ) {
         capture_cmd => sub ( $hv, $cmd ) {
             $cmd =~ s/\s+2>\/dev\/null\z//;
             my ($arg) = $cmd =~ m/'([^']*)'/;
-            return entry_for( \@ANSWERS, $cmd )->( $state, $arg // q{} ) // q{};
+            return entry_for( \@ANSWERS, $cmd )->( $state, $arg // q{}, $cmd ) // q{};
         }
     );
     $mock->redefine(
@@ -134,6 +185,8 @@ sub with_hypervisor ( $state, $code ) {
     );
     $mock->redefine(
         run_cmd => sub ( $hv, @argv ) {
+            return $state->{kvm} ? 0 : 1 if "@argv" eq 'test -c /dev/kvm';
+            return $state->{apt} ? 0 : 1 if "@argv" eq 'test -d /etc/apt/apt.conf.d';
             my $file = $state->{files}{ $argv[-1] };
             return defined $file           ? 1 : 0 if "@argv[0..4]" eq 'sudo -n test ! -e';
             return ( $file // q{} ) ne q{} ? 0 : 1 if "@argv[0..3]" eq 'sudo -n test -s';
@@ -190,7 +243,7 @@ sub reads_as_a_slice ($text) {
     my $analyze = File::Which::which('systemd-analyze');
   SKIP: {
         skip 'no systemd-analyze here to read the slice', 1 unless $analyze;
-        my $unit = "$dir/machine-runner.slice";
+        my $unit = "$dir/user-1001.slice";
         File::Slurper::Temp::write_text( $unit, "$text\n" );
         IPC::Run3::run3( [ $analyze, 'verify', $unit ], \undef, \my $out, \my $err );
         is( $? >> 8, 0, 'systemd-analyze verify takes the slice' ) or diag $out, $err;
@@ -217,24 +270,25 @@ subtest 'the plan refuses what a step would read as syntax' => sub {
     like( exception { $plan->( pool_path => '/bogus/../etc' ) }, qr/absolute[ ]path/,                  'a pool path that climbs out' );
     like( exception { $plan->( pool_path => 'relative/dir' ) },  qr/absolute[ ]path/,                  'a relative pool path' );
     like( exception { $plan->( quota     => 'lots' ) },          qr/not[ ]a[ ]size/,                   'a quota zfs cannot read' );
-    like( exception { $plan->( partition => '/runner' ) },       qr{has[ ]to[ ]be[ ]/machine/NAME},    'a partition outside /machine' );
-    like( exception { $plan->( cores     => 4 ) },               qr/need[ ]a[ ]partition/,             'a slice limit with no slice' );
-    like( exception { $plan->( partition => '/machine/r', cores => 0 ) },    qr/1[ ]or[ ]more/,       'no CPU at all' );
-    like( exception { $plan->( partition => '/machine/r', cores => '4c' ) }, qr/number[ ]of[ ]cores/, 'cores that are not a number' );
-    like( exception { $plan->( partition => '/machine/r', cores => 0.5 ) },  qr/whole[ ]number/,      'a part of a core' );
-    is( $plan->( partition => '/machine/r', cores => 1 )->{cores}, 1, 'and one core is the least' );
-    like( exception { $plan->( partition => '/machine/r', io_weight => 0 ) }, qr/from[ ]1[ ]to[ ]10000/, 'an IOWeight systemd refuses' );
-    like( exception { $plan->( pool_name => undef ) },                        qr/needs[ ]a[ ]pool_name/, 'and an account with no pool' );
-
-    is( $plan->( partition => '/machine/runner' )->{slice}, 'machine-runner.slice', 'the partition names the slice that libvirt puts the guests in' );
+    like( exception { $plan->( cores     => 0 ) },               qr/1[ ]or[ ]more/,                    'no CPU at all' );
+    like( exception { $plan->( cores     => '4c' ) },            qr/number[ ]of[ ]cores/,              'cores that are not a number' );
+    like( exception { $plan->( cores     => 0.5 ) },             qr/whole[ ]number/,                   'a part of a core' );
+    is( $plan->( cores => 1 )->{cores}, 1, 'and one core is the least' );
+    like( exception { $plan->( io_weight => 0 ) },     qr/from[ ]1[ ]to[ ]10000/, 'an IOWeight systemd refuses' );
+    like( exception { $plan->( pool_name => undef ) }, qr/needs[ ]a[ ]pool_name/, 'and an account with no pool' );
 };
 
-subtest 'cores is what the slice gets' => sub {
+subtest 'cores is what the user slice gets' => sub {
     my $state = fresh_state();
     run_tool( $state, ( grep { $_ ne '--cores' && $_ ne '4' } @create ), '--cores', 32 );
-    my $slice = $state->{files}{'/etc/systemd/system/machine-runner.slice'} // q{};
-    like( $slice, qr/^CPUQuota=3200%$/m, '32 cores of the host' );
-    reads_as_a_slice($slice);
+    my $dropin = $state->{files}{$DROPIN} // q{};
+    like( $dropin, qr/^CPUQuota=3200%$/m, '32 cores of the host, in the slice of the uid of the account' );
+    reads_as_a_slice($dropin);
+
+    $state = fresh_state();
+    my %limit = map { $_ => 1 } qw{--cores 4 --io-weight 50};
+    run_tool( $state, grep { !$limit{$_} } @create );
+    ok( !exists $state->{files}{$DROPIN}, 'and no drop-in without a limit to put in it' );
 };
 
 subtest 'a dry run asks, says, and changes nothing' => sub {
@@ -245,7 +299,7 @@ subtest 'a dry run asks, says, and changes nothing' => sub {
     is_deeply( $state->{root}, [], 'and runs nothing as root' );
     like( $said, qr/would[ ]make[ ]the[ ]user[ ]runner/,                        'it says it would make the user' );
     like( $said, qr{would[ ]make[ ]the[ ]ZFS[ ]dataset[ ]tank/vm-disks/runner}, 'and the dataset, a child of the one on the parent directory' );
-    like( $said, qr/Nothing[ ]changed:[ ]8[ ]step/,                             'and counts every step' );
+    like( $said, qr/Nothing[ ]changed:[ ]14[ ]step/,                            'and counts every step' );
 };
 
 subtest 'a run makes the account, and a second run finds nothing to do' => sub {
@@ -253,16 +307,25 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
 
     my ( $rc, $said ) = run_tool( $state, @create );
     is( $rc, 0, 'it exits 0' );
-    is_deeply(
-        $state->{users}{runner}{groups},
-        ['libvirt'], 'the user exists, in the libvirt group',
-    );
+    is_deeply( $state->{users}{runner}{groups}, ['kvm'], 'the user exists, in the kvm group, and not in the libvirt group' );
     like( $state->{files}{'/home/runner/.ssh/authorized_keys'}, qr/operator\@test[.]test/, 'the key of --authorize can log in as it' );
     is( $state->{datasets}{'tank/vm-disks/runner'}{quota}, '500G', 'the dataset has the quota' );
-    is_deeply( [ @{ $state->{pools}{runner_disks} }{qw{path owner group}} ], [ '/bogus/vm-disks/runner', 1001, 1001 ], 'the pool is on it, owned by the user' );
-    my $slice = $state->{files}{'/etc/systemd/system/machine-runner.slice'};
-    like( $slice, qr/CPUQuota=400%\nIOWeight=50/, 'the slice has the caps' );
-    reads_as_a_slice($slice);
+    is_deeply( $state->{owners}{'/bogus/vm-disks/runner'}, { user => 'runner', mode => 700 },                                                      'and belongs to the user alone' );
+    is_deeply( $state->{pools},                            {},                                                                                     'and no pool of the system daemon' );
+    is_deeply( $state->{session_pools},                    { runner_disks => { path => '/bogus/vm-disks/runner', running => 1, autostart => 1 } }, 'but a pool in the session of the user, running and started with it, which placement asks for its free space' );
+    my ($defined) = grep { m/pool-define-as/ } @{ $state->{root} };
+    like( $defined, qr{\Asystemd-run[ ]},                         'defined through systemd-run' );
+    like( $defined, qr{[ ]--machine=runner\@[.]host[ ]--user[ ]}, 'as the user, in its own systemd manager' );
+    ok( exists $state->{files}{$LINGER}, 'the user lingers, so its guests outlive the login that started them' );
+
+    my $dropin = $state->{files}{$DROPIN};
+    like( $dropin, qr/CPUQuota=400%\nIOWeight=50/, 'the user slice has the caps' );
+    reads_as_a_slice($dropin);
+
+    is( $state->{files}{$ACL}, "allow virbr0\nallow br0", 'the user may join the NAT bridge and the outbound bridge' );
+    like( $state->{files}{$BRIDGES}, qr{^include[ ]\Q$ACL\E$}m, 'which bridge.conf includes' );
+    ok( $state->{caps}{$HELPER}, 'the bridge helper has the capability to add a tap device to a bridge' );
+    like( $state->{files}{$APT_HOOK}, qr{setcap[ ]cap_net_admin\+ep[ ]\Q$HELPER\E}, 'and an apt hook gives it back after an upgrade' );
 
     my $grant = $state->{files}{'/etc/sudoers.d/90-trog-runner-runner'};
     like( $grant, qr/^runner[ ]ALL=\(root\)[ ]NOPASSWD:/m, 'the grant for the user is installed' );
@@ -275,8 +338,9 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     $state->{root} = [];
     ( $rc, $said ) = run_tool( $state, @create );
     is_deeply( $state->{root}, [], 'the second run runs nothing as root' );
-    like( $said, qr/Done:[ ]0[ ]step/,                                           'and says so' );
-    like( $said, qr{libvirt_uri:[ ]qemu\+ssh://runner\@hv[.]test[.]test/system}, 'it prints the hypervisors entry, with the account in the URI' );
+    like( $said, qr/Done:[ ]0[ ]step/,                                            'and says so' );
+    like( $said, qr{libvirt_uri:[ ]qemu\+ssh://runner\@hv[.]test[.]test/session}, 'it prints the hypervisors entry, with the account and its session in the URI' );
+    unlike( $said, qr/partition/, 'and no partition, which a session cannot have' );
     my ($account) = $said =~ m/^([ ]+account:\n(?:[ ]+\w+:[^\n]*\n)+)/m;
     is( $account // q{}, qq{            account:\n                quota: 500G\n                cores: 4\n                io_weight: 50\n}, 'and the account block that makes bin/provision keep it so' );
 
@@ -293,9 +357,17 @@ subtest 'it refuses a hypervisor that cannot hold the account' => sub {
     like( exception { run_tool( $state, @create ) }, qr/older[ ]than[ ]1[.]9[.]10/, 'a sudo that cannot read the patterns of the grant' );
     $state->{sudo} = 'Sudo version 1.9.15p5';
 
-    delete $state->{files}{'/usr/libexec/virtiofs-better'};
-    like( exception { run_tool( $state, @create ) }, qr/will[ ]not[ ]be[ ]able[ ]to[ ]install[ ]it/, 'a hypervisor without virtiofs-better, which the account cannot install' );
-    $state->{files}{'/usr/libexec/virtiofs-better'} = q{};
+    $state->{kvm} = 0;
+    like( exception { run_tool( $state, @create ) }, qr{no[ ]/dev/kvm}, 'a host without KVM' );
+    $state->{kvm} = 1;
+
+    delete $state->{files}{$HELPER};
+    like( exception { run_tool( $state, @create ) }, qr/no[ ]qemu-bridge-helper/, 'a host without the bridge helper, which puts a guest of a session on a bridge' );
+    $state->{files}{$HELPER} = q{};
+
+    $state->{apt} = 0;
+    like( exception { run_tool( $state, @create ) }, qr/after[ ]a[ ]package[ ]upgrade/, 'a host with no apt to hook, where an upgrade drops the capability' );
+    $state->{apt} = 1;
 
     $state->{fstype}{'/bogus/vm-disks'} = 'xfs';
     my $error = exception { run_tool( $state, @create ) };
@@ -307,9 +379,21 @@ subtest 'it refuses a hypervisor that cannot hold the account' => sub {
     like( exception { run_tool( $state, @create ) }, qr/would[ ]not[ ]mount[ ]at/, 'a parent directory that is not where a dataset is mounted' );
     $state->{datasets}{'tank/vm-disks'}{mountpoint} = '/bogus/vm-disks';
 
-    $state->{pools}{runner_disks} = { path => '/bogus/elsewhere' };
-    like( exception { run_tool( $state, @create ) }, qr/already[ ]has[ ]a[ ]pool[ ]runner_disks[ ]at/, 'a pool name libvirt already has somewhere else' );
-    is( $state->{pools}{runner_disks}{path}, '/bogus/elsewhere', 'and leaves that pool alone' );
+    is_deeply( $state->{root}, [], 'and each refusal comes before anything changes' );
+
+    $state->{session_pools}{runner_disks} = { path => '/bogus/elsewhere' };
+    like( exception { run_tool( $state, @create ) }, qr/already[ ]has[ ]a[ ]pool[ ]runner_disks[ ]at/, 'and a pool name that the session already has somewhere else' );
+    is( $state->{session_pools}{runner_disks}{path}, '/bogus/elsewhere', 'which it leaves alone' );
+};
+
+subtest 'a pool that the session marked running by itself is finished, not built again' => sub {
+    my $state = fresh_state();
+    $state->{session_pools}{runner_disks} = { path => '/bogus/vm-disks/runner', running => 1 };
+
+    my ($rc) = run_tool( $state, @create );
+    is( $rc, 0, 'it exits 0' );
+    ok( $state->{session_pools}{runner_disks}{autostart}, 'with the autostart that a run which stopped before it never set' );
+    is_deeply( [ grep { m/pool-(?:define-as|build|start)/ } @{ $state->{root} } ], [], 'and without a define, a build or a start, which a running pool refuses' );
 };
 
 subtest 'a grant visudo refuses is not installed' => sub {
@@ -325,34 +409,41 @@ subtest 'remove takes it all away, and not the disks of guests' => sub {
     my $state = fresh_state();
     run_tool( $state, @create );
 
-    push @{ $state->{pools}{runner_disks}{volumes} }, 'vm.test.test.qcow2';
+    $state->{dirs}{'/bogus/vm-disks/runner'} = [ '/bogus/vm-disks/runner/baseimage-noble.img-f4d6c0a4a56d', '/bogus/vm-disks/runner/left-behind.qcow2' ];
     $state->{root} = [];
-    like( exception { run_tool( $state, @remove ) }, qr/still[ ]holds[ ]vm[.]test[.]test[.]qcow2/, 'a pool with a volume in it stops the removal' );
+    like( exception { run_tool( $state, @remove ) }, qr/still[ ]holds[ ]\/bogus\/vm-disks\/runner\/left-behind/, 'a disk in the directory of the pool stops the removal' );
     is_deeply( $state->{root}, [], 'before it changes anything, so the account stays whole, with its grant and its slice' );
-
-    $state->{pools}{runner_disks}{volumes} = [];
-    $state->{dirs}{'/bogus/vm-disks/runner'} = '/bogus/vm-disks/runner/left-behind.qcow2';
-    like( exception { run_tool( $state, @remove ) }, qr/still[ ]holds[ ]\/bogus\/vm-disks\/runner\/left-behind/, 'so does a file in the directory that the pool does not list' );
     ok( exists $state->{datasets}{'tank/vm-disks/runner'}, 'and the dataset is still there' );
 
-    # The pool undefined by hand leaves the disks in the dataset.
-    my $pool = delete $state->{pools}{runner_disks};
-    like( exception { run_tool( $state, @remove ) }, qr/still[ ]holds/, 'with no pool to ask, the files in the directory still stop the removal' );
-    ok( exists $state->{datasets}{'tank/vm-disks/runner'}, 'and the dataset is still there' );
-    $state->{pools}{runner_disks} = $pool;
-
-    delete $state->{dirs}{'/bogus/vm-disks/runner'};
+    $state->{dirs}{'/bogus/vm-disks/runner'} = ['/bogus/vm-disks/runner/baseimage-noble.img-f4d6c0a4a56d'];
     my ($rc) = run_tool( $state, @remove );
-    is( $rc, 0, 'an empty one goes' );
-    ok( !exists $state->{files}{'/etc/sudoers.d/90-trog-runner-runner'},     'with the grant' );
-    ok( !exists $state->{files}{'/etc/systemd/system/machine-runner.slice'}, 'the slice' );
-    ok( !exists $state->{pools}{runner_disks},                               'the pool' );
-    ok( !exists $state->{datasets}{'tank/vm-disks/runner'},                  'the dataset' );
-    ok( !exists $state->{users}{runner},                                     'and the user' );
+    is( $rc, 0, 'one that holds only a base image goes, because that is a download and not the disk of a guest' );
+    ok( !exists $state->{files}{'/etc/sudoers.d/90-trog-runner-runner'}, 'with the grant' );
+    ok( !exists $state->{files}{$DROPIN},                                'the limits of the slice' );
+    ok( $state->{rmdir}{'/etc/systemd/system/user-1001.slice.d'},        'and their directory, when nothing else is in it' );
+    ok( !exists $state->{files}{$ACL},                                   'the bridges' );
+    unlike( $state->{files}{$BRIDGES}, qr/trog-runner-runner/, 'and their line in bridge.conf' );
+    ok( !$state->{caps}{$HELPER},                           'the capability of the bridge helper, which no other account needs' );
+    ok( !exists $state->{files}{$APT_HOOK},                 'and its hook' );
+    ok( !exists $state->{files}{$LINGER},                   'the lingering' );
+    ok( $state->{stopped}{'user-1001.slice'},               'every process of the account, by its slice, before userdel, which refuses a user with a process' );
+    ok( !exists $state->{datasets}{'tank/vm-disks/runner'}, 'the dataset' );
+    ok( !exists $state->{users}{runner},                    'and the user, with the session of libvirt in its home' );
 
     $state->{root} = [];
     run_tool( $state, @remove );
     is_deeply( $state->{root}, [], 'and a second removal has nothing to do' );
+};
+
+subtest 'the bridge helper keeps its capability while another account needs it' => sub {
+    my $state = fresh_state();
+    run_tool( $state, @create );
+    $state->{files}{'/etc/qemu/trog-runner-other.conf'} = 'allow virbr0';
+
+    run_tool( $state, @remove );
+    ok( !exists $state->{files}{$ACL},     'the bridges of this account go' );
+    ok( $state->{caps}{$HELPER},           'and the capability stays for the other one' );
+    ok( exists $state->{files}{$APT_HOOK}, 'with its hook' );
 };
 
 subtest 'the key of a runner replaces its old line, and comes out again' => sub {

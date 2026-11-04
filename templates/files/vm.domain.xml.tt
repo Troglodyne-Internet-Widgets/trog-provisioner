@@ -131,9 +131,19 @@
          devices sit behind PCIe root ports that libvirt allocates, and the
          name comes from the path.  So the address is left out there, and the
          rename above is what settles the name. -->
+[% IF session -%]
+[%# A session cannot use a network of the system daemon.  So the guest joins
+        the bridge of that network, through qemu-bridge-helper, and the dnsmasq
+        of the network still gives it its lease.  See is_session in
+        Trog::HV::Libvirt. -%]
+    <interface type='bridge'>
+      <mac address='[% nat_mac %]'/>
+      <source bridge='[% virbr_device %]'/>
+[% ELSE -%]
     <interface type='network'>
       <mac address='[% nat_mac %]'/>
       <source network='default'/>
+[% END -%]
       <model type='virtio'/>
 [% IF !pcie -%]
       <address type='pci' domain='0x0000' bus='0x00' slot='[% nat_slot %]' function='0x0'/>

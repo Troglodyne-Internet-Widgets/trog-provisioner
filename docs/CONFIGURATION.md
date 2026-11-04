@@ -539,15 +539,33 @@ runner's `recipes.yaml`, into `data.tar.gz` and into every backup of the domain.
 as `secret:GROUP/TITLE/FIELD` -- a reference, like a hand-written `recipes.yaml`
 holds, which the runner resolves against its own store.
 
-**`hypervisor_access` defaults to `none`.** `least` is a sudo grant for the
-libvirt lease helper plus libvirt group membership, which is all a provision
-needs; `full` is `NOPASSWD:ALL`, which is only wanted for a first-ever
-`virtiofs-better` install.  The key itself is made either way and kept in the
-secret store, so a rebuild reuses it rather than accumulating a new one;
-`bin/provision` is what writes the public half into each hypervisor's
-`authorized_keys`, and `bin/destroy` is what takes it out again.  What the
-runner still cannot be held to is a quota -- see the hypervisor section of the
-[README](../README.md), and `perldoc Provisioner::Recipe::trogrunner`.
+**`hypervisor_access` defaults to `none`.** With `least` or `full`,
+`bin/provision` writes the public half of the key of the runner into the
+`authorized_keys` of the user of each `libvirt_uri`, and `bin/destroy` takes it
+out again. The key itself is made either way and kept in the secret store, so a
+rebuild reuses it. `full` is `NOPASSWD:ALL` for that user, and is only wanted
+for a first install of `virtiofs-better`.
+
+Give a hypervisor an `account` block to make that user an account of its own,
+which builds in a libvirt session instead of on the system daemon:
+
+```yaml
+            hv1:
+                libvirt_uri: qemu+ssh://runner@hv1.example.test/session
+                pool_path:   /srv/vm-disks/runner
+                pool_name:   runner_disks
+                account:
+                    quota: 500G
+                    cores: 4
+```
+
+`bin/provision` makes the account, and `bin/destroy` takes it away. The guests
+of a session run as the account, so they can open only what it can open, and
+the kernel holds them to the quota of the pool and the CPU of the user slice.
+On the system URI the user would need the `libvirt` group, and a member of that
+group can define a domain that reads any file of the host. A guest of a session
+has no virtiofs share (#537), and does not start with the host (#536). See
+ACCOUNTS in `perldoc Provisioner::Recipe::trogrunner`.
 
 ## `_base`
 

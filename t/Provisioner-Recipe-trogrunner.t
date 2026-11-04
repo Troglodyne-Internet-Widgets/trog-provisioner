@@ -83,6 +83,11 @@ my %HYPERVISORS = (
     },
 );
 
+# The entry of hv1 for an account, which builds in a session of its own, and so
+# has no partition.
+my %SESSION = ( %{ $HYPERVISORS{hv1} }, libvirt_uri => 'qemu+ssh://runner@hv1.test.test:2222/session' );
+delete $SESSION{partition};
+
 subtest 'what the runner configures its own guests with' => sub {
     my ($dir) = built(
         config  => { transfer_user => 'fetcher' },
@@ -545,7 +550,7 @@ subtest 'a dry run has no store, and says what it would let in' => sub {
 
 subtest 'a runner with an account has it made, and its key put in as root' => sub {
     my $dir     = tempdir( CLEANUP => 1 );
-    my %blocks  = ( hv1 => { %{ $HYPERVISORS{hv1} }, account => { quota => '500G', cores => 32 } } );
+    my %blocks  = ( hv1 => { %SESSION, account => { quota => '500G', cores => 32 } } );
     my @steps   = Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least', restrict_key_to_ip => 0, hypervisors => \%blocks );
     my %context = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 0, secrets => runner_secrets() );
 
@@ -557,8 +562,8 @@ subtest 'a runner with an account has it made, and its key put in as root' => su
     my ( $plan, $account, $key ) = @{ $admin->{asked} };
     is_deeply(
         $plan->[1],
-        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', partition => '/machine/runner', quota => '500G', cores => 32 },
-        'the plan is the user of the URI, the pool and the slice of the entry, and the limits of the account'
+        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', quota => '500G', cores => 32 },
+        'the plan is the user of the URI, the pool of the entry, and the limits of the account'
     );
     is( $account->[0], 'account', 'and the account is made from it' );
     is( $key->[1],     'runner',  'and the key goes to that user' );
@@ -579,19 +584,22 @@ subtest 'access taken away leaves only what to take back' => sub {
 };
 
 subtest 'an account that cannot be made is refused when the configuration is written' => sub {
-    my %entry = %{ $HYPERVISORS{hv1} };
+    my %entry = %SESSION;
     my $with  = sub (%changed) { return ( hypervisor_access => 'least', hypervisors => { hv1 => { %entry, account => { quota => '1T' }, %changed } } ) };
 
     like( exception { built( $with->(), hypervisor_access => 'none' ) }, qr/hypervisor_access[ ]is[ ]none/, 'an account with no access to make it' );
-    like( exception { built( $with->( pool_name   => q{} ) ) },                               qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
-    like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/system' ) ) }, qr/names[ ]no[ ]user/,                   'an account for nobody' );
-    like( exception { built( $with->( account     => {} ) ) },                                qr/not[ ]valid/,                         'and an account with no quota' );
-    like( exception { built( $with->( account     => { quota => '1T', cores => 0 } ) ) },     qr/not[ ]valid/,                         'an account with no CPU at all' );
-    like( exception { built( $with->( account     => { quota => '1T', cores => 0.5 } ) ) },   qr/not[ ]valid/,                         'an account with a part of a core' );
+    like( exception { built( $with->( pool_name   => q{} ) ) },                                      qr/needs[ ]pool_name[ ]and[ ]pool_path/, 'an account with no pool to hold its quota' );
+    like( exception { built( $with->( libvirt_uri => 'qemu+ssh://hv1.test.test/session' ) ) },       qr/names[ ]no[ ]user/,                   'an account for nobody' );
+    like( exception { built( $with->( libvirt_uri => 'qemu+ssh://runner@hv1.test.test/system' ) ) }, qr{does[ ]not[ ]end[ ]in[ ]/session},    'an account on the system URI, whose libvirt group is root in all but name' );
+    like( exception { built( $with->( partition   => '/machine/runner' ) ) },                        qr/user[ ]slice[ ]of[ ]its[ ]account/,   'a partition for the guests of a session' );
+    like( exception { built( $with->( account     => {} ) ) },                                       qr/not[ ]valid/,                         'and an account with no quota' );
+    like( exception { built( $with->( account     => { quota => '1T', cores => 0 } ) ) },            qr/not[ ]valid/,                         'an account with no CPU at all' );
+    like( exception { built( $with->( account     => { quota => '1T', cores => 0.5 } ) ) },          qr/not[ ]valid/,                         'an account with a part of a core' );
 
-    my %unpartitioned = %entry;
+    my %unpartitioned = %{ $HYPERVISORS{hv1} };
     delete $unpartitioned{partition};
     like( exception { built( hypervisors => { hv1 => { %unpartitioned, max_memory => 4096 } } ) }, qr/partition/, 'a memory budget with no partition to be the budget of' );
+    is( exception { built( $with->( max_memory => 4096 ) ) }, undef, 'and a memory budget of the guests of a session, which are a share of their own' );
 
     my @warned;
     local $SIG{__WARN__} = sub { push @warned, @_ };

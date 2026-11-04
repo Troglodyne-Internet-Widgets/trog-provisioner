@@ -154,10 +154,16 @@ sub build {
         path      => $path,
     }, $class;
 
+    # A session daemon puts every domain in the user slice of its account, and
+    # refuses a partition.  Refused here, not when the first domain is defined.
+    die "The hypervisor at $uri is a session of libvirt, whose guests run in the user slice of its account, so it cannot have a partition.\n"
+      if $self->is_session && defined $given{partition};
+
     # reserve_memory already caps the memory of the whole host.  A budget with
     # no partition would be a second name for that, and the two could disagree.
+    # The guests of a session are a share of their own, as a partition is.
     die "max_memory is a budget for the guests of a partition, and the hypervisor at $uri names no partition.\n" . "To cap the memory of every guest on it, raise reserve_memory instead.\n"
-      if $given{max_memory} && !defined $given{partition};
+      if $given{max_memory} && !defined $given{partition} && !$self->is_session;
 
     # Fail now, not three minutes into a provision.
     die "The hypervisor at $uri is remote, but its transport gives us no shell.\n" . "Use an ssh transport instead, e.g. qemu+ssh://root\@" . ( $self->{host} // 'hypervisor' ) . "/system, so we can reach its filesystem.\n"
@@ -184,8 +190,37 @@ True when the hypervisor is the machine that runs this code.
 
 =cut
 
-sub explicit ($self) { return $self->{explicit} }
-sub uri      ($self) { return $self->setting('uri') }
+=head2 is_session
+
+True when the URI names the session daemon of its user, C<qemu:///session> or
+C<qemu+ssh://user@host/session>, and not the system daemon.
+
+A session daemon runs as its user, and so does each qemu that it starts.  So a
+domain there can open only the files that the user can open, and the user needs
+no group that the system daemon trusts.  That is what makes a runner account
+narrow.  See L</RUNNER ACCOUNTS>.  It changes four things here:
+
+=over 4
+
+=item * The NAT interface of a guest is a C<bridge> interface on
+L</virbr_device>, through C<qemu-bridge-helper>, because a session cannot use
+a network of the system daemon.
+
+=item * The leases of the NAT network come from a read-only connection to the
+system daemon.  See L</network_vmm>.
+
+=item * qemu-img runs as the user, because the user owns the disks.
+
+=item * L</capacity> counts the guests of the session as a share of their own,
+in the user slice of the account.
+
+=back
+
+=cut
+
+sub explicit   ($self) { return $self->{explicit} }
+sub uri        ($self) { return $self->setting('uri') }
+sub is_session ($self) { return ( $self->{path} // q{} ) eq '/session' }
 
 sub is_local {
     my ($self) = @_;
@@ -280,6 +315,24 @@ sub max_memory ($self) { return $self->setting('max_memory') // 0 }
 
 sub partition_slice ($partition) { return ( $partition =~ s{\A/}{}r =~ tr{/}{-}r ) . '.slice' }
 
+=head2 $unit = $hv->session_slice()
+
+The user slice of the account of a session URI, F<user-UID.slice>, where systemd
+puts every process of that user, and so the qemu of each guest of the session.
+Dies when the hypervisor does not say the uid of the user.  It asks once, and
+remembers the answer.
+
+=cut
+
+sub session_slice ($self) {
+    return $self->{session_slice} //= do {
+        my $uid = $self->capture_cmd('id -u') // q{};
+        chomp $uid;
+        die 'Could not ask ' . $self->describe . " for the uid of its user\n" unless $uid =~ m/\A\d+\z/;
+        "user-$uid.slice";
+    };
+}
+
 # The units that systemd writes a time span in, in seconds.
 my %SPAN_UNIT = ( us => 1e-6, ms => 1e-3, s => 1, min => 60 );
 
@@ -353,6 +406,29 @@ sub vmm {
     $self->{vmm} = eval { Sys::Virt->new( uri => $uri, readonly => 0 ) }
       or die "Could not connect to libvirt at " . $self->uri . ": $@\n";
     return $self->{vmm};
+}
+
+=head2 network_vmm
+
+The connection that has the C<default> network and its leases, and the domains
+of the system daemon.  That is L</vmm>, except on a session URI.  There it is a
+read-only connection to the system daemon of the same host, as the same user,
+because the NAT network belongs to the system daemon.  A read-only connection
+needs no group: libvirt lets any user open one, and refuses every change on it.
+The first call opens it, and later calls return the same one.
+
+=cut
+
+sub network_vmm {
+    my ($self) = @_;
+    return $self->vmm unless $self->is_session;
+    return $self->{network_vmm} if $self->{network_vmm};
+
+    $self->require_client;
+    my $uri = $self->uri =~ s{/session\z}{/system}r;
+    $self->{network_vmm} = eval { Sys::Virt->new( uri => $uri, readonly => 1 ) }
+      or die "Could not open a read-only connection to libvirt at $uri: $@\n";
+    return $self->{network_vmm};
 }
 
 # A domain lookup dies when there is no such domain, which is not an error for
@@ -670,7 +746,7 @@ to find the old leases of a rebuilt guest, to release them.
 sub lease_ips {
     my ( $self, $network, %opts ) = @_;
 
-    my $vmm = $self->vmm;
+    my $vmm = $self->network_vmm;
     my $net = eval { $vmm->get_network_by_name($network) } or return ();
 
     # get_dhcp_leases filters by MAC on the hypervisor.
@@ -1721,6 +1797,24 @@ sub backup_volumes {
     return @names;
 }
 
+=head2 $hv->disk_owner_runs(@argv), $hv->disk_owner_says($cmd)
+
+Run a command as the user that owns the disks of the pool, and return its exit
+code, or what it printed.  That is root on the system URI, because libvirt gives
+a disk to C<libvirt-qemu> when the guest starts.  On a session URI it is the
+user of the URI, because its qemu runs as that user, and the disks stay its own.
+C<$cmd> is a string for a shell, as C<capture_cmd> takes.
+
+=cut
+
+sub disk_owner_runs ( $self, @argv ) {
+    return $self->is_session ? $self->run_cmd(@argv) : $self->run_sudo(@argv);
+}
+
+sub disk_owner_says ( $self, $cmd ) {
+    return $self->capture_cmd( $self->is_session ? $cmd : "sudo $cmd" );
+}
+
 =head2 $hv->disk_layout($volume)
 
 The layout of an existing qcow2 volume, as a hashref with C<cluster_size> in
@@ -1732,13 +1826,12 @@ qemu-img does not answer.
 sub disk_layout {
     my ( $self, $name ) = @_;
 
-    # sudo, -U, and no 2>/dev/null.  The disk is 0600 libvirt-qemu:kvm, so
-    # qemu-img needs root to open it.  The guest can be running, and its qemu
-    # holds a write lock, so qemu-img also needs -U.  Either failure returns
-    # undef, which disk_reusable reads as a disk that cannot be kept.  So the
-    # errors stay visible.
+    # As the owner of the disk, -U, and no 2>/dev/null.  The guest can be
+    # running, and its qemu holds a write lock, so qemu-img also needs -U.
+    # Either failure returns undef, which disk_reusable reads as a disk that
+    # cannot be kept.  So the errors stay visible.
     my $path = $self->volume_path($name) or return undef;
-    my $json = $self->capture_cmd("sudo qemu-img info -U --output=json '$path'") // q{};
+    my $json = $self->disk_owner_says("qemu-img info -U --output=json '$path'") // q{};
     my $info = eval { Cpanel::JSON::XS::decode_json($json) } or return undef;
 
     my $format = $info->{'format-specific'}{data} // {};
@@ -1764,9 +1857,7 @@ sub snapshot_disk {
 
     my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to snapshot\n";
 
-    # As root, because libvirt makes the disk 0600 libvirt-qemu:kvm.  Without
-    # sudo, qemu-img fails with "Permission denied" and no snapshot.
-    return $self->run_sudo( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
+    return $self->disk_owner_runs( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
 =head2 $hv->revert_disk($volume, $name)
@@ -1792,9 +1883,9 @@ sub revert_disk {
 
     my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to revert\n";
 
-    # As root, for the reason that snapshot_disk gives.  A revert that fails
-    # without a word leaves the new guest on the filesystem of the old one.
-    return $self->run_sudo( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
+    # A revert that fails without a word leaves the new guest on the
+    # filesystem of the old one.
+    return $self->disk_owner_runs( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
 =head2 $hv->disk_snapshot_names($volume)
@@ -1807,11 +1898,11 @@ lists them.  An empty list when there is no such volume or no snapshot.
 sub disk_snapshot_names {
     my ( $self, $name ) = @_;
 
-    # sudo and -U, for the reasons that disk_layout gives.  rollback_possible
-    # asks this about a running guest.  If qemu-img cannot open the disk, the
-    # answer is "no snapshots", and no rollback happens.
+    # -U, for the reason that disk_layout gives.  rollback_possible asks this
+    # about a running guest.  If qemu-img cannot open the disk, the answer is
+    # "no snapshots", and no rollback happens.
     my $path = $self->volume_path($name) or return ();
-    my $said = $self->capture_cmd("sudo qemu-img snapshot -l -U '$path'") // q{};
+    my $said = $self->disk_owner_says("qemu-img snapshot -l -U '$path'") // q{};
 
     # After the header, each line starts with a numeric id, and the tag is the
     # second field.
@@ -1921,6 +2012,13 @@ host has no room.  So a runner with a partition of its own cannot fill the
 hypervisor for the guests outside it.  The disk stays as it is, because it is
 already that of the pool.
 
+On a session URI, the guests of the session are the share, as the guests of a
+partition are.  Their slice is the user slice of the account,
+F<user-UID.slice>, and C<partition> names that slice.  The host is the guests
+of the session and the guests of the system daemon, which L</network_vmm>
+lists.  The guests in the session of another user are not in it, because no
+connection of this user can see them.
+
 Memory stays that of the host, unless the block gives the partition a
 L</max_memory>.  Then the memory keys are those of the partition, and C<host>
 has the memory keys of the whole hypervisor as well:
@@ -1942,13 +2040,20 @@ sub capacity {
     my ($self) = @_;
     return $self->{capacity} if $self->{capacity};
 
-    my $node    = $self->vmm->get_node_info();
-    my @domains = $self->vmm->list_all_domains();
+    my $node = $self->vmm->get_node_info();
+
+    # Each domain, and whether it is in the share.  Every domain of a session
+    # is, and no domain of the system daemon beside it is.
+    my $session = $self->is_session;
+    my @domains = map { [ $_, $session ] } $self->vmm->list_all_domains();
+    push @domains, map { [ $_, 0 ] } $self->network_vmm->list_all_domains() if $session;
 
     my $partition = $self->partition;
+    my $slice     = $session ? $self->session_slice : defined $partition ? partition_slice($partition) : undef;
 
     my ( $memory_committed, $cpus_committed, $ours, $our_cpus, $our_memory ) = ( 0, 0, 0, 0, 0 );
-    foreach my $domain (@domains) {
+    foreach my $entry (@domains) {
+        my ( $domain, $in_session ) = @$entry;
         my $info = eval { $domain->get_info() } or next;
 
         my $vcpus = eval { $domain->is_active() } ? $info->{nrVirtCpu} // 0 : 0;
@@ -1958,10 +2063,13 @@ sub capacity {
         my $memory = ( $info->{maxMem} // 0 ) / $Provisioner::Vars::KB;
         $memory_committed += $memory;
 
-        next unless defined $partition;
-        my $xml = eval { $domain->get_xml_description() } // q{};
-        my ($in) = $xml =~ m{<partition>\s*([^<\s]+)\s*</partition>};
-        next unless ( $in // '/machine' ) eq $partition;
+        next unless defined $slice;
+        if ( !$in_session ) {
+            next if $session;
+            my $xml = eval { $domain->get_xml_description() } // q{};
+            my ($in) = $xml =~ m{<partition>\s*([^<\s]+)\s*</partition>};
+            next unless ( $in // '/machine' ) eq $partition;
+        }
         $ours++;
         $our_cpus   += $vcpus;
         $our_memory += $memory;
@@ -1985,7 +2093,7 @@ sub capacity {
     );
 
     my %cpus = %host;
-    if ( defined $partition ) {
+    if ( defined $slice ) {
         if ( $self->max_memory ) {
             my $budget = $self->max_memory < $memory_mb ? $self->max_memory : $memory_mb;
             %host   = ( %host, %memory );
@@ -1996,7 +2104,7 @@ sub capacity {
             );
         }
 
-        my $quota = $self->slice_cpu_quota( partition_slice($partition) );
+        my $quota = $self->slice_cpu_quota($slice);
         my $share = defined $quota && $quota < $cpus ? $quota : $cpus;
         my $total = int( $share * $self->cpu_overcommit );
         %cpus = (
@@ -2005,7 +2113,7 @@ sub capacity {
             cpus_committed   => $our_cpus,
             cpus_free        => $total - $our_cpus,
             guests           => $ours,
-            partition        => $partition,
+            partition        => $partition // $slice,
             host             => \%host,
         );
     }
@@ -2043,6 +2151,9 @@ F</usr/libexec/virtiofs-better> if it is not there.  That program runs in the
 qemu process, so it must be on the hypervisor.  Returns 1.  Dies if either step
 fails.
 
+On a session URI it does not install the program, because a guest there has no
+virtiofs share: see L<Provisioner::Recipe::vm/enrich>.
+
 =cut
 
 sub prepare_host {
@@ -2051,7 +2162,7 @@ sub prepare_host {
     $self->mkpath( $self->pool_path )
       or die "Could not create storage pool dir " . $self->pool_path . " on the hypervisor";
 
-    return 1 if $self->file_exists('/usr/libexec/virtiofs-better');
+    return 1 if $self->is_session || $self->file_exists('/usr/libexec/virtiofs-better');
 
     $self->put_file( $virtiofs, '/usr/libexec/virtiofs-better', sudo => 1 )
       or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
@@ -2242,11 +2353,12 @@ FIX
 Passes when the ssh user has passwordless sudo, for everything or only for the
 lease helper.  Fails, with the commands that give the grant, when it has neither.
 
-A grant for the lease helper alone is enough to build a guest.  The other root
-steps are the first install of F<virtiofs-better> and the C<qemu-img> calls for
-the C<trog-pristine> snapshot and its revert.  Without those, a guest builds,
-but a rebuild cannot keep its disk.  C<runner_sudoers> writes the narrow grant
-with all of them but the install.
+A grant for the lease helper alone is enough to build a guest.  On the system
+URI, the other root steps are the first install of F<virtiofs-better> and the
+C<qemu-img> calls for the C<trog-pristine> snapshot and its revert.  Without
+those, a guest builds, but a rebuild cannot keep its disk.  On a session URI,
+the account runs those as itself, so the grant of C<runner_sudoers> is all
+that it needs.
 
 C<sudo -n true> fails for the narrow grant, so this also asks C<sudo -n -l>
 about the lease helper.  It asks with the arguments that
@@ -2273,8 +2385,9 @@ sub check_passwordless_sudo {
     # A narrow grant is correct for an account that builds guests unattended.
     my $helper = $self->lease_helper // $LEASE_HELPERS[0];
     return $self->verdict( 1, "Passwordless sudo for $helper, which is what a provision needs", <<"FIX" )
-A rebuild that keeps the disk of a guest works only if the grant also names
-qemu-img on the volumes of the pool.  bin/runner_account writes that grant.
+On the system URI, a rebuild that keeps the disk of a guest also needs root for
+qemu-img on the volumes of the pool.  An account of bin/runner_account builds
+on its session URI, and needs only this.
 FIX
       if $self->run_cmd( qw{sudo -n -l}, $helper, qw{del ip}, $PROBE_LEASE ) == 0;
 
@@ -2399,7 +2512,8 @@ sub check_libvirt {
     return $self->verdict( 0, 'libvirt did not answer', <<"FIX" );
 $@
 The URI is @{[ $self->uri ]}.  Check libvirtd is running there and that the user
-is in the libvirt group.
+is in the libvirt group, or, for a session URI, in the kvm group and lingering:
+see runner_account_steps in Trog::HV::Libvirt.
 FIX
 }
 
@@ -2939,7 +3053,25 @@ is the account of the block in F<hypervisors.conf>, not the account that they
 make.  F<bin/provision> runs them for a trogrunner block that asks for an
 C<account>, and F<bin/runner_account> runs them by hand.
 
+The account builds its guests in its own session of libvirt, on
+C<qemu+ssh://USER@HOST/session>, and not on the system URI.  See
+L</is_session>.  On the system URI an account needs the C<libvirt> group, and
+that group can define a domain whose disk is any file or device of the host.
+The system daemon opens it as root, so the account can read any file of the
+host.  The polkit access driver of libvirt does not close that, because it
+checks the names of objects and not the XML of a domain.  A session daemon
+runs as the account, so its domains can open only what the account can open.
+
 =cut
+
+# The place of qemu-bridge-helper, by distribution, and the file of the
+# account that tells it which bridges the account may use.
+my @BRIDGE_HELPERS  = qw{/usr/lib/qemu/qemu-bridge-helper /usr/libexec/qemu-bridge-helper};
+my $BRIDGE_CONF     = '/etc/qemu/bridge.conf';
+my $BRIDGE_APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
+my sub bridge_acl ($user) { return "/etc/qemu/trog-runner-$user.conf" }
+my sub sudoers_of ($user) { return "/etc/sudoers.d/90-trog-runner-$user" }
+my sub linger_of  ($user) { return "/var/lib/systemd/linger/$user" }
 
 # A string for a shell on the hypervisor, quoted.
 my sub q1 ($value) { return q{'} . ( $value =~ s/'/'\\''/gr ) . q{'} }
@@ -2963,44 +3095,41 @@ my sub home_of ( $hv, $user ) { return said( $hv, 'getent passwd ' . q1($user) .
 # What root reads in $file, or an empty string.
 my sub root_reads ( $hv, $file ) { return said( $hv, 'sudo -n cat ' . q1($file) ) }
 
+# The uid of $user, or an empty string when there is no such user.
+my sub uid_of ( $hv, $user ) { return said( $hv, 'id -u ' . q1($user) ) }
+
+# The drop-in that limits the user slice of the account with $uid.
+my sub slice_dropin ($uid) { return "/etc/systemd/system/user-$uid.slice.d/50-trog-runner.conf" }
+
+# True when root finds no $file on the hypervisor.
+my sub absent ( $hv, $file ) { return $hv->run_cmd( qw{sudo -n test ! -e}, $file ) == 0 }
+
+# The first qemu-bridge-helper that the hypervisor has, or undef.
+my sub bridge_helper ($hv) {
+    return List::Util::first { $hv->file_exists($_) } @BRIDGE_HELPERS;
+}
+
 =head2 $text = Trog::HV::Libvirt->runner_sudoers(%args)
 
 The sudoers file for an account that builds guests on this hypervisor, and
-cannot do anything else as root.  C<%args> takes C<user>, C<pool_path>,
-C<lease_helper> and C<qemu_img>, the last two as full paths.  Dies if a value
-holds a character that sudoers or the patterns below would read as syntax.
+cannot do anything else as root.  C<%args> takes C<user> and C<lease_helper>,
+the second as a full path.  Dies if a value holds a character that sudoers or
+the pattern below would read as syntax.
 
-These are all of the commands that this tool runs as root on a hypervisor
-while it builds, rebuilds or destroys a guest:
+It grants one command, C<VIR_BRIDGE_NAME=$bridge $lease_helper del ip
+$address>, from C<release_dhcp_lease>.  The file keeps C<VIR_BRIDGE_NAME> for
+that command only.  Without that line, sudo refuses the variable, and so the
+command.  The grant does not use C<SETENV>, because C<SETENV> lets the caller
+set C<LD_PRELOAD> too.  The arguments are a regular expression, which sudo
+1.9.10 and later accept.  Issue #539 of trog-provisioner removes the release,
+and with it this file.
 
-=over 4
-
-=item * C<VIR_BRIDGE_NAME=$bridge $lease_helper del ip $address>, from
-C<release_dhcp_lease>.  The file keeps C<VIR_BRIDGE_NAME> for that command
-only.  Without that line, sudo refuses the variable, and so the command.  The
-grant does not use C<SETENV>, because C<SETENV> lets the caller set
-C<LD_PRELOAD> too.
-
-=item * C<qemu-img info -U --output=json $volume>, C<qemu-img snapshot -c>,
-C<-a> and C<-l -U>, from C<disk_layout> and the snapshot methods, which a
-rebuild that keeps the disk of a guest uses.  They need root because libvirt
-gives a disk to C<libvirt-qemu> when the guest starts.
-
-=back
-
-Each argument list is a regular expression, which sudo 1.9.10 and later
-accept.  A volume must be a plain file name directly in C<pool_path>, and so
-cannot name the disk of a guest in another pool.  With a shell glob instead, a
-C<*> also matches C<../>, and the account could revert the disk of any guest.
-
-Three other commands run as root on a hypervisor, and this grant leaves them
-out on purpose.  The account cannot run them.
+The other commands that a build runs as root on the system URI need no root in
+a session.  qemu-img opens the disks of the account as the account, and a
+session has no F</usr/libexec/virtiofs-better> to install.  Two commands that
+need root are left out on purpose, and the account cannot run them:
 
 =over 4
-
-=item * The first install of F</usr/libexec/virtiofs-better>, in
-C<prepare_host>.  It runs once on each hypervisor, and every later provision
-finds the file there.  Install it from an account with the wide grant first.
 
 =item * The address sweep of L<Provisioner::IPPool/ensure_seeded>, which runs
 C<sudo sh -c>.  That is root for any command, and cannot be narrowed.  Without
@@ -3012,38 +3141,26 @@ read the disk of any guest, which is the reason to run them.
 
 =back
 
-The account also needs the C<libvirt> group for the API.  On the system URI,
-that group can define a domain that mounts any file of the host, so it is
-root in all but name.  Only the polkit access driver of libvirt narrows it,
-and this file cannot.  See QUOTAS in L<Provisioner::Recipe::trogrunner>.
-
 =cut
 
 sub runner_sudoers {
     my ( $class, %args ) = @_;
 
-    # sudoers reads , : = \ ! and space as syntax, and a pattern reads the
-    # rest of the punctuation.  None of them has a reason to be in these.
-    foreach my $key (qw{user pool_path lease_helper qemu_img}) {
+    # sudoers reads , : = \ ! and space as syntax.  None of them has a reason
+    # to be in these.
+    foreach my $key (qw{user lease_helper}) {
         my $value = $args{$key} // die "runner_sudoers needs $key\n";
         my $ok    = $key eq 'user' ? qr/\A[[:lower:]_][[:lower:]\d_-]*\z/ : qr{\A(?:/[\w.-]+)+\z};
         die "runner_sudoers: '$value' is not a $key that a sudoers file can hold as written\n" unless $value =~ $ok;
     }
-    my ( $user, $lease, $qemu ) = @args{qw{user lease_helper qemu_img}};
-
-    # Escaped for the pattern.  The check above leaves only the dot to escape.
-    ( my $pool = $args{pool_path} ) =~ s/[.]/\\./g;
-    my $file = '[A-Za-z0-9_.-]+';
+    my ( $user, $lease ) = @args{qw{user lease_helper}};
 
     return <<"SUDOERS";
 # What trog-provisioner runs as root on this hypervisor for $user, and nothing
 # else.  Written by runner_account_steps.  runner_sudoers in Trog::HV::Libvirt
-# says why each line is here, and which commands are left out.
+# says why the line is here, and which commands are left out.
 Defaults!$lease env_keep += "VIR_BRIDGE_NAME"
-$user ALL=(root) NOPASSWD: $lease ^del ip [0-9.]+\$, \\
-    $qemu ^info -U --output=json $pool/$file\$, \\
-    $qemu ^snapshot -[ca] $file $pool/$file\$, \\
-    $qemu ^snapshot -l -U $pool/$file\$
+$user ALL=(root) NOPASSWD: $lease ^del ip [0-9.]+\$
 SUDOERS
 }
 
@@ -3051,16 +3168,15 @@ SUDOERS
 
 Checks what an account is to be, and returns what the methods below need.
 C<%args> takes C<user>, C<pool_name> and C<pool_path>, which are required, and
-C<quota>, C<partition>, C<cores> and C<io_weight>.  The plan has those,
-and C<slice>, the unit name of the partition, or undef.
+C<quota>, C<cores> and C<io_weight>.  The plan has those.
 
-C<cores> is the CPU time that the guests of the partition get together, in
-whole cores of the host, such as 16.  The slice gets it as C<CPUQuota>, 100%
-for each core.
+C<cores> is the CPU time that the guests of the account get together, in
+whole cores of the host, such as 16.  The user slice of the account gets it as
+C<CPUQuota>, 100% for each core.
 
 C<quota> is required to make an account, and not to take one away, so this
 does not require it.  Dies on a value that a step would write into a file or a
-command as syntax, and on C<cores> or C<io_weight> without a C<partition>.
+command as syntax.
 
 =cut
 
@@ -3079,24 +3195,12 @@ sub runner_account_plan {
       if $args{pool_path} !~ m{\A(?:/[\w.-]+)+\z} || $args{pool_path} =~ m{/[.]{1,2}(?:/|\z)};
     die "quota '$args{quota}' is not a size zfs reads, such as 500G\n" if defined $args{quota} && $args{quota} !~ m/\A\d+[KMGTP]?\z/;
 
-    my $slice;
-    if ( defined $args{partition} ) {
-        die "partition '$args{partition}' has to be /machine/NAME: libvirt makes NAME a slice under machine.slice\n"
-          unless $args{partition} =~ m{\A/machine/[[:lower:]\d_]+\z};
-        $slice = partition_slice( $args{partition} );
-    }
-    die "cores and io_weight are limits of the slice, and need a partition\n"
-      if !$slice && ( defined $args{cores} || defined $args{io_weight} );
-
     die "cores '$args{cores}' has to be a whole number of cores, 1 or more, such as 16\n"
       if defined $args{cores} && ( $args{cores} !~ m/\A\d+\z/ || $args{cores} < 1 );
     die "io_weight '$args{io_weight}' has to be from 1 to 10000\n"
       if defined $args{io_weight} && ( $args{io_weight} !~ m/\A\d+\z/ || $args{io_weight} < 1 || $args{io_weight} > 10_000 );
 
-    return {
-        ( map { $_ => $args{$_} } qw{user pool_name pool_path quota partition cores io_weight} ),
-        slice => $slice,
-    };
+    return { map { $_ => $args{$_} } qw{user pool_name pool_path quota cores io_weight} };
 }
 
 =head2 @actions = $hv->runner_account_steps(\%plan)
@@ -3105,38 +3209,55 @@ The actions that make the account of C<\%plan>, in order:
 
 =over 4
 
-=item 1. A system user with no password, a shell and a home, in the C<libvirt>
-group.  The group is what the libvirt API on the system URI asks for.
+=item 1. A system user with no password, a shell and a home, in the C<kvm>
+group, which opens F</dev/kvm>.  Not in the C<libvirt> group: see
+L</RUNNER ACCOUNTS>.
 
 =item 2. A ZFS dataset at C<pool_path>, with C<quota> set to the C<quota> of the
 plan.  Its parent is the dataset mounted on the parent directory of
-C<pool_path>.
+C<pool_path>.  The user owns it, with mode 0700.
 
-=item 3. A libvirt storage pool C<pool_name> on that directory, owned by the
-user and started with the host.  The pool owns the permissions of the
-directory, so a later build of the pool keeps them.
+=item 3. Lingering for the user, so that systemd keeps the user slice and the
+guests of the session after the login that started them ends.
 
-=item 4. With C<partition>, the systemd slice for it, with C<CPUQuota> and
-C<IOWeight> from C<cores> and C<io_weight>.  There is no limit for memory,
-because C<MemoryMax> on a slice kills a guest rather than refusing the next
-one.  C<max_memory> is the budget that refuses it instead.  See QUOTAS in
+=item 4. The storage pool C<pool_name> at C<pool_path>, in the session of the
+user, started with the session.  It runs as the user, in its systemd manager,
+because the connection of this object cannot reach the session of another
+user.  The pool must be there before the first build, because placement asks
+it for its free space.
+
+=item 5. With C<cores> or C<io_weight>, a drop-in for the user slice,
+F<user-UID.slice>, with C<CPUQuota> and C<IOWeight>.  There is no limit for
+memory, because C<MemoryMax> on a slice kills a guest rather than refusing the
+next one.  C<max_memory> is the budget that refuses it instead.  See QUOTAS in
 L<Provisioner::Recipe::trogrunner>.
 
-=item 5. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
-C<runner_sudoers> writes.  C<visudo -c> checks it before it is installed.
+=item 6. The bridges that qemu-bridge-helper lets the user join: the NAT
+bridge, L</virbr_device>, and the outbound bridge, L</bridge_device>.  They go
+in F</etc/qemu/trog-runner-USER.conf>, and F</etc/qemu/bridge.conf> includes
+that file.
+
+=item 7. The C<cap_net_admin> capability on qemu-bridge-helper, and an apt
+hook that sets it again after each package upgrade.  Ubuntu installs the helper
+without setuid, and without the capability it cannot add the tap device of a
+guest to a bridge.
+
+=item 8. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
+C<runner_sudoers> writes.  C<visudo -c> makes sure that it is valid before it
+is installed.
 
 =back
 
-Before the first, it checks what every step needs from the hypervisor, and dies
-with the reason if one is missing: a quota in the plan, sudo 1.9.10 or later for
-the patterns of the grant, the lease helper, qemu-img,
-F</usr/libexec/virtiofs-better>, and ZFS under the parent of the pool.  On a
-filesystem other than ZFS, the message says how to put a quota there, which is
-the advice of C<note_pool_quota>.
+The capability lets every user who can run the helper join a bridge that
+F<bridge.conf> allows.  That is what the helper is for, and the bridges are
+the two that every guest already joins.
 
-The account cannot install F</usr/libexec/virtiofs-better>, so the file must be
-on the hypervisor first.  A provision from the account of the block in
-F<hypervisors.conf> installs it.
+Before the first, it makes sure that the hypervisor has what every step needs,
+and dies with the reason if one is missing: a quota in the plan, sudo 1.9.10
+or later for the pattern of the grant, the lease helper, F</dev/kvm>,
+qemu-bridge-helper, apt for the hook, both bridges, and ZFS under the parent
+of the pool.  On a filesystem other than ZFS, the message says how to put a
+quota there, which is the advice of C<note_pool_quota>.
 
 =cut
 
@@ -3149,10 +3270,13 @@ sub runner_account_steps {
     my ($version) = said( $hv, 'sudo -V' ) =~ m/version\s+(\d+)[.](\d+)[.](\d+)/ ? ( sprintf '%d.%03d%03d', $1, $2, $3 ) : (0);
     die "sudo on " . $hv->describe . " is older than 1.9.10, which is the first that takes the patterns the grant needs\n" if $version < 1.009010;
 
-    my $lease = $hv->lease_helper                  or die 'There is no libvirt lease helper on ' . $hv->describe . "\n";
-    my $qemu  = said( $hv, 'command -v qemu-img' ) or die 'There is no qemu-img on ' . $hv->describe . "\n";
-    $hv->file_exists('/usr/libexec/virtiofs-better')
-      or die "/usr/libexec/virtiofs-better is not on " . $hv->describe . ", and the account will not be able to install it.\n" . "Provision one guest there from the account that hypervisors.conf has, which installs it, and run this again.\n";
+    my $lease = $hv->lease_helper or die 'There is no libvirt lease helper on ' . $hv->describe . "\n";
+    $hv->run_cmd(qw{test -c /dev/kvm}) == 0
+      or die 'There is no /dev/kvm on ' . $hv->describe . ", so the guests of a session would run without KVM.\n";
+    my $helper = bridge_helper($hv) or die 'There is no qemu-bridge-helper on ' . $hv->describe . ", which a session needs to put a guest on a bridge.\n";
+    $hv->run_cmd(qw{test -d /etc/apt/apt.conf.d}) == 0
+      or die 'There is no apt on ' . $hv->describe . ", so nothing would set the capability of $helper again after a package upgrade.\n";
+    my @bridges = ( $hv->virbr_device, $hv->bridge_device );
 
     my $parent = File::Basename::dirname($path);
     my $fstype = $hv->path_fstype($parent);
@@ -3165,39 +3289,53 @@ sub runner_account_steps {
       unless $parent_set && $mounted_at eq $parent;
     my $dataset = "$parent_set/" . File::Basename::basename($path);
 
-    # The unit file of the slice, and the action that installs it.
+    # The drop-in of the user slice, and the action that installs it.  The uid
+    # is asked when the step runs, because the first step makes the user.
     my @slice;
-    if ( $plan->{slice} ) {
-        my $unit = "/etc/systemd/system/$plan->{slice}";
-        my $text = join "\n", "[Unit]", "Description=Guests that the trog-provisioner runner $user builds", "Before=slices.target", q{}, "[Slice]",
+    if ( defined $plan->{cores} || defined $plan->{io_weight} ) {
+        my $text = join "\n", "# The guests of the trog-provisioner runner $user.  See runner_account_steps", '# in Trog::HV::Libvirt.', '[Slice]',
           ( defined $plan->{cores}     ? sprintf( 'CPUQuota=%d%%', $plan->{cores} * 100 ) : () ),
           ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}"                    : () );
         @slice = {
-            what => "write $unit" . ( $plan->{cores} || $plan->{io_weight} ? q{} : ' with no limits in it' ),
-            done => sub { root_reads( $hv, $unit ) eq $text },
+            what => "limit the user slice of $user",
+            done => sub { my $uid = uid_of( $hv, $user ); $uid ne q{} && root_reads( $hv, slice_dropin($uid) ) eq $text },
             do   => sub {
-                $hv->write_text( $unit, "$text\n", sudo => 1, mode => '0644' ) or die "Could not write $unit\n";
+                my $file = slice_dropin( uid_of( $hv, $user ) );
+                as_root( $hv, qw{install -d -m 0755}, File::Basename::dirname($file) );
+                $hv->write_text( $file, "$text\n", sudo => 1, mode => '0644' ) or die "Could not write $file\n";
                 as_root( $hv, qw{systemctl daemon-reload} );
             },
         };
     }
 
-    my $sudoers = "/etc/sudoers.d/90-trog-runner-$user";
-    my $grant   = Trog::HV::Libvirt->runner_sudoers( user => $user, pool_path => $path, lease_helper => $lease, qemu_img => $qemu );
-    my $id_of   = sub ($flag) { said( $hv, "id $flag " . q1($user) ) };
+    my $acl      = bridge_acl($user);
+    my $acl_text = join q{}, map { "allow $_\n" } @bridges;
+    my $include  = "include $acl";
+    my $hook     = join "\n", '// Written by trog-provisioner for the runner accounts on this hypervisor.  A new',
+      '// qemu package puts back a qemu-bridge-helper without the capability that lets', '// an account put the guests of its session on a bridge.  See runner_account_steps',
+      '// in Trog::HV::Libvirt.',                                                        qq{DPkg::Post-Invoke { "if [ -e $helper ]; then setcap cap_net_admin+ep $helper; fi"; };};
+
+    my $sudoers = sudoers_of($user);
+    my $grant   = Trog::HV::Libvirt->runner_sudoers( user => $user, lease_helper => $lease );
+
+    # virsh as $user, in its own systemd manager.  So the session daemon that
+    # it starts belongs to the account, and stops when the account stops
+    # lingering, and not with the login of the operator.
+    my @virsh        = ( qw{systemd-run --quiet --wait --pipe}, "--machine=$user\@.host", qw{--user virsh -q -c qemu:///session} );
+    my $session_says = sub ( $verb, $pool ) { said( $hv, join q{ }, 'sudo -n', @virsh, $verb, q1($pool) ) };
 
     my @steps = (
         {
             what => "make the user $user, with no password",
-            done => sub { $id_of->('-u') ne q{} },
+            done => sub { uid_of( $hv, $user ) ne q{} },
             do   => sub { as_root( $hv, qw{useradd --system --create-home --shell /bin/bash}, $user ) },
         },
         {
-            what => "put $user in the libvirt group",
+            what => "put $user in the kvm group",
             done => sub {
-                grep { $_ eq 'libvirt' } split q{ }, $id_of->('-nG');
+                List::Util::any { $_ eq 'kvm' } split q{ }, said( $hv, 'id -nG ' . q1($user) );
             },
-            do => sub { as_root( $hv, qw{usermod -aG libvirt}, $user ) },
+            do => sub { as_root( $hv, qw{usermod -aG kvm}, $user ) },
         },
         {
             what => "make the ZFS dataset $dataset at $path",
@@ -3210,20 +3348,65 @@ sub runner_account_steps {
             do   => sub { as_root( $hv, qw{zfs set}, "quota=$plan->{quota}", $dataset ) },
         },
         {
-            what => "define the storage pool $name at $path, owned by $user",
+            what => "give $path to $user, with mode 0700",
+            done => sub { said( $hv, 'stat -c %U:%a ' . q1($path) ) eq "$user:700" },
+            do   => sub { as_root( $hv, 'chown', "$user:", $path ); as_root( $hv, qw{chmod 0700}, $path ) },
+        },
+        {
+            what => "let the guests of $user run while it is not logged in",
+            done => sub { !absent( $hv, linger_of($user) ) },
+            do   => sub { as_root( $hv, qw{loginctl enable-linger}, $user ) },
+        },
+        {
+            what => "define the storage pool $name at $path in the session of $user, started with the session",
             done => sub {
-                my $target = $hv->pool_target($name) // return 0;
-                die "libvirt already has a pool $name at $target, and finds a pool by its name: pick another pool_name, or remove that pool\n" if $target ne $path;
-                return 1;
+                my $xml = $session_says->( 'pool-dumpxml', $name );
+                my ($target) = $xml =~ m{<target>.*?<path>([^<]+)</path>} or return 0;
+                die "The session of $user already has a pool $name at $target, and libvirt finds a pool by its name: pick another pool_name, or remove that pool\n" if $target ne $path;
+                my $info = $session_says->( 'pool-info', $name );
+                return $info =~ m/^State:\s+running\s*$/m && $info =~ m/^Autostart:\s+yes\s*$/m;
             },
+
+            # No pool-build: the steps above made the directory and gave it to
+            # the user, and a session daemon that starts finds it there and
+            # marks the pool running, which pool-build then refuses.
             do => sub {
-                my $pool = $hv->define_pool( $name, $path, owner => $id_of->('-u'), group => $id_of->('-g'), mode => '0755' );
-                $pool->create() unless $pool->is_active();
+                as_root( $hv, @virsh, qw{pool-define-as}, $name, qw{dir --target}, $path ) if $session_says->( 'pool-dumpxml', $name ) eq q{};
+                as_root( $hv, @virsh, 'pool-start',       $name ) unless $session_says->( 'pool-info', $name ) =~ m/^State:\s+running$/m;
+                as_root( $hv, @virsh, 'pool-autostart',   $name );
             },
         },
         @slice,
         {
-            what => "grant $user sudo for what a build runs, in $sudoers",
+            what => "let $user join " . join( ' and ', @bridges ) . " in $acl",
+            done => sub { root_reads( $hv, $acl ) . "\n" eq $acl_text },
+            do   => sub {
+                as_root( $hv, qw{install -d -m 0755 /etc/qemu} );
+                $hv->write_text( $acl, $acl_text, sudo => 1, mode => '0644' ) or die "Could not write $acl\n";
+            },
+        },
+        {
+            what => "include $acl in $BRIDGE_CONF",
+            done => sub {
+                List::Util::any { $_ eq $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
+            },
+            do => sub {
+                my @lines = ( ( grep { $_ ne $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF ) ), $include );
+                $hv->write_text( $BRIDGE_CONF, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_CONF\n";
+            },
+        },
+        {
+            what => "give $helper the capability cap_net_admin",
+            done => sub { said( $hv, 'getcap ' . q1($helper) ) =~ m/cap_net_admin/ },
+            do   => sub { as_root( $hv, qw{setcap cap_net_admin+ep}, $helper ) },
+        },
+        {
+            what => "set it again after each upgrade, in $BRIDGE_APT_HOOK",
+            done => sub { root_reads( $hv, $BRIDGE_APT_HOOK ) eq $hook },
+            do   => sub { $hv->write_text( $BRIDGE_APT_HOOK, "$hook\n", sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_APT_HOOK\n" },
+        },
+        {
+            what => "grant $user sudo for the lease release, in $sudoers",
             done => sub { chomp( my $wanted = $grant ); root_reads( $hv, $sudoers ) eq $wanted },
             do   => sub {
                 my $staged = said( $hv, 'mktemp' ) or die 'Could not make a temporary file on ' . $hv->describe . "\n";
@@ -3241,62 +3424,99 @@ sub runner_account_steps {
 =head2 @actions = $hv->runner_removal_steps(\%plan)
 
 The actions that take the account of C<\%plan> away, in the other order from
-C<runner_account_steps>.  The user goes with its home, and the keys in it.  The
-dataset goes with C<zfs destroy>, without C<-r>, so a snapshot or a child
-dataset stops it.
+C<runner_account_steps>.  The user goes with its home, and the keys and the
+session configuration of libvirt in it.  The dataset goes with C<zfs destroy>,
+without C<-r>, so a snapshot or a child dataset stops it.  The capability of
+qemu-bridge-helper and its apt hook go only with the last account that
+needs them.
 
-It refuses to start, and dies, while the pool holds a volume, or while the
-directory of the pool holds a file, because each is a disk of a guest.  Destroy
-the guests of the runner first.  So a refusal leaves the whole account, and not
-an account without its sudo or its slice.
+It refuses to start, and dies, while the directory of the pool holds a file
+other than a base image of C<base_image>, because that is a disk of a guest.
+Destroy the guests of the runner first.  So a refusal leaves the whole account,
+and not an account without its sudo or its slice.
 
 =cut
 
 sub runner_removal_steps {
-    my ( $hv, $plan ) = @_;
-    my ( $user, $path, $name ) = @{$plan}{qw{user pool_path pool_name}};
+    my ( $hv,   $plan ) = @_;
+    my ( $user, $path ) = @{$plan}{qw{user pool_path}};
 
-    my $sudoers = "/etc/sudoers.d/90-trog-runner-$user";
-    my $absent  = sub ($file) { $hv->run_cmd( qw{sudo -n test ! -e}, $file ) == 0 };
     my $dataset = sub { said( $hv, 'zfs list -H -o name ' . q1($path) ) };
+    my $acl     = bridge_acl($user);
+    my $include = "include $acl";
+    my $helper  = bridge_helper($hv);
+    my $own     = File::Basename::basename($acl);
 
-    # A pool that is not running cannot list its volumes, and the disks of its
-    # guests are files in the directory.  So the directory is asked as well.
+    # True when no other runner account has a bridge ACL in /etc/qemu.
+    my $last = sub {
+        !List::Util::any { m/\Atrog-runner-.+[.]conf\z/ && $_ ne $own } $hv->list_dir('/etc/qemu');
+    };
+
+    # The session keeps no volume that the directory does not have.  A base
+    # image is a download that any guest can fetch again, and not a disk.
     my $refuse_if_full = sub {
-        if ( defined $hv->pool_target($name) ) {
-            my $pool    = $hv->vmm->get_storage_pool_by_name($name);
-            my @volumes = $pool->is_active() ? map { $_->get_name() } $pool->list_all_volumes() : ();
-            die "The pool $name still holds " . join( ', ', @volumes ) . ", so the account $user stays.  Destroy those guests first.\n" if @volumes;
-        }
-        my $first = said( $hv, 'sudo -n find ' . q1($path) . ' -mindepth 1 -print -quit' );
+        my $first = said( $hv, 'sudo -n find ' . q1($path) . q{ -mindepth 1 ! -name 'baseimage-*' -print -quit} );
         die "$path still holds $first, and maybe more, so the account $user stays.  Destroy the guests of the runner first.\n" if $first ne q{};
     };
     $refuse_if_full->();
 
     return (
         {
-            what => "remove $sudoers",
-            done => sub { $absent->($sudoers) },
-            do   => sub { as_root( $hv, qw{rm -f}, $sudoers ) },
+            what => 'remove ' . sudoers_of($user),
+            done => sub { absent( $hv, sudoers_of($user) ) },
+            do   => sub { as_root( $hv, qw{rm -f}, sudoers_of($user) ) },
+        },
+        {
+            what => "take $acl out of $BRIDGE_CONF",
+            done => sub {
+                !List::Util::any { $_ eq $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
+            },
+            do => sub {
+                my @lines = grep { $_ ne $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
+                $hv->write_text( $BRIDGE_CONF, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_CONF\n";
+            },
+        },
+        {
+            what => "remove $acl",
+            done => sub { absent( $hv, $acl ) },
+            do   => sub { as_root( $hv, qw{rm -f}, $acl ) },
+        },
+        {
+            what => "remove $BRIDGE_APT_HOOK, unless another runner account needs it",
+            done => sub { !$last->() || absent( $hv, $BRIDGE_APT_HOOK ) },
+            do   => sub { as_root( $hv, qw{rm -f}, $BRIDGE_APT_HOOK ) },
         },
         (
-            $plan->{slice}
+            $helper
             ? {
-                what => "remove /etc/systemd/system/$plan->{slice}",
-                done => sub { $absent->("/etc/systemd/system/$plan->{slice}") },
-                do   => sub { as_root( $hv, qw{rm -f}, "/etc/systemd/system/$plan->{slice}" ); as_root( $hv, qw{systemctl daemon-reload} ) },
+                what => "take cap_net_admin away from $helper, unless another runner account needs it",
+                done => sub { !$last->() || said( $hv, 'getcap ' . q1($helper) ) !~ m/cap_net_admin/ },
+                do   => sub { as_root( $hv, qw{setcap -r}, $helper ) },
               }
             : ()
         ),
         {
-            what => "remove the storage pool $name",
-            done => sub { !defined $hv->pool_target($name) },
+            what => "remove the limits of the user slice of $user",
+            done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || absent( $hv, slice_dropin($uid) ) },
             do   => sub {
-                $refuse_if_full->();
-                my $pool = $hv->vmm->get_storage_pool_by_name($name);
-                $pool->destroy() if $pool->is_active();
-                $pool->undefine();
+                my $file = slice_dropin( uid_of( $hv, $user ) );
+                as_root( $hv, qw{rm -f},                            $file );
+                as_root( $hv, qw{rmdir --ignore-fail-on-non-empty}, File::Basename::dirname($file) );
+                as_root( $hv, qw{systemctl daemon-reload} );
             },
+        },
+        {
+            what => "stop the lingering of $user",
+            done => sub { absent( $hv, linger_of($user) ) },
+            do   => sub { as_root( $hv, qw{loginctl disable-linger}, $user ) },
+        },
+        {
+            # By the slice, because a session daemon outlives the login that
+            # started it, in a scope that logind calls abandoned and does not
+            # end.  userdel refuses a user that still has a process.
+            what => "stop every process of $user",
+            done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || said( $hv, "systemctl is-active user-$uid.slice" ) ne 'active' },
+            do   => sub { as_root( $hv, qw{systemctl stop}, 'user-' . uid_of( $hv, $user ) . '.slice' ) },
         },
         {
             what => "destroy the ZFS dataset at $path",
@@ -3305,7 +3525,7 @@ sub runner_removal_steps {
         },
         {
             what => "remove the user $user and its home",
-            done => sub { said( $hv, 'id -u ' . q1($user) ) eq q{} },
+            done => sub { uid_of( $hv, $user ) eq q{} },
             do   => sub { as_root( $hv, qw{userdel --remove}, $user ) },
         },
     );

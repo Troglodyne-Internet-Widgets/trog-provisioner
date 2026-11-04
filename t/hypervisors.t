@@ -737,6 +737,53 @@ subtest 'a memory budget belongs to a partition' => sub {
     is( $opts{max_memory}, 4096, 'a block of hypervisors.conf hands it to the hypervisor' );
 };
 
+subtest 'the guests of a session are a share of their own, in the user slice of the account' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my $mb   = 4096 * $Provisioner::Vars::KB;
+
+    # The session lists its own guests, and the read-only system connection the
+    # rest.  A domain of the system daemon is not ours, whatever partition it
+    # names.
+    my @session = ( FakeDomain->new( maxMem => $mb, nrVirtCpu => 2, active => 1 ), FakeDomain->new( maxMem => $mb, nrVirtCpu => 8, active => 0 ) );
+    my @system  = ( FakeDomain->new( maxMem => $mb, nrVirtCpu => 4, active => 1 ), FakeDomain->new( maxMem => $mb, nrVirtCpu => 2, active => 1, partition => '/machine/runner' ) );
+    $mock->redefine( vmm             => sub { FakeVMM->new(@session) } );
+    $mock->redefine( network_vmm     => sub { FakeVMM->new(@system) } );
+    $mock->redefine( pool_free       => sub { 200 * $GB } );
+    $mock->redefine( capture_cmd     => sub ( $, $cmd ) { $cmd eq 'id -u'                    ? "1001\n" : die "not expecting $cmd\n" } );
+    $mock->redefine( slice_cpu_quota => sub ( $, $unit ) { return $unit eq 'user-1001.slice' ? 2        : undef } );
+
+    Trog::HV->forget();
+    my $hv = Trog::HV->candidate(
+        uri            => 'qemu+ssh://runner@hv/session', name         => 'hv1', max_memory => 10_240,
+        reserve_memory => 2048,                           reserve_cpus => 2,     max_guests => 3,
+    );
+
+    my $have = $hv->capacity;
+    is( $have->{partition},        'user-1001.slice', 'its share is the user slice of the account' );
+    is( $have->{guests},           2,                 'the domains of the session, running or not' );
+    is( $have->{cpus},             2,                 'the CPUQuota of that slice, in cores' );
+    is( $have->{cpus_committed},   2,                 'vCPUs of its running guests only' );
+    is( $have->{memory_mb},        10_240,            'a memory budget, with no partition' );
+    is( $have->{memory_committed}, 8192,              'held by the guests of the session' );
+    is_deeply(
+        $have->{host},
+        { cpus => 8, cpus_allocatable => 32, cpus_committed => 8, cpus_free => 22, guests => 4, memory_mb => 32_768, memory_committed => 16_384, memory_free => 14_336 },
+        'and the host is the session and the system daemon together'
+    );
+    is_deeply(
+        [ $hv->shortfalls( memory_mb => 1024, cpus => 7, disk_bytes => $GB ) ],
+        ['needs 7 vCPUs, 6 free in the partition user-1001.slice (2 CPUs for it x4 overcommit, 2 committed there)'],
+        'a guest too big for the slice is refused in its name'
+    );
+
+    Trog::HV->forget();
+    like(
+        exception { Trog::HV->candidate( uri => 'qemu+ssh://runner@hv/session', name => 'hv1', partition => '/machine/runner' ) },
+        qr/cannot[ ]have[ ]a[ ]partition/,
+        'and a session is refused a partition, which its daemon would refuse at the first define'
+    );
+};
+
 subtest 'the CPUQuota of a slice, from what systemctl says' => sub {
     Trog::HV->forget();
     my $hv   = Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1' );

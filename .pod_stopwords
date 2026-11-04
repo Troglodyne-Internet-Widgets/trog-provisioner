@@ -254,6 +254,9 @@ dotfile
 dotfiles
 dryrun
 DUID
+setuid
+uid
+virtiofs
 dzil
 easyrsa
 env
