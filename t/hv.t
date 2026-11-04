@@ -1692,6 +1692,61 @@ subtest 'leases are looked up by MAC, not by name' => sub {
     }
 }
 
+subtest 'a session reads its leases from the system daemon, and runs qemu-img as itself' => sub {
+    ok( fresh( uri  => 'qemu+ssh://runner@hv/session' )->is_session, 'a session URI is a session' );
+    ok( !fresh( uri => 'qemu+ssh://runner@hv/system' )->is_session,  'and the system URI is not' );
+    ok( !fresh()->is_session, 'nor is the default' );
+
+    my $hv   = fresh( uri => 'qemu+ssh://runner@hv/session' );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+
+    # The session has no network of the system daemon to ask.
+    my @asked;
+    $mock->redefine( vmm         => sub { die "the session was asked for a lease\n" } );
+    $mock->redefine( network_vmm => sub { FakeLeaseVMM->new( \@asked ) } );
+    is( $hv->lease_ip( 'default', mac => '52:54:00:aa:bb:cc' ), '192.168.122.50', 'the lease comes from the connection that has the network' );
+
+    my @ran;
+    $mock->redefine( volume_path => sub { '/bogus/pool/vm.test.test-qcow2' } );
+    $mock->redefine( run_cmd     => sub ( $, @argv ) { push @ran, "user: @argv"; 0 } );
+    $mock->redefine( run_sudo    => sub ( $, @argv ) { push @ran, "root: @argv"; 0 } );
+    $mock->redefine( capture_cmd => sub ( $, $cmd ) { push @ran, "says: $cmd"; q{} } );
+    $hv->snapshot_disk( 'vm.test.test-qcow2', 'trog-pristine' );
+    $hv->revert_disk( 'vm.test.test-qcow2', 'trog-pristine' );
+    $hv->disk_snapshot_names('vm.test.test-qcow2');
+    is_deeply(
+        \@ran,
+        [ 'user: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', 'user: qemu-img snapshot -a trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: qemu-img snapshot -l -U '/bogus/pool/vm.test.test-qcow2'} ],
+        'qemu-img runs as the account, which owns the disks of its session'
+    );
+
+    @ran = ();
+    my $system = fresh( uri => 'qemu+ssh://runner@hv/system' );
+    $system->snapshot_disk( 'vm.test.test-qcow2', 'trog-pristine' );
+    $system->disk_snapshot_names('vm.test.test-qcow2');
+    is_deeply(
+        \@ran,
+        [ 'root: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: sudo qemu-img snapshot -l -U '/bogus/pool/vm.test.test-qcow2'} ],
+        'and as root on the system URI, where libvirt gives each disk to libvirt-qemu'
+    );
+};
+
+subtest 'network_vmm: the system daemon of the same host, read-only, for a session' => sub {
+    my @opened;
+    my $virt = Test::MockModule->new('Sys::Virt');
+    $virt->redefine( new => sub ( $class, %args ) { push @opened, \%args; return bless {}, 'FakeVirtConnection' } );
+
+    my $hv = fresh( uri => 'qemu+ssh://runner@hv/session' );
+    $hv->network_vmm;
+    $hv->network_vmm;
+    is_deeply( \@opened, [ { uri => 'qemu+ssh://runner@hv/system', readonly => 1 } ], 'once, as the same user, with no write access' );
+
+    @opened = ();
+    $hv     = fresh( uri => 'qemu+ssh://runner@hv/system' );
+    is( $hv->network_vmm, $hv->vmm, 'and on the system URI it is the connection itself' );
+    is( scalar @opened,   1,        'which opens only one' );
+};
+
 subtest 'a rebuilt guest can hold two leases, and the newest is the address it has' => sub {
     my $hv = fresh( uri => 'qemu+ssh://hv/system' );
 
@@ -1995,8 +2050,8 @@ subtest 'what a block is asked is a subset of what a hypervisor is asked' => sub
     }
 };
 
-subtest 'runner_sudoers pins each command to the pool' => sub {
-    my %args  = ( user => 'runner', pool_path => '/bogus/vm-disks/runner', lease_helper => '/usr/lib/libvirt/libvirt_leaseshelper', qemu_img => '/usr/bin/qemu-img' );
+subtest 'runner_sudoers grants the lease release, with its arguments pinned' => sub {
+    my %args  = ( user => 'runner', lease_helper => '/usr/lib/libvirt/libvirt_leaseshelper' );
     my $grant = Trog::HV::Libvirt->runner_sudoers(%args);
 
   SKIP: {
@@ -2008,26 +2063,22 @@ subtest 'runner_sudoers pins each command to the pool' => sub {
         is( $? >> 8, 0, 'visudo takes the grant, which bin/runner_account also asks before it installs one' ) or diag $out, $err;
     }
 
-    # How sudo matches each command, here in perl.  The patterns are POSIX
-    # extended expressions, which perl reads the same way for these, once (?^:)
-    # turns off the /x of this file: a space in them is a space.  Each command
-    # is the one this backend runs as root.
+    # How sudo matches the command, here in perl.  The pattern is a POSIX
+    # extended expression, which perl reads the same way for this one, once
+    # (?^:) turns off the /x of this file: a space in it is a space.
     my @patterns = map { qr/(?^:$_)/ } $grant =~ m/[ ](\^.+?\$)[,\n]/g;
-    is( scalar @patterns, 4, 'four commands, each with its arguments pinned' );
+    is( scalar @patterns, 1, 'one command, with its arguments pinned' );
     my sub allowed ($argv) {
         return any { $argv =~ $_ } @patterns;
     }
 
-    ok( allowed('del ip 192.0.2.7'),                                                    'the lease release of release_dhcp_lease' );
-    ok( allowed('snapshot -a trog-pristine /bogus/vm-disks/runner/vm.test.test.qcow2'), 'a revert of a disk in the pool' );
-    ok( allowed('info -U --output=json /bogus/vm-disks/runner/vm.test.test.qcow2'),     'the layout of a disk in the pool' );
-    ok( !allowed('snapshot -a trog-pristine /bogus/vm-disks/runner/../other/vm.qcow2'), 'not a disk reached through ..' );
-    ok( !allowed('snapshot -a trog-pristine /bogus/vm-disks/other/vm.qcow2'),           'not a disk of another pool' );
-    ok( !allowed('snapshot -a x /bogus/vm-disks/runner/a.qcow2 /bogus/b.qcow2'),        'not a second file on the end' );
-    ok( !allowed('del ip 192.0.2.7; id'),                                               'not a lease release with more after it' );
+    ok( allowed('del ip 192.0.2.7'),      'the lease release of release_dhcp_lease' );
+    ok( !allowed('del ip 192.0.2.7; id'), 'not a lease release with more after it' );
+    ok( !allowed('add ip 192.0.2.7'),     'and not another verb of the helper' );
+    unlike( $grant, qr/qemu-img/, 'and no qemu-img, which the account of a session runs as itself' );
 
-    like( exception { Trog::HV::Libvirt->runner_sudoers( %args, pool_path => '/bogus/vm,disks' ) }, qr/sudoers[ ]file[ ]can[ ]hold/, 'a path that sudoers reads as syntax' );
-    like( exception { Trog::HV::Libvirt->runner_sudoers( %args, user      => 'ALL' ) },             qr/sudoers[ ]file[ ]can[ ]hold/, 'and a user that is a keyword' );
+    like( exception { Trog::HV::Libvirt->runner_sudoers( %args, lease_helper => '/bogus/lease,helper' ) }, qr/sudoers[ ]file[ ]can[ ]hold/, 'a path that sudoers reads as syntax' );
+    like( exception { Trog::HV::Libvirt->runner_sudoers( %args, user         => 'ALL' ) },                 qr/sudoers[ ]file[ ]can[ ]hold/, 'and a user that is a keyword' );
 };
 
 subtest 'configured_gateway and guest_pool: the network of a block of hypervisors.conf' => sub {

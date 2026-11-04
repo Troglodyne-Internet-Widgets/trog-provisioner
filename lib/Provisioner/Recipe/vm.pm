@@ -461,6 +461,17 @@ an image file.  Any other pool is the name of another libvirt pool.  A C<fuse>
 line is skipped, because the guest mounts those itself.  Each line of
 C<devices_map> is C<name=vdX> for a directory, or C<name=/dev/vdX> for a disk.
 
+On a session URI, only C<file> and C<fuse> lines are possible.  The qemu of a
+session runs as the account, so it cannot open a block device or a volume of
+the system daemon, and a session has no virtiofs yet.  So a C<raw> or C<dir>
+line, or a line that names a pool, dies with the reason.  See
+L<Trog::HV::Libvirt/is_session>.
+
+=item C<session> and C<virbr_device>
+
+On a session URI, C<session> is 1 and C<virbr_device> is the bridge of the NAT
+network, which the NAT interface of the guest joins.  Absent otherwise.
+
 =back
 
 =cut
@@ -549,6 +560,13 @@ sub enrich {
     # names one to put every guest built here into one systemd slice to cap.
     $opts{partition} = $hv->partition;
 
+    # A session cannot use the NAT network of the system daemon, so its guest
+    # joins the bridge of that network through qemu-bridge-helper.
+    if ( $hv->is_session ) {
+        $opts{session}      = 1;
+        $opts{virbr_device} = $hv->virbr_device;
+    }
+
     # Whether the machine gives the guest a PCIe topology.  A q35 of any
     # version does; i440fx does not.  The template puts the interfaces on the
     # bus that the machine has.
@@ -572,6 +590,16 @@ sub enrich {
     foreach my $diskspec (@specs) {
         my ( $pool, $disk ) = split( m/=/, $diskspec );
         next if $pool eq 'fuse';
+
+        # The qemu of a session runs as its user, which opens no block device
+        # and no pool of the system daemon, and the session has no virtiofs.
+        if ( $hv->is_session && $pool ne 'file' ) {
+            my $why =
+                $pool eq 'dir' ? 'a virtiofs share, and a session cannot give one yet: see trog-provisioner issue #537'
+              : $pool eq 'raw' ? 'a block device of the host, which the account of a session cannot open'
+              :                  "a volume of the pool $pool, and a session has only the pool of its own account";
+            die "mounts.txt asks for $pool=$disk, which is $why.\n" . 'Build this guest from an account on the system URI of ' . ( $hv->describe =~ s{/session\z}{/system}r ) . ", or remove the line.\n";
+        }
 
         $order++;
         my $dev = shift @devnames or die "Ran out of vdnames!\n";

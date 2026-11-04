@@ -30,12 +30,12 @@ pool that has a quota and sudo for only what a build runs
 
     bin/runner_account --hypervisor hv1 --user runner \
         --pool-name runner_disks --pool-path /srv/vm-disks/runner --quota 500G \
-        --partition /machine/runner --cores 4 --io-weight 50 \
+        --cores 4 --io-weight 50 \
         [--authorize ~/.ssh/id_ed25519.pub] [--dryrun]
 
     bin/runner_account --hypervisor hv1 --user runner \
         --pool-name runner_disks --pool-path /srv/vm-disks/runner \
-        --partition /machine/runner --remove [--dryrun]
+        --remove [--dryrun]
 
 =head1 DESCRIPTION
 
@@ -65,27 +65,29 @@ runner.
 
 =head2 What the account can and cannot do
 
-The sudo grant names each command that this tool runs as root on a hypervisor
-during a build, a rebuild and a teardown, with its arguments pinned by a
-regular expression.  C<runner_sudoers> in L<Trog::HV::Libvirt> lists them, and
-the three that it leaves out.  The account cannot install
-F</usr/libexec/virtiofs-better>, so that file must be on the hypervisor before
-the runner builds there.  This command refuses to start when the file is not
-there.
+The account builds its guests in its own session of libvirt, on
+C<qemu+ssh://USER@HOST/session>.  Its guests run as the account, in its user
+slice, and their disks are files that it owns in the dataset.  So the kernel
+holds it to the quota and to the CPU of the slice, and it can open no file of
+the host that the account cannot open.  It is not in the C<libvirt> group,
+which is root in all but name.  L<Trog::HV::Libvirt/RUNNER ACCOUNTS> says why.
 
-The C<libvirt> group is root in all but name, because a domain can be
-defined that mounts any file of the host.  Neither the pool nor the slice
-stops a runner that names another pool or partition.  Only the polkit access
-driver of libvirt closes that, and this command does not configure it.
+The sudo grant names one command, the release of a DHCP lease, with its
+arguments pinned by a regular expression.  C<runner_sudoers> in
+L<Trog::HV::Libvirt> says why, and which commands it leaves out.
+
+A guest of a session has no virtiofs share and no block device of the host.  It
+does not start with the host either, until issue #536 of trog-provisioner.
 
 =head2 Taking it away
 
 C<--remove> undoes each step, in the other order, through
-C<runner_removal_steps>.  It refuses to start while the pool holds a volume, or
-the directory of the pool holds a file, because each is a disk of a guest.
+C<runner_removal_steps>.  It refuses to start while the directory of the pool
+holds a file, because that is a disk of a guest.
 Destroy the guests of the runner with F<bin/destroy> first.  It removes the
 dataset with C<zfs destroy>, without C<-r>, so a snapshot or a child dataset
-stops it.  It removes the user with its home, and the keys in it.
+stops it.  It removes the user with its home, and the keys and the session of
+libvirt in it.
 
 =head1 OPTIONS
 
@@ -110,17 +112,12 @@ that exists.
 The quota of the dataset, as C<zfs> reads it, for example C<500G>.  Required,
 except with C<--remove>.
 
-=item B<--partition> PATH
-
-The libvirt partition of the guests of the runner, as C</machine/NAME>.
-Optional.
-
 =item B<--cores> N, B<--io-weight> WEIGHT
 
-The CPU and I/O limits of the slice.  C<--cores> is the CPU of the host that the
-guests get together, in whole cores, such as 16, and the slice gets it as
-C<CPUQuota>.  C<--io-weight> is C<IOWeight> as systemd reads it.  Only with
-C<--partition>.
+The CPU and I/O limits of the user slice of the account.  C<--cores> is the CPU
+of the host that the guests get together, in whole cores, such as 16, and the
+slice gets it as C<CPUQuota>.  C<--io-weight> is C<IOWeight> as systemd reads
+it.
 
 =item B<--authorize> FILE
 
@@ -150,14 +147,14 @@ sub main {
     my %opt = ( authorize => [] );
     GetOptionsFromArray(
         \@args, \%opt,
-        qw{hypervisor=s user=s pool-name=s pool-path=s quota=s partition=s cores=i io-weight=s authorize=s@ remove dryrun hvconf=s help},
+        qw{hypervisor=s user=s pool-name=s pool-path=s quota=s cores=i io-weight=s authorize=s@ remove dryrun hvconf=s help},
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
 
     my @missing = grep { !defined $opt{$_} } ( qw{hypervisor user pool-name pool-path}, $opt{remove} ? () : 'quota' );
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Missing: ' . join( ', ', map { "--$_" } @missing ) ) if @missing;
 
-    my $plan = Trog::HV::Libvirt->runner_account_plan( map { (tr/-/_/r) => $opt{$_} } grep { defined $opt{$_} } qw{user pool-name pool-path quota partition cores io-weight} );
+    my $plan = Trog::HV::Libvirt->runner_account_plan( map { (tr/-/_/r) => $opt{$_} } grep { defined $opt{$_} } qw{user pool-name pool-path quota cores io-weight} );
     my @keys = keys_in( @{ $opt{authorize} } );
 
     my $fleet = Trog::Hypervisors->load( $opt{hvconf} // Trog::Hypervisors->default_path() );
@@ -207,10 +204,9 @@ sub trogrunner_entry {
     my $host = $hv->ssh_host // 'localhost';
     my $port = $hv->ssh_port != 22 ? ':' . $hv->ssh_port : q{};
     return join "\n", 'The hypervisors entry for the trogrunner block of the runner:', q{}, '    hypervisors:', '        ' . $hv->name . ':',
-      "            libvirt_uri: qemu+ssh://$plan->{user}\@$host$port/system",
+      "            libvirt_uri: qemu+ssh://$plan->{user}\@$host$port/session",
       "            pool_name:   $plan->{pool_name}",
       "            pool_path:   $plan->{pool_path}",
-      ( $plan->{partition} ? "            partition:   $plan->{partition}" : () ),
       '            account:',
       "                quota: $plan->{quota}",
       ( defined $plan->{cores}     ? "                cores: $plan->{cores}"         : () ),

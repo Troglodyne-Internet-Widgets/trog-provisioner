@@ -32,6 +32,8 @@ use File::Slurper();
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
+use File::Which();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -175,8 +177,8 @@ sub tuned_xml {
 
     my $dir = tempdir( CLEANUP => 1 );
     mkdir "$dir/vm.example.test";
-    File::Slurper::Temp::write_text( "$dir/vm.example.test/mounts.txt", "raw=/dev/sdb\n" )
-      if $opts{extra_disk};
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/mounts.txt", $opts{mounts} // "raw=/dev/sdb\n" )
+      if $opts{extra_disk} || $opts{mounts};
 
     my $config = Config::Simple->new(
         conf(
@@ -203,7 +205,7 @@ sub tuned_xml {
 
     Trog::HV->forget();
     Trog::HV->new(
-        uri        => 'qemu+ssh://root@hv/system',
+        uri        => $opts{uri} // 'qemu+ssh://root@hv/system',
         domain_dir => $dir,
         %{ $opts{hv} // {} },
     );
@@ -449,6 +451,30 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
     );
     like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );                                                       ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $confined, qr/<source[ ]pool='runner_disks'/,                                     'out of the pool it was given, rather than the literal that used to be here' );
+};
+
+subtest 'a guest of a session joins the NAT bridge, and asks for nothing the session cannot give' => sub {
+    my %session = ( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), uri => 'qemu+ssh://runner@hv/session', hv => { virbr_device => 'virbr0' } );
+
+    my $xml = tuned_xml(%session);
+    like( $xml, qr{<interface[ ]type='bridge'>\s*<mac[ ]address='[^']+'/>\s*<source[ ]bridge='virbr0'/>}, 'the NAT interface is on the bridge of the network, through the bridge helper' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    unlike( $xml, qr/<source[ ]network=/, 'and names no network of the system daemon, which a session cannot use' );
+    like( tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ) ), qr/<source[ ]network='default'/, 'while a guest of the system daemon stays on the network' );
+
+  SKIP: {
+        my $validate = File::Which::which('virt-xml-validate');
+        skip 'no virt-xml-validate here to read the domain', 1 unless $validate;
+        my $file = tempdir( CLEANUP => 1 ) . '/domain.xml';
+        File::Slurper::Temp::write_text( $file, $xml );
+        IPC::Run3::run3( [ $validate, $file, 'domain' ], \undef, \my $out, \my $err );
+        is( $? >> 8, 0, 'the schema of libvirt takes the domain' ) or diag $out, $err;
+    }
+
+    like( tuned_xml( %session, mounts => "file=/bogus/disk.qcow2\nfuse=/bogus/fuse\n" ), qr{<source[ ]file='/bogus/disk[.]qcow2'/>}, 'an image file, which the account opens as itself' );
+    like( exception { tuned_xml( %session, mounts => "dir=/bogus/share\n" ) },     qr/virtiofs[ ]share.*\#537/,                        'a virtiofs share, which waits on issue #537' );
+    like( exception { tuned_xml( %session, mounts => "raw=/dev/sdb\n" ) },         qr/block[ ]device[ ]of[ ]the[ ]host/,               'a block device of the host' );
+    like( exception { tuned_xml( %session, mounts => "otherpool=disk-qcow2\n" ) }, qr/pool[ ]otherpool.*only[ ]the[ ]pool[ ]of[ ]its/, 'and a volume of another pool' );
+    like( exception { tuned_xml( %session, mounts => "raw=/dev/sdb\n" ) },         qr{system[ ]URI[ ]of[ ].*/system},                  'each says where the guest can be built instead' );
 };
 
 # --- The machine type, and the topology that follows from it -----------------

@@ -42,7 +42,9 @@ use Trog::Utils();
 
             hypervisors:
                 hv1:
-                    libvirt_uri: "qemu+ssh://runner@hv1.test.test/system"
+                    # session, not system, because the account below
+                    # builds in a session of its own.  See ACCOUNTS.
+                    libvirt_uri: "qemu+ssh://runner@hv1.test.test/session"
                     resolvers:   ["192.0.2.254", "1.1.1.1"]
 
                     # The pool that the runner takes addresses from on hv1,
@@ -54,7 +56,6 @@ use Trog::Utils();
                     pool_cidr:      ["192.0.2.192/28"]
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
-                    partition:   "/machine/runner"
                     max_memory:  65536
 
                     # bin/provision makes the account above, with these
@@ -149,9 +150,10 @@ finds a pool by name.  If the name is of a pool that already exists elsewhere,
 libvirt ignores the path, and every volume goes into the existing pool.
 
 =item * C<partition> puts every guest that the runner builds into one systemd
-slice, where one cap holds all of them.  With an C<account>, C<cores> sets
-that cap: see ACCOUNTS.  Without one, the operator sets it with C<systemctl
-set-property machine-runner.slice CPUQuota=400%>, which is 4 cores.
+slice, where one cap holds all of them.  The operator sets it with C<systemctl
+set-property machine-runner.slice CPUQuota=400%>, which is 4 cores.  An
+C<account> has no partition, because its guests run in its user slice, and
+C<cores> sets the cap of that slice: see ACCOUNTS.
 
 Cap CPU and I/O there, not memory.  A C<MemoryMax> on a slice of virtual
 machines kills one of them, and does not refuse the next.  The per-domain
@@ -164,24 +166,30 @@ partition already hold, running or not.  It still refuses one that does not fit
 on the host after C<reserve_memory>.  The kernel holds no guest to it, so it
 binds a runner that cooperates, as the next paragraph says.
 
-With a C<partition>, the runner counts only its own guests.  C<max_guests>
+With a C<partition> or an C<account>, the runner counts only its own guests.  C<max_guests>
 caps how many the partition holds, and C<cpu_overcommit> is the vCPUs for each
 of the cores that the slice gets.  The runner still refuses a guest when
 the whole hypervisor has no vCPUs left after C<reserve_cpus>, so it cannot take
 the room of the guests outside its partition.  Give the hypervisor block the
 C<reserve_memory>, C<reserve_cpus> and C<cpu_overcommit> of the block in the
 F<hypervisors.conf> of the operator, because the runner gets no other copy of
-them.  Without a C<partition>, every limit counts every guest on the
-hypervisor, so a C<max_guests> of a few refuses every build on a busy one.  A
-C<max_memory> without a C<partition> is refused.
+them.  Without either, every limit counts every guest on the hypervisor, so
+a C<max_guests> of a few refuses every build on a busy one.  A C<max_memory>
+without either is refused.
 
 =back
 
-A runner that cooperates respects both limits.  Neither stops a runner that
-names a different pool or partition.  That takes the polkit access driver of
-libvirt, which is off by default and is a change to the hypervisor, not to this
-guest.  Say which of the two you have before you tell anyone that the runner
-has a cap.
+Without an C<account>, these limits bind a runner that cooperates.  Nothing
+stops a runner that names a different pool or partition, because the user of
+its URI is in the C<libvirt> group, which is root in all but name.
+
+With an C<account>, the kernel holds the runner to its pool and its slice.
+Its guests run as the account, in the user slice that C<cores> caps, and their
+disks are files that the account owns, in the dataset that C<quota> caps.  The
+account can still write to its home and to F</tmp>, as any user can, and no
+quota covers those.  C<max_memory> and C<max_guests> still bind only a runner
+that cooperates.  Say which of these you have before you tell anyone that the
+runner has a cap.
 
 =cut
 
@@ -402,7 +410,9 @@ runner.
 Splits the URI of each hypervisor into the host, user and port that
 C<ssh-keyscan> needs.  Dies if C<checkout_dir> or C<store> is not a relative
 path under the domain directory, or if a hypervisor URI has no host or is
-remote without ssh.
+remote without ssh.  Also dies if a hypervisor asks for an C<account> and its
+URI is not a session, or gives a C<partition> with a session URI.  See
+L</ACCOUNTS>.
 
 =cut
 
@@ -484,9 +494,12 @@ sub enrich {
           if $block->{ssh_host} && $transport ne 'ssh';
 
         # OpenAPIv3 cannot make one key need another, and Trog::HV::Libvirt
-        # would refuse this only on the runner.
-        die "trogrunner: hypervisor '$name' gives max_memory and no partition, and a budget of memory is that of a partition.  reserve_memory already caps the host.\n"
-          if $block->{max_memory} && !$block->{partition};
+        # would refuse these only on the runner.
+        my $session = $block->{libvirt_uri} =~ m{/session\z};
+        die "trogrunner: hypervisor '$name' gives max_memory and no partition, and a budget of memory is that of a partition or a session.  reserve_memory already caps the host.\n"
+          if $block->{max_memory} && !$block->{partition} && !$session;
+        die "trogrunner: hypervisor '$name' gives a partition, and $block->{libvirt_uri} is a session, whose guests run in the user slice of its account\n"
+          if $block->{partition} && $session;
 
         next unless $block->{account};
 
@@ -498,6 +511,11 @@ sub enrich {
           unless $block->{pool_name} && $block->{pool_path};
         die "trogrunner: hypervisor '$name' asks for an account for the user in its libvirt_uri, and $block->{libvirt_uri} names no user\n"
           unless $block->{ssh_user};
+
+        # The system URI would need the libvirt group, which is root in all
+        # but name.  See RUNNER ACCOUNTS in Trog::HV::Libvirt.
+        die "trogrunner: hypervisor '$name' asks for an account, which builds in a session of its own, and $block->{libvirt_uri} does not end in /session\n"
+          unless $session;
     }
 
     warn "trogrunner: hypervisor_access is $opts{hypervisor_access}, and no hypervisor is named, so no hypervisor lets the runner in\n"
@@ -663,23 +681,31 @@ recipe object.
 =head3 ACCOUNTS
 
 An C<account> block in a C<hypervisors> entry gives the runner an account of
-its own there.  The user is the user of C<libvirt_uri>, and the pool and the
-slice are its C<pool_name>, C<pool_path> and C<partition>:
+its own there.  The user is the user of C<libvirt_uri>, and the pool is its
+C<pool_name> and C<pool_path>.  The URI must name the session of the account,
+not the system daemon:
 
     hypervisors:
         hv1:
-            libvirt_uri: "qemu+ssh://runner@hv1.test.test/system"
+            libvirt_uri: "qemu+ssh://runner@hv1.test.test/session"
             pool_name:   "runner_disks"
             pool_path:   "/srv/vm-disks/runner"
-            partition:   "/machine/runner"
             account:
                 quota:     500G      # required: of the ZFS dataset of the pool
-                cores:     4         # CPU of the slice, as CPUQuota=400%
-                io_weight: 50        # IOWeight of the slice
+                cores:     4         # CPU of the user slice, as CPUQuota=400%
+                io_weight: 50        # IOWeight of the user slice
+
+On the system URI, the account would need the C<libvirt> group, and with it a
+domain can read any file of the host.  In its session, its guests run as the
+account, and open only what the account can open.  L<Trog::HV::Libvirt/RUNNER
+ACCOUNTS> has the whole of it.  A session has no C<partition>, because its
+guests run in the user slice of the account, and C<cores> and C<io_weight> cap
+that slice.  A guest of a session has no virtiofs share and no block device, so
+a guest whose F<mounts.txt> asks for one must be built from another account.
+Issue #537 is about virtiofs.
 
 The parent of C<pool_path> must be where a ZFS dataset is mounted, because the
-quota is a quota of a child dataset.  C<cores> and C<io_weight> need a
-C<partition>.
+quota is a quota of a child dataset.
 
 C<cores> is how much of the CPU of the host the guests of the runner get
 together, in whole cores, such as 16.  It is not the C<cpus> of a
@@ -711,7 +737,7 @@ sub outside_steps {
         my ( undef, undef, $user ) = uri_parts($uri);
 
         if ( ref $block->{account} eq 'HASH' ) {
-            my %plan = ( user => $user, %{$block}{qw{pool_name pool_path partition}}, %{ $block->{account} } );
+            my %plan = ( user => $user, %{$block}{qw{pool_name pool_path}}, %{ $block->{account} } );
             delete @plan{ grep { !defined $plan{$_} } keys %plan };
             push @steps, {
                 id      => "trogrunner:account:$name",
