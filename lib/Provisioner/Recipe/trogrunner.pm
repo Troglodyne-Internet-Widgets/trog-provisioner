@@ -92,6 +92,31 @@ repositories, such as a coding agent, already has one.  A second copy under
 C<install_dir> is a second copy to keep in step.  Point C<deps_from> at the
 path where it clones instead, and the dependencies still install.
 
+=head3 THE PROVISIONING ACCOUNT
+
+The configuration directory, the secret store and the key that a hypervisor
+trusts belong to one account, the one that runs F<bin/provision>.  That is the
+service C<user> of the domain unless C<provision_user> names another.
+
+Name another when the service user runs something that must not provision.
+L<Provisioner::Recipe::clod> runs each C<claude> run as its C<agent_user>, an
+account that cannot read the token of the bot.  The agent is what builds a
+guest to test on, so it needs the key, and the bot does not:
+
+    trogrunner:
+        provision_user: clod-agent
+
+The account then owns F<etc/trog-provisioner> and everything in it, and the
+key, with mode 0600 as ssh insists.  It also gets the right to pass through
+the domain directory, F<etc> and F<.ssh>, and nothing more.  A link in its own
+F<~/.ssh> points at the key, and the host keys of each hypervisor go into its
+F<known_hosts>.  The service user keeps its own F<.ssh>, and no longer owns
+the key.
+
+F<trogrunner-owner.sh> does this in the postrun, after every target.  A
+recipe such as C<claude> makes the account in a target that can run after this
+one.  The script fails when the account does not exist by then.
+
 =head3 What it needs from the guest, and how long it takes
 
 The build was measured on four vCPUs and 8GB.  Nobody tuned these numbers.
@@ -366,6 +391,10 @@ sub args {
             # admin_authorized_keys.
             store => { type => 'string', default => q{} },
 
+            # The account that runs bin/provision, if it is not the service
+            # user.  See THE PROVISIONING ACCOUNT.
+            provision_user => { type => 'string', pattern => '^[a-z_][a-z0-9_-]*$' },
+
             hypervisor_access  => { type => 'string',  enum    => [qw{none least full}], default => 'none' },
             restrict_key_to_ip => { type => 'boolean', default => 1 },
         },
@@ -470,6 +499,8 @@ sub enrich {
     };
     my %global = map { $_ => $config->{$_} } grep { $said->($_) } keys %$config;
     $opts{recipes}{_base}{_global} = { %global, %{ $opts{recipes}{_base}{_global} // {} } };
+
+    $opts{provision_user} //= $opts{user};
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !$opts{checkout_dir} || $opts{checkout_dir} eq '.' );
@@ -809,6 +840,7 @@ sub template_files {
         'trogrunner.recipes.yaml.tt'          => 'trogrunner.recipes.yaml',
         'trogrunner.hypervisors.conf.tt'      => 'trogrunner.hypervisors.conf',
         'trogrunner.profile.tt'               => 'trogrunner.profile',
+        'trogrunner.owner.sh.tt'              => 'trogrunner-owner.sh',
     );
 }
 

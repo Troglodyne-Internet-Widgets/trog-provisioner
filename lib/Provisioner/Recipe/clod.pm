@@ -180,6 +180,11 @@ the claude recipe runs after this one, and makes the account.
 
 =back
 
+If the agent builds guests to test on, with L<Provisioner::Recipe::trogrunner>
+on the same domain, name C<agent_user> as the C<provision_user> of that recipe
+too.  Then the agent gets the key that the hypervisors trust, and the worker
+does not.  See L<Provisioner::Recipe::trogrunner/THE PROVISIONING ACCOUNT>.
+
 C<deps> is in L<Provisioner::Recipe::Ubuntu::clod>.
 
 =cut

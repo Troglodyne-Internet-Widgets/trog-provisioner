@@ -18,9 +18,11 @@ use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
+use File::Path();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
+use IPC::Run3();
 use FindBin::libs;
 use Provisioner::Utils();
 use YAML::XS();
@@ -178,13 +180,6 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     is( $got{hypervisors}{hv1}{ssh_user}, 'runner',        'the user' );
     is( $got{hypervisors}{hv1}{ssh_port}, 2222,            'and the port, when it is not 22' );
 
-    my $fragment = $recipe->render(%$vars);
-    like( $fragment, qr/ssh-keyscan[ ]-p[ ]'2222'[ ]'hv1\.test\.test'/, 'which is what gets scanned' );
-
-    # Into the home ssh will read, asked of passwd, rather than into the domain
-    # directory -- which is a home only when the domain names a service user.
-    like( $fragment, qr/getent[ ]passwd[ ]'someadmin'/, 'the home is asked for rather than assumed' );
-    like( $fragment, qr{known_hosts},                   'and that is where the host keys go' );
 };
 
 subtest 'a hypervisor we could not get a shell on is refused here, not on the guest' => sub {
@@ -429,6 +424,71 @@ subtest 'the symlink is made with -n, or the second provision fails' => sub {
     # and this recipe does not require one -- so a dotfile there is read by
     # nobody.  perl.tt was fixed for the same assumption.
     like( $fragment, qr{/etc/profile\.d/trogrunner\.sh}, 'and the shell profile goes somewhere every login shell reads' );
+};
+
+# Runs trogrunner-owner.sh with each command that changes an owner, a mode or a
+# link replaced by one that records its arguments.  Returns the exit status of
+# the script, what it printed, the commands it ran, one to a line, and the
+# directory of the domain.  The key is there unless $key is false.
+sub run_owner_script {
+    my ( $key, %extra ) = @_;
+
+    my $install = tempdir( CLEANUP => 1 );
+    my $domain  = "$install/$DOMAIN";
+    File::Path::make_path("$domain/.ssh");
+    File::Slurper::Temp::write_text( "$domain/.ssh/id_ed25519", "not a key\n" ) if $key;
+    my ($dir) = built( install_dir => $install, user => 'svc', %extra );
+
+    my $stubs = tempdir( CLEANUP => 1 );
+    my $log   = "$stubs/asked";
+    File::Slurper::Temp::write_text( $log, q{} );
+    foreach my $command (qw{chown chmod install setfacl ln}) {
+        File::Slurper::Temp::write_text( "$stubs/$command", qq{#!/bin/sh\necho "$command \$*" >> '$log'\n} );
+    }
+
+    # The host key is not known yet, so the script asks for it.
+    File::Slurper::Temp::write_text( "$stubs/runuser", qq{#!/bin/sh\necho "runuser \$*" >> '$log'\ncase "\$*" in *' -F '*) exit 1;; esac\n} );
+    File::Slurper::Temp::write_text( "$stubs/getent",  qq{#!/bin/sh\necho "\$2:x:1001:1001::/bogus/home/\$2:/bin/sh"\n} );
+    chmod 0755, glob("$stubs/*");
+
+    local $ENV{PATH} = "$stubs:/usr/bin:/bin";
+    my $said;
+    IPC::Run3::run3( [ 'sh', "$dir/trogrunner-owner.sh" ], \undef, \$said, \$said );
+    return ( $? >> 8, $said, File::Slurper::read_text($log), $domain );
+}
+
+subtest 'the account that provisions gets the configuration and the key, and passes through the rest' => sub {
+    my ( $status, $said, $asked, $domain ) = run_owner_script( 1, provision_user => 'agent', hypervisor_access => 'least', hypervisors => { hv1 => {%SESSION} } );
+    is( $status, 0, 'the script succeeds' ) or diag $said;
+
+    my @lines = split /\n/, $asked;
+    my %did   = map { $_ => 1 } @lines;
+    my $key   = "$domain/.ssh/id_ed25519";
+    ok( $did{"chown -R agent:someadmin $domain/etc/trog-provisioner"},                                                   'the configuration is the account own, so it can write ips.db' )            or diag $asked;
+    ok( $did{"setfacl -m u:agent:x $domain $domain/etc"},                                                                'it can pass through the domain directory to it' )                          or diag $asked;
+    ok( $did{"chown agent:agent $key"},                                                                                  'the key is the account own' )                                              or diag $asked;
+    ok( $did{"chmod 0600 $key"},                                                                                         'kept to itself, which ssh insists on' )                                    or diag $asked;
+    ok( $did{"setfacl -m u:agent:x $domain/.ssh"},                                                                       'it can pass through the .ssh of the service user to the key' )             or diag $asked;
+    ok( $did{"ln -sfn $key /bogus/home/agent/.ssh/id_ed25519"},                                                          'the key is linked where ssh looks for it' )                                or diag $asked;
+    ok( $did{"runuser -u agent -- sh -c ssh-keyscan -p '2222' 'hv1.test.test' >> '/bogus/home/agent/.ssh/known_hosts'"}, 'the host key of the hypervisor goes into the known_hosts of the account' ) or diag $asked;
+    is( ( scalar grep { m{svc} } @lines ), 0, 'and nothing is given to the service user' ) or diag $asked;
+};
+
+subtest 'without a provision_user, the service user provisions, and needs no ACL' => sub {
+    my ( $status, $said, $asked, $domain ) = run_owner_script( 1, hypervisor_access => 'least', hypervisors => { hv1 => {%SESSION} } );
+    is( $status, 0, 'the script succeeds' ) or diag $said;
+
+    my %did = map { $_ => 1 } split /\n/, $asked;
+    ok( $did{"chown -R svc:someadmin $domain/etc/trog-provisioner"}, 'the configuration is the service user own' ) or diag $asked;
+    ok( $did{"chown svc:svc $domain/.ssh/id_ed25519"},               'and so is the key' )                         or diag $asked;
+    is( ( scalar grep { m{\Asetfacl} } keys %did ), 0, 'an account that owns the directory needs no ACL on it' ) or diag $asked;
+};
+
+subtest 'a runner with access and no key stops the postrun, which fails the build' => sub {
+    my ( $status, $said, $asked ) = run_owner_script( 0, provision_user => 'agent', hypervisor_access => 'least', hypervisors => { hv1 => {%SESSION} } );
+    isnt( $status, 0, 'the script fails' );
+    like( $said, qr{no[ ]hypervisor[ ]key[ ]was[ ]placed}, 'and says which key is missing' );
+    unlike( $asked, qr{\Aln[ ]}m, 'and links nothing to a key that is not there' );
 };
 
 # --- What a runner needs on its hypervisors -----------------------------------
