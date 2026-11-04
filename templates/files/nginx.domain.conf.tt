@@ -52,7 +52,18 @@ server {
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
 
 [% IF static_dir %]
+[%# try_files ignores the query string, so a request with one goes to the
+    application.  The DESCRIPTION of Provisioner::Recipe::nginxproxy says why.
+
+    An if cannot hold try_files or name a location, so the 418 only jumps to
+    @default.  The client never gets it: "=" with no code sends the status that
+    the application answers.  Use a code that nothing else here returns. -%]
     location / {
+        error_page 418 = @default;
+        if ($args) {
+            return 418;
+        }
+        charset utf-8;
         gzip on;
         etag on;
         expires 1d;

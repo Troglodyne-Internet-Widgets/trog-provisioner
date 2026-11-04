@@ -52,6 +52,18 @@ try_files directive does this:
 
 nginx serves a file that exists and sends everything else to the application.
 
+try_files looks only at the path.  So nginx sends each request that has a
+query string to the application, before try_files, even where a file exists.
+A render on disk is the answer to its path with no query string, and the
+application must answer the query itself.  A request for a static file with a
+query string, such as F</styles/screen.css?v=2>, also goes to the application.
+An application that does not route that path answers 404, and the ban rules of
+the vhost count it.
+
+nginx sends the files of static_dir with C<charset=utf-8> in their
+C<Content-Type>, as the application does when it answers itself.  The
+application must write its renders in C<UTF-8>.
+
 nocache_prefix names a route that always goes to your application.  Use it for
 pages that must be dynamic.  Your application must strip that part of the route
 and then route as usual.

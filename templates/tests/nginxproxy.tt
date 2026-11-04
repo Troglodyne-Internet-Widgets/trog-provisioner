@@ -53,6 +53,43 @@ foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
     unlink $probe;
 }
 
+# The probe is a render on disk, and the same path with a query string must
+# reach the application, because the render answers only the bare path.
+[% FOR port IN vhosts.keys().sort() -%]
+[% v = vhosts.$port -%]
+[% IF v.static_dir AND NOT v.ssl_redirect -%]
+{
+    my $root  = '[% install_dir %]/[% domain %]/[% v.static_dir %]';
+    my $probe = 'nginxproxy query probe ' . time . " $$\n";
+    my $file  = "$root/.nginxproxy_query_probe.html";
+    if (open(my $fh, '>', $file)) {
+        print {$fh} $probe;
+        close $fh;
+        chmod 0750, $file;
+        my $url = '[% IF v.ssl %]https[% ELSE %]http[% END %]://[% domain %]:[% port %]/.nginxproxy_query_probe';
+        my $get = sub {
+            my ($query) = @_;
+            my $out = `curl -sk --max-time 10 --resolve '[% domain %]:[% port %]:127.0.0.1' -w '\\n%{http_code} %{content_type}' '$url$query' 2>/dev/null`;
+            my ($body, $code, $type) = $out =~ m/\A(.*)\n(\d+) ([^\n]*)\z/s;
+            return ($body // '', $code // 0, $type // '');
+        };
+
+        my ($body, $code, $type) = $get->('');
+        is($code, 200, 'port [% port %] serves a render from the static root');
+        is($body, $probe, 'and serves the file itself');
+        like($type, qr/charset=utf-8/i, 'with the charset of the render');
+
+        ($body) = $get->('?nginxproxy_probe=1');
+        isnt($body, $probe, 'port [% port %] sends a request with a query string to the application, not the render');
+        unlink $file;
+    }
+    else {
+        fail("could not write $file: $!");
+    }
+}
+[% END -%]
+[% END -%]
+
 # Every server block must serve something.  A vhost that neither serves files
 # nor proxies from / answers 404 to everything, which looks like a fault in the
 # application.
