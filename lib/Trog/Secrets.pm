@@ -33,7 +33,7 @@ it answers.
 
     my %needed = Trog::Secrets->needed($config);
     if (%needed) {
-        my %values = Trog::Secrets->lookup($file, Trog::Credentials->prompt('Enter password:', 'keepass'), %needed);
+        my %values = Trog::Secrets->lookup($file, Trog::Credentials->store_password(), %needed);
         Trog::Secrets->apply($config, %values);
     }
 

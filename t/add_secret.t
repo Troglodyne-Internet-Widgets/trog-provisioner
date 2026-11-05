@@ -201,10 +201,26 @@ subtest 'a reference that already holds something is left alone' => sub {
         $rc = add( '--secrets', $kdbx, qw{--group seed --title entry --}, 'something else' );
     }
     isnt( $rc, 0, 'a different value is refused' );
-    like( join( '', @said ), qr/will[ ]not[ ]replace[ ]it/, 'and says why' );
+    like( join( '', @said ), qr/will[ ]not[ ]replace[ ]it.*--overwrite/, 'and says why, and how to replace it' );
 
     my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:seed/entry/password' );
     is( $got{probe}, 'already here', 'leaving the store as it was' );
+};
+
+subtest '--overwrite replaces a value that is there, and nothing else' => sub {
+    my $kdbx = store();
+    is( add( '--secrets', $kdbx, qw{--group other --title kept -- untouched} ), 0, 'a second secret is in the store' );
+
+    my $rc = add( '--secrets', $kdbx, qw{--overwrite --group seed --title entry --}, 'rotated' );
+    is( $rc, 0, 'it reports success' );
+
+    my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', seed => 'secret:seed/entry/password', other => 'secret:other/kept/password' );
+    is( $got{seed},  'rotated',   'the store holds the new value' );
+    is( $got{other}, 'untouched', 'and every other secret is as it was' );
+
+    is( add( '--secrets', $kdbx, qw{--overwrite --group new --title one -- fresh} ), 0, 'with nothing there, it adds' );
+    my %new = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:new/one/password' );
+    is( $new{probe}, 'fresh', 'and the store holds it' );
 };
 
 subtest 'a field the database does not keep is an error, not a success' => sub {

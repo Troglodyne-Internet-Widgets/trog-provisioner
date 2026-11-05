@@ -336,7 +336,7 @@ sub secret_for {
     Trog::Secrets->parse($secret);
 
     return sub {
-        my %found = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $secret );
+        my %found = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->store_password(), secret => $secret );
         return $found{secret};
     };
 }

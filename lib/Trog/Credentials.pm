@@ -141,6 +141,22 @@ sub prompt {
     return $typed;
 }
 
+=head2 store_password(%opts)
+
+Returns the password of the secret store, the KeePass database, through
+C<prompt> under the name C<keepass>.  The prompt names the store, so that a
+person who has just typed a secret for it does not take the question for a
+second ask of that secret.  C<%opts> goes to C<prompt>.
+
+=cut
+
+our $STORE_PROMPT = 'Password of the secret store, the KeePass database:';
+
+sub store_password {
+    my ( $class, %opts ) = @_;
+    return $class->prompt( $STORE_PROMPT, 'keepass', %opts );
+}
+
 =head2 remember($name, $value)
 
 Keeps a credential that a person typed, so that the rest of the run does not
