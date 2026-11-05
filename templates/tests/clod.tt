@@ -115,4 +115,12 @@ ok(-d "$home/clod-state" && (stat _)[4] == (getpwnam('[% user %]'))[2], 'the dat
 }
 [% END %]
 
+[% IF user != admin_user -%]
+# servicesudo lets the service user restart its own units, and nothing else.
+foreach my $unit (qw{clod-[% domain %].service clod-worker-[% domain %].service}) {
+    system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', '/usr/bin/systemctl', 'restart', $unit);
+    is($? >> 8, 0, "[% user %] may restart $unit with sudo");
+}
+[% END -%]
+
 done_testing();

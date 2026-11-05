@@ -33,4 +33,12 @@ foreach my $name (sort keys %owner) {
 my $vhost = do { local (@ARGV, $/) = '/etc/nginx/sites-enabled/[% domain %].conf'; <> } // '';
 like($vhost, qr{\Qserver unix:$sock\E}, 'and nginx has an upstream for it') or diag $vhost;
 
+[% IF user != admin_user -%]
+# servicesudo lets the service user restart its own units, and nothing else.
+foreach my $unit (qw{[% domain %].service}) {
+    system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', '/usr/bin/systemctl', 'restart', $unit);
+    is($? >> 8, 0, "[% user %] may restart $unit with sudo");
+}
+[% END -%]
+
 done_testing();

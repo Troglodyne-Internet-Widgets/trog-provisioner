@@ -10,6 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Recipe::servicesudo();
 use Provisioner::Utils();
 
 # One copy for args and fetch_hosts, so that two copies do not drift apart.
@@ -214,13 +215,18 @@ C<host-passthrough> by default, which shows the real CPU to the guest.  If you
 change C<cpu_mode> for a koan host, pick a model that has AVX.  Otherwise
 C<claude> crashes the first time it runs.
 
+The recipe requires C<servicesudo>, which lets the service user restart
+F<koan.service> and F<koan-awake.service>, and ask for their status, with
+sudo, as L<Provisioner::Recipe::servicesudo/unit_commands> says.
+
 C<deps> is in L<Provisioner::Recipe::Ubuntu::koan>.
 
 =cut
 
 sub required_recipes {
     return (
-        claude => sub { () },
+        claude      => sub { () },
+        servicesudo => sub { return ( commands => [ Provisioner::Recipe::servicesudo::unit_commands(qw{koan.service koan-awake.service}) ] ) },
 
         # The bot is a GitHub account, which is two things: github logs the
         # CLI in with its token, and git holds the key it pushes and signs

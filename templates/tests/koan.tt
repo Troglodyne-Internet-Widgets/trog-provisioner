@@ -71,4 +71,12 @@ ok(!-e '/etc/ufw/applications.d/koan', 'no matrix firewall profile on a bot that
 ok(-d '[% p.path %]/.git', '[% pname %] is cloned at [% p.path %]');
 [% END %]
 [% END %]
+[% IF user != admin_user -%]
+# servicesudo lets the service user restart its own units, and nothing else.
+foreach my $unit (qw{koan.service koan-awake.service}) {
+    system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', '/usr/bin/systemctl', 'restart', $unit);
+    is($? >> 8, 0, "[% user %] may restart $unit with sudo");
+}
+[% END -%]
+
 done_testing();

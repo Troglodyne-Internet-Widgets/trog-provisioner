@@ -117,6 +117,25 @@ sub enrich {
     return %opts;
 }
 
+=head2 @commands = unit_commands(@units)
+
+A function, not a method.  The commands that let the service user restart each
+systemd unit of C<@units> and ask for its status:
+C</usr/bin/systemctl restart $unit> and C</usr/bin/systemctl status $unit>.
+
+A recipe that installs a unit that runs as C<user> requires this recipe with
+these commands for its own units, and for no other.  Name each unit with its
+suffix, such as C<example.test.service>.  sudo matches the arguments as they
+are written, so a program that calls sudo writes the unit the same way, and
+C</usr/bin/systemctl> by its full path.
+
+=cut
+
+sub unit_commands {
+    my (@units) = @_;
+    return map { ( "/usr/bin/systemctl restart $_", "/usr/bin/systemctl status $_" ) } @units;
+}
+
 sub template_files {
     return ( 'servicesudo.sudoers.tt' => 'servicesudo.sudoers' );
 }
