@@ -79,11 +79,17 @@ SKIP: {
     like( $out, qr/password is required|not allowed|may not run/, 'and sudo says it refused' ) or diag $out;
 }
 
-# What sudo would let the user do at all.  None of it may be ALL.
+# What sudo would let the user do at all.  Nothing that it may run as root may
+# be ALL.  Another recipe can grant ALL as some other account: clod lets its
+# service user run anything as the agent account, which is not root.
 my ( $exit, $listing ) = as_user( 'sudo', '-n', '-l' );
 if (@commands) {
     is( $exit, 0, "sudo lists what $user may run" ) or diag $listing;
-    unlike( $listing, qr/:\s*ALL\s*$/m, 'and none of it is ALL' ) or diag $listing;
+    my @root_all = grep {
+        my ($runas) = m/^\s*\(([^)]*)\)/;
+        defined $runas && ( grep { $_ eq 'root' || $_ eq 'ALL' } split /[\s,:]+/, $runas ) && m/\bALL\s*$/
+    } split /\n/, $listing;
+    is_deeply( \@root_all, [], 'and none of what it may run as root is ALL' ) or diag $listing;
 }
 else {
     isnt( $exit, 0, "$user, with no commands listed, may not run sudo at all" ) or diag $listing;
