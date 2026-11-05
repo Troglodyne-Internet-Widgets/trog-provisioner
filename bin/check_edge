@@ -26,7 +26,7 @@ use Trog::Hypervisors();
 
 =head1 USAGE
 
-    check_edge [--credentials] EDGE GUEST NAME
+    check_edge [--credentials] [--media PATH] EDGE GUEST NAME
 
 Checks, from this machine and from the edge, that EDGE serves the internet for
 GUEST.  EDGE runs C<openvpnclient> and C<nginxrelay>.  GUEST runs C<nginx> with
@@ -67,6 +67,21 @@ again.
 
 =back
 
+With B<--media>, NAME is a media name of GUEST, which EDGE serves and caches
+itself.  See L<Provisioner::Recipe::nginxrelay/Media names>.  Then the HTTPS
+check wants the certificate that EDGE serves for NAME, and one more check asks
+EDGE for PATH twice, and for a file under F</assets/private/>:
+
+=over 4
+
+=item * The cache.  The first answer for PATH is a 200 with C<X-Relay-Cache>, and
+the second one says C<HIT>.  PATH must be a file that GUEST serves, because EDGE
+caches only a 200 or a 206.
+
+=item * The private files.  EDGE answers 404 under F</assets/private/>.
+
+=back
+
 Mail through the edge is not checked yet.
 
 =head1 OPTIONS
@@ -76,6 +91,11 @@ Mail through the edge is not checked yet.
 =item B<--credentials>
 
 Read the password of the store from standard input.  See L<Trog::Credentials>.
+
+=item B<--media> PATH
+
+NAME is a media name, and PATH is a file that GUEST serves under it.  See
+L</What it checks>.
 
 =back
 
@@ -90,10 +110,11 @@ our $BAN_SET = 'nginxrelay-bans';
 sub main {
     my @args = @_;
 
-    my ( $credentials, $help );
+    my ( $credentials, $help, $media );
     GetOptionsFromArray(
         \@args,
         'credentials' => \$credentials,
+        'media=s'     => \$media,
         'help'        => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
@@ -108,7 +129,8 @@ sub main {
     my @results = (
         check_tunnel( $edge, $guest_domain ),
         check_resolvers( $edge, $name ),
-        check_https( $edge->ssh_host, $name, $token ),
+        check_https( $edge->ssh_host, $name, $token, defined $media ),
+        ( defined $media ? check_media( $edge->ssh_host, $name, $media ) : () ),
         check_http( $edge->ssh_host, $name ),
         check_client_address( $guest, $token, client_address($edge), edge_addresses( $edge, $edge_domain ) ),
         check_ban( $guest, $edge, $guest_domain ),
@@ -202,19 +224,36 @@ sub check_resolvers {
     return [ 1, $label ];
 }
 
-=head2 [$ok, $label, $why] = check_https($address, $name, $token)
+=head2 [$ok, $label, $why] = check_https($address, $name, $token, $media)
 
 Connects to port 443 at C<$address> with C<$name> in SNI, requires a
 certificate that is valid for C<$name>, and asks for the path C</$token>.  Any
 HTTP status passes, because the path is there only to find the request in the
-access log.
+access log.  With C<$media> true, C<$name> is a media name, whose certificate
+the edge serves itself.
 
 =cut
 
 sub check_https {
-    my ( $address, $name, $token ) = @_;
-    my $label  = "port 443 of the edge passes TLS for $name through to the guest";
-    my $socket = IO::Socket::SSL->new(
+    my ( $address, $name, $token, $media ) = @_;
+    my $label  = $media ? "port 443 of the edge serves $name itself" : "port 443 of the edge passes TLS for $name through to the guest";
+    my $socket = tls_to( $address, $name ) or return [ 0, $label, "No verified TLS connection to $address for $name: " . ( IO::Socket::SSL::errstr() // $! ) ];
+
+    my $status = http_status( $socket, $name, "/$token" );
+    return [ 0, $label, "The TLS connection was verified, but no HTTP answer came" ] unless $status;
+    return [ 1, "$label, with a certificate for it, and HTTP $status" ];
+}
+
+=head2 $socket = tls_to($address, $name)
+
+A TLS connection to port 443 at C<$address> with C<$name> in SNI, and a
+certificate that is valid for C<$name>, or undef.
+
+=cut
+
+sub tls_to {
+    my ( $address, $name ) = @_;
+    return IO::Socket::SSL->new(
         PeerHost            => $address,
         PeerPort            => 443,
         SSL_hostname        => $name,
@@ -222,11 +261,36 @@ sub check_https {
         SSL_verifycn_name   => $name,
         SSL_verifycn_scheme => 'http',
         Timeout             => 10,
-    ) or return [ 0, $label, "No verified TLS connection to $address for $name: " . ( IO::Socket::SSL::errstr() // $! ) ];
+    );
+}
 
-    my $status = http_status( $socket, $name, "/$token" );
-    return [ 0, $label, "The TLS connection was verified, but no HTTP answer came" ] unless $status;
-    return [ 1, "$label, with a certificate for it, and HTTP $status" ];
+=head2 [$ok, $label, $why] = check_media($address, $name, $path)
+
+Asks the edge at C<$address> twice for C<$path> of the media name C<$name>,
+and wants the second answer from the cache of the edge.  Then it asks for a
+file under F</assets/private/>, and wants a 404.  See L</What it checks>.
+
+=cut
+
+sub check_media {
+    my ( $address, $name, $path ) = @_;
+    my $label = "the edge caches $path of $name, and serves no private file";
+
+    my @answers;
+    foreach ( 1 .. 2 ) {
+        my $socket = tls_to( $address, $name ) or return [ 0, $label, "No verified TLS connection to $address for $name: " . ( IO::Socket::SSL::errstr() // $! ) ];
+        push( @answers, [ http_answer( $socket, $name, $path ) ] );
+    }
+    my ( $first, $second ) = @answers;
+    return [ 0, $label, "The first answer for $path was HTTP " . ( $first->[0] // 'nothing' ) . ", and the edge caches only a 200 or a 206" ]
+      unless ( $first->[0] // 0 ) == 200;
+    my $cache = $second->[1]{'x-relay-cache'} // 'no X-Relay-Cache';
+    return [ 0, $label, "The second answer for $path did not come from the cache: $cache" ] unless $cache eq 'HIT';
+
+    my $socket = tls_to( $address, $name ) or return [ 0, $label, "No verified TLS connection to $address for $name: " . ( IO::Socket::SSL::errstr() // $! ) ];
+    my ($private) = http_answer( $socket, $name, '/assets/private/check-edge' );
+    return [ 0, $label, "A private file got HTTP " . ( $private // 'nothing' ) . ", not 404" ] unless ( $private // 0 ) == 404;
+    return [ 1, $label ];
 }
 
 =head2 [$ok, $label, $why] = check_http($address, $name)
@@ -255,10 +319,30 @@ status code of the answer, or undef when there is no status line.
 
 sub http_status {
     my ( $socket, $name, $path ) = @_;
+    my ($status) = http_answer( $socket, $name, $path );
+    return $status;
+}
+
+=head2 ($status, \%headers) = http_answer($socket, $name, $path)
+
+As C<http_status>, and the headers of the answer too, by their names in lower
+case.
+
+=cut
+
+sub http_answer {
+    my ( $socket, $name, $path ) = @_;
     print {$socket} "GET $path HTTP/1.1\r\nHost: $name\r\nUser-Agent: check_edge\r\nConnection: close\r\n\r\n";
     my $line = <$socket> // return;
     my ($status) = $line =~ m{\AHTTP/\d(?:[.]\d)?\s+(\d{3})\b} or return;
-    return $status;
+
+    my %headers;
+    while ( my $header = <$socket> ) {
+        last if $header =~ m/\A\r?\n\z/;
+        my ( $field, $value ) = $header =~ m/\A([^:]+):\s*(.*?)\r?\n?\z/ or next;
+        $headers{ lc $field } = $value;
+    }
+    return ( $status, \%headers );
 }
 
 =head2 $address = client_address($edge)

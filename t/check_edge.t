@@ -182,6 +182,45 @@ subtest 'http_status: the status of the answer' => sub {
     is( ( $ask->("SSH-2.0-OpenSSH_9.6\r\n") )[0], undef, 'and nothing for an answer that is not HTTP' );
 };
 
+subtest 'http_answer: the status and the headers of the answer' => sub {
+    socketpair( my $near, my $far, Socket::AF_UNIX(), Socket::SOCK_STREAM(), Socket::PF_UNSPEC() ) or die "socketpair: $!";
+    $_->autoflush(1) for $near, $far;
+    print {$far} "HTTP/1.1 200 OK\r\nX-Relay-Cache: HIT\r\nContent-Length: 2\r\n\r\nok";
+    shutdown( $far, 1 );
+    my ( $status, $headers ) = Provisioner::Bin::check_edge::http_answer( $near, 'name.test', '/x' );
+    is( $status, 200, 'the code of the status line' );
+    is_deeply( $headers, { 'x-relay-cache' => 'HIT', 'content-length' => 2 }, 'and each header by its name in lower case, without the line end' );
+};
+
+subtest 'check_media: the second answer from the cache, and no private file' => sub {
+    my $mock = Test::MockModule->new( 'Provisioner::Bin::check_edge', no_auto => 1 );
+    my @answers;
+    my @asked;
+    $mock->redefine( tls_to      => sub { return bless {}, 'IO::Socket::SSL' } );
+    $mock->redefine( http_answer => sub { my ( undef, undef, $path ) = @_; push( @asked, $path ); return @{ shift @answers } } );
+
+    my $miss = [ 200, { 'x-relay-cache' => 'MISS' } ];
+    my $hit  = [ 200, { 'x-relay-cache' => 'HIT' } ];
+    @answers = ( $miss, $hit, [ 404, {} ] );
+    my $result = Provisioner::Bin::check_edge::check_media(qw{198.51.100.9 media.name.test /assets/a.jpg});
+    is( $result->[0], 1, 'it passes when the second answer is a HIT and a private file gets 404' ) or diag $result->[2];
+    is_deeply( \@asked, [qw{/assets/a.jpg /assets/a.jpg /assets/private/check-edge}], 'after it asked for the path twice and for a private file' );
+
+    my %fails = (
+        'a path that is not there'       => [ [ [ 404, {} ], [ 404, {} ] ], qr/caches[ ]only[ ]a[ ]200/ ],
+        'a second answer that is no HIT' => [ [ $miss,       $miss ],       qr/did[ ]not[ ]come[ ]from[ ]the[ ]cache:[ ]MISS/ ],
+        'a private file that is served'  => [ [ $miss, $hit, [ 200, {} ] ], qr/private[ ]file[ ]got[ ]HTTP[ ]200/ ],
+    );
+    foreach my $case ( sort keys %fails ) {
+        my ( $given, $why ) = @{ $fails{$case} };
+        @answers = @$given;
+        like( Provisioner::Bin::check_edge::check_media(qw{198.51.100.9 media.name.test /assets/a.jpg})->[2], $why, "$case fails" );
+    }
+
+    $mock->redefine( tls_to => sub { return } );
+    like( Provisioner::Bin::check_edge::check_media(qw{198.51.100.9 media.name.test /assets/a.jpg})->[2], qr/No[ ]verified[ ]TLS[ ]connection/, 'and so does no verified connection' );
+};
+
 subtest 'check_https and check_http: a connection and an HTTP answer' => sub {
     my $mock = Test::MockModule->new( 'Provisioner::Bin::check_edge', no_auto => 1 );
     my $ssl  = Test::MockModule->new('IO::Socket::SSL');
@@ -229,6 +268,14 @@ subtest 'main: a line for each check, and the exit status' => sub {
     $mock->redefine( check_http => sub { return [ 1, 'http' ] } );
     capture_stdout { $status = Provisioner::Bin::check_edge::main(qw{edge.test guest.test name.test}) };
     is( $status, 0, 'and 0 when every check passed' );
+
+    my ( @https, @media );
+    $mock->redefine( check_https => sub { @https = @_; return [ 1, 'https' ] } );
+    $mock->redefine( check_media => sub { @media = @_; return [ 1, 'media' ] } );
+    $out = capture_stdout { Provisioner::Bin::check_edge::main(qw{--media /assets/a.jpg edge.test guest.test media.name.test}) };
+    ok( $https[3], 'with --media, the HTTPS check looks for the certificate of the edge' );
+    is_deeply( [ @media[ 1, 2 ] ], [qw{media.name.test /assets/a.jpg}], 'and the cache is checked for the path of the media name' );
+    like( $out, qr/^ok[ ]4[ ]-[ ]media$/m, 'right after the HTTPS check' );
 };
 
 done_testing();
