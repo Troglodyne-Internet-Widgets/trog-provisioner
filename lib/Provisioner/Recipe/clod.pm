@@ -302,6 +302,23 @@ C<cpan_deps>.  C<clod deps install> needs them to run at all, before the local
 lib has any.  The recipe adds C<App::cpanoutdated> there, for C<clod deps
 outdated>.
 
+=head2 THE AGENT LIB
+
+The agent runs C<perlcritic>, C<perltidy> and the tools of Devel::NYTProf in a
+spoke, and in its hooks.  The policies that C<perlcritic> needs are those that the critic
+profiles of the standards name, and the standards can name a new one at any
+time.  So they go into a second local lib, F<agent-perl5> in the directory of
+the domain, which the bot keeps, rather than into the perl of the host, where
+only a provision could add one.  It is C<agent_lib> in F<clod.conf>, and
+App::Clod puts it first on the C<PERL5LIB> and C<PATH> of every claude run.
+C<clod deps install> fills it in the postrun, with the rest.  See
+L<App::Clod::Deps>.
+
+C<user> owns it, and its group is C<agent_user>, or C<admin_user> without one.
+Its mode is C<2750>, so what the bot installs there takes that group, and
+App::Clod installs with C<umask 0027>.  So the agent may read the tools and
+not change them.
+
 =head2 %required = $recipe->required_recipes(%opts)
 
 C<perl>, which installs what the checkout needs, C<App::cpanoutdated>, the
@@ -369,6 +386,7 @@ sub enrich {
       unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
     $opts{agent_home} = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
     $opts{local_lib}  = "$opts{install_dir}/$opts{domain}/perl5";
+    $opts{agent_lib}  = "$opts{install_dir}/$opts{domain}/agent-perl5";
 
     # App::Clod hashes the bytes of the password that basic authentication sends.
     $opts{dashboard_password_sha256} = Digest::SHA::sha256_hex( Encode::encode( 'UTF-8', delete $opts{dashboard_password} ) );

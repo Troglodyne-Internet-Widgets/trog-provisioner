@@ -147,4 +147,22 @@ foreach my $program (sort keys %runs) {
     is($? >> 8, 0, "[% user %] runs $program") or diag $said;
 }
 
+# The agent lib: the agent loads its policies from it, and cannot change them.
+# THE AGENT LIB in Provisioner::Recipe::clod.
+{
+    my $lib   = '[% agent_lib %]';
+    my $agent = '[% agent_user || admin_user %]';
+    my @st    = stat $lib;
+    is(sprintf('%04o', ($st[2] // 0) & 07777), '2750', 'the agent lib has mode 2750');
+    is(scalar getpwuid($st[4] // -1), '[% user %]', 'and belongs to [% user %]');
+    is(scalar getgrgid($st[5] // -1), $agent, "with the group $agent");
+[% IF agent_user -%]
+    my $env = "env PERL5LIB=$lib/lib/perl5 PATH=$lib/bin:/usr/bin:/bin";
+    my $said = qx{runuser -u '[% agent_user %]' -- $env perl -MPerl::Critic::Policy::Variables::RequireNoAutovivification -e 1 2>&1};
+    is($? >> 8, 0, '[% agent_user %] loads a policy of the standards from it') or diag $said;
+    system('runuser', '-u', '[% agent_user %]', '--', 'test', '-w', "$lib/lib/perl5");
+    isnt($? >> 8, 0, 'and cannot change it');
+[% END -%]
+}
+
 done_testing();

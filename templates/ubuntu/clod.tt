@@ -16,6 +16,9 @@ HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directo
 # www-data, so the socket takes that group, and nginx can connect to it.
 install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/clod-state'
 install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% local_lib %]'
+[%# The tools of the agent, which it may read and not change.  THE AGENT LIB
+    in Provisioner::Recipe::clod. -%]
+install -d -o '[% user %]' -g '[% agent_user || admin_user %]' -m 2750 '[% agent_lib %]'
 [% IF agent_user -%]
 [%# clod-share.sh shares the workspace with the agent account, in the postrun,
     before the restart below.  The script says why it waits. -%]
