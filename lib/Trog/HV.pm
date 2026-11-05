@@ -463,7 +463,7 @@ sub setting {
 
     my %found = Trog::Secrets->lookup(
         Trog::Config->path('secrets.kdbx'),
-        Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
+        Trog::Credentials->store_password(),
         $name => $value,
     );
 

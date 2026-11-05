@@ -365,7 +365,7 @@ sub seal_key {
     # and so deletes every other secret in the store.
     Trog::Secrets->replace(
         $store,
-        Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
+        Trog::Credentials->store_password(),
         $class->ref_for_key($domain) => $private,
     );
 
@@ -412,7 +412,7 @@ sub key_path {
     my %got = eval {
         Trog::Secrets->lookup(
             $store,
-            Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
+            Trog::Credentials->store_password(),
             key => $class->ref_for_key($domain),
         );
     };

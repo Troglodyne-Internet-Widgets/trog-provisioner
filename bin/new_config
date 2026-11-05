@@ -730,7 +730,7 @@ sub handle_domain {
     # not print it into the setup log.
     my @secret_values;
     if (%to_replace) {
-        $keepass = Trog::Credentials->prompt( 'Enter password:', 'keepass' );
+        $keepass = Trog::Credentials->store_password();
         my %secrets = Trog::Secrets->lookup( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         @secret_values = values %secrets;
@@ -1547,7 +1547,7 @@ sub write_guest_secrets {
     my %generator = map { $wanted->{$_}{ref} => $wanted->{$_}{generate} } grep { $wanted->{$_}{ref} } keys %$wanted;
 
     # Only now, so that a run with nothing to place asks for no password.
-    $keepass //= Trog::Credentials->prompt( 'Enter password:', 'keepass' ) if %generator;
+    $keepass //= Trog::Credentials->store_password() if %generator;
     my %held = Trog::Secrets->remember( $store, $keepass, %generator );
 
     my %manifest = map {

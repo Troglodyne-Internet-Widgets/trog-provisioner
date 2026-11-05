@@ -122,6 +122,19 @@ subtest 'who actually asks' => sub {
     is( $asked, 2, 'without asking first' );
 };
 
+# A person who has just typed a secret for the store must not read the next
+# question as a second ask for that secret.
+subtest 'the password of the store is asked for as the password of the store' => sub {
+    Trog::Credentials->forget();
+    my @asked;
+    my $mock = Test::MockModule->new('IO::Prompter');
+    $mock->redefine( prompt => sub { push @asked, $_[0]; return 'typed' } );
+
+    is( Trog::Credentials->store_password(), 'typed', 'it returns what was typed' );
+    like( $asked[0], qr/secret[ ]store.*KeePass[ ]database/, 'and the question names the store' );
+    is( Trog::Credentials->get('keepass'), 'typed', 'and keeps it as the keepass password, so nothing asks again' );
+};
+
 subtest 'asking at the terminal, for a caller whose standard input is spoken for' => sub {
     Trog::Credentials->forget();
 

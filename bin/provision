@@ -322,7 +322,7 @@ sub place_guest_secrets {
     }
 
     my %needed = map { $_ => $wanted->{$_}{ref} } grep { $wanted->{$_}{ref} } keys %$wanted;
-    my %values = %needed ? Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed ) : ();
+    my %values = %needed ? Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->store_password(), %needed ) : ();
     foreach my $path ( sort grep { $wanted->{$_}{issue} } keys %$wanted ) {
         $values{$path} = issue_secret( $domain, $path, $wanted->{$path}{issue} );
     }
