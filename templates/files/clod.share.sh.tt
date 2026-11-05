@@ -11,3 +11,8 @@ install -d -o '[% user %]' -g '[% agent_user %]' -m 2770 "$workspace"
 chgrp -R '[% agent_user %]' "$workspace"
 chmod -R g+rwX "$workspace"
 find "$workspace" -type d -exec chmod g+s {} +
+
+# The Claude token of the agent, which only the agent reads.  See THE AGENT
+# ACCOUNT in Provisioner::Recipe::clod.
+install -o '[% agent_user %]' -g '[% agent_user %]' -m 0400 '[% install_dir %]/[% domain %]/clod-agent.token' '[% agent_home %]/.claude-token'
+rm -f '[% install_dir %]/[% domain %]/clod-agent.token'

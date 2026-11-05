@@ -16,6 +16,7 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 use File::Which();
 use IPC::Run3();
 use Cpanel::JSON::XS();
@@ -226,11 +227,39 @@ subtest 'claude runs as the agent account' => sub {
         is_deeply( $grants->{Defaults}, [ { Binding => [ { username => 'test-agent' } ], Options => [ { umask => '0007' } ] } ], 'with the umask 0007' ) or diag explain $grants;
     }
 
+    # sudo logs each variable that it passes, with its value, so the token
+    # goes to the agent as a file, and claude reads it through clod-claude.sh.
+    is( $conf->{claude}{bin}, '/bogus/bot.test.test/clod-claude.sh', 'and through the wrapper that brings the token of the agent' );
+    unlike( File::Slurper::read_text("$dir/clod.env"), qr/CLAUDE_CODE_OAUTH_TOKEN/, 'so the worker has no Claude token' );
+    is( File::Slurper::read_text("$dir/clod-agent.token"), 'sk-x', 'the token file holds the token alone' );
+    my $handed = "install -o 'test-agent' -g 'test-agent' -m 0400 '/bogus/bot.test.test/clod-agent.token' '$got{agent_home}/.claude-token'";
+    ok( ( grep { $_ eq $handed } split m/\n/, $share ), 'and the postrun gives it to the agent alone' ) or diag $share;
+
+    # The wrapper, with a home of its own and a claude that says what it got.
+    my $home = tempdir( CLEANUP => 1 );
+    my $bin  = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$bin/claude", qq{#!/bin/sh\nprintf '%s|%s\\n' "\$CLAUDE_CODE_OAUTH_TOKEN" "\$*"\n} );
+    chmod 0755, "$bin/claude";
+    my $wrapper = File::Slurper::read_text("$dir/clod-claude.sh") =~ s/\Q$got{agent_home}\E/$home/gr;
+    File::Slurper::Temp::write_text( "$home/wrapper", $wrapper );
+    my $run = sub {
+        local $ENV{PATH} = "$bin:/usr/bin:/bin";
+        delete local $ENV{CLAUDE_CODE_OAUTH_TOKEN};
+        IPC::Run3::run3( [ 'sh', "$home/wrapper", qw{-p --verbose} ], \undef, \my $out, \my $err );
+        return ( $? >> 8, $out );
+    };
+    my ( $failed, undef ) = $run->();
+    isnt( $failed, 0, 'without the token file, the wrapper runs no claude' );
+    File::Slurper::Temp::write_text( "$home/.claude-token", 'sk-agent' );
+    my ( $status, $out ) = $run->();
+    is_deeply( [ $status, $out ], [ 0, "sk-agent|-p --verbose\n" ], 'with it, claude gets the token of the agent, and every argument' );
+
     my $plain = tempdir( CLEANUP => 1 );
     my $none  = recipe($plain);
     my %bare  = $none->validated( $none->takes( %GLOBALS, user => 'svc' ), %BASE );
     $none->generate_files( $plain, %bare );
     ok( !exists +( do "$plain/clod.conf" )->{claude}{run_as}, 'a domain that names no agent runs claude as the worker' );
+    like( File::Slurper::read_text("$plain/clod.env"), qr/^CLAUDE_CODE_OAUTH_TOKEN=sk-x$/m, 'with the Claude token in the environment of the worker' );
   SKIP: {
         skip 'no cvtsudoers here', 1 unless $cvtsudoers;
         my $grants = grants("$plain/clod.sudoers");
