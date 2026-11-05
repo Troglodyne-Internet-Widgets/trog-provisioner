@@ -64,6 +64,23 @@ my %SPLIT = (
     443 => { ssl          => 1, proxy_uri => 'http://127.0.0.1:8008' },
 );
 
+# nginx runs as www-data, which is neither the owner nor the group of the
+# domain directory, so it reaches nothing under it without o+x on it.
+subtest 'www-data can pass through the domain directory to a socket or to static files' => sub {
+    my $chmods = sub {
+        my (%opts) = @_;
+        my $r = Provisioner::Cookbook->load( 'nginxproxy', distro => 'ubuntu' )->new(
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => tempdir( CLEANUP => 1 ),
+            distro        => 'ubuntu',
+        );
+        return [ grep { m/\Achmod[ ]o[+]x[ ]'\/opt\/domains\/proxy[.]test[.]test'\z/ } split m/\n/, $r->render( %BASE, %opts ) ];
+    };
+    is( scalar @{ $chmods->( proxy_uri => 'run/app.sock' ) },                               1, 'a socket upstream, which is under the domain directory' );
+    is( scalar @{ $chmods->( proxy_uri => 'http://127.0.0.1:8008', static_dir => 'www' ) }, 1, 'static files under it' );
+    is( scalar @{ $chmods->( proxy_uri => 'http://127.0.0.1:8008' ) },                      0, 'and nothing for a proxy to a port, which needs no passage' );
+};
+
 subtest 'the ipv6 of the recipe covers every vhost' => sub {
     is_deeply( listens( proxy_uri => 'http://127.0.0.1:8008' ),            [qw{443 80 [::]:443 [::]:80}], 'on by default' );
     is_deeply( listens( proxy_uri => 'http://127.0.0.1:8008', ipv6 => 0 ), [qw{443 80}],                  'off for every vhost when it is off' );

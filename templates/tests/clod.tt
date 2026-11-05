@@ -30,6 +30,11 @@ is($code, '401', 'the application answers on it, and asks who is there');
 my $vhost = do { local (@ARGV, $/) = '/etc/nginx/sites-enabled/[% domain %].conf'; <> } // '';
 like($vhost, qr{\Qserver unix:$sock\E}, 'and nginx has an upstream for it') or diag $vhost;
 
+# The request above is root at the socket.  This one goes through nginx, which
+# runs as www-data and must pass through the domain directory to the socket.
+my $proxied = `curl -sk -o /dev/null -w '%{http_code}' --resolve '[% domain %]:443:127.0.0.1' 'https://[% domain %]/' 2>&1`;
+is($proxied, '401', 'and nginx reaches it, so a request to the page gets the 401 and not a 502');
+
 # The service user reads its secrets and cannot change them.
 foreach my $file ("$home/clod.conf", "$home/clod.env") {
     my @st = stat $file;

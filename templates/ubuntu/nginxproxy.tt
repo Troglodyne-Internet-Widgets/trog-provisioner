@@ -23,10 +23,11 @@ find '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]' -type d -ex
 [% END -%]
 [%# The data recipe leaves the domain directory 0750 user:admin_user, and
     www-data is not that user or in that group.  Without o+x, every request for
-    a static file fails stat() and falls through try_files to the proxy.  o+x
-    lets www-data descend, but not list or read.  The makefile builds targets in
+    a static file fails stat() and falls through try_files to the proxy, and
+    every request to a socket upstream fails connect() with a 502.  o+x lets
+    www-data descend, but not list or read.  The makefile builds targets in
     lexical order, so this runs after the data target and its chmod. -%]
-[% IF serves_static %]
+[% IF www_data_enters %]
 chmod o+x '[% install_dir %]/[% domain %]'
 [% END -%]
 [%# Also every directory between the domain root and a static_dir.  If the
