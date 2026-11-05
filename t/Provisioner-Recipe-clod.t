@@ -31,11 +31,11 @@ use Provisioner::Cookbook();
 
 my %GLOBALS = ( domain => 'bot.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', admin_user => 'bogus' );
 my %BASE    = (
-    bot                       => 'test-bot',
-    github_token              => 'ghp_x',
-    claude_oauth_token        => 'sk-x',
-    spokes                    => [ 'test-org/one', 'test-org/two' ],
-    dashboard_password_sha256 => 'a' x 64,
+    bot                => 'test-bot',
+    github_token       => 'ghp_x',
+    claude_oauth_token => 'sk-x',
+    spokes             => [ 'test-org/one', 'test-org/two' ],
+    dashboard_password => 'not-the-password',
 );
 
 sub recipe {
@@ -67,11 +67,23 @@ subtest 'clod.conf is perl that App::Clod reads' => sub {
     my $conf = do "$dir/clod.conf";
     my $why  = $@ || File::Slurper::read_text("$dir/clod.conf");
     ok( ref $conf eq 'HASH', 'it evaluates to a hash' ) or diag $why;
-    is_deeply( $conf->{spokes},                                         $BASE{spokes},                                    'with every spoke' );
-    is_deeply( [ @{$conf}{qw{authorized_users owners poll_interval}} ], [ ['someone'], ['test-org'], 120 ],               'and who it obeys, what is ours, and the interval' );
-    is_deeply( $conf->{auth},                                           { user => 'admin', password_sha256 => 'a' x 64 }, 'and basic authentication for the page' );
+    is_deeply( $conf->{spokes},                                         $BASE{spokes},                      'with every spoke' );
+    is_deeply( [ @{$conf}{qw{authorized_users owners poll_interval}} ], [ ['someone'], ['test-org'], 120 ], 'and who it obeys, what is ours, and the interval' );
+
+    # The hash is what printf %s not-the-password | sha256sum prints.
+    is_deeply( $conf->{auth}, { user => 'admin', password_sha256 => '77210af2f1758a49f5d167d60dd8404361f27d652d269625cc88309f2f0080b1' }, 'and basic authentication for the page, with the SHA-256 of the password' );
     is( $conf->{minion}, 'sqlite:/bogus/bot.test.test/clod-state/minion.db', 'and the database where the salvage puts it back' );
-    unlike( File::Slurper::read_text("$dir/clod.conf"), qr/ghp_x|sk-x/, 'and no token, which goes in clod.env' );
+    unlike( File::Slurper::read_text("$dir/clod.conf"), qr/ghp_x|sk-x|not-the-password/, 'and no token, which goes in clod.env, and not the password itself' );
+};
+
+# App::Clod hashes the bytes that basic authentication sends, which a browser
+# sends as UTF-8.  The hash is what printf %s on that password gives sha256sum.
+subtest 'a password that is not ASCII is hashed as its UTF-8 bytes' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $r   = recipe($dir);
+    $r->generate_files( $dir, $r->validated( $r->takes(%GLOBALS), %BASE, dashboard_password => "p\N{LATIN SMALL LETTER A WITH DIAERESIS}ssw\N{LATIN SMALL LETTER O WITH DIAERESIS}rd" ) );
+    my $conf = do "$dir/clod.conf";
+    is( $conf->{auth}{password_sha256}, '46970bef70aced8123f0d5d094717e2a5cd412041e03b26376049fe65b2834a4', 'the hash is that of the UTF-8 bytes' ) or diag $@;
 };
 
 # The prompt is free text, so it holds whatever could end a perl string or

@@ -11,6 +11,8 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use B();
+use Digest::SHA();
+use Encode();
 use Mojo::JSON();
 use Text::Xslate();
 
@@ -57,7 +59,7 @@ our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/App-Clod.git
 
             # HTTP basic authentication for the health page.  The hash is the
             # output of: printf %s 'the password' | sha256sum
-            dashboard_password_sha256: "secret:clod/dashboard/password"
+            dashboard_password: "secret:clod/dashboard/password"
 
             # Optional.
             dashboard_user: "admin"
@@ -210,7 +212,7 @@ my $RULE = q{^[A-Za-z][A-Za-z0-9_]*(?:[(][^\n\r'"\\\\]+[)])?\z};
 sub args {
     return (
         type     => 'object',
-        required => [qw{bot github_token claude_oauth_token dashboard_password_sha256}],
+        required => [qw{bot github_token claude_oauth_token dashboard_password}],
         anyOf    => [ { required => ['spokes'] }, { required => ['spoke_orgs'] } ],
 
         # App::Clod makes a repository in an org of spoke_orgs, and dies without one.
@@ -245,8 +247,8 @@ sub args {
             authorized_users => { type => 'array', default => [], items => {%NAME}, description => 'The logins whose assignments, review requests and mentions the bot acts on.  The bot ignores everyone else.' },
             owners           => { type => 'array', default => [], items => {%NAME}, description => 'The users and organizations whose repositories are ours.  A fix that belongs anywhere else goes back to a person.' },
 
-            dashboard_user            => { %NAME, default => 'admin', description => 'The user name of HTTP basic authentication for the health page.' },
-            dashboard_password_sha256 => { type => 'string', 'x-secret' => 1, pattern => '^[0-9a-f]{64}$', description => q{The SHA-256 of the password of the health page, in lowercase hex: printf %s 'the password' | sha256sum} },
+            dashboard_user     => { %NAME, default => 'admin', description => 'The user name of HTTP basic authentication for the health page.' },
+            dashboard_password => { type => 'string', 'x-secret' => 1, minLength => 1, description => 'The password of the health page.  clod.conf gets only its SHA-256.' },
 
             workers       => { type => 'integer', default => 2,  minimum     => 1, description => 'How many jobs the worker runs at once.  Each job can be a claude run.' },
             poll_interval => { type => 'integer', minimum => 60, description => 'The least number of seconds between two reads of the inbox.  Unset is the default of App::Clod.' },
@@ -302,6 +304,10 @@ sub required_recipes {
 Adds C<agent_home>, the home that L<Provisioner::Recipe::claude> makes for
 C<agent_user>, when the domain names one.
 
+Replaces C<dashboard_password> with C<dashboard_password_sha256>, the SHA-256 of
+its C<UTF-8> bytes in lowercase hex, which is what F<clod.conf> holds.  So the
+password is a secret of the store like every other, and it reaches no template.
+
 Dies when C<user> is not a plain account name.  It goes into a sudoers line
 and into the name of F</etc/sudoers.d/clod-E<lt>userE<gt>>, and sudo skips a
 file whose name has a dot in it.  C<user> is a global, which the schema of a
@@ -314,6 +320,9 @@ sub enrich {
     die "clod: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
       unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
     $opts{agent_home} = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
+
+    # App::Clod hashes the bytes of the password that basic authentication sends.
+    $opts{dashboard_password_sha256} = Digest::SHA::sha256_hex( Encode::encode( 'UTF-8', delete $opts{dashboard_password} ) );
     return %opts;
 }
 

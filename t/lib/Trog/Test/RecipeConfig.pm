@@ -141,11 +141,11 @@ sub required_config {
             github_token       => 'ghp_fakefakefake',
         },
         clod => {
-            bot                       => 'test-bot',
-            github_token              => 'ghp_fakefakefake',
-            claude_oauth_token        => 'sk-ant-fake',
-            spokes                    => ['test-org/app'],
-            dashboard_password_sha256 => 'a' x 64,
+            bot                => 'test-bot',
+            github_token       => 'ghp_fakefakefake',
+            claude_oauth_token => 'sk-ant-fake',
+            spokes             => ['test-org/app'],
+            dashboard_password => 'not-the-password',
         },
         backupdestination => {
             base_dir    => '/opt/backups',
