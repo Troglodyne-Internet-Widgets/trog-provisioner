@@ -124,14 +124,11 @@ subtest 'claude gets --add-dir for every clone, on a guest that runs claude' => 
     unlike( fresh()->render( %COMMON, modules => [qw{admincode}] ), qr/bashrc/, 'and its .bashrc is left alone' );
 };
 
-# The fragment installs the file that the subtest above runs, and has the
-# .bashrc of the admin source it once.
-subtest 'the .bashrc of the admin sources the function once' => sub {
+# The fragment hands the file that the subtest above runs to bashrc_d, which
+# t/bashrc_d.t tests.
+subtest 'the admin gets the function in ~/.bashrc.d' => sub {
     my $with = fresh()->render( %COMMON, modules => [qw{admincode claude}] );
-    my $file = '/opt/domains/code.test.test/admincode.claude.bash';
-    my $rc   = '/home/someadmin/.bashrc';
-    my @want = ( "install -o root -g root -m 0644 admincode.claude.bash $file", "grep -qxF '. $file' $rc || echo '. $file' >> $rc" );
-    is_deeply( [ grep { index( $with, "$_\n" ) < 0 } @want ], [], 'the function is installed in the directory of the domain, and the .bashrc sources it unless it does already' ) or diag $with;
+    ok( index( $with, "/root/bin/bashrc_d someadmin 50-admincode-code.test.test admincode.claude.bash\n" ) >= 0, 'one file per domain, named for it' ) or diag $with;
 };
 
 subtest 'the extra packages install at first boot, with the rest' => sub {

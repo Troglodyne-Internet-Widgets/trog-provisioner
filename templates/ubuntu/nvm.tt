@@ -1,34 +1,11 @@
-# A shell profile for nvm to install itself into.
-#
-# The installer appends its loader to one of ~/.bashrc, ~/.bash_profile,
-# ~/.zprofile, ~/.zshrc or ~/.profile.  If it finds none, it says
-#   Profile not found. Tried ~/.bashrc ...
-# and continues without a loader.  useradd makes the home of a service user
-# with no skeleton, so that home has no .bashrc.
-@NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
-test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
-test -f "$$NVM_HOME/.bashrc" || { touch "$$NVM_HOME/.bashrc"; chown '[% user %]' "$$NVM_HOME/.bashrc"; }
-
 # Install nvm for [% user %] with the official install script.  It is safe to run again.
+# PROFILE=/dev/null keeps it out of every profile, because bashrc_d loads nvm.
 su - [% user %] -s /bin/bash -c \
-    "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/[% nvm_version %]/install.sh | bash"
+    "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/[% nvm_version %]/install.sh | PROFILE=/dev/null bash"
 
 # Install the latest Node.js and make it the default alias
 su - [% user %] -s /bin/bash -c \
     ". ~/.nvm/nvm.sh && nvm install node && nvm alias default node"
 
-# These lines go in the .bashrc in the home directory that passwd gives the
-# user.  For a service user, that is the domain directory.  For the admin user,
-# which is the default, it is under /home.
-#
-# This target also writes the nvm loader, and does not rely on the installer
-# for it.  The grep keeps out a second copy if the installer wrote one.
-@NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
-test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
-grep -qF 'NVM_DIR' "$$NVM_HOME/.bashrc" 2>/dev/null \
-    || printf '%s\n' 'export NVM_DIR="$$HOME/.nvm"' '[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"' >> "$$NVM_HOME/.bashrc"; \
-grep -qF 'nvm use node &>/dev/null' "$$NVM_HOME/.bashrc" 2>/dev/null \
-    || echo 'nvm use node &>/dev/null' >> "$$NVM_HOME/.bashrc"; \
-grep -qF 'export NODE_PATH=' "$$NVM_HOME/.bashrc" 2>/dev/null \
-    || echo '[ -n "$$NVM_BIN" ] && export NODE_PATH="$${NVM_BIN%/bin}/lib/node_modules"; /bin/true' >> "$$NVM_HOME/.bashrc"; \
-chown '[% user %]' "$$NVM_HOME/.bashrc"
+# The loader, nvm use node and NODE_PATH, in ~/.bashrc.d of the user.
+[% script_dir %]/bashrc_d [% user %] 20-nvm nvm.bashrc

@@ -59,8 +59,8 @@ agent can read and write it.  That entry does not load the skills in the
 F<.claude/skills> of the clone.  Claude Code loads those only for a directory
 that the session starts with C<--add-dir>, or that C</add-dir> adds during it.
 
-So the recipe also installs F<admincode.claude.bash> in the directory of the
-domain, and sources it from the F<~/.bashrc> of the admin.  It defines a
+So the recipe also gives the admin F<~/.bashrc.d/50-admincode-E<lt>domainE<gt>>,
+through F<scripts/bashrc_d>.  It defines a
 C<claude> function that passes C<--add-dir> for each clone in C<basedir>, which
 it lists each time it runs, so a later clone needs no provision.  If several
 domains on one machine run this recipe, the function adds the clones of each.
