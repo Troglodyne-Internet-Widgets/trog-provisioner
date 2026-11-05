@@ -190,7 +190,10 @@ in the C<upstreams> hash, name to socket path.
 
 =item *
 
-C<serves_static> is 1 if any vhost has a static_dir, and 0 if none has.
+C<www_data_enters> is 1 if any vhost has a static_dir or a socket upstream, and
+0 if none has.  Either one is under the domain directory, so nginx, as
+C<www-data>, must pass through that directory to reach it.  The directory of a
+socket must let C<www-data> in itself, as F<run> of clod does with its group.
 
 =item *
 
@@ -271,8 +274,8 @@ sub enrich {
                 $traverse{$path} = 1;
             }
         }
-        $opts{serves_static} = $serves_static ? 1 : 0;
-        $opts{traverse_dirs} = [ sort keys %traverse ];
+        $opts{www_data_enters} = $serves_static || %upstreams ? 1 : 0;
+        $opts{traverse_dirs}   = [ sort keys %traverse ];
     }
 
     return %opts;
