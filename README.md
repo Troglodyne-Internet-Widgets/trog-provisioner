@@ -194,6 +194,14 @@ They describe an *installation*, not this software.  They used to sit in the che
 
 `TROG_PROVISIONER_CONFIG` points somewhere else -- another installation, or a temporary directory in a test with no business reading the real one.  Every command also takes `--recipes` and `--hvconf` individually.
 
+### Tab completion of a domain
+
+`bin/domains` prints each domain that the configuration names.  The bash completion in `completions/trog-provisioner.bash` uses it to complete the domain of `bin/new_config`, `bin/provision` and `bin/destroy`.  To load it, add this line to `~/.bashrc`:
+
+    source /path/to/trog-provisioner/completions/trog-provisioner.bash
+
+The completion runs the `bin/domains` of the checkout that holds the command you type.  It reads the same configuration as that command: `TROG_PROVISIONER_CONFIG`, or the `--recipes FILE` already on the line.
+
 ### Spinning one up from the recipes
 
 `bin/new_guest` writes a domain configuration from a list of recipes, so a

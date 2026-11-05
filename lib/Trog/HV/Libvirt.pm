@@ -2828,7 +2828,7 @@ sub note_log_destination {
     my ($self) = @_;
 
     my $conf    = eval { Provisioner::Cookbook->configuration() } // {};
-    my @domains = grep { !m/\A_/ } sort keys %$conf;
+    my @domains = Provisioner::Cookbook->domains($conf);
 
     my ( $shipping, %collectors );
     foreach my $domain (@domains) {

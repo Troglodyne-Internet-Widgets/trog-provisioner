@@ -618,7 +618,7 @@ sub sweep_orphans {
 
     # Ask the hypervisor, not libvirt, because a cloud has no libvirt.  It
     # answers from Nova.
-    my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
+    my %spoken_for = map { $_ => 1 } Provisioner::Cookbook->domains();
     foreach my $hv (@hvs) {
         $spoken_for{$_} = 1 for $hv->guest_names;
     }

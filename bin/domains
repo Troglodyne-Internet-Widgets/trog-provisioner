@@ -1,0 +1,69 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::Domains;
+
+#ABSTRACT: List the domains that the configuration names.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+use Provisioner::Cookbook();
+
+=head1 NAME
+
+domains - list the domains that the configuration names
+
+=head1 SYNOPSIS
+
+    bin/domains
+    bin/domains --recipes /path/to/recipes.yaml
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--recipes> FILE
+
+The recipe configuration to read.  The default is F<recipes.yaml> in the
+directory of L<Trog::Config>, with the files of F<recipes.d> beside it.
+
+=back
+
+=head1 DESCRIPTION
+
+Prints each domain that the configuration names, one on each line, sorted.
+These are the names that F<bin/new_config>, F<bin/provision> and
+F<bin/destroy> take.  The bash completion in
+F<completions/trog-provisioner.bash> runs this command to complete a domain.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ( $recipes, $help );
+    GetOptionsFromArray(
+        \@args,
+        'recipes=s' => \$recipes,
+        'help'      => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'domains takes no arguments' ) if @args;
+
+    my $conf = Provisioner::Cookbook->configuration($recipes);
+    print map { "$_\n" } Provisioner::Cookbook->domains($conf);
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

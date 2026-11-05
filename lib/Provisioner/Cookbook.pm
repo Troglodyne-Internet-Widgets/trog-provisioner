@@ -376,7 +376,7 @@ sub distros_in_use {
     my $conf = eval { $class->configuration() } // {};
 
     my %named;
-    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+    foreach my $domain ( $class->domains($conf) ) {
         my $global = eval { $class->global_config( $domain, $conf ) } // {};
         my $name   = $global->{distro}                                // 'ubuntu';
         $named{$name}{ $global->{release} // $class->load($name)->release } = 1;
@@ -403,7 +403,7 @@ sub globals_in_use {
 
     my $conf = eval { $class->configuration() } // {};
     my %named;
-    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+    foreach my $domain ( $class->domains($conf) ) {
         my $value = ( eval { $class->global_config( $domain, $conf ) } // {} )->{$key};
         $named{$value} = 1 if defined $value && length $value;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- what somebody wrote, whatever it is
     }
@@ -1311,6 +1311,21 @@ sub configures {
     return exists $conf->{$name} ? 1 : 0;
 }
 
+=head2 @domains = domains($conf)
+
+Returns each domain of the configuration, sorted: each name that C<configures>
+accepts.  A section, such as C<_base> or C<_shared>, is not in the list.
+C<$conf> is as for C<host_of>.
+
+=cut
+
+sub domains {
+    my ( $class, $conf ) = @_;
+    $conf //= $class->configuration();
+    my @domains = sort grep { $class->configures( $_, $conf ) } keys %{$conf};
+    return @domains;
+}
+
 =head2 helo_name_of($domain, $conf)
 
 Returns the name that the machine of C<$domain> announces when it sends mail:
@@ -1375,7 +1390,7 @@ my sub global_properties ($class) {
 # is a walk over schemas, and upstream_order needs it only for a cycle.
 my sub references ( $class, $domain, $conf ) {
 
-    my %configured = map { $_ => 1 } grep { !m/\A_/ } keys %$conf;
+    my %configured = map { $_ => 1 } $class->domains($conf);
     my $host       = $class->host_of( $domain, $conf ) // q{};
 
     my @named;
@@ -1908,7 +1923,7 @@ sub alias_map {
     $conf //= $class->configuration();
 
     my %aliases;
-    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+    foreach my $domain ( $class->domains($conf) ) {
         my $said = $class->global_config( $domain, $conf )->{aliases} or next;
         $aliases{$domain} = Provisioner::Utils::coerce_arrayref($said);
     }
