@@ -39,7 +39,14 @@ The recipe also installs F<.claude/settings.json> in the directory of the
 domain under C<install_dir>.  The settings enable the perl-slop and
 C<simple-english> plugins on every guest.  They enable more plugins when the
 domain runs the C<perl> or C<perllsp> recipe.  Each enabled plugin comes with
-the marketplace that publishes it.
+the marketplace that publishes it.  C<plugins> is the list.
+
+The recipe also installs each plugin, in each home that it makes.  The settings
+alone are not enough: a session clones the marketplaces that they declare, but
+only an interactive one offers to install the plugins, and a C<claude -p> run
+has nobody to accept.  C<claude plugin install> adds the marketplace of the
+plugin and installs it, and needs no login.  Run again, it says that the plugin
+is already installed, and exits 0.
 
 The recipe salvages F<.claude.json> from that directory on the old guest, and
 the memories that the agent saved, but not its transcripts.  See
@@ -228,11 +235,36 @@ sub restricted_home {
     return "$opts{install_dir}/$opts{domain}/agents/$opts{restricted_user}";
 }
 
+=head2 @plugins = $recipe->plugins(%opts)
+
+The plugins that a guest with the recipes in C<modules> gets.  Each is a hash:
+C<name>, the plugin; C<marketplace>, the name of the marketplace that publishes
+it; and C<repo>, the GitHub repository of that marketplace.  Every guest gets
+perl-slop and C<simple-english>.  A guest with C<perllsp> also gets
+C<perlnavigator>, and a guest with C<perl> gets C<perl-development>.
+
+=cut
+
+sub plugins {
+    my ( $self, %opts ) = @_;
+    my %runs = map { $_ => 1 } @{ $opts{modules} // [] };
+
+    return (
+        ( $runs{perllsp} ? { name => 'perlnavigator',    marketplace => 'claude-code-perlnavigator', repo => 'yuji-hatakeyama/claude-code-perlnavigator' } : () ),
+        ( $runs{perl}    ? { name => 'perl-development', marketplace => 'perigrin-marketplace',      repo => 'perigrin/claude-plugins-marketplace' }       : () ),
+        { name => 'perl-slop',      marketplace => 'troglodyne-marketplace', repo => 'Troglodyne-Internet-Widgets/claude-plugins-marketplace' },
+        { name => 'simple-english', marketplace => 'simple-english',         repo => 'AminBlg/SimpleEnglish' },
+    );
+}
+
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<gh_config_dir>, the directory of C<bot_config_dir>, when the domain
 names a bot.  Dies when it names only some of C<github_user>, C<github_token>
 and C<git_email>.
+
+Adds C<plugins>, the list that L</plugins> returns, which the settings and the
+fragment both read, so that a plugin that is enabled is also installed.
 
 Adds C<restricted_home> when the domain names a C<restricted_user>.  Dies when
 that is the service C<user> or the admin, because the point of the account is
@@ -248,6 +280,7 @@ sub enrich {
       if $given && $given != 3;
 
     $opts{gh_config_dir} = $self->bot_config_dir(%opts) if $given;
+    $opts{plugins}       = [ $self->plugins(%opts) ];
 
     if ( defined $opts{restricted_user} ) {
         my %taken = map { $_ => 1 } grep { defined } @opts{qw{user admin_user}};
