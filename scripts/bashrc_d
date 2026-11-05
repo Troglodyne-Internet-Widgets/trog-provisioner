@@ -1,0 +1,149 @@
+#!/usr/bin/perl
+
+package Trog::BashrcD;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use File::Temp ();
+use List::Util ();
+
+my $USAGE = "usage: bashrc_d USER NAME FILE\n";
+
+=head1 NAME
+
+bashrc_d - give a user a piece of shell setup, as a file of its own in
+F<~/.bashrc.d>
+
+=head1 SYNOPSIS
+
+    bashrc_d USER NAME FILE
+
+Installs C<FILE> as F<~/.bashrc.d/NAME> in the home that passwd gives
+C<USER>, owned by C<USER>, mode 0644.  A file of that name is replaced.
+
+Bash reads no directory of its own, so the F<~/.bashrc> of the user gets
+C<$LOOP>, a line that sources each file in F<~/.bashrc.d>, in the order of
+their names.  The line goes at the end, once, so it runs after the return of a
+skeleton F<.bashrc> in a shell that is not interactive.  If the user has no
+F<.bashrc>, as a service user made with no skeleton has not, the user gets one.
+
+So a recipe that sets something up for the shells of a user installs one file
+with this, and edits no F<.bashrc>.  A number at the front of C<NAME>, such as
+C<20-nvm>, puts it in order.  C<NAME> is letters, digits, C<_>, C<.> and C<->,
+and does not start with a dot.
+
+=head1 FUNCTIONS
+
+=head2 $LOOP
+
+The line that F<~/.bashrc> gets.  C<unset rc> leaves the status 0 when the
+last file is not a regular file.
+
+=cut
+
+our $LOOP = 'for rc in ~/.bashrc.d/*; do [ -f "$rc" ] && . "$rc"; done; unset rc';
+
+=head2 $exit = main(@args)
+
+Runs the command in C<@args>, and returns the exit status.  Dies with the
+reason on any failure.
+
+=cut
+
+sub main {
+    my ( $user, $name, $file ) = @_;
+
+    die $USAGE if List::Util::any { !defined || $_ eq q{} } $user, $name, $file;
+    die "NAME must be letters, digits, _, . and -, and must not start with a dot: $name\n"
+      unless $name =~ m/\A[[:alnum:]_-][[:alnum:]_.-]*\z/;
+
+    # Read first, so that a FILE that is not there changes nothing.
+    open my $in, '<', $file or die "$file is not a file that can be read: $!\n";
+    my $text = do { local $/; <$in> };
+    close $in or die "Cannot close $file: $!\n";
+
+    my ( $uid, $gid, $home ) = account($user);
+    my $dir = "$home/.bashrc.d";
+
+    add_loop( "$home/.bashrc", $uid, $gid );
+    if ( !-d $dir ) {
+        mkdir $dir, 0755 or die "Cannot make $dir: $!\n";
+        chown $uid, $gid, $dir or die "Cannot chown $dir: $!\n";
+    }
+    install( $text, "$dir/$name", $uid, $gid );
+
+    return 0;
+}
+
+=head2 ($uid, $gid, $home) = account($user)
+
+What passwd says of C<$user>.  Dies if the user does not exist.
+
+=cut
+
+sub account {
+    my ($user) = @_;
+    my ( undef, undef, $uid, $gid, undef, undef, undef, $home ) = getpwnam $user;
+    die "No user $user.\n" unless defined $uid;
+    return ( $uid, $gid, $home );
+}
+
+=head2 add_loop($bashrc, $uid, $gid)
+
+Appends C<$LOOP> to C<$bashrc> unless a line of it is C<$LOOP> already.  Makes
+C<$bashrc>, owned by C<$uid> and C<$gid>, if it does not exist.
+
+=cut
+
+sub add_loop {
+    my ( $bashrc, $uid, $gid ) = @_;
+
+    my $text = q{};
+    if ( -e $bashrc ) {
+        open my $in, '<', $bashrc or die "Cannot read $bashrc: $!\n";
+        $text = do { local $/; <$in> };
+        close $in or die "Cannot close $bashrc: $!\n";
+        return if List::Util::any { $_ eq $LOOP } split m/\n/, $text;
+    }
+
+    my $new = !-e $bashrc;
+    open my $out, '>>', $bashrc or die "Cannot append to $bashrc: $!\n";
+    print {$out} ( $text ne q{} && $text !~ m/\n\z/ ? "\n" : q{} ), "$LOOP\n";
+    close $out or die "Cannot close $bashrc: $!\n";
+    if ($new) {
+        chown $uid, $gid, $bashrc or die "Cannot chown $bashrc: $!\n";
+        chmod 0644, $bashrc or die "Cannot chmod $bashrc: $!\n";
+    }
+
+    return;
+}
+
+=head2 install($text, $path, $uid, $gid)
+
+Writes C<$text> to C<$path> through a temporary file in the same directory, so
+that a shell that starts meanwhile reads the old file or the new one, and never
+half of one.
+
+=cut
+
+sub install {
+    my ( $text, $path, $uid, $gid ) = @_;
+
+    my ($dir) = $path =~ m{\A(.*)/};
+    my $tmp = File::Temp->new( DIR => $dir );
+    print {$tmp} $text or die "Cannot write $tmp: $!\n";
+    close $tmp         or die "Cannot close $tmp: $!\n";
+    chown $uid, $gid, "$tmp" or die "Cannot chown $tmp: $!\n";
+    chmod 0644, "$tmp" or die "Cannot chmod $tmp: $!\n";
+    rename "$tmp", $path or die "Cannot rename $tmp to $path: $!\n";
+
+    # The name is the file now, so the object must not unlink it.
+    $tmp->unlink_on_destroy(0);
+
+    return;
+}
+
+exit main(@ARGV) unless caller;

@@ -12,13 +12,8 @@ ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
 ok(-d "$home/.nvm", 'nvm directory exists');
 
-# The home must also have a profile that loads nvm.  The nvm installer refuses
-# to write its loader when it finds no profile: "Profile not found. Tried
-# ~/.bashrc ...".  useradd makes the home of a service user with no skeleton,
-# so that home has no profile.
-my $bashrc = do { local (@ARGV, $/) = "$home/.bashrc"; <> } // '';
-like($bashrc, qr/NVM_DIR/, "$home/.bashrc loads nvm") or diag $bashrc;
-like($bashrc, qr{nvm\.sh}, 'by sourcing nvm.sh');
+# bashrc_d loads nvm.  The shells below are what show that it works.
+ok(-f "$home/.bashrc.d/20-nvm", "$home/.bashrc.d has the loader of nvm");
 
 # .bashrc returns early in a non-interactive shell, so each command needs -i
 # to get nvm.  Quote the command: `bash -c which node` runs which with no

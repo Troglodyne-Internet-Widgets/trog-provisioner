@@ -27,11 +27,8 @@ rm -f [% install_dir %]/[% domain %]/.repos_for.token
     may read and write. -%]
 [% script_dir %]/queue_postrun_task [% script_dir %]/claude_settings add-repos [% install_dir %]/[% domain %]/[% basedir %] [% install_dir %]/[% domain %]/.claude/settings.json
 [%# The function passes each clone to claude as --add-dir, which loads its
-    skills.  A home with no skeleton has no .bashrc, so the admin gets one,
-    owned by the admin and not by root. -%]
-install -o root -g root -m 0644 admincode.claude.bash [% install_dir %]/[% domain %]/admincode.claude.bash
-test -f /home/[% admin_user %]/.bashrc || install -o [% admin_user %] -g [% admin_user %] -m 0644 /dev/null /home/[% admin_user %]/.bashrc
-grep -qxF '. [% install_dir %]/[% domain %]/admincode.claude.bash' /home/[% admin_user %]/.bashrc || echo '. [% install_dir %]/[% domain %]/admincode.claude.bash' >> /home/[% admin_user %]/.bashrc
+    skills. -%]
+[% script_dir %]/bashrc_d [% admin_user %] 50-admincode-[% domain %] admincode.claude.bash
 [% END -%]
 [% IF modules.grep('^perl$').size() %]
 [%# --notest always, because this smokes the suites of the repositories and not

@@ -27,10 +27,12 @@ use parent qw{Provisioner::Recipe};
 
 Installs L<nvm|https://nvm.sh> (Node Version Manager) for the configured user.
 Then it installs the latest Node.js with C<nvm install node> and makes it the
-default alias.  It appends the nvm loader and C<nvm use node> to the
-C<~/.bashrc> of the user, so node is active in every interactive shell.
+default alias.  It gives the user F<~/.bashrc.d/20-nvm> through
+F<scripts/bashrc_d>, which loads nvm and runs C<nvm use node>, so node is
+active in every interactive shell.  The installer runs with
+C<PROFILE=/dev/null>, so it writes no loader of its own.
 
-The same C<~/.bashrc> exports C<NODE_PATH>.  It points at the global
+The same file exports C<NODE_PATH>.  It points at the global
 C<node_modules> directory of the active node version.  It comes from
 C<NVM_BIN>, so it follows a version switch.  Without it, C<require()> cannot
 find a module installed with C<npm -g>.
@@ -71,6 +73,16 @@ sub args {
             nvm_version => { type => 'string', default => 'v0.40.3' },
         },
     );
+}
+
+=head3 template_files
+
+F<nvm.bashrc>, copied as it is, because it has no variables.
+
+=cut
+
+sub template_files {
+    return ( 'nvm.bashrc' => 'nvm.bashrc' );
 }
 
 sub tests {
