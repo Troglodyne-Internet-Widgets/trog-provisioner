@@ -4,6 +4,7 @@ use warnings;
 use Test::More;
 use JSON::PP ();
 use File::Basename qw{basename dirname};
+use File::Temp ();
 
 my $code = '[% install_dir %]/[% domain %]/[% basedir %]';
 ok(-d $code, 'code directory exists');
@@ -53,8 +54,8 @@ if (-f $repos_cache) {
 [% END -%]
 
 [% IF modules.grep('^claude$').size() %]
-# Each clone is a directory the agent may work in, from wherever its session
-# starts, which is what loads the skills of the repository.
+# Each clone is a directory the agent may read and write, from wherever its
+# session starts.
 {
     my $settings_path = '[% install_dir %]/[% domain %]/.claude/settings.json';
     my $settings = eval { JSON::PP->new->decode(do { local (@ARGV, $/) = $settings_path; <> }) } // {};
@@ -64,6 +65,24 @@ if (-f $repos_cache) {
     my @missing = grep { !$added{$_} } @clones;
     is(scalar @missing, 0, 'every clone is an additional directory of the agent')
         or diag "not in $settings_path: @missing";
+}
+
+# Only --add-dir loads the skills of a clone, so an interactive bash of the
+# admin runs claude, with a claude first on PATH that prints what it got.
+{
+    my $stub = File::Temp::tempdir( CLEANUP => 1 );
+    open( my $fh, '>', "$stub/claude" ) or die "Cannot write $stub/claude: $!";
+    print {$fh} qq{#!/bin/sh\nprintf '%s\\n' "\$@"\n};
+    close($fh) or die "Cannot close $stub/claude: $!";
+    chmod 0755, $stub, "$stub/claude";
+
+    my @got = `sudo -u [% admin_user %] -i bash -ic 'PATH=$stub:\$PATH claude' 2>/dev/null`;
+    chomp @got;
+    my %added = map { $got[$_] eq '--add-dir' ? ( $got[ $_ + 1 ] => 1 ) : () } 0 .. $#got;
+    my @clones  = grep { basename($_) ne '.' && basename($_) ne '..' } map { dirname($_) } glob "$code/*/.git $code/.*/.git";
+    my @missing = grep { !$added{$_} } @clones;
+    is(scalar @missing, 0, 'claude in a shell of the admin adds every clone, which loads its skills')
+        or diag "not added: @missing; claude got: @got";
 }
 [% END -%]
 

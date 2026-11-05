@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util();
+
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::admincode
@@ -46,10 +48,22 @@ API also works.  F<scripts/repos_for> clones each repository as the admin user
 over https.  Then it sets the origin to the ssh URL, so the admin can push.
 
 The purpose is to set up a developer or an agent with all of their repositories
-in one step.  On a guest that also runs L<Provisioner::Recipe::claude>, each
-clone becomes a directory that the agent can work in, and whose skills it
-loads.  That recipe says how.  Supply the global git configuration of the admin through the
+in one step.  Supply the global git configuration of the admin through the
 C<skel> of L<Provisioner::Recipe::adminconfig>.
+
+=head2 On a guest that runs claude
+
+With L<Provisioner::Recipe::claude>, each clone becomes an entry of
+C<permissions.additionalDirectories> in the settings of the domain, so the
+agent can read and write it.  That entry does not load the skills in the
+F<.claude/skills> of the clone.  Claude Code loads those only for a directory
+that the session starts with C<--add-dir>, or that C</add-dir> adds during it.
+
+So the recipe also installs F<admincode.claude.bash> in the directory of the
+domain, and sources it from the F<~/.bashrc> of the admin.  It defines a
+C<claude> function that passes C<--add-dir> for each clone in C<basedir>, which
+it lists each time it runs, so a later clone needs no provision.  If several
+domains on one machine run this recipe, the function adds the clones of each.
 
 If the C<perl> recipe is enabled, the CPAN dependencies of each repository are
 installed into the perl that it built, and then the tests of the repository run
@@ -150,6 +164,17 @@ sub args {
 
         },
     );
+}
+
+=head2 %files = $recipe->template_files(@loaded_recipes)
+
+F<admincode.claude.bash>, on a guest that also runs claude.
+
+=cut
+
+sub template_files {
+    my ( $self, @recipes ) = @_;
+    return ( List::Util::any { $_ eq q{claude} } @recipes ) ? ( 'admincode.claude.bash.tt' => 'admincode.claude.bash' ) : ();
 }
 
 sub tests {

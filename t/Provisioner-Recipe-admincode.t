@@ -15,6 +15,9 @@ t/Provisioner-Recipe-admincode.t - which guests smoke the Perl repositories they
 use Test::More;
 use Test::NoWarnings;
 use File::Temp qw{tempdir};
+use File::Path();
+use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -81,6 +84,54 @@ subtest 'the checkouts are working directories of the agent only on a guest that
     my $with   = fresh()->render( %COMMON, modules => [qw{admincode claude}] );
     my $queued = 'queue_postrun_task /root/bin/claude_settings add-repos /opt/domains/code.test.test/src /opt/domains/code.test.test/.claude/settings.json';
     ok( index( $with, $queued ) >= 0, 'a guest with it adds the basedir clones to the settings of the agent, after every target' ) or diag $with;
+};
+
+# Claude Code loads the skills of a checkout only for --add-dir, so this runs
+# the function that the recipe writes, with a claude that prints what it got.
+subtest 'claude gets --add-dir for every clone, on a guest that runs claude' => sub {
+    my $root = tempdir( CLEANUP => 1 );
+    foreach my $repo (qw{one/.git .github/.git}) {
+        File::Path::make_path("$root/code.test.test/src/$repo");
+    }
+    File::Path::make_path( "$root/code.test.test/src/notarepo", "$root/other.test.test/src/two/.git" );
+
+    my $bin = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$bin/claude", qq{#!/bin/sh\nprintf '%s\\n' "\$@"\n} );
+    chmod 0755, "$bin/claude";
+
+    my @sources;
+    foreach my $domain (qw{code.test.test other.test.test}) {
+        my $dir     = tempdir( CLEANUP => 1 );
+        my @written = fresh()->generate_files( $dir, %COMMON, domain => $domain, install_dir => $root, modules => [qw{admincode claude}] );
+        is_deeply( \@written, ['admincode.claude.bash'], "the recipe writes the function for $domain" );
+        push( @sources, "$dir/admincode.claude.bash" );
+    }
+
+    my $run = sub {
+        my (@files) = @_;
+        my $script = join( q{}, map { ". '$_'\n" } @files ) . "PATH='$bin':\$PATH claude --resume\n";
+        IPC::Run3::run3( [ 'bash', '-c', $script ], \undef, \my $out, \my $err );
+        is( $err, q{}, 'and bash says nothing about it' );
+        return [ split /\n/, $out ];
+    };
+
+    my @one = map { ( '--add-dir', "$root/code.test.test/src/$_" ) } qw{one .github};
+    is_deeply( [ sort @{ $run->( $sources[0], $sources[0] ) } ], [ sort @one, q{--resume} ], q{each clone of the basedir, dotted ones too, once each however often .bashrc runs, and the arguments of the caller} ) or diag explain $run->( $sources[0], $sources[0] );
+    is_deeply( [ sort @{ $run->(@sources) } ], [ sort @one, '--add-dir', "$root/other.test.test/src/two", '--resume' ], 'and the clones of a second domain on the machine as well as the first' );
+
+    my $alone = tempdir( CLEANUP => 1 );
+    is_deeply( [ fresh()->generate_files( $alone, %COMMON, modules => [qw{admincode}] ) ], [], 'a guest without claude gets no function' );
+    unlike( fresh()->render( %COMMON, modules => [qw{admincode}] ), qr/bashrc/, 'and its .bashrc is left alone' );
+};
+
+# The fragment installs the file that the subtest above runs, and has the
+# .bashrc of the admin source it once.
+subtest 'the .bashrc of the admin sources the function once' => sub {
+    my $with = fresh()->render( %COMMON, modules => [qw{admincode claude}] );
+    my $file = '/opt/domains/code.test.test/admincode.claude.bash';
+    my $rc   = '/home/someadmin/.bashrc';
+    my @want = ( "install -o root -g root -m 0644 admincode.claude.bash $file", "grep -qxF '. $file' $rc || echo '. $file' >> $rc" );
+    is_deeply( [ grep { index( $with, "$_\n" ) < 0 } @want ], [], 'the function is installed in the directory of the domain, and the .bashrc sources it unless it does already' ) or diag $with;
 };
 
 subtest 'the extra packages install at first boot, with the rest' => sub {
