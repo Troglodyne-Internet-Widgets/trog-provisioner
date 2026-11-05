@@ -20,13 +20,19 @@ mv claude.settings.json [% install_dir %]/[% domain %]/.claude/settings.json
 
     Re-entrant: a second run says the hook is already present. -%]
 HOME='[% install_dir %]/[% domain %]' rtk init -g --auto-patch
+[%# The settings only enable the plugins.  See DESCRIPTION in
+    Provisioner::Recipe::claude for why each is installed here. -%]
+[% FOREACH plugin IN plugins -%]
+HOME='[% install_dir %]/[% domain %]' claude plugin install '[% plugin.name %]' --marketplace '[% plugin.repo %]'
+[% END -%]
 [%# Make runs as root, so everything above lands in the home of the agent as
     root: RTK.md, a CLAUDE.md that references it and a backup of the settings
-    in .claude, the cache of npm in .npm, and the filters and history of rtk
-    under .config and .local.  The service user runs the agent, so it owns
-    them, and the group of the admin can read them.  A path that is not there,
-    such as .npm where claude was already installed, is skipped. -%]
-cd '[% install_dir %]/[% domain %]' && for p in .claude .npm .config .local; do test ! -e "$$p" || chown -R '[% user %]:[% admin_user %]' "$$p" || exit 1; done
+    in .claude, the cache of npm in .npm, the filters and history of rtk under
+    .config and .local, and the .claude.json that the plugin install writes.
+    The service user runs the agent, so it owns them, and the group of the
+    admin can read them.  A path that is not there, such as .npm where claude
+    was already installed, is skipped. -%]
+cd '[% install_dir %]/[% domain %]' && for p in .claude .claude.json .npm .config .local; do test ! -e "$$p" || chown -R '[% user %]:[% admin_user %]' "$$p" || exit 1; done
 [% IF restricted_user -%]
 [%# The account that a program runs claude as, and its home.  See A
     RESTRICTED AGENT in Provisioner::Recipe::claude.  rtk edits the settings,
@@ -37,6 +43,9 @@ setfacl -m 'u:[% restricted_user %]:x' '[% install_dir %]/[% domain %]'
 install -d -o '[% restricted_user %]' -g '[% restricted_user %]' -m 0750 '[% restricted_home %]' '[% restricted_home %]/.claude'
 mv claude.restricted.settings.json '[% restricted_home %]/.claude/settings.json'
 HOME='[% restricted_home %]' rtk init -g --auto-patch
+[% FOREACH plugin IN plugins -%]
+HOME='[% restricted_home %]' claude plugin install '[% plugin.name %]' --marketplace '[% plugin.repo %]'
+[% END -%]
 HOME='[% restricted_home %]' git config --global --replace-all safe.directory '*'
 chown -R '[% restricted_user %]:[% restricted_user %]' '[% restricted_home %]'
 [% END -%]

@@ -65,6 +65,8 @@ subtest 'what npm and rtk leave in the home goes to the service user' => sub {
     my ($line) = grep { m/\Afor[ ]p[ ]in[ ]/ } map { s/\A.*?&&[ ]//r } split m/\n/, recipe()->render(%G);
     ok( $line, 'the fragment hands over the home' ) or return;
     File::Path::make_path( "$home/.claude", "$home/.config/rtk", "$home/.local/share/rtk" );
+    open( my $state, '>', "$home/.claude.json" ) or die "Cannot write the fake .claude.json: $!";
+    close($state)                                or die "Cannot close the fake .claude.json: $!";
 
     # A chown that records its arguments, so this runs as any user.
     my $bin = tempdir( CLEANUP => 1 );
@@ -78,7 +80,7 @@ subtest 'what npm and rtk leave in the home goes to the service user' => sub {
     is( $status, 0, 'it succeeds where there is no .npm' ) or diag $out;
     my @log = split m/\n/, do { local ( @ARGV, $/ ) = "$bin/log"; <> }
       // '';
-    is_deeply( \@log, [ map { "-R agent:someadmin $_" } qw{.claude .config .local} ], 'and gives the service user everything else' );
+    is_deeply( \@log, [ map { "-R agent:someadmin $_" } qw{.claude .claude.json .config .local} ], 'and gives the service user everything else' );
 };
 
 subtest 'the rtk release it installs' => sub {
@@ -212,6 +214,55 @@ sub run_sh {
     IPC::Run3::run3( [ '/bin/sh', '-c', $command ], \undef, \my $out, \my $err );
     return ( $? >> 8, $err );
 }
+
+# The lines of the fragment that install plugins, run with a claude that records
+# its HOME and arguments, so this runs anywhere and fetches nothing.
+sub plugin_installs {
+    my (%opts) = @_;
+    my @lines  = grep { m/[ ]claude[ ]plugin[ ]install[ ]/ } split m/\n/, recipe()->render( %G, %opts );
+
+    my $bin = tempdir( CLEANUP => 1 );
+    open( my $fake, '>', "$bin/claude" ) or die "Cannot write the fake claude: $!";
+    print {$fake} qq{#!/bin/sh\necho "\$HOME \$*" >> '$bin/log'\n};
+    close($fake)                 or die "Cannot close the fake claude: $!";
+    chmod( 0755, "$bin/claude" ) or die "Cannot chmod the fake claude: $!";
+
+    my ( $status, $err ) = run_sh( join "\n", "PATH='$bin':\$PATH", map { "$_ || exit 1" } @lines );
+    is( $status, 0, 'the install lines succeed' ) or diag $err;
+    return split m/\n/, do { local ( @ARGV, $/ ) = "$bin/log"; <> }
+      // q{};
+}
+
+# The settings only enable a plugin, and a claude -p run installs nothing.  So
+# each enabled plugin must be installed, in each home, from the marketplace that
+# the settings name for it.
+subtest 'each enabled plugin is installed in each home' => sub {
+    foreach my $what ( sort keys %CASES ) {
+        my ( undef, $conf ) = settings_for( @{ $CASES{$what} } );
+        my %repo   = map { $_ => $conf->{extraKnownMarketplaces}{$_}{source}{repo} } keys %{ $conf->{extraKnownMarketplaces} };
+        my @wanted = map {
+            my ( $name, $market ) = split m/\@/, $_, 2;
+            "/opt/domains/agent.test.test plugin install $name --marketplace $repo{$market}"
+        } sort keys %{ $conf->{enabledPlugins} };
+
+        my @got = plugin_installs( modules => [ @{ $CASES{$what} } ] );
+        is_deeply( [ sort @got ], \@wanted, "on $what, into the home of the agent, from the marketplace of each" );
+    }
+
+    my $home = '/opt/domains/agent.test.test/agents/test-agent';
+    my @got  = grep { m/\A\Q$home\E[ ]/ } plugin_installs( modules => ['claude'], restricted_user => 'test-agent' );
+    is_deeply(
+        [ sort map { ( split m/[ ]/ )[3] } @got ],
+        [qw{perl-slop simple-english}],
+        'and into the home of the restricted agent'
+    );
+
+    my $said = recipe()->render( %G, restricted_user => 'test-agent' );
+    my $at   = index( $said, "HOME='/opt/domains/agent.test.test' claude plugin install" );
+    ok( $at > index( $said, "HOME='/opt/domains/agent.test.test' rtk init" ), 'after rtk has edited the settings' );
+    ok( $at < index( $said, 'for p in .claude ' ),                            'and before the home goes to the service user' );
+    ok( index( $said, "HOME='$home' claude plugin install" ) < index( $said, "chown -R 'test-agent:test-agent'" ), 'and to the restricted agent' );
+};
 
 # The command runs here, on a fake home, because what it lets through is the
 # whole point of it.  A transcript that comes down is a secret in every backup.
