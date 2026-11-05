@@ -74,10 +74,13 @@ defaults of Claude Code.
 
 On a guest that also runs L<Provisioner::Recipe::admincode>, each repository
 that it clones becomes an entry of C<permissions.additionalDirectories>, which
-is what C</add-dir> saves.  So the agent can work in any of them, and loads the
-skills in their F<.claude/skills>, wherever its session starts.  The admincode
-fragment queues C<claude_settings add-repos> as a postrun task, because it
-knows the C<basedir>, and this target can run after its own.
+is what C</add-dir> saves.  So the agent can read and write any of them,
+wherever its session starts.  The admincode fragment queues C<claude_settings
+add-repos> as a postrun task, because it knows the C<basedir>, and this target
+can run after its own.
+
+That entry does not load the skills of a checkout.  The C<claude> function that
+admincode gives the admin does.  L<Provisioner::Recipe::admincode> says how.
 
 =head2 A BOT FOR THE AGENT
 

@@ -38,9 +38,9 @@ not exist, it changes nothing and exits 0.  Most domains have no fragment.
 
 C<add-repos> adds each git repository directly under C<BASEDIR> to
 C<permissions.additionalDirectories>, which is what C</add-dir> saves.  So the
-agent can work in each of them, and loads the skills in their
-F<.claude/skills>, from wherever its session starts.  The directories that are
-there already stay.
+agent can read and write each of them, from wherever its session starts.  It
+does not load their skills, which needs C<--add-dir>.  The directories that
+are there already stay.
 
 =head1 FUNCTIONS
 
