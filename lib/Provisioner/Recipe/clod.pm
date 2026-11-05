@@ -11,6 +11,7 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use B();
+use Mojo::JSON();
 use Text::Xslate();
 
 use Provisioner::Recipe::claude();
@@ -60,6 +61,14 @@ our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/App-Clod.git
 
             # Optional.
             dashboard_user: "admin"
+
+            # Let an authorized user have the bot make a repository in an
+            # organization of spoke_orgs, one per request.  The token must be
+            # able to make repositories there.
+            create_repos: true
+
+            # How many follow-up issues one request may file.  0 turns it off.
+            follow_up_max: 3
             workers:        2
             spoke_modules:
                 - "Test2::V0"
@@ -200,9 +209,12 @@ my $RULE = q{^[A-Za-z][A-Za-z0-9_]*(?:[(][^\n\r'"\\\\]+[)])?\z};
 
 sub args {
     return (
-        type       => 'object',
-        required   => [qw{bot github_token claude_oauth_token dashboard_password_sha256}],
-        anyOf      => [ { required => ['spokes'] }, { required => ['spoke_orgs'] } ],
+        type     => 'object',
+        required => [qw{bot github_token claude_oauth_token dashboard_password_sha256}],
+        anyOf    => [ { required => ['spokes'] }, { required => ['spoke_orgs'] } ],
+
+        # App::Clod makes a repository in an org of spoke_orgs, and dies without one.
+        allOf      => [ { anyOf => [ { properties => { create_repos => { type => 'boolean', enum => [Mojo::JSON::false] } } }, { required => ['spoke_orgs'] } ] } ],
         properties => {
             repo_url    => { type => 'string', default => $DEFAULT_REPO, description => 'Where to clone App::Clod from.' },
             repo_branch => { type => 'string', default => 'master',      description => 'The branch of repo_url that the services run.' },
@@ -238,6 +250,8 @@ sub args {
 
             workers       => { type => 'integer', default => 2,  minimum     => 1, description => 'How many jobs the worker runs at once.  Each job can be a claude run.' },
             poll_interval => { type => 'integer', minimum => 60, description => 'The least number of seconds between two reads of the inbox.  Unset is the default of App::Clod.' },
+            create_repos  => { type => 'boolean', default => 0,  description => 'Whether an authorized user can have the bot make a new repository, in an organization of spoke_orgs, one per request.  Needs spoke_orgs, and a token that may make repositories there.' },
+            follow_up_max => { type => 'integer', minimum => 0,  description => 'How many follow-up issues one request may have the bot file.  0 turns it off.  Unset is the default of App::Clod.' },
             spoke_modules => { type => 'array',   default => [], items       => { type => 'string' }, description => 'Modules that the tests of the spokes need, beyond what App::Clod needs.  The perl recipe installs them.' },
 
             extra_tools => {

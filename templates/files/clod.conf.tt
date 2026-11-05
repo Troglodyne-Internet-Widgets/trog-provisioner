@@ -24,4 +24,8 @@
 [% IF poll_interval -%]
     poll_interval    => [% poll_interval %],
 [% END -%]
+    create_repos     => [% create_repos ? 1 : 0 %],
+[% IF follow_up_max.defined() -%]
+    follow_up_max    => [% follow_up_max %],
+[% END -%]
 };
