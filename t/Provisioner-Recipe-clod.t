@@ -51,10 +51,10 @@ sub recipe {
 subtest 'the perl recipe installs the checkout, and the modules of the spokes after it' => sub {
     my %required = recipe()->required_recipes();
     my %perl     = $required{perl}->(%GLOBALS);
-    is_deeply( $perl{cpan_deps}, [ { dzil => '/bogus/bot.test.test/App-Clod' } ], 'with no spoke_modules, the checkout alone' );
+    is_deeply( $perl{cpan_deps}, [ { dzil => '/bogus/bot.test.test/App-Clod' }, { install => ['App::cpanoutdated'] } ], 'with no spoke_modules, the checkout, and cpan-outdated, which clod deps needs' );
 
     my %more = $required{perl}->( %GLOBALS, spoke_modules => ['Test2::V0'] );
-    is_deeply( $more{cpan_deps}[1], { install => ['Test2::V0'] }, 'and the modules of the spokes, when there are some' );
+    is_deeply( $more{cpan_deps}[2], { install => ['Test2::V0'] }, 'and the modules of the spokes, when there are some' );
 
     my %proxy = $required{nginxproxy}->(%GLOBALS);
     is( $proxy{proxy_uri}, 'run/clod.sock', 'nginxproxy serves the socket of the daemon' );
@@ -185,6 +185,41 @@ sub grants {
     return {}                                          if $out eq q{};
     return eval { Cpanel::JSON::XS::decode_json($out) } // { error => "not JSON: $out" };
 }
+
+subtest 'the local lib that the bot upgrades its modules in' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $r   = recipe($dir);
+    my %got = $r->validated( $r->takes( %GLOBALS, user => 'svc' ), %BASE );
+    $r->generate_files( $dir, %got );
+    my $lib = '/bogus/bot.test.test/perl5';
+
+    my $conf = do "$dir/clod.conf";
+    is( $conf->{local_lib}, $lib, 'App::Clod keeps its modules in the local lib' ) or diag $@;
+    is_deeply( $conf->{restart_units}, [qw{clod-bot.test.test.service clod-worker-bot.test.test.service}], 'and restarts both units after an update' );
+    foreach my $unit (qw{clod.service clod-worker.service}) {
+        my $text = File::Slurper::read_text("$dir/$unit");
+        like( $text, qr{^Environment=PERL5LIB=\Q$lib\E/lib/perl5$}m,              "$unit loads the modules of the local lib first" );
+        like( $text, qr{^Environment=PATH=\Q$lib\E/bin:/opt/perl5/current/bin:}m, 'and finds its programs first' );
+    }
+
+    # The script, run with a runuser that prints what it was asked to run.
+    my $bin = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$bin/runuser", qq{#!/bin/sh\nprintf '%s\\n' "\$@"\n} );
+    chmod 0755, "$bin/runuser" or die "chmod: $!";
+    local $ENV{PATH} = "$bin:$ENV{PATH}";
+    IPC::Run3::run3( [ '/bin/sh', "$dir/clod-deps.sh" ], \undef, \my $said, \my $err );
+    is( $? >> 8, 0, 'the script runs' ) or diag $err;
+    my @argv = split m/\n/, $said;
+    is_deeply( [ @argv[ 0 .. 2 ] ], [qw{-u svc --}], 'as the service user, who owns the local lib' );
+    ok( ( grep { $_ eq "PERL5LIB=$lib/lib/perl5" } @argv ), 'with the local lib first' );
+    is_deeply( [ @argv[ -3 .. -1 ] ], [ '/bogus/bot.test.test/App-Clod/script/clod', qw{deps install} ], 'and runs clod deps install' );
+
+    my $fragment = $r->render(%got);
+    my $owner    = qr{-o[ ]'svc'[ ]-g[ ]'bogus'};
+    like( $fragment, qr{^install[ ]-d[ ]$owner[ ]-m[ ]0750[ ]'\Q$lib\E'$}m, 'the fragment makes the local lib for the service user' );
+    my $deps = index( $fragment, "queue_postrun_task '/bogus/bot.test.test/clod-deps.sh'" );
+    ok( $deps >= 0 && $deps < index( $fragment, 'queue_postrun_task systemctl restart' ), 'and fills it in the postrun, before the units start' );
+};
 
 subtest 'claude runs as the agent account' => sub {
     my %required = recipe()->required_recipes();

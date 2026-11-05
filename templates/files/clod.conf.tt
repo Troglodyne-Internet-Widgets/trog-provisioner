@@ -25,6 +25,8 @@
     poll_interval    => [% poll_interval %],
 [% END -%]
     create_repos     => [% create_repos ? 1 : 0 %],
+    local_lib        => '[% local_lib %]',
+    restart_units    => [ 'clod-[% domain %].service', 'clod-worker-[% domain %].service' ],
 [% IF follow_up_max.defined() -%]
     follow_up_max    => [% follow_up_max %],
 [% END -%]

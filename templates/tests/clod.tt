@@ -123,4 +123,12 @@ foreach my $unit (qw{clod-[% domain %].service clod-worker-[% domain %].service}
 }
 [% END -%]
 
+# The local lib holds a copy of what the bot needs, which the service user
+# owns, so that it can upgrade it.  THE LOCAL LIB in Provisioner::Recipe::clod.
+{
+    my $copy = '[% local_lib %]/lib/perl5/Mojolicious.pm';
+    ok(-e $copy, 'the local lib has its own Mojolicious');
+    is(scalar getpwuid((stat $copy)[4] // -1), '[% user %]', 'which belongs to [% user %]');
+}
+
 done_testing();
