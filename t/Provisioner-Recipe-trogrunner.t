@@ -470,6 +470,7 @@ subtest 'the account that provisions gets the configuration and the key, and pas
     ok( $did{"chmod 0600 $key"},                                                                                         'kept to itself, which ssh insists on' )                                    or diag $asked;
     ok( $did{"setfacl -m u:agent:x $domain/.ssh"},                                                                       'it can pass through the .ssh of the service user to the key' )             or diag $asked;
     ok( $did{"ln -sfn $key /bogus/home/agent/.ssh/id_ed25519"},                                                          'the key is linked where ssh looks for it' )                                or diag $asked;
+    ok( $did{"chown -h agent:agent /bogus/home/agent/.ssh/id_ed25519"},                                                  'and the link is the account own, not root' )                               or diag $asked;
     ok( $did{"runuser -u agent -- sh -c ssh-keyscan -p '2222' 'hv1.test.test' >> '/bogus/home/agent/.ssh/known_hosts'"}, 'the host key of the hypervisor goes into the known_hosts of the account' ) or diag $asked;
     is( ( scalar grep { m{svc} } @lines ), 0, 'and nothing is given to the service user' ) or diag $asked;
 };

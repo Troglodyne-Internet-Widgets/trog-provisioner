@@ -45,8 +45,9 @@ setfacl -m "u:$who:x" "$dir/.ssh"
 
 # A link in the home, because ssh looks in ~/.ssh, and nothing in a libvirt
 # qemu+ssh URI can point it elsewhere.  The key in the domain directory is the
-# main copy, which remote_skip keeps out of the salvage.
-if [ "$home" != "$dir" ]; then ln -sfn "$key" "$home/.ssh/id_ed25519"; fi
+# main copy, which remote_skip keeps out of the salvage.  The link is the
+# account own too, because nothing in its home belongs to another user.
+if [ "$home" != "$dir" ]; then ln -sfn "$key" "$home/.ssh/id_ed25519"; chown -h "$who:$who" "$home/.ssh/id_ed25519"; fi
 [% FOR name IN hypervisors.keys().sort() -%]
 [% SET hv = hypervisors.$name -%]
 [% IF hv.ssh_host -%]
