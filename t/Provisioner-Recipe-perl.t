@@ -180,6 +180,24 @@ subtest 'the tidy and critic configurations' => sub {
     like( $tidy, qr{^ln[ ]-s[ ]/etc/perltidyrc[ ]}, 'and the .perltidyrc of the domain links to the tidy one' );
 };
 
+# /etc/profile sources it under sh, so this does too, and asks for PATH after.
+subtest 'a login shell gets the current perl first on PATH, once' => sub {
+    my $dir     = tempdir( CLEANUP => 1 );
+    my %written = map { $_ => 1 } recipe('perl')->generate_files( $dir, %GUEST );
+    ok( $written{'perl.profile'},                                                                         'the recipe writes the profile' );
+    ok( ( grep { $_ eq 'install -m 0644 perl.profile /etc/profile.d/perl.sh' } split m/\n/, rendered() ), 'and installs it in profile.d' );
+
+    my $path_after = sub {
+        my ( $path, $times ) = @_;
+        local $ENV{PATH} = $path;
+        IPC::Run3::run3( [ '/bin/sh', '-c', ( qq{. '$dir/perl.profile'; } x $times ) . 'printf %s "$PATH"' ], \undef, \my $out, \my $err );
+        is( $err, q{}, 'and sh says nothing about it' );
+        return $out;
+    };
+    is( $path_after->( '/usr/bin:/bin', 1 ), '/opt/perl5/current/bin:/usr/bin:/bin', 'the link to the built perl goes first' );
+    is( $path_after->( '/usr/bin:/bin', 2 ), '/opt/perl5/current/bin:/usr/bin:/bin', 'and a second source adds it no second time' );
+};
+
 subtest 'a dependent told no install_dir dies, rather than installing from somewhere else' => sub {
     my %required = recipe('tcms')->required_recipes();
     like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined,[ ]positive-length/, 'tcms' );
