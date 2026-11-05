@@ -12,6 +12,8 @@ use parent qw{Provisioner::Recipe};
 
 use Path::Tiny();
 
+use Provisioner::Recipe::servicesudo();
+
 =head1 Provisioner::Recipe::tpsgi
 
 =head2 SYNOPSIS
@@ -35,7 +37,10 @@ runs the application that the data recipe copies there.
 
 It requires the C<perl> recipe, which installs Starman and the dependencies of
 the checkout.  It also requires the C<nginxproxy> recipe.  With no overrides,
-C<nginxproxy> sets up the vhost on ports 80 and 443.
+C<nginxproxy> sets up the vhost on ports 80 and 443.  And it requires
+C<servicesudo>, which lets the service user restart F<$domain.service>, and
+ask for its status, with sudo, as
+L<Provisioner::Recipe::servicesudo/unit_commands> says.
 
 The checkout is the head of the default branch of tPSGI.  You cannot choose a
 commit.
@@ -55,6 +60,10 @@ sub required_recipes {
                     { dzil    => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
                 ],
             );
+        },
+        servicesudo => sub {
+            my (%opts) = @_;
+            return ( commands => [ Provisioner::Recipe::servicesudo::unit_commands("$opts{domain}.service") ] );
         },
         nginxproxy => sub {
             my (%opts) = @_;

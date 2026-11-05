@@ -122,4 +122,34 @@ subtest 'a domain with no service user' => sub {
     like( exception { recipe()->validate( %G, user => 'a.b' ) }, qr/not[ ]a[ ]name/, 'a user that sudo would skip the file of is refused' );
 };
 
+# What each recipe whose units run as the service user asks for, and what
+# servicesudo and visudo make of it.
+subtest 'the units of the recipes that run as the service user' => sub {
+    is_deeply(
+        [ Provisioner::Recipe::servicesudo::unit_commands('x.test.service') ],
+        [ '/usr/bin/systemctl restart x.test.service', '/usr/bin/systemctl status x.test.service' ],
+        'a unit can be restarted and asked for its status, and nothing else'
+    );
+
+    my %units = (
+        clod  => [qw{clod-agent.test.test.service clod-worker-agent.test.test.service}],
+        koan  => [qw{koan.service koan-awake.service}],
+        tpsgi => [qw{agent.test.test.service}],
+    );
+    foreach my $name ( sort keys %units ) {
+        my %required = Provisioner::Cookbook->load( $name, distro => 'ubuntu' )->new(%PROV)->required_recipes(%G);
+        ok( ref $required{servicesudo} eq 'CODE', "$name requires servicesudo" ) or next;
+        my %asked = $required{servicesudo}->(%G);
+        is_deeply( $asked{commands}, [ Provisioner::Recipe::servicesudo::unit_commands( @{ $units{$name} } ) ], "for its own units: @{ $units{$name} }" );
+
+        my %opts = eval { recipe()->validate( %G, %asked ) };
+        ok( %opts, "which servicesudo takes" ) or diag $@;
+      SKIP: {
+            skip 'no visudo here', 1 unless $visudo;
+            my ( $ok, $said ) = parses( recipe()->render_file( 'files/servicesudo.sudoers.tt', %opts ) );
+            ok( $ok, 'and visudo reads' ) or diag $said;
+        }
+    }
+};
+
 done_testing();

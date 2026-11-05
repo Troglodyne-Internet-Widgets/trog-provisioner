@@ -17,6 +17,7 @@ use Mojo::JSON();
 use Text::Xslate();
 
 use Provisioner::Recipe::claude();
+use Provisioner::Recipe::servicesudo();
 use Provisioner::Utils();
 
 # One copy for args and fetch_hosts, so that two copies do not drift apart.
@@ -281,6 +282,10 @@ sub args {
 C<perl>, which installs what the checkout needs and C<spoke_modules>.
 C<nginxproxy>, which serves the socket.  C<claude>, which installs the program
 that does the work, and makes the C<agent_user> as its C<restricted_user>.
+C<servicesudo>, which lets the service user restart both units, and ask for
+their status, with sudo, as
+L<Provisioner::Recipe::servicesudo/unit_commands> says.  So the dashboard can
+restart the bot after an update.
 
 =cut
 
@@ -299,8 +304,12 @@ sub required_recipes {
                 ],
             );
         },
-        nginxproxy => sub { return ( proxy_uri => 'run/clod.sock' ) },
-        claude     => sub {
+        nginxproxy  => sub { return ( proxy_uri => 'run/clod.sock' ) },
+        servicesudo => sub {
+            my (%opts) = @_;
+            return ( commands => [ Provisioner::Recipe::servicesudo::unit_commands( "clod-$opts{domain}.service", "clod-worker-$opts{domain}.service" ) ] );
+        },
+        claude => sub {
             my (%opts) = @_;
             return defined $opts{agent_user} ? ( restricted_user => $opts{agent_user} ) : ();
         },
