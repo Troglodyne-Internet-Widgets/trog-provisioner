@@ -10,8 +10,21 @@ map $host $relay_http {
     include /etc/nginx/nginxrelay.d/*.http.map;
 }
 
+[%# The origin of each media name, which this guest serves and caches.  The
+    "Media names" section of Provisioner::Recipe::nginxrelay has the whole
+    account. -%]
+map $host $relay_media {
+    include /etc/nginx/nginxrelay.d/*.media.map;
+}
+
+proxy_cache_path /var/cache/nginx/nginxrelay-media levels=1:2 keys_zone=nginxrelay_media:10m max_size=[% media_cache_size %] inactive=[% media_cache_valid %] use_temp_path=off;
+
 server {
     listen 80 default_server;
+
+    if ($relay_media != "") {
+        return 301 https://$host$request_uri;
+    }
 
     if ($relay_http = "") {
         return 444;
@@ -22,5 +35,59 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto http;
+    }
+}
+
+[%# The stream proxy sends a media name here with the PROXY protocol, so the
+    address of the client is in its header.  nginx loads a certificate that a
+    variable names in its workers, so nginxrelay_client cert leaves the key
+    readable by www-data. -%]
+server {
+    listen unix:[% media_socket %] ssl proxy_protocol;
+    set_real_ip_from unix:;
+    real_ip_header proxy_protocol;
+
+    ssl_certificate     /etc/nginx/nginxrelay.d/media/$ssl_server_name.crt;
+    ssl_certificate_key /etc/nginx/nginxrelay.d/media/$ssl_server_name.key;
+
+    [%# The certificate is of the SNI name, so a Host of another name must not
+        choose the origin. -%]
+    if ($host != $ssl_server_name) {
+        return 421;
+    }
+    if ($relay_media = "") {
+        return 444;
+    }
+
+    [%# The guest gates this directory on the session of the reader, which
+        this server never sees. -%]
+    location ^~ /assets/private/ {
+        return 404;
+    }
+
+    location / {
+        limit_except GET {
+            deny all;
+        }
+
+        [%# One slice of a large file at a time, so a seek in a video fetches
+            one slice, not the whole file. -%]
+        slice 1m;
+        proxy_cache       nginxrelay_media;
+        proxy_cache_key   $host$uri$is_args$args$slice_range;
+        proxy_cache_valid 200 206 [% media_cache_valid %];
+        proxy_set_header  Range $slice_range;
+
+        [%# The cache must be the same for each reader. -%]
+        proxy_set_header    Cookie "";
+        proxy_ignore_headers Set-Cookie Cache-Control Expires X-Accel-Expires;
+        proxy_hide_header   Set-Cookie;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        add_header X-Relay-Cache $upstream_cache_status always;
+        proxy_pass http://$relay_media;
     }
 }
