@@ -169,9 +169,9 @@ login.  See L<Provisioner::Recipe::letsencrypt/Certificates of their own>.
 =item * The command at C<cert_deployer> sends that certificate to the relay
 with the media key, and the relay checks it again.  letsencrypt runs the
 command after each run of dehydrated, so a renewal reaches the relay the same
-night, and so does a certificate that the salvage put back.  The fragment of
-this recipe also runs it once, because the target of letsencrypt runs before
-the command is in place.
+night, and so does a certificate that the salvage put back.  This recipe
+requires letsencrypt, so the target of letsencrypt runs after the target of
+this recipe, and C<get_cert> finds the command in place at build time.
 
 =back
 
