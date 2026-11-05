@@ -563,8 +563,8 @@ rejects_missing(
     'matrix rejects missing admin_password'
 );
 
-rejects_missing( 'clod', { bot => 'b', github_token => 'x', claude_oauth_token => 'x', dashboard_password_sha256 => 'a' x 64 }, 'spokes' );
-rejects_missing( 'clod', { bot => 'b', github_token => 'x', claude_oauth_token => 'x', spokes                    => ['o/a'] },  'dashboard_password_sha256' );
+rejects_missing( 'clod', { bot => 'b', github_token => 'x', claude_oauth_token => 'x', dashboard_password => 'not-the-password' }, 'spokes' );
+rejects_missing( 'clod', { bot => 'b', github_token => 'x', claude_oauth_token => 'x', spokes             => ['o/a'] },            'dashboard_password' );
 
 rejects_missing( 'ldap',  {},                                          'admin_password', 'ldap rejects missing admin_password' );
 rejects_missing( 'tpsgi', {},                                          'routers',        'tpsgi rejects missing routers' );
