@@ -59,6 +59,50 @@ the registrations in F</etc/nginx/nginxrelay.d> are salvaged.
 Two guests cannot register one name.  The second one fails to build, and the
 error names the domain that holds it.
 
+=head2 Media names
+
+A guest can also register a media name, such as C<media.$domain>, from which
+readers fetch its uploaded files.  This guest does not pass a media name
+through.  It ends TLS for it, and caches what readers fetch, so a file crosses
+the link to the guest once, not on each request.
+
+The stream proxy sends a media name to a server of this guest on the socket
+C<$MEDIA_SOCKET>, with the PROXY protocol.  That server:
+
+=over 4
+
+=item * presents the certificate of the SNI name from
+F</etc/nginx/nginxrelay.d/media>.  The guest gets that certificate itself, by
+DNS-01, and sends it here with a key that can run only C<nginxrelay_client
+cert>.  So this guest holds the key of each media name, and of no name that
+passes through.  Until the certificate arrives, a TLS connection for the name
+fails its handshake.
+
+=item * fetches what it does not hold from the HTTP port of the guest, with the
+media name as the C<Host>.
+
+=item * caches each file in slices of one megabyte, so a reader who seeks in a
+video makes it fetch one slice.  The cache is in
+F</var/cache/nginx/nginxrelay-media>, at most C<media_cache_size>, and it keeps a
+file for C<media_cache_valid>, whatever the guest says.
+
+=item * drops the C<Cookie> of the reader and the C<Set-Cookie> of the guest,
+so every reader gets the same file.
+
+=item * takes only C<GET> and C<HEAD>.
+
+=item * answers 404 under F</assets/private/> without asking the guest.  The
+guest gates that directory on the session of the reader, which this server
+never sees.
+
+=item * answers 421 when the C<Host> is not the SNI name.
+
+=back
+
+On 80, a media name redirects to HTTPS.  The bans close C<tls_port> and 80, so
+they cover the media names too.  The response header C<X-Relay-Cache> says
+whether the cache answered.
+
 =head2 Bans
 
 A guest behind this relay sends its bans here, as
@@ -93,8 +137,36 @@ sub args {
                 default     => 4443,
                 description => 'The port of the stream proxy, where ufw forwards 443 from outside.  See "Ports".',
             },
+            media_cache_size => {
+                type        => 'string',
+                pattern     => '^[1-9][0-9]*[kmg]$',
+                default     => '1g',
+                description => 'The most that the cache of the media names holds on disk, in the units of nginx, such as 512m or 4g.  See "Media names".',
+            },
+            media_cache_valid => {
+                type        => 'string',
+                pattern     => '^[1-9][0-9]*[mhd]$',
+                default     => '7d',
+                description => 'How long the cache of the media names keeps a file, in the units of nginx, such as 12h or 30d.  See "Media names".',
+            },
         },
     );
+}
+
+# Also in scripts/nginxrelay_client, which runs on the relay without these
+# libraries.  t/nginxrelay_client.t makes sure that the two are equal.
+our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<media_socket>, where the media server listens, to what
+L<Provisioner::RelayRecipe/enrich> adds.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET );
 }
 
 # Defaulted here as well as in args, because required_recipes and rate_limits
@@ -176,29 +248,59 @@ sub banned_ports {
 The ban key that the relay issues when it registers the names of the client of
 C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant>
 adds the host key of the relay.  C<%terms> has
-C<< upstreams => { tls => $tls, http => $http } >> and
-C<< names => \@names >>.
+C<< upstreams => { tls => $tls, http => $http } >>, C<< names => \@names >>, and
+can have C<< media => \@media >>.
 
 The command is F<scripts/nginxrelay_client> C<register>, which root runs on the
 relay.  C<$tls> and C<$http> are each an IPv4 address and a port, where the
 relay sends TLS and plain HTTP for C<@names>.  See L</Registration>.
+
+With C<@media>, the relay also registers each of them as a media name, which
+it fetches from C<$http>.  Then it issues the media key as well, at
+C<media_key_path> of the client.  See L</Media names>.
 
 =cut
 
 sub registration_files {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
+    my $script = "$Provisioner::Vars::SCRIPT_DIR/nginxrelay_client";
+    my @media  = @{ $terms{media} // [] };
 
-    return (
+    my %files = (
         $self->key_path($client) => {
             issue => {
                 guest   => $grant->{guest},
-                command => join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/nginxrelay_client register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} } ),
+                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, map { ( '--media', $_ ) } @media ),
             },
             owner => 'root:root',
             mode  => '0600',
         },
     );
+    return %files unless @media;
+
+    my ($address) = split( m/:/, $terms{upstreams}{http} );
+    return (
+        %files,
+        $self->media_key_path($client) => {
+            issue => { guest => $grant->{guest}, command => "$script media-key $client $address" },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
+=head2 $path = $recipe->media_key_path($domain)
+
+Where the media key that this relay issues for C<$domain> is, on the guest of
+C<$domain>, in base64.  The guest sends the certificates of its media names
+with it.  See L</Media names>.
+
+=cut
+
+sub media_key_path {
+    my ( $self, $domain ) = @_;
+    return '/etc/ssl/' . $self->recipe_name . "/$domain.media.key.b64";
 }
 
 =head2 %revocation = $recipe->revoke_grant($grant)

@@ -178,16 +178,7 @@ our $RELAY_BAN = File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_ba
 
 sub issue_ban_key {
     my ( $dir, $domain, $address, $set ) = @_;
-
-    my $keys = File::Temp::tempdir( CLEANUP => 1 );
-    ## no critic (PreferredBinaries) -- this runs under the system perl of the relay, which has no Provisioner::Utils
-    my ( $said, $ok ) = run( qw{ssh-keygen -q -t ed25519 -N}, q{}, '-C', "bans of $domain", '-f', "$keys/key" );
-    ## use critic
-    die "Could not make the key of $domain: $said\n" unless $ok;
-
-    write_file( "$dir/$domain.ban.pub", qq{restrict,from="$address",command="$RELAY_BAN $set $domain" } . read_file("$keys/key.pub") );
-    write_authorized_keys($dir);
-    return MIME::Base64::encode_base64( read_file("$keys/key"), q{} );
+    return issue_key( $dir, $domain, $address, 'ban', "$RELAY_BAN $set $domain" );
 }
 
 =head2 revoke_ban_key($dir, $domain)
@@ -199,7 +190,50 @@ already.
 
 sub revoke_ban_key {
     my ( $dir, $domain ) = @_;
-    write_file( "$dir/$domain.ban.pub", undef );
+    return revoke_key( $dir, $domain, 'ban' );
+}
+
+=head2 $key = issue_key($dir, $domain, $address, $kind, $command)
+
+Makes a new ed25519 key for C<$domain>, and returns the private half in base64
+on one line.  The public half goes into C<$dir/$domain.$kind.pub>, and then into
+C<$dir/authorized_keys.root>.  It can run only C<$command>, and only from
+C<$address>.  It replaces the key of that C<$kind> that C<$domain> had.
+C<$kind> is one of C<@KEY_KINDS>.  C<issue_ban_key> is the usual caller.
+
+Dies, and leaves the old key, when C<ssh-keygen> fails.
+
+=cut
+
+# Each kind of key that a relay issues, and so each file that sshd takes.
+our @KEY_KINDS = qw{ban media};
+
+sub issue_key {
+    my ( $dir, $domain, $address, $kind, $command ) = @_;
+    my %known = map { $_ => 1 } @KEY_KINDS;
+    die "There is no kind of key $kind\n" unless $known{$kind};
+
+    my $keys = File::Temp::tempdir( CLEANUP => 1 );
+    ## no critic (PreferredBinaries) -- this runs under the system perl of the relay, which has no Provisioner::Utils
+    my ( $said, $ok ) = run( qw{ssh-keygen -q -t ed25519 -N}, q{}, '-C', "$kind of $domain", '-f', "$keys/key" );
+    ## use critic
+    die "Could not make the key of $domain: $said\n" unless $ok;
+
+    write_file( "$dir/$domain.$kind.pub", qq{restrict,from="$address",command="$command" } . read_file("$keys/key.pub") );
+    write_authorized_keys($dir);
+    return MIME::Base64::encode_base64( read_file("$keys/key"), q{} );
+}
+
+=head2 revoke_key($dir, $domain, $kind)
+
+Removes the key of C<$kind> of C<$domain> that C<issue_key> made.  It can be
+gone already.
+
+=cut
+
+sub revoke_key {
+    my ( $dir, $domain, $kind ) = @_;
+    write_file( "$dir/$domain.$kind.pub", undef );
     write_authorized_keys($dir);
     return;
 }
@@ -208,7 +242,7 @@ sub revoke_ban_key {
 # Only a line that restricts its key, so that a bare key never logs in as root.
 sub write_authorized_keys {
     my ($dir) = @_;
-    my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort glob("$dir/*.ban.pub");
+    my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort map { glob("$dir/*.$_.pub") } @KEY_KINDS;
     write_file( "$dir/authorized_keys.root", join( q{}, @lines ) );
     return;
 }

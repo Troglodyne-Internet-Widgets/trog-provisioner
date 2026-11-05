@@ -115,6 +115,107 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     ok( !banned($abuser), 'and the address leaves the set' );
 };
 
+# A media name, which this guest serves and caches, from an origin that stands
+# in for the HTTP port of the guest.  The origin logs the request line of each
+# request, and whether it had a cookie.  The name is short, because openssl
+# refuses a common name of more than 64 characters.
+my $media  = 'media.relay-selftest.test.test';
+my $origin = listener();
+my $origin_log = '/root/.nginxrelay-media-origin.log';
+unlink $origin_log;
+my $origin_pid = fork() // die "Cannot fork: $!\n";
+if ( !$origin_pid ) {
+    # prove reads the output of this test until every copy of it closes, so
+    # the origin must not hold one.  It also gives up by itself.
+    open( STDOUT, '>', '/dev/null' ) or die "Cannot close the output: $!\n";
+    open( STDERR, '>', '/dev/null' ) or die "Cannot close the errors: $!\n";
+    alarm 600;
+    open( my $log, '>>', $origin_log ) or die "Cannot write $origin_log: $!\n";
+    $log->autoflush(1);
+    while ( my $conn = $origin->accept() ) {
+        my $request = q{};
+        while ( IO::Select->new($conn)->can_read(5) ) {
+            sysread( $conn, my $buf, 4096 ) or last;
+            $request .= $buf;
+            last if $request =~ m/\r\n\r\n/;
+        }
+        my ($line) = $request =~ m/\A([^\r\n]*)/;
+        print {$log} $line, ( $request =~ m/^Cookie:/mi ? ' cookie' : q{} ), "\n";
+        my $body = "media probe\n";
+        print {$conn} "HTTP/1.1 200 OK\r\nContent-Length: " . length($body) . "\r\nSet-Cookie: origin=1\r\nConnection: close\r\n\r\n$body";
+        close $conn;
+    }
+    exit 0;
+}
+END {
+    if ($origin_pid) {
+        kill 'TERM', $origin_pid;
+        waitpid( $origin_pid, 0 );
+    }
+}
+sub origin_saw {
+    my ($line) = @_;
+    open( my $log, '<', $origin_log ) or return 0;
+    return scalar grep { index( $_, $line ) == 0 } <$log>;
+}
+
+# What curl gets for a request to $media: the status, the headers and the body.
+sub media_get {
+    my ( $path, @curl ) = @_;
+    my $out = `curl -sk --max-time 10 -D - --resolve '$media:[% tls_port %]:127.0.0.1' @curl 'https://$media:[% tls_port %]$path' 2>/dev/null`;
+    my ($code) = $out =~ m{\AHTTP/\S+ (\d+)};
+    return ( $code // '000', $out );
+}
+
+subtest 'a media name is served and cached here' => sub {
+    my $said = `$client register $domain 127.0.0.1:@{[ $tls->sockport ]} 127.0.0.1:@{[ $origin->sockport ]} $name --media $media 2>&1`;
+    is( $?, 0, 'a guest registers a media name' ) or diag $said;
+    settle();
+    is( ( media_get('/assets/probe.jpg') )[0], '000', 'before its certificate arrives, a TLS connection for it fails' );
+
+    my $media_key = `$client media-key $domain 127.0.0.1 2>&1`;
+    is( $?, 0, 'the guest gets a key for its certificates' ) or diag $media_key;
+    my $keyfile = '/root/.nginxrelay-media.key';
+    my $pem     = '/root/.nginxrelay-media.pem';
+    open( my $fh, '>', $keyfile ) or die "Cannot write $keyfile: $!\n";
+    chmod 0600, $keyfile;
+    print {$fh} MIME::Base64::decode_base64($media_key);
+    close $fh or die "Cannot write $keyfile: $!\n";
+    my $made = `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=$media -addext subjectAltName=DNS:$media -keyout $pem.key -out $pem.crt 2>&1 && cat $pem.crt $pem.key > $pem`;
+    is( $?, 0, 'the test makes a certificate for the media name' ) or return diag $made;
+
+    my $ssh = "ssh -i $keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1";
+    $said = `$ssh 'install $media' < $pem 2>&1`;
+    is( $?, 0, 'and sends it with that key' ) or diag $said;
+    $said = `$ssh 'install $name' < $pem 2>&1`;
+    isnt( $?, 0, 'but the key cannot install a certificate for a name that passes through' );
+    $said = `ssh -n -i $keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1 id 2>&1`;
+    unlike( $said, qr/uid=/, 'and it runs nothing else' );
+    unlink $keyfile, $pem, "$pem.key", "$pem.crt";
+    settle();
+
+    my ( $code, $out ) = media_get( '/assets/probe.jpg', q{-H 'Cookie: session=1'} );
+    is( $code, 200, 'a reader gets a file' ) or diag $out;
+    like( $out, qr/^X-Relay-Cache: MISS\r$/mi, 'which the cache did not hold yet' );
+    unlike( $out, qr/^Set-Cookie:/mi, 'without the cookie of the origin' );
+    ( $code, $out ) = media_get('/assets/probe.jpg');
+    like( $out, qr/^X-Relay-Cache: HIT\r$/mi, 'and the second time, the cache answers' );
+    is( origin_saw('GET /assets/probe.jpg'), 1, 'so the origin saw one request' );
+    unlike( do { open( my $log, '<', $origin_log ) or die "Cannot read $origin_log: $!\n"; local $/ = undef; <$log> }, qr/cookie/, 'and no cookie of a reader' );
+
+    is( ( media_get('/assets/private/probe.jpg') )[0], 404, 'a private file gets 404' );
+    is( origin_saw('GET /assets/private/'), 0, 'and the origin never sees the request' );
+    is( ( media_get( '/assets/probe.jpg', '-X POST' ) )[0], 403, 'a POST is refused' );
+    is( ( media_get( '/assets/probe.jpg', q{-H 'Host: other.test.test'} ) )[0], 421, 'and so is a Host that is not the name of the certificate' );
+
+    my $redirect = `curl -s --max-time 5 -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$media:80:127.0.0.1' 'http://$media/assets/probe.jpg' 2>/dev/null`;
+    is( $redirect, "301 https://$media/assets/probe.jpg", 'on 80, a media name goes to HTTPS' );
+};
+kill 'TERM', $origin_pid;
+waitpid( $origin_pid, 0 );
+$origin_pid = 0;
+unlink $origin_log;
+
 my $host = `ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key 2>&1`;
 my $pub  = do { local ( @ARGV, $/ ) = '/etc/ssh/ssh_host_ed25519_key.pub'; <> } // '';
 is( ( split ' ', $pub )[1], ( split ' ', $host )[1], 'the host key that the guests pin is the one that sshd has' );
@@ -125,6 +226,7 @@ is( $?, 0, 'a guest releases its names' ) or diag $released;
 settle();
 is( status( $name, 80 ), '000', 'and the name gets no reply after that' );
 ok( !-e "/etc/nginx/nginxrelay.d/$domain.ban.pub", 'and its key is gone' );
+ok( !-e "/etc/nginx/nginxrelay.d/media/$media.key", 'and so is the key of its media name' );
 my ( $rc, $said ) = as_guest("check $abuser");
 is( $rc, 255, 'and the key logs in no more' ) or diag $said;
 unlink $keyfile;

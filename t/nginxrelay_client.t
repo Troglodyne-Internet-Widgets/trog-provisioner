@@ -20,6 +20,7 @@ use File::Temp();
 use File::Slurper();
 use File::Slurper::Temp();
 use MIME::Base64();
+use POSIX();
 
 use FindBin;
 use FindBin::libs;
@@ -36,11 +37,19 @@ my @NAMES  = qw{public.web.test.test www.customer.test};
 my $nginx_ok;
 my @ran;
 
+# What openssl says of the certificate that cert checks: the host that it is
+# for, whether it is still valid, its public key, and the public key of the
+# private key beside it.
+my %openssl;
+
 sub fresh_relay {
     no warnings 'once';
-    $Trog::NginxRelayClient::RELAY_D = File::Temp::tempdir( CLEANUP => 1 );
-    @ran                             = ();
-    $nginx_ok                        = 1;
+    $Trog::NginxRelayClient::RELAY_D   = File::Temp::tempdir( CLEANUP => 1 );
+    $Trog::NginxRelayClient::MEDIA_DIR = "$Trog::NginxRelayClient::RELAY_D/media";
+    $Trog::NginxRelayClient::KEY_GROUP = getgrgid( POSIX::getegid() );
+    @ran                               = ();
+    $nginx_ok                          = 1;
+    %openssl                           = ( host => 'media.web.test.test', valid => 1, pubkey => "PUBLIC\n", pkey => "PUBLIC\n" );
     return $Trog::NginxRelayClient::RELAY_D;
 }
 
@@ -51,6 +60,14 @@ $files->redefine(
         my (@command) = @_;
         shift @command if ref $command[0] eq 'HASH';
         push( @ran, "@command" );
+
+        if ( $command[0] eq 'openssl' ) {
+            my %flag = map { $_ => 1 } @command;
+            return ( "Hostname $command[-1] " . ( $command[-1] eq $openssl{host} ? 'does match' : 'does NOT match' ) . " certificate\n", 1 )               if $flag{'-checkhost'};
+            return ( q{},                                                                                                                $openssl{valid} ) if $flag{'-checkend'};
+            return ( $openssl{pubkey},                                                                                                   1 )               if $flag{'-pubkey'};
+            return ( $openssl{pkey},                                                                                                     1 )               if $command[1] eq 'pkey';
+        }
 
         if ( $command[0] eq 'ssh-keygen' ) {
             my ($file) = map { $command[ $_ + 1 ] } grep { $command[$_] eq '-f' } 0 .. $#command;
@@ -162,6 +179,119 @@ subtest 'it refuses what it cannot put in a file of nginx' => sub {
     }
     like( exception { Trog::NginxRelayClient::main( 'release', $DOMAIN, 'extra' ) }, qr/\Ausage:/, 'a release with more than the domain' );
     is_deeply( \@ran, [], 'and none of them ran anything' );
+};
+
+my $MEDIA = 'media.web.test.test';
+my $PEM   = "-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nCHAIN\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n";
+
+# What cert says for $request on $pem, as register says for its arguments.
+sub cert {
+    my ( $request, $pem ) = @_;
+    local $ENV{SSH_ORIGINAL_COMMAND} = $request;
+    open( local *STDIN, '<', \$pem ) or die "Cannot read a string: $!\n";
+    my $died;
+    my ( $out, $err, $rc ) = capture {
+        my $status = eval { Trog::NginxRelayClient::main( 'cert', $DOMAIN ) };
+        $died = $@;
+        $status;
+    };
+    return ( $out, $err . $died, $rc );
+}
+
+subtest 'a media name goes to the media server of the relay, which fetches it from the guest' => sub {
+    my $relay = fresh_relay();
+    my ( undef, $err, $rc ) = register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 public.web.test.test --media}, $MEDIA );
+
+    is( $rc,                                                  0,                                                                                  'it exits 0' ) or diag $err;
+    is( File::Slurper::read_text("$relay/$DOMAIN.tls.map"),   "public.web.test.test 192.0.2.10:8443;\n$MEDIA unix:/run/nginxrelay-media.sock;\n", 'its SNI name goes to the socket of the media server' );
+    is( File::Slurper::read_text("$relay/$DOMAIN.http.map"),  "public.web.test.test 192.0.2.10:8080;\n",                                          'and it does not pass through on 80' );
+    is( File::Slurper::read_text("$relay/$DOMAIN.media.map"), "$MEDIA 192.0.2.10:8080;\n",                                                        'and the media server fetches it from the HTTP port of the guest' );
+
+    ( undef, $err, $rc ) = register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media}, $MEDIA );
+    is( $rc, 0, 'a guest can register media names alone' ) or diag $err;
+
+    register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 public.web.test.test} );
+    ok( !-e "$relay/$DOMAIN.media.map", 'and a registration without them takes them away' );
+
+    like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', $MEDIA, '--media', $MEDIA ) }, qr/cannot[ ]both[ ]pass[ ]through/, 'a name cannot be both' );
+
+    File::Slurper::Temp::write_text( "$relay/other.test.test.tls.map", "$MEDIA 192.0.2.11:8443;\n" );
+    ( undef, $err ) = register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media}, $MEDIA );
+    like( $err, qr/\Q$MEDIA\E[ ]is[ ]registered[ ]to[ ]other[.]test[.]test/, 'and a media name that another domain holds is refused' );
+};
+
+subtest 'the media key runs cert for its domain, from its guest alone' => sub {
+    my $relay = fresh_relay();
+    my ($out) = capture { Trog::NginxRelayClient::main( 'media-key', $DOMAIN, '192.0.2.10' ) };
+    is( MIME::Base64::decode_base64($out), "PRIVATE KEY\n", 'it prints the private half of the key, in base64' );
+    my $command = qr/command="\S+\/nginxrelay_client[ ]cert[ ]\Q$DOMAIN\E"/;
+    like( File::Slurper::read_text("$relay/authorized_keys.root"),                   qr/^restrict,from="192[.]0[.]2[.]10",$command[ ]/m, 'and root takes the public half for cert alone' );
+    like( exception { Trog::NginxRelayClient::main( 'media-key', $DOMAIN, 'web' ) }, qr/\Ausage:/,                                       'the address must be an IPv4 address' );
+};
+
+subtest 'a guest installs the certificate of its media name' => sub {
+    my $relay = fresh_relay();
+    register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media}, $MEDIA );
+    @ran = ();
+
+    my ( undef, $err, $rc ) = cert( "install $MEDIA", $PEM );
+    is( $rc,                                                 0,                                                                                                                               'it exits 0' ) or diag $err;
+    is( File::Slurper::read_text("$relay/media/$MEDIA.crt"), "-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nCHAIN\n-----END CERTIFICATE-----\n", 'the certificate and its chain land under the name' );
+    is( File::Slurper::read_text("$relay/media/$MEDIA.key"), "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n",                                                                 'and so does the key' );
+    is( ( stat "$relay/media/$MEDIA.key" )[2] & oct 777,     oct 640,                                                                                                                         'which the group of the workers of nginx can read, and nobody else' );
+    is_deeply( [ grep { m/\A(?:nginx|systemctl)/ } @ran ], [ 'nginx -t', 'systemctl reload nginx' ], 'then nginx reloads' );
+
+    my %refused = (
+        'a name that is no media name of the domain' => [ 'install public.web.test.test', $PEM,                                                             qr/no[ ]media[ ]name/ ],
+        'a request that is not install'              => [ "remove $MEDIA",                $PEM,                                                             qr/\Ausage:/ ],
+        'an input with no key'                       => [ "install $MEDIA",               "-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n", qr/one[ ]private[ ]key/ ],
+        'an input that is too long'                  => [ "install $MEDIA",               'x' x 70_000,                                                     qr/more[ ]than/ ],
+    );
+    foreach my $case ( sort keys %refused ) {
+        my ( $request, $pem, $why ) = @{ $refused{$case} };
+        ( undef, $err, $rc ) = cert( $request, $pem );
+        like( $err, $why, "$case is refused" );
+    }
+
+    my %bad_cert = (
+        'a certificate of another name'               => [ host  => 'other.test.test', qr/not[ ]for/ ],
+        'a certificate that has expired'              => [ valid => 0,                 qr/expired/ ],
+        'a key that does not go with the certificate' => [ pkey  => "OTHER\n",         qr/does[ ]not[ ]go/ ],
+    );
+    foreach my $case ( sort keys %bad_cert ) {
+        my ( $field, $value, $why ) = @{ $bad_cert{$case} };
+        my %saved = %openssl;
+        $openssl{$field} = $value;
+        ( undef, $err, $rc ) = cert( "install $MEDIA", $PEM =~ s/LEAF/NEW/r );
+        %openssl = %saved;
+        like( $err, $why, "$case is refused" );
+        unlike( File::Slurper::read_text("$relay/media/$MEDIA.crt"), qr/NEW/, 'and the old certificate stays' );
+    }
+
+    $nginx_ok = 0;
+    ( undef, $err ) = cert( "install $MEDIA", $PEM =~ s/LEAF/NEW/r );
+    like( $err, qr/nginx[ ]said[ ]no/, 'what nginx refuses' );
+    unlike( File::Slurper::read_text("$relay/media/$MEDIA.crt"), qr/NEW/, 'is taken back' );
+    is( ( stat "$relay/media/$MEDIA.key" )[2] & oct 777, oct 640, 'and the key that comes back keeps its mode' );
+};
+
+subtest 'a release takes the media names, their certificates and the media key' => sub {
+    my $relay = fresh_relay();
+    register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media}, $MEDIA );
+    capture { Trog::NginxRelayClient::main( 'media-key', $DOMAIN, '192.0.2.10' ) };
+    cert( "install $MEDIA", $PEM );
+
+    my ( undef, undef, $rc ) = capture { Trog::NginxRelayClient::main( 'release', $DOMAIN ) };
+    is( $rc, 0, 'it exits 0' );
+    is_deeply( [ glob("$relay/$DOMAIN.*"), glob("$relay/media/*") ], [], 'and nothing of the domain is left' );
+    is( File::Slurper::read_text("$relay/authorized_keys.root"), q{}, 'and root takes neither key' );
+};
+
+subtest 'the media server listens where the client sends a media name' => sub {
+    no warnings 'once';
+    require Provisioner::Cookbook;
+    my %opts = Provisioner::Cookbook->load('nginxrelay')->enrich( modules => ['nginxrelay'] );
+    is( $opts{media_socket}, $Trog::NginxRelayClient::MEDIA_SOCKET, 'the recipe has its own copy of the socket, and it names the same one' );
 };
 
 done_testing;
