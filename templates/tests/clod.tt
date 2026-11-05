@@ -131,4 +131,20 @@ foreach my $unit (qw{clod-[% domain %].service clod-worker-[% domain %].service}
     is(scalar getpwuid((stat $copy)[4] // -1), '[% user %]', 'which belongs to [% user %]');
 }
 
+# App::Clod lets a run use these programs, so each one must run, as the
+# service user, on the PATH of the units.  nytprofhtml and nytprofmerge have
+# no --version, so for them the module that they load must load.
+my $path = '[% local_lib %]/bin:/opt/perl5/current/bin:/usr/local/bin:/usr/bin:/bin';
+my %runs = (
+    perlcritic   => 'perlcritic --version',
+    perltidy     => 'perltidy --version',
+    make         => 'make --version',
+    nytprofhtml  => 'command -v nytprofhtml && perl -MDevel::NYTProf::Data -e 1',
+    nytprofmerge => 'command -v nytprofmerge && perl -MDevel::NYTProf::Data -e 1',
+);
+foreach my $program (sort keys %runs) {
+    my $said = qx{runuser -u '[% user %]' -- env PATH='$path' sh -c '$runs{$program}' 2>&1};
+    is($? >> 8, 0, "[% user %] runs $program") or diag $said;
+}
+
 done_testing();
