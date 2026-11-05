@@ -271,6 +271,12 @@ subtest 'configures says whether a name is a domain of this installation' => sub
     is( Provisioner::Cookbook->configures( undef,          $conf ), 0, 'and nor is no name' );
 };
 
+subtest 'domains lists each domain of the configuration and no section' => sub {
+    my $conf = { _base => {}, _shared => { 'b.test' => ['c.test'] }, 'b.test' => {}, 'a.test' => {}, 'c.test' => {} };
+    is_deeply( [ Provisioner::Cookbook->domains($conf) ],             [qw{a.test b.test c.test}], 'every domain, sorted, and neither _base nor _shared' );
+    is_deeply( [ Provisioner::Cookbook->domains( { _base => {} } ) ], [],                         'and none when only _base is there' );
+};
+
 subtest 'asking about a domain does not configure it' => sub {
     my $conf = { _base => { _global => { cache => 'cache.test' } }, 'cache.test' => { fetchcache => {} } };
 

@@ -194,6 +194,34 @@ They describe an *installation*, not this software.  They used to sit in the che
 
 `TROG_PROVISIONER_CONFIG` points somewhere else -- another installation, or a temporary directory in a test with no business reading the real one.  Every command also takes `--recipes` and `--hvconf` individually.
 
+### Tab completion of a domain
+
+`bin/domains` prints each domain that the configuration names.  The bash completion in `completions/trog-provisioner.bash` uses it to complete the domain of `bin/new_config`, `bin/provision` and `bin/destroy`.  Install it in one of three ways.
+
+For all users, link it into the directory that the bash-completion package reads at the start of every shell:
+
+```sh
+sudo ln -s /path/to/trog-provisioner/completions/trog-provisioner.bash /etc/bash_completion.d/trog-provisioner
+```
+
+For one user, link it into the directory that bash-completion reads on demand.  That directory finds a file by the name of the command, so each command needs its own link:
+
+```sh
+dir=~/.local/share/bash-completion/completions
+mkdir -p $dir
+ln -s /path/to/trog-provisioner/completions/trog-provisioner.bash $dir/new_config
+ln -s /path/to/trog-provisioner/completions/trog-provisioner.bash $dir/provision
+ln -s /path/to/trog-provisioner/completions/trog-provisioner.bash $dir/destroy
+```
+
+Without the bash-completion package, add this line to `~/.bashrc`:
+
+```sh
+source /path/to/trog-provisioner/completions/trog-provisioner.bash
+```
+
+If the checkout changes, a link follows it, but a copy does not.  The completion runs the `bin/domains` of the checkout that holds the command you type.  It reads the same configuration as that command: `TROG_PROVISIONER_CONFIG`, or the `--recipes FILE` already on the line.
+
 ### Spinning one up from the recipes
 
 `bin/new_guest` writes a domain configuration from a list of recipes, so a

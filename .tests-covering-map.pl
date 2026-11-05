@@ -80,6 +80,11 @@ says nothing that reading the hook does not.
 
 It stands for each test that names it.  F<t/post-commit.t> runs it as git does.
 
+=item A file under F<completions/>
+
+A bash completion is shell, and nothing loads it.  It stands for each test that
+names it.  F<t/bash-completion.t> runs it in bash.
+
 =back
 
 Anything else is left unexplained, and the hook then runs every test.
@@ -192,7 +197,7 @@ return sub {
         return @tests;
     }
 
-    return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example';
+    return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example' || $path =~ m{\Acompletions/[^/]+\z};
     return ( 'lib/Trog/HV/Libvirt.pm', tests_naming($path) ) if $path eq 'virtiofs-better';
     return 'lib/Provisioner/IPPool.pm'                       if $path =~ m{\Aschema/ips(?:[.]v\d+[.]update)?[.]sql\z};
 

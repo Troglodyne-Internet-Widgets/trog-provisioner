@@ -1363,7 +1363,7 @@ sub check_fetch_sources {
     my $conf = eval { Provisioner::Cookbook->configuration() } // {};
     my %wanted;
 
-    foreach my $domain ( grep { !m/\A_/ } sort keys %$conf ) {
+    foreach my $domain ( Provisioner::Cookbook->domains($conf) ) {
         my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
 
         foreach my $name ( sort keys %$recipes ) {
@@ -1425,7 +1425,7 @@ sub check_config {
         my $said = eval {
             my $conf = Provisioner::Cookbook->configuration();
             Provisioner::Cookbook->base_globals($conf);
-            Provisioner::Cookbook->globals( $_, $conf ) foreach ( grep { !m/\A_/ } sort keys %$conf );
+            Provisioner::Cookbook->globals( $_, $conf ) foreach ( Provisioner::Cookbook->domains($conf) );
             1;
         };
         return $self->verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;
@@ -1521,7 +1521,7 @@ F<ips.db>, and the question belongs to C<bin/new_config>.
 sub note_apt_mirror {
     my $conf = eval { Provisioner::Cookbook->configuration() } // {};
 
-    my @domains = grep { !m/\A_/ } sort keys %$conf;
+    my @domains = Provisioner::Cookbook->domains($conf);
     return { ok => 1 } unless @domains;
 
     my %distro = map { $_ => 1 } Provisioner::Cookbook->distros();
