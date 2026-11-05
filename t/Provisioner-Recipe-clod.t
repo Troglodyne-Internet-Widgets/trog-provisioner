@@ -51,7 +51,7 @@ sub recipe {
 subtest 'the perl recipe installs the checkout, and the modules of the spokes after it' => sub {
     my %required = recipe()->required_recipes();
     my %perl     = $required{perl}->(%GLOBALS);
-    is_deeply( $perl{cpan_deps}, [ { dzil => '/bogus/bot.test.test/App-Clod' }, { install => ['App::cpanoutdated'] } ], 'with no spoke_modules, the checkout, and cpan-outdated, which clod deps needs' );
+    is_deeply( $perl{cpan_deps}, [ { dzil => '/bogus/bot.test.test/App-Clod' }, { install => [qw{App::cpanoutdated Perl::Critic Perl::Tidy Devel::NYTProf}] } ], 'with no spoke_modules, the checkout, cpan-outdated, which clod deps needs, and the programs that a run may use' );
 
     my %more = $required{perl}->( %GLOBALS, spoke_modules => ['Test2::V0'] );
     is_deeply( $more{cpan_deps}[2], { install => ['Test2::V0'] }, 'and the modules of the spokes, when there are some' );

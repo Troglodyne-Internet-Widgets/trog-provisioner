@@ -304,8 +304,12 @@ outdated>.
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<perl>, which installs what the checkout needs, C<App::cpanoutdated> and
-C<spoke_modules>.
+C<perl>, which installs what the checkout needs, C<App::cpanoutdated>, the
+programs that App::Clod lets a run use, and C<spoke_modules>.  Those programs
+are C<perlcritic>, C<perltidy>, C<nytprofhtml> and C<nytprofmerge>, from
+Perl::Critic, Perl::Tidy and Devel::NYTProf.  Perl::Critic and Perl::Tidy also arrive
+through the author dependencies of the checkout, but only by chance, so the
+recipe names them.
 C<nginxproxy>, which serves the socket.  C<claude>, which installs the program
 that does the work, and makes the C<agent_user> as its C<restricted_user>.
 C<servicesudo>, which lets the service user restart both units, and ask for
@@ -326,7 +330,7 @@ sub required_recipes {
             return (
                 cpan_deps => [
                     { dzil    => "$opts{install_dir}/$opts{domain}/App-Clod" },
-                    { install => ['App::cpanoutdated'] },
+                    { install => [qw{App::cpanoutdated Perl::Critic Perl::Tidy Devel::NYTProf}] },
                     ( @modules ? { install => \@modules } : () ),
                 ],
             );
