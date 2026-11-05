@@ -1,9 +1,9 @@
 # Bash completion of the domain for bin/new_config, bin/provision and
 # bin/destroy.
 #
-# Load it in ~/.bashrc:
-#
-#     source /path/to/trog-provisioner/completions/trog-provisioner.bash
+# Link it into /etc/bash_completion.d, or link it once for each command into
+# ~/.local/share/bash-completion/completions, or source it in ~/.bashrc.
+# "Tab completion of a domain" in README.md has the commands.
 #
 # The domains come from bin/domains, beside the command that you complete, so
 # a checkout completes from its own code.  That command reads the
