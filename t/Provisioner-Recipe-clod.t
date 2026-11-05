@@ -117,6 +117,32 @@ subtest 'an organization can stand in for the list of spokes' => sub {
     ok( exception { $fresh->validated( $fresh->takes(%GLOBALS), %org ) }, 'and with neither, the recipe refuses' );
 };
 
+# App::Clod dies on create_repos without spoke_orgs, so the recipe refuses it
+# first, and clod.conf is read by perl as App::Clod reads it.
+subtest 'create_repos and follow_up_max reach clod.conf' => sub {
+    my %org = ( %BASE, spoke_orgs => ['test-org'] );
+    delete $org{spokes};
+
+    my %conf;
+    foreach my $case ( [ off => {} ], [ on => { create_repos => 1, follow_up_max => 0 } ], [ word => { create_repos => 'true', follow_up_max => 5 } ] ) {
+        my ( $name, $opts ) = @$case;
+        my $dir = tempdir( CLEANUP => 1 );
+        my $r   = recipe($dir);
+        $r->generate_files( $dir, $r->validated( $r->takes(%GLOBALS), %org, %$opts ) );
+        $conf{$name} = do "$dir/clod.conf" or diag( $@, File::Slurper::read_text("$dir/clod.conf") );
+    }
+    is_deeply( [ $conf{off}{create_repos}, exists $conf{off}{follow_up_max} ], [ 0, !!0 ], 'unset, the bot makes no repository, and App::Clod keeps its own follow-up limit' );
+    is_deeply( [ @{ $conf{on} }{qw{create_repos follow_up_max}} ],             [ 1, 0 ],   'set, the bot makes them, and a limit of 0 turns follow-ups off' );
+    is_deeply( [ @{ $conf{word} }{qw{create_repos follow_up_max}} ],           [ 1, 5 ],   'and true in YAML is the same switch' );
+
+    foreach my $refused ( [ { create_repos => 1 }, 'create_repos without spoke_orgs' ], [ { follow_up_max => -1 }, 'a negative follow_up_max' ] ) {
+        my $r = recipe();
+        ok( exception { $r->validated( $r->takes(%GLOBALS), %BASE, %{ $refused->[0] } ) }, "the recipe refuses $refused->[1]" );
+    }
+    my $r = recipe();
+    is( exception { $r->validated( $r->takes(%GLOBALS), %BASE, create_repos => 0 ) }, undef, 'and takes create_repos off without spoke_orgs' );
+};
+
 subtest 'the daemon listens on the socket that nginx proxies to' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     my $r   = recipe($dir);
