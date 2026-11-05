@@ -285,6 +285,62 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
     like( exception { $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test' ) }, qr/web[.]test[.]test[ ]has[ ]no[ ]address/, 'a guest that the relay cannot reach stops the build' );
 };
 
+subtest 'a media name is fetched by the relay on 8080, and gets a certificate of its own' => sub {
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
+
+    my %media = ( %VPN, sites => ['web.test.test'], relay => 'relay.test.test', media_names => { 'media.web.test.test' => 'web.test.test' } );
+    my $opts  = enriched(%media);
+    is( $opts->{proxied}, undef, 'a media name does not pass through, so no vhost listens for it on 8443' );
+    is_deeply( $opts->{proxied_http}, { 'web.test.test' => ['media.web.test.test'] }, 'but its vhost answers for it on 8080, where the relay fetches' );
+    is_deeply( $opts->{domain_names}, ['web.test.test'],                              'and the vhost of the domain does not also list it' );
+    is_deeply(
+        $opts->{relay_cert},
+        {
+            names    => ['media.web.test.test'],
+            key_b64  => '/etc/ssl/nginxrelay/web.test.test.media.key.b64',
+            key      => '/etc/ssl/nginxrelay/web.test.test.media.key',
+            deployer => '/etc/dehydrated/deployers/nginxrelay-web.test.test',
+        },
+        'the guest sends its certificate with the media key that the relay issued'
+    );
+    my $nginx = 'Provisioner::Recipe::nginx';
+    is_deeply( [ $nginx->served_names( %media, domain => 'web.test.test' ) ], ['media.web.test.test'], 'the registrar publishes the media name, and letsencrypt certifies it' );
+
+    my %required = $nginx->required_recipes( %media, domain => 'web.test.test' );
+    is_deeply(
+        { $required{letsencrypt}->() },
+        { certificate_readers => ['nginx'], own_certificates => ['media.web.test.test'], certificate_deployers => ['/etc/dehydrated/deployers/nginxrelay-web.test.test'] },
+        'on a certificate of its own, which the deployer sends to the relay'
+    );
+    my %plain = $nginx->required_recipes( domain => 'web.test.test' );
+    is_deeply( { $plain{letsencrypt}->() }, { certificate_readers => ['nginx'] }, 'a domain with no media name asks letsencrypt for nothing else' );
+
+    # What each case changes in %media, and why the build stops.
+    my %refused = (
+        'a media name with no relay'                 => [ [ relay => undef ],                                                    qr/no[ ]relay/ ],
+        'a media name outside every zone'            => [ [ media_names => { 'media.customer.test' => 'web.test.test' } ],       qr/cannot[ ]get[ ]the[ ]certificate/ ],
+        'a name that is public and media'            => [ [ public_names => { 'media.web.test.test' => 'web.test.test' } ],      qr/both[ ]a[ ]public[ ]name[ ]and[ ]a[ ]media[ ]name/ ],
+        'a media name that a vhost lists'            => [ [ sites => [qw{web.test.test media.web.test.test}] ],                  qr/a[ ]vhost[ ]lists/ ],
+        'a media name of a vhost that nothing lists' => [ [ media_names => { 'media.web.test.test' => 'other.web.test.test' } ], qr/no[ ]recipe/ ],
+    );
+    foreach my $case ( sort keys %refused ) {
+        my ( $change, $why ) = @{ $refused{$case} };
+        my %opts = ( %media, @$change );
+        delete $opts{relay} unless defined $opts{relay};
+        like( exception { enriched(%opts) }, $why, "$case stops the build" );
+    }
+
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $recipe = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
+    $recipe->generate_files( $dir, domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %media );
+    my $deployer = File::Slurper::read_text("$dir/nginx_relay_cert");
+    like( $deployer,                                          qr/^[ ]+media[.]web[.]test[.]test\)[ ];;$/m,     'the deployer acts on the media name' );
+    like( $deployer,                                          qr/^[ ]+\*\)[ ]exit[ ]0[ ];;$/m,                 'and on no other' );
+    like( $deployer,                                          qr/root\@10[.]8[.]0[.]197[ ]"install[ ]\$name"/, 'and sends it to the relay, at its address in the tunnel' );
+    like( File::Slurper::read_text("$dir/nginx.global.conf"), qr/listen[ ]8080[ ]default_server/,              'a guest with media names alone still listens for the relay' );
+};
+
 subtest 'the teardown releases the names on the relay whenever the domain names one' => sub {
     my %config;
     my $mock = Test::MockModule->new('Provisioner::Cookbook');

@@ -1,0 +1,21 @@
+#!/bin/bash
+[%# letsencrypt runs this after each run of dehydrated, for each certificate,
+    with its name, its private key and its full chain.  It sends the
+    certificate of a media name of this domain to the relay, which serves that
+    name itself, and ignores every other name.  The relay checks the name and
+    the certificate again.  Provisioner::Recipe::nginx has the whole account,
+    under Media names. -%]
+set -euo pipefail
+
+name="$1" key="$2" chain="$3"
+case "$name" in
+[% FOR name IN relay_cert.names -%]
+    [% name %]) ;;
+[% END -%]
+    *) exit 0 ;;
+esac
+
+cat "$chain" "$key" | ssh -i [% relay_cert.key %] -o BatchMode=yes -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=yes -o UserKnownHostsFile=[% ban_relay.known_hosts %] -o ConnectTimeout=20 \
+    root@[% relay_address %] "install $name"
+echo "Sent the certificate of $name to [% relay %]"

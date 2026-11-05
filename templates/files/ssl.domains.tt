@@ -1,4 +1,9 @@
 [%# Every name the guest answers for: the aliases configured for the domain,
     and the names that the recipes on it hand over.  See
-    served_names in Provisioner::Recipe.  Nothing is named here. -%]
+    served_names in Provisioner::Recipe.  Nothing is named here.  Each name of
+    own_certificates is on a line of its own, so it gets a key of its own.
+    Provisioner::Recipe::letsencrypt says why. -%]
 [% domain %] [% FOR alias IN domain_aliases %] [% alias %][% END %]
+[% FOR name IN own_certificates -%]
+[% name %]
+[% END -%]

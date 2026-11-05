@@ -92,6 +92,26 @@ sub with_registrar {
     return $mock;
 }
 
+subtest 'a name of own_certificates gets a certificate of its own, which the deployers get' => sub {
+    my ( undef, undef, $read ) = generated( hostnames => [ "www.$DOMAIN", "media.$DOMAIN" ], own_certificates => ["media.$DOMAIN"], certificate_deployers => ['/bogus/deploy'] );
+    is( $read->('domains.txt'), "$DOMAIN  www.$DOMAIN\nmedia.$DOMAIN\n", 'it is on a line of its own, and off the certificate of the domain' );
+
+    my $hook        = $read->('domain.hook');
+    my ($deploy)    = $hook =~ m/^function[ ]deploy_cert[ ]\{(.*?)^\}/ms;
+    my ($unchanged) = $hook =~ m/^function[ ]unchanged_cert[ ]\{(.*?)^\}/ms;
+    my $args        = qr{"\$\{DOMAIN\}"[ ]"\$\{KEYFILE\}"[ ]"\$\{FULLCHAINFILE\}"};
+    my $runs        = qr{^[ ]+/bogus/deploy[ ]$args[ ]\|\|[ ]echo[ ]}m;
+    like( $deploy,    $runs, 'each deployer runs for a certificate that dehydrated issues, and a failure does not stop the renewal' );
+    like( $unchanged, $runs, 'and for one that is still valid, such as one that the salvage put back' );
+
+    ( undef, undef, $read ) = generated();
+    is( $read->('domains.txt'), "$DOMAIN  www.$DOMAIN\n", 'without it, one certificate holds every name' );
+    unlike( $read->('domain.hook'), qr{/bogus/deploy}, 'and no deployer runs' );
+
+    like( exception { generated( own_certificates => ["media.$DOMAIN"] ) }, qr/which[ ]no[ ]recipe[ ]on[ ]\Q$DOMAIN\E[ ]serves/,  'a name that no recipe serves is refused, because nothing publishes it' );
+    like( exception { generated( own_certificates => [$DOMAIN] ) },         qr/cannot[ ]have[ ]a[ ]certificate[ ]of[ ]its[ ]own/, 'and so is the domain itself' );
+};
+
 subtest 'the CA defaults to the public one where a public CA could issue' => sub {
     my $registrar = with_registrar();
     my ( undef, undef, $slurp ) = generated( domain => $PUBLIC );

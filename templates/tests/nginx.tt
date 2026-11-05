@@ -116,6 +116,26 @@ subtest 'nginx believes X-Forwarded-For on 8080 only from proxy_from' => sub {
     like( $ufw, qr/^nginx-proxy\s+ALLOW\s/m, 'ufw lets the proxy reach the two ports' ) or diag $ufw;
 };
 [% END -%]
+[% IF relay_cert -%]
+
+subtest 'the relay fetches each media name here, and serves its certificate' => sub {
+[% FOR name IN relay_cert.names -%]
+    {
+        my $code = `curl -s --max-time 10 -o /dev/null -w '%{http_code}' --resolve '[% name %]:8080:127.0.0.1' 'http://[% name %]:8080/' 2>/dev/null` || '000';
+        isnt( $code, '000', '[% name %] answers on 8080, where the relay fetches' );
+
+        # The certificate that the relay serves for the name, against the one
+        # that letsencrypt issued here.
+        my $here  = `openssl x509 -noout -fingerprint -sha256 -in /var/lib/dehydrated/certs/[% name %]/cert.pem 2>&1`;
+        my $there = `openssl s_client -connect [% relay_address %]:443 -servername [% name %] </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>&1`;
+        like( $here, qr/Fingerprint=/, 'letsencrypt issued [% name %] a certificate of its own' ) or diag $here;
+        is( $there, $here, 'and the relay serves it' );
+    }
+[% END -%]
+    ok( -x '[% relay_cert.deployer %]', 'letsencrypt has the deployer for each renewal' );
+    is( ( ( stat '[% relay_cert.key %]' )[2] // 0 ) & oct(7777), oct(600), 'and the media key is for root alone' );
+};
+[% END -%]
 [% IF ban_relay -%]
 [% INCLUDE "files/relay.client_test.tt" WITH recipe = 'nginx' %]
 [% END -%]

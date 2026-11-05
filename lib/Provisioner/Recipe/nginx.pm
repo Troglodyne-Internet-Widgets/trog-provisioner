@@ -135,6 +135,51 @@ C<bin/destroy> releases the names on the relay.  If the relay is not up then, it
 warns and says what to run there.  Until then, the relay sends those names to an
 address that the pool can give to the next guest.
 
+=head2 Media names
+
+    internal.somedomain:
+        nginx:
+            relay: relay.somedomain
+            media_names:
+                media.internal.somedomain: internal.somedomain
+
+C<media_names> maps each name from which readers fetch the uploaded files of
+this guest to the vhost that serves them, as C<public_names> does.  The relay
+does not pass a media name through.  It ends TLS for it and caches what readers
+fetch, so a file crosses the link to this guest once.  See
+L<Provisioner::Recipe::nginxrelay/Media names> for what the relay does.
+
+=over 4
+
+=item * C<bin/provision> registers the media names on the relay with the public
+names, and the relay issues a second key, the media key, at
+L<Provisioner::Recipe::nginxrelay/media_key_path>.
+
+=item * The vhost answers for a media name on 8080, where the relay fetches,
+and not on 8443, because nothing passes it through.
+
+=item * The registrar publishes the name, at the address of the domain, which
+is the relay when the zone points the domain there.
+
+=item * letsencrypt gives each media name a certificate and a key of its own,
+apart from the certificate of the domain, by DNS-01 as for any other name.  So
+the relay holds a key for the media name, and none for a name that carries a
+login.  See L<Provisioner::Recipe::letsencrypt/Certificates of their own>.
+
+=item * The command at C<cert_deployer> sends that certificate to the relay
+with the media key, and the relay checks it again.  letsencrypt runs the
+command after each run of dehydrated, so a renewal reaches the relay the same
+night, and so does a certificate that the salvage put back.  The fragment of
+this recipe also runs it once, because the target of letsencrypt runs before
+the command is in place.
+
+=back
+
+A media name needs C<relay>, and it must be in the zone of the domain or in a
+zone that an account of the registrar lists, because the relay has no
+stand-in name to serve.  A name cannot be both a public name and a media name,
+and no vhost may list it in C<sites>.
+
 =head2 Bans through the relay
 
 A ban on this guest blocks nothing that comes through the relay, because those
@@ -204,7 +249,30 @@ that the vhosts serve.
 =cut
 
 sub required_recipes {
-    return ( letsencrypt => sub { return ( certificate_readers => ['nginx'] ) } );
+    my ( $self, %opts ) = @_;
+    my @media  = sort keys %{ $opts{media_names} // {} };
+    my $domain = $opts{domain};
+    return (
+        letsencrypt => sub {
+            return (
+                certificate_readers => ['nginx'],
+                @media ? ( own_certificates => [@media], certificate_deployers => [ cert_deployer($domain) ] ) : (),
+            );
+        }
+    );
+}
+
+=head2 $path = cert_deployer($domain)
+
+Where the command that sends the certificates of the media names of C<$domain>
+to the relay is, on the guest.  L<Provisioner::Recipe::letsencrypt> runs it
+for each certificate.  See L</Media names>.
+
+=cut
+
+sub cert_deployer {
+    my ($domain) = @_;
+    return "/etc/dehydrated/deployers/nginxrelay-$domain";
 }
 
 sub args {
@@ -231,10 +299,18 @@ sub args {
                   'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as a relay guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
+            media_names => {
+                type                 => 'object',
+                propertyNames        => { format => 'hostname' },
+                additionalProperties => { type   => 'string', format => 'hostname' },
+                default              => {},
+                description          => 'Each name that the relay serves and caches itself for this guest, such as media.DOMAIN, mapped to a name of the vhost that serves its files.  Needs relay.  Each name gets a certificate of its own, which the relay gets too, so it must be in the zone of the domain or in a zone that an account of the registrar lists.  See "Media names".',
+            },
+
             relay => {
                 type        => 'string',
                 format      => 'hostname',
-                description => 'The guest that runs the nginxrelay recipe, where the public names of this domain are registered when it is built.  Read only when public_names has a name.  See "Registration with a relay guest".',
+                description => 'The guest that runs the nginxrelay recipe, where the public names and the media names of this domain are registered when it is built.  Read only when public_names or media_names has a name.  See "Registration with a relay guest".',
             },
 
             proxied_jails => {
@@ -268,12 +344,13 @@ my sub vhost_of ( $name, %opts ) {
     return $of_domain{$name} ? $opts{domain} : $name;
 }
 
-# The public names of each vhost, as a map of the vhost to the names.
-my sub public_names_by_vhost (%opts) {
+# The names of the map in $opts{$field}, such as public_names, by the vhost
+# that answers for them.
+my sub names_by_vhost ( $field, %opts ) {
     my %by_vhost;
-    my $public = $opts{public_names} // {};
-    foreach my $name ( sort keys %$public ) {
-        push( @{ $by_vhost{ vhost_of( $public->{$name}, %opts ) } }, $name );
+    my $names = $opts{$field} // {};
+    foreach my $name ( sort keys %$names ) {
+        push( @{ $by_vhost{ vhost_of( $names->{$name}, %opts ) } }, $name );
     }
     return %by_vhost;
 }
@@ -288,7 +365,7 @@ my sub certifiable ( $name, $domain ) {
 # for on the ports of the proxy: the public names that it can certify, then
 # public.VHOST when a public name is not one, then the others.
 my sub proxied_by_vhost (%opts) {
-    my %by_vhost = public_names_by_vhost(%opts);
+    my %by_vhost = names_by_vhost( public_names => %opts );
     my %names;
     foreach my $vhost ( keys %by_vhost ) {
         my @inside  = grep { certifiable( $_,  $opts{domain} ) } @{ $by_vhost{$vhost} };
@@ -302,7 +379,8 @@ my sub proxied_by_vhost (%opts) {
 
 The names of the base class, then each public name in the zone of the domain
 or in a zone that an account of the registrar lists, then C<public.VHOST> for
-each vhost that answers for a public name in neither.  See L</Names that reach the guest through a proxy>.
+each vhost that answers for a public name in neither, then each media name.
+See L</Names that reach the guest through a proxy> and L</Media names>.
 
 =cut
 
@@ -312,10 +390,13 @@ sub served_names {
     my %proxied = proxied_by_vhost(%opts);
     return (
         $self->SUPER::served_names(%opts),
-        map {
-            grep { certifiable( $_, $opts{domain} ) }
-              @{ $proxied{$_} }
-        } sort keys %proxied
+        (
+            map {
+                grep { certifiable( $_, $opts{domain} ) }
+                  @{ $proxied{$_} }
+            } sort keys %proxied
+        ),
+        sort keys %{ $opts{media_names} // {} },
     );
 }
 
@@ -352,7 +433,7 @@ my sub relay_grant ( $domain, $relay ) {
 
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    return () unless defined $opts{relay} && %{ $opts{public_names} // {} };
+    return () unless defined $opts{relay} && ( %{ $opts{public_names} // {} } || %{ $opts{media_names} // {} } );
 
     return relay_grant( $domain, $opts{relay} );
 }
@@ -379,9 +460,9 @@ sub revocations {
 
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
-Where the relay sends TLS and plain HTTP for the client of C<$grant>, and the
-names that it sends there, as L<Provisioner::Recipe::nginxrelay/issue_grant>
-takes them.
+Where the relay sends TLS and plain HTTP for the client of C<$grant>, the names
+that it sends there, and the media names that it serves itself, as
+L<Provisioner::Recipe::nginxrelay/issue_grant> takes them.
 
 Dies when the guest of the client has no address in the address pool, because
 the relay reaches the guest by that address.
@@ -400,6 +481,7 @@ sub grant_terms {
     return (
         upstreams => { tls => "$address:$port{443}", http => "$address:$port{80}" },
         names     => [ $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() ) ],
+        media     => [ sort keys %{ $opts{media_names} // {} } ],
     );
 }
 
@@ -434,7 +516,7 @@ sub enrich {
 
     my %proxied = proxied_by_vhost(%opts);
     if (%proxied) {
-        my %by_vhost = public_names_by_vhost(%opts);
+        my %by_vhost = names_by_vhost( public_names => %opts );
         foreach my $vhost ( sort keys %by_vhost ) {
             my $names = join( ', ', @{ $by_vhost{$vhost} } );
             die "nginx: public_names points $names at $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n"
@@ -451,22 +533,51 @@ sub enrich {
                 ( $vhost => [ grep { vhost_of( $_, %opts ) ne $vhost } @{ $proxied{$vhost} } ] )
             } keys %proxied
         };
+    }
+
+    my %media = names_by_vhost( media_names => %opts );
+    if (%media) {
+        die "nginx: $opts{domain} has media_names, but no relay to serve them.\n" unless defined $opts{relay};
+        my %public = map { $_ => 1 } keys %{ $opts{public_names} // {} };
+        foreach my $vhost ( sort keys %media ) {
+            my $names = join( ', ', @{ $media{$vhost} } );
+            die "nginx: media_names points $names at $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n" unless $listed{$vhost};
+            my @uncertified = grep { !certifiable( $_, $opts{domain} ) } @{ $media{$vhost} };
+            die "nginx: media_names has " . join( ', ', @uncertified ) . ", which is in no zone of $opts{domain} or of an account of the registrar, so it cannot get the certificate that the relay serves.\n"
+              if @uncertified;
+            my @both = grep { $public{$_} } @{ $media{$vhost} };
+            die "nginx: " . join( ', ', @both ) . " is both a public name and a media name, but the relay either passes a name through or serves it.\n" if @both;
+            my @taken = grep { $listed{$_} } @{ $media{$vhost} };
+            die "nginx: media_names has " . join( ', ', @taken ) . ", but each is a name that a vhost lists in sites.\n" if @taken;
+        }
+    }
+
+    # The relay fetches a media name on 8080 only, because it ends TLS itself.
+    if ( %proxied || %media ) {
+        $opts{proxied_http} = { map { $_ => [ @{ ( $opts{proxied} // {} )->{$_} // [] }, @{ $media{$_} // [] } ] } List::Util::uniq( keys %proxied, keys %media ) };
 
         my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
         $opts{proxy_from} //= [ map { Provisioner::IPPool::blocks( $bins{$_} ) } grep { defined $bins{$_}{via} } sort keys %bins ];
-        die "nginx: $opts{domain} has public_names, but nothing says where the proxy connects from.  Give a bin of ip_pool a via, or set proxy_from.\n"
+        die "nginx: $opts{domain} has public_names or media_names, but nothing says where the proxy connects from.  Give a bin of ip_pool a via, or set proxy_from.\n"
           unless @{ $opts{proxy_from} };
 
         if ( defined $opts{relay} ) {
+            my $nginxrelay = Provisioner::Cookbook->load('nginxrelay');
             $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{relay} );
-            $opts{ban_relay}     = Provisioner::Cookbook->load('nginxrelay')->ban_client( $opts{domain}, $opts{relay_address} );
+            $opts{ban_relay}     = $nginxrelay->ban_client( $opts{domain}, $opts{relay_address} );
             $opts{relay_jails}   = [ sort { $a cmp $b } List::Util::uniq( keys %{ { $self->jails(%opts) } }, @{ $opts{proxied_jails} // [] } ) ];
+            $opts{relay_cert}    = {
+                names    => [ sort map { @$_ } values %media ],
+                key_b64  => $nginxrelay->media_key_path( $opts{domain} ),
+                key      => $nginxrelay->media_key_path( $opts{domain} ) =~ s/[.]b64\z//r,
+                deployer => cert_deployer( $opts{domain} ),
+            } if %media;
         }
     }
 
     if ( $listed{ $opts{domain} } ) {
         my %public;
-        $public{$_} = 1 foreach map { @$_ } values %{ $opts{proxied} // {} };
+        $public{$_} = 1 foreach map { @$_ } values %{ $opts{proxied_http} // {} };
         $opts{domain_names} = [ $opts{domain}, grep { !$listed{$_} && !$public{$_} } $self->domain_aliases(%opts) ];
     }
 
@@ -482,6 +593,7 @@ sub template_files {
         'nginx.ufw.conf.tt'    => 'nginx_proxy_ufw.conf',
         'relay.action.tt'      => 'nginx_relay.action',
         'nginx.relay.jail.tt'  => 'nginx_relay.jail',
+        'nginx.relay_cert.tt'  => 'nginx_relay_cert',
     );
 }
 

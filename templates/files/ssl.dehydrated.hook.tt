@@ -136,6 +136,9 @@ function deploy_cert {
     #   The path of the file containing the full certificate chain.
     # - CHAINFILE
     #   The path of the file containing the intermediate certificate(s).
+[% FOR deployer IN certificate_deployers -%]
+    [% deployer %] "${DOMAIN}" "${KEYFILE}" "${FULLCHAINFILE}" || echo "[% deployer %] failed for ${DOMAIN}" >&2
+[% END -%]
 [% IF certificate_readers.size() %]
 
     # The nightly renewal ends here, and a service reads the certificate only
@@ -164,6 +167,12 @@ function unchanged_cert {
     #   The path of the file containing the full certificate chain.
     # - CHAINFILE
     #   The path of the file containing the intermediate certificate(s).
+
+    # Again here, so the deployers get a certificate that the salvage put back.
+    # Provisioner::Recipe::letsencrypt has the whole account.
+[% FOR deployer IN certificate_deployers -%]
+    [% deployer %] "${DOMAIN}" "${KEYFILE}" "${FULLCHAINFILE}" || echo "[% deployer %] failed for ${DOMAIN}" >&2
+[% END -%]
 }
 
 exit_hook() {
