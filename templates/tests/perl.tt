@@ -18,6 +18,10 @@ my $built = '/opt/perl5/current/bin/perl';
 ($built) = glob('/opt/perl5/*/bin/perl') unless -x $built;
 ok($built && -x $built, 'a perl was built under /opt/perl5');
 
+# /etc/profile.d/perl.sh names the link, so a login shell finds the built perl.
+chomp( my $login_perl = `sudo -u $user /bin/bash -lc 'command -v perl' 2>/dev/null` );
+is($login_perl, '/opt/perl5/current/bin/perl', "a login shell of $user finds the built perl first");
+
 [% IF version -%]
 # The release this domain asked for, which is what the directory is named after.
 is(readlink('/opt/perl5/current'), 'perl[% version %]', 'the perl that the configuration named is the current one');

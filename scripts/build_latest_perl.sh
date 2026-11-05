@@ -13,7 +13,7 @@
 # symlink /opt/perl5/current points at it, and scripts/cpan_install follows
 # that.  Without the symlink cpan_install takes the newest under /opt/perl5,
 # which is the same perl on a guest that has only one.  A person finds it
-# through profile.d.
+# through the profile.d file that the perl recipe installs.
 
 # perlbrew fails under cloud-init without these.
 export SHELL='/bin/bash';
@@ -72,13 +72,3 @@ yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus || exit 1
 # cpan_install is the one thing on a guest that gets modules from CPAN.  This runs
 # each time, so a module added here gets to a guest whose perl is already built.
 "$WD/cpan_install" --notest install Module::Build Dist::Zilla || exit 1
-
-# Where a person finds this perl.  The build does not use it, because make runs
-# from an atd job under a non-interactive sh.  systemd and cron also read no
-# shell init.  So everything that installs into this perl names it by path (see
-# scripts/cpan_install).  This file is written again each run, so the perl that
-# this build made is the one on the PATH.
-cat > /etc/profile.d/perl.sh <<PROFILE
-PATH="/opt/perl5/$NICE_PERL_NAME/bin:\$PATH"
-PROFILE
-chmod 0644 /etc/profile.d/perl.sh

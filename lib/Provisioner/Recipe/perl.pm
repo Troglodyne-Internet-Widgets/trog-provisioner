@@ -30,8 +30,10 @@ F</opt/perl5/current> at it, and F<scripts/cpan_install> follows that link.  So
 a guest that is rebuilt with another C<version> keeps the perl it had, beside
 the new one, and nothing installs into the old one by accident.
 
-It writes F</etc/profile.d/perl.sh>, so a person who logs in gets that perl
-first.  Nothing in a build reads shell init.  make runs its recipe lines under a
+It installs F</etc/profile.d/perl.sh>, which puts F</opt/perl5/current/bin>
+first on the C<PATH> of a login shell, once however often it is sourced.  It
+names the link and not the build, so a rebuild with another C<version> needs
+no new file.  Nothing in a build reads shell init.  make runs its recipe lines under a
 non-interactive sh from an atd job, and systemd and cron read no shell init
 either.  So everything that installs into this perl finds it under
 F</opt/perl5>.
@@ -181,6 +183,7 @@ sub template_files {
     return (
         'perl.critic.rc.tt' => 'perl.critic.rc',
         'perl.tidy.rc.tt'   => 'perl.tidy.rc',
+        'perl.profile'      => 'perl.profile',
     );
 }
 
