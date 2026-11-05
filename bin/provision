@@ -32,6 +32,10 @@ use Trog::Utils();
 
 use Carp::Always;
 
+# A trace shows each call and not its arguments, which hold the secrets of
+# the store once a configuration is resolved.
+$Carp::MaxArgNums = -1;
+
 =head1 NAME
 
 provision - build a VM from a domain directory

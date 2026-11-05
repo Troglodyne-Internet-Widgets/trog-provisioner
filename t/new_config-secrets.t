@@ -26,10 +26,12 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
+use Test::Fatal qw{exception};
 use File::Temp();
 use File::Slurper();
 use YAML::XS();
 use Trog::Secrets();
+use Provisioner::Cookbook();
 use Test::MockModule qw{strict};
 
 # Deliberately not t/new_config.t: that one runs under Test::MockFile in strict
@@ -140,6 +142,21 @@ subtest 'the manifest is not something the guest is handed' => sub {
 
     ok( defined $members, 'found what goes into data.tar.gz' );
     unlike( $members // '', qr/guest-secrets/, 'and the manifest is not among it' );
+};
+
+# bin/new_config loads Carp::Always, so a die anywhere under it carries a trace.
+# By the time a recipe validates, every secret: reference is its value, and a
+# trace that showed arguments printed them.
+subtest 'a configuration that fails names no secret in its trace' => sub {
+    my $recipe = Provisioner::Cookbook->load( 'clod', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+    my $secret = 'resolved-from-the-store';
+    my $died   = exception { $recipe->validated( domain => 'bot.test.test', bot => 'test-bot', github_token => $secret ) };
+    like( $died, qr/is[ ]not[ ]valid.*[ ]called[ ]at[ ]/, 'the recipe refuses it, with a trace' );
+    unlike( $died, qr/\Q$secret\E/, 'and the trace does not hold the token' ) or diag $died;
 };
 
 done_testing();
