@@ -217,6 +217,12 @@ subtest 'the local lib that the bot upgrades its modules in' => sub {
     my $fragment = $r->render(%got);
     my $owner    = qr{-o[ ]'svc'[ ]-g[ ]'bogus'};
     like( $fragment, qr{^install[ ]-d[ ]$owner[ ]-m[ ]0750[ ]'\Q$lib\E'$}m, 'the fragment makes the local lib for the service user' );
+    is( $conf->{agent_lib}, '/bogus/bot.test.test/agent-perl5', 'App::Clod keeps the tools of the agent in the agent lib' );
+    my $agent_lib = qr{[ ]-m[ ]2750[ ]'/bogus/bot\.test\.test/agent-perl5'$}m;
+    like( $fragment, qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'bogus'$agent_lib}m, 'which, with no agent, takes the group of the admin' );
+    my $with  = recipe( tempdir( CLEANUP => 1 ) );
+    my %agent = $with->validated( $with->takes( %GLOBALS, user => 'svc' ), %BASE, agent_user => 'test-agent' );
+    like( $with->render(%agent), qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'test-agent'$agent_lib}m, 'and with one, the group of the agent, which may then read it' );
     my $deps = index( $fragment, "queue_postrun_task '/bogus/bot.test.test/clod-deps.sh'" );
     ok( $deps >= 0 && $deps < index( $fragment, 'queue_postrun_task systemctl restart' ), 'and fills it in the postrun, before the units start' );
 };
