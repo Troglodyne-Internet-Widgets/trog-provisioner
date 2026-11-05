@@ -23,7 +23,10 @@ UMask=0007
 [% END -%]
 Environment=MOJO_MODE=production
 # The git hooks of the spokes run perltidy and perlcritic from this perl.
-Environment=PATH=/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The local lib of the bot comes first, so the modules that it upgrades there
+# win.  THE LOCAL LIB in Provisioner::Recipe::clod.
+Environment=PERL5LIB=[% local_lib %]/lib/perl5
+Environment=PATH=[% local_lib %]/bin:/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/perl5/current/bin/perl -I[% home %]/App-Clod/lib [% home %]/App-Clod/script/clod minion worker -j [% workers %]
 # On TERM the worker takes no new job and stops when its jobs finish.  A job
 # can be a claude run of up to an hour, and a job that is killed fails.

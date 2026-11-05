@@ -16,7 +16,10 @@ Environment=CLOD_CONFIG=[% home %]/clod.conf
 Environment=HOME=[% home %]
 Environment=MOJO_MODE=production
 Environment=MOJO_REVERSE_PROXY=1
-Environment=PATH=/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The local lib of the bot comes first, so the modules that it upgrades there
+# win.  THE LOCAL LIB in Provisioner::Recipe::clod.
+Environment=PERL5LIB=[% local_lib %]/lib/perl5
+Environment=PATH=[% local_lib %]/bin:/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Group rw on the socket, which takes the www-data group of run/, so that
 # nginx can connect to it.
 UMask=0007

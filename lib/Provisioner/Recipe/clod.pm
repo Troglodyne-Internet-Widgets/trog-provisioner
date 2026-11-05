@@ -277,9 +277,35 @@ sub args {
     );
 }
 
+=head2 THE LOCAL LIB
+
+The C<perl> recipe installs what the checkout needs into the perl of the host,
+which root owns.  So the bot, which runs as C<user>, could not install what a
+new version of itself needs, nor upgrade a module with a newer release.  A
+sudo grant for cpm would be root, because cpm takes any mirror.
+
+So the recipe makes a local lib, F<perl5> in the directory of the domain, that
+C<user> owns, and names it as C<local_lib> in F<clod.conf>.  Both units put it
+first on C<PERL5LIB>, and its F<bin> first on C<PATH>, so a module there wins
+over the one of the host.  In the postrun, before the units start,
+F<clod-deps.sh> runs C<clod deps install> as C<user>, which installs every
+module that the checkout needs into it.  cpm installs a module into a local
+lib even when the perl has it, so the local lib holds a copy of each.  From
+then on the dashboard of the bot installs and upgrades them there, with no
+sudo.  See L<App::Clod::Deps>.
+
+The recipe also names both units in C<restart_units>, which the bot restarts
+after an update, through the sudo grant of C<servicesudo>.
+
+The perl of the host still gets every module too, from the C<dzil> step of
+C<cpan_deps>.  C<clod deps install> needs them to run at all, before the local
+lib has any.  The recipe adds C<App::cpanoutdated> there, for C<clod deps
+outdated>.
+
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<perl>, which installs what the checkout needs and C<spoke_modules>.
+C<perl>, which installs what the checkout needs, C<App::cpanoutdated> and
+C<spoke_modules>.
 C<nginxproxy>, which serves the socket.  C<claude>, which installs the program
 that does the work, and makes the C<agent_user> as its C<restricted_user>.
 C<servicesudo>, which lets the service user restart both units, and ask for
@@ -299,7 +325,8 @@ sub required_recipes {
             my @modules = @{ $opts{spoke_modules} // [] };
             return (
                 cpan_deps => [
-                    { dzil => "$opts{install_dir}/$opts{domain}/App-Clod" },
+                    { dzil    => "$opts{install_dir}/$opts{domain}/App-Clod" },
+                    { install => ['App::cpanoutdated'] },
                     ( @modules ? { install => \@modules } : () ),
                 ],
             );
@@ -337,6 +364,7 @@ sub enrich {
     die "clod: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
       unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
     $opts{agent_home} = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
+    $opts{local_lib}  = "$opts{install_dir}/$opts{domain}/perl5";
 
     # App::Clod hashes the bytes of the password that basic authentication sends.
     $opts{dashboard_password_sha256} = Digest::SHA::sha256_hex( Encode::encode( 'UTF-8', delete $opts{dashboard_password} ) );
@@ -405,6 +433,7 @@ sub template_files {
         'clod.sudoers.tt'        => 'clod.sudoers',
         'clod.share.sh.tt'       => 'clod-share.sh',
         'clod.claude.sh.tt'      => 'clod-claude.sh',
+        'clod.deps.sh.tt'        => 'clod-deps.sh',
         'clod.agent-token.tt'    => 'clod-agent.token',
     );
 }
