@@ -172,9 +172,9 @@ L<Provisioner::Recipe::claude/A RESTRICTED AGENT>.
 =item * Lets C<user> run any command as C<agent_user>, with C<SETENV> and no
 password, in F</etc/sudoers.d/clod-E<lt>userE<gt>>.  The grant goes from the
 account of the worker down to an account that holds less, so it gives the
-worker nothing that it does not already have.  C<SETENV> lets App::Clod pass
-C<CLAUDE_CODE_OAUTH_TOKEN> through the environment, never through the argument
-list, which C<ps> shows to every account.  The file also sets the umask of a
+worker nothing that it does not already have.  C<SETENV> lets App::Clod pass the
+names of its C<env> through the environment, never through the argument list,
+which C<ps> shows to every account.  The file also sets the umask of a
 command that runs as C<agent_user> to C<0007>, because sudo combines its own
 umask with that of the worker.  Without C<agent_user>, the file holds no
 grant, so a provision takes back the grant of an earlier one.
@@ -186,6 +186,14 @@ the commit and remove the work tree.  The group of C<user> stays the group of
 F<clod.env> and F<clod.conf>, and the agent is not in it.  F<clod-share.sh>
 does this in the postrun, before the services restart, because the target of
 the claude recipe runs after this one, and makes the account.
+
+=item * Gives the Claude token to C<agent_user> alone, in
+F<E<lt>agent_homeE<gt>/.claude-token>, mode 0400.  F<clod-claude.sh> in the
+directory of the domain reads it and runs claude, and is C<bin> of the
+C<claude> section of F<clod.conf>.  So the token never goes through sudo,
+which logs each variable that it passes, with its value.  F<clod.env> then
+holds no Claude token, because the worker needs none.  F<clod-share.sh>
+installs the token, because the account exists only in the postrun.
 
 =item * Writes C<run_as> into the C<claude> section of F<clod.conf>.
 
@@ -387,6 +395,8 @@ sub template_files {
         'clod.salvage.sh.tt'     => 'clod-salvage.sh',
         'clod.sudoers.tt'        => 'clod.sudoers',
         'clod.share.sh.tt'       => 'clod-share.sh',
+        'clod.claude.sh.tt'      => 'clod-claude.sh',
+        'clod.agent-token.tt'    => 'clod-agent.token',
     );
 }
 

@@ -17,7 +17,7 @@
     authorized_users => [ [% FOR u IN authorized_users %]'[% u %]', [% END %]],
     owners           => [ [% FOR o IN owners %]'[% o %]', [% END %]],
     auth             => { user => '[% dashboard_user %]', password_sha256 => '[% dashboard_password_sha256 %]' },
-    claude           => { [% IF agent_user %]run_as => '[% agent_user %]', [% END %]extra_tools => [ [% FOR t IN extra_tools %][% perl_string(t) %], [% END %]] },
+    claude           => { [% IF agent_user %]run_as => '[% agent_user %]', bin => '[% home %]/clod-claude.sh', [% END %]extra_tools => [ [% FOR t IN extra_tools %][% perl_string(t) %], [% END %]] },
 [% IF spoke_prompt.defined() -%]
     spoke_prompt     => [% perl_string(spoke_prompt) %],
 [% END -%]

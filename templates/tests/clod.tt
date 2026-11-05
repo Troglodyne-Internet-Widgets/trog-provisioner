@@ -100,6 +100,18 @@ ok(-d "$home/clod-state" && (stat _)[4] == (getpwnam('[% user %]'))[2], 'the dat
     my @removed = $as->('worker', 'rm', '-r', $repo);
     is($removed[0], 0, 'and removes what the agent made') or diag $removed[1];
     system('rm', '-rf', $repo);
+
+    # The Claude token is the agent alone, as a file, because sudo logs what
+    # it passes in the environment.  Its value is never printed.
+    my $token = '[% agent_home %]/.claude-token';
+    my @st    = stat $token;
+    is(sprintf('%s %04o', scalar getpwuid($st[4] // -1) // '', ($st[2] // 0) & 07777), "$agent 0400", 'the token of the agent is its own, mode 0400');
+    system('runuser', '-u', '[% user %]', '--', 'test', '-r', $token);
+    isnt($? >> 8, 0, 'and the worker cannot read it');
+    unlike(do { local (@ARGV, $/) = "$home/clod.env"; <> } // '', qr/CLAUDE_CODE_OAUTH_TOKEN/, 'and clod.env holds no Claude token');
+    ok(!-e "$home/clod-agent.token", 'and the copy that waited for the postrun is gone');
+    my @version = $as->('agent', '/usr/bin/env', "PATH=$ENV{PATH}", "$home/clod-claude.sh", '--version');
+    like($version[1], qr/Claude[ ]Code/, 'the agent runs claude through clod-claude.sh') or diag $version[1];
 }
 [% END %]
 
