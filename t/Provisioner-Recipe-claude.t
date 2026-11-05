@@ -318,6 +318,12 @@ subtest 'only the memories are staged for the salvage' => sub {
     my ($none) = recipe()->remote_prepare( $empty, 'agent.test.test' );
     is( ( run_sh($none) )[0], 0, 'a guest with no projects is not a failure' );
     ok( !-e "$empty/agent.test.test/.claude-memory-salvage/projects", 'and stages nothing' );
+
+    File::Path::remove_tree("$home/.claude");
+    File::Path::make_path("$staged/projects/-bogus-project/memory");
+    my ( $rc_bare, $err_bare ) = run_sh( $commands[0] );
+    is( $rc_bare, 0, 'a guest with no .claude at all is not a failure, as when its build stopped before this recipe' ) or diag "$commands[0]\n$err_bare";
+    ok( -d $staged && !-e "$staged/projects", 'and the copy staged before goes, while the staging directory stays for the salvage' );
 };
 
 subtest '.claude.json is staged in a directory of its own for the salvage' => sub {

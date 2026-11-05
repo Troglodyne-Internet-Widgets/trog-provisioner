@@ -339,8 +339,8 @@ C<remote_files> salvages directories, not files.
 The commands are rsync and not an installed script, so that it also runs on a
 guest built before this recipe salvaged memories.  Every guest has rsync,
 because the salvage itself runs it there.  On a guest with no
-F<.claude/projects>, it stages nothing and succeeds, and the same goes for a
-guest with no F<.claude.json>.  A staged copy of either that is gone from the
+F<.claude/projects>, or no F<.claude> at all, it stages nothing and succeeds,
+and the same goes for a guest with no F<.claude.json>.  A staged copy of either that is gone from the
 guest goes from the staging directory too.
 
 =cut
@@ -352,9 +352,12 @@ sub remote_prepare {
     # No slash after projects, because --delete-missing-args covers only a
     # source that names a file or directory, not the contents of one.  The
     # include of /projects itself, because rsync takes a missing source for a
-    # file, and the exclude of everything else would keep its copy.
+    # file, and the exclude of everything else would keep its copy.  The test
+    # of .claude, because rsync fails when the parent of a source is missing,
+    # as on a guest whose build stopped before this recipe ran.
+    my $staged = "$home/.claude-memory-salvage";
     return (
-        "rsync -a --delete --delete-missing-args --prune-empty-dirs --include='/projects' --include='*/' --include='/projects/*/memory/***' --exclude='*' '$home/.claude/projects' '$home/.claude-memory-salvage/'",
+        "if [ -d '$home/.claude' ]; then rsync -a --delete --delete-missing-args --prune-empty-dirs --include='/projects' --include='*/' --include='/projects/*/memory/***' --exclude='*' '$home/.claude/projects' '$staged/'; else mkdir -p '$staged' && rm -rf '$staged/projects'; fi",
         "rsync -a --delete-missing-args '$home/.claude.json' '$home/.claude-state-salvage/'",
     );
 }
