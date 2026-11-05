@@ -220,11 +220,22 @@ subtest 'the local lib that the bot upgrades its modules in' => sub {
     is( $conf->{agent_lib}, '/bogus/bot.test.test/agent-perl5', 'App::Clod keeps the tools of the agent in the agent lib' );
     my $agent_lib = qr{[ ]-m[ ]2750[ ]'/bogus/bot\.test\.test/agent-perl5'$}m;
     like( $fragment, qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'bogus'$agent_lib}m, 'which, with no agent, takes the group of the admin' );
-    my $with  = recipe( tempdir( CLEANUP => 1 ) );
-    my %agent = $with->validated( $with->takes( %GLOBALS, user => 'svc' ), %BASE, agent_user => 'test-agent' );
-    like( $with->render(%agent), qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'test-agent'$agent_lib}m, 'and with one, the group of the agent, which may then read it' );
-    my $deps = index( $fragment, "queue_postrun_task '/bogus/bot.test.test/clod-deps.sh'" );
-    ok( $deps >= 0 && $deps < index( $fragment, 'queue_postrun_task systemctl restart' ), 'and fills it in the postrun, before the units start' );
+    my $with       = recipe( tempdir( CLEANUP => 1 ) );
+    my %agent      = $with->validated( $with->takes( %GLOBALS, user => 'svc' ), %BASE, agent_user => 'test-agent' );
+    my $with_agent = $with->render(%agent);
+    unlike( $with_agent, qr{-g[ ]'test-agent'}, 'and with one, the fragment names no group of the agent, because the claude target makes the account later' );
+    like( $with_agent, qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'bogus'$agent_lib}m, 'but makes the agent lib with the group of the admin' );
+    my $agent_dir = tempdir( CLEANUP => 1 );
+    $with->generate_files( $agent_dir, %agent );
+    like(
+        File::Slurper::read_text("$agent_dir/clod-share.sh"),
+        qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'test-agent'$agent_lib}m,
+        'and the postrun gives it to the group of the agent, which may then read it'
+    );
+    my $share = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-share.sh'" );
+    my $deps  = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-deps.sh'" );
+    ok( $share >= 0 && $share < $deps,                                        'before it fills the agent lib' );
+    ok( $deps < index( $with_agent, 'queue_postrun_task systemctl restart' ), 'which it does before the units start' );
 };
 
 subtest 'claude runs as the agent account' => sub {

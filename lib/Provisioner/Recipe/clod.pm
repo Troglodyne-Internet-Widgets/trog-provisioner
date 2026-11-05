@@ -315,6 +315,9 @@ C<clod deps install> fills it in the postrun, with the rest.  See
 L<App::Clod::Deps>.
 
 C<user> owns it, and its group is C<agent_user>, or C<admin_user> without one.
+The fragment makes it with the group of C<admin_user>, because the C<claude>
+target makes the agent account after the fragment runs.  F<clod-share.sh>
+gives it to C<agent_user> in the postrun, before C<clod deps install>.
 Its mode is C<2750>, so what the bot installs there takes that group, and
 App::Clod installs with C<umask 0027>.  So the agent may read the tools and
 not change them.
