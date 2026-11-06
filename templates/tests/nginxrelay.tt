@@ -200,14 +200,16 @@ sub take_cert_key {
     return;
 }
 
-# Makes a certificate for $cn, and sends it with the key.  What ssh said, and
-# whether it exited 0.
+# Makes a certificate for $cn, and sends it with the key as the certificate of
+# $as, which is $cn unless the test says otherwise.  What ssh said, and whether
+# it exited 0.
 sub send_cert {
-    my ($cn) = @_;
+    my ( $cn, $as ) = @_;
+    $as //= $cn;
     my $pem  = '/root/.nginxrelay-media.pem';
     my $made = `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=$cn -addext subjectAltName=DNS:$cn -keyout $pem.key -out $pem.crt 2>&1 && cat $pem.crt $pem.key > $pem`;
     die "openssl could not make a certificate for $cn: $made\n" if $?;
-    my $said = `$ssh 'install $cn' < $pem 2>&1`;
+    my $said = `$ssh 'install $as' < $pem 2>&1`;
     my $ok   = $? == 0;
     unlink $pem, "$pem.key", "$pem.crt";
     return ( $said, $ok );
@@ -223,7 +225,7 @@ subtest 'a media name is served and cached here' => sub {
     my $ok;
     ( $said, $ok ) = send_cert($media);
     ok( $ok, 'and sends the certificate of the media name with that key' ) or diag $said;
-    ( $said, $ok ) = send_cert($name);
+    ( $said, $ok ) = send_cert( $media, $name );
     ok( !$ok, 'but the key cannot install a certificate for a name that passes through' );
     $said = `ssh -n -i $cert_keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1 id 2>&1`;
     unlike( $said, qr/uid=/, 'and it runs nothing else' );
