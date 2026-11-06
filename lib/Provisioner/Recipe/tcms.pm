@@ -79,7 +79,8 @@ L<Provisioner::Recipe::trogrunner> pins it for the same reason.
 =head2 THE SYSTEM PACKAGES
 
 tCMS declares the system packages that it needs under C<x_system_packages> in
-the F<metamerge.yml> of its repository.  See
+the F<metamerge.yml> of its repository, one for each dependency, and the
+archives that some of them come from under C<x_system_sources>.  See
 L<Dist::Conformance::Check::SystemPackages>.  So the recipe names no package
 itself: C<deps> of the subclass for a distribution asks C<declared_packages>
 for those of its packager, and the guest installs them at first boot, before
@@ -108,8 +109,8 @@ sub args {
 
 What F<metamerge.yml> on C<repo_branch> of C<repo_url> in C<%opts>, or on the
 default of each, declares for C<%host>, as
-L<Dist::Conformance::Check::SystemPackages/resolve> returns it: C<packages>,
-C<sources> and C<programs>.  C<%host> is what C<resolve> takes: C<packager>,
+L<Dist::Conformance::Check::SystemPackages/resolve> returns it: C<needs>,
+C<packages>, C<sources>, C<programs> and C<unresolved>, which is empty.  C<%host> is what C<resolve> takes: C<packager>,
 C<distro>, C<release> and C<codename>.  Each source has its C<fingerprint>,
 which L<Provisioner::Packager::Deb> holds its key to.
 
@@ -121,7 +122,10 @@ them, and a guest without them fails long after the generation: when the file
 cannot be fetched, with the answer of GitHub; when the repository has no
 F<metamerge.yml>; when the declaration is not valid, or cannot be resolved for
 the host, with what L<Dist::Conformance::Check::SystemPackages> said about it;
-and when it declares no package for the host.
+when it declares no dependency at all; and when a dependency has no package of
+the packager for the host, naming each.  A dependency that the declaration
+gives no package on the host, with a null, is not an error, because the
+declaration says so for that host.
 
 =cut
 
@@ -146,9 +150,10 @@ sub declared_for ( $self, $host, %opts ) {    ## no critic (ProhibitMisplacedMet
         eval { Dist::Conformance::Check::SystemPackages->declared($snapshot) } // die "tcms: the system packages of tCMS at $url: $@";
     };
 
+    die "tcms: $url declares no system packages, so the guest would install none of what tCMS needs.\n" unless %{ $declaration->{packages} };
     my $resolved = eval { Dist::Conformance::Check::SystemPackages->resolve( $declaration, %$host ) } // die "tcms: the system packages of tCMS at $url: $@";
-    die "tcms: $url declares no $host->{packager} packages for $host->{distro} $host->{release}, so the guest would install none of what tCMS needs.\n"
-      unless @{ $resolved->{packages} };
+    die "tcms: $url names no $host->{packager} package for $host->{distro} $host->{release} for " . join( ', ', @{ $resolved->{unresolved} } ) . ", so the guest would lack what tCMS needs.\n"
+      if @{ $resolved->{unresolved} };
     return $resolved;
 }
 

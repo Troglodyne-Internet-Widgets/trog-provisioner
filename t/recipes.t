@@ -66,15 +66,20 @@ $garage->redefine( latest_version => sub { return 'v2.4.1' } );
 # distribution has.
 my $TCMS_DECLARATION = <<'YAML';
 x_system_packages:
-  deb: [libmagic-dev]
-  sources:
+  File::LibMagic:
+    deb: libmagic-dev
+  Vendor:
     deb:
-      - name: tcms-vendor
-        uri: https://archive.test.test/apt
-        suites: ['{codename}']
-        components: [main]
-        key: https://archive.test.test/key.asc
-        fingerprint: 0123456789ABCDEF0123456789ABCDEF01234567
+      name: vendor-tool
+      source: tcms-vendor
+x_system_sources:
+  deb:
+    - name: tcms-vendor
+      uri: https://archive.test.test/apt
+      suites: ['{codename}']
+      components: [main]
+      key: https://archive.test.test/key.asc
+      fingerprint: 0123456789ABCDEF0123456789ABCDEF01234567
 YAML
 my $tcms = Test::MockModule->new('Provisioner::Recipe::tcms');
 $tcms->redefine( fetch => sub { return { success => 1, status => 200, reason => 'OK', content => $TCMS_DECLARATION } } );
