@@ -87,6 +87,33 @@ subtest 'the packages are those that tCMS declares, and never none' => sub {
         like( exception { $deps->( $dies{$case}[0] ) }, $dies{$case}[1], "when $case, the generation stops and says so" );
     }
 
+    # A name and an archive for a release, resolved for the release of the domain.
+    my $declaration = <<'YAML';
+x_system_packages:
+  deb:
+    - libmagic-dev
+    - name: libssl3
+      ubuntu/24.04: libssl3t64
+  sources:
+    deb:
+      - name: vendor
+        uri: https://archive.test.test/apt
+        suites: ['{codename}']
+        components: [main]
+        key: https://archive.test.test/key.asc
+        fingerprint: 0123456789abcdef0123456789abcdef01234567
+        distros: [ubuntu/24.04]
+YAML
+    is_deeply( [ $deps->($declaration) ], [qw{git libmagic-dev libssl3t64}], 'the name of a package for the pinned release' );
+    is_deeply(
+        [ $recipe->package_sources( repo_branch => "b$branch" ) ],
+        [ { name => 'vendor', uri => 'https://archive.test.test/apt', suites => ['noble'], components => ['main'], key => 'https://archive.test.test/key.asc', fingerprint => '0123456789abcdef0123456789abcdef01234567' } ],
+        'and its archive, for the codename of the release, with the fingerprint of its key'
+    );
+    is_deeply( [ $recipe->deps( repo_branch => "b$branch", distro_release => 'resolute' ) ],            [qw{git libmagic-dev libssl3}], 'another release gets the name of every other' );
+    is_deeply( [ $recipe->package_sources( repo_branch => "b$branch", distro_release => 'resolute' ) ], [],                             'and not an archive that is only for one release' );
+    is( scalar @asked, $branch + 1, 'from the declaration that was read once' );
+
     like( exception { $recipe->deps( repo_url => 'https://bogus.test.test/x/tCMS' ) },                                                                                qr/not[ ]a[ ]repository[ ]on[ ]GitHub/, 'a repository that is not on GitHub is refused' );
     like( exception { $recipe->validate( domain => 'web.test.test', install_dir => '/bogus', admin_user => 'bogus', repo_url => 'https://bogus.test.test/x/tCMS' ) }, qr{/repo_url},                          'and so by the schema' );
     is_deeply( [ $recipe->fetch_hosts( repo_url => 'https://github.com/test-org/tCMS-fork' ) ], ['github.com'], 'the guest clones it from GitHub' );

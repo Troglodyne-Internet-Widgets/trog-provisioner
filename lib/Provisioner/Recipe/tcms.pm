@@ -83,7 +83,9 @@ the F<metamerge.yml> of its repository.  See
 L<Dist::Conformance::Check::SystemPackages>.  So the recipe names no package
 itself: C<deps> of the subclass for a distribution asks C<declared_packages>
 for those of its packager, and the guest installs them at first boot, before
-the C<perl> recipe builds the modules of the checkout against them.
+the C<perl> recipe builds the modules of the checkout against them.  An archive
+that tCMS declares for the guest goes to C<package_sources> of the subclass,
+with the fingerprint of its key, and first boot adds it before it installs.
 
 They are read when the configuration is generated, from C<repo_branch> of
 C<repo_url>, and not from the checkout on the guest.  A guest that keeps the
@@ -102,23 +104,28 @@ sub args {
     );
 }
 
-=head2 @packages = $recipe->declared_packages($packager, %opts)
+=head2 $resolved = $recipe->declared_for(\%host, %opts)
 
-The packages of C<$packager>, such as C<deb>, that F<metamerge.yml> on
-C<repo_branch> of C<repo_url> in C<%opts> declares, or on the defaults of each.
+What F<metamerge.yml> on C<repo_branch> of C<repo_url> in C<%opts>, or on the
+default of each, declares for C<%host>, as
+L<Dist::Conformance::Check::SystemPackages/resolve> returns it: C<packages>,
+C<sources> and C<programs>.  C<%host> is what C<resolve> takes: C<packager>,
+C<distro>, C<release> and C<codename>.  Each source has its C<fingerprint>,
+which L<Provisioner::Packager::Deb> holds its key to.
+
 It reads the file once for each repository and branch in each process, with
-C<fetch>.
+C<fetch>, and resolves it for each call.
 
 It dies rather than return no packages, because tCMS does not run without
 them, and a guest without them fails long after the generation: when the file
 cannot be fetched, with the answer of GitHub; when the repository has no
-F<metamerge.yml>; when the declaration is not valid, with what
-L<Dist::Conformance::Check::SystemPackages> said about it; and when it declares
-no package of C<$packager>.
+F<metamerge.yml>; when the declaration is not valid, or cannot be resolved for
+the host, with what L<Dist::Conformance::Check::SystemPackages> said about it;
+and when it declares no package for the host.
 
 =cut
 
-sub declared_packages ( $self, $packager, %opts ) {    ## no critic (ProhibitMisplacedMethods) -- the subclass of every distribution answers deps with it, and Ubuntu is the only one yet
+sub declared_for ( $self, $host, %opts ) {    ## no critic (ProhibitMisplacedMethods) -- the subclass of every distribution answers deps and package_sources with it, and Ubuntu is the only one yet
     my $repo = $opts{repo_url} // $DEFAULT_REPO;
     my ( $owner, $name ) = $repo =~ m{\Ahttps://github[.]com/([^/]+)/([^/]+?)(?:[.]git)?/?\z}
       or die "tcms: $repo is not a repository on GitHub, so the recipe cannot read the system packages that it declares.\n";
@@ -139,9 +146,10 @@ sub declared_packages ( $self, $packager, %opts ) {    ## no critic (ProhibitMis
         eval { Dist::Conformance::Check::SystemPackages->declared($snapshot) } // die "tcms: the system packages of tCMS at $url: $@";
     };
 
-    my @packages = @{ $declaration->{$packager} // [] };
-    die "tcms: $url declares no $packager packages, so the guest would install none of what tCMS needs.\n" unless @packages;
-    return @packages;
+    my $resolved = eval { Dist::Conformance::Check::SystemPackages->resolve( $declaration, %$host ) } // die "tcms: the system packages of tCMS at $url: $@";
+    die "tcms: $url declares no $host->{packager} packages for $host->{distro} $host->{release}, so the guest would install none of what tCMS needs.\n"
+      unless @{ $resolved->{packages} };
+    return $resolved;
 }
 
 =head2 $res = $recipe->fetch($url)

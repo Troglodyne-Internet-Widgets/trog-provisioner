@@ -14,8 +14,9 @@ use parent qw{Provisioner::Packager};
 
 use HTTP::Tiny();
 use JSON::Validator();
-use List::Util   qw{uniq};
-use MIME::Base64 qw{encode_base64};
+use List::Util qw{uniq};
+use Digest::SHA();
+use MIME::Base64 qw{decode_base64 encode_base64};
 use URI();
 
 use Dist::Conformance::Check::SystemPackages();
@@ -71,6 +72,14 @@ The URL of the signing key, armored or binary.
 Optional.  An array reference, for an archive that does not publish every
 architecture.
 
+=item C<fingerprint>
+
+Optional.  The fingerprint of the signing key, as 40 hex digits in either
+case.  With it, C<files> refuses a key that is not exactly one primary key with
+that fingerprint, so a key that the URL serves later is not trusted on its
+word.  A source that a repository declares, through
+L<Dist::Conformance::Check::SystemPackages>, always has one.
+
 =item C<pin>
 
 Optional.  A hash reference with C<priority>, and C<packages>, which defaults
@@ -94,6 +103,7 @@ my %SCHEMA = (
         suites        => { type => 'array',  minItems => 1, items => { type => 'string', pattern => '^[^\s]+$' } },
         components    => { type => 'array',  items    => { type => 'string', pattern => '^[^\s]+$' } },
         architectures => { type => 'array',  items    => { type => 'string', pattern => '^[a-z0-9]+$' } },
+        fingerprint   => { type => 'string', pattern  => '^[0-9A-Fa-f]{40}$' },
         pin           => {
             type                 => 'object',
             required             => ['priority'],
@@ -244,7 +254,8 @@ otherwise.
 
 A key is fetched once for each process, however many domains name it.
 
-Dies when a key cannot be fetched or is not a PGP key, and when the archive
+Dies when a key cannot be fetched or is not a PGP key, when a source has a
+C<fingerprint> and its key is not one primary key with it, and when the archive
 does not answer for a suite.  A guest that boots with either fails in its
 package install, where the error names neither the archive nor the key.
 
@@ -257,6 +268,11 @@ sub files {
     foreach my $source (@sources) {
         my $name = $source->{name};
         my $key  = key( $source->{key}, $name );
+        if ( defined( my $want = $source->{fingerprint} ) ) {
+            my @found = key_fingerprints($key);
+            die "The signing key of the apt source $name at $source->{key} is " . ( @found ? join( ' and ', @found ) : 'no key that has a fingerprint' ) . ', not ' . uc($want) . ".\n"
+              unless @found == 1 && $found[0] eq uc $want;
+        }
         foreach my $suite ( @{ $source->{suites} } ) {
             check_suite( $source->{uri}, $suite, $name );
         }
@@ -340,6 +356,55 @@ sub key {
           unless $armored || $binary;
         $body;
     };
+}
+
+=head2 @fingerprints = key_fingerprints($key)
+
+The fingerprint of each primary key in C<$key>, an armored or a binary key, in
+upper case: the SHA-1 of its public key packet, as RFC 4880 defines it for a key
+of version 4.  A key of another version gives C<v5> or C<v6> in its place,
+which matches no fingerprint of 40 digits.  Dies when C<$key> is not a sequence
+of packets of the PGP format.
+
+=cut
+
+sub key_fingerprints {
+    my ($key) = @_;
+
+    if ( $key =~ $ARMORED ) {
+        my ($body) = $key =~ m/^\s*\n(.*?)^-----END/ms or die "The armored key has no body.\n";
+        $key = decode_base64( $body =~ s{^=[[:alnum:]+/]{4}\s*$}{}mr );
+    }
+
+    my @fingerprints;
+    my $at = 0;
+    while ( $at < length $key ) {
+        my $head = ord substr( $key, $at++, 1 );
+        die "The key is not a sequence of packets of the PGP format.\n" unless $head & 0x80;
+        my ( $tag, $length );
+        if ( $head & 0x40 ) {
+            $tag = $head & 0x3f;
+            my $first = ord substr( $key, $at++, 1 );
+            if    ( $first < 192 )  { $length = $first }
+            elsif ( $first < 224 )  { $length = ( ( $first - 192 ) << 8 ) + ord( substr( $key, $at++, 1 ) ) + 192 }
+            elsif ( $first == 255 ) { $length = unpack 'N', substr( $key, $at, 4 ); $at += 4 }
+            else                    { die "The key has a packet of partial length, which no key packet is.\n" }
+        }
+        else {
+            $tag = ( $head >> 2 ) & 0x0f;
+            my $bytes = ( 1, 2, 4 )[ $head & 3 ] // die "The key has a packet of no stated length.\n";
+            $length = unpack( (qw{C n N})[ $head & 3 ], substr( $key, $at, $bytes ) );
+            $at += $bytes;
+        }
+        my $packet = substr( $key, $at, $length );
+        die "The key ends inside a packet.\n" unless length $packet == $length;
+        $at += $length;
+        next unless $tag == 6;
+
+        my $version = ord $packet;
+        push @fingerprints, $version == 4 ? uc Digest::SHA::sha1_hex( pack( 'Cn', 0x99, $length ) . $packet ) : "v$version";
+    }
+    return @fingerprints;
 }
 
 =head2 check_suite($uri, $suite, $name)
