@@ -62,6 +62,14 @@ subtest 'a guest with media names registers them too, and gets a key to send the
     ok( !exists $files{ $relay->media_key_path('web.test.test') }, 'a guest with no media name gets no media key' );
 };
 
+subtest 'a guest with page names registers them too, and gets the same key for their certificates' => sub {
+    my $grant = { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' };
+    my %files = $relay->issue_grant( $grant, upstreams => { tls => '192.0.2.10:8443', http => '192.0.2.10:8080' }, names => ['secure.web.test.test'], pages => ['web.test.test'] );
+
+    is( $files{ $relay->key_path('web.test.test') }{issue}{command},       '/root/bin/nginxrelay_client register web.test.test 192.0.2.10:8443 192.0.2.10:8080 secure.web.test.test --page web.test.test', 'each page name goes to register after --page' );
+    is( $files{ $relay->media_key_path('web.test.test') }{issue}{command}, '/root/bin/nginxrelay_client media-key web.test.test 192.0.2.10',                                                               'and a guest with page names and no media name gets the key of the certificates' );
+};
+
 subtest 'bin/destroy releases them by the same script' => sub {
     my %revocation = $relay->revoke_grant( { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' } );
     is( $revocation{command}, '/root/bin/nginxrelay_client release web.test.test', 'nginxrelay_client release, for the domain' );

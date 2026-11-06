@@ -103,6 +103,47 @@ On 80, a media name redirects to HTTPS.  The bans close C<tls_port> and 80, so
 they cover the media names too.  The response header C<X-Relay-Cache> says
 whether the cache answered.
 
+=head2 Page names
+
+A guest can also register a page name, usually the domain itself, whose pages
+this guest serves and caches as a reader sees them.  The guest then has a
+second name, such as C<secure.$domain>, for the pages that need a login, which
+passes through as every other name does.  So this guest sees the pages of
+readers in the clear, and no password or session.
+
+The stream proxy sends a page name to a server of this guest on the socket
+C<$PAGE_SOCKET>.  That server takes its certificate as the media server does,
+and also answers 421 when the C<Host> is not the SNI name.  It differs from the
+media server in what it caches:
+
+=over 4
+
+=item * It caches a C<GET> or a C<HEAD> with no query string and no C<Cookie>,
+for C<page_cache_valid>, whatever the guest says.  Then it asks the guest
+whether the page changed, with C<If-Modified-Since> and C<If-None-Match>, so a
+page that did not change costs a C<304>.  A response with C<Set-Cookie> is not
+cached.
+
+=item * A request with a query string or a C<Cookie> goes to the guest with
+its cookie, and its answer is not cached.
+
+=item * Any method other than C<GET> and C<HEAD> gets 404 without asking the
+guest.  The forms that take a login are on the secure name, so a form body on
+a page name is a mistake.
+
+=item * While the guest does not answer, or answers with an error, readers get
+the last page that the cache holds.
+
+=back
+
+The cache is in F</var/cache/nginx/nginxrelay-pages>, at most
+C<page_cache_size>.  On 80, a page name redirects to HTTPS, as a media name
+does.
+
+This guest holds the key of each page name and media name, and no other key of
+the guest.  The letsencrypt of the guest gives a page name a certificate of its
+own, which names nothing else.  See L<Provisioner::Recipe::nginx/Cached names>.
+
 =head2 Bans
 
 A guest behind this relay sends its bans here, as
@@ -149,6 +190,18 @@ sub args {
                 default     => '7d',
                 description => 'How long the cache of the media names keeps a file, in the units of nginx, such as 12h or 30d.  See "Media names".',
             },
+            page_cache_size => {
+                type        => 'string',
+                pattern     => '^[1-9][0-9]*[kmg]$',
+                default     => '256m',
+                description => 'The most that the cache of the page names holds on disk, in the units of nginx.  See "Page names".',
+            },
+            page_cache_valid => {
+                type        => 'string',
+                pattern     => '^[1-9][0-9]*[smh]$',
+                default     => '1m',
+                description => 'How long the cache of the page names serves a page before it asks the guest whether the page changed, in the units of nginx, such as 30s or 5m.  A reader sees a page up to this late.  See "Page names".',
+            },
         },
     );
 }
@@ -156,17 +209,18 @@ sub args {
 # Also in scripts/nginxrelay_client, which runs on the relay without these
 # libraries.  t/nginxrelay_client.t makes sure that the two are equal.
 our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
+our $PAGE_SOCKET  = '/run/nginxrelay-pages.sock';
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Adds C<media_socket>, where the media server listens, to what
-L<Provisioner::RelayRecipe/enrich> adds.
+Adds C<media_socket> and C<page_socket>, where the media server and the page
+server listen, to what L<Provisioner::RelayRecipe/enrich> adds.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET );
+    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET, page_socket => $PAGE_SOCKET );
 }
 
 # Defaulted here as well as in args, because required_recipes and rate_limits
@@ -249,15 +303,17 @@ The ban key that the relay issues when it registers the names of the client of
 C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant>
 adds the host key of the relay.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >>, C<< names => \@names >>, and
-can have C<< media => \@media >>.
+can have C<< media => \@media >> and C<< pages => \@pages >>.
 
 The command is F<scripts/nginxrelay_client> C<register>, which root runs on the
 relay.  C<$tls> and C<$http> are each an IPv4 address and a port, where the
 relay sends TLS and plain HTTP for C<@names>.  See L</Registration>.
 
 With C<@media>, the relay also registers each of them as a media name, which
-it fetches from C<$http>.  Then it issues the media key as well, at
-C<media_key_path> of the client.  See L</Media names>.
+it fetches from C<$http>, and with C<@pages>, each of them as a page name.  If
+there is either, it issues the media key as well, at C<media_key_path> of the
+client, with which the client sends the certificates of both.  See
+L</Media names> and L</Page names>.
 
 =cut
 
@@ -266,18 +322,19 @@ sub registration_files {
     my $client = $grant->{client};
     my $script = "$Provisioner::Vars::SCRIPT_DIR/nginxrelay_client";
     my @media  = @{ $terms{media} // [] };
+    my @pages  = @{ $terms{pages} // [] };
 
     my %files = (
         $self->key_path($client) => {
             issue => {
                 guest   => $grant->{guest},
-                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, map { ( '--media', $_ ) } @media ),
+                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), map { ( '--page', $_ ) } @pages ),
             },
             owner => 'root:root',
             mode  => '0600',
         },
     );
-    return %files unless @media;
+    return %files unless @media || @pages;
 
     my ($address) = split( m/:/, $terms{upstreams}{http} );
     return (
@@ -293,8 +350,8 @@ sub registration_files {
 =head2 $path = $recipe->media_key_path($domain)
 
 Where the media key that this relay issues for C<$domain> is, on the guest of
-C<$domain>, in base64.  The guest sends the certificates of its media names
-with it.  See L</Media names>.
+C<$domain>, in base64.  The guest sends the certificates of its media names and
+its page names with it.  See L</Media names>.
 
 =cut
 

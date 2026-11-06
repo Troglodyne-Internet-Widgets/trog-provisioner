@@ -18,7 +18,7 @@ BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_fi
 
 =head2 SYNOPSIS
 
-    nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...]
+    nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...]
     nginxrelay_client media-key DOMAIN ADDRESS
     nginxrelay_client cert DOMAIN    # "install NAME" from ssh, and the PEM on stdin
     nginxrelay_client release DOMAIN
@@ -47,9 +47,17 @@ Each C<--media> NAME is a media name, which this guest serves and caches
 itself.  The stream proxy sends it to the media server of this guest, on the
 socket C<$MEDIA_SOCKET>.  That server fetches from HTTP_UPSTREAM what it does
 not hold.  So a media name needs a certificate on this guest, which C<cert>
-installs.  Until then, a TLS connection for it fails its handshake.  A name
-cannot both pass through and be a media name.  See
+installs.  Until then, a TLS connection for it fails its handshake.  See
 L<Provisioner::Recipe::nginxrelay/Media names>.
+
+Each C<--page> NAME is a page name, which this guest serves and caches as
+well, as a reader sees it.  The stream proxy sends it to the page server of
+this guest, on the socket C<$PAGE_SOCKET>, which fetches from HTTP_UPSTREAM.
+It needs a certificate as a media name does.  See
+L<Provisioner::Recipe::nginxrelay/Page names>.
+
+A name can be only one of the three: passed through, a media name, or a page
+name.
 
 C<media-key> makes a key for DOMAIN, and prints the private half in base64 on
 one line.  Like the ban key, it works only from ADDRESS.  It can run only
@@ -58,7 +66,7 @@ certificates with it.
 
 C<cert> is the forced command of that key.  sshd puts what the guest asked
 for in C<SSH_ORIGINAL_COMMAND>, which must be C<install NAME>, for a media name
-of DOMAIN.  The standard input holds the certificate of NAME, its chain and its
+or a page name of DOMAIN.  The standard input holds the certificate of NAME, its chain and its
 private key, in PEM, as one file.  C<cert> installs them in C<$MEDIA_DIR> if
 C<openssl> agrees that the certificate is for NAME, has not expired, and goes
 with the key.  Then it reloads nginx.  The key is readable by the group
@@ -66,7 +74,7 @@ C<www-data>, because nginx loads a certificate that a variable names in its
 workers, and they run as C<www-data>.
 
 C<release> removes everything that DOMAIN registered, its keys and the
-certificates of its media names included.  Any of it can be gone already.
+certificates of its media names and its page names included.  Any of it can be gone already.
 
 Each one waits up to a minute for another C<register> or C<release> to
 finish, and then gives up and says which file is locked.
@@ -76,7 +84,7 @@ with another status.
 
 =cut
 
-my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...]
+my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...]
 " . "       nginxrelay_client media-key DOMAIN ADDRESS
 " . "       nginxrelay_client cert DOMAIN
 " . "       nginxrelay_client release DOMAIN
@@ -90,30 +98,36 @@ our $BAN_SET = 'nginxrelay-bans';
 # templates/files/nginxrelay.http.conf.tt listens.
 our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
 
-# The certificates of the media names, by name, under the salvage of $RELAY_D.
+# Where the stream proxy sends a page name, and where the page server listens.
+our $PAGE_SOCKET = '/run/nginxrelay-pages.sock';
+
+# The certificates of the media names and the page names, by name, under the
+# salvage of $RELAY_D.  The page names came later than the directory.
 our $MEDIA_DIR = "$RELAY_D/media";
 
-# The group of the workers of nginx, which read the key of a media name.
+# The group of the workers of nginx, which read the key of a certificate here.
 our $KEY_GROUP = 'www-data';
 
 # The most that cert reads: a chain of a few certificates and a key.
 our $MAX_PEM = 65_536;
 
-# The files of $domain: the map of each port, and the origin of each media name.
-# relay_files keeps its keys.
+# The files of $domain: the map of each port, and the origin of each media name
+# and of each page name.  relay_files keeps its keys.
 sub files_of {
     my ($domain) = @_;
-    return ( tls => "$RELAY_D/$domain.tls.map", http => "$RELAY_D/$domain.http.map", media => "$RELAY_D/$domain.media.map" );
+    return map { $_ => "$RELAY_D/$domain.$_.map" } qw{tls http media page};
 }
 
-# The media names of $domain, from its map.
-sub media_names_of {
+# The names of $domain that this guest serves itself, from their maps: the
+# names that have a certificate here.
+sub served_names_of {
     my ($domain) = @_;
-    my %file = files_of($domain);
-    return map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, Trog::RelayFiles::read_file( $file{media} ) // q{};
+    my %file     = files_of($domain);
+    my $maps     = join( q{}, map { Trog::RelayFiles::read_file($_) // q{} } @file{qw{media page}} );
+    return map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, $maps;
 }
 
-# The certificate and the key of a media name.
+# The certificate and the key of a name that this guest serves.
 sub cert_files {
     my ($name) = @_;
     return ( crt => "$MEDIA_DIR/$name.crt", key => "$MEDIA_DIR/$name.key" );
@@ -142,22 +156,25 @@ sub reload_nginx {
     return;
 }
 
+# $served holds the names that this guest serves itself, by their kind: media
+# or page.
 sub register {
-    my ( $domain, $tls, $http, $names, $media ) = @_;
+    my ( $domain, $tls, $http, $names, $served ) = @_;
+    my ( $media, $pages ) = @{$served}{qw{media page}};
 
     my $lock   = lock_relay();
     my %holder = names_of_others($domain);
-    my @taken  = grep { defined $holder{$_} } @$names, @$media;
+    my @taken  = grep { defined $holder{$_} } @$names, @$media, @$pages;
     die join( q{}, map { "$_ is registered to $holder{$_}\n" } @taken ) . "So $domain cannot register it.  Release it there first.\n" if @taken;
 
-    # A media name has no line in the http map, so it does not pass through.
+    # A media name or a page name has no line in the http map, so it does not pass through.
     my %file  = files_of($domain);
-    my @kinds = qw{tls http media};
+    my @kinds = qw{tls http media page};
     my %old   = map { $_ => scalar Trog::RelayFiles::read_file( $file{$_} ) } @kinds;
-    my @tls   = ( ( map { "$_ $tls;\n" } @$names ), map { "$_ unix:$MEDIA_SOCKET;\n" } @$media );
-    Trog::RelayFiles::write_file( $file{tls},   join( q{}, @tls ) );
-    Trog::RelayFiles::write_file( $file{http},  join( q{}, map { "$_ $http;\n" } @$names ) );
-    Trog::RelayFiles::write_file( $file{media}, @$media ? join( q{}, map { "$_ $http;\n" } @$media ) : undef );
+    my @tls   = ( ( map { "$_ $tls;\n" } @$names ), ( map { "$_ unix:$MEDIA_SOCKET;\n" } @$media ), map { "$_ unix:$PAGE_SOCKET;\n" } @$pages );
+    Trog::RelayFiles::write_file( $file{tls},  join( q{}, @tls ) );
+    Trog::RelayFiles::write_file( $file{http}, join( q{}, map { "$_ $http;\n" } @$names ) );
+    Trog::RelayFiles::write_file( $file{$_},   @{ $served->{$_} } ? join( q{}, map { "$_ $http;\n" } @{ $served->{$_} } ) : undef ) foreach keys %$served;
 
     my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
     if ( !$ok ) {
@@ -219,7 +236,7 @@ sub cert {
     my ( $certs, $key ) = split_pem($pem);
 
     my $lock = lock_relay();
-    die "$name is no media name of $domain\n" unless any { $_ eq $name } media_names_of($domain);
+    die "$name is no media name or page name of $domain\n" unless any { $_ eq $name } served_names_of($domain);
 
     my $checked = openssl( $certs->[0], qw{x509 -noout -checkhost}, $name ) // q{};
     die "The certificate is not for $name\n"     unless $checked =~ m/\bdoes[ ]match\b/;
@@ -249,7 +266,7 @@ sub release {
 
     my $lock  = lock_relay();
     my %file  = files_of($domain);
-    my @certs = map { my %cert = cert_files($_); values %cert } media_names_of($domain);
+    my @certs = map { my %cert = cert_files($_); values %cert } served_names_of($domain);
     Trog::RelayFiles::write_file( $_, undef ) foreach values %file, @certs;
     Trog::RelayFiles::revoke_ban_key( $RELAY_D, $domain );
     Trog::RelayFiles::revoke_key( $RELAY_D, $domain, 'media' );
@@ -270,14 +287,15 @@ sub main {
     die $USAGE unless defined $command && Trog::RelayFiles::dns_name($domain);
 
     if ( $command eq 'register' ) {
-        Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media ) or die $USAGE;
+        Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media, 'page=s@' => \my @pages ) or die $USAGE;
         my ( $tls, $http, @names ) = @args;
-        die $USAGE unless Trog::RelayFiles::upstream($tls) && Trog::RelayFiles::upstream($http) && ( @names || @media );
-        die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names, @media;
-        my %passes = map  { $_ => 1 } @names;
-        my @both   = grep { $passes{$_} } @media;
-        die "@both cannot both pass through and be a media name\n" if @both;
-        return register( $domain, $tls, $http, \@names, \@media );
+        die $USAGE unless Trog::RelayFiles::upstream($tls) && Trog::RelayFiles::upstream($http) && ( @names || @media || @pages );
+        die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names, @media, @pages;
+        my %count;
+        $count{$_}++ foreach List::Util::uniq(@names), List::Util::uniq(@media), List::Util::uniq(@pages);
+        my @twice = grep { $count{$_} > 1 } sort keys %count;
+        die join( q{}, map { "$_ is named twice, but it can only pass through, be a media name, or be a page name\n" } @twice ) if @twice;
+        return register( $domain, $tls, $http, \@names, { media => \@media, page => \@pages } );
     }
     if ( $command eq 'media-key' ) {
         my ($address) = @args;

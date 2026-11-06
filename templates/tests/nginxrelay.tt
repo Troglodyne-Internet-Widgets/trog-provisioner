@@ -115,11 +115,14 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     ok( !banned($abuser), 'and the address leaves the set' );
 };
 
-# A media name, which this guest serves and caches, from an origin that stands
-# in for the HTTP port of the guest.  The origin logs the request line of each
-# request, and whether it had a cookie.  The name is short, because openssl
-# refuses a common name of more than 64 characters.
+# A media name and a page name, which this guest serves and caches, from an
+# origin that stands in for the HTTP port of the guest.  The origin logs the
+# request line of each request, and whether it had a cookie.  It answers a path
+# under /page as tCMS answers a page, and anything else as it answers a file.
+# The names are short, because openssl refuses a common name of more than 64
+# characters.
 my $media  = 'media.relay-selftest.test.test';
+my $page   = 'relay-selftest.test.test';
 my $origin = listener();
 my $origin_log = '/root/.nginxrelay-media-origin.log';
 unlink $origin_log;
@@ -141,8 +144,15 @@ if ( !$origin_pid ) {
         }
         my ($line) = $request =~ m/\A([^\r\n]*)/;
         print {$log} $line, ( $request =~ m/^Cookie:/mi ? ' cookie' : q{} ), "\n";
-        my $body = "media probe\n";
-        print {$conn} "HTTP/1.1 200 OK\r\nContent-Length: " . length($body) . "\r\nSet-Cookie: origin=1\r\nConnection: close\r\n\r\n$body";
+        if ( $line =~ m{\A\S+ /page} ) {
+            my $body = "page probe\n";
+            my $head = "ETag: \"v1\"\r\nCache-Control: no-cache, max-age=0\r\nConnection: close\r\n";
+            print {$conn} $request =~ m/^If-None-Match: "v1"/mi ? "HTTP/1.1 304 Not Modified\r\n$head\r\n" : "HTTP/1.1 200 OK\r\nContent-Length: " . length($body) . "\r\n$head\r\n$body";
+        }
+        else {
+            my $body = "media probe\n";
+            print {$conn} "HTTP/1.1 200 OK\r\nContent-Length: " . length($body) . "\r\nSet-Cookie: origin=1\r\nConnection: close\r\n\r\n$body";
+        }
         close $conn;
     }
     exit 0;
@@ -159,12 +169,42 @@ sub origin_saw {
     return scalar grep { index( $_, $line ) == 0 } <$log>;
 }
 
-# What curl gets for a request to $media: the status, the headers and the body.
-sub media_get {
-    my ( $path, @curl ) = @_;
-    my $out = `curl -sk --max-time 10 -D - --resolve '$media:[% tls_port %]:127.0.0.1' @curl 'https://$media:[% tls_port %]$path' 2>/dev/null`;
+# What curl gets for a request to $path on $host: the status, the headers and
+# the body.
+sub get_from {
+    my ( $host, $path, @curl ) = @_;
+    my $out = `curl -sk --max-time 10 -D - --resolve '$host:[% tls_port %]:127.0.0.1' @curl 'https://$host:[% tls_port %]$path' 2>/dev/null`;
     my ($code) = $out =~ m{\AHTTP/\S+ (\d+)};
     return ( $code // '000', $out );
+}
+sub media_get { return get_from( $media, @_ ) }
+sub page_get  { return get_from( $page,  @_ ) }
+
+# The key with which the guest sends its certificates, written to $cert_keyfile, and
+# the ssh command that uses it.
+my $cert_keyfile = '/root/.nginxrelay-media.key';
+my $ssh     = "ssh -i $cert_keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1";
+sub take_cert_key {
+    my $media_key = `$client media-key $domain 127.0.0.1 2>&1`;
+    is( $?, 0, 'the guest gets a key for its certificates' ) or diag $media_key;
+    open( my $fh, '>', $cert_keyfile ) or die "Cannot write $cert_keyfile: $!\n";
+    chmod 0600, $cert_keyfile;
+    print {$fh} MIME::Base64::decode_base64($media_key);
+    close $fh or die "Cannot write $cert_keyfile: $!\n";
+    return;
+}
+
+# Makes a certificate for $cn, and sends it with the key.  What ssh said, and
+# whether it exited 0.
+sub send_cert {
+    my ($cn) = @_;
+    my $pem  = '/root/.nginxrelay-media.pem';
+    my $made = `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=$cn -addext subjectAltName=DNS:$cn -keyout $pem.key -out $pem.crt 2>&1 && cat $pem.crt $pem.key > $pem`;
+    die "openssl could not make a certificate for $cn: $made\n" if $?;
+    my $said = `$ssh 'install $cn' < $pem 2>&1`;
+    my $ok   = $? == 0;
+    unlink $pem, "$pem.key", "$pem.crt";
+    return ( $said, $ok );
 }
 
 subtest 'a media name is served and cached here' => sub {
@@ -173,25 +213,14 @@ subtest 'a media name is served and cached here' => sub {
     settle();
     is( ( media_get('/assets/probe.jpg') )[0], '000', 'before its certificate arrives, a TLS connection for it fails' );
 
-    my $media_key = `$client media-key $domain 127.0.0.1 2>&1`;
-    is( $?, 0, 'the guest gets a key for its certificates' ) or diag $media_key;
-    my $keyfile = '/root/.nginxrelay-media.key';
-    my $pem     = '/root/.nginxrelay-media.pem';
-    open( my $fh, '>', $keyfile ) or die "Cannot write $keyfile: $!\n";
-    chmod 0600, $keyfile;
-    print {$fh} MIME::Base64::decode_base64($media_key);
-    close $fh or die "Cannot write $keyfile: $!\n";
-    my $made = `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=$media -addext subjectAltName=DNS:$media -keyout $pem.key -out $pem.crt 2>&1 && cat $pem.crt $pem.key > $pem`;
-    is( $?, 0, 'the test makes a certificate for the media name' ) or return diag $made;
-
-    my $ssh = "ssh -i $keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1";
-    $said = `$ssh 'install $media' < $pem 2>&1`;
-    is( $?, 0, 'and sends it with that key' ) or diag $said;
-    $said = `$ssh 'install $name' < $pem 2>&1`;
-    isnt( $?, 0, 'but the key cannot install a certificate for a name that passes through' );
-    $said = `ssh -n -i $keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1 id 2>&1`;
+    take_cert_key();
+    my $ok;
+    ( $said, $ok ) = send_cert($media);
+    ok( $ok, 'and sends the certificate of the media name with that key' ) or diag $said;
+    ( $said, $ok ) = send_cert($name);
+    ok( !$ok, 'but the key cannot install a certificate for a name that passes through' );
+    $said = `ssh -n -i $cert_keyfile -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root\@127.0.0.1 id 2>&1`;
     unlike( $said, qr/uid=/, 'and it runs nothing else' );
-    unlink $keyfile, $pem, "$pem.key", "$pem.crt";
     settle();
 
     my ( $code, $out ) = media_get( '/assets/probe.jpg', q{-H 'Cookie: session=1'} );
@@ -211,9 +240,50 @@ subtest 'a media name is served and cached here' => sub {
     my $redirect = `curl -s --max-time 5 -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$media:80:127.0.0.1' 'http://$media/assets/probe.jpg' 2>/dev/null`;
     is( $redirect, "301 https://$media/assets/probe.jpg", 'on 80, a media name goes to HTTPS' );
 };
-kill 'TERM', $origin_pid;
-waitpid( $origin_pid, 0 );
-$origin_pid = 0;
+
+subtest 'a page name is served and cached here, for readers alone' => sub {
+    my $said = `$client register $domain 127.0.0.1:@{[ $tls->sockport ]} 127.0.0.1:@{[ $origin->sockport ]} $name --media $media --page $page 2>&1`;
+    is( $?, 0, 'a guest registers a page name' ) or diag $said;
+    settle();
+    my $ok;
+    ( $said, $ok ) = send_cert($page);
+    ok( $ok, 'and sends its certificate with the key of its certificates' ) or diag $said;
+    settle();
+
+    my ( $code, $out ) = page_get('/page');
+    is( $code, 200, 'a reader gets a page' ) or diag $out;
+    like( $out, qr/^X-Relay-Cache: MISS\r$/mi, 'which the cache did not hold yet' );
+    ( $code, $out ) = page_get('/page');
+    like( $out, qr/^X-Relay-Cache: HIT\r$/mi, 'and the second time, the cache answers, though the origin said no-cache' );
+    is( origin_saw('GET /page '), 1, 'so the origin saw one request' );
+
+    page_get('/page?q=1') for 1 .. 2;
+    is( origin_saw('GET /page?q=1 '), 2, 'a request with a query string reaches the origin each time' );
+
+    page_get( '/page-of-one', q{-H 'Cookie: tcmslogin=1'} ) for 1 .. 2;
+    is( origin_saw('GET /page-of-one HTTP/1.1 cookie'), 2, 'and so does one with a cookie, which the origin gets' );
+    ( $code, $out ) = page_get('/page-of-one');
+    like( $out, qr/^X-Relay-Cache: MISS\r$/mi, 'and its answer was not kept for the next reader' );
+
+    is( ( page_get( '/page', '-X POST' ) )[0], 404, 'a POST gets 404' );
+    is( origin_saw('POST'), 0, 'and the origin never sees it' );
+    is( ( page_get( '/page', q{-H 'Host: other.test.test'} ) )[0], 421, 'a Host that is not the name of the certificate gets 421' );
+
+    my $redirect = `curl -s --max-time 5 -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$page:80:127.0.0.1' 'http://$page/page' 2>/dev/null`;
+    is( $redirect, "301 https://$page/page", 'on 80, a page name goes to HTTPS' );
+
+    kill 'TERM', $origin_pid;
+    waitpid( $origin_pid, 0 );
+    $origin_pid = 0;
+    ( $code, $out ) = page_get('/page');
+    is( $code, 200, 'while the origin is down, a page that the cache holds still answers' ) or diag $out;
+};
+unlink $cert_keyfile;
+if ($origin_pid) {
+    kill 'TERM', $origin_pid;
+    waitpid( $origin_pid, 0 );
+    $origin_pid = 0;
+}
 unlink $origin_log;
 
 my $host = `ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key 2>&1`;
@@ -227,6 +297,7 @@ settle();
 is( status( $name, 80 ), '000', 'and the name gets no reply after that' );
 ok( !-e "/etc/nginx/nginxrelay.d/$domain.ban.pub", 'and its key is gone' );
 ok( !-e "/etc/nginx/nginxrelay.d/media/$media.key", 'and so is the key of its media name' );
+ok( !-e "/etc/nginx/nginxrelay.d/media/$page.key",  'and of its page name' );
 my ( $rc, $said ) = as_guest("check $abuser");
 is( $rc, 255, 'and the key logs in no more' ) or diag $said;
 unlink $keyfile;

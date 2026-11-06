@@ -213,7 +213,7 @@ subtest 'a media name goes to the media server of the relay, which fetches it fr
     register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 public.web.test.test} );
     ok( !-e "$relay/$DOMAIN.media.map", 'and a registration without them takes them away' );
 
-    like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', $MEDIA, '--media', $MEDIA ) }, qr/cannot[ ]both[ ]pass[ ]through/, 'a name cannot be both' );
+    like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', $MEDIA, '--media', $MEDIA ) }, qr/\Q$MEDIA\E[ ]is[ ]named[ ]twice/, 'a name cannot be both' );
 
     File::Slurper::Temp::write_text( "$relay/other.test.test.tls.map", "$MEDIA 192.0.2.11:8443;\n" );
     ( undef, $err ) = register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media}, $MEDIA );
@@ -287,11 +287,47 @@ subtest 'a release takes the media names, their certificates and the media key' 
     is( File::Slurper::read_text("$relay/authorized_keys.root"), q{}, 'and root takes neither key' );
 };
 
-subtest 'the media server listens where the client sends a media name' => sub {
+my $PAGE = 'web.test.test';
+
+subtest 'a page name goes to the page server of the relay, which fetches it from the guest' => sub {
+    my $relay = fresh_relay();
+    my ( undef, $err, $rc ) = register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 public.web.test.test --page}, $PAGE, '--media', $MEDIA );
+
+    is( $rc, 0, 'it exits 0' ) or diag $err;
+    is(
+        File::Slurper::read_text("$relay/$DOMAIN.tls.map"),
+        "public.web.test.test 192.0.2.10:8443;\n$MEDIA unix:/run/nginxrelay-media.sock;\n$PAGE unix:/run/nginxrelay-pages.sock;\n",
+        'its SNI name goes to the socket of the page server'
+    );
+    is( File::Slurper::read_text("$relay/$DOMAIN.http.map"), "public.web.test.test 192.0.2.10:8080;\n", 'and it does not pass through on 80' );
+    is( File::Slurper::read_text("$relay/$DOMAIN.page.map"), "$PAGE 192.0.2.10:8080;\n",                'and the page server fetches it from the HTTP port of the guest' );
+
+    register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 public.web.test.test} );
+    ok( !-e "$relay/$DOMAIN.page.map", 'a registration without page names takes them away' );
+
+    like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080},        $PAGE, '--page',  $PAGE ) }, qr/\Q$PAGE\E[ ]is[ ]named[ ]twice/, 'a name cannot both pass through and be a page name' );
+    like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --page}, $PAGE, '--media', $PAGE ) }, qr/\Q$PAGE\E[ ]is[ ]named[ ]twice/, 'nor be a page name and a media name' );
+};
+
+subtest 'a guest installs the certificate of its page name, and a release takes it' => sub {
+    my $relay = fresh_relay();
+    register( $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --page}, $PAGE );
+    $openssl{host} = $PAGE;
+
+    my ( undef, $err, $rc ) = cert( "install $PAGE", $PEM );
+    is( $rc, 0, 'the key of the certificates installs it' ) or diag $err;
+    ok( -e "$relay/media/$PAGE.key", 'beside the certificates of the media names' );
+
+    capture { Trog::NginxRelayClient::main( 'release', $DOMAIN ) };
+    is_deeply( [ glob("$relay/$DOMAIN.*"), glob("$relay/media/*") ], [], 'and a release leaves nothing of the page name' );
+};
+
+subtest 'the servers listen where the client sends their names' => sub {
     no warnings 'once';
     require Provisioner::Cookbook;
     my %opts = Provisioner::Cookbook->load('nginxrelay')->enrich( modules => ['nginxrelay'] );
     is( $opts{media_socket}, $Trog::NginxRelayClient::MEDIA_SOCKET, 'the recipe has its own copy of the socket, and it names the same one' );
+    is( $opts{page_socket},  $Trog::NginxRelayClient::PAGE_SOCKET,  'and so for the socket of the page server' );
 };
 
 done_testing;
