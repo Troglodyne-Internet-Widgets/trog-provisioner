@@ -19,10 +19,22 @@ map $host $relay_media {
 
 proxy_cache_path /var/cache/nginx/nginxrelay-media levels=1:2 keys_zone=nginxrelay_media:10m max_size=[% media_cache_size %] inactive=[% media_cache_valid %] use_temp_path=off;
 
+[%# The origin of each page name, which this guest serves and caches as a
+    reader sees it.  The "Page names" section of
+    Provisioner::Recipe::nginxrelay has the whole account. -%]
+map $host $relay_page {
+    include /etc/nginx/nginxrelay.d/*.page.map;
+}
+
+proxy_cache_path /var/cache/nginx/nginxrelay-pages levels=1:2 keys_zone=nginxrelay_pages:10m max_size=[% page_cache_size %] inactive=1d use_temp_path=off;
+
 server {
     listen 80 default_server;
 
     if ($relay_media != "") {
+        return 301 https://$host$request_uri;
+    }
+    if ($relay_page != "") {
         return 301 https://$host$request_uri;
     }
 
@@ -89,5 +101,55 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         add_header X-Relay-Cache $upstream_cache_status always;
         proxy_pass http://$relay_media;
+    }
+}
+
+[%# The page server, which the stream proxy sends a page name to as it sends a
+    media name to the server above. -%]
+server {
+    listen unix:[% page_socket %] ssl proxy_protocol;
+    set_real_ip_from unix:;
+    real_ip_header proxy_protocol;
+
+    ssl_certificate     /etc/nginx/nginxrelay.d/media/$ssl_server_name.crt;
+    ssl_certificate_key /etc/nginx/nginxrelay.d/media/$ssl_server_name.key;
+
+    if ($host != $ssl_server_name) {
+        return 421;
+    }
+    if ($relay_page = "") {
+        return 444;
+    }
+
+    location / {
+        [%# The forms that take a login are on the secure name, which passes
+            through. -%]
+        if ($request_method !~ ^(GET|HEAD)$) {
+            return 404;
+        }
+
+        proxy_cache          nginxrelay_pages;
+        proxy_cache_key      $host$request_uri;
+        proxy_cache_valid    200 301 302 [% page_cache_valid %];
+        proxy_ignore_headers Cache-Control Expires X-Accel-Expires;
+
+        [%# A reader with a cookie, or a query string, may get a page of its
+            own, so the guest answers it, and the answer is not kept. -%]
+        proxy_cache_bypass $http_cookie $args;
+        proxy_no_cache     $http_cookie $args;
+
+        [%# Each hit past page_cache_valid asks the guest whether the page
+            changed, and the last copy serves while the guest is down. -%]
+        proxy_cache_revalidate       on;
+        proxy_cache_lock             on;
+        proxy_cache_background_update on;
+        proxy_cache_use_stale        error timeout updating http_500 http_502 http_503 http_504;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        add_header X-Relay-Cache $upstream_cache_status always;
+        proxy_pass http://$relay_page;
     }
 }
