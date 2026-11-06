@@ -95,6 +95,24 @@ them twice: in C<get_cert>, after it links the certificate into F</etc/ssl>, and
 in the C<deploy_cert> hook, after the nightly renewal writes a new one.  A unit
 that is not running stays as it is.
 
+=head2 Certificates of their own
+
+Each name in C<own_certificates> gets a certificate and a key of its own, on a
+line of its own in F<domains.txt>, and stays off the certificate of the domain.
+A recipe asks for this for a key that leaves the guest.
+L<Provisioner::Recipe::nginx> does, for each of its C<media_names>, because it
+sends that key to a relay.  So the relay holds a key for the media name, and
+not one for the domain.  Such a name must still be one that a recipe on the
+domain serves, so that the registrar publishes it.
+
+The hook runs each command of C<certificate_deployers> for each certificate,
+with its name, its private key and its full chain.  It runs them from
+C<deploy_cert> after dehydrated issues a certificate, and from
+C<unchanged_cert> for a certificate that is still valid.  So C<get_cert> runs
+them at build time, even for a certificate that the salvage put back, and the
+nightly renewal runs them each night.  A command decides itself which names it
+acts on, and must be harmless to run twice.
+
 =head2 Which CA issues, and how a reserved TLD gets one at all
 
 C<ca> is a dehydrated preset name or the URL of a directory.  Its default
@@ -205,6 +223,18 @@ sub args {
                 default     => [],
                 description => 'The systemd units that read the certificate of the domain, which this recipe reloads after it links a certificate and after a renewal.  Each recipe that serves the certificate hands its own over in its required_recipes.  Add a unit here for a service of your own that reads it.',
             },
+            own_certificates => {
+                type        => 'array',
+                items       => { type => 'string', format => 'hostname' },
+                default     => [],
+                description => 'Names that each get a certificate and a key of their own, and stay off the certificate of the domain.  A recipe hands these over for a key that leaves the guest, such as the nginx recipe for its media_names.  See "Certificates of their own".',
+            },
+            certificate_deployers => {
+                type        => 'array',
+                items       => { type => 'string' },
+                default     => [],
+                description => 'Commands that run after each run of dehydrated, once for each certificate, with its name, its private key and its full chain.  A recipe hands its own over.  See "Certificates of their own".',
+            },
         },
     );
 }
@@ -241,10 +271,18 @@ sub enrich {
     # asks for a challenge.  An authority is reached at a URL, not a socket.
     my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
     $params{lexicon_socket} = $registrar->serves_itself( $params{domain} ) ? $extra{PDNS_SERVER} // q{} : q{};
-    $params{domain_aliases} = [ $self->domain_aliases(%params) ];
 
     # Two recipes can name one unit, and the merge keeps both.
-    $params{certificate_readers} = [ uniq @{ $params{certificate_readers} } ];
+    $params{certificate_readers}   = [ uniq @{ $params{certificate_readers} } ];
+    $params{own_certificates}      = [ uniq @{ $params{own_certificates} } ];
+    $params{certificate_deployers} = [ uniq @{ $params{certificate_deployers} } ];
+
+    my %served   = map  { $_ => 1 } $params{domain}, $self->domain_aliases(%params);
+    my @unserved = grep { !$served{$_} } @{ $params{own_certificates} };
+    die "letsencrypt: own_certificates names @unserved, which no recipe on $params{domain} serves, so no record of it is published.\n" if @unserved;
+    my %own = map { $_ => 1 } @{ $params{own_certificates} };
+    die "letsencrypt: $params{domain} is the name of the certificate of the domain, so it cannot have a certificate of its own.\n" if $own{ $params{domain} };
+    $params{domain_aliases} = [ grep { !$own{$_} } $self->domain_aliases(%params) ];
 
     # The zones of registrar accounts that hold a name of the certificate, longer
     # first, for the hook to choose a shortcut by.

@@ -13,11 +13,13 @@ printf 'server_name %s;\n' '[% domain_names.join(' ') %]' > /etc/nginx/names/[% 
     Provisioner::Recipe::nginx has the whole account. -%]
 rm -rf /etc/nginx/proxied
 mkdir -p /etc/nginx/proxied
-[% IF proxied -%]
+[% IF proxied_http -%]
 install -o root -g root -m 0644 nginx_proxy_ufw.conf /etc/ufw/applications.d/nginx-proxy
-[% FOR vhost IN proxied.keys().sort() -%]
+[% FOR vhost IN proxied_http.keys().sort() -%]
+[% IF proxied.$vhost.defined() -%]
 printf '%s\n' 'listen 8443 ssl proxy_protocol;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].443.conf
-printf '%s\n' 'listen 8080;' 'real_ip_header X-Forwarded-For;'[% IF proxied.$vhost.size() %] 'server_name [% proxied.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].80.conf
+[% END -%]
+printf '%s\n' 'listen 8080;' 'real_ip_header X-Forwarded-For;'[% IF proxied_http.$vhost.size() %] 'server_name [% proxied_http.$vhost.join(' ') %];'[% END %] > /etc/nginx/proxied/[% vhost %].80.conf
 [% END -%]
 [% END -%]
 [% script_dir %]/queue_postrun_task systemctl reload nginx
@@ -30,4 +32,14 @@ install -o root -g root -m 0644 nginx_relay.jail /etc/fail2ban/jail.d/[% domain 
 [%# Here, because fail2ban runs no jail at all while one action does not
     parse, and the restart in the postrun would fail with no reason. -%]
 fail2ban-client -t
+[% END -%]
+[%# The command that sends the certificate of each media name to the relay,
+    which letsencrypt runs after each run of dehydrated.  The target of
+    letsencrypt runs after this one, so get_cert finds it in place.
+    Provisioner::Recipe::nginx has the whole account, under Media names. -%]
+rm -f /etc/dehydrated/deployers/nginxrelay-[% domain %]
+[% IF relay_cert -%]
+umask 077 && base64 -d [% relay_cert.key_b64 %] > [% relay_cert.key %]
+install -d -o root -g root -m 0700 /etc/dehydrated/deployers
+install -o root -g root -m 0700 nginx_relay_cert [% relay_cert.deployer %]
 [% END -%]
