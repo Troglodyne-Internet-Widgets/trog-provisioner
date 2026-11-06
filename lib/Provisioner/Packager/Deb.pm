@@ -18,6 +18,8 @@ use List::Util   qw{uniq};
 use MIME::Base64 qw{encode_base64};
 use URI();
 
+use Dist::Conformance::Check::SystemPackages();
+
 use Trog::Utils();
 
 =head1 NAME
@@ -142,6 +144,38 @@ which C<cc_write_files> writes for every packager.
 
 sub cloud_init_modules {
     return qw{cc_apt_configure};
+}
+
+=head2 $pattern = Provisioner::Packager::Deb->package_name()
+
+The rule of the Debian policy for the name of a package, as
+L<Dist::Conformance::Check::SystemPackages> holds a declaration to it, so that
+an installer refuses what a declaration may not name.  Among what it refuses
+are C<foo->, which C<apt-get install> reads as a removal, C<-y>, C<foo=1.2>,
+C<foo/sid>, C<foo:i386>, F<./foo.deb> and a name with a space.
+
+=cut
+
+sub package_name {
+    return $Dist::Conformance::Check::SystemPackages::PACKAGE_NAME{deb};
+}
+
+=head2 @argv = Provisioner::Packager::Deb->install_command()
+
+C<apt-get install> without recommends, through C<env> with
+C<DEBIAN_FRONTEND=noninteractive>, so that sudo, which empties the environment,
+cannot drop it.  It keeps the configuration files that the operator changed,
+and waits for the lock of the package database rather than failing on it, because
+unattended-upgrades can hold it.  Unlike the C<packager_invocation> of
+L<Provisioner::Recipe::ubuntu>, it does not remove the packages that nothing needs any more.
+
+=cut
+
+sub install_command {
+    return (
+        qw{/usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y --no-install-recommends},
+        qw{-o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold},
+    );
 }
 
 # A source as one string of its scalar leaves, so that two sources compare

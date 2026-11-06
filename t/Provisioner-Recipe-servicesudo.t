@@ -136,11 +136,15 @@ subtest 'the units of the recipes that run as the service user' => sub {
         koan  => [qw{koan.service koan-awake.service}],
         tpsgi => [qw{agent.test.test.service}],
     );
+
+    # clod also lets its service user install system packages, through one
+    # program of root's that checks every name it is given.
+    my %more = ( clod => ['/usr/local/sbin/clod-install-packages'] );
     foreach my $name ( sort keys %units ) {
         my %required = Provisioner::Cookbook->load( $name, distro => 'ubuntu' )->new(%PROV)->required_recipes(%G);
         ok( ref $required{servicesudo} eq 'CODE', "$name requires servicesudo" ) or next;
         my %asked = $required{servicesudo}->(%G);
-        is_deeply( $asked{commands}, [ Provisioner::Recipe::servicesudo::unit_commands( @{ $units{$name} } ) ], "for its own units: @{ $units{$name} }" );
+        is_deeply( $asked{commands}, [ Provisioner::Recipe::servicesudo::unit_commands( @{ $units{$name} } ), @{ $more{$name} // [] } ], "for its own units: @{ $units{$name} }" );
 
         my %opts = eval { recipe()->validate( %G, %asked ) };
         ok( %opts, "which servicesudo takes" ) or diag $@;

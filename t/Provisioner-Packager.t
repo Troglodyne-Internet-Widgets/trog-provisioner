@@ -51,7 +51,7 @@ subtest 'a packager that does not answer says so' => sub {
         package Provisioner::Packager::Mute;
         use parent -norequire, 'Provisioner::Packager';
     }
-    foreach my $method (qw{merge first_boot_files answers cloud_init_modules}) {
+    foreach my $method (qw{merge first_boot_files answers cloud_init_modules package_name install_command}) {
         like( exception { Provisioner::Packager::Mute->$method() }, qr/Provisioner::Packager::Mute[ ]does[ ]not[ ]say[ ]$method/, "$method, naming the packager" );
     }
 };
@@ -63,6 +63,13 @@ subtest 'the Debian family' => sub {
     is_deeply( [ $deb->first_boot_files( domain => 'one.test' ) ], [],                   'no sources and no conflicts is no files' );
     my ($pin) = $deb->first_boot_files( domain => 'one.test', conflicts => [qw{ntp apache2 ntp}] );
     like( $pin->{content}, qr/^Package:[ ]apache2[ ]ntp$/m, 'a conflict is pinned out, once, whatever order it came in' );
+
+    my $name = $deb->package_name;
+    is_deeply( [ grep { m/$name/ } qw{g++ libmagic-dev lib.x foo- -y foo=1 foo/sid foo:i386 Foo x} ], [qw{g++ libmagic-dev lib.x}], 'a package name is a plain name of the Debian policy, and nothing that apt reads otherwise' );
+    my @install = $deb->install_command;
+    my %wanted  = map { $_ => 1 } qw{install --no-install-recommends DEBIAN_FRONTEND=noninteractive};
+    is_deeply( [ grep { $wanted{$_} } @install ],     [qw{DEBIAN_FRONTEND=noninteractive install --no-install-recommends}], 'the install command installs without recommends or a prompt' );
+    is_deeply( [ grep { m/remove|purge/ } @install ], [],                                                                   'and removes nothing' );
 };
 
 # The distro recipe asks its packager, so a distribution of another family needs

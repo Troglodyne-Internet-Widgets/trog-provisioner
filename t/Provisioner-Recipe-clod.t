@@ -322,6 +322,66 @@ subtest 'claude runs as the agent account' => sub {
     like( exception { $dotted->validated( $dotted->takes( %GLOBALS, user => 'svc.dotted' ), %BASE ) }, qr/sudoers\.d/, 'a service user that would name a sudoers file that sudo skips is refused' );
 };
 
+# THE SYSTEM PACKAGES in Provisioner::Recipe::clod.  The installer runs here,
+# with a fake packager in place of its command, which says what it was given.
+subtest 'the installer of the system packages installs plain names, and refuses anything else' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $r   = recipe($dir);
+    my %got = $r->validated( $r->takes( %GLOBALS, user => 'svc' ), %BASE );
+    $r->generate_files( $dir, %got );
+    my $installer = '/usr/local/sbin/clod-install-packages';
+
+    my $conf = do "$dir/clod.conf";
+    is_deeply( $conf->{system_packages}, { packager => 'deb', installer => $installer }, 'clod.conf names the packager of the distribution, and the installer' ) or diag $@;
+
+    my %required = $r->required_recipes();
+    my %sudo     = $required{servicesudo}->(%GLOBALS);
+    is( $sudo{commands}[-1], $installer, 'the service user may run it as root with any arguments' );
+    my @lines = split m/\n/, $r->render(%got);
+    is_deeply( [ grep { $_ eq "install -o root -g root -m 0755 clod-install-packages '$installer'" } @lines ], ["install -o root -g root -m 0755 clod-install-packages '$installer'"], 'and the fragment installs it for root, mode 0755' );
+
+    my $bin = tempdir( CLEANUP => 1 );
+    my $log = "$bin/argv";
+    File::Slurper::Temp::write_text( "$bin/packager", qq{#!/bin/sh\nprintf '%s\\n' "\$@" > '$log'\necho the packager said this\nexit \${FAKE_EXIT:-0}\n} );
+    chmod 0755, "$bin/packager" or die "chmod: $!";
+
+    my $deb = Provisioner::Packager->named('deb');
+    my $run = sub {
+        my (@names) = @_;
+        unlink $log;
+        my $shim = q{my $f = shift; do $f or die $@ || $!; @main::INSTALL = (shift); exit main(@ARGV)};
+        IPC::Run3::run3( [ $^X, '-e', $shim, "$dir/clod-install-packages", "$bin/packager", @names ], \undef, \my $out, \my $err );
+        return ( $? >> 8, $out, $err, -e $log ? [ split m/\n/, File::Slurper::read_text($log) ] : undef );
+    };
+
+    my $shown = q{do $ARGV[0] or die $@ || $!; print join("\n", $main::NAME, @main::INSTALL), "\n"};
+    IPC::Run3::run3( [ $^X, '-e', $shown, "$dir/clod-install-packages" ], \undef, \my $rendered, \my $broken );
+    is_deeply( [ split m/\n/, $rendered ], [ $deb->package_name, $deb->install_command ], 'the installer holds the name rule and the command of the packager' ) or diag $broken;
+
+    my ( $status, $out, $err, $argv ) = $run->(qw{ffmpeg libmagic-dev g++});
+    is( $status, 0, 'a plain name is installed' ) or diag $err;
+    is_deeply( $argv, [qw{ffmpeg libmagic-dev g++}], 'with every name, in order, after the command' );
+    is( $out, "the packager said this\n", 'and it prints what the packager printed' );
+
+    {
+        local $ENV{FAKE_EXIT} = 100;
+        ( $status, undef, undef, $argv ) = $run->('ffmpeg');
+        is( $status, 100, 'and exits with the status of the packager' );
+    }
+
+    foreach my $bad ( qw{ffmpeg- -y --purge foo=1.2 foo/sid foo:i386 ./foo.deb F Foo}, 'two names', "ffmpeg\n", q{} ) {
+        ( $status, $out, $err, $argv ) = $run->( 'git', $bad );
+        is_deeply( [ $status, $argv ], [ 2, undef ], 'a call with ' . ( $bad =~ s/\n/\\n/r ) . ' in it is refused whole, and runs no packager' );
+        like( $err, qr/not[ ]a[ ]plain[ ]deb[ ]package[ ]name.*installed[ ]nothing/, 'and says why on stderr' ) or diag $err;
+    }
+    ( $status, undef, $err, $argv ) = $run->();
+    is_deeply( [ $status, $argv ], [ 2, undef ], 'a call that names no package is refused' );
+    like( $err, qr/name[ ]the[ ]deb[ ]packages/, 'and says so' );
+
+    my $generic = 'Provisioner::Recipe::clod'->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
+    like( exception { $generic->validated( $generic->takes(%GLOBALS), %BASE ) }, qr/does[ ]not[ ]say[ ]which[ ]packager/, 'a distribution with no subclass of the recipe says that it has no packager' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();
