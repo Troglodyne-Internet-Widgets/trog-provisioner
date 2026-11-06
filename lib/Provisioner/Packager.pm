@@ -104,6 +104,11 @@ it from the archives that the guest trusts, with no prompt and no terminal.
 It installs and does nothing else: it removes no package, and it installs no
 package that is only recommended.
 
+=item C<@argv = $packager-E<gt>update_command($file)>
+
+The command, as a list of words, that refreshes the index of the one source
+in C<$file>, a file of sources of this packager, and of no other source.
+
 =back
 
 =cut
@@ -119,5 +124,6 @@ sub answers            { my ($class) = @_; return unanswered( $class, 'answers' 
 sub cloud_init_modules { my ($class) = @_; return unanswered( $class, 'cloud_init_modules' ) }
 sub package_name       { my ($class) = @_; return unanswered( $class, 'package_name' ) }
 sub install_command    { my ($class) = @_; return unanswered( $class, 'install_command' ) }
+sub update_command     { my ($class) = @_; return unanswered( $class, 'update_command' ) }
 
 1;

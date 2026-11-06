@@ -153,6 +153,19 @@ foreach my $unit (qw{clod-[% domain %].service clod-worker-[% domain %].service}
         unlike($said, qr/^(?!clod-install-packages: )/m, 'without running the packager') or diag $said;
     }
 
+    # A file of sources that the service user writes, with a source in it
+    # that could end a line of apt, is refused before anything is written.
+    my $sources = "$home/workspace/.clod-guest-test.sources";
+    open(my $out, '>', $sources) or die "$sources: $!";
+    print {$out} qq({"name":"clod-guest-test","uri":"https://bogus.test.test/\\nTrusted: yes","suites":["noble"],"components":["main"],"key":"https://bogus.test.test/key.asc","fingerprint":"0123456789ABCDEF0123456789ABCDEF01234567"}\n);
+    close $out;
+    chmod 0644, $sources;
+    my ($refused, $why) = $install->('--sources-file', $sources, 'sqlite3');
+    is($refused, 2, 'it refuses a file of sources with a source that is not one') or diag $why;
+    unlike($why, qr/^(?!clod-install-packages: )/m, 'without running the packager') or diag $why;
+    ok(!-e '/etc/apt/sources.list.d/clod-guest-test.sources', 'and writes no source');
+    unlink $sources;
+
     # sqlite3 is a dep of this recipe, so it is installed already.
     my ($exit, $said) = $install->('sqlite3');
     is($exit, 0, 'it accepts a package that is installed already') or diag $said;

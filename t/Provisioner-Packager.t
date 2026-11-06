@@ -51,7 +51,7 @@ subtest 'a packager that does not answer says so' => sub {
         package Provisioner::Packager::Mute;
         use parent -norequire, 'Provisioner::Packager';
     }
-    foreach my $method (qw{merge first_boot_files answers cloud_init_modules package_name install_command}) {
+    foreach my $method (qw{merge first_boot_files answers cloud_init_modules package_name install_command update_command}) {
         like( exception { Provisioner::Packager::Mute->$method() }, qr/Provisioner::Packager::Mute[ ]does[ ]not[ ]say[ ]$method/, "$method, naming the packager" );
     }
 };
@@ -68,8 +68,10 @@ subtest 'the Debian family' => sub {
     is_deeply( [ grep { m/$name/ } qw{g++ libmagic-dev lib.x foo- -y foo=1 foo/sid foo:i386 Foo x} ], [qw{g++ libmagic-dev lib.x}], 'a package name is a plain name of the Debian policy, and nothing that apt reads otherwise' );
     my @install = $deb->install_command;
     my %wanted  = map { $_ => 1 } qw{install --no-install-recommends DEBIAN_FRONTEND=noninteractive};
-    is_deeply( [ grep { $wanted{$_} } @install ],     [qw{DEBIAN_FRONTEND=noninteractive install --no-install-recommends}], 'the install command installs without recommends or a prompt' );
-    is_deeply( [ grep { m/remove|purge/ } @install ], [],                                                                   'and removes nothing' );
+    is_deeply( [ grep { $wanted{$_} } @install ], [qw{DEBIAN_FRONTEND=noninteractive install --no-install-recommends}], 'the install command installs without recommends or a prompt' );
+    my %update = map { $_ => 1 } $deb->update_command('/bogus/one.sources');
+    ok( $update{update} && $update{'Dir::Etc::sourcelist=/bogus/one.sources'} && $update{'Dir::Etc::sourceparts=-'}, 'the update command refreshes the one file of sources, and no other' );
+    is_deeply( [ grep { m/remove|purge/ } @install ], [], 'and removes nothing' );
 };
 
 # The distro recipe asks its packager, so a distribution of another family needs

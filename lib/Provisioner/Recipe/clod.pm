@@ -349,9 +349,53 @@ which apt reads as a removal, an option such as C<-y>, a version, an archive,
 a file and a second name in one argument.  So the grant can install a package
 from the archives that the guest already trusts, and do nothing else.
 
-Otherwise it runs the C<install_command> of the packager, without recommends
-and without a prompt, with the names after it.  It prints what the packager
+A spoke can also declare the third-party archives that its packages come
+from.  Then the bot writes them, as App::Clod resolves them for the guest, into
+a file, one JSON object for each line, as C<conformance packages --sources>
+prints them, and names it first:
+
+    sudo -n /usr/local/sbin/clod-install-packages --sources-file FILE ffmpeg
+
+Each object is a source of L<Provisioner::Packager::Deb/A source>, with
+C<fingerprint>, the 40 hex digits of the fingerprint of its key, beside it.
+The service user writes the file, so the installer trusts none of it.  It
+refuses the whole call, with exit 2, before it changes anything, when:
+
+=over 4
+
+=item * a line is not JSON, or a source has a field that a source does not, or
+lacks one, or one is not what a source holds: a name of lowercase letters,
+digits, dots and dashes; an C<http> or C<https> URI and key URL; one word of
+printable ASCII for each suite, component and architecture; and an integer
+priority for a pin.  So no value can end a line of a file of apt, or name a
+file outside the directories below.
+
+=item * two sources have one name.
+
+=item * the key does not fetch, is not a PGP key, or holds other than one
+primary key, whose fingerprint, as C<gpg --show-keys> reads it, is not
+C<fingerprint>.
+
+=item * a file that a source would write is there already with other content,
+such as the sources of the distribution.  The same content is not refused, so
+a source that the guest has already is no reason to refuse.
+
+=back
+
+Otherwise it writes the files that L<Provisioner::Packager::Deb/files> writes
+at first boot, the key under F</etc/apt/keyrings>, the deb822 F<.sources>
+with C<Signed-By> and the pin, mode 0644, and runs the C<update_command> of
+the packager for each source.  When one fails, it exits with that status and
+installs nothing.
+
+Then it runs the C<install_command> of the packager, without recommends and
+without a prompt, with the names after it.  It prints what the packager
 printed, and exits with its status.
+
+The installer runs on the system perl, which has no checkout of this
+repository, so it holds its own copy of how a source becomes files.
+F<t/Provisioner-Recipe-clod.t> holds the copy to what
+L<Provisioner::Packager::Deb> writes.
 
 F<clod.conf> gets C<system_packages>, with the packager of the guest, from the
 subclass of the recipe for its distribution, and the path of the installer.
@@ -420,8 +464,8 @@ Adds C<agent_home>, the home that L<Provisioner::Recipe::claude> makes for
 C<agent_user>, when the domain names one.
 
 Adds C<packager>, from C<distro_packager>, and from its L<Provisioner::Packager>,
-C<package_name> and C<install_command>, which the installer of L</THE SYSTEM
-PACKAGES> holds.  Adds C<installer>, its path.
+C<package_name>, C<install_command> and C<update_command>, which the installer
+of L</THE SYSTEM PACKAGES> holds.  Adds C<installer>, its path.
 
 Replaces C<dashboard_password> with C<dashboard_password_sha256>, the SHA-256 of
 its C<UTF-8> bytes in lowercase hex, which is what F<clod.conf> holds.  So the
@@ -445,6 +489,7 @@ sub enrich {
     my $packager = Provisioner::Packager->named( $opts{packager} = $self->distro_packager );
     $opts{package_name}    = $packager->package_name;
     $opts{install_command} = [ $packager->install_command ];
+    $opts{update_command}  = [ $packager->update_command('{sources}') ];
     $opts{installer}       = $INSTALLER;
 
     # App::Clod hashes the bytes of the password that basic authentication sends.

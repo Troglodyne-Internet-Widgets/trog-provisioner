@@ -178,6 +178,22 @@ sub install_command {
     );
 }
 
+=head2 @argv = Provisioner::Packager::Deb->update_command($file)
+
+C<apt-get update> of the deb822 F<.sources> file C<$file> alone, which keeps
+the lists of every other source as they are.
+
+=cut
+
+sub update_command {
+    my ( $class, $file ) = @_;
+    return (
+        qw{/usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get update},
+        qw{-o Acquire::Retries=3 -o DPkg::Lock::Timeout=300},
+        '-o', "Dir::Etc::sourcelist=$file", qw{-o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0},
+    );
+}
+
 # A source as one string of its scalar leaves, so that two sources compare
 # with eq whatever the order of their keys.
 my sub canonical ($value) {
