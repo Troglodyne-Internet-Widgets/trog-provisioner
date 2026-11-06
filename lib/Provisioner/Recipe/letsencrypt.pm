@@ -113,6 +113,26 @@ them at build time, even for a certificate that the salvage put back, and the
 nightly renewal runs them each night.  A command decides itself which names it
 acts on, and must be harmless to run twice.
 
+The domain itself can be in C<own_certificates> too.  Its line in
+F<domains.txt> then has an alias, so its certificate names the domain and
+nothing else, while the certificate of the domain still holds every name.
+own_certificate_dir() says where each certificate of its own is.
+
+=head2 $dir = own_certificate_dir($name, $domain)
+
+The directory under F</var/lib/dehydrated/certs> that holds the certificate of
+its own of C<$name>, a name of C<own_certificates> of C<$domain>: C<$name>
+itself, or C<own-$domain> for the domain.  The hook passes its key to each
+command of C<certificate_deployers>, with C<$name> as the domain.  So a command
+that must not touch the certificate of the domain tells the two apart by this
+directory.
+
+=cut
+
+sub own_certificate_dir ( $name, $domain ) {
+    return $name eq $domain ? "own-$domain" : $name;
+}
+
 =head2 Which CA issues, and how a reserved TLD gets one at all
 
 C<ca> is a dehydrated preset name or the URL of a directory.  Its default
@@ -281,8 +301,8 @@ sub enrich {
     my @unserved = grep { !$served{$_} } @{ $params{own_certificates} };
     die "letsencrypt: own_certificates names @unserved, which no recipe on $params{domain} serves, so no record of it is published.\n" if @unserved;
     my %own = map { $_ => 1 } @{ $params{own_certificates} };
-    die "letsencrypt: $params{domain} is the name of the certificate of the domain, so it cannot have a certificate of its own.\n" if $own{ $params{domain} };
     $params{domain_aliases} = [ grep { !$own{$_} } $self->domain_aliases(%params) ];
+    $params{own_lines}      = [ map { { name => $_, dir => own_certificate_dir( $_, $params{domain} ) } } @{ $params{own_certificates} } ];
 
     # The zones of registrar accounts that hold a name of the certificate, longer
     # first, for the hook to choose a shortcut by.

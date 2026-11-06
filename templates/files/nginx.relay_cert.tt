@@ -1,16 +1,19 @@
 #!/bin/bash
 [%# letsencrypt runs this after each run of dehydrated, for each certificate,
     with its name, its private key and its full chain.  It sends the
-    certificate of a media name of this domain to the relay, which serves that
-    name itself, and ignores every other name.  The relay checks the name and
-    the certificate again.  Provisioner::Recipe::nginx has the whole account,
-    under Media names. -%]
+    certificate of a media name or a cached name of this domain to the relay,
+    which serves that name itself, and ignores every other certificate.  The
+    relay checks the name and the certificate again.  Provisioner::Recipe::nginx has the whole account,
+    under Media names and Cached names. -%]
 set -euo pipefail
 
-name="$1" key="$2" chain="$3"
-case "$name" in
-[% FOR name IN relay_cert.names -%]
-    [% name %]) ;;
+key="$2" chain="$3"
+[%# By the directory of the certificate, not by the name that dehydrated
+    passes, because it passes the name of the domain for the certificate of
+    the domain too, which holds every name, the secure name included. -%]
+case "$(basename "$(dirname "$key")")" in
+[% FOR cert IN relay_cert.certs -%]
+    [% cert.dir %]) name=[% cert.name %] ;;
 [% END -%]
     *) exit 0 ;;
 esac
