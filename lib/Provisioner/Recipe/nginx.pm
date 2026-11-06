@@ -10,6 +10,7 @@ use re '/aasx';
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use Provisioner::Recipe::letsencrypt();
 use Provisioner::Utils();
 use List::Util();
 
@@ -180,6 +181,48 @@ zone that an account of the registrar lists, because the relay has no
 stand-in name to serve.  A name cannot be both a public name and a media name,
 and no vhost may list it in C<sites>.
 
+=head2 Cached names
+
+    internal.somedomain:
+        nginx:
+            relay: relay.somedomain
+            public_names:
+                secure.internal.somedomain: internal.somedomain
+            cached_names:
+                internal.somedomain: internal.somedomain
+
+C<cached_names> maps each name whose pages the relay serves and caches for
+readers to the vhost that serves them.  It is usually the domain itself.  The
+relay ends TLS for a cached name, as for a media name, so it must never carry
+a login.  The pages that need one go on a second name, here
+C<secure.internal.somedomain>, which is a public name and passes through.  A
+site that runs tCMS says which is which with C<general.hostname> and
+C<general.secure_host>.  See L<Provisioner::Recipe::nginxrelay/Page names> for
+what the relay does.
+
+A cached name differs from a media name in three ways:
+
+=over 4
+
+=item * It can be a name that its own vhost lists in C<sites>, such as the
+domain.  It cannot be one that another vhost lists.
+
+=item * letsencrypt gives it a certificate of its own that names it alone.  For
+the domain, that is a second certificate, under an alias, beside the
+certificate of the domain, which still holds every name.  The command at
+C<cert_deployer> sends only that second certificate, and tells the two apart by
+their directories, because dehydrated runs it for both with the name of the
+domain.  So the relay never holds a key for the secure name.  See
+L<Provisioner::Recipe::letsencrypt/Certificates of their own>.
+
+=item * The relay registers it as a page name, not a media name.
+
+=back
+
+A cached name needs C<relay>, and it must be in the zone of the domain or in a
+zone that an account of the registrar lists.  It cannot also be a public name or
+a media name.
+
 =head2 Bans through the relay
 
 A ban on this guest blocks nothing that comes through the relay, because those
@@ -250,13 +293,13 @@ that the vhosts serve.
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
-    my @media  = sort keys %{ $opts{media_names} // {} };
+    my @own    = sort( keys %{ $opts{media_names} // {} }, keys %{ $opts{cached_names} // {} } );
     my $domain = $opts{domain};
     return (
         letsencrypt => sub {
             return (
                 certificate_readers => ['nginx'],
-                @media ? ( own_certificates => [@media], certificate_deployers => [ cert_deployer($domain) ] ) : (),
+                @own ? ( own_certificates => [@own], certificate_deployers => [ cert_deployer($domain) ] ) : (),
             );
         }
     );
@@ -264,9 +307,9 @@ sub required_recipes {
 
 =head2 $path = cert_deployer($domain)
 
-Where the command that sends the certificates of the media names of C<$domain>
-to the relay is, on the guest.  L<Provisioner::Recipe::letsencrypt> runs it
-for each certificate.  See L</Media names>.
+Where the command that sends the certificates of the media names and the cached
+names of C<$domain> to the relay is, on the guest.  L<Provisioner::Recipe::letsencrypt> runs it
+for each certificate.  See L</Media names> and L</Cached names>.
 
 =cut
 
@@ -305,6 +348,14 @@ sub args {
                 additionalProperties => { type   => 'string', format => 'hostname' },
                 default              => {},
                 description          => 'Each name that the relay serves and caches itself for this guest, such as media.DOMAIN, mapped to a name of the vhost that serves its files.  Needs relay.  Each name gets a certificate of its own, which the relay gets too, so it must be in the zone of the domain or in a zone that an account of the registrar lists.  See "Media names".',
+            },
+
+            cached_names => {
+                type                 => 'object',
+                propertyNames        => { format => 'hostname' },
+                additionalProperties => { type   => 'string', format => 'hostname' },
+                default              => {},
+                description          => 'Each name whose pages the relay serves and caches for readers, usually the domain itself, mapped to a name of the vhost that serves them.  Needs relay, and a second name for the pages that need a login, among public_names.  See "Cached names".',
             },
 
             relay => {
@@ -379,8 +430,9 @@ my sub proxied_by_vhost (%opts) {
 
 The names of the base class, then each public name in the zone of the domain
 or in a zone that an account of the registrar lists, then C<public.VHOST> for
-each vhost that answers for a public name in neither, then each media name.
-See L</Names that reach the guest through a proxy> and L</Media names>.
+each vhost that answers for a public name in neither, then each media name and
+each cached name.  See L</Names that reach the guest through a proxy>,
+L</Media names> and L</Cached names>.
 
 =cut
 
@@ -396,7 +448,7 @@ sub served_names {
                   @{ $proxied{$_} }
             } sort keys %proxied
         ),
-        sort keys %{ $opts{media_names} // {} },
+        sort( keys %{ $opts{media_names} // {} }, keys %{ $opts{cached_names} // {} } ),
     );
 }
 
@@ -433,7 +485,7 @@ my sub relay_grant ( $domain, $relay ) {
 
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    return () unless defined $opts{relay} && ( %{ $opts{public_names} // {} } || %{ $opts{media_names} // {} } );
+    return () unless defined $opts{relay} && List::Util::any { %{ $opts{$_} // {} } } qw{public_names media_names cached_names};
 
     return relay_grant( $domain, $opts{relay} );
 }
@@ -461,7 +513,8 @@ sub revocations {
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
 Where the relay sends TLS and plain HTTP for the client of C<$grant>, the names
-that it sends there, and the media names that it serves itself, as
+that it sends there, and the media names and the cached names, as page names,
+that it serves itself, as
 L<Provisioner::Recipe::nginxrelay/issue_grant> takes them.
 
 Dies when the guest of the client has no address in the address pool, because
@@ -481,7 +534,8 @@ sub grant_terms {
     return (
         upstreams => { tls => "$address:$port{443}", http => "$address:$port{80}" },
         names     => [ $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() ) ],
-        media     => [ sort keys %{ $opts{media_names} // {} } ],
+        media     => [ sort keys %{ $opts{media_names}  // {} } ],
+        pages     => [ sort keys %{ $opts{cached_names} // {} } ],
     );
 }
 
@@ -552,13 +606,40 @@ sub enrich {
         }
     }
 
-    # The relay fetches a media name on 8080 only, because it ends TLS itself.
-    if ( %proxied || %media ) {
-        $opts{proxied_http} = { map { $_ => [ @{ ( $opts{proxied} // {} )->{$_} // [] }, @{ $media{$_} // [] } ] } List::Util::uniq( keys %proxied, keys %media ) };
+    my %cached = names_by_vhost( cached_names => %opts );
+    if (%cached) {
+        die "nginx: $opts{domain} has cached_names, but no relay to serve them.\n" unless defined $opts{relay};
+        my %other = map {
+            my $field = $_;
+            map { $_ => $field } keys %{ $opts{$field} // {} }
+        } qw{public_names media_names};
+        foreach my $vhost ( sort keys %cached ) {
+            my $names = join( ', ', @{ $cached{$vhost} } );
+            die "nginx: cached_names points $names at $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n" unless $listed{$vhost};
+            my @uncertified = grep { !certifiable( $_, $opts{domain} ) } @{ $cached{$vhost} };
+            die "nginx: cached_names has " . join( ', ', @uncertified ) . ", which is in no zone of $opts{domain} or of an account of the registrar, so it cannot get the certificate that the relay serves.\n"
+              if @uncertified;
+            foreach my $name ( grep { $other{$_} } @{ $cached{$vhost} } ) {
+                my $kind = $other{$name} =~ s/_names\z//r;
+                die "nginx: $name is both a $kind name and a cached name, but the relay can treat a name in only one way.\n";
+            }
+            my @taken = grep { $listed{$_} && vhost_of( $_, %opts ) ne $vhost } @{ $cached{$vhost} };
+            die "nginx: cached_names points " . join( ', ', @taken ) . " at $vhost, but another vhost lists each in sites.\n" if @taken;
+        }
+    }
+
+    # The relay fetches a media name or a cached name on 8080 only, because it
+    # ends TLS itself.  A vhost lists a cached name of its own already.
+    my %fetched = map {
+        my $vhost = $_;
+        ( $vhost => [ @{ $media{$vhost} // [] }, grep { !$listed{$_} } @{ $cached{$vhost} // [] } ] )
+    } List::Util::uniq( keys %media, keys %cached );
+    if ( %proxied || %fetched ) {
+        $opts{proxied_http} = { map { $_ => [ @{ ( $opts{proxied} // {} )->{$_} // [] }, @{ $fetched{$_} // [] } ] } List::Util::uniq( keys %proxied, keys %fetched ) };
 
         my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
         $opts{proxy_from} //= [ map { Provisioner::IPPool::blocks( $bins{$_} ) } grep { defined $bins{$_}{via} } sort keys %bins ];
-        die "nginx: $opts{domain} has public_names or media_names, but nothing says where the proxy connects from.  Give a bin of ip_pool a via, or set proxy_from.\n"
+        die "nginx: $opts{domain} has public_names, media_names or cached_names, but nothing says where the proxy connects from.  Give a bin of ip_pool a via, or set proxy_from.\n"
           unless @{ $opts{proxy_from} };
 
         if ( defined $opts{relay} ) {
@@ -566,12 +647,13 @@ sub enrich {
             $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{relay} );
             $opts{ban_relay}     = $nginxrelay->ban_client( $opts{domain}, $opts{relay_address} );
             $opts{relay_jails}   = [ sort { $a cmp $b } List::Util::uniq( keys %{ { $self->jails(%opts) } }, @{ $opts{proxied_jails} // [] } ) ];
-            $opts{relay_cert}    = {
-                names    => [ sort map { @$_ } values %media ],
+            my @own = sort map { @$_ } values %media, values %cached;
+            $opts{relay_cert} = {
+                certs    => [ map { { name => $_, dir => Provisioner::Recipe::letsencrypt::own_certificate_dir( $_, $opts{domain} ) } } @own ],
                 key_b64  => $nginxrelay->media_key_path( $opts{domain} ),
                 key      => $nginxrelay->media_key_path( $opts{domain} ) =~ s/[.]b64\z//r,
                 deployer => cert_deployer( $opts{domain} ),
-            } if %media;
+            } if @own;
         }
     }
 

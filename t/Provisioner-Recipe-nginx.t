@@ -19,6 +19,8 @@ use Test::Fatal qw{exception};
 use Test::MockModule();
 use File::Temp qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -297,7 +299,7 @@ subtest 'a media name is fetched by the relay on 8080, and gets a certificate of
     is_deeply(
         $opts->{relay_cert},
         {
-            names    => ['media.web.test.test'],
+            certs    => [ { name => 'media.web.test.test', dir => 'media.web.test.test' } ],
             key_b64  => '/etc/ssl/nginxrelay/web.test.test.media.key.b64',
             key      => '/etc/ssl/nginxrelay/web.test.test.media.key',
             deployer => '/etc/dehydrated/deployers/nginxrelay-web.test.test',
@@ -334,11 +336,72 @@ subtest 'a media name is fetched by the relay on 8080, and gets a certificate of
     my $dir    = tempdir( CLEANUP => 1 );
     my $recipe = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
     $recipe->generate_files( $dir, domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %media );
-    my $deployer = File::Slurper::read_text("$dir/nginx_relay_cert");
-    like( $deployer,                                          qr/^[ ]+media[.]web[.]test[.]test\)[ ];;$/m,     'the deployer acts on the media name' );
-    like( $deployer,                                          qr/^[ ]+\*\)[ ]exit[ ]0[ ];;$/m,                 'and on no other' );
-    like( $deployer,                                          qr/root\@10[.]8[.]0[.]197[ ]"install[ ]\$name"/, 'and sends it to the relay, at its address in the tunnel' );
-    like( File::Slurper::read_text("$dir/nginx.global.conf"), qr/listen[ ]8080[ ]default_server/,              'a guest with media names alone still listens for the relay' );
+    is( deployed( "$dir/nginx_relay_cert", 'media.web.test.test' ), 'root@10.8.0.197 install media.web.test.test', 'the deployer sends the certificate of the media name to the relay, at its address in the tunnel' );
+    is( deployed( "$dir/nginx_relay_cert", 'web.test.test' ),       q{},                                           'and no other' );
+    like( File::Slurper::read_text("$dir/nginx.global.conf"), qr/listen[ ]8080[ ]default_server/, 'a guest with media names alone still listens for the relay' );
+};
+
+# What the deployer at $script asks the relay for when letsencrypt runs it for
+# the certificate in the directory $certdir, by way of an ssh that stands in for
+# the real one: its last two arguments, or nothing when it did not run.
+sub deployed {
+    my ( $script, $certdir, $name ) = @_;
+    $name //= $certdir;
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/$certdir" or die "Cannot make $dir/$certdir: $!";
+    File::Slurper::Temp::write_text( "$dir/$certdir/$_", "PEM\n" ) foreach qw{privkey.pem fullchain.pem};
+    File::Slurper::Temp::write_text( "$dir/ssh",         qq{#!$^X\nmy \$pem = do { local \$/; <STDIN> };\nopen( my \$fh, '>', '$dir/asked' ) or die;\nprint {\$fh} "\$ARGV[-2] \$ARGV[-1]";\n} );
+    chmod 0755, "$dir/ssh", $script;
+    local $ENV{PATH} = "$dir:$ENV{PATH}";
+    IPC::Run3::run3( [ 'bash', $script, $name, "$dir/$certdir/privkey.pem", "$dir/$certdir/fullchain.pem" ], \undef, \my $out, \my $err );
+    return "exited $?: $err" if $?;
+    return q{} unless -e "$dir/asked";
+    my $asked = File::Slurper::read_text("$dir/asked");
+    chomp $asked;
+    return $asked;
+}
+
+subtest 'a cached name is fetched by the relay on 8080, on a certificate that names it alone' => sub {
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
+
+    my %cached = (
+        %VPN,
+        sites        => ['web.test.test'],
+        relay        => 'relay.test.test',
+        public_names => { 'secure.web.test.test' => 'web.test.test' },
+        cached_names => { 'web.test.test'        => 'web.test.test' },
+    );
+    my $opts = enriched(%cached);
+    is_deeply( $opts->{proxied},           { 'web.test.test' => ['secure.web.test.test'] }, 'the secure name still passes through on 8443' );
+    is_deeply( $opts->{proxied_http},      { 'web.test.test' => ['secure.web.test.test'] }, 'and the vhost answers on 8080, where the relay fetches the cached name, which it lists already' );
+    is_deeply( $opts->{relay_cert}{certs}, [ { name => 'web.test.test', dir => 'own-web.test.test' } ], 'the guest sends the certificate of its own of the cached name' );
+
+    my $nginx    = 'Provisioner::Recipe::nginx';
+    my %required = $nginx->required_recipes( %cached, domain => 'web.test.test' );
+    is_deeply( { $required{letsencrypt}->() }->{own_certificates}, ['web.test.test'], 'which letsencrypt makes' );
+    ok( scalar( $nginx->grants( 'web.test.test', %cached, public_names => {} ) ), 'a cached name alone registers on the relay' );
+
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $recipe = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
+    $recipe->generate_files( $dir, domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %cached );
+    is( deployed( "$dir/nginx_relay_cert", 'own-web.test.test', 'web.test.test' ), 'root@10.8.0.197 install web.test.test', 'the deployer sends the certificate that names the domain alone, as the domain' );
+    is( deployed( "$dir/nginx_relay_cert", 'web.test.test' ), q{}, 'and never the certificate of the domain, which names the secure name too' );
+
+    my %refused = (
+        'a cached name with no relay'                 => [ [ relay => undef ],                                                                                                            qr/no[ ]relay/ ],
+        'a cached name outside every zone'            => [ [ cached_names => { 'www.customer.test' => 'web.test.test' } ],                                                                qr/cannot[ ]get[ ]the[ ]certificate/ ],
+        'a name that is public and cached'            => [ [ public_names => { 'web.test.test' => 'web.test.test' } ],                                                                    qr/both[ ]a[ ]public[ ]name[ ]and[ ]a[ ]cached[ ]name/ ],
+        'a name that is media and cached'             => [ [ media_names => { 'media.web.test.test' => 'web.test.test' }, cached_names => { 'media.web.test.test' => 'web.test.test' } ], qr/both[ ]a[ ]media[ ]name[ ]and[ ]a[ ]cached[ ]name/ ],
+        'a cached name of a vhost that nothing lists' => [ [ cached_names => { 'shop.web.test.test' => 'other.web.test.test' } ],                                                         qr/no[ ]recipe/ ],
+        'a cached name that another vhost lists'      => [ [ sites => [qw{web.test.test shop.web.test.test}], cached_names => { 'shop.web.test.test' => 'web.test.test' } ],              qr/another[ ]vhost[ ]lists/ ],
+    );
+    foreach my $case ( sort keys %refused ) {
+        my ( $change, $why ) = @{ $refused{$case} };
+        my %opts = ( %cached, @$change );
+        delete $opts{relay} unless defined $opts{relay};
+        like( exception { enriched(%opts) }, $why, "$case stops the build" );
+    }
 };
 
 subtest 'the teardown releases the names on the relay whenever the domain names one' => sub {
