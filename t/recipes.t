@@ -61,6 +61,11 @@ my $template_dir = "$FindBin::Bin/../templates";
 my $garage = Test::MockModule->new('Provisioner::Recipe::garage');
 $garage->redefine( latest_version => sub { return 'v2.4.1' } );
 
+# tcms reads its packages from the metamerge.yml of tCMS on GitHub, so this
+# is that file, with packages for every packager that a distribution has.
+my $tcms = Test::MockModule->new('Provisioner::Recipe::tcms');
+$tcms->redefine( fetch => sub { return { success => 1, status => 200, reason => 'OK', content => "x_system_packages:\n  deb: [libmagic-dev]\n" } } );
+
 # The mail relay binds its relay to its own address in the pool, which bin/new_config
 # assigns before it renders, and this file never does.
 my $holdings = Test::MockModule->new('Provisioner::IPPool');
