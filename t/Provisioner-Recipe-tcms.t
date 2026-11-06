@@ -67,7 +67,7 @@ subtest 'the packages are those that tCMS declares, and never none' => sub {
         return $recipe->deps( repo_branch => "b$branch" );
     };
 
-    is_deeply( [ $deps->("x_system_packages:\n  deb: [libmagic-dev, g++]\n  rpm: [file-devel]\n") ], [qw{libmagic-dev g++}], 'the deb packages of the declaration, on Ubuntu' );
+    is_deeply( [ $deps->("x_system_packages:\n  deb: [libmagic-dev, g++]\n  rpm: [file-devel]\n") ], [qw{git libmagic-dev g++}], 'git, which the recipe clones with, and the deb packages of the declaration, on Ubuntu' );
     is( $asked[-1], 'https://raw.githubusercontent.com/Troglodyne-Internet-Widgets/tCMS/b1/metamerge.yml', 'read from the branch of the repository' );
     $recipe->deps( repo_branch => 'b1' ) for 1 .. 2;
     is( scalar @asked, 1, 'once for each branch' );

@@ -68,7 +68,9 @@ the last guest already has the flag, and the test leaves it alone.
 
 TODO: let the configuration name a commit to check out (#223).
 
-tCMS requires C<Sys::Virt>, so this recipe installs it before the other modules
+tCMS builds with Dist::Zilla, so the C<dzil> step of the C<perl> recipe
+installs the modules that the F<dist.ini> of the checkout names.  tCMS
+requires C<Sys::Virt>, so this recipe installs it before the other modules
 that the checkout needs.  It pins the version that pkg-config reports for the
 libvirt of the guest.  Without the pin, cpm takes the newest, and its build
 wants a libvirt far newer than the distribution ships.
@@ -181,8 +183,8 @@ sub required_recipes {
             my (%perl_opts) = @_;
             return (
                 cpan_deps => [
-                    { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
-                    { installdeps => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
+                    { pin  => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
+                    { dzil => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
                 ],
             );
         },

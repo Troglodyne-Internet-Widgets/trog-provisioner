@@ -18,15 +18,15 @@ Provisioner::Recipe::Ubuntu::tcms - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =head2 @pkgs = $recipe->deps(%opts)
 
-The packages that tCMS declares for the packager of
-L<Provisioner::Recipe::ubuntu>.  See
+git, which the fragment clones tCMS with, and the packages that tCMS
+declares for the packager of L<Provisioner::Recipe::ubuntu>.  See
 L<Provisioner::Recipe::tcms/THE SYSTEM PACKAGES>, which also says when it dies.
 
 =cut
 
 sub deps {
     my ( $self, %opts ) = @_;
-    return $self->declared_packages( 'Provisioner::Recipe::ubuntu'->packager, %opts );
+    return ( 'git', $self->declared_packages( 'Provisioner::Recipe::ubuntu'->packager, %opts ) );
 }
 
 1;
