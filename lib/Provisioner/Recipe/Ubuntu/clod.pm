@@ -22,12 +22,14 @@ git, which the bot runs for its mirrors and work trees, and sqlite3, which
 C<remote_prepare> backs the database up with.  For the installer of
 L<Provisioner::Recipe::clod/THE SYSTEM PACKAGES>, which runs on the system
 perl: C<gnupg>, which reads the fingerprint of the key of a source, and the TLS of
-HTTP::Tiny, which fetches it.
+HTTP::Tiny, which fetches it.  C<strace> and C<gdb>, because the default tools
+of App::Clod let a run that changes a spoke trace or debug a program that the
+spoke integrates with.
 
 =cut
 
 sub deps {
-    return qw{git sqlite3 gnupg libio-socket-ssl-perl libnet-ssleay-perl};
+    return qw{git sqlite3 gnupg libio-socket-ssl-perl libnet-ssleay-perl strace gdb};
 }
 
 =head2 $packager = $recipe->distro_packager()
