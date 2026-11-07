@@ -211,6 +211,23 @@ subtest 'held answers what remember read or made in this process, and opens noth
     is( Trog::Secrets->held('secret:other/entry/password'),    undef,                 'and nothing for a reference that remember was not asked about' );
 };
 
+subtest 'a generator can take over the value of the reference that it replaces' => sub {
+    my $file = File::Temp::tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
+    Trog::Secrets->create( $file, 'throwaway', 'secret:old/entry/password' => 'kept from before' );
+
+    my %asked;
+    my $take = sub ($stored) {
+        %asked = ( old => $stored->('secret:old/entry/password'), missing => $stored->('secret:nosuch/entry/password'), title => $stored->('secret:old/nosuch/password') );
+        return $asked{old};
+    };
+    my %held = Trog::Secrets->remember( $file, 'throwaway', 'secret:new/entry/password' => $take );
+    is( $held{'secret:new/entry/password'}, 'kept from before', 'the new reference gets the value of the old one' );
+    is_deeply( [ @asked{qw{missing title}} ], [ undef, undef ], 'and a reference that the store does not hold is undef, for a group or an entry that is not there' );
+
+    my %read = Trog::Secrets->lookup( $file, 'throwaway', new => 'secret:new/entry/password', old => 'secret:old/entry/password' );
+    is_deeply( \%read, { new => 'kept from before', old => 'kept from before' }, 'and the store keeps both, so a build of the old code still finds its value' );
+};
+
 subtest 'remember makes a secret once and keeps it' => sub {
     my $dir  = File::Temp::tempdir( CLEANUP => 1 );
     my $file = "$dir/secrets.kdbx";

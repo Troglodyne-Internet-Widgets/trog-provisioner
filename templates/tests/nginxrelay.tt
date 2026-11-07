@@ -222,11 +222,6 @@ waitpid( $origin_pid, 0 );
 $origin_pid = 0;
 unlink $origin_log;
 
-my $host = `ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key 2>&1`;
-my $pub  = do { local ( @ARGV, $/ ) = '/etc/ssh/ssh_host_ed25519_key.pub'; <> } // '';
-is( ( split ' ', $pub )[1], ( split ' ', $host )[1], 'the host key that the guests pin is the one that sshd has' );
-
-
 my $released = `$client release $domain 2>&1`;
 is( $?, 0, 'a guest releases its names' ) or diag $released;
 settle();

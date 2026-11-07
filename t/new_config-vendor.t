@@ -34,6 +34,9 @@ use File::Slurper::Temp();
 use YAML::XS();
 
 use Provisioner::Cookbook();
+use Trog::Test::Store();
+
+Trog::Test::Store::throwaway();
 
 File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 

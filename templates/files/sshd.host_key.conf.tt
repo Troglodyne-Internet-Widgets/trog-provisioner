@@ -1,0 +1,6 @@
+[%# The host key that sshd offers, and no other.  The key comes from the
+    secret store, so the clients that pinned it still trust this guest after a
+    rebuild.  sshd loads only the keys that a HostKey line names, so the RSA
+    and ECDSA keys that cloud-init makes stay unused.
+    Provisioner::Recipe::sshd has the whole account. -%]
+HostKey /etc/ssh/ssh_host_ed25519_key

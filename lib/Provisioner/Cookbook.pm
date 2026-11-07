@@ -216,7 +216,7 @@ sub fetch_hosts {
 =head2 @refs = secret_references()
 
 Every C<secret:> reference this installation asks the store for, sorted and
-without duplicates.  Three kinds go in:
+without duplicates.  These go in:
 
 =over 4
 
@@ -228,6 +228,11 @@ C<guest_secrets> names.
 
 =item * The key of each configured domain, which opens the guest and which
 L<Trog::Guest/ref_for_key> names.
+
+=item * The ssh host key of the guest of each configured domain, which
+L<Provisioner::Recipe::sshd/host_key_ref> names.  Every guest has that recipe,
+and no configuration names it, so the loop over the recipes of a domain does
+not find it.
 
 =item * What a block of F<hypervisors.conf> names, such as a hypervisor's API
 token, which L<Trog::Hypervisors::Config/secret_references> finds.
@@ -261,7 +266,7 @@ sub secret_references {
         # looking for xdg-user-dir.  Every test that mocks the filesystem loads
         # this module, and an unmocked stat is fatal there.
         require Trog::Guest;
-        push( @refs, Trog::Guest->ref_for_key($domain) );
+        push( @refs, Trog::Guest->ref_for_key($domain), $class->load('sshd')->host_key_ref($domain) );
 
         foreach my $recipe ( sort keys %$config ) {
             next unless $class->has($recipe);

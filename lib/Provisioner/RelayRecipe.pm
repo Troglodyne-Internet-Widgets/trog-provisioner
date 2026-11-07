@@ -8,11 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use File::Slurper();
-use File::Temp();
-
 use Provisioner::Cookbook();
-use Provisioner::Utils();
 
 use parent qw{Provisioner::Recipe};
 
@@ -38,8 +34,6 @@ what they share must work once on one guest:
 
 =over 4
 
-=item * The ssh host key, which the guests behind the relay pin.
-
 =item * The keys that the guests send their bans with, which sshd reads from
 one directive.
 
@@ -49,6 +43,10 @@ one directive.
 
 A subclass includes F<templates/files/relay.install.tt> in its fragment, which
 installs them.
+
+The guests behind a relay pin its ssh host key.  Every guest keeps that key
+across a rebuild, because L<Provisioner::Recipe::sshd> places it from the secret
+store.  C<issue_grant> hands out its public half.
 
 =head2 Bans
 
@@ -202,34 +200,6 @@ sub issue_grant {
             issue => { guest => $grant->{guest}, command => 'base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub' },
             owner => 'root:root',
             mode  => '0644',
-        },
-    );
-}
-
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
-
-The ed25519 host key of sshd, which the guests behind the relay pin.  It comes
-from the secret store, so a rebuild keeps it.  Every relay names the same entry,
-so a guest that runs two relays has one key.
-
-=cut
-
-sub guest_secrets {
-    my ( $self, $install_dir, $domain ) = @_;
-    return (
-        '/etc/ssh/ssh_host_ed25519_key' => {
-            ref      => "secret:relay/$domain-ssh-host-key/password",
-            generate => sub {
-                my $path = File::Temp::tempdir( CLEANUP => 1 ) . '/host_key';
-                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, "root\@$domain" );
-
-                # bin/provision adds a newline, and ssh-keygen refuses a key
-                # that ends with a blank line.
-                chomp( my $key = File::Slurper::read_binary($path) );
-                return $key;
-            },
-            owner => 'root:root',
-            mode  => '0600',
         },
     );
 }

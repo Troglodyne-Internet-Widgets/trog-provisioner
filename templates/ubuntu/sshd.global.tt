@@ -1,0 +1,8 @@
+[%# bin/provision placed the private key from the secret store before this
+    ran.  The public key that cloud-init wrote belongs to the key that it
+    replaced, so derive it again.  Provisioner::Recipe::sshd has the whole
+    account. -%]
+ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
+install -o root -g root -m 0644 sshd.host_key.conf /etc/ssh/sshd_config.d/10-host-key.conf
+[% script_dir %]/check_sshd_config
+[% script_dir %]/queue_postrun_task systemctl try-reload-or-restart ssh

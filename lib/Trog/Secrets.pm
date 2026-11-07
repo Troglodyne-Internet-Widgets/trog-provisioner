@@ -257,6 +257,15 @@ and keeps the result in the database.  A reference that holds a value keeps
 that value, and its generator is not called.  Returns an empty list if
 C<%generator_by_ref> is empty.
 
+A generator gets one argument, a coderef that takes another reference and
+returns what the store holds for it, or undef.  A secret that moves to a new
+reference uses it to take over the value of its old one, so the move does not
+make a new secret.  The old entry stays where it is.
+
+    'secret:ssh/vm.test-host-key/password' => sub ($stored) {
+        return $stored->('secret:relay/vm.test-ssh-host-key/password') // new_key();
+    },
+
 Use it for a secret that the provisioner owns, such as a signing key.  The
 secret stays the same when the guest is rebuilt.  It is never written into the
 domain directory, where the data recipe would put it into each backup.
@@ -281,6 +290,16 @@ sub remember {
               or die "Could not open $file\n";
             $kdbx->unlock() or die "Could not unlock $file\n";
 
+            # What the open store holds for another reference, for a generator
+            # that takes over the value of a reference that it replaces.
+            my $stored = sub ($other) {
+                my ( $group, $title, $field ) = $class->parse($other);
+                my $g     = group_named( $kdbx, $group ) or return undef;
+                my $entry = entry_named( $g, $title )    or return undef;
+                my $value = $entry->{$field} // q{};
+                return $value ne q{} ? $value : undef;
+            };
+
             my ( %values, %made );
             foreach my $ref ( sort keys %generator_by_ref ) {
                 my ( $group, $title, $field ) = $class->parse($ref);
@@ -293,7 +312,7 @@ sub remember {
                     next;
                 }
 
-                my $made = $generator_by_ref{$ref}->()
+                my $made = $generator_by_ref{$ref}->($stored)
                   or die "The generator for $ref produced nothing\n";
 
                 $g     //= $kdbx->add_group( { title => $group } );

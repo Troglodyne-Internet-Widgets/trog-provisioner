@@ -16,6 +16,7 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 
 use FindBin::libs;
 use MIME::Base64();
@@ -137,6 +138,16 @@ subtest 'somewhere it cannot write is fatal, not silent' => sub {
     # A key that was not written is a service that will not start.  Whoever is
     # reading the build output should be told, rather than finding out later.
     ok( exception { Provisioner::Utils::write_pem( "$dir/no/such/dir/key.pem", "key\n", 0600 ) }, 'a directory that does not exist' );
+};
+
+subtest 'new_ssh_private_key is the private half, as the store keeps it' => sub {
+    my $key = Provisioner::Utils::new_ssh_private_key( Ed25519 => 256, 'probe' );
+    like( $key, qr/\A-{5}BEGIN[ ]OPENSSH[ ]PRIVATE[ ]KEY-{5}\n/, 'an OpenSSH private key' );
+    unlike( $key, qr/\n\z/, 'without the last newline, which bin/provision adds' );
+
+    my $file = tempdir( CLEANUP => 1 ) . '/key';
+    File::Slurper::Temp::write_text( $file, "$key\n" );
+    like( Provisioner::Utils::ssh_pubkey_from_private($file), qr/\Assh-ed25519[ ]/, 'which a reader of the placed file reads back' );
 };
 
 subtest 'dovecot_password_hash makes the Argon2id hash that dovecot reads' => sub {
