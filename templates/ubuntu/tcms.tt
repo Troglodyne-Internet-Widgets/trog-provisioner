@@ -6,4 +6,7 @@ chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/tCMS'
 [%# The directories that tCMS needs and does not track, data/ among them.  It
     makes only what is missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk install
+[%# The front-end files, only when one is missing, because the target fetches
+    the newest of each.  See Provisioner::Recipe::tcms. -%]
+[% FOR file IN frontend_files %][ -e '[% install_dir %]/[% domain %]/tCMS/[% file %]' ] && [% END %]true || sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk prereq-frontend
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'

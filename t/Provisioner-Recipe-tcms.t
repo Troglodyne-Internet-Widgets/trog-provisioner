@@ -126,7 +126,7 @@ YAML
 
     like( exception { $recipe->deps( repo_url => 'https://bogus.test.test/x/tCMS' ) },                                                                                qr/not[ ]a[ ]repository[ ]on[ ]GitHub/, 'a repository that is not on GitHub is refused' );
     like( exception { $recipe->validate( domain => 'web.test.test', install_dir => '/bogus', admin_user => 'bogus', repo_url => 'https://bogus.test.test/x/tCMS' ) }, qr{/repo_url},                          'and so by the schema' );
-    is_deeply( [ $recipe->fetch_hosts( repo_url => 'https://github.com/test-org/tCMS-fork' ) ], ['github.com'], 'the guest clones it from GitHub' );
+    is_deeply( [ $recipe->fetch_hosts( repo_url => 'https://github.com/test-org/tCMS-fork' ) ], [qw{github.com raw.githubusercontent.com cdn.jsdelivr.net}], 'the guest clones it from GitHub, and fetches the front-end files of prereq-frontend' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -24,6 +24,12 @@ use Provisioner::Utils();
 # One copy for args, deps and fetch_hosts.
 our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/tCMS.git';
 
+# What the prereq-frontend target of Installer.mk in tCMS writes, under the checkout.
+our @FRONTEND = qw{
+  www/scripts/list.min.json www/scripts/highlight.min.js www/scripts/chart.min.js www/scripts/reveal.min.js
+  www/styles/obsidian.min.css www/styles/reveal.css www/styles/reveal-white.css
+};
+
 =head1 Provisioner::Recipe::tcms
 
 =head2 SYNOPSIS
@@ -58,6 +64,14 @@ needs and git does not track: C<data/> for its databases, C<totp/>, C<logs/>,
 the C<www/> directories, and C<~/.tcms>.  Without C<data/>, tCMS cannot open
 its database, and every request answers 500.  The target makes only what is
 missing, so it does not change a checkout that came down from the last guest.
+
+Then, when one of the files in C<@FRONTEND> is missing, the fragment runs the
+C<prereq-frontend> target, as the service user.  It downloads the scripts and
+styles that tCMS serves and git does not track, such as the emoji list of the
+emoji picker, from C<raw.githubusercontent.com> and C<cdn.jsdelivr.net>.  The
+target fetches the newest of each, so it runs only when one is missing.  A
+checkout that came down from the last guest keeps the files that it serves.
+C<@FRONTEND> must name what that target writes.
 
 The guest test asks tCMS for its front page.  tCMS offers the page that
 registers the first user only until it answers its first request, which
@@ -255,12 +269,25 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts(%opts)
 
-The host of C<repo_url>, which serves the tCMS checkout this recipe clones.
+The host of C<repo_url>, which serves the tCMS checkout this recipe clones, and
+the hosts that the C<prereq-frontend> target of F<Installer.mk> downloads from.
 
 =cut
 
 sub fetch_hosts ( $, %opts ) {
-    return Provisioner::Utils::host_of( $opts{repo_url} // $DEFAULT_REPO );
+    return ( Provisioner::Utils::host_of( $opts{repo_url} // $DEFAULT_REPO ), qw{raw.githubusercontent.com cdn.jsdelivr.net} );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<frontend_files>, the files of C<@FRONTEND>, for the fragment and the
+test.  It is not in the schema, because it must name what F<Installer.mk>
+writes, and no configuration can change that.
+
+=cut
+
+sub enrich ( $self, %opts ) {
+    return ( $self->SUPER::enrich(%opts), frontend_files => [@FRONTEND] );
 }
 
 1;
