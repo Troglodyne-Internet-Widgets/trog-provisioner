@@ -21,6 +21,7 @@ use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Path       qw{make_path};
+use Test::MockFile   qw{nostrict};
 
 use FindBin;
 use FindBin::libs;
@@ -41,12 +42,10 @@ for my $tool (qw{cpanm cpm dzil}) {
 }
 my $CPANM = "$PERL/bin/cpanm";
 
-# A checkout that builds with Dist::Zilla, which the dzil step tells by its dist.ini.
-my $CHECKOUT = tempdir( CLEANUP => 1 );
-{
-    open( my $fh, '>', "$CHECKOUT/dist.ini" ) or die $!;
-    close($fh)                                or die "Could not close $CHECKOUT/dist.ini: $!";
-}
+# The dzil step tells a checkout that builds with Dist::Zilla by its dist.ini.
+# The perl above is real files, so the mock is not strict.
+my $dist_ini    = Test::MockFile->file( '/bogus/checkout/dist.ini', q{} );
+my $no_dist_ini = Test::MockFile->file('/bogus/old-checkout/dist.ini');
 
 # cpm, run by that perl, resolving from the index of the mirror alone, and
 # without the specs.  --test is added when the suites run.
@@ -114,22 +113,21 @@ subtest 'installdeps and dzil' => sub {
     is_deeply( $r->{ran}, [ [ '/bogus/app', @CPM, '--top-level-phase', 'configure,build,test,runtime' ] ], 'installdeps is what the distribution says it needs, read by cpm in its directory, without what only an author needs' );
 
     $r = install(
-        args    => [ dzil => $CHECKOUT ],
+        args    => [qw{dzil /bogus/checkout}],
         capture => { "$PERL/bin/dzil authordeps" => [ "Dist::Zilla::Plugin::Git\n", "\n" ], "$PERL/bin/dzil listdeps" => ["Moo\n"] },
     );
     is_deeply(
         $r->{ran},
-        [ [ $CHECKOUT, "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, @CPM, '--test', 'Dist::Zilla::Plugin::Git' ], [ $CHECKOUT, "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, @CPM, '--test', 'Moo' ], ],
+        [ [ '/bogus/checkout', "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, @CPM, '--test', 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, @CPM, '--test', 'Moo' ], ],
         'the plugins dist.ini names, then what they say the distribution needs, asked in the checkout'
     );
 
-    $r = install( args => [ dzil => $CHECKOUT ] );
+    $r = install( args => [qw{dzil /bogus/checkout}] );
     is( scalar( grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
 
-    my $old = tempdir( CLEANUP => 1 );
-    $r = install( args => [ qw{--notest dzil}, $old ] );
-    is_deeply( $r->{ran}, [ [ $old, @CPM, '--top-level-phase', 'configure,build,test,runtime' ] ], 'a checkout with no dist.ini, from before its distribution used dzil, is read as installdeps reads it' );
-    like( $r->{err}, qr{\Q$old\E[ ]has[ ]no[ ]dist[.]ini}, 'and the log says why dzil was not asked' );
+    $r = install( args => [qw{--notest dzil /bogus/old-checkout}] );
+    is_deeply( $r->{ran}, [ [ '/bogus/old-checkout', @CPM, '--top-level-phase', 'configure,build,test,runtime' ] ], 'a checkout with no dist.ini, from before its distribution used dzil, is read as installdeps reads it' );
+    like( $r->{err}, qr{/bogus/old-checkout[ ]has[ ]no[ ]dist[.]ini}, 'and the log says why dzil was not asked' );
 };
 
 subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => sub {
@@ -140,24 +138,24 @@ subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => s
     my %before = ( GIT_CONFIG_COUNT => 1, GIT_CONFIG_KEY_0 => 'bogus.key', GIT_CONFIG_VALUE_0 => 'bogus value' );
     local @ENV{@keys} = @before{@keys};
 
-    my $r = install( args => [ dzil => $CHECKOUT ] );
+    my $r = install( args => [qw{dzil /bogus/checkout}] );
     is_deeply(
         $r->{git_config},
-        [ ( [ 1, 'safe.directory', $CHECKOUT ] ) x 2 ],
+        [ ( [ 1, 'safe.directory', '/bogus/checkout' ] ) x 2 ],
         'git trusts the checkout for both dzil commands, which it would otherwise refuse as owned by the service user'
     );
     is_deeply( { map { $_ => $ENV{$_} } @keys }, \%before, 'and for nothing after them' );
 
     $r = install(
-        args         => [ dzil => $CHECKOUT ],
+        args         => [qw{dzil /bogus/checkout}],
         capture      => { "$PERL/bin/dzil authordeps" => ["Dist::Zilla::Plugin::Git\n"] },
         capture_exit => { "$PERL/bin/dzil listdeps"   => 128 },
     );
     is( $r->{rc}, 128, 'listdeps failing fails the step, with its exit code' );
-    like( $r->{err}, qr{dzil[ ]listdeps[ ]--missing[ ]exited[ ]128[ ]in[ ]\Q$CHECKOUT\E}, 'naming which dzil and where' );
+    like( $r->{err}, qr{dzil[ ]listdeps[ ]--missing[ ]exited[ ]128[ ]in[ ]/bogus/checkout}, 'naming which dzil and where' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     $r = install(
-        args         => [ dzil => $CHECKOUT ],
+        args         => [qw{dzil /bogus/checkout}],
         capture      => { "$PERL/bin/dzil authordeps" => ["Dist::Zilla::Plugin::Git\n"], "$PERL/bin/dzil listdeps" => ["Moo\n"] },
         capture_exit => { "$PERL/bin/dzil authordeps" => 2 },
     );
