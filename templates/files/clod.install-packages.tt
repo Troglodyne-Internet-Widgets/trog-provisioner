@@ -11,6 +11,10 @@
 use strict;
 use warnings;
 
+# The apt-get of serial_apt first, so that an install waits for any other apt of
+# the guest.  scripts/serial_apt in trog-provisioner says why.
+$ENV{PATH} = [% perl_string(script_dir _ '/serial-apt:/usr/sbin:/usr/bin:/sbin:/bin') %];
+
 use File::Temp();
 use HTTP::Tiny();
 use JSON::PP();

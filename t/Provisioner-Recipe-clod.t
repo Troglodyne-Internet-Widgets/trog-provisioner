@@ -380,6 +380,20 @@ subtest 'the installer of the system packages installs plain names, and refuses 
     is_deeply( [ $status, $argv ], [ 2, undef ], 'a call that names no package is refused' );
     like( $err, qr/name[ ]the[ ]deb[ ]packages/, 'and says so' );
 
+    # The apt-get of the guest is the link that scripts/serial_apt is under, so the real command, not the fake.
+    my $scripts = tempdir( CLEANUP => 1 );
+    my $through = tempdir( CLEANUP => 1 );
+    my $other   = recipe($through);
+    my %serial  = $other->validated( $other->takes( %GLOBALS, script_dir => $scripts, user => 'svc' ), %BASE );
+    $other->generate_files( $through, %serial );
+    mkdir "$scripts/serial-apt" or die "mkdir: $!";
+    File::Slurper::Temp::write_text( "$scripts/serial-apt/apt-get", qq{#!/bin/sh\nprintf '%s\\n' "\$DEBIAN_FRONTEND" "\$@" > '$log'\n} );
+    chmod 0755, "$scripts/serial-apt/apt-get" or die "chmod: $!";
+    unlink $log;
+    IPC::Run3::run3( [ $^X, '-e', q{my $f = shift; do $f or die $@ || $!; exit main(@ARGV)}, "$through/clod-install-packages", 'ffmpeg' ], \undef, \my $serial_out, \my $serial_err );
+    my @apt = -e $log ? split( m/\n/, File::Slurper::read_text($log) ) : ();
+    is_deeply( [ @apt[ 0, 1, -1 ] ], [qw{noninteractive install ffmpeg}], 'the install runs the apt-get of serial_apt, so that it waits for any other apt of the guest' ) or diag $serial_err;
+
     my $generic = 'Provisioner::Recipe::clod'->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
     like( exception { $generic->validated( $generic->takes(%GLOBALS), %BASE ) }, qr/does[ ]not[ ]say[ ]which[ ]packager/, 'a distribution with no subclass of the recipe says that it has no packager' );
 };

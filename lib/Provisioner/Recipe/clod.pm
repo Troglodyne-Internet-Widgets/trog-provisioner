@@ -390,7 +390,9 @@ installs nothing.
 
 Then it runs the C<install_command> of the packager, without recommends and
 without a prompt, with the names after it.  It prints what the packager
-printed, and exits with its status.
+printed, and exits with its status.  Its C<PATH> starts with the links of
+F<scripts/serial_apt>, so each C<apt-get> waits for any other apt that the
+build runs, rather than failing on the lock of the lists.
 
 The installer runs on the system perl, which has no checkout of this
 repository, so it holds its own copy of how a source becomes files.

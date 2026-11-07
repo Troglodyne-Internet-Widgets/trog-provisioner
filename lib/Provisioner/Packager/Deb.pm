@@ -164,7 +164,9 @@ sub package_name {
 
 C<apt-get install> without recommends, through C<env> with
 C<DEBIAN_FRONTEND=noninteractive>, so that sudo, which empties the environment,
-cannot drop it.  It keeps the configuration files that the operator changed,
+cannot drop it.  C<env> finds C<apt-get> on the C<PATH>, so a caller can put
+the link of F<scripts/serial_apt> first, as the installer of
+L<Provisioner::Recipe::clod> does.  It keeps the configuration files that the operator changed,
 and waits for the lock of the package database rather than failing on it, because
 unattended-upgrades can hold it.  Unlike the C<packager_invocation> of
 L<Provisioner::Recipe::ubuntu>, it does not remove the packages that nothing needs any more.
@@ -173,7 +175,7 @@ L<Provisioner::Recipe::ubuntu>, it does not remove the packages that nothing nee
 
 sub install_command {
     return (
-        qw{/usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y --no-install-recommends},
+        qw{/usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends},
         qw{-o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold},
     );
 }
@@ -181,14 +183,15 @@ sub install_command {
 =head2 @argv = Provisioner::Packager::Deb->update_command($file)
 
 C<apt-get update> of the deb822 F<.sources> file C<$file> alone, which keeps
-the lists of every other source as they are.
+the lists of every other source as they are.  It finds C<apt-get> on the
+C<PATH>, as C<install_command> does.
 
 =cut
 
 sub update_command {
     my ( $class, $file ) = @_;
     return (
-        qw{/usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get update},
+        qw{/usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update},
         qw{-o Acquire::Retries=3 -o DPkg::Lock::Timeout=300},
         '-o', "Dir::Etc::sourcelist=$file", qw{-o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0},
     );
