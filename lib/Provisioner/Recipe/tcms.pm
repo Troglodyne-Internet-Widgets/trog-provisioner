@@ -53,6 +53,14 @@ state.  It is the site that somebody runs, so this recipe does not reset,
 update or reconcile it.  C<config/> is partly tracked, so a write into the
 working tree replaces a live configuration with what master says today.
 
+The fragment does set the owner of the checkout, which the service user and
+its own group own.  C<www/> is the exception, and has the group C<www-data>.
+The first time tPSGI serves a file out of C<www/>, it hard-links the file into
+the F<www/static> of the domain, where nginx serves it from then on.  A hard
+link has the group and the mode of the file, so nginx reads a linked file only
+through its group.  Nothing else in the checkout is for nginx, and the group
+of the service user keeps it out.
+
 After the checkout is in place, the fragment runs the C<install> target of F<Installer.mk> in the
 checkout, as the service user.  That target makes the directories that tCMS
 needs and git does not track: C<data/> for its databases, C<totp/>, C<logs/>,

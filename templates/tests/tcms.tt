@@ -52,6 +52,14 @@ ok(eval { require JSON::PP; JSON::PP::decode_json($emoji) }, 'and the emoji list
 my $code = `curl -s -m 30 -o /dev/null -w '%{http_code}' --unix-socket '[% install_dir %]/[% domain %]/run/tpsgi.sock' -H 'Host: [% domain %]' http://localhost/ 2>&1`;
 is($code, '200', 'tCMS answers its front page');
 
+# tPSGI answers the first request for a file of www/ and links the file into
+# www/static, and nginx answers the second from the link.
+foreach my $try (qw{first second}) {
+    my $css = `curl -sk -m 30 -o /dev/null -w '%{http_code}' --resolve '[% domain %]:443:127.0.0.1' https://[% domain %]/styles/structure.css 2>&1`;
+    is($css, '200', "nginx answers the $try request for a stylesheet of tCMS");
+}
+isnt(system(qw{runuser -u www-data -- test -r}, "$dir/config/default.cfg"), 0, 'and nginx cannot read the configuration of tCMS');
+
 # Asking took the first-time setup away from a fresh install, so give it back.
 # The running workers opened the databases that the reset deletes, so restart
 # them too.
