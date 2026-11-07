@@ -44,11 +44,20 @@ sub store {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     Trog::Secrets->create(
         $file, 'pw',
-        'secret:guests/example.test/password' => 'the key of a guest that exists',
-        'secret:old/retired/password'         => 'nothing reads this',
+        'secret:guests/example.test/password'       => 'the key of a guest that exists',
+        'secret:old/retired/password'               => 'nothing reads this',
+        'secret:ssh/example.test-host-key/password' => 'the host key that its clients pinned',
     );
     return $file;
 }
+
+subtest 'the host key of a guest is refused, though no recipe of it is configured' => sub {
+    my $file = store();
+
+    my ( $warned, $rc ) = capture_stderr { Provisioner::Bin::forget_secret::main( qw{--group ssh --title example.test-host-key --secrets}, $file ) };
+    is( $rc, 1, 'it refuses' );
+    like( $warned, qr/still[ ]asks[ ]for[ ]secret:ssh\/example\.test-host-key/, 'naming the reference that wants it' );
+};
 
 subtest 'a secret nothing asks for is removed' => sub {
     my $file = store();

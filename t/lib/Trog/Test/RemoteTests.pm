@@ -57,7 +57,9 @@ use YAML::XS();
 
 use Provisioner::Cookbook();
 use Provisioner::Utils();
+use Trog::Config();
 use Trog::Test::RecipeConfig();
+use Trog::Test::Store();
 
 my $TLD = 'test.test';
 
@@ -130,15 +132,8 @@ sub run {
     my $tcms_mock = Test::MockModule->new('Provisioner::Recipe::tcms');
     $tcms_mock->redefine( fetch => sub { return "x_system_packages:\n  File::LibMagic:\n    deb: libmagic-dev\n" } );
 
-    # garage, matrix and trogrunner each keep a file for the guest in the secret
-    # store, so new_config opens it.  That needs a store, and its password handed
-    # in up front, as Trog::Credentials documents for a run with nobody at a
-    # keyboard.  Both are throwaways in this test's own configuration directory.
-    require Trog::Config;
-    require Trog::Credentials;
-    require Trog::Secrets;
-    Trog::Secrets->create( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
-    Trog::Credentials->remember( keepass => 'throwaway' );
+    # In this test's own configuration directory.
+    Trog::Test::Store::throwaway();
 
     my $tmpdir = File::Temp::tempdir( CLEANUP => 1 );
 

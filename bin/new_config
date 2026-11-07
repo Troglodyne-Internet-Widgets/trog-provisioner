@@ -596,7 +596,7 @@ sub targets_in_order {
     my (%args) = @_;
     my $state = $args{state_dir};
 
-    my @global = qw{sysctl packages scripts data ssl ssh sendmail testdeps};
+    my @global = qw{sysctl packages scripts data ssl sendmail testdeps};
     unshift( @global, $args{user} eq $args{admin_user} ? 'admin_user' : 'service_user' ) if $args{user};
     unshift( @global, 'resolver' )                                                       if $args{resolver};
     unshift( @global, 'state' );

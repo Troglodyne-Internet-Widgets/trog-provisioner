@@ -1,0 +1,28 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# What sshd offers, not what the files say.  Provisioner::Recipe::sshd has the
+# whole account.
+my $private = `ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key 2>&1`;
+is( $?, 0, 'the host key that bin/provision placed is a key' ) or diag $private;
+
+my $pub = do { local ( @ARGV, $/ ) = '/etc/ssh/ssh_host_ed25519_key.pub'; <> } // '';
+is( ( split ' ', $pub )[1], ( split ' ', $private )[1], 'and the public key beside it is its public half' );
+
+my $effective = `sshd -T 2>&1`;
+my @hostkeys  = $effective =~ m/^hostkey (\S+)$/mg;
+is_deeply( \@hostkeys, ['/etc/ssh/ssh_host_ed25519_key'], 'sshd loads that key and no other' ) or diag $effective;
+
+# sshd prints prohibit-password by its older name.
+like( $effective, qr/^passwordauthentication no$/m,               'sshd takes no password' )            or diag $effective;
+like( $effective, qr/^permitrootlogin without-password$/m,        'and lets root in with a key only' ) or diag $effective;
+ok( !-e '/etc/ssh/sshd_config.d/100-security.conf', 'and the policy has one copy, in the drop-in of the sshd recipe' );
+
+my $scan    = `ssh-keyscan -T 10 -t rsa,ecdsa,ed25519 127.0.0.1 2>/dev/null`;
+my @offered = map { [ ( split ' ' )[ 1, 2 ] ] } grep { m/\S/ && !m/\A#/ } split( m/\n/, $scan );
+is( scalar @offered, 1, 'so a client is offered one host key' ) or diag $scan;
+is_deeply( $offered[0], [ 'ssh-ed25519', ( split ' ', $private )[1] ], 'and it is that key' ) or diag $scan;
+
+done_testing();

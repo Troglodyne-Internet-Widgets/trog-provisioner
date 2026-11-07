@@ -10,9 +10,6 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use File::Slurper();
-use File::Temp();
-
 use List::Util qw{uniq};
 
 use Provisioner::Utils();
@@ -200,16 +197,7 @@ sub guest_secrets {
 
             # Ed25519 because the key fits in a password field, and no
             # passphrase because nothing is there to type one.
-            generate => sub {
-                my $dir  = File::Temp::tempdir( CLEANUP => 1 );
-                my $path = "$dir/id_git";
-                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, "git-$account" );
-
-                # bin/provision adds a newline, and ssh-keygen refuses a key
-                # that ends with a blank line.
-                chomp( my $key = File::Slurper::read_binary($path) );
-                return $key;
-            },
+            generate => sub { Provisioner::Utils::new_ssh_private_key( Ed25519 => 256, "git-$account" ) },
 
             # Owned by root until the fragment gives it to the account, because
             # the file is placed before the makefile makes that account.

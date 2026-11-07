@@ -879,8 +879,8 @@ rebuild gets the same key, and the line that the hypervisor has still matches.
 The key is ed25519, which keeps an F<authorized_keys> line short enough to
 read, and is also why F<bin/preflight> suggests it.  The secret is the private
 key as text, without the last newline.
-L<Provisioner::Utils/write_ssh_keypair> makes it so that OpenSSH and CryptX can
-both read it.
+L<Provisioner::Utils/new_ssh_private_key> makes it so that OpenSSH and CryptX
+can both read it.
 
 =cut
 
@@ -890,17 +890,9 @@ sub guest_secrets {
     return (
         "$install_dir/$domain/.ssh/id_ed25519" => {
             ref      => key_ref($domain),
-            generate => sub {
-                my $dir  = File::Temp::tempdir( CLEANUP => 1 );
-                my $path = "$dir/id_ed25519";
-
-                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => $ED25519_BITS, 'trog-provisioner runner' );
-
-                chomp( my $key = File::Slurper::read_text($path) );
-                return $key;
-            },
-            owner => 'root:root',
-            mode  => '0600',
+            generate => sub { Provisioner::Utils::new_ssh_private_key( Ed25519 => $ED25519_BITS, 'trog-provisioner runner' ) },
+            owner    => 'root:root',
+            mode     => '0600',
         },
     );
 }

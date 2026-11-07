@@ -30,6 +30,9 @@ use File::Slurper::Temp();
 use YAML::XS();
 
 use Provisioner::Cookbook();
+use Trog::Test::Store();
+
+Trog::Test::Store::throwaway();
 
 # The administrator's keys are read out of the configuration directory now,
 # rather than named as an identity for cloud-init to fetch at first boot.

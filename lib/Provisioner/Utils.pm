@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use File::Find();
+use File::Temp();
 use List::Util();
 use MIME::Base64 qw{encode_base64};
 
@@ -413,6 +414,29 @@ sub write_ssh_keypair {
     File::Slurper::Temp::write_text( "$path.pub", "$public\n" );
 
     return $public;
+}
+
+=head3 $private = new_ssh_private_key($type, $bits, $comment)
+
+Makes an ssh keypair with C<write_ssh_keypair> in a temporary directory, and
+returns the private half as text.  The temporary files are gone when this
+returns.  This is the value that a C<generate> of C<guest_secrets> in
+L<Provisioner::Recipe> returns for a private key.
+
+The text has no final newline.  F<bin/provision> adds one when it places the
+file, and C<ssh-keygen> refuses a key that ends with a blank line.
+
+=cut
+
+sub new_ssh_private_key {
+    my ( $type, $bits, $comment ) = @_;
+
+    my $dir  = File::Temp->newdir();
+    my $path = "$dir/key";
+    write_ssh_keypair( $path, $type, $bits, $comment );
+
+    chomp( my $private = File::Slurper::read_text($path) );
+    return $private;
 }
 
 # Maps the curve names of libtomcrypt to the names that OpenSSH puts on the wire.

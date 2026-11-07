@@ -15,13 +15,10 @@ web relay, to register its names and to release them
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp();
-use File::Slurper::Temp();
 
 use FindBin::libs;
 
 use Provisioner::Cookbook();
-use Provisioner::Utils();
 
 my $relay = Provisioner::Cookbook->load('nginxrelay');
 
@@ -66,17 +63,6 @@ subtest 'bin/destroy releases them by the same script' => sub {
     my %revocation = $relay->revoke_grant( { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' } );
     is( $revocation{command}, '/root/bin/nginxrelay_client release web.test.test', 'nginxrelay_client release, for the domain' );
     like( $revocation{stays}, qr/Run[ ]\Q$revocation{command}\E[ ]there/, 'and a relay that is not up is told the same command' );
-};
-
-subtest 'the host key comes from the store' => sub {
-    my %secrets = $relay->guest_secrets( '/opt/domains', 'relay.test.test' );
-    my $secret  = $secrets{'/etc/ssh/ssh_host_ed25519_key'};
-    is( $secret->{ref},  'secret:relay/relay.test.test-ssh-host-key/password', 'so a rebuilt relay keeps the host key that the guests pinned' );
-    is( $secret->{mode}, '0600',                                               'readable by root only' );
-
-    my $file = File::Temp::tempdir( CLEANUP => 1 ) . '/key';
-    File::Slurper::Temp::write_binary( $file, $secret->{generate}->() . "\n" );
-    like( Provisioner::Utils::ssh_pubkey_from_private($file), qr/\Assh-ed25519[ ]/, 'and the key that it generates is an ed25519 key with no passphrase' );
 };
 
 Test::NoWarnings::had_no_warnings();

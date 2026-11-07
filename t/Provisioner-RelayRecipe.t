@@ -53,13 +53,6 @@ subtest 'each relay has its own set of bans, and its own files on the guests beh
     );
 };
 
-subtest 'every relay names the one host key of the guest' => sub {
-    my %bare  = Bare::Relay->guest_secrets( '/bogus', 'relay.test.test' );
-    my %nginx = Provisioner::Cookbook->load('nginxrelay')->guest_secrets( '/bogus', 'relay.test.test' );
-    is( $bare{'/etc/ssh/ssh_host_ed25519_key'}{ref},  'secret:relay/relay.test.test-ssh-host-key/password', 'from an entry of the store that no recipe owns' );
-    is( $nginx{'/etc/ssh/ssh_host_ed25519_key'}{ref}, $bare{'/etc/ssh/ssh_host_ed25519_key'}{ref},          'so two relays on one guest pin one key' );
-};
-
 subtest 'sshd reads the keys of every relay of the guest from one directive' => sub {
     my $nginxrelay = Provisioner::Cookbook->load('nginxrelay');
     my %opts       = $nginxrelay->enrich( modules => [qw{ubuntu nginx nginxrelay}] );

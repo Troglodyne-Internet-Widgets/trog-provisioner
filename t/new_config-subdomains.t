@@ -37,13 +37,10 @@ use MIME::Base64();
 
 use Provisioner::Cookbook();
 use Trog::Config();
-use Trog::Credentials();
 use Trog::Secrets();
+use Trog::Test::Store();
 
-# A throwaway store, and its password handed over up front, because mail keeps
-# its DKIM key in the store.  As Trog::Test::RemoteTests does.
-Trog::Secrets->create( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
-Trog::Credentials->remember( keepass => 'throwaway' );
+Trog::Test::Store::throwaway();
 
 File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 
