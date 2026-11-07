@@ -1,0 +1,72 @@
+Subject: [PATCH] Send an easyDNS CNAME target absolute, and read one back as easyDNS serves it
+
+easyDNS reads a CNAME target without its trailing dot as a name inside the
+zone, but lexicon means such a target as an absolute name, as the powerdns
+provider does.  So "create CNAME www.example.com --content=host.example.com"
+published a record that resolves to host.example.com.example.com.  Listing
+it gave back host.example.com, so a client that compared what it wanted with
+what it read saw nothing wrong.
+
+The provider now sends a CNAME target with its trailing dot, on create and
+on update.  It lists a target that easyDNS holds with its dot without that
+dot, as lexicon writes names, and one that easyDNS holds without its dot as
+the name that easyDNS serves for it, qualified into the zone.
+
+---
+--- a/usr/lib/python3/dist-packages/lexicon/_private/providers/easydns.py
++++ b/usr/lib/python3/dist-packages/lexicon/_private/providers/easydns.py
+@@ -51,7 +51,9 @@
+     # Create record. If record already exists with the same content, do nothing'
+ 
+     def create_record(self, rtype, name, content):
+-        priority, content = self._split_priority(rtype, content)
++        priority, content = self._split_priority(
++            rtype, self._absolute_target(rtype, content)
++        )
+         record = {
+             "type": rtype,
+             "domain": self.domain_id,
+@@ -85,7 +87,7 @@
+                 "type": record["type"],
+                 "name": f"{record['host']}.{record['domain']}",
+                 "ttl": record["ttl"],
+-                "content": self._join_priority(record),
++                "content": self._target_as_served(record),
+                 "id": record["id"],
+             }
+             records.append(processed_record)
+@@ -110,7 +112,9 @@
+         if name:
+             data["host"] = self._relative_name(name)
+         if content:
+-            priority, data["rdata"] = self._split_priority(rtype, content)
++            priority, data["rdata"] = self._split_priority(
++                rtype, self._absolute_target(rtype, content)
++            )
+             if rtype in ("MX", "SRV"):
+                 data["prio"] = priority
+ 
+@@ -166,6 +170,23 @@
+             return f"{record['prio']} {record['rdata']}"
+         return record["rdata"]
+ 
++    # easyDNS reads a target without its trailing dot as a name inside the
++    # zone, but lexicon means it as an absolute name.  So the target of a
++    # CNAME goes up with its dot, and a target that easyDNS holds without it
++    # is read back as the name that easyDNS serves.
++    def _absolute_target(self, rtype, content):
++        if rtype == "CNAME" and content and not content.endswith("."):
++            return content + "."
++        return content
++
++    def _target_as_served(self, record):
++        content = self._join_priority(record)
++        if record["type"] != "CNAME" or not content:
++            return content
++        if content.endswith("."):
++            return content[:-1]
++        return f"{content}.{record['domain']}"
++
+     def _request(self, action="GET", url="/", data=None, query_params=None):
+         if data is None:
+             data = {}
