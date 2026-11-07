@@ -39,6 +39,10 @@ is missing in C<DIR>.  The order is necessary.  F<dist.ini> names plugins, and
 dzil cannot read it to answer C<listdeps> until those plugins are installed.  If
 dzil fails, the step fails.  A failure does not count as nothing missing.
 
+A C<DIR> with no F<dist.ini> is a checkout from before its distribution moved
+to Dist::Zilla, such as one that a rebuild keeps.  The step then installs what
+that checkout says it needs, as C<installdeps> does.
+
 =item * C<pin> installs C<MODULE> at the version that pkg-config reports for
 C<PKGCONFIG_PACKAGE> when this runs.  C<Sys::Virt> is the reason for this verb.
 Its version must match the C<libvirt> that it builds against.
@@ -137,6 +141,11 @@ sub main {
 
     # See "Which perl".
     local $ENV{PATH} = join ':', $bin, $ENV{PATH} // ();
+
+    if ( $verb eq 'dzil' && @rest == 1 && !-e "$rest[0]/dist.ini" ) {
+        warn "cpan_install: $rest[0] has no dist.ini, so this installs what its distribution says it needs\n";
+        $verb = 'installdeps';
+    }
 
     my $rc = 0;
     if ( $verb eq 'install' && @rest ) {

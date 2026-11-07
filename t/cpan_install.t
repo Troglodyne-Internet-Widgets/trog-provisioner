@@ -21,6 +21,7 @@ use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Path       qw{make_path};
+use Test::MockFile   qw{nostrict};
 
 use FindBin;
 use FindBin::libs;
@@ -40,6 +41,11 @@ for my $tool (qw{cpanm cpm dzil}) {
     chmod( 0755, "$PERL/bin/$tool" );
 }
 my $CPANM = "$PERL/bin/cpanm";
+
+# The dzil step tells a checkout that builds with Dist::Zilla by its dist.ini.
+# The perl above is real files, so the mock is not strict.
+my $dist_ini    = Test::MockFile->file( '/bogus/checkout/dist.ini', q{} );
+my $no_dist_ini = Test::MockFile->file('/bogus/old-checkout/dist.ini');
 
 # cpm, run by that perl, resolving from the index of the mirror alone, and
 # without the specs.  --test is added when the suites run.
@@ -118,6 +124,10 @@ subtest 'installdeps and dzil' => sub {
 
     $r = install( args => [qw{dzil /bogus/checkout}] );
     is( scalar( grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
+
+    $r = install( args => [qw{--notest dzil /bogus/old-checkout}] );
+    is_deeply( $r->{ran}, [ [ '/bogus/old-checkout', @CPM, '--top-level-phase', 'configure,build,test,runtime' ] ], 'a checkout with no dist.ini, from before its distribution used dzil, is read as installdeps reads it' );
+    like( $r->{err}, qr{/bogus/old-checkout[ ]has[ ]no[ ]dist[.]ini}, 'and the log says why dzil was not asked' );
 };
 
 subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => sub {
