@@ -10,6 +10,7 @@ find /etc/nginx/nginxrelay.d/media -name '*.key' -exec chown root:www-data {} + 
 [%# nginx makes only the last directory of a proxy_cache_path, and refuses to
     start without the rest. -%]
 install -d -o www-data -g www-data -m 0700 /var/cache/nginx/nginxrelay-media
+install -d -o www-data -g www-data -m 0700 /var/cache/nginx/nginxrelay-pages
 rm -f /etc/nginx/sites-enabled/default
 [% INCLUDE "files/relay.install.tt" %]
 install -o root -g root -m 0644 nginxrelay.stream /etc/nginx/relay-stream.d/nginxrelay.conf

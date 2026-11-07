@@ -118,18 +118,20 @@ subtest 'nginx believes X-Forwarded-For on 8080 only from proxy_from' => sub {
 [% END -%]
 [% IF relay_cert -%]
 
-subtest 'the relay fetches each media name here, and serves its certificate' => sub {
-[% FOR name IN relay_cert.names -%]
+subtest 'the relay fetches each name that it serves here, on a certificate of that name alone' => sub {
+[% FOR cert IN relay_cert.certs -%]
     {
-        my $code = `curl -s --max-time 10 -o /dev/null -w '%{http_code}' --resolve '[% name %]:8080:127.0.0.1' 'http://[% name %]:8080/' 2>/dev/null` || '000';
-        isnt( $code, '000', '[% name %] answers on 8080, where the relay fetches' );
+        my $code = `curl -s --max-time 10 -o /dev/null -w '%{http_code}' --resolve '[% cert.name %]:8080:127.0.0.1' 'http://[% cert.name %]:8080/' 2>/dev/null` || '000';
+        isnt( $code, '000', '[% cert.name %] answers on 8080, where the relay fetches' );
 
         # The certificate that the relay serves for the name, against the one
-        # that letsencrypt issued here.
-        my $here  = `openssl x509 -noout -fingerprint -sha256 -in /var/lib/dehydrated/certs/[% name %]/cert.pem 2>&1`;
-        my $there = `openssl s_client -connect [% relay_address %]:443 -servername [% name %] </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>&1`;
-        like( $here, qr/Fingerprint=/, 'letsencrypt issued [% name %] a certificate of its own' ) or diag $here;
+        # that letsencrypt issued here for it alone.
+        my $here  = `openssl x509 -noout -fingerprint -sha256 -in /var/lib/dehydrated/certs/[% cert.dir %]/cert.pem 2>&1`;
+        my $there = `openssl s_client -connect [% relay_address %]:443 -servername [% cert.name %] </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>&1`;
+        like( $here, qr/Fingerprint=/, 'letsencrypt issued [% cert.name %] a certificate of its own' ) or diag $here;
         is( $there, $here, 'and the relay serves it' );
+        my $san = `openssl x509 -noout -ext subjectAltName -in /var/lib/dehydrated/certs/[% cert.dir %]/cert.pem 2>&1`;
+        is_deeply( [ $san =~ m/DNS:([^,\s]+)/g ], ['[% cert.name %]'], 'which names it and nothing else, so the relay holds no key of another name' ) or diag $san;
     }
 [% END -%]
     ok( -x '[% relay_cert.deployer %]', 'letsencrypt has the deployer for each renewal' );

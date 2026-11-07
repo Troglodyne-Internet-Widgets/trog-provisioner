@@ -108,8 +108,12 @@ subtest 'a name of own_certificates gets a certificate of its own, which the dep
     is( $read->('domains.txt'), "$DOMAIN  www.$DOMAIN\n", 'without it, one certificate holds every name' );
     unlike( $read->('domain.hook'), qr{/bogus/deploy}, 'and no deployer runs' );
 
-    like( exception { generated( own_certificates => ["media.$DOMAIN"] ) }, qr/which[ ]no[ ]recipe[ ]on[ ]\Q$DOMAIN\E[ ]serves/,  'a name that no recipe serves is refused, because nothing publishes it' );
-    like( exception { generated( own_certificates => [$DOMAIN] ) },         qr/cannot[ ]have[ ]a[ ]certificate[ ]of[ ]its[ ]own/, 'and so is the domain itself' );
+    like( exception { generated( own_certificates => ["media.$DOMAIN"] ) }, qr/which[ ]no[ ]recipe[ ]on[ ]\Q$DOMAIN\E[ ]serves/, 'a name that no recipe serves is refused, because nothing publishes it' );
+
+    ( undef, undef, $read ) = generated( own_certificates => [$DOMAIN] );
+    is( $read->('domains.txt'), "$DOMAIN  www.$DOMAIN\n$DOMAIN > own-$DOMAIN\n", 'the domain itself gets a second certificate, which names it alone, under an alias' );
+    is( Provisioner::Recipe::letsencrypt::own_certificate_dir( $DOMAIN,         $DOMAIN ), "own-$DOMAIN",   'which is the directory of that certificate' );
+    is( Provisioner::Recipe::letsencrypt::own_certificate_dir( "media.$DOMAIN", $DOMAIN ), "media.$DOMAIN", 'while another name keeps its own name' );
 };
 
 subtest 'the CA defaults to the public one where a public CA could issue' => sub {
