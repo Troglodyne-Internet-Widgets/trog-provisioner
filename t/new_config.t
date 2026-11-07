@@ -27,7 +27,7 @@ use Test::Fatal      qw{exception};
 # Because Config::Simple is incompatible with Test::MockFile
 use File::Temp;
 
-# None of the three below are called from this file, and all three have to be
+# None of the modules below are called from this file, and all of them have to be
 # here: anything that opens a file has to be compiled before Test::MockFile
 # installs its own open, or it will open the real one at runtime.  Loading them
 # is the point, so the unused-import policy has nothing to go on.
@@ -50,6 +50,10 @@ use Config::Simple;
 # MockFile could replace them, and every read the SUT does through
 # Provisioner::Cookbook would go to the real filesystem and fail on /bogus.
 use Net::OpenSSH::More;
+
+# Dist::Conformance::Check::SystemPackages, which the tcms recipe loads, loads
+# this, and its file-level code stats ~/.inflectrc.
+use Lingua::EN::Inflect ();
 ## use critic
 
 # It is important to use MockFile last
