@@ -19,6 +19,7 @@ use JSON::Validator();
 use List::Util   qw{uniq};
 use MIME::Base64 qw{encode_base64};
 use URI();
+use version();
 
 use Dist::Conformance::Check::SystemPackages();
 
@@ -373,6 +374,9 @@ when gpg reads no key in C<$key>.
 # The command, so that a test can run another one.
 our @GPG = ('gpg');
 
+# The first release of GnuPG with --show-keys.
+our $GPG_SHOW_KEYS = '2.2.8';
+
 sub key_fingerprints {
     my ($key) = @_;
     my $home = File::Temp->newdir;
@@ -391,6 +395,23 @@ sub key_fingerprints {
         elsif ( $type eq 'fpr' && $primary ) { push @fingerprints, uc $field[8] }
     }
     return @fingerprints;
+}
+
+=head2 $why = Provisioner::Packager::Deb->gpg_error()
+
+Why C<key_fingerprints> cannot run on this machine, or undef when it can: gpg
+must run, and be GnuPG 2.2.8 or later, the first release with C<--show-keys>.
+C<bin/preflight> asks it.
+
+=cut
+
+sub gpg_error {
+    my ( $out, $err ) = ( q{}, q{} );
+    eval { IPC::Run3::run3( [ @GPG, '--version' ], \undef, \$out, \$err ); 1 } or return "gpg does not run: $@";
+    return 'gpg --version exited with ' . ( $? >> 8 ) . ': ' . ( ( split m/\n/, $err )[0] // q{} ) if $?;
+    my ($version) = $out =~ m/\Agpg[ ][(]GnuPG[)][ ](\d+[.]\d+[.]\d+)/ or return 'gpg --version names no release of GnuPG: ' . ( ( split m/\n/, $out )[0] // q{} );
+    return "gpg is GnuPG $version, and --show-keys needs $GPG_SHOW_KEYS or later" if version->parse($version) < version->parse($GPG_SHOW_KEYS);
+    return;
 }
 
 =head2 check_suite($uri, $suite, $name)

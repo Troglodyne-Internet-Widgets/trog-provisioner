@@ -292,6 +292,20 @@ subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest c
     like( $result->{fix},  qr/AppArmor/,                         'and what refuses it when it is installed' );
 };
 
+subtest 'a machine without a gpg that reads keys cannot trust an archive' => sub {
+    my $deb = Test::MockModule->new('Provisioner::Packager::Deb');
+
+    $deb->redefine( gpg_error => sub { undef } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_gpg } );
+    ok( $result->{ok}, 'a gpg that reads keys passes' );
+
+    $deb->redefine( gpg_error => sub { 'gpg is GnuPG 2.2.4, and --show-keys needs 2.2.8 or later' } );
+    ($result) = quietly( sub { Trog::HV->new()->check_gpg } );
+    ok( !$result->{ok}, 'one that does not fails' );
+    like( $result->{what}, qr/GnuPG[ ]2[.]2[.]4/,     'with what is wrong' );
+    like( $result->{fix},  qr/apt[ ]install[ ]gpg$/m, 'and how to install it' );
+};
+
 # Every other check can pass while this one cannot, and then the run dies
 # minutes in on a curl, naming the image URL rather than the permissions that
 # refused it.  That is how a hypervisor whose pool had just been moved onto a

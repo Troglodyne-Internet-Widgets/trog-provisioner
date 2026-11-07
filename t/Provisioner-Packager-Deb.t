@@ -17,6 +17,7 @@ use Test::Fatal;
 use Test::MockModule qw{strict};
 use Test::NoWarnings qw{had_no_warnings};
 use MIME::Base64     qw{decode_base64};
+use File::Slurper::Temp();
 use File::Temp();
 use File::Which();
 use IPC::Run3();
@@ -188,8 +189,17 @@ subtest 'files: a key that must have its fingerprint' => sub {
     {
         no warnings 'once';
         local @Provisioner::Packager::Deb::GPG = ('/bogus/gpg');
-        like( exception { Provisioner::Packager::Deb::key_fingerprints($armored) }, qr/needs[ ]gpg/, 'and without gpg, nothing is trusted' );
+        like( exception { Provisioner::Packager::Deb::key_fingerprints($armored) }, qr/needs[ ]gpg/,            'and without gpg, nothing is trusted' );
+        like( Provisioner::Packager::Deb->gpg_error,                                qr/gpg[ ]does[ ]not[ ]run/, 'which gpg_error says' );
+
+        # A gpg from before --show-keys, which says only its version.
+        my $old = "$home/old-gpg";
+        File::Slurper::Temp::write_text( $old, qq{#!/bin/sh\necho 'gpg (GnuPG) 2.2.4'\n} );
+        chmod 0755, $old or die "chmod: $!";
+        local @Provisioner::Packager::Deb::GPG = ($old);
+        like( Provisioner::Packager::Deb->gpg_error, qr/GnuPG[ ]2[.]2[.]4.*2[.]2[.]8[ ]or[ ]later/, 'and so for a gpg too old to show a key without importing it' );
     }
+    is( Provisioner::Packager::Deb->gpg_error, undef, 'the gpg here reads keys' );
 
     my %suite = ( 'https://apt.fpr.test/dists/stable/InRelease' => q{} );
     %answer = ( %suite, 'https://apt.fpr.test/one.asc' => $armored, 'https://apt.fpr.test/both.asc' => $both );
