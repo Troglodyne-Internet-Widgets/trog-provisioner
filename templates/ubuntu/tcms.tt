@@ -2,7 +2,10 @@
     A checkout that came down from the last guest is the live site, and this
     recipe leaves it alone.  See Provisioner::Recipe::tcms. -%]
 [ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/tCMS'
-chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/tCMS'
+[%# www/ has the group of nginx, which serves the files that tPSGI links out of
+    it.  See Provisioner::Recipe::tcms. -%]
+chown -R [% user %]: '[% install_dir %]/[% domain %]/tCMS'
+chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/tCMS/www'
 [%# The directories that tCMS needs and does not track, data/ among them.  It
     makes only what is missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk install
