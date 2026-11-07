@@ -28,6 +28,7 @@
     local_lib        => '[% local_lib %]',
     agent_lib        => '[% agent_lib %]',
     restart_units    => [ 'clod-[% domain %].service', 'clod-worker-[% domain %].service' ],
+    system_packages  => { packager => '[% packager %]', installer => '[% installer %]' },
 [% IF follow_up_max.defined() -%]
     follow_up_max    => [% follow_up_max %],
 [% END -%]

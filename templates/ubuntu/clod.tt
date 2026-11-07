@@ -44,6 +44,10 @@ chown '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/.gitconfig'
 install -o root -g '[% user %]' -m 0640 clod.conf '[% install_dir %]/[% domain %]/clod.conf'
 install -o root -g '[% user %]' -m 0640 clod.env  '[% install_dir %]/[% domain %]/clod.env'
 install -o root -g root -m 0700 clod-salvage.sh '[% install_dir %]/[% domain %]/clod-salvage.sh'
+[%# Root owns it, every account may run it, and none may change it.  servicesudo lets
+    the service user run it as root.  THE SYSTEM PACKAGES in
+    Provisioner::Recipe::clod. -%]
+install -o root -g root -m 0755 clod-install-packages '[% installer %]'
 
 install -o root -g root -m 0644 clod.service        '/etc/systemd/system/clod-[% domain %].service'
 install -o root -g root -m 0644 clod-worker.service '/etc/systemd/system/clod-worker-[% domain %].service'

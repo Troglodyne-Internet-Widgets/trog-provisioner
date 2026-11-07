@@ -18,6 +18,8 @@ use File::Temp  qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Which();
+use File::Find();
+use Test::MockModule qw{strict};
 use IPC::Run3();
 use Cpanel::JSON::XS();
 
@@ -320,6 +322,200 @@ subtest 'claude runs as the agent account' => sub {
 
     my $dotted = recipe();
     like( exception { $dotted->validated( $dotted->takes( %GLOBALS, user => 'svc.dotted' ), %BASE ) }, qr/sudoers\.d/, 'a service user that would name a sudoers file that sudo skips is refused' );
+};
+
+# THE SYSTEM PACKAGES in Provisioner::Recipe::clod.  The installer runs here,
+# with a fake packager in place of its command, which says what it was given.
+subtest 'the installer of the system packages installs plain names, and refuses anything else' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $r   = recipe($dir);
+    my %got = $r->validated( $r->takes( %GLOBALS, user => 'svc' ), %BASE );
+    $r->generate_files( $dir, %got );
+    my $installer = '/usr/local/sbin/clod-install-packages';
+
+    my $conf = do "$dir/clod.conf";
+    is_deeply( $conf->{system_packages}, { packager => 'deb', installer => $installer }, 'clod.conf names the packager of the distribution, and the installer' ) or diag $@;
+
+    my %required = $r->required_recipes();
+    my %sudo     = $required{servicesudo}->(%GLOBALS);
+    is( $sudo{commands}[-1], $installer, 'the service user may run it as root with any arguments' );
+    my @lines = split m/\n/, $r->render(%got);
+    is_deeply( [ grep { $_ eq "install -o root -g root -m 0755 clod-install-packages '$installer'" } @lines ], ["install -o root -g root -m 0755 clod-install-packages '$installer'"], 'and the fragment installs it for root, mode 0755' );
+
+    my $bin = tempdir( CLEANUP => 1 );
+    my $log = "$bin/argv";
+    File::Slurper::Temp::write_text( "$bin/packager", qq{#!/bin/sh\nprintf '%s\\n' "\$@" > '$log'\necho the packager said this\nexit \${FAKE_EXIT:-0}\n} );
+    chmod 0755, "$bin/packager" or die "chmod: $!";
+
+    my $deb = Provisioner::Packager->named('deb');
+    my $run = sub {
+        my (@names) = @_;
+        unlink $log;
+        my $shim = q{my $f = shift; do $f or die $@ || $!; @main::INSTALL = (shift); exit main(@ARGV)};
+        IPC::Run3::run3( [ $^X, '-e', $shim, "$dir/clod-install-packages", "$bin/packager", @names ], \undef, \my $out, \my $err );
+        return ( $? >> 8, $out, $err, -e $log ? [ split m/\n/, File::Slurper::read_text($log) ] : undef );
+    };
+
+    my $shown = q{do $ARGV[0] or die $@ || $!; print join("\n", $main::NAME, @main::INSTALL, '--', @main::UPDATE), "\n"};
+    IPC::Run3::run3( [ $^X, '-e', $shown, "$dir/clod-install-packages" ], \undef, \my $rendered, \my $broken );
+    is_deeply( [ split m/\n/, $rendered ], [ $deb->package_name, $deb->install_command, '--', $deb->update_command('{sources}') ], 'the installer holds the name rule and the commands of the packager' ) or diag $broken;
+
+    my ( $status, $out, $err, $argv ) = $run->(qw{ffmpeg libmagic-dev g++});
+    is( $status, 0, 'a plain name is installed' ) or diag $err;
+    is_deeply( $argv, [qw{ffmpeg libmagic-dev g++}], 'with every name, in order, after the command' );
+    is( $out, "the packager said this\n", 'and it prints what the packager printed' );
+
+    {
+        local $ENV{FAKE_EXIT} = 100;
+        ( $status, undef, undef, $argv ) = $run->('ffmpeg');
+        is( $status, 100, 'and exits with the status of the packager' );
+    }
+
+    foreach my $bad ( qw{ffmpeg- -y --purge foo=1.2 foo/sid foo:i386 ./foo.deb F Foo}, 'two names', "ffmpeg\n", q{} ) {
+        ( $status, $out, $err, $argv ) = $run->( 'git', $bad );
+        is_deeply( [ $status, $argv ], [ 2, undef ], 'a call with ' . ( $bad =~ s/\n/\\n/r ) . ' in it is refused whole, and runs no packager' );
+        like( $err, qr/not[ ]a[ ]plain[ ]deb[ ]package[ ]name.*installed[ ]nothing/, 'and says why on stderr' ) or diag $err;
+    }
+    ( $status, undef, $err, $argv ) = $run->();
+    is_deeply( [ $status, $argv ], [ 2, undef ], 'a call that names no package is refused' );
+    like( $err, qr/name[ ]the[ ]deb[ ]packages/, 'and says so' );
+
+    # The apt-get of the guest is the link that scripts/serial_apt is under, so the real command, not the fake.
+    my $scripts = tempdir( CLEANUP => 1 );
+    my $through = tempdir( CLEANUP => 1 );
+    my $other   = recipe($through);
+    my %serial  = $other->validated( $other->takes( %GLOBALS, script_dir => $scripts, user => 'svc' ), %BASE );
+    $other->generate_files( $through, %serial );
+    mkdir "$scripts/serial-apt" or die "mkdir: $!";
+    File::Slurper::Temp::write_text( "$scripts/serial-apt/apt-get", qq{#!/bin/sh\nprintf '%s\\n' "\$DEBIAN_FRONTEND" "\$@" > '$log'\n} );
+    chmod 0755, "$scripts/serial-apt/apt-get" or die "chmod: $!";
+    unlink $log;
+    IPC::Run3::run3( [ $^X, '-e', q{my $f = shift; do $f or die $@ || $!; exit main(@ARGV)}, "$through/clod-install-packages", 'ffmpeg' ], \undef, \my $serial_out, \my $serial_err );
+    my @apt = -e $log ? split( m/\n/, File::Slurper::read_text($log) ) : ();
+    is_deeply( [ @apt[ 0, 1, -1 ] ], [qw{noninteractive install ffmpeg}], 'the install runs the apt-get of serial_apt, so that it waits for any other apt of the guest' ) or diag $serial_err;
+
+    my $generic = 'Provisioner::Recipe::clod'->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
+    like( exception { $generic->validated( $generic->takes(%GLOBALS), %BASE ) }, qr/does[ ]not[ ]say[ ]which[ ]packager/, 'a distribution with no subclass of the recipe says that it has no packager' );
+};
+
+# The sources of the installer, with a fake packager for the install and the
+# update, keys that gpg makes here, and a fetch that answers from them.
+subtest 'the installer adds a source whose key has its fingerprint, and refuses every other' => sub {
+    my $gpg = File::Which::which('gpg');
+    plan skip_all => 'no gpg here, which the installer reads the keys with' unless $gpg;
+
+    my $dir = tempdir( CLEANUP => 1 );
+    my $r   = recipe($dir);
+    $r->generate_files( $dir, $r->validated( $r->takes( %GLOBALS, user => 'svc' ), %BASE ) );
+
+    # Two keys, and a file that holds both.
+    my $home = tempdir( CLEANUP => 1 );
+    my %fpr;
+    foreach my $who (qw{good other}) {
+        IPC::Run3::run3( [ $gpg, '--homedir', $home, qw{--batch --passphrase}, q{}, '--quick-gen-key', "$who <$who\@test.test>", qw{ed25519 sign never} ], \undef, \my $o, \my $e );
+        is( $?, 0, "gpg makes the key $who" ) or diag $e;
+        IPC::Run3::run3( [ $gpg, '--homedir', $home, qw{--batch --armor --export},          "$who\@test.test" ], \undef, "$home/$who.asc", \$e );
+        IPC::Run3::run3( [ $gpg, '--homedir', $home, qw{--batch --with-colons --show-keys}, "$home/$who.asc" ],  \undef, \my $colons,      \$e );
+        ( $fpr{$who} ) = $colons =~ m/^fpr:+([[:xdigit:]]{40}):/m;
+    }
+    File::Slurper::Temp::write_text( "$home/both.asc", File::Slurper::read_text("$home/good.asc") . File::Slurper::read_text("$home/other.asc") );
+
+    my $bin = tempdir( CLEANUP => 1 );
+    foreach my $step (qw{install update}) {
+        File::Slurper::Temp::write_text( "$bin/$step", qq{#!/bin/sh\nprintf '%s\\n' "\$@" > '$bin/$step.argv'\nexit \${FAKE_\U$step\E_EXIT:-0}\n} );
+        chmod 0755, "$bin/$step" or die "chmod: $!";
+    }
+
+    my %keys = map { ( "https://keys.test.test/$_.asc" => "$home/$_.asc" ) } qw{good other both};
+    my $apt  = tempdir( CLEANUP => 1 );
+    my $run  = sub {
+        my ( $sources, @names ) = @_;
+        unlink glob "$bin/*.argv";
+        my $file = "$bin/sources.jsonl";
+        File::Slurper::Temp::write_text( $file, join q{}, map { ref $_ ? Cpanel::JSON::XS->new->canonical->encode($_) . "\n" : $_ } @$sources );
+        my $shim = q{
+            my ( $f, $conf ) = splice @ARGV, 0, 2;
+            do $f or die $@ || $!;
+            my $c = JSON::PP::decode_json($conf);
+            $main::APT     = $c->{apt};
+            @main::GPG     = ( $c->{gpg} );
+            @main::INSTALL = ( $c->{install} );
+            @main::UPDATE  = ( $c->{update}, '{sources}' );
+            $main::FETCH = sub {
+                my $path = $c->{keys}{ $_[0] } // return { success => 0, status => 404 };
+                return { success => 1, status => 200, content => do { local ( @ARGV, $/ ) = $path; <> } };
+            };
+            exit main(@ARGV);
+        };
+        my $conf = Cpanel::JSON::XS::encode_json( { apt => $apt, gpg => $gpg, install => "$bin/install", update => "$bin/update", keys => \%keys } );
+        IPC::Run3::run3( [ $^X, '-e', $shim, "$dir/clod-install-packages", $conf, '--sources-file', $file, @names ], \undef, \my $out, \my $err );
+        my %ran = map { ( $_ => -e "$bin/$_.argv" ? [ split m/\n/, File::Slurper::read_text("$bin/$_.argv") ] : undef ) } qw{install update};
+        return ( $? >> 8, $err, \%ran );
+    };
+    my $written = sub {
+        my %files;
+        File::Find::find( { no_chdir => 1, wanted => sub { $files{ '/etc/apt' . substr( $_, length $apt ) } = File::Slurper::read_text($_) unless -d } }, $apt );
+        return %files;
+    };
+
+    my %source = (
+        name        => 'vendor',
+        uri         => 'https://archive.test.test/apt',
+        suites      => ['noble'],
+        components  => ['main'],
+        key         => 'https://keys.test.test/good.asc',
+        fingerprint => lc $fpr{good},
+        pin         => { priority => 600, packages => 'vendor-*' },
+    );
+
+    # Every way that a source can be wrong, refused before anything is written.
+    my @bad = (
+        [ 'a key with another fingerprint',      { %source, fingerprint => $fpr{other} },                                qr/is[ ]$fpr{good},[ ]not[ ]$fpr{other}/ ],
+        [ 'a file of two keys',                  { %source, key         => 'https://keys.test.test/both.asc' },          qr/is[ ]\S+[ ]and[ ]\S+,[ ]not/ ],
+        [ 'a key that does not fetch',           { %source, key         => 'https://keys.test.test/none.asc' },          qr/answered[ ]404/ ],
+        [ 'a name that is a path',               { %source, name        => '../vendor' },                                qr/its[ ]name[ ]is[ ]not[ ]one/ ],
+        [ 'a uri that is not http',              { %source, uri         => 'file:///bogus' },                            qr/its[ ]uri[ ]is[ ]not[ ]one/ ],
+        [ 'a uri that ends a line of apt',       { %source, uri         => "https://archive.test.test/\nTrusted: yes" }, qr/its[ ]uri[ ]is[ ]not[ ]one/ ],
+        [ 'a suite with a space',                { %source, suites      => ['noble main'] },                             qr/its[ ]suites[ ]is[ ]not[ ]one/ ],
+        [ 'no suite',                            { %source, suites      => [] },                                         qr/its[ ]suites[ ]is[ ]not[ ]one/ ],
+        [ 'a pin that is not a number',          { %source, pin         => { priority => 'high' } },                     qr/its[ ]pin[ ]is[ ]not[ ]one/ ],
+        [ 'a field that a source does not have', { %source, trusted     => 'yes' },                                      qr/it[ ]has[ ]trusted/ ],
+        [ 'no fingerprint',                      { map { $_ eq 'fingerprint' ? () : ( $_ => $source{$_} ) } keys %source }, qr/it[ ]has[ ]no[ ]fingerprint/ ],
+        [ 'a line that is not JSON',             "not json\n",                                                              qr/line[ ]1[ ]\N*[ ]it[ ]is[ ]not[ ]JSON/ ],
+    );
+    foreach my $case (@bad) {
+        my ( $what,   $bad, $why ) = @$case;
+        my ( $status, $err, $ran ) = $run->( [$bad], 'vendor-tool' );
+        is_deeply( [ $status, $ran, { $written->() } ], [ 2, { install => undef, update => undef }, {} ], "$what is refused, and nothing is written or run" );
+        like( $err, $why, 'and it says why' ) or diag $err;
+    }
+    my ( $status, $err, $ran ) = $run->( [ \%source, \%source ], 'vendor-tool' );
+    is( $status, 2, 'two sources of one name are refused' );
+
+    ( $status, $err, $ran ) = $run->( [ \%source ], 'vendor-tool' );
+    is( $status, 0, 'a source whose key has its fingerprint is added' ) or diag $err;
+    my $deb  = Test::MockModule->new('Provisioner::Packager::Deb');
+    my $good = File::Slurper::read_text("$home/good.asc");
+    $deb->redefine( fetch => sub { return { success => 1, status => 200, content => $good } } );
+    my %plain = %source;
+    delete $plain{fingerprint};
+    is_deeply( { $written->() }, { map { ( $_->{path} => $_->{content} ) } Provisioner::Packager::Deb->files( \%plain ) }, 'with the files that first boot writes for it' );
+    is( sprintf( '%04o', ( stat "$apt/sources.list.d/vendor.sources" )[2] & oct 7777 ), '0644', 'which every account may read' );
+    is_deeply( $ran->{update},  ["$apt/sources.list.d/vendor.sources"], 'then it updates that source, which {sources} in the command stands for' ) or diag explain $ran;
+    is_deeply( $ran->{install}, ['vendor-tool'],                        'and installs' );
+
+    ( $status, $err, $ran ) = $run->( [ \%source ], 'vendor-tool' );
+    is( $status, 0, 'a source that is there already, the same, is no reason to refuse' ) or diag $err;
+
+    File::Slurper::Temp::write_text( "$apt/sources.list.d/vendor.sources", "Types: deb\nURIs: https://bogus.test.test\n" );
+    ( $status, $err, $ran ) = $run->( [ \%source ], 'vendor-tool' );
+    is_deeply( [ $status, $ran->{install} ], [ 2, undef ], 'but a file of that name with other content is not replaced' );
+    like( $err, qr/is[ ]there[ ]already/, 'and it says so' );
+    unlink "$apt/sources.list.d/vendor.sources";
+
+    local $ENV{FAKE_UPDATE_EXIT} = 100;
+    ( $status, $err, $ran ) = $run->( [ \%source ], 'vendor-tool' );
+    is_deeply( [ $status, $ran->{install} ], [ 100, undef ], 'an update that fails installs nothing, with the status of the update' );
 };
 
 Test::NoWarnings::had_no_warnings();

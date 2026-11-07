@@ -123,6 +123,55 @@ foreach my $unit (qw{clod-[% domain %].service clod-worker-[% domain %].service}
 }
 [% END -%]
 
+# The installer of the system packages, as the bot runs it.  THE SYSTEM
+# PACKAGES in Provisioner::Recipe::clod.
+{
+    my $installer = '[% installer %]';
+    my @st        = stat $installer;
+    is(sprintf('%s %04o', scalar getpwuid($st[4] // -1) // '', ($st[2] // 0) & 07777), 'root 0755', "$installer is root's, mode 0755");
+
+    # Runs the installer as the service user, through sudo, with stderr in the
+    # output.  A list all the way down, so that a name with a space stays one
+    # argument.
+    my $install = sub {
+        my @names = @_;
+        open(my $fh, '-|', 'runuser', '-u', '[% user %]', '--', 'sh', '-c', 'exec "$@" 2>&1', 'sh', 'sudo', '-n', $installer, @names)
+            or return (-1, "runuser: $!");
+        my $out = do { local $/; <$fh> } // '';
+        close $fh;
+        return ($? >> 8, $out);
+    };
+
+    system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', $installer, 'sqlite3');
+    is($? >> 8, 0, "[% user %] may run $installer with sudo, with arguments");
+
+    # apt-get always prints something, so output that is all the installer's
+    # own lines means that the packager never ran.
+    foreach my $bad ('sqlite3-', '-y', 'sqlite3 git') {
+        my ($exit, $said) = $install->('git', $bad);
+        is($exit, 2, "it refuses '$bad', and the whole call with it") or diag $said;
+        unlike($said, qr/^(?!clod-install-packages: )/m, 'without running the packager') or diag $said;
+    }
+
+    # A file of sources that the service user writes, with a source in it
+    # that could end a line of apt, is refused before anything is written.
+    my $sources = "$home/workspace/.clod-guest-test.sources";
+    open(my $out, '>', $sources) or die "$sources: $!";
+    print {$out} qq({"name":"clod-guest-test","uri":"https://bogus.test.test/\\nTrusted: yes","suites":["noble"],"components":["main"],"key":"https://bogus.test.test/key.asc","fingerprint":"0123456789ABCDEF0123456789ABCDEF01234567"}\n);
+    close $out;
+    chmod 0644, $sources;
+    my ($refused, $why) = $install->('--sources-file', $sources, 'sqlite3');
+    is($refused, 2, 'it refuses a file of sources with a source that is not one') or diag $why;
+    unlike($why, qr/^(?!clod-install-packages: )/m, 'without running the packager') or diag $why;
+    ok(!-e '/etc/apt/sources.list.d/clod-guest-test.sources', 'and writes no source');
+    unlink $sources;
+
+    # sqlite3 is a dep of this recipe, so it is installed already.
+    my ($exit, $said) = $install->('sqlite3');
+    is($exit, 0, 'it accepts a package that is installed already') or diag $said;
+    like($said, qr/sqlite3/, 'and prints what the packager printed') or diag $said;
+}
+
 # The local lib holds a copy of what the bot needs, which the service user
 # owns, so that it can upgrade it.  THE LOCAL LIB in Provisioner::Recipe::clod.
 {

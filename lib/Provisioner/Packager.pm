@@ -90,6 +90,25 @@ packager gives them.  A packager whose packages ask nothing returns none.
 The cloud-init modules that apply the sources and the answers, which a domain
 added to a guest that is up runs again before its packages install.
 
+=item C<$pattern = $packager-E<gt>package_name()>
+
+A regular expression, as a string, that matches a plain package name of this
+packager and nothing else: no version, no archive, no file, no option and no
+second name.  Something that installs whatever names it is given, such as the
+installer of L<Provisioner::Recipe::clod>, refuses every other name with it.
+
+=item C<@argv = $packager-E<gt>install_command()>
+
+The command, as a list of words, that installs the package names that follow
+it from the archives that the guest trusts, with no prompt and no terminal.
+It installs and does nothing else: it removes no package, and it installs no
+package that is only recommended.
+
+=item C<@argv = $packager-E<gt>update_command($file)>
+
+The command, as a list of words, that refreshes the index of the one source
+in C<$file>, a file of sources of this packager, and of no other source.
+
 =back
 
 =cut
@@ -103,5 +122,8 @@ sub merge              { my ($class) = @_; return unanswered( $class, 'merge' ) 
 sub first_boot_files   { my ($class) = @_; return unanswered( $class, 'first_boot_files' ) }
 sub answers            { my ($class) = @_; return unanswered( $class, 'answers' ) }
 sub cloud_init_modules { my ($class) = @_; return unanswered( $class, 'cloud_init_modules' ) }
+sub package_name       { my ($class) = @_; return unanswered( $class, 'package_name' ) }
+sub install_command    { my ($class) = @_; return unanswered( $class, 'install_command' ) }
+sub update_command     { my ($class) = @_; return unanswered( $class, 'update_command' ) }
 
 1;
