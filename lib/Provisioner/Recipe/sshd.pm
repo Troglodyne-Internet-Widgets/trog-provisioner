@@ -15,8 +15,8 @@ use Provisioner::Utils();
 
 =head1 NAME
 
-Provisioner::Recipe::sshd - the host key that sshd offers, the same after every
-rebuild.
+Provisioner::Recipe::sshd - the configuration of sshd on every guest: who logs
+in, how, and the host key that it offers, the same after every rebuild.
 
 =head1 SYNOPSIS
 
@@ -24,6 +24,29 @@ Nobody configures this recipe.  Every distro recipe requires it, so every guest
 has it.  See L<Provisioner::DistroRecipe/required_recipes>.
 
 =head1 DESCRIPTION
+
+This recipe owns F</etc/ssh/sshd_config.d/10-provisioner.conf>, the drop-in
+that every guest gets.  A recipe that adds to sshd, such as
+L<Provisioner::Recipe::sssd> or a relay, installs a drop-in of its own.
+
+=head2 No passwords
+
+The drop-in sets C<PasswordAuthentication no> and C<PermitRootLogin
+prohibit-password>.  So nobody logs in with a password.  Set up the users and
+their keys in F<recipes.yaml> and in the F<users.yaml> of the data directory.
+root logs in with a key only, which is how a backup reaches a guest.
+
+sshd takes the first value that it reads for these options, and it reads the
+drop-ins in lexical order.  cloud-init and the cloud image write
+F<50-cloud-init.conf> and F<60-cloudimg-settings.conf>, and either can allow
+passwords.  The name starts with C<10->, so this drop-in comes first and its
+values win.
+
+The makefile kept this policy in F<100-security.conf> before this recipe.  The
+fragment removes that file, so a guest provisioned in place has one copy of the
+policy.
+
+=head2 The host key
 
 A client of a guest pins its host key in F<known_hosts>.  cloud-init makes new
 host keys on the first boot of each guest, so after a rebuild every client that
@@ -41,15 +64,17 @@ runs.  The global fragment then does three things:
 that was placed.  The public key that cloud-init wrote belongs to the key that
 the placement replaced.
 
-=item * It installs F</etc/ssh/sshd_config.d/10-host-key.conf>, which names
-that key as the only C<HostKey>.  cloud-init still makes RSA and ECDSA keys,
+=item * The drop-in names that key as the only C<HostKey>.  sshd adds up
+C<HostKey> lines, so the order of the drop-ins does not matter for this
+option.  cloud-init still makes RSA and ECDSA keys,
 and they are new on each build.  With a C<HostKey> line, sshd loads only the
 keys that the configuration names, so a client never sees a key that changed.
 The fast lane sshd of L<Provisioner::Recipe::sshfastlane> includes the main
 configuration, so it offers the same key.
 
 =item * It checks the configuration with F<scripts/check_sshd_config>, and
-queues a reload of sshd, which then offers the placed key.
+queues a reload of sshd, which then offers the placed key and refuses
+passwords.
 
 =back
 
@@ -116,7 +141,7 @@ sub guest_secrets {
 }
 
 sub template_files {
-    return ( 'sshd.host_key.conf.tt' => 'sshd.host_key.conf' );
+    return ( 'sshd.conf.tt' => 'sshd.conf' );
 }
 
 sub tests {

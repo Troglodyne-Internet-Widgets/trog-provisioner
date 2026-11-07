@@ -77,9 +77,9 @@ subtest 'a relay keeps the key that the guests behind it pinned' => sub {
     is( $read{probe}, 'the key of the relay', 'and keeps it, so every later build reads it from there' );
 };
 
-# Ask sshd, because a HostKey line that sshd reads differently would offer the
-# keys of cloud-init beside it, and the file would still look right.
-subtest 'sshd offers the placed key and no other' => sub {
+# Ask sshd, because a line that sshd reads differently, or after a drop-in of
+# cloud-init, changes what it does, and the file still looks right.
+subtest 'sshd offers the placed key, and takes no password' => sub {
     plan skip_all => 'needs RELEASE_TESTING' unless $ENV{RELEASE_TESTING};
 
     # -G and not -T, because -T loads the keys, which only root can read.
@@ -93,21 +93,34 @@ subtest 'sshd offers the placed key and no other' => sub {
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
     mkdir "$dir/sshd_config.d" or die "mkdir: $!";
     my $recipe = $sshd->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
-    my ($dropin) = $recipe->generate_files( $dir, domain => 'alone.test.test' );
+    my ($generated) = $recipe->generate_files( $dir, domain => 'alone.test.test' );
+
+    # The name that the fragment installs it as, because the name decides the order.
+    my ($installed) = $recipe->render_global( domain => 'alone.test.test', script_dir => '/bogus/bin' ) =~ m{^install[ ].*[ ]\Q$generated\E[ ]/etc/ssh/sshd_config[.]d/(\S+)$}m;
+    ok( defined $installed, 'the fragment installs the drop-in into sshd_config.d' ) or return;
+
+    # What cloud-init writes when an image allows passwords, which a drop-in
+    # that sorts after it does not override.
+    File::Slurper::Temp::write_text( "$dir/sshd_config.d/50-cloud-init.conf", "PasswordAuthentication yes\nPermitRootLogin yes\n" );
 
     # As the sshd_config of Ubuntu has it: the drop-ins first, and no HostKey.
-    my $hostkeys = sub (@include) {
-        File::Slurper::Temp::write_text( "$dir/sshd_config", join( q{}, map { "Include $_\n" } @include ) );
+    File::Slurper::Temp::write_text( "$dir/sshd_config", "Include $dir/sshd_config.d/*.conf\n" );
+    my $effective = sub {
         my $said = $ask->("$dir/sshd_config") // q{};
-        return [ $said =~ m/^hostkey[ ](\S+)$/mg ], $said;
+        return { hostkeys => [ $said =~ m/^hostkey[ ](\S+)$/mg ], map { $_ => [ $said =~ m/^$_[ ](\S+)$/m ]->[0] } qw{passwordauthentication permitrootlogin} }, $said;
     };
 
-    my ( $without, $said ) = $hostkeys->();
-    cmp_ok( scalar @$without, '>', 1, 'with no HostKey line, sshd loads every kind of key that cloud-init makes' ) or diag $said;
+    my ( $without, $said ) = $effective->();
+    cmp_ok( scalar @{ $without->{hostkeys} }, '>', 1, 'with no HostKey line, sshd loads every kind of key that cloud-init makes' ) or diag $said;
+    is( $without->{passwordauthentication}, 'yes', 'and cloud-init can allow passwords' )                                          or diag $said;
 
-    File::Slurper::Temp::write_text( "$dir/sshd_config.d/10-host-key.conf", File::Slurper::read_text("$dir/$dropin") );
-    my ( $with, $told ) = $hostkeys->("$dir/sshd_config.d/*.conf");
-    is_deeply( $with, [$HOST_KEY], 'and with the drop-in, only the key from the store' ) or diag $told;
+    File::Slurper::Temp::write_text( "$dir/sshd_config.d/$installed", File::Slurper::read_text("$dir/$generated") );
+    my ( $with, $told ) = $effective->();
+    is_deeply( $with->{hostkeys}, [$HOST_KEY], 'with the drop-in, sshd loads only the key from the store' ) or diag $told;
+    is( $with->{passwordauthentication}, 'no', 'and takes no password, whatever cloud-init says after it' ) or diag $told;
+
+    # sshd prints prohibit-password by its older name.
+    is( $with->{permitrootlogin}, 'without-password', 'and lets root in with a key only' ) or diag $told;
 };
 
 Test::NoWarnings::had_no_warnings();

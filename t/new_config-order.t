@@ -53,7 +53,7 @@ subtest 'targets_in_order' => sub {
 
     my @all    = Trog::Provisioner::Config::Generator::targets_in_order( %args, fetch => 1, ufw => 1 );
     my %at     = map { $_->{target} => $_ } @all;
-    my @global = map { "$S/$_" } qw{state service_user sysctl packages scripts data ssl ssh sendmail testdeps};
+    my @global = map { "$S/$_" } qw{state service_user sysctl packages scripts data ssl sendmail testdeps};
 
     is_deeply( [ map { $_->{target} } @all ],    [ @global, "$S/fetch_via_cache", @ordered, "$S/ufw" ], 'the global targets, the cache, the recipes in order, and ufw last' );
     is_deeply( [ map { $_->{slot} } @all ],      [ 1 .. scalar @all ],                                  'each in the slot of its place, from 1' );
