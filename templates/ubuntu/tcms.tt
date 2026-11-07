@@ -10,3 +10,11 @@ sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir
     they are missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk prereq-frontend
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'
+[%# The worker of the job queue.  restart, so that a provision of a running
+    guest loads the new checkout, after the perl target has built what the
+    worker loads.  See THE JOB WORKER in Provisioner::Recipe::tcms. -%]
+install -o root -g root -m 0644 tcms-worker.service '/etc/systemd/system/tcms-worker-[% domain %].service'
+systemctl daemon-reload
+systemctl enable 'tcms-worker-[% domain %].service'
+[% script_dir %]/queue_postrun_task systemctl daemon-reload
+[% script_dir %]/queue_postrun_task systemctl restart 'tcms-worker-[% domain %].service'
