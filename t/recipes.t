@@ -62,7 +62,7 @@ my $garage = Test::MockModule->new('Provisioner::Recipe::garage');
 $garage->redefine( latest_version => sub { return 'v2.4.1' } );
 
 # tcms reads its packages and archives from the metamerge.yml of tCMS on
-# GitHub, so this is that file, with both for every packager that a
+# its repository, so this is that file, with both for every packager that a
 # distribution has.
 my $TCMS_DECLARATION = <<'YAML';
 x_system_packages:
@@ -82,7 +82,7 @@ x_system_sources:
       fingerprint: 0123456789ABCDEF0123456789ABCDEF01234567
 YAML
 my $tcms = Test::MockModule->new('Provisioner::Recipe::tcms');
-$tcms->redefine( fetch => sub { return { success => 1, status => 200, reason => 'OK', content => $TCMS_DECLARATION } } );
+$tcms->redefine( fetch => sub { return $TCMS_DECLARATION } );
 
 # The mail relay binds its relay to its own address in the pool, which bin/new_config
 # assigns before it renders, and this file never does.

@@ -128,7 +128,7 @@ sub run {
     # its packages from.
     require Provisioner::Recipe::tcms;
     my $tcms_mock = Test::MockModule->new('Provisioner::Recipe::tcms');
-    $tcms_mock->redefine( fetch => sub { return { success => 1, status => 200, reason => 'OK', content => "x_system_packages:\n  File::LibMagic:\n    deb: libmagic-dev\n" } } );
+    $tcms_mock->redefine( fetch => sub { return "x_system_packages:\n  File::LibMagic:\n    deb: libmagic-dev\n" } );
 
     # garage, matrix and trogrunner each keep a file for the guest in the secret
     # store, so new_config opens it.  That needs a store, and its password handed

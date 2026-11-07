@@ -12,7 +12,8 @@ use parent qw{Provisioner::Recipe};
 
 use feature 'state';
 
-use HTTP::Tiny();
+use File::Temp();
+use IPC::Run3();
 use Path::Tiny();
 
 use Dist::Conformance::Check::SystemPackages();
@@ -23,12 +24,6 @@ use Provisioner::Utils();
 
 # One copy for args, deps and fetch_hosts.
 our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/tCMS.git';
-
-# What the prereq-frontend target of Installer.mk in tCMS writes, under the checkout.
-our @FRONTEND = qw{
-  www/scripts/list.min.json www/scripts/highlight.min.js www/scripts/chart.min.js www/scripts/reveal.min.js
-  www/styles/obsidian.min.css www/styles/reveal.css www/styles/reveal-white.css
-};
 
 =head1 Provisioner::Recipe::tcms
 
@@ -65,13 +60,12 @@ the C<www/> directories, and C<~/.tcms>.  Without C<data/>, tCMS cannot open
 its database, and every request answers 500.  The target makes only what is
 missing, so it does not change a checkout that came down from the last guest.
 
-Then, when one of the files in C<@FRONTEND> is missing, the fragment runs the
-C<prereq-frontend> target, as the service user.  It downloads the scripts and
-styles that tCMS serves and git does not track, such as the emoji list of the
-emoji picker, from C<raw.githubusercontent.com> and C<cdn.jsdelivr.net>.  The
-target fetches the newest of each, so it runs only when one is missing.  A
-checkout that came down from the last guest keeps the files that it serves.
-C<@FRONTEND> must name what that target writes.
+Then the fragment runs the C<prereq-frontend> target, as the service user.  It
+downloads the scripts and styles that tCMS serves and git does not track, such
+as the emoji list of the emoji picker, from C<raw.githubusercontent.com> and
+C<cdn.jsdelivr.net>.  F<Installer.mk> fetches only the files that are missing,
+so a checkout that came down from the last guest keeps the files that it
+serves.  The guest test asks C<make -q> whether any is still missing.
 
 The guest test asks tCMS for its front page.  tCMS offers the page that
 registers the first user only until it answers its first request, which
@@ -113,8 +107,14 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            repo_url    => { type => 'string', default => $DEFAULT_REPO, pattern => q{^https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$}, description => 'The GitHub repository to clone tCMS from, which declares its system packages.' },
-            repo_branch => { type => 'string', default => 'master',      pattern => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$},                        description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+            repo_url => {
+                type             => 'string',
+                default          => $DEFAULT_REPO,
+                pattern          => q{^(?:(?:https?|ssh|git|file)://\S+|[^/\s@]+@[A-Za-z0-9][A-Za-z0-9.-]*:\S+)$},
+                'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
+                description      => 'The git repository to clone tCMS from, which declares its system packages.',
+            },
+            repo_branch => { type => 'string', default => 'master', pattern => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
         },
     );
 }
@@ -133,7 +133,7 @@ C<fetch>, and resolves it for each call.
 
 It dies rather than return no packages, because tCMS does not run without
 them, and a guest without them fails long after the generation: when the file
-cannot be fetched, with the answer of GitHub; when the repository has no
+cannot be read, with what git said; when the branch has no
 F<metamerge.yml>; when the declaration is not valid, or cannot be resolved for
 the host, with what L<Dist::Conformance::Check::SystemPackages> said about it;
 when it declares no dependency at all; and when a dependency has no package of
@@ -144,42 +144,53 @@ declaration says so for that host.
 =cut
 
 sub declared_for ( $self, $host, %opts ) {    ## no critic (ProhibitMisplacedMethods) -- the subclass of every distribution answers deps and package_sources with it, and Ubuntu is the only one yet
-    my $repo = $opts{repo_url} // $DEFAULT_REPO;
-    my ( $owner, $name ) = $repo =~ m{\Ahttps://github[.]com/([^/]+)/([^/]+?)(?:[.]git)?/?\z}
-      or die "tcms: $repo is not a repository on GitHub, so the recipe cannot read the system packages that it declares.\n";
-    my $url = "https://raw.githubusercontent.com/$owner/$name/" . ( $opts{repo_branch} // 'master' ) . "/$Dist::Conformance::Check::SystemPackages::FILE";
+    my $repo   = $opts{repo_url}    // $DEFAULT_REPO;
+    my $branch = $opts{repo_branch} // 'master';
+    my $where  = "$Dist::Conformance::Check::SystemPackages::FILE on $branch of $repo";
 
     state %declared;
-    my $declaration = $declared{$url} //= do {
-        my $res = $self->fetch($url);
-        die "tcms: $url is not there, so tCMS declares no system packages, and the guest would install none of what it needs.\n" if $res->{status} == 404;
-        die "tcms: could not read the system packages of tCMS from $url: $res->{status} $res->{reason}" . ( $res->{status} == 599 ? ": $res->{content}" : "\n" )
-          unless $res->{success};
-
-        my $content  = $res->{content};
+    my $declaration = $declared{"$repo\n$branch"} //= do {
+        my $content  = $self->fetch( $repo, $branch ) // die "tcms: there is no $where, so tCMS declares no system packages, and the guest would install none of what it needs.\n";
         my $snapshot = Dist::Conformance::Snapshot::Tree->new(
             paths => { $Dist::Conformance::Check::SystemPackages::FILE => Dist::Conformance::Snapshot::blob_sha($content) },
             fetch => sub ($) { return $content },
         );
-        eval { Dist::Conformance::Check::SystemPackages->declared($snapshot) } // die "tcms: the system packages of tCMS at $url: $@";
+        eval { Dist::Conformance::Check::SystemPackages->declared($snapshot) } // die "tcms: the system packages of tCMS at $where: $@";
     };
 
-    die "tcms: $url declares no system packages, so the guest would install none of what tCMS needs.\n" unless %{ $declaration->{packages} };
-    my $resolved = eval { Dist::Conformance::Check::SystemPackages->resolve( $declaration, %$host ) } // die "tcms: the system packages of tCMS at $url: $@";
-    die "tcms: $url names no $host->{packager} package for $host->{distro} $host->{release} for " . join( ', ', @{ $resolved->{unresolved} } ) . ", so the guest would lack what tCMS needs.\n"
+    die "tcms: $where declares no system packages, so the guest would install none of what tCMS needs.\n" unless %{ $declaration->{packages} };
+    my $resolved = eval { Dist::Conformance::Check::SystemPackages->resolve( $declaration, %$host ) } // die "tcms: the system packages of tCMS at $where: $@";
+    die "tcms: $where names no $host->{packager} package for $host->{distro} $host->{release} for " . join( ', ', @{ $resolved->{unresolved} } ) . ", so the guest would lack what tCMS needs.\n"
       if @{ $resolved->{unresolved} };
     return $resolved;
 }
 
-=head2 $res = $recipe->fetch($url)
+=head2 $content = $recipe->fetch($repo, $branch)
 
-The L<HTTP::Tiny> response to a C<GET> of C<$url>.  The one place this recipe
-reaches the network, so a test replaces it.
+The content of F<metamerge.yml> on C<$branch> of the git repository C<$repo>,
+or undef when the branch has none.  It clones the branch with git, one commit
+deep, with no checkout and no other file, so it reads from any host that git
+reaches.  git asks no password, because nobody is there to answer.  Dies with
+what git said when it cannot clone.  The one place this recipe reaches the
+network, so a test replaces it.
 
 =cut
 
-sub fetch ( $, $url ) {
-    return HTTP::Tiny->new( timeout => 30 )->get($url);
+sub fetch ( $, $repo, $branch ) {
+    local $ENV{GIT_TERMINAL_PROMPT} = 0;
+    my $dir  = File::Temp->newdir;
+    my $file = $Dist::Conformance::Check::SystemPackages::FILE;
+    my $err  = q{};
+
+    IPC::Run3::run3( [ qw{git clone --quiet --depth 1 --single-branch --no-checkout --filter=blob:none --branch}, $branch, '--', $repo, "$dir/repo" ], \undef, \undef, \$err );
+    die "tcms: could not clone $branch of $repo: " . ( ( split m/\n/, $err )[0] // 'git exited with ' . ( $? >> 8 ) ) . "\n" if $?;
+
+    IPC::Run3::run3( [ 'git', '-C', "$dir/repo", 'cat-file', '-e', "HEAD:$file" ], \undef, \undef, \undef );
+    return if $?;
+
+    IPC::Run3::run3( [ 'git', '-C', "$dir/repo", 'show', "HEAD:$file" ], \undef, \my $content, \$err );
+    die "tcms: could not read $file on $branch of $repo: " . ( ( split m/\n/, $err )[0] // q{} ) . "\n" if $?;
+    return $content;
 }
 
 sub required_recipes {
@@ -276,18 +287,6 @@ the hosts that the C<prereq-frontend> target of F<Installer.mk> downloads from.
 
 sub fetch_hosts ( $, %opts ) {
     return ( Provisioner::Utils::host_of( $opts{repo_url} // $DEFAULT_REPO ), qw{raw.githubusercontent.com cdn.jsdelivr.net} );
-}
-
-=head2 %opts = $recipe->enrich(%opts)
-
-Adds C<frontend_files>, the files of C<@FRONTEND>, for the fragment and the
-test.  It is not in the schema, because it must name what F<Installer.mk>
-writes, and no configuration can change that.
-
-=cut
-
-sub enrich ( $self, %opts ) {
-    return ( $self->SUPER::enrich(%opts), frontend_files => [@FRONTEND] );
 }
 
 1;

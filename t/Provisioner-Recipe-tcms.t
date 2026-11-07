@@ -18,6 +18,9 @@ use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use File::Which();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -48,12 +51,13 @@ subtest 'tpsgi is told to add the syslog output of tCMS' => sub {
     like( File::Slurper::read_text("$dir/tpsgi.ini"), qr/^basedir=tCMS$/m,                    'and tPSGI changes into the checkout of tCMS' );
 };
 
-# THE SYSTEM PACKAGES in Provisioner::Recipe::tcms.  GitHub is faked: each
-# answer is what fetch gives for the next URL that is not cached yet.
+# THE SYSTEM PACKAGES in Provisioner::Recipe::tcms.  git is faked: each answer
+# is what fetch gives for the next repository and branch that is not cached yet,
+# the content of metamerge.yml, undef for none, or a code reference that dies.
 subtest 'the packages are those that tCMS declares, and never none' => sub {
     my ( $answer, @asked );
     my $mock = Test::MockModule->new('Provisioner::Recipe::tcms');
-    $mock->redefine( fetch => sub { push @asked, $_[1]; return $answer } );
+    $mock->redefine( fetch => sub { push @asked, "$_[2] of $_[1]"; return ref $answer ? $answer->() : $answer } );
     my $recipe = Provisioner::Cookbook->load( 'tcms', distro => 'ubuntu' )->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => '/nonexistent',
@@ -63,25 +67,26 @@ subtest 'the packages are those that tCMS declares, and never none' => sub {
     my $deps   = sub {
         my ($content) = @_;
         $branch++;
-        $answer = ref $content ? $content : { success => 1, status => 200, reason => 'OK', content => $content };
+        $answer = $content;
         return $recipe->deps( repo_branch => "b$branch" );
     };
 
     is_deeply( [ $deps->("x_system_packages:\n  File::LibMagic:\n    deb: libmagic-dev\n  Gpp:\n    deb: g++\n    rpm: gcc-c++\n") ], [qw{git libmagic-dev g++}], 'git, which the recipe clones with, and the deb package of each dependency, on Ubuntu' );
-    is( $asked[-1], 'https://raw.githubusercontent.com/Troglodyne-Internet-Widgets/tCMS/b1/metamerge.yml', 'read from the branch of the repository' );
+    is( $asked[-1], 'b1 of https://github.com/Troglodyne-Internet-Widgets/tCMS.git', 'read from the branch of the repository' );
     $recipe->deps( repo_branch => 'b1' ) for 1 .. 2;
     is( scalar @asked, 1, 'once for each branch' );
-    $recipe->deps( repo_branch => 'b1', repo_url => 'https://github.com/test-org/tCMS-fork' );
-    is( $asked[-1], 'https://raw.githubusercontent.com/test-org/tCMS-fork/b1/metamerge.yml', 'and of each repository' );
+    $recipe->deps( repo_branch => 'b1', repo_url => 'https://git.test.test/test-org/tCMS-fork' );
+    is( $asked[-1], 'b1 of https://git.test.test/test-org/tCMS-fork', 'and of each repository, on any host' );
 
-    my %dies = (
-        'GitHub does not answer'                 => [ { success => 0, status => 599, reason => 'Internal Exception', content => "Could not connect\n" }, qr/could[ ]not[ ]read\N*599\N*Could[ ]not[ ]connect/ ],
-        'GitHub fails'                           => [ { success => 0, status => 503, reason => 'Service Unavailable' },                                  qr/could[ ]not[ ]read\N*503[ ]Service/ ],
-        'the repository has no file'             => [ { success => 0, status => 404, reason => 'Not Found' },                                            qr/is[ ]not[ ]there\N*declares[ ]no[ ]system[ ]packages/ ],
-        'the file does not parse'                => [ "x_system_packages: [\n",                                                                          qr/system[ ]packages[ ]of[ ]tCMS/ ],
-        'the declaration is not valid'           => [ "x_system_packages:\n  FFmpeg:\n    deb: ffmpeg-\n",                                               qr/metamerge[.]yml[ ]is[ ]not[ ]valid/ ],
-        'it declares nothing'                    => [ "name: tCMS\n",                                                                                    qr/declares[ ]no[ ]system[ ]packages/ ],
-        'a dependency has only another packager' => [ "x_system_packages:\n  File::LibMagic:\n    rpm: file-devel\n  Gpp:\n    deb: g++\n",              qr/for[ ]File::LibMagic,/ ],
+    my $cloned = qr/could[ ]not[ ]clone/;
+    my $none   = qr/there[ ]is[ ]no[ ]metamerge[.]yml/;
+    my %dies   = (
+        'git cannot clone'                       => [ sub { die "tcms: could not clone b of x: fatal: repository not found\n" },            qr/$cloned\N*repository[ ]not[ ]found/ ],
+        'the branch has no file'                 => [ undef,                                                                                qr/$none\N*declares[ ]no[ ]system[ ]packages/ ],
+        'the file does not parse'                => [ "x_system_packages: [\n",                                                             qr/system[ ]packages[ ]of[ ]tCMS/ ],
+        'the declaration is not valid'           => [ "x_system_packages:\n  FFmpeg:\n    deb: ffmpeg-\n",                                  qr/metamerge[.]yml[ ]is[ ]not[ ]valid/ ],
+        'it declares nothing'                    => [ "name: tCMS\n",                                                                       qr/declares[ ]no[ ]system[ ]packages/ ],
+        'a dependency has only another packager' => [ "x_system_packages:\n  File::LibMagic:\n    rpm: file-devel\n  Gpp:\n    deb: g++\n", qr/for[ ]File::LibMagic,/ ],
     );
     foreach my $case ( sort keys %dies ) {
         like( exception { $deps->( $dies{$case}[0] ) }, $dies{$case}[1], "when $case, the generation stops and says so" );
@@ -124,9 +129,46 @@ YAML
     is_deeply( [ map { $_->{suites} } $recipe->package_sources( repo_branch => "b$branch", distro_release => 'resolute' ) ], [ ['resolute'] ],                           'and the archive for its own codename' );
     is( scalar @asked, $branch + 1, 'from the declaration that was read once' );
 
-    like( exception { $recipe->deps( repo_url => 'https://bogus.test.test/x/tCMS' ) },                                                                                qr/not[ ]a[ ]repository[ ]on[ ]GitHub/, 'a repository that is not on GitHub is refused' );
-    like( exception { $recipe->validate( domain => 'web.test.test', install_dir => '/bogus', admin_user => 'bogus', repo_url => 'https://bogus.test.test/x/tCMS' ) }, qr{/repo_url},                          'and so by the schema' );
+    my $validate = sub ($url) {
+        return exception { $recipe->validate( domain => 'web.test.test', install_dir => '/bogus', admin_user => 'bogus', repo_url => $url ) }
+    };
+    foreach my $url (qw{https://git.test.test/x/tCMS.git ssh://git@git.test.test/x/tCMS.git git@git.test.test:x/tCMS.git file:///bogus/tCMS.git}) {
+        is( $validate->($url), undef, "the schema takes $url" );
+    }
+    like( $validate->('git.test.test/x/tCMS'), qr{/repo_url:\ is\ not\ a\ git\ remote}, 'and refuses what is not a git remote, and says so' );
     is_deeply( [ $recipe->fetch_hosts( repo_url => 'https://github.com/test-org/tCMS-fork' ) ], [qw{github.com raw.githubusercontent.com cdn.jsdelivr.net}], 'the guest clones it from GitHub, and fetches the front-end files of prereq-frontend' );
+};
+
+# fetch itself, against a repository here, by file://, as git reads any other.
+subtest 'fetch reads metamerge.yml from a branch of a git repository' => sub {
+    my $git = File::Which::which('git');
+    plan skip_all => 'no git here' unless $git;
+
+    # A hook sets GIT_DIR and GIT_INDEX_FILE, which git obeys over -C.
+    IPC::Run3::run3( [ $git, qw{rev-parse --local-env-vars} ], \undef, \my $vars, \undef );
+    my @local = split m/\n/, $vars;
+    local @ENV{@local};
+    delete @ENV{@local};
+
+    my $work = tempdir( CLEANUP => 1 );
+    my $run  = sub (@args) {
+        IPC::Run3::run3( [ $git, '-C', $work, @args ], \undef, \my $out, \my $err );
+        die "git @args: $err" if $?;
+        return $out;
+    };
+    $run->(qw{init --quiet --initial-branch=main});
+    File::Slurper::Temp::write_text( "$work/metamerge.yml", "x_system_packages:\n  Gpp:\n    deb: g++\n" );
+    File::Slurper::Temp::write_text( "$work/other",         "a file of another name\n" );
+    $run->(qw{add metamerge.yml other});
+    $run->(qw{-c user.name=Test -c user.email=test@test.test commit --quiet -m one});
+    $run->(qw{checkout --quiet -b bare});
+    $run->(qw{rm --quiet metamerge.yml});
+    $run->(qw{-c user.name=Test -c user.email=test@test.test commit --quiet -m two});
+
+    my $recipe = Provisioner::Cookbook->load( 'tcms', distro => 'ubuntu' );
+    is( $recipe->fetch( "file://$work", 'main' ), "x_system_packages:\n  Gpp:\n    deb: g++\n", 'the file on the branch' );
+    is( $recipe->fetch( "file://$work", 'bare' ), undef,                                        'and none on a branch that has none' );
+    like( exception { $recipe->fetch( "file://$work", 'nowhere' ) }, qr/could[ ]not[ ]clone[ ]nowhere[ ]of[ ]file:/, 'and a branch that is not there stops it' );
 };
 
 Test::NoWarnings::had_no_warnings();
