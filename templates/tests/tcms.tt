@@ -39,6 +39,14 @@ foreach my $made ("$dir/data/files", "$dir/totp", "$dir/logs", '[% install_dir %
     is($owner, '[% user %]', "$made is there, and the service user owns it");
 }
 
+# prereq-frontend of Installer.mk fetches what the pages load, and make -q says
+# whether a file is still missing.  The emoji picker dies without its list.
+my $frontend = `sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -q -C '$dir' -f Installer.mk prereq-frontend 2>&1`;
+is($? >> 8, 0, 'every front-end file that Installer.mk fetches is there') or diag $frontend;
+my $emoji = '';
+if (open(my $fh, '<', "$dir/www/scripts/list.min.json")) { local $/; $emoji = <$fh> }
+ok(eval { require JSON::PP; JSON::PP::decode_json($emoji) }, 'and the emoji list is JSON') or diag $@;
+
 # The tests run after post_install has started the service.  Ask its socket,
 # not nginx, whose cache can answer 200 for a tCMS that answers 500.
 my $code = `curl -s -m 30 -o /dev/null -w '%{http_code}' --unix-socket '[% install_dir %]/[% domain %]/run/tpsgi.sock' -H 'Host: [% domain %]' http://localhost/ 2>&1`;

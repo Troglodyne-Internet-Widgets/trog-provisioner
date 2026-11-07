@@ -17,6 +17,10 @@ use Test::Fatal;
 use Test::MockModule qw{strict};
 use Test::NoWarnings qw{had_no_warnings};
 use MIME::Base64     qw{decode_base64};
+use File::Slurper::Temp();
+use File::Temp();
+use File::Which();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -156,6 +160,57 @@ subtest 'files: a key is fetched once' => sub {
     Provisioner::Packager::Deb->files( source( name => 'once', uri => 'https://apt.once.test', key => 'https://apt.once.test/key' ) ) for 1 .. 2;
     is( $asked{'GET https://apt.once.test/key'},                     1, 'for two domains that name it' );
     is( $asked{'HEAD https://apt.once.test/dists/stable/InRelease'}, 1, 'and so is each suite' );
+};
+
+# Keys that gpg makes here, and what gpg says their fingerprints are, so that
+# key_fingerprints is held to gpg rather than to itself.
+subtest 'files: a key that must have its fingerprint' => sub {
+    my $gpg = File::Which::which('gpg');
+    plan skip_all => 'no gpg here to make keys with' unless $gpg;
+    my $home = File::Temp::tempdir( CLEANUP => 1 );
+    my $run  = sub {
+        my (@args) = @_;
+        IPC::Run3::run3( [ $gpg, '--homedir', $home, '--batch', @args ], \undef, \my $out, \my $err );
+        die "gpg @args: $err" if $?;
+        return $out;
+    };
+    $run->( qw{--passphrase}, q{}, '--quick-gen-key', 'one <one@test.test>', qw{rsa2048 sign never} );
+    $run->( qw{--passphrase}, q{}, '--quick-gen-key', 'two <two@test.test>', qw{ed25519 sign never} );
+    my %fpr = map { ( $_ => ( $run->( qw{--with-colons --list-keys}, "$_\@test.test" ) =~ m/^fpr:+([[:xdigit:]]{40}):/m )[0] ) } qw{one two};
+    $run->( '--passphrase', q{}, '--quick-add-key', $fpr{one}, qw{rsa2048 encr never} );
+
+    my $armored = $run->( qw{--armor --export}, 'one@test.test' );
+    my $binary  = $run->( qw{--export},         'one@test.test' );
+    my $both    = $run->(qw{--armor --export});
+    is_deeply( [ Provisioner::Packager::Deb::key_fingerprints($armored) ],      [ $fpr{one} ],              'the fingerprint of an armored key, with a subkey, is what gpg says, once' );
+    is_deeply( [ Provisioner::Packager::Deb::key_fingerprints($binary) ],       [ $fpr{one} ],              'and of the same key in binary' );
+    is_deeply( [ sort( Provisioner::Packager::Deb::key_fingerprints($both) ) ], [ sort @fpr{qw{one two}} ], 'and a file of two keys has two' );
+    like( exception { Provisioner::Packager::Deb::key_fingerprints('not a key') }, qr/gpg[ ]reads[ ]no[ ]OpenPGP[ ]key/, 'what is not a key is refused' );
+    {
+        no warnings 'once';
+        local @Provisioner::Packager::Deb::GPG = ('/bogus/gpg');
+        like( exception { Provisioner::Packager::Deb::key_fingerprints($armored) }, qr/needs[ ]gpg/,            'and without gpg, nothing is trusted' );
+        like( Provisioner::Packager::Deb->gpg_error,                                qr/gpg[ ]does[ ]not[ ]run/, 'which gpg_error says' );
+
+        # A gpg from before --show-keys, which says only its version.
+        my $old = "$home/old-gpg";
+        File::Slurper::Temp::write_text( $old, qq{#!/bin/sh\necho 'gpg (GnuPG) 2.2.4'\n} );
+        chmod 0755, $old or die "chmod: $!";
+        local @Provisioner::Packager::Deb::GPG = ($old);
+        like( Provisioner::Packager::Deb->gpg_error, qr/GnuPG[ ]2[.]2[.]4.*2[.]2[.]8[ ]or[ ]later/, 'and so for a gpg too old to show a key without importing it' );
+    }
+    is( Provisioner::Packager::Deb->gpg_error, undef, 'the gpg here reads keys' );
+
+    my %suite = ( 'https://apt.fpr.test/dists/stable/InRelease' => q{} );
+    %answer = ( %suite, 'https://apt.fpr.test/one.asc' => $armored, 'https://apt.fpr.test/both.asc' => $both );
+    my %fpr_source = ( name => 'fpr', uri => 'https://apt.fpr.test', key => 'https://apt.fpr.test/one.asc' );
+    my ($keyring)  = Provisioner::Packager::Deb->files( source( %fpr_source, fingerprint => lc $fpr{one} ) );
+    is( $keyring->{content}, $armored, 'a key with the fingerprint of its source is written, whatever its case' );
+    like( exception { Provisioner::Packager::Deb->files( source( %fpr_source, fingerprint => $fpr{two} ) ) }, qr/is[ ]$fpr{one},[ ]not[ ]$fpr{two}/, 'one with another stops the build' );
+    like( exception { Provisioner::Packager::Deb->files( source( %fpr_source, key => 'https://apt.fpr.test/both.asc', fingerprint => $fpr{one} ) ) }, qr/[ ]and[ ]/, 'and so does a file that holds a second key beside it' );
+
+    is( scalar Provisioner::Packager::Deb->merge( source( fingerprint => $fpr{one} ) ), 1, 'merge takes a source with a fingerprint' );
+    like( exception { Provisioner::Packager::Deb->merge( source( fingerprint => 'ABCD' ) ) }, qr/fingerprint/, 'and refuses one that is not 40 hex digits' );
 };
 
 subtest 'forbid: a pin that keeps packages out, for one domain' => sub {

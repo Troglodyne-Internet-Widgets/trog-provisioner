@@ -10,7 +10,20 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use feature 'state';
+
+use File::Temp();
+use IPC::Run3();
 use Path::Tiny();
+
+use Dist::Conformance::Check::SystemPackages();
+use Dist::Conformance::Snapshot();
+use Dist::Conformance::Snapshot::Tree();
+
+use Provisioner::Utils();
+
+# One copy for args, deps and fetch_hosts.
+our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/tCMS.git';
 
 =head1 Provisioner::Recipe::tcms
 
@@ -18,6 +31,9 @@ use Path::Tiny();
 
     somedomain:
         tcms:
+            # Optional.  Where to clone tCMS from, and which branch.
+            repo_url:    "https://github.com/Troglodyne-Internet-Widgets/tCMS.git"
+            repo_branch: "master"
 
 =head2 DESCRIPTION
 
@@ -29,7 +45,7 @@ before anything serves from it.
 The checkout lives in C<tCMS/> in the directory of the domain.  It gets there in
 one of two ways, and you do neither of them.  C<remote_files> brings the
 checkout of the guest that this build replaces.  If there is none, the fragment
-clones master.  That happens for a domain that never existed, or for one whose
+clones C<repo_branch> of C<repo_url>.  That happens for a domain that never existed, or for one whose
 data directory somebody emptied.
 
 This recipe leaves a checkout that is already there exactly as it is, in any
@@ -44,6 +60,13 @@ the C<www/> directories, and C<~/.tcms>.  Without C<data/>, tCMS cannot open
 its database, and every request answers 500.  The target makes only what is
 missing, so it does not change a checkout that came down from the last guest.
 
+Then the fragment runs the C<prereq-frontend> target, as the service user.  It
+downloads the scripts and styles that tCMS serves and git does not track, such
+as the emoji list of the emoji picker, from C<raw.githubusercontent.com> and
+C<cdn.jsdelivr.net>.  F<Installer.mk> fetches only the files that are missing,
+so a checkout that came down from the last guest keeps the files that it
+serves.  The guest test asks C<make -q> whether any is still missing.
+
 The guest test asks tCMS for its front page.  tCMS offers the page that
 registers the first user only until it answers its first request, which
 touches F<config/setup>.  So when that flag was not there before the test, the
@@ -53,13 +76,122 @@ the last guest already has the flag, and the test leaves it alone.
 
 TODO: let the configuration name a commit to check out (#223).
 
-tCMS requires C<Sys::Virt>, so this recipe installs it before the other modules
+tCMS builds with Dist::Zilla, so the C<dzil> step of the C<perl> recipe
+installs the modules that the F<dist.ini> of the checkout names.  tCMS
+requires C<Sys::Virt>, so this recipe installs it before the other modules
 that the checkout needs.  It pins the version that pkg-config reports for the
 libvirt of the guest.  Without the pin, cpm takes the newest, and its build
 wants a libvirt far newer than the distribution ships.
 L<Provisioner::Recipe::trogrunner> pins it for the same reason.
 
+=head2 THE SYSTEM PACKAGES
+
+tCMS declares the system packages that it needs under C<x_system_packages> in
+the F<metamerge.yml> of its repository, one for each dependency, and the
+archives that some of them come from under C<x_system_sources>.  See
+L<Dist::Conformance::Check::SystemPackages>.  So the recipe names no package
+itself: C<deps> of the subclass for a distribution asks C<declared_packages>
+for those of its packager, and the guest installs them at first boot, before
+the C<perl> recipe builds the modules of the checkout against them.  An archive
+that tCMS declares for the guest goes to C<package_sources> of the subclass,
+with the fingerprint of its key, and first boot adds it before it installs.
+
+They are read when the configuration is generated, from C<repo_branch> of
+C<repo_url>, and not from the checkout on the guest.  A guest that keeps the
+checkout of the guest before it, as C<remote_files> says, gets the packages
+that the branch declares now, and not those of the commit that it serves.
+
 =cut
+
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            repo_url => {
+                type             => 'string',
+                default          => $DEFAULT_REPO,
+                pattern          => q{^(?:(?:https?|ssh|git|file)://\S+|[^/\s@]+@[A-Za-z0-9][A-Za-z0-9.-]*:\S+)$},
+                'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
+                description      => 'The git repository to clone tCMS from, which declares its system packages.',
+            },
+            repo_branch => { type => 'string', default => 'master', pattern => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+        },
+    );
+}
+
+=head2 $resolved = $recipe->declared_for(\%host, %opts)
+
+What F<metamerge.yml> on C<repo_branch> of C<repo_url> in C<%opts>, or on the
+default of each, declares for C<%host>, as
+L<Dist::Conformance::Check::SystemPackages/resolve> returns it: C<needs>,
+C<packages>, C<sources>, C<programs> and C<unresolved>, which is empty.  C<%host> is what C<resolve> takes: C<packager>,
+C<distro>, C<release> and C<codename>.  Each source has its C<fingerprint>,
+which L<Provisioner::Packager::Deb> holds its key to.
+
+It reads the file once for each repository and branch in each process, with
+C<fetch>, and resolves it for each call.
+
+It dies rather than return no packages, because tCMS does not run without
+them, and a guest without them fails long after the generation: when the file
+cannot be read, with what git said; when the branch has no
+F<metamerge.yml>; when the declaration is not valid, or cannot be resolved for
+the host, with what L<Dist::Conformance::Check::SystemPackages> said about it;
+when it declares no dependency at all; and when a dependency has no package of
+the packager for the host, naming each.  A dependency that the declaration
+gives no package on the host, with a null, is not an error, because the
+declaration says so for that host.
+
+=cut
+
+sub declared_for ( $self, $host, %opts ) {    ## no critic (ProhibitMisplacedMethods) -- the subclass of every distribution answers deps and package_sources with it, and Ubuntu is the only one yet
+    my $repo   = $opts{repo_url}    // $DEFAULT_REPO;
+    my $branch = $opts{repo_branch} // 'master';
+    my $where  = "$Dist::Conformance::Check::SystemPackages::FILE on $branch of $repo";
+
+    state %declared;
+    my $declaration = $declared{"$repo\n$branch"} //= do {
+        my $content  = $self->fetch( $repo, $branch ) // die "tcms: there is no $where, so tCMS declares no system packages, and the guest would install none of what it needs.\n";
+        my $snapshot = Dist::Conformance::Snapshot::Tree->new(
+            paths => { $Dist::Conformance::Check::SystemPackages::FILE => Dist::Conformance::Snapshot::blob_sha($content) },
+            fetch => sub ($) { return $content },
+        );
+        eval { Dist::Conformance::Check::SystemPackages->declared($snapshot) } // die "tcms: the system packages of tCMS at $where: $@";
+    };
+
+    die "tcms: $where declares no system packages, so the guest would install none of what tCMS needs.\n" unless %{ $declaration->{packages} };
+    my $resolved = eval { Dist::Conformance::Check::SystemPackages->resolve( $declaration, %$host ) } // die "tcms: the system packages of tCMS at $where: $@";
+    die "tcms: $where names no $host->{packager} package for $host->{distro} $host->{release} for " . join( ', ', @{ $resolved->{unresolved} } ) . ", so the guest would lack what tCMS needs.\n"
+      if @{ $resolved->{unresolved} };
+    return $resolved;
+}
+
+=head2 $content = $recipe->fetch($repo, $branch)
+
+The content of F<metamerge.yml> on C<$branch> of the git repository C<$repo>,
+or undef when the branch has none.  It clones the branch with git, one commit
+deep, with no checkout and no other file, so it reads from any host that git
+reaches.  git asks no password, because nobody is there to answer.  Dies with
+what git said when it cannot clone.  The one place this recipe reaches the
+network, so a test replaces it.
+
+=cut
+
+sub fetch ( $, $repo, $branch ) {
+    local $ENV{GIT_TERMINAL_PROMPT} = 0;
+    my $dir  = File::Temp->newdir;
+    my $file = $Dist::Conformance::Check::SystemPackages::FILE;
+    my $err  = q{};
+
+    IPC::Run3::run3( [ qw{git clone --quiet --depth 1 --single-branch --no-checkout --filter=blob:none --branch}, $branch, '--', $repo, "$dir/repo" ], \undef, \undef, \$err );
+    die "tcms: could not clone $branch of $repo: " . ( ( split m/\n/, $err )[0] // 'git exited with ' . ( $? >> 8 ) ) . "\n" if $?;
+
+    IPC::Run3::run3( [ 'git', '-C', "$dir/repo", 'cat-file', '-e', "HEAD:$file" ], \undef, \undef, \undef );
+    return if $?;
+
+    IPC::Run3::run3( [ 'git', '-C', "$dir/repo", 'show', "HEAD:$file" ], \undef, \my $content, \$err );
+    die "tcms: could not read $file on $branch of $repo: " . ( ( split m/\n/, $err )[0] // q{} ) . "\n" if $?;
+    return $content;
+}
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
@@ -89,8 +221,8 @@ sub required_recipes {
             my (%perl_opts) = @_;
             return (
                 cpan_deps => [
-                    { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
-                    { installdeps => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
+                    { pin  => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
+                    { dzil => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
                 ],
             );
         },
@@ -146,14 +278,15 @@ sub tests {
     return qw{tcms.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 @hosts = $recipe->fetch_hosts(%opts)
 
-GitHub, which serves the tCMS checkout this recipe clones.
+The host of C<repo_url>, which serves the tCMS checkout this recipe clones, and
+the hosts that the C<prereq-frontend> target of F<Installer.mk> downloads from.
 
 =cut
 
-sub fetch_hosts {
-    return qw{github.com};
+sub fetch_hosts ( $, %opts ) {
+    return ( Provisioner::Utils::host_of( $opts{repo_url} // $DEFAULT_REPO ), qw{raw.githubusercontent.com cdn.jsdelivr.net} );
 }
 
 1;

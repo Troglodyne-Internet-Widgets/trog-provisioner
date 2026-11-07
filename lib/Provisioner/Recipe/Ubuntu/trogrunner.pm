@@ -39,6 +39,10 @@ database.
 service user reach its key.  See L<Provisioner::Recipe::trogrunner/THE
 PROVISIONING ACCOUNT>.
 
+=item * C<gpg> for the fingerprint of the signing key of an apt archive, which
+L<Provisioner::Packager::Deb> reads with C<gpg --show-keys> when the runner
+generates a configuration.  C<bin/preflight> fails without it.
+
 =back
 
 C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
@@ -59,6 +63,7 @@ sub deps {
       libexpat1-dev
       libsqlite3-dev
       acl
+      gpg
     };
 }
 

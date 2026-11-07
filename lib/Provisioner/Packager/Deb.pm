@@ -12,11 +12,14 @@ use feature 'state';
 
 use parent qw{Provisioner::Packager};
 
+use File::Temp();
 use HTTP::Tiny();
+use IPC::Run3();
 use JSON::Validator();
 use List::Util   qw{uniq};
 use MIME::Base64 qw{encode_base64};
 use URI();
+use version();
 
 use Dist::Conformance::Check::SystemPackages();
 
@@ -71,6 +74,14 @@ The URL of the signing key, armored or binary.
 Optional.  An array reference, for an archive that does not publish every
 architecture.
 
+=item C<fingerprint>
+
+Optional.  The fingerprint of the signing key, as 40 hex digits in either
+case.  With it, C<files> refuses a key that is not exactly one primary key with
+that fingerprint, so a key that the URL serves later is not trusted on its
+word.  A source that a repository declares, through
+L<Dist::Conformance::Check::SystemPackages>, always has one.
+
 =item C<pin>
 
 Optional.  A hash reference with C<priority>, and C<packages>, which defaults
@@ -94,6 +105,7 @@ my %SCHEMA = (
         suites        => { type => 'array',  minItems => 1, items => { type => 'string', pattern => '^[^\s]+$' } },
         components    => { type => 'array',  items    => { type => 'string', pattern => '^[^\s]+$' } },
         architectures => { type => 'array',  items    => { type => 'string', pattern => '^[a-z0-9]+$' } },
+        fingerprint   => { type => 'string', pattern  => '^[0-9A-Fa-f]{40}$' },
         pin           => {
             type                 => 'object',
             required             => ['priority'],
@@ -244,7 +256,8 @@ otherwise.
 
 A key is fetched once for each process, however many domains name it.
 
-Dies when a key cannot be fetched or is not a PGP key, and when the archive
+Dies when a key cannot be fetched or is not a PGP key, when a source has a
+C<fingerprint> and its key is not one primary key with it, and when the archive
 does not answer for a suite.  A guest that boots with either fails in its
 package install, where the error names neither the archive nor the key.
 
@@ -257,6 +270,11 @@ sub files {
     foreach my $source (@sources) {
         my $name = $source->{name};
         my $key  = key( $source->{key}, $name );
+        if ( defined( my $want = $source->{fingerprint} ) ) {
+            my @found = key_fingerprints($key);
+            die "The signing key of the apt source $name at $source->{key} is " . ( @found ? join( ' and ', @found ) : 'no key that has a fingerprint' ) . ', not ' . uc($want) . ".\n"
+              unless @found == 1 && $found[0] eq uc $want;
+        }
         foreach my $suite ( @{ $source->{suites} } ) {
             check_suite( $source->{uri}, $suite, $name );
         }
@@ -340,6 +358,60 @@ sub key {
           unless $armored || $binary;
         $body;
     };
+}
+
+=head2 @fingerprints = key_fingerprints($key)
+
+The fingerprint of each primary key in C<$key>, an armored or a binary key, in
+upper case, as C<gpg --show-keys> reads it.  gpg reads every version and
+algorithm of OpenPGP key, and it reads the key into a home directory of its
+own, so no keyring changes.  The installer of L<Provisioner::Recipe::clod>
+reads keys on the guest in the same way.  Dies when there is no gpg to run, and
+when gpg reads no key in C<$key>.
+
+=cut
+
+# The command, so that a test can run another one.
+our @GPG = ('gpg');
+
+# The first release of GnuPG with --show-keys.
+our $GPG_SHOW_KEYS = '2.2.8';
+
+sub key_fingerprints {
+    my ($key) = @_;
+    my $home = File::Temp->newdir;
+    my ( $out, $err ) = ( q{}, q{} );
+    eval { IPC::Run3::run3( [ @GPG, '--homedir', "$home", qw{--batch --no-tty --with-colons --show-keys} ], \$key, \$out, \$err ); 1 }
+      or die "Reading the fingerprint of a signing key needs gpg, which did not run: $@";
+    die 'gpg reads no OpenPGP key in it: ' . ( ( split m/\n/, $err )[0] // 'it exited with ' . ( $? >> 8 ) ) . "\n" if $?;
+
+    # One pub line for each primary key, and one fpr line after it, and after each of its subkeys.
+    my ( @fingerprints, $primary );
+    foreach my $line ( split m/\n/, $out ) {
+        my ( $type, @field ) = split m/:/, $line;
+        next unless defined $type;
+        if    ( $type eq 'pub' )             { $primary = 1 }
+        elsif ( $type eq 'sub' )             { $primary = 0 }
+        elsif ( $type eq 'fpr' && $primary ) { push @fingerprints, uc $field[8] }
+    }
+    return @fingerprints;
+}
+
+=head2 $why = Provisioner::Packager::Deb->gpg_error()
+
+Why C<key_fingerprints> cannot run on this machine, or undef when it can: gpg
+must run, and be GnuPG 2.2.8 or later, the first release with C<--show-keys>.
+C<bin/preflight> asks it.
+
+=cut
+
+sub gpg_error {
+    my ( $out, $err ) = ( q{}, q{} );
+    eval { IPC::Run3::run3( [ @GPG, '--version' ], \undef, \$out, \$err ); 1 } or return "gpg does not run: $@";
+    return 'gpg --version exited with ' . ( $? >> 8 ) . ': ' . ( ( split m/\n/, $err )[0] // q{} ) if $?;
+    my ($version) = $out =~ m/\Agpg[ ][(]GnuPG[)][ ](\d+[.]\d+[.]\d+)/ or return 'gpg --version names no release of GnuPG: ' . ( ( split m/\n/, $out )[0] // q{} );
+    return "gpg is GnuPG $version, and --show-keys needs $GPG_SHOW_KEYS or later" if version->parse($version) < version->parse($GPG_SHOW_KEYS);
+    return;
 }
 
 =head2 check_suite($uri, $suite, $name)

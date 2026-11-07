@@ -16,6 +16,7 @@ use Trog::Credentials();
 use Trog::Secrets();
 use Trog::Utils();
 use Provisioner::Cookbook();
+use Provisioner::Packager::Deb();
 use File::Slurper();
 use YAML::XS();
 
@@ -1337,6 +1338,30 @@ If it is installed and still refused, the system does not let it make a user
 namespace.  On Ubuntu 24.04 and later, AppArmor allows that only to a program
 with a profile, which the bubblewrap package supplies in /etc/apparmor.d/bwrap.
 Elsewhere, see the user.max_user_namespaces sysctl.
+FIX
+}
+
+=head2 $result = $hv->check_gpg()
+
+Checks that this machine has a gpg that L<Provisioner::Packager::Deb> can read
+a signing key with.  C<bin/new_config> reads the fingerprint of the key of each
+apt archive that names one, such as those that tCMS declares, and stops
+without it.  It asks only this machine, because C<new_config> runs here.
+
+=cut
+
+sub check_gpg {
+    my ($self) = @_;
+
+    my $why = Provisioner::Packager::Deb->gpg_error;
+    return $self->verdict( 1, 'gpg can read the fingerprint of a signing key', q{} ) unless defined $why;
+
+    return $self->verdict( 0, "No gpg on this machine that can read a signing key: $why", <<'FIX' );
+bin/new_config reads the fingerprint of the signing key of each third-party apt
+archive with gpg --show-keys, and refuses an archive whose key it cannot read.
+Install GnuPG 2.2.8 or later:
+
+    sudo apt install gpg
 FIX
 }
 

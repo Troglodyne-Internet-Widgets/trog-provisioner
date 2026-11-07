@@ -31,8 +31,8 @@ C<run> writes a configuration for a domain for every recipe, the way an
 installation has many, and runs F<bin/new_config> for the domain of C<$recipe>
 only.  Then it checks that the configuration package has what F<bin/provision>
 needs, every file that C<template_files> names, and every guest test that
-C<tests> names.  It does not provision a guest.  The hypervisor and the
-archives of vendors are mocked, because the recipe is what is under test.  So
+C<tests> names.  It does not provision a guest.  The hypervisor, the
+archives of vendors and the repository of tCMS are mocked, because the recipe is what is under test.  So
 it reaches no network.
 
 It skips unless C<AUTHOR_TESTING> is set.
@@ -123,6 +123,12 @@ sub run {
     require Provisioner::Packager::Deb;
     my $apt_mock = Test::MockModule->new('Provisioner::Packager::Deb');
     $apt_mock->redefine( fetch => sub { return { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+
+    # Nor is the repository of tCMS, whose metamerge.yml the tcms recipe reads
+    # its packages from.
+    require Provisioner::Recipe::tcms;
+    my $tcms_mock = Test::MockModule->new('Provisioner::Recipe::tcms');
+    $tcms_mock->redefine( fetch => sub { return "x_system_packages:\n  File::LibMagic:\n    deb: libmagic-dev\n" } );
 
     # garage, matrix and trogrunner each keep a file for the guest in the secret
     # store, so new_config opens it.  That needs a store, and its password handed

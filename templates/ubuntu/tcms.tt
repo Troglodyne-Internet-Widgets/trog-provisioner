@@ -1,9 +1,12 @@
 [%# Clone only when nothing is there, which means a domain that never existed.
     A checkout that came down from the last guest is the live site, and this
     recipe leaves it alone.  See Provisioner::Recipe::tcms. -%]
-[ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone https://github.com/Troglodyne-Internet-Widgets/tCMS.git '[% install_dir %]/[% domain %]/tCMS'
+[ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/tCMS'
 chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/tCMS'
 [%# The directories that tCMS needs and does not track, data/ among them.  It
     makes only what is missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk install
+[%# The front-end files that tCMS serves, which Installer.mk fetches only when
+    they are missing.  See Provisioner::Recipe::tcms. -%]
+sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk prereq-frontend
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'
