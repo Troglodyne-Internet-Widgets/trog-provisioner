@@ -12,11 +12,12 @@ use feature 'state';
 
 use parent qw{Provisioner::Packager};
 
+use File::Temp();
 use HTTP::Tiny();
+use IPC::Run3();
 use JSON::Validator();
-use List::Util qw{uniq};
-use Digest::SHA();
-use MIME::Base64 qw{decode_base64 encode_base64};
+use List::Util   qw{uniq};
+use MIME::Base64 qw{encode_base64};
 use URI();
 
 use Dist::Conformance::Check::SystemPackages();
@@ -361,48 +362,33 @@ sub key {
 =head2 @fingerprints = key_fingerprints($key)
 
 The fingerprint of each primary key in C<$key>, an armored or a binary key, in
-upper case: the SHA-1 of its public key packet, as RFC 4880 defines it for a key
-of version 4.  A key of another version gives C<v5> or C<v6> in its place,
-which matches no fingerprint of 40 digits.  Dies when C<$key> is not a sequence
-of packets of the PGP format.
+upper case, as C<gpg --show-keys> reads it.  gpg reads every version and
+algorithm of OpenPGP key, and it reads the key into a home directory of its
+own, so no keyring changes.  The installer of L<Provisioner::Recipe::clod>
+reads keys on the guest in the same way.  Dies when there is no gpg to run, and
+when gpg reads no key in C<$key>.
 
 =cut
 
+# The command, so that a test can run another one.
+our @GPG = ('gpg');
+
 sub key_fingerprints {
     my ($key) = @_;
+    my $home = File::Temp->newdir;
+    my ( $out, $err ) = ( q{}, q{} );
+    eval { IPC::Run3::run3( [ @GPG, '--homedir', "$home", qw{--batch --no-tty --with-colons --show-keys} ], \$key, \$out, \$err ); 1 }
+      or die "Reading the fingerprint of a signing key needs gpg, which did not run: $@";
+    die 'gpg reads no OpenPGP key in it: ' . ( ( split m/\n/, $err )[0] // 'it exited with ' . ( $? >> 8 ) ) . "\n" if $?;
 
-    if ( $key =~ $ARMORED ) {
-        my ($body) = $key =~ m/^\s*\n(.*?)^-----END/ms or die "The armored key has no body.\n";
-        $key = decode_base64( $body =~ s{^=[[:alnum:]+/]{4}\s*$}{}mr );
-    }
-
-    my @fingerprints;
-    my $at = 0;
-    while ( $at < length $key ) {
-        my $head = ord substr( $key, $at++, 1 );
-        die "The key is not a sequence of packets of the PGP format.\n" unless $head & 0x80;
-        my ( $tag, $length );
-        if ( $head & 0x40 ) {
-            $tag = $head & 0x3f;
-            my $first = ord substr( $key, $at++, 1 );
-            if    ( $first < 192 )  { $length = $first }
-            elsif ( $first < 224 )  { $length = ( ( $first - 192 ) << 8 ) + ord( substr( $key, $at++, 1 ) ) + 192 }
-            elsif ( $first == 255 ) { $length = unpack 'N', substr( $key, $at, 4 ); $at += 4 }
-            else                    { die "The key has a packet of partial length, which no key packet is.\n" }
-        }
-        else {
-            $tag = ( $head >> 2 ) & 0x0f;
-            my $bytes = ( 1, 2, 4 )[ $head & 3 ] // die "The key has a packet of no stated length.\n";
-            $length = unpack( (qw{C n N})[ $head & 3 ], substr( $key, $at, $bytes ) );
-            $at += $bytes;
-        }
-        my $packet = substr( $key, $at, $length );
-        die "The key ends inside a packet.\n" unless length $packet == $length;
-        $at += $length;
-        next unless $tag == 6;
-
-        my $version = ord $packet;
-        push @fingerprints, $version == 4 ? uc Digest::SHA::sha1_hex( pack( 'Cn', 0x99, $length ) . $packet ) : "v$version";
+    # One pub line for each primary key, and one fpr line after it, and after each of its subkeys.
+    my ( @fingerprints, $primary );
+    foreach my $line ( split m/\n/, $out ) {
+        my ( $type, @field ) = split m/:/, $line;
+        next unless defined $type;
+        if    ( $type eq 'pub' )             { $primary = 1 }
+        elsif ( $type eq 'sub' )             { $primary = 0 }
+        elsif ( $type eq 'fpr' && $primary ) { push @fingerprints, uc $field[8] }
     }
     return @fingerprints;
 }

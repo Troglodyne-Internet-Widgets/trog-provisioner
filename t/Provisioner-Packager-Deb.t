@@ -184,7 +184,12 @@ subtest 'files: a key that must have its fingerprint' => sub {
     is_deeply( [ Provisioner::Packager::Deb::key_fingerprints($armored) ],      [ $fpr{one} ],              'the fingerprint of an armored key, with a subkey, is what gpg says, once' );
     is_deeply( [ Provisioner::Packager::Deb::key_fingerprints($binary) ],       [ $fpr{one} ],              'and of the same key in binary' );
     is_deeply( [ sort( Provisioner::Packager::Deb::key_fingerprints($both) ) ], [ sort @fpr{qw{one two}} ], 'and a file of two keys has two' );
-    like( exception { Provisioner::Packager::Deb::key_fingerprints('not a key') }, qr/not[ ]a[ ]sequence[ ]of[ ]packets/, 'what is not a key is refused' );
+    like( exception { Provisioner::Packager::Deb::key_fingerprints('not a key') }, qr/gpg[ ]reads[ ]no[ ]OpenPGP[ ]key/, 'what is not a key is refused' );
+    {
+        no warnings 'once';
+        local @Provisioner::Packager::Deb::GPG = ('/bogus/gpg');
+        like( exception { Provisioner::Packager::Deb::key_fingerprints($armored) }, qr/needs[ ]gpg/, 'and without gpg, nothing is trusted' );
+    }
 
     my %suite = ( 'https://apt.fpr.test/dists/stable/InRelease' => q{} );
     %answer = ( %suite, 'https://apt.fpr.test/one.asc' => $armored, 'https://apt.fpr.test/both.asc' => $both );

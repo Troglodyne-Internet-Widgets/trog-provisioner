@@ -88,6 +88,7 @@ OOM
 OPENSSH
 OpenAPIv
 OpenLDAP
+OpenPGP
 OpenSSH
 OpenStack
 OpenVPN
@@ -279,6 +280,7 @@ gh
 github
 gitignored
 gogs
+gpg
 grafana
 grafanasyslog
 greppable
