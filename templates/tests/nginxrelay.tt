@@ -68,6 +68,12 @@ subtest 'a plain request goes by its Host header, with X-Forwarded-For' => sub {
 is( status( 'nosuch.test.test', [% tls_port %] ), '000', 'a name that nobody registered gets no TLS handshake' );
 is( status( 'nosuch.test.test', 80 ),  '000', 'and no reply on 80' );
 
+# A rebuild puts the certificates back from the salvage, and nginx opens each
+# one as www-data at the handshake.
+foreach my $file ( glob '/etc/nginx/nginxrelay.d/media/*' ) {
+    is( system( qw{runuser -u www-data -- test -r}, $file ), 0, "nginx can read $file, which it serves to readers" );
+}
+
 my $other = `$client register other-$domain 127.0.0.1:1 127.0.0.1:2 $name 2>&1`;
 isnt( $?, 0, 'another domain cannot register the same name' );
 like( $other, qr/\Q$name is registered to $domain\E/, 'and the refusal names the domain that holds it' );
