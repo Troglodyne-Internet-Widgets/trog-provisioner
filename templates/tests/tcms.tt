@@ -70,6 +70,14 @@ SKIP: {
     ok(!-e "$dir/config/setup", 'so its first visitor is offered the setup page');
 }
 
+# The Minion worker transcodes the uploaded videos, and the units of the
+# postrun tasks have started by now.
+my $worker = `systemctl is-active 'tcms-worker-[% domain %].service' 2>&1`;
+chomp $worker;
+is($worker, 'active', 'the tCMS job worker is active') or diag `journalctl -u 'tcms-worker-[% domain %].service' -n 20 --no-pager 2>&1`;
+my $ffmpeg = `ffmpeg -version 2>&1`;
+is($? >> 8, 0, 'ffmpeg, which the worker transcodes with, runs') or diag $ffmpeg;
+
 # git refuses to work in a checkout that another account owns, and the service
 # user is not the admin.
 my $safe = `HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null`;

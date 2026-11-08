@@ -51,6 +51,30 @@ subtest 'tpsgi is told to add the syslog output of tCMS' => sub {
     like( File::Slurper::read_text("$dir/tpsgi.ini"), qr/^basedir=tCMS$/m,                    'and tPSGI changes into the checkout of tCMS' );
 };
 
+# THE JOB WORKER in Provisioner::Recipe::tcms.
+subtest 'the job worker is a unit that starts after tPSGI and restarts on failure' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $recipe = Provisioner::Cookbook->load( 'tcms', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => $dir,
+        distro        => 'ubuntu',
+    );
+    my %base = ( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', user => 'bogus', admin_user => 'bogusadmin' );
+
+    is( { $recipe->validate(%base) }->{worker_jobs}, 1, 'one job at a time unless the configuration says more' );
+    isnt( exception { $recipe->validate( %base, worker_jobs => 0 ) }, undef, 'and a worker that runs no job is refused' );
+
+    $recipe->generate_files( $dir, %base, worker_jobs => 2 );
+    my $unit = File::Slurper::read_text("$dir/tcms-worker.service");
+    like( $unit, qr{^User=bogus$}m,                                     'it runs as the service user' );
+    like( $unit, qr{^WorkingDirectory=/bogus/web[.]test[.]test/tCMS$}m, 'in the checkout' );
+    my $perl   = qr{^ExecStart=\S*/perl[ ]bin/tcms-jobs}m;
+    my $worker = qr{[ ]minion[ ]worker[ ]-j[ ]2$}m;
+    like( $unit, qr{$perl$worker},                              'with the worker command of tCMS and the configured jobs' );
+    like( $unit, qr{^After=.*\bweb[.]test[.]test[.]service\b}m, 'after the service of tPSGI' );
+    like( $unit, qr{^Restart=on-failure$}m,                     'and restarts on failure' );
+};
+
 # THE SYSTEM PACKAGES in Provisioner::Recipe::tcms.  git is faked: each answer
 # is what fetch gives for the next repository and branch that is not cached yet,
 # the content of metamerge.yml, undef for none, or a code reference that dies.

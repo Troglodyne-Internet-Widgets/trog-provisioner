@@ -34,6 +34,8 @@ our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/tCMS.git';
             # Optional.  Where to clone tCMS from, and which branch.
             repo_url:    "https://github.com/Troglodyne-Internet-Widgets/tCMS.git"
             repo_branch: "master"
+            # Optional.  Jobs that the transcode worker runs at once.
+            worker_jobs: 1
 
 =head2 DESCRIPTION
 
@@ -92,6 +94,21 @@ libvirt of the guest.  Without the pin, cpm takes the newest, and its build
 wants a libvirt far newer than the distribution ships.
 L<Provisioner::Recipe::trogrunner> pins it for the same reason.
 
+=head2 THE JOB WORKER
+
+tCMS transcodes the videos that users upload in a Minion queue, and a
+separate process works that queue.  The recipe installs it as the unit
+C<tcms-worker-E<lt>domainE<gt>.service>.  The unit runs
+C<bin/tcms-jobs minion worker -j worker_jobs> in the checkout, as the service
+user, with the perl that the C<perl> recipe built.  systemd restarts it on
+failure.
+
+The unit starts after the service of tPSGI, which is named for the domain.  The
+worker saves the posts that it transcodes, so it needs the checkout in place,
+and it is useful only while tCMS serves.  The guest test asks systemd whether
+the unit is active, and whether C<ffmpeg> runs.  C<ffmpeg> is one of the system
+packages that tCMS declares, below, and this recipe names no package for it.
+
 =head2 THE SYSTEM PACKAGES
 
 tCMS declares the system packages that it needs under C<x_system_packages> in
@@ -122,7 +139,8 @@ sub args {
                 'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
                 description      => 'The git repository to clone tCMS from, which declares its system packages.',
             },
-            repo_branch => { type => 'string', default => 'master', pattern => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+            repo_branch => { type => 'string',  default => 'master', pattern => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+            worker_jobs => { type => 'integer', default => 1,        minimum => 1,                                  description => 'How many jobs the Minion worker of tCMS runs at once.  A job is one video transcode, and each one uses every core it can.' },
         },
     );
 }
@@ -280,6 +298,10 @@ installs that use C<bin/tcms-vault-key --file>.
 
 sub remote_skip {
     return ('secrets.key');
+}
+
+sub template_files {
+    return ( 'tcms-worker.service.tt' => 'tcms-worker.service' );
 }
 
 sub tests {
