@@ -52,6 +52,13 @@ ok(eval { require JSON::PP; JSON::PP::decode_json($emoji) }, 'and the emoji list
 my $code = `curl -s -m 30 -o /dev/null -w '%{http_code}' --unix-socket '[% install_dir %]/[% domain %]/run/tpsgi.sock' -H 'Host: [% domain %]' http://localhost/ 2>&1`;
 is($code, '200', 'tCMS answers its front page');
 
+[% IF secure_host -%]
+# Asked after the front page, which set tCMS up: before that, every path is the
+# setup page.
+my $login = `curl -s -m 30 -o /dev/null -w '%{http_code} %{redirect_url}' --unix-socket '[% install_dir %]/[% domain %]/run/tpsgi.sock' -H 'Host: [% domain %]' http://localhost/login 2>&1`;
+is($login, '302 https://[% secure_host %]/login', 'tCMS sends the login of the domain to the secure host');
+[% END -%]
+
 # tPSGI answers the first request for a file of www/ and links the file into
 # www/static, and nginx answers the second from the link.
 foreach my $try (qw{first second}) {

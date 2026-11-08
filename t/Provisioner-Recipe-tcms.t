@@ -75,6 +75,34 @@ subtest 'the job worker is a unit that starts after tPSGI and restarts on failur
     like( $unit, qr{^Restart=on-failure$}m,                     'and restarts on failure' );
 };
 
+# A SITE BEHIND A RELAY in Provisioner::Recipe::tcms.
+subtest 'a secure host is written by tCMS, after the perl target' => sub {
+
+    # A recipe for each render, since validated() keeps the first options that it is given.
+    my $recipe = sub {
+        return Provisioner::Cookbook->load( 'tcms', distro => 'ubuntu' )->new(
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => tempdir( CLEANUP => 1 ),
+            distro        => 'ubuntu',
+        );
+    };
+    my %base     = ( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', user => 'bogus', admin_user => 'bogusadmin' );
+    my $hostname = sub (%opts) {
+        return grep { m/tcms-hostname/ } Provisioner::Recipe->fragment_commands( $recipe->()->render( %base, %opts ) );
+    };
+
+    is( scalar $hostname->(), 0, 'without one, the recipe leaves the hosts of tCMS alone' );
+
+    my @set = $hostname->( secure_host => 'secure.web.test.test' );
+    is( scalar @set, 1, 'with one, it sets them once' );
+    like( $set[0], qr{^\S*/queue_postrun_task[ ]}, 'in a task that runs after every target, the perl target among them' );
+    like( $set[0], qr{sudo[ ]-u[ ]bogus[ ]},       'as the service user' );
+    my $hosts = qr{[ ]'secure[.]web[.]test[.]test'[ ]'web[.]test[.]test'}x;
+    like( $set[0], qr{bin/tcms-hostname[ ]--secure$hosts}, 'with the secure host, and the domain as the hostname' );
+
+    isnt( exception { $recipe->()->validate( %base, secure_host => 'not a host' ) }, undef, 'and a secure host that is not a host name is refused' );
+};
+
 # THE SYSTEM PACKAGES in Provisioner::Recipe::tcms.  git is faked: each answer
 # is what fetch gives for the next repository and branch that is not cached yet,
 # the content of metamerge.yml, undef for none, or a code reference that dies.
