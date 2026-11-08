@@ -36,6 +36,8 @@ our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/tCMS.git';
             repo_branch: "master"
             # Optional.  Jobs that the transcode worker runs at once.
             worker_jobs: 1
+            # Optional.  The name of the logins, for a site behind a relay.
+            secure_host: secure.somedomain
 
 =head2 DESCRIPTION
 
@@ -94,6 +96,26 @@ libvirt of the guest.  Without the pin, cpm takes the newest, and its build
 wants a libvirt far newer than the distribution ships.
 L<Provisioner::Recipe::trogrunner> pins it for the same reason.
 
+=head2 A SITE BEHIND A RELAY
+
+A relay caches the pages of a public name, so a site behind one keeps its
+logins on another name, which passes through.  See
+L<Provisioner::Recipe::nginx/Cached names>.  tCMS needs both names:
+C<general.hostname> is the domain, where it sends readers, and
+C<general.secure_host> is C<secure_host>, where it sends every page that needs
+a login.
+
+When C<secure_host> is set, the fragment queues F<bin/tcms-hostname> of the
+checkout to write both into F<config/main.cfg>, as the service user.  It is the
+one change that this recipe makes to a checkout that is already there, and
+only these two settings.  It runs after the C<perl> recipe has built the
+modules that tCMS loads, and before the service of tPSGI starts.  The
+F<bin/tcms-hostname> of the checkout must take C<--secure>, which a checkout
+older than that does not, and then the task fails.
+
+The guest test asks tCMS for F</login> on the domain, and expects a redirect
+to C<secure_host>.
+
 =head2 THE JOB WORKER
 
 tCMS transcodes the videos that users upload in a Minion queue, and a
@@ -139,8 +161,9 @@ sub args {
                 'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
                 description      => 'The git repository to clone tCMS from, which declares its system packages.',
             },
-            repo_branch => { type => 'string',  default => 'master', pattern => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
-            worker_jobs => { type => 'integer', default => 1,        minimum => 1,                                  description => 'How many jobs the Minion worker of tCMS runs at once.  A job is one video transcode, and each one uses every core it can.' },
+            repo_branch => { type => 'string',  default => 'master',   pattern     => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+            worker_jobs => { type => 'integer', default => 1,          minimum     => 1,                                  description => 'How many jobs the Minion worker of tCMS runs at once.  A job is one video transcode, and each one uses every core it can.' },
+            secure_host => { type => 'string',  format  => 'hostname', description => 'The name that carries the logins of a site behind a relay, and that the relay passes through.  tCMS then sends the pages that need a login there, and readers to the domain.' },
         },
     );
 }

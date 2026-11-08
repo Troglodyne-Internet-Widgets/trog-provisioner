@@ -1178,6 +1178,7 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         tls_port        => 4443,
 
         # The branches that only a guest behind a relay renders.
+        secure_host     => 'secure.d.test',
         mailrelay       => 'relay.d.test',
         relay_jails     => ['nginx-botsearch'],
         mailrelay_login => { address => '192.0.2.5', port => 2587, password => '/etc/postfix/mailrelay/d.test.password' },
