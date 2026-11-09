@@ -17,6 +17,17 @@ use FindBin;
 use FindBin::libs;
 
 use Test::More;
+use Trog::Local();
+
+# The fetches below run in the sandbox, as a guest's do, and there is no other
+# way to ask rsync what the guest gets.  The skip comes before Test::NoWarnings
+# loads, because its test at END would follow the plan of a skip.
+BEGIN {
+    if ( my $why = Trog::Local->new()->sandbox_error ) {
+        plan skip_all => "No sandbox here, so no fetch either: $why";
+    }
+}
+
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
@@ -24,15 +35,8 @@ use File::Path  qw{make_path};
 use File::Slurper::Temp();
 use Path::Tiny();
 use IPC::Run3();
-use Trog::Local();
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
-
-# The fetches below run in the sandbox, as a guest's do, and there is no other
-# way to ask rsync what the guest gets.
-if ( my $why = Trog::Local->new()->sandbox_error ) {
-    plan skip_all => "No sandbox here, so no fetch either: $why";
-}
 
 my $root = tempdir( CLEANUP => 1 );
 my $host = "$root/domains/host.test";
