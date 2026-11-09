@@ -121,6 +121,12 @@ SKIP: {
     is( sprintf( '%04o', $stat[2] & 07777 ), '0600', "$home/.ssh/config is narrow enough for Net::OpenSSH::More" );
 }
 
+# The same sandbox that sandbox_error in Trog::Local asks for, as the account
+# that provisions.  Without it, bin/provision authorizes no guest key.
+my $sandbox = `runuser -u $user -- bwrap --unshare-all --die-with-parent --ro-bind / / true 2>&1`;
+is( $?, 0, "bwrap can make the sandbox of a guest fetch as $user" )
+    or diag "bwrap said: $sandbox";
+
 # Reported, not asserted.  Most preflight checks are about the hypervisor,
 # which is not this guest.  But the operator needs the list in the provision
 # log.
