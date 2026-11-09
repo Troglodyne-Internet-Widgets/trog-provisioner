@@ -132,9 +132,17 @@ is( $?, 0, "bwrap can make the sandbox of a guest fetch as $user" )
 # log.
 diag "bin/preflight on this guest:";
 [% IF checkout %]
-# As the service user, not as root.  The key that a hypervisor trusts is in
-# the ~/.ssh of that user, so root can only report that it cannot connect.
-diag $_ for split( "\n", `runuser -u $user -- sh -c "cd '$dir/[% checkout_dir %]' && $bin/perl -Ilib bin/preflight" 2>&1` );
+# As the account that provisions, not as root.  The key that a hypervisor
+# trusts is in the ~/.ssh of that account, so root can only report that it
+# cannot connect.  An account other than the service user can only pass
+# through the domain directory, so it cannot read the checkout.  See THE
+# PROVISIONING ACCOUNT in Provisioner::Recipe::trogrunner.
+if ( system("runuser -u $user -- test -r '$dir/[% checkout_dir %]/bin/preflight'") == 0 ) {
+    diag $_ for split( "\n", `runuser -u $user -- sh -c "cd '$dir/[% checkout_dir %]' && $bin/perl -Ilib bin/preflight" 2>&1` );
+}
+else {
+    diag "skipped: $user cannot read the checkout";
+}
 [% ELSE %]
 diag 'skipped: no checkout here to run it from';
 [% END %]
