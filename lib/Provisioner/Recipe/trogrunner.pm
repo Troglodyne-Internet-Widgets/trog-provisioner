@@ -841,6 +841,7 @@ sub template_files {
         'trogrunner.hypervisors.conf.tt'      => 'trogrunner.hypervisors.conf',
         'trogrunner.profile.tt'               => 'trogrunner.profile',
         'trogrunner.owner.sh.tt'              => 'trogrunner-owner.sh',
+        'trogrunner.bwrap.apparmor.tt'        => 'trogrunner.bwrap.apparmor',
     );
 }
 

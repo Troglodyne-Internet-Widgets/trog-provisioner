@@ -44,9 +44,14 @@ L<Provisioner::Packager::Deb> reads with C<gpg --show-keys> when the runner
 generates a configuration.  C<bin/preflight> fails without it.
 
 =item * C<bubblewrap> for the sandbox that F<rsyncd_sandbox> runs the rsync
-daemon of each guest's key in.  On Ubuntu 24.04 and later, its AppArmor profile
-is what allows the user namespace.  Without it, C<bin/preflight> fails and
+daemon of each guest's key in.  Without it, C<bin/preflight> fails and
 C<bin/provision> refuses to authorize the key of a guest.
+
+On Ubuntu 24.04 and later, AppArmor also refuses a user namespace to a program
+that has no profile allowing one, and the package ships none.  So the recipe
+installs F</etc/apparmor.d/bwrap>, which leaves C<bwrap> unconfined and allows
+C<userns>, in the form of the profiles that Ubuntu ships for other programs
+that need one.
 
 =back
 

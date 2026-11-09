@@ -40,6 +40,12 @@ install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/
 # Every login shell sources this, so each user gets the checkout on the PATH.
 install -o root -g root -m 0644 trogrunner.profile /etc/profile.d/trogrunner.sh
 
+# The sandbox of every guest fetch needs bwrap to make a user namespace, and
+# AppArmor refuses that without this profile.  See deps in
+# Provisioner::Recipe::Ubuntu::trogrunner.
+install -o root -g root -m 0644 trogrunner.bwrap.apparmor /etc/apparmor.d/bwrap
+apparmor_parser -r /etc/apparmor.d/bwrap
+
 [% IF hypervisor_access != 'none' %]
 # Where bin/provision put the key that a hypervisor is asked to trust, before
 # this makefile started.  trogrunner-owner.sh gives the key to the account.

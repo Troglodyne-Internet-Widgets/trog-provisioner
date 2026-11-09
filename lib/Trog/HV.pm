@@ -1336,7 +1336,10 @@ Install bubblewrap:
 
 If it is installed and still refused, the system does not let it make a user
 namespace.  On Ubuntu 24.04 and later, AppArmor allows that only to a program
-with a profile, which the bubblewrap package supplies in /etc/apparmor.d/bwrap.
+with a profile, and the bubblewrap package ships none.  The trogrunner recipe
+installs one in /etc/apparmor.d/bwrap.  On a machine set up by hand, copy
+templates/files/trogrunner.bwrap.apparmor.tt of this checkout there, and load
+it with apparmor_parser -r.
 Elsewhere, see the user.max_user_namespaces sysctl.
 FIX
 }

@@ -1,0 +1,12 @@
+# Lets bwrap make a user namespace, which Ubuntu 24.04 refuses to a program
+# without a profile that allows it.  The rsyncd_sandbox of each guest key runs
+# under bwrap, and the bubblewrap package ships no profile.
+# Provisioner::Recipe::Ubuntu::trogrunner has the whole account.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/bwrap>
+}
