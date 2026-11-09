@@ -139,7 +139,9 @@ subtest 'the units of the recipes that run as the service user' => sub {
 
     # clod also lets its service user install system packages, through one
     # program of root's that checks every name it is given.
-    my %more = ( clod => ['/usr/local/sbin/clod-install-packages'] );
+    # And it restarts its units without waiting, because the restart of the
+    # worker comes from a job of that worker.
+    my %more = ( clod => [ ( map { "/usr/bin/systemctl restart --no-block $_" } @{ $units{clod} } ), '/usr/local/sbin/clod-install-packages' ] );
     foreach my $name ( sort keys %units ) {
         my %required = Provisioner::Cookbook->load( $name, distro => 'ubuntu' )->new(%PROV)->required_recipes(%G);
         ok( ref $required{servicesudo} eq 'CODE', "$name requires servicesudo" ) or next;

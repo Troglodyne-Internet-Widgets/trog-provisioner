@@ -29,7 +29,9 @@ Environment=PERL5LIB=[% local_lib %]/lib/perl5
 Environment=PATH=[% local_lib %]/bin:/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/perl5/current/bin/perl -I[% home %]/App-Clod/lib [% home %]/App-Clod/script/clod minion worker -j [% workers %]
 # On TERM the worker takes no new job and stops when its jobs finish.  A job
-# can be a claude run of up to an hour, and a job that is killed fails.
+# can be a claude run of up to an hour, and a job that is killed fails.  mixed
+# sends the TERM to the worker alone, where the default sends it to every job.
+KillMode=mixed
 TimeoutStopSec=3660
 Restart=on-failure
 RestartSec=10

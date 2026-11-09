@@ -17,6 +17,12 @@ foreach my $unit ('clod-[% domain %]', 'clod-worker-[% domain %]') {
     is(scalar getpwuid($st[4] // -1), '[% user %]', "and runs as [% user %]");
 }
 
+# A stop of the worker sends TERM to the worker alone, which then waits for its
+# jobs, a claude run among them.
+my $kill = `systemctl show -p KillMode --value 'clod-worker-[% domain %]' 2>/dev/null`;
+chomp $kill;
+is($kill, 'mixed', 'a stop of the worker leaves its jobs to finish');
+
 # nginx proxies to this socket.  If the service runs without it, every request
 # gets a 502.
 my $sock = "$home/run/clod.sock";
@@ -120,6 +126,8 @@ ok(-d "$home/clod-state" && (stat _)[4] == (getpwnam('[% user %]'))[2], 'the dat
 foreach my $unit (qw{clod-[% domain %].service clod-worker-[% domain %].service}) {
     system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', '/usr/bin/systemctl', 'restart', $unit);
     is($? >> 8, 0, "[% user %] may restart $unit with sudo");
+    system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', '/usr/bin/systemctl', 'restart', '--no-block', $unit);
+    is($? >> 8, 0, "and without waiting, as the dashboard does");
 }
 [% END -%]
 
