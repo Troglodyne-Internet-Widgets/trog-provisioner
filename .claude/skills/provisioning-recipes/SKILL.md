@@ -97,6 +97,35 @@ link dies unless the variable is set, and then runs the tool in `bin/`.
 `teardown`, `collect_artifacts` and `ask_guest` make the same check.  A run
 against the real configuration sets the variable to that path explicitly.
 
+### When the session cannot set a variable
+
+A session that runs under permission rules, such as a run of the App-Clod bot,
+cannot use `eval`, `export` or `VAR=value command`.  Claude Code refuses each
+of them, because no rule allows a command that begins with one.  `clod.json`
+at the top of this repository allows the scripts in `scripts/` and three tools
+in `bin/`, and nothing else.  So name the configuration with `--config DIR`
+instead, as the first argument of each script after `scratch_config`:
+
+```
+.claude/skills/provisioning-recipes/scripts/scratch_config --fleet-cache
+```
+
+Read the directory and the password out of its two `export` lines, and write
+them out in each call that follows.  The password is throwaway, as the
+scratch store is:
+
+```
+printf 'keepass: %s\n\n' 'PASSWORD' | .claude/skills/provisioning-recipes/scripts/provision --config DIR --credentials "$DOMAIN"
+.claude/skills/provisioning-recipes/scripts/teardown --config DIR "$DOMAIN"
+```
+
+If `--fleet-cache` prints why it built nothing, run `scratch_config` again
+without it.  A pipe from `printf` or `echo` into a script is allowed, because
+Claude Code checks each command of a pipe on its own.  `--config` must come
+first, because a link passes every argument after it to its tool unread.  A
+`TROG_SETUP_TIMEOUT=3h` in front of `provision` is refused in the same way, so
+such a session builds with the default timeout.
+
 It takes the settings of the installation out of the `_global` of `_base` in
 its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
 `recipes.d/` empty, and builds a KeePass DB holding a made-up value for every

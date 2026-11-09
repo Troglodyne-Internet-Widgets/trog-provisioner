@@ -28,6 +28,7 @@ ask_guest - ask a live guest a question, rather than reasoning about it
 
     ask_guest vm.test 'postconf -h mydestination'
     ask_guest vm.test 'configd status postfix'
+    ask_guest --config /path/to/scratch vm.test 'ss -lnt'
 
 =head1 DESCRIPTION
 
@@ -43,7 +44,9 @@ Runs as root, because everything worth asking here is.
 exit main(@ARGV) unless caller;
 
 sub main {
-    my ( $domain, @command ) = @_;
+    my @args = @_;
+    Trog::Skill::Teardown::config_option( \@args );
+    my ( $domain, @command ) = @args;
     die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
     Trog::Skill::Teardown::require_config();
 

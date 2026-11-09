@@ -28,6 +28,7 @@ teardown - take the throwaway guest and the throwaway configuration back out aga
 
     teardown vm.test
     teardown --keep-config vm.test
+    teardown --config /path/to/scratch vm.test
 
 and for what a run that ended without one left behind, which is C<bin/destroy>'s:
 
@@ -101,6 +102,7 @@ our $MARKER = '.trog-scratch-config';
 
 sub main {
     my @args = @_;
+    config_option( \@args );
 
     my ( $keep_config, $keep_data, $hv_name, $hvconf, $dryrun, $help );
     GetOptionsFromArray(
@@ -165,6 +167,28 @@ sub destroy_guest {
 
 =head1 SUBROUTINES
 
+=head2 config_option(\@args)
+
+Takes C<--config DIR> or C<--config=DIR> off the front of @args, and puts DIR
+in C<TROG_PROVISIONER_CONFIG> for this process and every tool it runs.  So a
+caller that cannot set a variable, such as a Claude Code session, whose rules
+refuse a command that begins with one, can still name the configuration.  It
+must come before every other argument, because a wrapper passes the rest to its
+tool unread.  Without it, nothing changes.  Dies when it names no directory.
+
+=cut
+
+sub config_option {
+    my ($args) = @_;
+    return unless @$args && $args->[0] =~ m{\A --config (?: = (.*) )? \z}s;
+    my $dir = $1;
+    shift @$args;
+    $dir //= shift @$args;
+    die "--config needs the directory of a configuration.\n" unless defined $dir && length $dir;
+    $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    return $dir;
+}
+
 =head2 require_config()
 
 Returns the directory that C<TROG_PROVISIONER_CONFIG> names, and dies when it
@@ -182,7 +206,7 @@ sub require_config {
     return $dir if defined $dir && length $dir;
 
     die "TROG_PROVISIONER_CONFIG is not set, so this would use $Trog::Config::DIR.\n"
-      . "Set it to the directory that scratch_config made.  For a run against $Trog::Config::DIR, set it to that path.\n";
+      . "Set it, or pass --config first, to the directory that scratch_config made.  For a run against $Trog::Config::DIR, name that path.\n";
 }
 
 =head2 is_scratch()

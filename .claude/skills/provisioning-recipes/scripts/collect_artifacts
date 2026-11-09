@@ -40,6 +40,7 @@ collect_artifacts - pull the logs off a guest that say what its recipes actually
 
     collect_artifacts vm.test
     collect_artifacts --into /tmp/evidence vm.test
+    collect_artifacts --config /path/to/scratch vm.test
 
 =head1 DESCRIPTION
 
@@ -132,6 +133,7 @@ C<bin/destroy> finds a guest to destroy.
 
 sub main {
     my @args = @_;
+    Trog::Skill::Teardown::config_option( \@args );
 
     my ( $into, $user, $key, $host, $hv_name, $hvconf, $help );
     GetOptionsFromArray(

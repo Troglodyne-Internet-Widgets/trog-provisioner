@@ -75,6 +75,9 @@ subtest 'a file that the code reads at run time stands for what reads it' => sub
     my @example = $map->('hypervisors.conf.example');
     ok( ( grep { $_ eq 't/hypervisors.t' } @example ), 'and the example fleet, for the test that reads it' ) or diag "got: @example";
 
+    my @declared = $map->('clod.json');
+    ok( ( grep { $_ eq 't/clod-json.t' } @declared ), 'and the programs that the bot may run, for the test that checks each one' ) or diag "got: @declared";
+
     my @completion = $map->('completions/trog-provisioner.bash');
     ok( ( grep { $_ eq 't/bash-completion.t' } @completion ), 'and the bash completion, for the test that runs it in bash' ) or diag "got: @completion";
 };
