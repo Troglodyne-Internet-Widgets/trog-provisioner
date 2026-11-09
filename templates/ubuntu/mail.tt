@@ -55,7 +55,18 @@ install -m 0644 -o root -g root dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
 install -m 0644 -o root -g root dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
 # The accounts come from the recipe, so keep the salvaged passwd file as
 # passwd.old.  The data target restored the mailboxes before this target ran.
-# TODO make the old one take precedence via configuration
+[%# An address that the salvaged file holds and mail.names lacks has a mailbox
+    and cannot log in, and nothing used to say so.  Find them before the file
+    moves.  The first file is the new one, and its comment line puts a harmless
+    key in the table.  A run that stops here leaves the salvaged file where it
+    was, so the next run sees the same accounts. -%]
+: > unlisted_accounts
+! test -f /mail/[% domain %]/passwd || awk -F: 'NR == FNR { if ($$1 != "") seen[$$1] = 1; next } $$0 !~ /^[ \t]*#/ && $$1 != "" && !($$1 in seen) { print }' mailpasswd /mail/[% domain %]/passwd > unlisted_accounts
+[% IF unlisted_accounts == 'keep' -%]
+test ! -s unlisted_accounts || { echo "mail: [% domain %]: keeping the accounts that the salvaged passwd holds and mail.names does not list, because unlisted_accounts is keep:"; cut -d: -f1 unlisted_accounts | sed 's/^/mail:   /'; cat unlisted_accounts >> mailpasswd; }
+[% ELSE -%]
+test ! -s unlisted_accounts || { echo "mail: [% domain %]: the salvaged passwd holds accounts that mail.names does not list, and unlisted_accounts is refuse.  Add each to mail.names (bin/add_mail_user) or remove it (bin/remove_mail_user), then build again:"; cut -d: -f1 unlisted_accounts | sed 's/^/mail:   /'; exit 1; }
+[% END -%]
 test -f /mail/[% domain %]/passwd && mv /mail/[% domain %]/passwd /mail/[% domain %]/passwd.old; /bin/true
 sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
 mv mailpasswd /mail/[% domain %]/passwd

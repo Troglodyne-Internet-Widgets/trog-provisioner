@@ -19,7 +19,13 @@ use Test::MockModule qw{strict};
 
 use FindBin::libs;
 
+use File::Slurper();
+use File::Slurper::Temp();
+use File::Temp();
+use IPC::Run3();
+
 use Provisioner::Cookbook();
+use Provisioner::MailAccount();
 use Trog::Secrets();
 
 use Crypt::PK::RSA();
@@ -65,6 +71,80 @@ subtest 'the catchall is an account of the domain it catches for' => sub {
 
     my ($someuser) = grep { /^someuser\@/ } split /\n/, $passwd;
     like( ( split /:/, $someuser // q{} )[1], qr/\A\{ARGON2ID\}\$argon2id\$/, 'an account with a password gets the Argon2id hash of it, which dovecot reads' );
+};
+
+# bin/add_mail_user writes a line to a running guest, and a build writes the same
+# account from the template.  Both must make the same line, or a rebuild would
+# change an account that a tool made.
+subtest 'the template renders the line that the tools write' => sub {
+
+    # A recipe remembers the options it validated, so each render needs its own.
+    my $fresh = sub {
+        return Provisioner::Cookbook->load( 'mail', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => '/nonexistent', distro => 'ubuntu' );
+    };
+
+    my $gecos  = 'Some & User';
+    my $passwd = $fresh->()->render_file( 'files/mail.passwd.tt', %BASE, names => { someuser => { password => 'x', gecos => $gecos } } );
+    my ($line) = grep { /^someuser\@/ } split /\n/, $passwd;
+
+    my $hash = ( split /:/, $line // q{} )[1];
+    is(
+        $line,
+        Provisioner::MailAccount::passwd_line( domain => $BASE{domain}, name => 'someuser', gecos => $gecos, hash => $hash ),
+        'the same bytes, with an ampersand in the gecos that the template does not escape'
+    );
+    my $names = sub { my %names = @_; return $fresh->()->enrich( $fresh->()->validate( %BASE, names => \%names ) ) };
+    like( exception { $names->( 'some:one' => { password => 'x', gecos => 'x' } ) },    qr/not[ ]'some:one'/,     'a name that the file cannot hold stops the build, since the template would only warn' );
+    like( exception { $names->( someone    => { password => 'x', gecos => 'x:y' } ) },  qr{/names/someone/gecos}, 'and so does a gecos with a colon' );
+    like( exception { $names->( someone    => { password => 'x', gecos => "x\ny" } ) }, qr{/names/someone/gecos}, 'or a line break' );
+};
+
+subtest 'an account that only the salvaged passwd-file holds is refused, or kept, and named' => sub {
+    my %names = ( names => { someuser => { password => 'x', gecos => 'Some User' } }, script_dir => '/nonexistent', install_dir => '/nonexistent' );
+
+    my %default = $recipe->enrich( $recipe->validate( %BASE, %names ) );
+    is( $default{unlisted_accounts}, 'refuse', 'a build refuses by default' );
+    like( exception { $recipe->validate( %BASE, %names, unlisted_accounts => 'ignore' ) }, qr{/unlisted_accounts}, 'and nothing else is a choice' );
+
+    # Run what make would hand the shell, in a scratch directory: a new passwd
+    # file in the working directory, and a salvaged one with a stray account.
+    my $build = sub {
+        my (%opts) = @_;
+
+        my $dir = File::Temp::tempdir( CLEANUP => 1 );
+        mkdir "$dir/mail" or die "mkdir: $!";
+        File::Slurper::Temp::write_text( "$dir/mailpasswd",  "# new\nsomeuser\@mail.test.test:H:1:1:Some:/h:/s\ncatchall\@mail.test.test:::::/h:/s\n" );
+        File::Slurper::Temp::write_text( "$dir/mail/passwd", "# old\nsomeuser\@mail.test.test:OLD:1:1:Some:/h:/s\nstray\@mail.test.test:S:1:1:Stray:/h:/s\n" );
+
+        my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, %names, %opts ) ) );
+        my $salvaged = qr{\bmv\b[ ]/mail/mail[.]test[.]test/passwd};
+        my @lines    = grep { m/unlisted_accounts|$salvaged/ && !m/\A\#/ } split m/\n/, $fragment;
+        s/\$\$/\$/g                             for @lines;
+        s{/mail/mail[.]test[.]test}{$dir/mail}g for @lines;
+
+        my ( $out, $status ) = ( q{}, 0 );
+        foreach my $line (@lines) {
+            my $got;
+            IPC::Run3::run3( [ 'bash', '-c', "cd '$dir' && ( $line )" ], \undef, \$got, \$got );
+            $out .= $got;
+            $status = $? >> 8;
+            last if $status;
+        }
+        return ( $out, $status, File::Slurper::read_text("$dir/mailpasswd"), -e "$dir/mail/passwd" ? 1 : 0 );
+    };
+
+    my ( $said, $status, $new, $still_there ) = $build->();
+    isnt( $status, 0, 'under refuse, the build stops' );
+    like( $said, qr/stray\@mail[.]test[.]test/, 'and the log names the address that only the salvaged file holds' );
+    unlike( $said, qr/someuser\@/, 'and not the one that mail.names lists' );
+    unlike( $new,  qr/stray/,      'the new file did not take it' );
+    is( $still_there, 1, 'and the salvaged file is where it was, so the next run finds the same account' );
+
+    ( $said, $status, $new, $still_there ) = $build->( unlisted_accounts => 'keep' );
+    is( $status, 0, 'under keep, the build goes on' );
+    like( $said, qr/stray\@mail[.]test[.]test/,                'and the log names the address' );
+    like( $new,  qr/^stray\@mail[.]test[.]test:S:1:1:Stray:/m, 'and the new file holds its line, hash and all' );
+    is( $still_there, 0, 'and the salvaged file moved aside' );
 };
 
 subtest 'a relay that is a mail relay of this installation takes every sender, with a login' => sub {

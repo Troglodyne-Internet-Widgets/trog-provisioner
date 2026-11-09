@@ -1,0 +1,152 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::add_mail_user;
+
+#ABSTRACT: Add a mail account to a guest that is running, and to its configuration.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+use Provisioner::MailAccount();
+use Trog::Config();
+use Trog::Credentials();
+
+=head1 USAGE
+
+    add_mail_user [--credentials] [--stdin] [--gecos TEXT] [--mailbox NAME ...] [--secrets FILE] DOMAIN NAME
+
+Adds C<NAME@DOMAIN> to the guest of C<DOMAIN>, while the guest runs, and to the
+configuration, so that a rebuild makes the same account.
+
+=head1 DESCRIPTION
+
+Without this tool, a new address on a production site needs a password in the
+secret store, an entry under C<mail.names> in F<recipes.d/DOMAIN.yaml>, and a
+rebuild of the guest.  This does the first two and puts the account on the
+running guest instead of the rebuild.  In order, it:
+
+=over 4
+
+=item 1. Asks for the password, two times, with no echo.
+
+=item 2. Refuses if the account is already in C<mail.names> or in
+F</mail/DOMAIN/passwd> on the guest.  Nothing has changed at that point.
+
+=item 3. Stores the password as C<secret:mail/DOMAIN-NAME/password>, as
+C<bin/add_secret> would.
+
+=item 4. Adds the line to F</mail/DOMAIN/passwd> on the guest, with the same
+Argon2id hash that F<templates/ubuntu/mail.tt> renders.  It writes a temporary
+file and renames it, and dovecot needs no restart.  Then it makes the mailboxes
+with C<doveadm mailbox create>.
+
+=item 5. Adds the account to F<recipes.d/DOMAIN.yaml>, with the C<secret:>
+reference.
+
+=back
+
+The configuration comes last.  If a step on the guest fails, the configuration
+is as it was, and you can run the tool again.
+
+If F<recipes.yaml> holds C<mail.names> of the domain, the tool stops at the last
+step, because a value there wins over F<recipes.d>.  Add the account there.
+
+=head2 OPTIONS
+
+=over 4
+
+=item C<--gecos TEXT>
+
+The full name of the account.  It defaults to the name.  It cannot hold a colon.
+
+=item C<--mailbox NAME>
+
+A mailbox to make besides C<INBOX>, for example C<INBOX.Archive>.  Give it more
+than once for more mailboxes.  The account keeps them in C<mailboxes>.
+
+=item C<--credentials>
+
+Read a block of C<name: value> lines from standard input first, as
+C<bin/provision --credentials> does, for the passphrase of the store and the
+sudo password on the hypervisor.  See L<Trog::Credentials>.
+
+=item C<--stdin>
+
+Read the password from the next line of standard input and not at the terminal.
+Use it with C<--credentials>, whose block ends at a blank line:
+
+    printf 'keepass: %s\n\n%s\n' "$STORE_PASS" "$NEW_PASS" | bin/add_mail_user --credentials --stdin DOMAIN NAME
+
+A person at a terminal does not need either.
+
+=item C<--secrets FILE>
+
+The secret store.  It defaults to F<secrets.kdbx> in the configuration directory.
+
+=back
+
+See also C<bin/reset_mail_password> and C<bin/remove_mail_user>.
+
+=head1 SUBROUTINES
+
+=head2 $rc = main(@args)
+
+Adds the account.  Returns 0, or 2 for a usage error.  Dies with the reason if it
+refuses.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ( $gecos, @mailboxes, $store, $credentials, $stdin, $help );
+    GetOptionsFromArray(
+        \@args,
+        'gecos=s'     => \$gecos,
+        'mailbox=s'   => \@mailboxes,
+        'secrets=s'   => \$store,
+        'credentials' => \$credentials,
+        'stdin'       => \$stdin,
+        'help'        => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Need a domain and a name' ) unless @args == 2;
+
+    my ( $domain, $name ) = @args;
+
+    # Before the password, so that the block that holds the passphrase is read
+    # ahead of the line that holds the password.
+    Trog::Credentials->load() if $credentials;
+
+    # Refuse the account the configuration has before asking for a password,
+    # so that nobody types two answers for nothing.  add checks the guest too.
+    my $address = Provisioner::MailAccount::address( $domain, $name );
+    die "$address is already in the configuration of $domain, under mail.names.\n" if exists Provisioner::MailAccount::configured_accounts($domain)->{$name};
+
+    my $password = Provisioner::MailAccount::ask_password( $address, stdin => $stdin );
+
+    Provisioner::MailAccount::add(
+        domain    => $domain,
+        name      => $name,
+        gecos     => $gecos,
+        mailboxes => \@mailboxes,
+        password  => $password,
+        secrets   => $store // Trog::Config->path('secrets.kdbx'),
+    );
+
+    print "Added $name\@$domain to the guest, to the secret store and to recipes.d/$domain.yaml\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

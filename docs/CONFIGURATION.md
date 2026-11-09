@@ -302,6 +302,32 @@ the root group whatever its reference said. Run it once after upgrading, with
 new code does not look, and a reference that resolves to nothing is one that
 `bin/new_config` generates a fresh value for.
 
+### Mail accounts of a running guest
+
+The `mail` recipe makes its accounts from `mail.names`. Three tools change an
+account while the guest runs, and change the configuration with it, so that the
+next build makes the same account:
+
+    bin/add_mail_user DOMAIN NAME [--gecos TEXT] [--mailbox NAME ...]
+    bin/reset_mail_password DOMAIN NAME [--kick]
+    bin/remove_mail_user DOMAIN NAME [--kick]
+
+Each asks for the password with no echo. Each opens the secret store, so each
+reads the passphrase and the sudo password the way `bin/provision` does, and
+takes `--credentials` for a run with nobody at the terminal.
+
+`add_mail_user` stores the password as `secret:mail/DOMAIN-NAME/password`,
+adds the account to `recipes.d/DOMAIN.yaml` with that reference, and adds the
+line to `/mail/DOMAIN/passwd` on the guest. `reset_mail_password` replaces the
+value in the store and the hash in the one line. The tools refuse an account
+that is in the wrong state for the job, before they change anything. They cannot
+change an account that `recipes.yaml` holds, because `recipes.d` does not
+override it. Change it there.
+
+A build refuses an account that the salvaged `passwd` holds and `mail.names`
+lacks. `mail.unlisted_accounts: keep` copies it instead. `bin/recipes mail`
+shows the option, and `perldoc Provisioner::Recipe::mail` explains both.
+
 ## `_global`
 
 Variables every recipe's templates for that domain can see.

@@ -126,6 +126,24 @@ subtest 'replace() sets what it names and leaves the rest of the store alone' =>
     is( Trog::Secrets->replace( $file, $pass ), 0, 'nothing asked for is nothing done' );
 };
 
+subtest 'put() adds, keeps, refuses and replaces, and says which' => sub {
+    my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
+    Trog::Secrets->create( $file, 'pw', 'secret:seed/entry/password' => 'already here' );
+    my $ref = 'secret:g/t/password';
+    my $got = sub { my %f = Trog::Secrets->lookup( $file, 'pw', probe => $ref ); return $f{probe} };
+
+    is( Trog::Secrets->put( $file, 'pw', ref => $ref, value => 'one' ),                 'added',    'a reference that was not there is added' );
+    is( $got->(),                                                                       'one',      'and the store holds it' );
+    is( Trog::Secrets->put( $file, 'pw', ref => $ref, value => 'one' ),                 'same',     'the same value is no change' );
+    is( Trog::Secrets->put( $file, 'pw', ref => $ref, value => 'two' ),                 'refused',  'another value is refused without overwrite' );
+    is( $got->(),                                                                       'one',      'and the store still holds the first' );
+    is( Trog::Secrets->put( $file, 'pw', ref => $ref, value => 'two', overwrite => 1 ), 'replaced', 'and replaced with it' );
+    is( $got->(),                                                                       'two',      'and the store holds the new value' );
+
+    my %seed = Trog::Secrets->lookup( $file, 'pw', probe => 'secret:seed/entry/password' );
+    is( $seed{probe}, 'already here', 'without a change to another secret' );
+};
+
 subtest 'lookup() says which part it could not find' => sub {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     Trog::Secrets->create( $file, 'hunter2', 'secret:a/b/password' => 'the password' );

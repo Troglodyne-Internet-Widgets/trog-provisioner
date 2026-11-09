@@ -157,6 +157,28 @@ sub store_password {
     return $class->prompt( $STORE_PROMPT, 'keepass', %opts );
 }
 
+=head2 typed_twice($message, $what)
+
+Asks at the terminal, F</dev/tty>, for a value that nobody can check by eye,
+two times, and returns it.  C<$message> is the first question.  Dies if the two
+answers differ, saying that nothing was stored for C<$what>.  Standard input
+stays free for the caller.  Dies if there is no terminal.
+
+This is the prompt of C<bin/add_secret --prompt> and of the mail account tools.
+It shows a C<*> for each character, as every other prompt here does.
+
+=cut
+
+sub typed_twice {
+    my ( $class, $message, $what ) = @_;
+
+    my $first = $class->prompt( $message,          undef, terminal => 1 );
+    my $again = $class->prompt( 'The same again:', undef, terminal => 1 );
+    die "The two values typed for $what differ, so nothing was stored.\n" unless $first eq $again;
+
+    return $first;
+}
+
 =head2 remember($name, $value)
 
 Keeps a credential that a person typed, so that the rest of the run does not
