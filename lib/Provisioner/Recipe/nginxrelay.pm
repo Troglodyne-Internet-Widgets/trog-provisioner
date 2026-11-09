@@ -84,7 +84,11 @@ media name as the C<Host>.
 =item * caches each file in slices of one megabyte, so a reader who seeks in a
 video makes it fetch one slice.  The cache is in
 F</var/cache/nginx/nginxrelay-media>, at most C<media_cache_size>, and it keeps a
-file for C<media_cache_valid>, whatever the guest says.
+file for C<media_cache_valid>, whatever the guest says.  nginx removes the
+least recently used files when the cache is larger than that.  It does so
+lazily, so the cache can go over the limit for a short time.  The caches are on
+the root disk, so nginx also removes files when that disk has less than
+C<cache_min_free> free.
 
 =item * drops the C<Cookie> of the reader and the C<Set-Cookie> of the guest,
 so every reader gets the same file.
@@ -189,6 +193,12 @@ sub args {
                 pattern     => '^[1-9][0-9]*[mhd]$',
                 default     => '7d',
                 description => 'How long the cache of the media names keeps a file, in the units of nginx, such as 12h or 30d.  See "Media names".',
+            },
+            cache_min_free => {
+                type        => 'string',
+                pattern     => '^(0|[1-9][0-9]*[kmg])$',
+                default     => '2g',
+                description => 'The free space to leave on the disk of the caches, in the units of nginx.  Below it, nginx removes the least recently used files of both caches, whatever their sizes say.  0 turns it off.  See "Media names".',
             },
             page_cache_size => {
                 type        => 'string',
