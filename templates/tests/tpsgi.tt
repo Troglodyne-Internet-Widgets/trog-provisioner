@@ -14,15 +14,16 @@ is($status, 'active', 'tpsgi service is running');
 my $sock = '[% install_dir %]/[% domain %]/run/tpsgi.sock';
 ok(-S $sock, 'the application socket is there') or diag "no socket at $sock";
 
-# git checks the checkout out as root.  The service reads it as [% user %], and
-# nginx reads www and run through the www-data group.
+# The service user and its login group own the checkout, and nginx reads www
+# and run through the www-data group.  See Provisioner::Recipe::tpsgi.
+my $group = getgrgid( ( getpwnam('[% user %]') )[3] // -1 ) // '';
 my %owner = (
-    '.git'       => '[% user %]:[% admin_user %]',
-    'bin'        => '[% user %]:[% admin_user %]',
-    '.tpsgi.ini' => '[% user %]:[% admin_user %]',
+    '.git'       => "[% user %]:$group",
+    'bin'        => "[% user %]:$group",
+    '.tpsgi.ini' => "[% user %]:$group",
     'www'        => '[% user %]:www-data',
     'run'        => '[% user %]:www-data',
-    'log'        => '[% user %]:[% admin_user %]',
+    'log'        => "[% user %]:$group",
 );
 foreach my $name (sort keys %owner) {
     my @st = stat "[% install_dir %]/[% domain %]/$name";
