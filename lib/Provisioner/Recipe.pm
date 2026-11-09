@@ -14,6 +14,9 @@ use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
 use Scalar::Util();
 use Socket();
+use Cwd();
+use File::Basename();
+use File::Spec();
 use File::Copy();
 use File::Slurper::Temp();
 
@@ -242,10 +245,42 @@ sub recipe_name {
     return $name;
 }
 
+=head3 %cache = $class->xslate_cache(%opts)
+
+The renderer options that say where it keeps compiled templates, as a list to
+put into the arguments of C<< Text::Xslate->new >>.  C<bin/new_config> and
+C<bin/ipmap2zones> use it too, so all three agree.
+
+Xslate decides that a compiled template is stale only from the modification
+time of the file, at one-second granularity.  With its default directory in
+the home of the user, a template that changed in the same second as its
+compile is not seen, and every checkout of every user shares the one
+directory.  So the directory is C<.xslate_cache> at the root of the checkout,
+found from the location of this file and not from the current directory.  Git
+ignores it.
+
+C<cache_dir> in C<%opts> names another directory.  C<cache> set to a false
+value turns the cache off, so every render reads the file as it is on disk.
+If C<cache> is absent, the cache is off when C<HARNESS_ACTIVE> is set, which
+C<prove> does for every test, and on otherwise.  A test that wants the cache
+passes C<< cache => 1 >>.
+
+=cut
+
+sub xslate_cache ( $, %opts ) {
+    my $on = $opts{cache} // ( $ENV{HARNESS_ACTIVE} ? 0 : 1 );
+    return ( cache => 0 ) unless $on;
+
+    my $root = File::Spec->catdir( File::Basename::dirname( Cwd::abs_path(__FILE__) ), File::Spec->updir, File::Spec->updir );
+    return ( cache => 1, cache_dir => $opts{cache_dir} // File::Spec->catdir( Cwd::abs_path($root), '.xslate_cache' ) );
+}
+
 =head3 $recipe = $class->new(%opts)
 
 Creates a recipe instance.  C<template_dirs> in C<%opts> is the list of
-directories that the renderer searches for templates.
+directories that the renderer searches for templates.  C<cache> and
+C<cache_dir> say where the renderer keeps compiled templates, see
+C<xslate_cache>.
 
 Dies if the class name is not a recipe name, or if the renderer does not start.
 
@@ -266,6 +301,7 @@ sub new {
             syntax   => 'TTerse',
             module   => [qw{Text::Xslate::Bridge::TT2}],
             function => { $class->formatters() },
+            $class->xslate_cache(%opts),
         }
     ) || die "Could not initialize template dir";
 

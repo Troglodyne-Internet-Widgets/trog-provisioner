@@ -20,6 +20,7 @@ use Net::IP;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Provisioner::Cookbook();
+use Provisioner::Recipe();
 use Trog::Config();
 use Provisioner::IPPool();
 use File::Slurper::Temp;
@@ -95,9 +96,10 @@ sub main {
     my $template_dir = "$FindBin::Bin/../templates";
     my $tt           = Text::Xslate->new(
         {
-            path     => [$template_dir],
-            syntax   => 'TTerse',
-            module   => [qw{Text::Xslate::Bridge::TT2}],
+            path   => [$template_dir],
+            syntax => 'TTerse',
+            module => [qw{Text::Xslate::Bridge::TT2}],
+            Provisioner::Recipe->xslate_cache(),
             function => {
                 reverse_ip => Text::Xslate::html_builder(
                     sub {

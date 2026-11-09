@@ -20,6 +20,8 @@ pm_to_blib
 blib/
 cover_db/
 .build
+# Compiled templates of Xslate, see Provisioner::Recipe::xslate_cache.
+.xslate_cache/
 # What `dzil build` leaves at the root: the dist named in dist.ini, at its
 # version, as a directory and as a tarball.  Anchored and version-shaped rather
 # than a bare Provisioner-Recipe-* glob, which matches at any depth and so also
