@@ -17,7 +17,7 @@ map $host $relay_media {
     include /etc/nginx/nginxrelay.d/*.media.map;
 }
 
-proxy_cache_path /var/cache/nginx/nginxrelay-media levels=1:2 keys_zone=nginxrelay_media:10m max_size=[% media_cache_size %] inactive=[% media_cache_valid %] use_temp_path=off;
+proxy_cache_path /var/cache/nginx/nginxrelay-media levels=1:2 keys_zone=nginxrelay_media:10m max_size=[% media_cache_size %] inactive=[% media_cache_valid %][% IF cache_min_free != '0' %] min_free=[% cache_min_free %][% END %] use_temp_path=off;
 
 [%# The origin of each page name, which this guest serves and caches as a
     reader sees it.  The "Page names" section of
@@ -26,7 +26,7 @@ map $host $relay_page {
     include /etc/nginx/nginxrelay.d/*.page.map;
 }
 
-proxy_cache_path /var/cache/nginx/nginxrelay-pages levels=1:2 keys_zone=nginxrelay_pages:10m max_size=[% page_cache_size %] inactive=1d use_temp_path=off;
+proxy_cache_path /var/cache/nginx/nginxrelay-pages levels=1:2 keys_zone=nginxrelay_pages:10m max_size=[% page_cache_size %] inactive=1d[% IF cache_min_free != '0' %] min_free=[% cache_min_free %][% END %] use_temp_path=off;
 
 server {
     listen 80 default_server;
