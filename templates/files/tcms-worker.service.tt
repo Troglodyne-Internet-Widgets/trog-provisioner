@@ -16,7 +16,9 @@ Environment=HOME=[% home %]
 Environment=PATH=/opt/perl5/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/perl5/current/bin/perl bin/tcms-jobs minion worker -j [% worker_jobs %]
 # On TERM the worker takes no new job and stops when its jobs finish.  A
-# transcode can run for hours, and a job that is killed fails.
+# transcode can run for hours, and a job that is killed fails.  mixed sends the
+# TERM to the worker alone, where the default sends it to every job.
+KillMode=mixed
 TimeoutStopSec=300
 Restart=on-failure
 RestartSec=10

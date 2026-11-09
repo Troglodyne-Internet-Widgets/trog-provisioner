@@ -426,8 +426,10 @@ C<nginxproxy>, which serves the socket.  C<claude>, which installs the program
 that does the work, and makes the C<agent_user> as its C<restricted_user>.
 C<servicesudo>, which lets the service user restart both units, and ask for
 their status, with sudo, as
-L<Provisioner::Recipe::servicesudo/unit_commands> says.  So the dashboard can
-restart the bot after an update.  It also lets the service user run the
+L<Provisioner::Recipe::servicesudo/unit_commands> says.  It also lets the
+service user run C</usr/bin/systemctl restart --no-block> for each unit, which
+is how the dashboard restarts the bot after an update.  The update runs in the
+worker, so a restart of the worker that waited would wait for itself.  It also lets the service user run the
 installer of L</THE SYSTEM PACKAGES> with any arguments.
 
 =cut
@@ -451,7 +453,8 @@ sub required_recipes {
         nginxproxy  => sub { return ( proxy_uri => 'run/clod.sock' ) },
         servicesudo => sub {
             my (%opts) = @_;
-            return ( commands => [ Provisioner::Recipe::servicesudo::unit_commands( "clod-$opts{domain}.service", "clod-worker-$opts{domain}.service" ), $INSTALLER ] );
+            my @units = ( "clod-$opts{domain}.service", "clod-worker-$opts{domain}.service" );
+            return ( commands => [ Provisioner::Recipe::servicesudo::unit_commands(@units), ( map { "/usr/bin/systemctl restart --no-block $_" } @units ), $INSTALLER ] );
         },
         claude => sub {
             my (%opts) = @_;
