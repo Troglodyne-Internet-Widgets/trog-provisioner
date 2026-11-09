@@ -20,6 +20,7 @@ use Dist::Conformance::Check::SystemPackages();
 use Dist::Conformance::Snapshot();
 use Dist::Conformance::Snapshot::Tree();
 
+use Provisioner::Recipe::servicesudo();
 use Provisioner::Utils();
 
 # One copy for args, deps and fetch_hosts.
@@ -128,7 +129,15 @@ failure.
 The unit starts after the service of tPSGI, which is named for the domain.  The
 worker saves the posts that it transcodes, so it needs the checkout in place,
 and it is useful only while tCMS serves.  The guest test asks systemd whether
-the unit is active, and whether C<ffmpeg> runs.  C<ffmpeg> is one of the system
+the unit is active, and whether C<ffmpeg> runs.
+
+The recipe requires C<servicesudo>, so that the service user can restart the
+unit with sudo and ask for its status.  tCMS updates its own checkout from a
+job of this worker, and the worker must then restart to load the new code.  So
+it also gets C<systemctl restart --no-block> for the unit.  The stop of the
+worker waits for its jobs, and a restart that waited for the stop would wait
+for itself.  tpsgi grants the same for F<$domain.service>, and the two lists
+of commands add up.  C<ffmpeg> is one of the system
 packages that tCMS declares, below, and this recipe names no package for it.
 
 =head2 THE SYSTEM PACKAGES
@@ -274,6 +283,11 @@ sub required_recipes {
                     { dzil => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
                 ],
             );
+        },
+        servicesudo => sub {
+            my (%sudo_opts) = @_;
+            my $worker = "tcms-worker-$sudo_opts{domain}.service";
+            return ( commands => [ Provisioner::Recipe::servicesudo::unit_commands($worker), "/usr/bin/systemctl restart --no-block $worker" ] );
         },
         tpsgi => sub {
             return (

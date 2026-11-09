@@ -90,6 +90,13 @@ chomp $worker;
 is($worker, 'active', 'the tCMS job worker is active') or diag `journalctl -u 'tcms-worker-[% domain %].service' -n 20 --no-pager 2>&1`;
 my $ffmpeg = `ffmpeg -version 2>&1`;
 is($? >> 8, 0, 'ffmpeg, which the worker transcodes with, runs') or diag $ffmpeg;
+[% IF user != admin_user -%]
+
+# tCMS restarts its worker from a job of that worker, after it updates its
+# checkout.  THE JOB WORKER in Provisioner::Recipe::tcms.
+system('runuser', '-u', '[% user %]', '--', 'sudo', '-n', '-l', '/usr/bin/systemctl', 'restart', '--no-block', 'tcms-worker-[% domain %].service');
+is($? >> 8, 0, '[% user %] may restart the job worker with sudo, without waiting');
+[% END -%]
 
 # git refuses to work in a checkout that another account owns, and the service
 # user is not the admin.
