@@ -43,6 +43,11 @@ PROVISIONING ACCOUNT>.
 L<Provisioner::Packager::Deb> reads with C<gpg --show-keys> when the runner
 generates a configuration.  C<bin/preflight> fails without it.
 
+=item * C<bubblewrap> for the sandbox that F<rsyncd_sandbox> runs the rsync
+daemon of each guest's key in.  On Ubuntu 24.04 and later, its AppArmor profile
+is what allows the user namespace.  Without it, C<bin/preflight> fails and
+C<bin/provision> refuses to authorize the key of a guest.
+
 =back
 
 C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
@@ -64,6 +69,7 @@ sub deps {
       libsqlite3-dev
       acl
       gpg
+      bubblewrap
     };
 }
 

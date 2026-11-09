@@ -528,6 +528,10 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     $hv->redefine( iso_maker => sub { die "none\n" } );
     $hv->redefine( vmm       => sub { die "no\n" } );
 
+    # The count is of the failures above, whether or not this machine has bwrap.
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( sandbox_error => sub { undef } );
+
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
 

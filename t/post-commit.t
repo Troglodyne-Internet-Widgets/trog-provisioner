@@ -21,7 +21,6 @@ with a fake tests-covering first on PATH that records each call.
 use Test::More;
 use List::Util  qw{any};
 use File::Temp  qw{tempdir};
-use File::Copy  qw{copy};
 use Time::HiRes qw{sleep time};
 use File::Slurper();
 use File::Slurper::Temp();
@@ -37,7 +36,12 @@ mkdir $repo        or die "Cannot make $repo: $!";
 mkdir "$dir/bin"   or die "Cannot make $dir/bin: $!";
 mkdir "$dir/hooks" or die "Cannot make $dir/hooks: $!";
 
-copy( "$FindBin::Bin/../git-hooks/post-commit", "$dir/hooks/post-commit" ) or die "Cannot copy the hook: $!";
+# The hook puts the bin of the built perl first on PATH, and a tests-covering
+# installed there would run in place of the fake below.  So the copy names this
+# bin in its place.
+my $hook = File::Slurper::read_text("$FindBin::Bin/../git-hooks/post-commit");
+$hook =~ s{/opt/perl5/current/bin}{$dir/bin}g or die "The hook no longer names /opt/perl5/current/bin";
+File::Slurper::Temp::write_text( "$dir/hooks/post-commit", $hook );
 chmod 0755, "$dir/hooks/post-commit";
 
 # Records the commit it was run for, so a case can wait for the call it expects.
