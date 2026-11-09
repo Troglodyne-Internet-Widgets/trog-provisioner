@@ -498,6 +498,7 @@ subtest 'every rsync of a payload names the machine holding it' => sub {
             # a bare Xslate cannot render the ones using TT2 vmethods.
             my $xslate = Text::Xslate->new(
                 path     => \@template_dirs,
+                cache    => 0,
                 syntax   => 'TTerse',
                 module   => [qw{Text::Xslate::Bridge::TT2}],
                 function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
@@ -1150,6 +1151,7 @@ subtest 'no template comment leaves a quote open' => sub {
 subtest 'every guest test renders to a Perl script that says something' => sub {
     my $xslate = Text::Xslate->new(
         path     => \@template_dirs,
+        cache    => 0,
         syntax   => 'TTerse',
         module   => [qw{Text::Xslate::Bridge::TT2}],
         function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
@@ -1812,6 +1814,7 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # running, and the fragment they are in is a template.
     my $setup = Text::Xslate->new(
         path   => \@template_dirs,
+        cache  => 0,
         syntax => 'TTerse',
         module => [qw{Text::Xslate::Bridge::TT2}],
     )->render(

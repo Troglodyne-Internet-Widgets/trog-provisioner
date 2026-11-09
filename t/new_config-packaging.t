@@ -79,6 +79,7 @@ subtest "the Makefile moves the scripts into place" => sub {
     # Configured the way new_config configures it; a bare Xslate has no tabinate.
     my $xslate = Text::Xslate->new(
         path     => ["$FindBin::Bin/../templates"],
+        cache    => 0,
         syntax   => 'TTerse',
         function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
     );

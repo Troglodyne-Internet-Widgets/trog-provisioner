@@ -33,6 +33,7 @@ use FindBin::libs;
 # one formatter.
 my $tt = Text::Xslate->new(
     path     => ["$FindBin::Bin/../templates"],
+    cache    => 0,
     syntax   => 'TTerse',
     module   => [qw{Text::Xslate::Bridge::TT2}],
     function => {

@@ -19,6 +19,10 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use File::Temp qw{tempdir};
+use Cwd();
+use File::Spec();
+use FindBin();
+use Time::HiRes();
 use Test::More;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
@@ -88,6 +92,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
             tt              => Text::Xslate->new(
                 {
                     path   => [$tdir],
+                    cache  => 0,
                     syntax => 'TTerse',
                     module => ['Text::Xslate::Bridge::TT2'],
                 }
@@ -647,6 +652,61 @@ subtest 'secrets_in finds each value that the schema marks, wherever it is' => s
     # wants a string is what validate refuses, not a secret.
     is_deeply( [ Test::Recipe::Secrets->secrets_in( { token => q{}, from => [ { key => undef } ], users => { someone => { password => ['x'] } } } ) ], [], 'an empty, undefined or structured value is not a secret' );
     is_deeply( [ Test::Recipe::Secrets->secrets_in( { bogus => { token => 'SeCrEt' } } ) ], [], 'nor is a value where the schema declares nothing' );
+};
+
+# Xslate decides that a compiled template is stale from its modification time
+# at one-second granularity.  A template rewritten inside the second of its
+# compile, as a stash and a pop do, then renders as the old text.  A test must
+# render the file as it is on disk.
+subtest 'a template rewritten in the same second renders as it is on disk' => sub {
+    my $tdir  = tempdir( CLEANUP => 1 );
+    my $file  = "$tdir/same.tt";
+    my $mtime = int( Time::HiRes::time() ) - 100;
+
+    my $write = sub ($text) {
+        open my $fh, '>', $file or die $!;
+        print {$fh} $text;
+        close($fh)                     or die "Could not close $file: $!";
+        utime( $mtime, $mtime, $file ) or die "Could not set the time of $file: $!";
+    };
+
+    # A new object each time, as a new process would be, with the default options.
+    my $render = sub {
+        return Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new( template_dirs => [$tdir] )->{tt}->render('same.tt');
+    };
+
+    $write->("old\n");
+    is( $render->(), "old\n", 'the first render shows the first text' );
+    $write->("new\n");
+    is( $render->(), "new\n", 'the render after a rewrite with the same time shows the new text' );
+};
+
+subtest 'the compiled templates are kept in the checkout, and not in the home of the user' => sub {
+    my $root   = Cwd::abs_path( File::Spec->catdir( $FindBin::Bin, File::Spec->updir ) );
+    my $home   = ( $ENV{HOME} // q{} ) . '/.xslate_cache';
+    my $before = -d $home ? scalar( () = glob("$home/*") ) : 0;
+
+    {
+        local $ENV{HARNESS_ACTIVE};
+        my %got = Provisioner::Recipe->xslate_cache();
+        is( $got{cache_dir}, "$root/.xslate_cache", 'the default directory is at the root of the checkout' );
+        ok( $got{cache}, 'and the cache is on outside a test harness' );
+    }
+
+    my %off = Provisioner::Recipe->xslate_cache();
+    is_deeply( \%off, { cache => 0 }, 'the cache is off under a test harness' );
+    my %own = Provisioner::Recipe->xslate_cache( cache => 1, cache_dir => '/x' );
+    is_deeply( \%own, { cache => 1, cache_dir => '/x' }, 'the caller can ask for the cache and name its directory' );
+    my %none = Provisioner::Recipe->xslate_cache( cache => 0 );
+    is_deeply( \%none, { cache => 0 }, 'and can turn it off' );
+
+    my $tdir = tempdir( CLEANUP => 1 );
+    open my $fh, '>', "$tdir/c.tt" or die $!;
+    print {$fh} "c\n";
+    close($fh) or die "Could not close $tdir/c.tt: $!";
+    Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new( template_dirs => [$tdir], cache => 1 )->{tt}->render('c.tt');
+    ok( -d "$root/.xslate_cache", 'a recipe with the default options creates the directory in the checkout' );
+    is( ( -d $home ? scalar( () = glob("$home/*") ) : 0 ), $before, 'and adds nothing to the home of the user' );
 };
 
 done_testing();

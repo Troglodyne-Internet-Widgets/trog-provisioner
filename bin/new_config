@@ -941,6 +941,7 @@ sub handle_domain {
             syntax   => 'TTerse',
             module   => [qw{Text::Xslate::Bridge::TT2}],
             function => \%formatters,
+            Provisioner::Recipe->xslate_cache(),
         }
     ) || die "Could not initialize template dir";
 
@@ -1621,7 +1622,7 @@ sub write_rsyncd_conf {
     my ( $part, $binds ) = ( q{}, q{} );
     foreach my $name ( sort keys %modules ) {
         die "'$name' is not a name for an rsync module\n" unless $name =~ m/\A\w+\z/;
-        die "The path of the rsync module $name has a line break in it\n" if $modules{$name} =~ m/\n/;
+        die "The path of the rsync module $name has a line break in it\n" if index( $modules{$name}, "\n" ) >= 0;
 
         $part .= "[$name.$fqdn]\npath = $modules{$name}\n";
         if ( $name eq 'payload' ) {
