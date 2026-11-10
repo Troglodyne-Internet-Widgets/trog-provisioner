@@ -1634,6 +1634,10 @@ sub write_rsyncd_conf {
     }
 
     make_path("$machine_dir/rsyncd.d");
+
+    # The transfer account reads these through the group: see Trog::Local/THE
+    # KEYS OF GUESTS.  They hold paths, and nothing secret.
+    local $File::Slurper::Temp::FILE_TEMP_PERMS = oct('0640');
     File::Slurper::Temp::write_text( "$machine_dir/rsyncd.d/$fqdn.binds", $binds );
     File::Slurper::Temp::write_text( "$machine_dir/rsyncd.d/$fqdn.conf",  $part );
     File::Slurper::Temp::write_text( "$machine_dir/rsyncd.conf",          "use chroot = no\nread only = yes\nlist = no\nrefuse options = copy-links copy-dirlinks copy-unsafe-links keep-dirlinks\n&include $machine_dir/rsyncd.d\n" );
