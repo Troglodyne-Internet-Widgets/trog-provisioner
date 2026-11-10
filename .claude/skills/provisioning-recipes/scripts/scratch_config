@@ -88,7 +88,7 @@ is in the list.
 =item F<recipes.yaml>
 
 B<Not> copied.  Built here, holding a C<_base> and nothing else: the settings
-above, a C<data_source> inside this directory, and the installation's C<mirror>
+above, a C<data_source> and a C<basedir> inside this directory, and the installation's C<mirror>
 when it has one.
 
 Copying it was the bug this replaced.  The installation's C<_base> names
@@ -231,7 +231,14 @@ sub main {
     # nothing behind.
     my $fleet = $fleet_cache ? fleet_cache($source) : undef;
 
-    $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
+    # Open to the group, because the account that guests fetch as is in the
+    # group of this one, and reads their payload from here.  See
+    # Trog::Local/THE KEYS OF GUESTS.
+    $dir //= do {
+        my $made = File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
+        chmod( 0750, $made ) or die "Could not open $made to the group: $!\n";
+        $made;
+    };
 
     my ( $password, $has_fleet, $keys_copied, $real, $left_out, @refs ) = build(
         $source, $dir,
@@ -322,6 +329,7 @@ sub build {
 
     make_path("$dir/recipes.d");
     make_path("$dir/data");
+    make_path("$dir/domains");
 
     # The pool of the installation, not a copy of it.  See the POD.
     my $pool = Cwd::abs_path($source) . '/ips.db';
@@ -358,10 +366,11 @@ sub build {
 
     # And the _base, built rather than taken: see the POD above for what copying
     # it cost.  The settings come across because a guest cannot be built without
-    # them; the recipes beside them do not.  The data source is inside this
-    # directory, so a throwaway guest reads and writes nothing of the
-    # installation's.
-    my %global = ( source_globals($source), data_source => "$dir/data" );
+    # them; the recipes beside them do not.  The data source and the domain
+    # directories are inside this directory, so a throwaway guest reads and
+    # writes nothing of the installation's, and an account that cannot write
+    # there can build one.
+    my %global = ( source_globals($source), data_source => "$dir/data", basedir => "$dir/domains" );
 
     # CPAN test suites, when what the build is testing is what gets installed.
     # Otherwise skipped, as on a real guest: see the skill, and

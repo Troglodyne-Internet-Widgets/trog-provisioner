@@ -52,8 +52,9 @@ L<Provisioner::Recipe>.
 =head2 What the key of the guest reaches
 
 The guest fetches from this machine with its own key, as C<transfer_user>.
-C<bin/provision> authorizes that key for one forced command, C<rsync --daemon>
+C<bin/provision> lets that key in for one forced command, C<rsync --daemon>
 with the F<rsyncd.conf> that C<bin/new_config> writes into the domain directory.
+See L<Trog::Local/THE KEYS OF GUESTS>.
 The daemon runs in a bubblewrap sandbox that holds only what the modules serve,
 so a bug in rsync reaches no more than the modules do.  The key gets no shell,
 and no forwarding.  It reaches these rsync modules, each named for the domain,
@@ -81,8 +82,10 @@ A tenant is built on the guest of its host, with the key of the host.  So
 F<rsyncd.conf> is in the directory of the host, and it includes the modules of
 each domain on that guest.  See C<write_rsyncd_conf> in F<bin/new_config>.
 
-A guest built before this restriction has a line in F<authorized_keys> without
-it.  The next build of the guest replaces that line.
+A guest built before the keys of guests came from the directory of guest keys
+has a line in the F<authorized_keys> of C<transfer_user> instead.  That line
+runs a copy of the sandbox in the domain directory of the guest, and it works
+until somebody removes it.  The next build of the guest does not remove it.
 
 =cut
 

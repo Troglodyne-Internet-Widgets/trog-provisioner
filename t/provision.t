@@ -233,14 +233,12 @@ subtest 'a dry run of a guest that is not there yet' => sub {
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/rsyncd.conf", "list = no\n" );
-    sandbox_in("$dir/vm.test");
-    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml", "users:\n  - name: someadmin\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     $hv->redefine( domain_dir    => sub { $dir } );
     $hv->redefine( domain_exists => sub { 0 } );
     $hv->redefine( describe      => sub { 'the cloud' } );
-    $loc->redefine( replace_line  => sub { 0 } );
-    $loc->redefine( sandbox_error => sub { undef } );
+    fetchable( $loc, [] );
 
     # If anything asks, that is the bug: there is no guest to ask about.
     my $asked = 0;
@@ -284,8 +282,7 @@ subtest 'a dry run applies nothing' => sub {
     $hv->redefine( write_text        => sub { push( @applied, 'write_text' );        1 } );
     $hv->redefine( put_file          => sub { push( @applied, 'put_file' );          1 } );
     $hv->redefine( run_sudo          => sub { push( @applied, 'run_sudo' );          0 } );
-    $loc->redefine( replace_line => sub { push( @applied, 'replace_line' ); 0 } );
-    $loc->redefine( sandbox_error => sub { undef } );
+    fetchable( $loc, [] );
 
     # The parts a dry run is supposed to do, faked out so the run reaches the end.
     $hv->redefine( virbr_device => sub { 'virbr0' } );
@@ -305,8 +302,7 @@ subtest 'a dry run applies nothing' => sub {
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/rsyncd.conf", "list = no\n" );
-    sandbox_in("$dir/vm.test");
-    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml", "users:\n  - name: someadmin\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( $_->[0], $_->[1] )
@@ -371,8 +367,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     $hv->redefine( define_domain        => sub { push( @applied, 'define_domain' ); 1 } );
     $hv->redefine( cloudinit_iso        => sub { my ( undef, undef, %f ) = @_; %seeded = %f; return '/bogus/pool/seed.iso' } );
     my @authorized;
-    $loc->redefine( replace_line  => sub { push( @applied, 'replace_line' ); push( @authorized, [ @_[ 2, 3 ] ] ); 0 } );
-    $loc->redefine( sandbox_error => sub { undef } );
+    fetchable( $loc, \@authorized );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
@@ -389,7 +384,6 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
         'rsyncd.conf'    => "list = no\n",
     );
     File::Slurper::Temp::write_text( "$dir/vm.test/$_", $wrote{$_} ) for keys %wrote;
-    sandbox_in("$dir/vm.test");
 
     my $config = Config::Simple->new(
         conf(
@@ -415,7 +409,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     ok( ( grep { $_ eq 'define_domain' } @applied ), 'and the domain was defined from it' );
     is_deeply(
         \@authorized,
-        [ [ 'ssh-rsa AAAA nobody', qq{command="$dir/vm.test/rsyncd_sandbox",restrict ssh-rsa AAAA nobody} ] ],
+        [ [ 'vm.test', "$dir/vm.test", 'ssh-rsa AAAA nobody' ] ],
         "the guest's key was authorized on the machine holding the payload, for the rsync modules of the domain and nothing else"
     );
 
@@ -460,15 +454,13 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     $hv->redefine( put_file               => sub { 1 } );
     $hv->redefine( run_sudo               => sub { 0 } );
     $hv->redefine( cloudinit_iso          => sub { '/bogus/pool/seed.iso' } );
-    $loc->redefine( replace_line  => sub { 0 } );
-    $loc->redefine( sandbox_error => sub { undef } );
+    fetchable( $loc, [] );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
       for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ];
-    sandbox_in("$dir/vm.test");
 
     my $config = Config::Simple->new(
         conf(
@@ -549,15 +541,13 @@ sub rebuild_answering {
     $hv->redefine( write_text           => sub { 1 } );
     $hv->redefine( put_file             => sub { 1 } );
     $hv->redefine( run_sudo             => sub { 0 } );
-    $loc->redefine( replace_line  => sub { 0 } );
-    $loc->redefine( sandbox_error => sub { undef } );
+    fetchable( $loc, [] );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
       for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ];
-    sandbox_in("$dir/vm.test");
 
     my $config = Config::Simple->new(
         conf(
@@ -981,10 +971,14 @@ sub quietly {
 
 # What bin/new_config puts beside rsyncd.conf, which bin/provision names as the
 # forced command of the key of the guest.
-sub sandbox_in {
-    my ($dir) = @_;
-    File::Slurper::Temp::write_text( "$dir/rsyncd_sandbox", "#!/bin/sh\n" );
-    chmod 0755, "$dir/rsyncd_sandbox";
+# Stands in for this machine as one where a guest can fetch: the sandbox is
+# installed and runs, and the directory of guest keys can be written.  Each key
+# that provision lets in goes onto @$authorized, as its name, its domain
+# directory and the key.
+sub fetchable {
+    my ( $loc, $authorized ) = @_;
+    $loc->redefine( $_                  => sub { undef } ) for qw{sandbox_program_error sandbox_error guest_keys_error};
+    $loc->redefine( authorize_guest_key => sub { push( @$authorized, [ @_[ 1 .. 3 ] ] ); 1 } );
     return;
 }
 
@@ -998,28 +992,24 @@ subtest 'the key of a guest is authorized only when its sandbox can run' => sub 
     Trog::HV->new( cloud => 'testcloud', domain_dir => $dir );
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
-    File::Slurper::Temp::write_text( "$dir/vm.test/rsyncd.conf", "list = no\n" );
 
     my @authorized;
-    $loc->redefine( replace_line  => sub { push( @authorized, $_[3] ); 1 } );
-    $loc->redefine( sandbox_error => sub { undef } );
+    fetchable( $loc, \@authorized );
 
-    like( ( ( exception { Trog::Bin::Provisioner::authorize_guest_key('vm.test') } ) // q{} ), qr/rsyncd_sandbox[ ]is[ ]not[ ]there/, 'a configuration from before the sandbox is refused' );
+    like( ( ( exception { Trog::Bin::Provisioner::authorize_guest_key('vm.test') } ) // q{} ), qr/rsyncd[.]conf[ ]is[ ]not[ ]there/, 'a configuration with no modules is refused' );
+    File::Slurper::Temp::write_text( "$dir/vm.test/rsyncd.conf", "list = no\n" );
 
-    sandbox_in("$dir/vm.test");
-    chmod 0644, "$dir/vm.test/rsyncd_sandbox";
-    like( ( ( exception { Trog::Bin::Provisioner::authorize_guest_key('vm.test') } ) // q{} ), qr/rsyncd_sandbox[ ]is[ ]not[ ]there/, 'and so is a sandbox that sshd cannot run' );
+    foreach my $check (qw{sandbox_program_error sandbox_error guest_keys_error}) {
+        $loc->redefine( $check => sub { "the reason of $check" } );
+        my $refused = ( exception { Trog::Bin::Provisioner::authorize_guest_key('vm.test') } ) // q{};
+        like( $refused, qr/could[ ]fetch[ ]nothing/,        "a machine that fails $check is refused" );
+        like( $refused, qr/the[ ]reason[ ]of[ ]\Q$check\E/, 'with the reason' );
+        $loc->redefine( $check => sub { undef } );
+    }
+    is_deeply( \@authorized, [], 'and none of those let in a key that would fetch nothing' );
 
-    chmod 0755, "$dir/vm.test/rsyncd_sandbox";
-    $loc->redefine( sandbox_error => sub { 'bwrap is not installed' } );
-    my $refused = ( exception { Trog::Bin::Provisioner::authorize_guest_key('vm.test') } ) // q{};
-    like( $refused, qr/could[ ]fetch[ ]nothing/,      'a machine where bwrap cannot make the sandbox is refused' );
-    like( $refused, qr/bwrap[ ]is[ ]not[ ]installed/, 'with the reason' );
-    is_deeply( \@authorized, [], 'and none of those wrote a line that would let the guest fetch nothing' );
-
-    $loc->redefine( sandbox_error => sub { undef } );
     is( Trog::Bin::Provisioner::authorize_guest_key('vm.test'), 1, 'with the sandbox there and working' );
-    is_deeply( \@authorized, [qq{command="$dir/vm.test/rsyncd_sandbox",restrict ssh-rsa AAAA nobody}], 'the key runs the sandbox and nothing else' );
+    is_deeply( \@authorized, [ [ 'vm.test', "$dir/vm.test", 'ssh-rsa AAAA nobody' ] ], 'the key is let in for the domain directory of the guest' );
 };
 
 subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {

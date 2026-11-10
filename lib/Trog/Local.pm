@@ -12,6 +12,10 @@ use Socket();
 use Time::HiRes qw{alarm};
 use File::Which();
 use IPC::Run3();
+use Fcntl qw{S_ISREG};
+use File::Slurper::Temp();
+use File::Temp();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -23,7 +27,7 @@ Trog::Local - this machine, the one that a guest fetches its payload from
 
     my $this_machine = Trog::Local->new();
 
-    $this_machine->replace_line( $this_machine->authorized_keys, $pubkey, $line );
+    $this_machine->authorize_guest_key( $domain, $domain_dir, $pubkey );
     my @reachable = $this_machine->transfer_ips( $guest_ip, $hv->virbr_ip );
 
 =head1 DESCRIPTION
@@ -256,6 +260,117 @@ sub sandbox_error {
 
     chomp $said;
     return $self->{sandbox_error} = "bwrap could not make a sandbox: $said";
+}
+
+=head2 sandbox_program
+
+The path of the F<rsyncd_sandbox> that the forced command of every guest key
+runs: F<rsyncd_sandbox> in C<$Trog::Utils::LIBEXEC>.
+
+=cut
+
+sub sandbox_program {
+    return "$Trog::Utils::LIBEXEC/rsyncd_sandbox";
+}
+
+=head2 sandbox_program_error
+
+Returns undef if C<sandbox_program> is a file that root owns, that only root can
+write, and that everybody can run.  Otherwise it returns the reason that it is
+not.  The account that a guest connects as runs it, and it must not be able to
+change what it runs.  F<scripts/setup_transfer_user> installs it.
+
+=cut
+
+sub sandbox_program_error {
+    my ($self) = @_;
+
+    my $path = $self->sandbox_program;
+    my @st   = stat $path;
+    return "$path is not there" unless @st;
+
+    my ( $mode, $uid ) = @st[ 2, 4 ];
+    return "$path is not a file" unless S_ISREG($mode);
+    return "$path is not owned by root"               if $uid != 0;
+    return "$path can be written by others than root" if $mode & oct('022');
+    return "$path cannot be run by every account"     if ( $mode & oct('0111') ) != oct('0111');
+    return;
+}
+
+=head1 THE KEYS OF GUESTS
+
+A guest fetches its payload from this machine over ssh, as the account that
+C<transfer_user> names.  sshd lets its key in through
+F<scripts/guest_authorized_keys>, which reads one file per guest from
+C<$Trog::Utils::GUEST_KEYS> and gives each key no command but the sandbox.  So
+the account that runs F<bin/provision> never edits an F<authorized_keys> file,
+and it can be another account than the one that the guest connects as.
+F<scripts/setup_transfer_user> sets this up.
+
+=head2 authorize_guest_key($name, $dir, $pubkey)
+
+Lets C<$pubkey> fetch from C<$dir>, the domain directory of C<$name> that holds
+its F<rsyncd.conf>: it writes C<$dir> and C<$pubkey>, a line each, to the file
+C<$name> in the directory of guest keys.  The file is replaced whole, and
+everybody can read it, because sshd reads it as C<nobody>.  Returns 1.
+
+Dies if C<$name> is not a domain name, if C<$dir> is not a path that the helper
+takes, or if it cannot write the file.
+
+=cut
+
+# What scripts/guest_authorized_keys takes, which a key line can hold
+# unquoted.
+our $GUEST_NAME = qr/\A[[:alnum:]][[:alnum:].-]*\z/;
+our $GUEST_DIR  = qr{\A/[[:alnum:]._/+-]+\z};
+
+sub authorize_guest_key {
+    my ( $self, $name, $dir, $pubkey ) = @_;
+
+    die "'$name' is not a domain name, so it cannot name a guest key\n" unless $name =~ $GUEST_NAME;
+    die "sshd cannot be given '$dir' in a key line: it must be an absolute path of letters, digits and ._/+-\n"
+      unless $dir =~ $GUEST_DIR;
+
+    local $File::Slurper::Temp::FILE_TEMP_PERMS = oct('0644');
+    File::Slurper::Temp::write_text( "$Trog::Utils::GUEST_KEYS/$name", "$dir\n$pubkey\n" );
+    return 1;
+}
+
+=head2 $had = revoke_guest_key($name)
+
+Removes the file that C<authorize_guest_key> wrote for C<$name>.  Returns 1 if
+there was one, and 0 if not.  Dies if C<$name> is not a domain name, or if it
+cannot remove the file.
+
+=cut
+
+sub revoke_guest_key {
+    my ( $self, $name ) = @_;
+
+    die "'$name' is not a domain name, so it names no guest key\n" unless $name =~ $GUEST_NAME;
+
+    my $file = "$Trog::Utils::GUEST_KEYS/$name";
+    return 0 unless -e $file;
+    unlink $file or die "Could not remove $file: $!\n";
+    return 1;
+}
+
+=head2 guest_keys_error
+
+Returns undef if this account can write a file into the directory of guest
+keys, and otherwise the reason that it cannot.  It finds out by writing one,
+and removing it again.
+
+=cut
+
+sub guest_keys_error {
+    my ($self) = @_;
+
+    my $dir = $Trog::Utils::GUEST_KEYS;
+    return "$dir is not there" unless -d $dir;
+    my $probe = eval { File::Temp->new( DIR => $dir ) };
+    return "this account cannot write $dir" unless $probe;
+    return;
 }
 
 =head1 SEE ALSO

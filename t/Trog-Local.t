@@ -130,5 +130,56 @@ subtest 'whether bubblewrap can make the sandbox of a fetch here' => sub {
     Trog::Local->forget();
 };
 
+subtest 'the sandbox program, which root must own so that the account that sshd runs it as cannot change it' => sub {
+    my $local        = Test::MockModule->new('Trog::Local');
+    my $this_machine = Trog::Local->new();
+
+    {
+        local $Trog::Utils::LIBEXEC = tempdir( CLEANUP => 1 );
+        is( $this_machine->sandbox_program, "$Trog::Utils::LIBEXEC/rsyncd_sandbox", 'it is rsyncd_sandbox in LIBEXEC' );
+        like( $this_machine->sandbox_program_error, qr/is[ ]not[ ]there/, 'not installed' );
+
+        File::Slurper::Temp::write_text( $this_machine->sandbox_program, "#!/bin/sh\n" );
+        chmod 0755, $this_machine->sandbox_program;
+        like( $this_machine->sandbox_program_error, qr/not[ ]owned[ ]by[ ]root/, 'installed by somebody else than root' ) if $> != 0;
+    }
+
+    # Files that root owns on every machine that runs this.
+    my %case = (
+        '/bin/sh'     => undef,
+        '/etc/passwd' => qr/cannot[ ]be[ ]run/,
+        '/etc'        => qr/not[ ]a[ ]file/,
+    );
+    foreach my $path ( sort keys %case ) {
+        $local->redefine( sandbox_program => sub { $path } );
+        my $why = $this_machine->sandbox_program_error;
+        if ( defined $case{$path} ) { like( $why, $case{$path}, "$path is refused" ) }
+        else                        { is( $why, undef, "$path, which root owns and everybody runs, is taken" ) }
+    }
+};
+
+subtest 'the key of a guest is a file of its own, which sshd can read' => sub {
+    local $Trog::Utils::GUEST_KEYS = tempdir( CLEANUP => 1 );
+    my $this_machine = Trog::Local->new();
+
+    is( $this_machine->guest_keys_error, undef, 'a directory that this account can write' );
+
+    is( $this_machine->authorize_guest_key( 'vm.test.test', '/bogus/domains/vm.test.test', 'ssh-rsa AAAA vm' ), 1, 'is written' );
+    my $file = "$Trog::Utils::GUEST_KEYS/vm.test.test";
+    is( File::Slurper::read_text($file), "/bogus/domains/vm.test.test\nssh-rsa AAAA vm\n", 'with the domain directory, and then the key' );
+    is( ( stat $file )[2] & oct('0777'), oct('0644'),                                      'and everybody can read it, because sshd reads it as nobody' );
+
+    like( exception { $this_machine->authorize_guest_key( '../escape',    '/bogus/d',              'ssh-rsa AAAA' ) }, qr/not[ ]a[ ]domain[ ]name/,          'a name that is not a domain is refused' );
+    like( exception { $this_machine->authorize_guest_key( 'vm.test.test', '/bogus/d",command="sh', 'ssh-rsa AAAA' ) }, qr/must[ ]be[ ]an[ ]absolute[ ]path/, 'and so is a directory that a key line cannot hold' );
+
+    is( $this_machine->revoke_guest_key('vm.test.test'), 1, 'revoking it' );
+    ok( !-e $file, 'removes it' );
+    is( $this_machine->revoke_guest_key('vm.test.test'), 0, 'and a key that is not there is nothing to revoke' );
+    like( exception { $this_machine->revoke_guest_key('../escape') }, qr/not[ ]a[ ]domain[ ]name/, 'and a name that is not a domain names nothing to remove' );
+
+    local $Trog::Utils::GUEST_KEYS = '/bogus/no/such/dir';
+    like( $this_machine->guest_keys_error, qr/is[ ]not[ ]there/, 'a directory that is not there' );
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();

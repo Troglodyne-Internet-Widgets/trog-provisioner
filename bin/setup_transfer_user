@@ -1,0 +1,74 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::SetupTransferUser;
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aasx';
+
+use FindBin;
+use IPC::Run3();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+=head1 NAME
+
+setup_transfer_user - let guests fetch their payload from this machine as an account
+
+=head1 SYNOPSIS
+
+    sudo bin/setup_transfer_user USER [PROVISION_USER]
+
+=head1 DESCRIPTION
+
+A guest fetches its payload from the machine that provisions it, over ssh, as
+C<transfer_user>.  Its key may run only the rsync daemon of its domain, in a
+sandbox.  This sets that up on this machine for the account C<USER>, and lets
+C<PROVISION_USER>, the account that runs F<bin/provision>, let the key of
+each guest in.  C<PROVISION_USER> defaults to the account that ran sudo, and
+can be C<USER>.
+
+It runs F<scripts/setup_transfer_user> of this checkout, which says what each
+step does.  L<Provisioner::Recipe::trogrunner> runs the same script on a guest
+that it builds.  See L<Trog::Local/THE KEYS OF GUESTS> for how a key gets in.
+
+Run it as root.  It can run again: each step leaves alone what is already
+right.  Then run F<bin/preflight> as C<PROVISION_USER>.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--help>
+
+Prints this.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my $help;
+    GetOptionsFromArray( \@args, 'help' => \$help )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ ) unless @args == 1 || @args == 2;
+
+    return run_script(@args);
+}
+
+# The script, rather than this in perl, because a guest runs it too, and a
+# guest has no checkout and no perl that can load this distribution.
+sub run_script {
+    my (@args) = @_;
+    IPC::Run3::run3( [ "$FindBin::Bin/../scripts/setup_transfer_user", @args ], undef, undef, undef );
+    return $? >> 8;
+}
+
+exit main(@ARGV) unless caller;
+1;

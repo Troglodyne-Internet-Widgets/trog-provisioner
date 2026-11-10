@@ -62,12 +62,13 @@ Trog::Provisioner::Config::Generator::write_rsyncd_conf( $host, 'host.test', pay
 Trog::Provisioner::Config::Generator::write_rsyncd_conf( $host, 'tenant.test', payload => "$root/domains/tenant.test", data => "$root/data/tenant.test" );
 
 # What sshd runs for the key, whatever the client asked for: the forced
-# command of bin/provision.  rsync hands its remote shell the host and the
-# command, and the sandbox ignores both, as sshd does.
-my $rsh = "$host/rsyncd_sandbox";
-## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
-is( Path::Tiny::path($rsh)->stat->mode & 0111, 0111, 'the sandbox is beside the configuration, ready for anyone to run' );
-## use critic
+# command that scripts/guest_authorized_keys gives it, the sandbox with the
+# domain directory.  rsync hands its remote shell the host and the command,
+# and this ignores both, as sshd does.
+my $sandbox_program = "$FindBin::Bin/../scripts/rsyncd_sandbox";
+my $rsh             = "$root/forced_command";
+File::Slurper::Temp::write_text( $rsh, "#!/bin/sh\nexec '$sandbox_program' '$host'\n" );
+chmod 0755, $rsh;
 
 # Fetches $what into a new directory, as the guest does.  Returns the exit
 # status of rsync, what it said, and what arrived, by path to content, with a
@@ -139,17 +140,16 @@ subtest 'and nothing else of this machine' => sub {
 # What a bug in rsync would reach: the same sandbox, running a shell where the
 # daemon would be.
 subtest 'code in the daemon reaches what the guest may fetch, and nothing else' => sub {
-    my $sandbox = Path::Tiny::path($rsh)->slurp_utf8;
+    my $sandbox = Path::Tiny::path($sandbox_program)->slurp_utf8;
     my $daemon  = 'rsync --server --daemon --config="$dir/rsyncd.conf" .';
     is( scalar( () = $sandbox =~ m/\Q$daemon\E/g ), 1, 'the daemon is the one command that the sandbox runs' );
 
-    # In the script, because the sandbox clears the environment.  Beside the
-    # configuration, because the sandbox finds it beside itself.
+    # In the script, because the sandbox clears the environment.
     my $ask = sub ($command) {
-        File::Slurper::Temp::write_text( "$host/probe", $sandbox =~ s/\Q$daemon\E/sh -c '$command'/r );
-        chmod 0755, "$host/probe";
+        File::Slurper::Temp::write_text( "$root/probe", $sandbox =~ s/\Q$daemon\E/sh -c '$command'/r );
+        chmod 0755, "$root/probe";
         my ( $out, $err );
-        IPC::Run3::run3( [ "$host/probe", 'host.test', 'rsync --server' ], \undef, \$out, \$err );
+        IPC::Run3::run3( [ "$root/probe", $host ], \undef, \$out, \$err );
         return ( $? >> 8, $out, $err );
     };
 
@@ -176,6 +176,16 @@ subtest 'code in the daemon reaches what the guest may fetch, and nothing else' 
 
     ( $status, $out ) = $ask->('cat /proc/net/dev');
     is( scalar( () = $out =~ m/:/g ), 1, 'and it has no network but loopback' ) or diag $out;
+};
+
+subtest 'the sandbox runs only for a domain directory' => sub {
+    foreach my $case ( [ 'host.test', 'a relative path' ], [ "$root/data", 'a directory with no rsyncd.conf' ], [ q{}, 'no directory at all' ] ) {
+        my ( $dir, $what ) = @$case;
+        my ( $out, $err );
+        IPC::Run3::run3( [ $sandbox_program, $dir ], \undef, \$out, \$err );
+        is( $? >> 8, 2, "$what is refused" );
+        like( $err, qr/rsyncd_sandbox:/, 'saying why' );
+    }
 };
 
 subtest 'a module that rsyncd.conf cannot say is refused' => sub {

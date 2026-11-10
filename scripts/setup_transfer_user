@@ -1,0 +1,92 @@
+#!/bin/sh
+# Sets up this machine so that guests fetch their payload from it as USER:
+#
+#   setup_transfer_user USER [PROVISION_USER]
+#
+# PROVISION_USER is the account that runs bin/provision, and lets the key of
+# each guest in by writing a file into the directory of guest keys.  It defaults
+# to the account that ran sudo, and can be USER.  Run it as root, again whenever
+# you like: each step leaves alone what is already right.
+#
+# It does this:
+#   1. Makes USER, if it is not there, as a system account with a shell, because
+#      sshd runs the forced command of a key through the shell of the account.
+#      Another USER joins the group of PROVISION_USER, to read the payload.
+#   2. Installs rsyncd_sandbox and guest_authorized_keys, from beside this
+#      script, owned by root, so that neither account can change what a key
+#      runs.
+#   3. Makes the directory of guest keys, which the group of PROVISION_USER can
+#      write and everybody can read.
+#   4. Gives sshd guest_authorized_keys as the AuthorizedKeysCommand of USER
+#      alone, makes sure that sshd took it, and reloads sshd.
+#
+# The paths are those of $LIBEXEC and $GUEST_KEYS in Trog::Utils.  The
+# variables below move them, for a test.
+set -eu
+
+LIBEXEC=${TROG_LIBEXEC:-/usr/local/libexec/trog-provisioner}
+GUEST_KEYS=${TROG_GUEST_KEYS:-/var/lib/trog-provisioner/guest-keys}
+SSHD_CONFIG_D=${TROG_SSHD_CONFIG_D:-/etc/ssh/sshd_config.d}
+
+die() {
+    echo "setup_transfer_user: $*" >&2
+    exit 1
+}
+
+[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: setup_transfer_user USER [PROVISION_USER]"
+user=$1
+provisioner=${2:-${SUDO_USER:-}}
+[ -n "$provisioner" ] || die "name the account that runs bin/provision, because sudo did not"
+[ "$(id -u)" = 0 ] || die "run it as root"
+
+here=$(dirname "$(readlink -f "$0")")
+for program in rsyncd_sandbox guest_authorized_keys; do
+    [ -f "$here/$program" ] || die "$program is not beside this script, in $here"
+done
+
+group=$(id -gn "$provisioner") || die "there is no account $provisioner"
+
+# 1. The account.
+if ! id "$user" >/dev/null 2>&1; then
+    useradd --system --shell /bin/sh --home-dir "/var/lib/trog-provisioner/home/$user" --create-home "$user"
+fi
+shell=$(getent passwd "$user" | cut -d: -f7)
+case $shell in
+*/nologin | */false | '')
+    die "$user has $shell for a shell, so sshd cannot run the command of a guest key.  Give it one with: usermod -s /bin/sh $user"
+    ;;
+esac
+if [ "$user" != "$provisioner" ]; then
+    usermod -a -G "$group" "$user"
+fi
+
+# 2. The programs.  Copied and then renamed, because a fetch can be running the
+# old copy, and sh reads a script as it goes.
+install -d -o root -g root -m 0755 "$LIBEXEC"
+for program in rsyncd_sandbox guest_authorized_keys; do
+    install -o root -g root -m 0755 "$here/$program" "$LIBEXEC/.$program.new"
+    mv -f "$LIBEXEC/.$program.new" "$LIBEXEC/$program"
+done
+
+# 3. The keys.  Setgid, so that every key file has the group too.
+install -d -o root -g root -m 0755 "$(dirname "$GUEST_KEYS")"
+install -d -o root -g "$group" -m 2775 "$GUEST_KEYS"
+
+# 4. sshd.  A Match block in a file of its own ends with the file.
+conf="$SSHD_CONFIG_D/50-trog-transfer-$user.conf"
+cat >"$conf.new" <<CONF
+# Written by setup_transfer_user of trog-provisioner.  Do not edit by hand.
+# The keys of guests, which may run only the sandbox of a fetch.
+Match User $user
+    AuthorizedKeysCommand $LIBEXEC/guest_authorized_keys $GUEST_KEYS
+    AuthorizedKeysCommandUser nobody
+CONF
+chmod 0644 "$conf.new"
+mv -f "$conf.new" "$conf"
+
+"$here/check_sshd_config" || die "sshd refuses $conf, so it is not reloaded"
+sshd -T -C "user=$user,host=localhost,addr=127.0.0.1" | grep -qx "authorizedkeyscommand $LIBEXEC/guest_authorized_keys $GUEST_KEYS" ||
+    die "sshd did not take $conf for $user: an earlier file names another AuthorizedKeysCommand"
+systemctl reload ssh 2>/dev/null || systemctl reload sshd
+
+echo "Guests fetch as $user, with keys that $provisioner puts in $GUEST_KEYS."

@@ -91,45 +91,21 @@ subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     );
 };
 
-# --- remove_authorized_key ---
-subtest 'remove_authorized_key removes only the domain key' => sub {
-    my $domain = 'remove-key.example';
-    make_domain_dir($domain);
+# --- remove_guest_key ---
+subtest 'remove_guest_key stops only the key of the domain fetching' => sub {
+    local $Trog::Utils::GUEST_KEYS = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$Trog::Utils::GUEST_KEYS/$_", "/bogus/$_\nssh-rsa AAAA $_\n" ) for qw{gone.test.test kept.test.test};
 
-    my $fake_home = tempdir( CLEANUP => 1 );
-    make_path("$fake_home/.ssh");
-    my $ak = "$fake_home/.ssh/authorized_keys";
+    my $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 1 ) };
+    ok( -e "$Trog::Utils::GUEST_KEYS/gone.test.test", 'a dry run leaves the key' );
 
-    my $domain_key = "ssh-rsa AAAA fake-key-$domain comment";
-    my $other_key  = "ssh-rsa BBBB other-key other-comment";
-    File::Slurper::Temp::write_text( $ak, "$other_key\n$domain_key\n" );
+    $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 0 ) };
+    ok( !-e "$Trog::Utils::GUEST_KEYS/gone.test.test", 'the key of the domain goes' );
+    ok( -e "$Trog::Utils::GUEST_KEYS/kept.test.test",  'and the key of another stays' );
+    like( $said, qr/Removed/, 'saying so' );
 
-    local $ENV{HOME} = $fake_home;
-
-    Trog::Bin::Destroy::remove_authorized_key( $domain, 0 );
-
-    my $after = File::Slurper::read_text($ak);
-    unlike( $after, qr/\Qfake-key-$domain\E/, 'domain key removed' );
-    like( $after, qr/\Qother-key\E/, 'other key preserved' );
-};
-
-subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
-    my $domain = 'dryrun-key.example';
-    make_domain_dir($domain);
-
-    my $fake_home = tempdir( CLEANUP => 1 );
-    make_path("$fake_home/.ssh");
-    my $ak = "$fake_home/.ssh/authorized_keys";
-
-    my $domain_key = "ssh-rsa AAAA fake-key-$domain comment";
-    File::Slurper::Temp::write_text( $ak, "$domain_key\n" );
-
-    local $ENV{HOME} = $fake_home;
-
-    Trog::Bin::Destroy::remove_authorized_key( $domain, 1 );
-
-    my $after = File::Slurper::read_text($ak);
-    like( $after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed' );
+    $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 0 ) };
+    like( $said, qr/not[ ]found/, 'a key that is not there is skipped' );
 };
 
 # --- remove_rsync_modules ---
@@ -811,7 +787,7 @@ subtest '--purge-data is asked for, and never implied by --purge' => sub {
 
     my @purged;
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_             => sub { 1 } ) for qw{remove_authorized_key purge_domain_dir release_ip};
+    $bin->redefine( $_             => sub { 1 } ) for qw{remove_guest_key purge_domain_dir release_ip};
     $bin->redefine( purge_data_dir => sub { push @purged, [@_]; 1 } );
 
     Trog::HV->forget();
@@ -842,7 +818,7 @@ subtest 'a guest that will not stop still gives its address back' => sub {
 
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
     $bin->redefine( destroy_vm => sub { die "Could not undefine tenant.test: still running\n" } );
-    $bin->redefine( $_         => sub { 1 } ) for qw{destroy_disks remove_authorized_key purge_domain_dir};
+    $bin->redefine( $_         => sub { 1 } ) for qw{destroy_disks remove_guest_key purge_domain_dir};
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
@@ -905,7 +881,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
 
     my ( @asked, @order );
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_ => sub { 1 } ) for qw{remove_authorized_key};
+    $bin->redefine( $_ => sub { 1 } ) for qw{remove_guest_key};
     $bin->redefine( $_ => sub { push( @asked, $_[0] ); 1 } ) for qw{destroy_vm destroy_disks};
     $bin->redefine( revoke_grants => sub { push( @order, 'revoke' ); 1 } );
 

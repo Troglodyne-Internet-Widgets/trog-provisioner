@@ -35,11 +35,6 @@ renders it.
 It stands for F<bin/new_config>, which copies it into the configuration of
 every domain, for the ssl target of the makefile.
 
-=item F<rsyncd_sandbox>
-
-It stands for F<bin/new_config>, which copies it beside the F<rsyncd.conf> of
-every guest, and for each test that names it.
-
 =item A script under F<scripts/>
 
 A script runs on the system perl of a guest, or in a shell, and neither records
@@ -202,8 +197,7 @@ return sub {
     return 'lib/Provisioner/IPPool.pm'                       if $path =~ m{\Aschema/ips(?:[.]v\d+[.]update)?[.]sql\z};
 
     # bin/new_config copies it into the configuration of every domain.
-    return 'bin/new_config'                          if $path eq 'openssl.conf';
-    return ( 'bin/new_config', tests_naming($path) ) if $path eq 'rsyncd_sandbox';
+    return 'bin/new_config' if $path eq 'openssl.conf';
 
     return 'lib/Provisioner/Cookbook.pm' if $path =~ m{\Alib/Provisioner/Recipe/.+[.]pm\z};
 

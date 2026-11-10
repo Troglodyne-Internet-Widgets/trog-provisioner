@@ -1,0 +1,51 @@
+#!/usr/bin/perl
+
+# The AuthorizedKeysCommand of the account that guests fetch their payload as:
+#
+#   guest_authorized_keys DIR
+#
+# DIR holds one file for each guest, named after its domain, with two lines: the
+# domain directory that holds its rsyncd.conf, and its public key.
+# Trog::Local writes them, and scripts/setup_transfer_user names DIR in the
+# configuration of sshd.
+#
+# This prints an authorized_keys line for each, with no command but the
+# rsyncd_sandbox beside this script, and with restrict.  It takes from a file
+# only a path and one key, and skips anything else, so nothing that the account
+# that writes DIR puts there gets more than the sandbox.  The system perl runs
+# it, as nobody, so it loads nothing outside the core.
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use File::Basename ();
+use File::Glob     ();
+use File::Spec     ();
+
+my ($dir) = @ARGV;
+die "usage: $0 DIR [USER]\n" unless defined $dir;
+
+my $sandbox = File::Spec->rel2abs( File::Basename::dirname($0) ) . '/rsyncd_sandbox';
+
+# The same as $GUEST_NAME and $GUEST_DIR in Trog::Local.  ASCII only, under
+# /a, because each goes into a key line unquoted.
+my $name_re = qr/\A[[:alnum:]][[:alnum:].-]*\z/a;
+my $dir_re  = qr{\A/[[:alnum:]._/+-]+\z}a;
+
+# One key of a type that a guest has, and its comment, which is dropped.
+my $type_re = qr/ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)/;
+my $key_re  = qr{\A($type_re[ ][[:alnum:]+/]+={0,2})(?:[ ]\S.*)?\z}a;
+
+-d $dir or die "guest_authorized_keys: cannot read $dir, which is not a directory\n";
+foreach my $name ( grep { $_ =~ $name_re } map { File::Basename::basename($_) } File::Glob::bsd_glob("$dir/*") ) {
+    open( my $fh, '<', "$dir/$name" ) or next;
+    chomp( my @lines = <$fh> );
+    close($fh) or next;
+    next unless @lines == 2;
+
+    my ( $from, $pubkey ) = @lines;
+    next unless $from =~ $dir_re && $pubkey =~ $key_re;
+    print qq{command="$sandbox $from",restrict $1\n};
+}

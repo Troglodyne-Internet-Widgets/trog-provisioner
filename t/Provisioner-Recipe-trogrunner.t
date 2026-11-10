@@ -108,6 +108,18 @@ subtest 'what the runner configures its own guests with' => sub {
     is( $global->{admin_email}, 'someadmin@test.test', 'and so does the address' );
 };
 
+subtest 'the account that the guests of the runner fetch as' => sub {
+    my ( undef, $recipe, $vars ) = built( user => 'svc' );
+    my %got = $recipe->validate(%$vars);
+    is( $got{transfer_account}, 'svc', 'with nothing named, the service user, which provisions' );
+
+    %got = $recipe->validate( %$vars, provision_user => 'agent' );
+    is( $got{transfer_account}, 'agent', 'the provisioning account, when another is named' );
+
+    %got = $recipe->validate( %$vars, provision_user => 'agent', config => { transfer_user => 'fetcher' } );
+    is( $got{transfer_account}, 'fetcher', 'and the transfer_user of config over both' );
+};
+
 subtest 'a runner told nothing at all can still build a guest' => sub {
 
     # bin/new_config refuses to generate anything for a domain unless all of
