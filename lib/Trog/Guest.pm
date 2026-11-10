@@ -421,7 +421,6 @@ sub key_path {
     # Keep the object in the hash.  File::Temp deletes the file when the object
     # goes out of scope, and ssh then points at a path that no longer exists.
     my $tmp = File::Temp->new( TEMPLATE => "guest-key-$domain-XXXXXX", TMPDIR => 1 );
-    chmod 0600, "$tmp";
     print {$tmp} $got{key} =~ m/\n\z/ ? $got{key} : "$got{key}\n";
     close($tmp) or die "Could not close $tmp: $!\n";
 

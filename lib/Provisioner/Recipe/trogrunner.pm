@@ -642,7 +642,6 @@ sub key_line {
         # ssh_pubkey_from_private reads a key from a file, so the key goes to a
         # temporary one that only this user can read, for as long as that takes.
         my $tmp = File::Temp->new( UNLINK => 1 );
-        chmod 0600, $tmp->filename;
         print {$tmp} "$private\n";
         $tmp->flush();
 
