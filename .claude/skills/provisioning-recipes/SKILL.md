@@ -556,22 +556,23 @@ between — silently, with no error and a zero exit. The nginx vhost came out tw
 bytes long. `t/recipes.t` checks every template comment closes its quotes; run
 it after editing one.
 
-**A template test can be reading bytecode compiled from a file you have already
-fixed.** Xslate keeps compiled templates in `~/.xslate_cache` and decides
-whether one is stale by mtime, at one-second granularity -- so an edit landing
-in the same second as the compile is not seen at all. Measured: render a
-template, rewrite it immediately, render again in a fresh process, and the first
-version comes back; a second later the change appears. The cache is also keyed
-by the path string it was handed, so `templates` and `t/../templates` are two
-separate entries, and a render you do by hand can look right while the test
-carries on failing.
+**A render by hand can come from bytecode compiled from a file you have
+already fixed.** Xslate decides whether a compiled template is stale by mtime,
+at one-second granularity, so an edit in the same second as the compile is not
+seen.  Measured: render a template, rewrite it at once, render again in a new
+process, and the first version comes back.  A second later the change appears.
+The cache is also keyed by the path string it was given, so `templates` and
+`t/../templates` are two entries.
 
-That combination is what makes it nasty. The file on disk is byte-correct, a
-render you do yourself agrees with you, the test fails anyway -- and it keeps
-failing after you restore the file, because the restore lands inside the same
-second. The tell is a failure that survives a correct restore, usually in a
-suspiciously fast run. `rm -rf ~/.xslate_cache/*<this checkout>*` clears it.
-It bites the break-it-on-purpose loop hardest, which is the loop worth doing.
+The tests are safe from this.  `Provisioner::Recipe->xslate_cache` turns the
+cache off when `HARNESS_ACTIVE` is set, which `prove` does, so every test
+renders the file as it is on disk.  Outside a harness, as in `bin/new_config`
+or a render you do with `perl -e`, the cache is on, in `.xslate_cache` at the
+top of the checkout.  Git ignores it, and no other checkout shares it.  The
+tell is a render that does not change after an edit that you made, usually in
+the break-it-on-purpose loop.  `rm -rf .xslate_cache` at the top of the
+checkout clears it.  `perldoc Provisioner::Recipe` has the options, under
+`xslate_cache`.
 
 **A default on a field that is only true sometimes is wrong for everything
 else.** `nginxproxy` defaulted `ssl` to true for every vhost, so a port 80 vhost
