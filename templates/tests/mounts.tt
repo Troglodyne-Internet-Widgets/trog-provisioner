@@ -13,6 +13,17 @@ plan skip_all => 'no disks or fuse mounts configured for [% domain %]';
 ok(-d '[% mount.mountpoint %]', 'mount point [% mount.mountpoint %] exists');
 my $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted = `findmnt -rn --target '[% mount.mountpoint %]' 2>/dev/null`;
 ok(length $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted, '[% mount.mountpoint %] is actually mounted');
+[% IF mount.pool == 'dir' %]
+[%# The services of the guest start after local-fs.target, so a share that is
+    ordered before it is mounted before they write to it. -%]
+{
+    my $unit = `systemd-escape -p --suffix=mount '[% mount.mountpoint %]'`;
+    chomp $unit;
+    is(`findmnt -no FSTYPE --mountpoint '[% mount.mountpoint %]'`, "virtiofs\n", '[% mount.mountpoint %] is the virtiofs share');
+    is(`systemctl is-enabled $unit 2>&1`, "enabled\n", "$unit is enabled, so the share mounts at boot");
+    like(`systemctl show -P Before $unit`, qr/\blocal-fs[.]target\b/, 'and is ordered before local-fs.target, so before the services');
+}
+[% END %]
 [% END %]
 [% FOREACH mount IN fuse %]
 my $[% mount.servicename.replace('-', '_') %]_status = `systemctl --user is-active [% mount.servicename %] 2>/dev/null`;

@@ -1,0 +1,26 @@
+#!/bin/bash
+# Print the device that /root/devices.map gives a key:
+#
+#   device_for <device-key>
+#
+# Each line of the map is key=device, and the key is the source on the
+# hypervisor, so it can hold any character but the newline.  The key must match
+# all of the text before the last '=', so /srv/data does not find
+# /srv/data2=vdc.  Exits 1, and says why, when no line has the key.
+set -eu
+
+KEY=${1:?usage: device_for <device-key>}
+MAP=${DEVICES_MAP:-/root/devices.map}
+
+[ -f "$MAP" ] || { echo "device_for: no $MAP to look '$KEY' up in" >&2; exit 1; }
+
+# Through the environment, because awk -v would read backslashes in the key as
+# escapes.
+DEVICE=$(KEY="$KEY" awk '{
+    device = $0; sub(/.*=/, "", device)
+    sub(/=[^=]*$/, "")
+    if ($0 == ENVIRON["KEY"]) { print device; exit }
+}' "$MAP")
+
+[ -n "$DEVICE" ] || { echo "device_for: no device for '$KEY' in $MAP" >&2; exit 1; }
+printf '%s\n' "$DEVICE"
