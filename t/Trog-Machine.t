@@ -180,11 +180,66 @@ subtest 'a salvage never removes our copy of something the guest stopped having'
 
     $machine->get_dir( "$dir/src", "$dir/dst" );
 
-    # rsync could delete it and must not.  This is the only copy: the domain
-    # directory is where a salvage lands and nothing else keeps a history of it.
-    # A backup mirrors its source and deletes on purpose, having yesterday to
-    # fall back on; this has nothing behind it.
-    ok( -f "$dir/dst/state.db", 'and a second fetch leaves behind what the guest no longer has' );
+    # Without a directory to put it in, rsync could delete it and must not.
+    # This is the only copy, and nothing else keeps a history of it.
+    ok( -f "$dir/dst/state.db", 'and a second fetch without deleted_to leaves behind what the guest no longer has' );
+};
+
+subtest 'with deleted_to, our copy mirrors the guest, and what the guest dropped is set aside' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path( "$dir/src/old", "$dir/src/lib" );
+    File::Slurper::Temp::write_text( "$dir/src/state.db",       "state\n" );
+    File::Slurper::Temp::write_text( "$dir/src/lib/Gone.pm",    "1;\n" );
+    File::Slurper::Temp::write_text( "$dir/src/old/stale.html", "stale\n" );
+    symlink( '../state.db', "$dir/src/lib/link" ) or die "could not make the link: $!";
+
+    my ( $machine, $mock ) = here();
+    my $aside = "$dir/aside/20261111T000000Z";
+    ok( $machine->get_dir( "$dir/src", "$dir/dst", deleted_to => $aside ), 'the first fetch works' );
+
+    # An update of the guest removed a module, a directory and a link, and
+    # rewrote the database.  A file that only our copy has, and that the
+    # exclude names, is not the guest's business.
+    unlink( "$dir/src/lib/Gone.pm", "$dir/src/lib/link", "$dir/src/old/stale.html" ) or die "could not remove from the source: $!";
+    rmdir("$dir/src/old")                                                            or die "could not remove $dir/src/old: $!";
+    File::Slurper::Temp::write_text( "$dir/src/state.db",  "state, rewritten\n" );
+    File::Slurper::Temp::write_text( "$dir/dst/kept.sock", "ours\n" );
+
+    my ($said) = capture_stdout { $machine->get_dir( "$dir/src", "$dir/dst", deleted_to => $aside, exclude => ['*.sock'] ) };
+
+    ok( !-e "$dir/dst/lib/Gone.pm", 'a file that the guest dropped leaves our copy' );
+    ok( !-e "$dir/dst/old",         'and so does a directory that it dropped' );
+    ok( !-l "$dir/dst/lib/link",    'and a link' );
+    is( File::Slurper::read_text("$dir/dst/state.db"), "state, rewritten\n", 'a file that changed still comes down' );
+    ok( -f "$dir/dst/kept.sock", 'and an excluded file of ours stays' );
+
+    # The salvage is the only copy, so a delete keeps what it removes.
+    is( File::Slurper::read_text("$aside/lib/Gone.pm"), "1;\n", 'the dropped file is set aside at its own path' );
+    ok( -f "$aside/old/stale.html", 'and the file of the dropped directory' );
+    is( readlink("$aside/lib/link"), '../state.db', 'and the link, as a link' );
+    ok( !-e "$aside/state.db",  'a file that was only overwritten is not set aside' );
+    ok( !-e "$aside/kept.sock", 'and neither is an excluded one' );
+    like( $said, qr{Set[ ]aside[ ]3[ ]files}, 'and the fetch says how many it set aside' );
+};
+
+subtest 'a fetch that cannot list what the guest dropped sets nothing aside' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path("$dir/dst");
+    File::Slurper::Temp::write_text( "$dir/dst/state.db", "state\n" );
+
+    my ( $machine, $mock ) = here();
+    my @warnings;
+    my $ok = do {
+        local $SIG{__WARN__} = sub { push( @warnings, $_[0] ) };
+        $machine->get_dir( "$dir/was-never-here", "$dir/dst", deleted_to => "$dir/aside" );
+    };
+
+    # A source that is not there makes the dry run fail, which is not the same
+    # as a source that holds nothing.
+    is( $ok, 0, 'the fetch fails' );
+    ok( -f "$dir/dst/state.db", 'and our copy is whole' );
+    ok( !-e "$dir/aside",       'and nothing was set aside' );
+    like( $warnings[0], qr{could[ ]not[ ]list}, 'and it says that it could not list what to set aside' );
 };
 
 subtest 'a privileged fetch asks the far end to be root, and not to wait for a password' => sub {

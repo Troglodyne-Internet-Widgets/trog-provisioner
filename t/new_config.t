@@ -344,10 +344,11 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     mkdir $empty or die "Could not create $empty: $!";
 
     my %args = (
-        recipe => 'redis',
-        host   => 'd.test.local',
-        user   => 'tester',
-        remote => '/var/lib/redis',
+        recipe     => 'redis',
+        host       => 'd.test.local',
+        user       => 'tester',
+        remote     => '/var/lib/redis',
+        deleted_to => "$salvage_root/aside",
     );
 
     # A destination with state in it is a salvage that worked, on this run or on
@@ -366,8 +367,18 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # what is newer on the guest, or the second run fetches everything again.
     is_deeply(
         $guest->{fetched},
-        { remote => '/var/lib/redis', local => $landed, exclude => ['*.sock'], update => 1, sudo => 1 },
-        'it fetched the path into the destination, as root, and only what is newer'
+        { remote => '/var/lib/redis', local => $landed, exclude => ['*.sock'], deleted_to => "$salvage_root/aside", update => 1, sudo => 1 },
+        'it fetched the path into the destination, as root, only what is newer, and set aside what the guest dropped'
+    );
+
+    # A salvage that mirrors with nowhere to keep what it deletes would take the
+    # only copy of it.
+    my %no_aside = %args;
+    delete $no_aside{deleted_to};
+    like(
+        exception { Trog::Provisioner::Config::Generator::salvage_path( %no_aside, guest => MockGuest->new( rc => 0 ), destination => $landed ) },
+        qr/needs[ ]deleted_to/,
+        'and it refuses to run without a directory for what the guest dropped'
     );
 
     # Nothing under the path on the guest: either it was never created, or the
@@ -412,10 +423,11 @@ subtest 'an empty tree of directories is not a salvage' => sub {
     # The guest still has files at the path, so each destination below that
     # counts as empty is a salvage that lost them.
     my %args = (
-        recipe => 'slapd',
-        host   => 'd.test.local',
-        user   => 'tester',
-        remote => '/etc/ldap/slapd.d',
+        recipe     => 'slapd',
+        host       => 'd.test.local',
+        user       => 'tester',
+        remote     => '/etc/ldap/slapd.d',
+        deleted_to => "$salvage_root/aside",
     );
     my sub gap_at ($destination) {
         return Trog::Provisioner::Config::Generator::salvage_path( %args, guest => MockGuest->new( rc => 0 ), destination => $destination );

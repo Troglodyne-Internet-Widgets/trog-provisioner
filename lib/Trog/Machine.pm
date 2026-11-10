@@ -7,6 +7,7 @@ use warnings FATAL => 'all';
 
 use re '/aasx';
 use File::Path();
+use File::Basename();
 use Path::Tiny();
 use File::Copy();
 use File::Temp();
@@ -611,11 +612,20 @@ files, and exits with success.  That looks the same as a guest with no state.
 C<sudo> needs passwordless sudo on the far side, and without it the fetch fails
 and does not wait.
 
-B<Nothing is ever deleted here.>  C<get_dir> is a salvage, and the copy that it
-writes into is the only copy.  If a guest stops making something, or one run
-cannot read it, a delete removes our copy too.  The backup mirrors a source and
-deletes on purpose, because it has history to fall back on.  A salvage has no
-history.
+Without C<deleted_to>, nothing is deleted here.  With it, our copy mirrors the
+far side: a file that is gone there leaves our copy as well.  It is not
+removed.  It moves into the directory that C<deleted_to> names, at the same
+relative path.  The copy that C<get_dir> writes into is the only copy, so that
+directory is the history that a mirror needs.  It must be an absolute path
+outside C<$local>.
+
+A dry run of rsync with C<--delete> lists what to move, before the fetch.  So
+only deleted files are kept: rsync's own C<--backup> would also keep each file
+that a run overwrites, and a salvage overwrites every database that changed.
+rsync lists no deletions on a run that had an I/O error, so a run that could not
+read part of the far side moves nothing.  If the dry run fails, nothing moves,
+and the fetch runs as without C<deleted_to>.  A path that C<exclude> names is
+neither fetched nor moved.
 
 The files that arrive belong to the user that runs this tool, not to the uids
 that they had on the guest.  rsync restores ownership only when the
@@ -827,14 +837,9 @@ sub get_dir {
     );
     my @exclude = @{ $opts{exclude} // [] };
 
-    my $rsync = File::Rsync->new(
+    my %reach = (
         archive => 1,
         timeout => $TIMEOUT,
-
-        # Report what moved, so that an unchanged tree says so.  Human units,
-        # because that number is usually in gigabytes.
-        stats            => 1,
-        'human-readable' => 1,
 
         ( $self->is_local ? ()                       : ( rsh => join( ' ', @rsh ) ) ),
         ( @exclude        ? ( exclude => \@exclude ) : () ),
@@ -842,6 +847,61 @@ sub get_dir {
         # sudo -n, because no terminal at the far end can answer a password
         # prompt.  -n exits, and rsync reports the failure.
         ( $opts{sudo} ? ( 'rsync-path' => 'sudo -n rsync' ) : () ),
+    );
+
+    # Before the fetch, a dry run with --delete names what the far side no
+    # longer has, and each of those files moves into deleted_to.
+    my $deleted_to = $opts{deleted_to};
+    my $dry        = defined $deleted_to ? File::Rsync->new( %reach, 'dry-run' => 1, delete => 1, 'itemize-changes' => 1 ) : undef;
+    if ( $dry && !$dry->exec( src => $src, dest => $dest ) ) {
+        warn "rsync $src -> $dest could not list what the far side no longer has, so nothing is set aside:\n" . join( '', map { "    $_" } @{ $dry->err || [] } );
+        $dry = undef;
+    }
+    if ($dry) {
+        my @lines = @{ $dry->out || [] };
+        chomp @lines;
+
+        # rsync names a path relative to $dest, and a directory with a slash at
+        # the end.  A path that climbs out of $dest is refused, whatever
+        # printed it.
+        my @gone  = grep { !m{(?:\A|/)[.][.](?:/|\z)} && !m{\A/} } map { m/\A[*]deleting\s+(.+)\z/ ? $1 : () } @lines;
+        my @dirs  = grep { m{/\z} } @gone;
+        my @files = grep { !m{/\z} } @gone;
+
+        my $set_aside = 0;
+        foreach my $file (@files) {
+            my ( $from, $to ) = ( "$dest$file", "$deleted_to/$file" );
+            next unless -e $from || -l $from;
+            File::Path::make_path( File::Basename::dirname($to) );
+
+            # rename fails across filesystems.  File::Copy::move copies a file
+            # there, but it copies the target of a symlink, so a symlink is
+            # made again.
+            my $ok =
+                rename( $from, $to ) ? 1
+              : -l $from             ? symlink( readlink($from) // q{}, $to ) && unlink($from)
+              :                        File::Copy::move( $from, $to );
+            if ($ok) {
+                $set_aside++;
+                next;
+            }
+            warn "Could not move $from, which the far side no longer has, to $to: $!\n";
+        }
+
+        # Deepest first, so that a parent is empty when its turn comes.  A
+        # directory that still holds a file, such as an excluded one, stays.
+        rmdir("$dest$_") foreach reverse sort { length($a) <=> length($b) } @dirs;
+
+        print "Set aside $set_aside files that the far side no longer has, in $deleted_to\n" if $set_aside;
+    }
+
+    my $rsync = File::Rsync->new(
+        %reach,
+
+        # Report what moved, so that an unchanged tree says so.  Human units,
+        # because that number is usually in gigabytes.
+        stats            => 1,
+        'human-readable' => 1,
 
         ( $opts{update} ? ( update => 1 ) : () ),
     );
