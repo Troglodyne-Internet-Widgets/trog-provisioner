@@ -181,9 +181,8 @@ that runs this tool.  On a remote machine, it is the login user.
 
 =head2 authorized_keys
 
-The path of the C<authorized_keys> file of that account.  The public key of a
-guest goes there, so that the guest can fetch.  Dies if it cannot find the home
-directory on a remote machine.
+The path of the C<authorized_keys> file of that account.  Dies if it cannot
+find the home directory on a remote machine.
 
 =head2 sshd_port
 
@@ -880,45 +879,6 @@ sub append_line {
     return 1 if $self->run_cmd( qw{grep -qxF --}, $line, $path ) == 0;
 
     return pour( $self, { stdin_data => "$line\n" }, $path, append => 1 );
-}
-
-=head2 replace_line($path, $needle, $line)
-
-Puts C<$line> in place of the line of C<$path> that contains the string
-C<$needle>.  With C<$line> undef, it removes that line.  If no line contains
-C<$needle>, it appends C<$line> as C<append_line> does, or does nothing when
-C<$line> is undef.  Returns the number of lines that contained C<$needle>
-before the call, 0 or 1.
-
-This is for a file such as F<authorized_keys>, where a mistake locks the owner
-out.  So it dies, and writes nothing, when the file exists and cannot be read,
-or when C<$needle> is on more than one line.
-
-=cut
-
-sub replace_line {
-    my ( $self, $path, $needle, $line ) = @_;
-
-    my $contents = q{};
-    if ( $self->file_exists($path) ) {
-        $contents = $self->read_text($path) // die "Could not read $path on " . $self->describe . "; refusing to rewrite it blind\n";
-    }
-
-    my @lines = split( m/\n/, $contents );
-    my @hits  = grep { index( $lines[$_], $needle ) >= 0 } 0 .. $#lines;
-    die "$path on " . $self->describe . ' has ' . scalar(@hits) . " lines with the same key; refusing to choose one\n"
-      if @hits > 1;
-
-    unless (@hits) {
-        $self->append_line( $path, $line ) or die "Could not add a line to $path on " . $self->describe . "\n"
-          if defined $line;
-        return 0;
-    }
-    return 1 if defined $line && $lines[ $hits[0] ] eq $line;
-
-    splice( @lines, $hits[0], 1, defined $line ? ($line) : () );
-    $self->write_text( $path, join( "\n", @lines ) . "\n" ) or die "Could not write $path on " . $self->describe . "\n";
-    return 1;
 }
 
 =head1 SEE ALSO

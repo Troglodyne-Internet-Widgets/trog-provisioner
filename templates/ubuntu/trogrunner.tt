@@ -57,6 +57,12 @@ install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain 
 # Provisioner::Recipe::trogrunner.
 install -o root -g root -m 0700 trogrunner-owner.sh '[% install_dir %]/[% domain %]/trogrunner-owner.sh'
 [% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/trogrunner-owner.sh'
+
+# Guests that the runner builds fetch from it as the transfer account, with keys
+# that the provisioning account lets in.  After the owner script, because the
+# accounts must exist.  See THE TRANSFER ACCOUNT in
+# Provisioner::Recipe::trogrunner.
+[% script_dir %]/queue_postrun_task [% script_dir %]/setup_transfer_user [% IF transfer_account == user %]--give-shell [% END %]'[% transfer_account %]' '[% provision_user %]'
 [% IF checkout %]
 # The checkout, only if nothing is there.  A checkout salvaged from the
 # replaced guest holds work, and a clone over it loses that work.  koan.tt has

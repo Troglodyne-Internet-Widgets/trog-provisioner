@@ -70,7 +70,8 @@ is( system( "runuser -u $user -- test -w '$confdir'" ), 0, "$user can write ther
 [% IF hypervisors.keys().size() %]
 ok( -r "$confdir/hypervisors.conf", 'the fleet is configured' );
 [% ELSE %]
-ok( !-e "$confdir/hypervisors.conf", 'no fleet file, so the runner is its own hypervisor' );
+my $fleet = do { local ( @ARGV, $/ ) = "$confdir/hypervisors.conf"; <> } // q{};
+like( $fleet, qr{^libvirt_uri\s*=\s*qemu:///system$}m, 'no hypervisor named, so the fleet is the libvirt of the runner itself' );
 [% END %]
 [% IF store %]
 ok( -r "$confdir/secrets.kdbx", 'the secret store is in place' );

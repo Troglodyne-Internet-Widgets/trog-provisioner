@@ -108,6 +108,29 @@ subtest 'what the runner configures its own guests with' => sub {
     is( $global->{admin_email}, 'someadmin@test.test', 'and so does the address' );
 };
 
+subtest 'the account that the guests of the runner fetch as' => sub {
+    my ( undef, $recipe, $vars ) = built( user => 'svc' );
+    my %got = $recipe->validate(%$vars);
+    is( $got{transfer_account}, 'svc', 'with nothing named, the service user, which provisions' );
+
+    %got = $recipe->validate( %$vars, provision_user => 'agent' );
+    is( $got{transfer_account}, 'agent', 'the provisioning account, when another is named' );
+
+    %got = $recipe->validate( %$vars, provision_user => 'agent', config => { transfer_user => 'fetcher' } );
+    is( $got{transfer_account}, 'fetcher', 'and the transfer_user of config over both' );
+
+    # What the postrun runs: the script, and the account.  A recipe each,
+    # because a recipe validates its options once.
+    my $setup = sub (%over) {
+        my ( undef, $fresh, $fresh_vars ) = built( user => 'svc', %over );
+        my ($line) = grep { index( $_, 'queue_postrun_task' ) >= 0 && index( $_, 'setup_transfer_user' ) >= 0 } split /\n/, $fresh->render(%$fresh_vars);
+        return $line // q{};
+    };
+    like( $setup->(), qr/--give-shell[ ]'svc'[ ]'svc'\z/, 'the service user, which is made with nologin, is given a shell, so that the defaults work' );
+    unlike( $setup->( provision_user => 'agent' ),                                           qr/--give-shell/, 'and another provisioning account keeps the shell that it has' );
+    unlike( $setup->( provision_user => 'agent', config => { transfer_user => 'fetcher' } ), qr/--give-shell/, 'and so does a named transfer account' );
+};
+
 subtest 'a runner told nothing at all can still build a guest' => sub {
 
     # bin/new_config refuses to generate anything for a domain unless all of

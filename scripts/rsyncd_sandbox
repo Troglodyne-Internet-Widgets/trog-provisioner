@@ -1,17 +1,33 @@
 #!/bin/sh
 # The forced command of the key of a guest, on the machine that the guest
-# fetches from.  bin/new_config copies it beside rsyncd.conf, and bin/provision
-# names the copy in authorized_keys.
+# fetches from:
 #
-# It runs the rsync daemon in a bubblewrap sandbox, as the same user, with no
-# network and no way to gain privileges.  The sandbox holds the programs in /usr,
-# the configuration, and the paths that rsyncd.d/*.binds name, one to a line,
-# all read only.  So a bug in rsync reaches what the guest may fetch, and
+#   rsyncd_sandbox DIR
+#
+# DIR is the domain directory that holds rsyncd.conf.  The trogrunner recipe
+# installs this, owned by root, in /usr/local/libexec/trog-provisioner, so that
+# the account that writes DIR cannot change what the key runs.
+#
+# It runs the rsync daemon in a bubblewrap sandbox, as the account that the
+# guest connects as, with no network and no way to gain privileges.  The sandbox
+# holds the programs in /usr, the configuration, and the paths that
+# rsyncd.d/*.binds name, one to a line, all read only.  So a bug in rsync reaches what the guest may fetch, and
 # nothing else of this machine.  write_rsyncd_conf in bin/new_config has the
 # whole account.
 set -eu
 
-dir=${0%/*}
+dir=${1:-}
+case $dir in
+/*) ;;
+*)
+    echo "rsyncd_sandbox: the domain directory must be an absolute path, not '$dir'" >&2
+    exit 2
+    ;;
+esac
+if [ ! -f "$dir/rsyncd.conf" ]; then
+    echo "rsyncd_sandbox: $dir holds no rsyncd.conf" >&2
+    exit 2
+fi
 
 set --
 for binds in "$dir"/rsyncd.d/*.binds; do

@@ -280,9 +280,18 @@ subtest 'rsync is the one thing both ends have to have' => sub {
 subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest can fetch from' => sub {
     my $local = Test::MockModule->new('Trog::Local');
 
-    $local->redefine( sandbox_error => sub { undef } );
+    $local->redefine( $_ => sub { undef } ) for qw{sandbox_error sandbox_program_error guest_keys_error};
     my ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
     ok( $result->{ok}, 'a sandbox that bwrap makes passes' );
+
+    foreach my $check (qw{sandbox_program_error guest_keys_error}) {
+        $local->redefine( $check => sub { "the reason of $check" } );
+        ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
+        ok( !$result->{ok}, "a machine that fails $check fails" );
+        like( $result->{what}, qr/the[ ]reason[ ]of[ ]\Q$check\E/, 'with the reason' );
+        like( $result->{fix},  qr/scripts\/setup_transfer_user/,   'and what sets it up' );
+        $local->redefine( $check => sub { undef } );
+    }
 
     $local->redefine( sandbox_error => sub { 'bwrap could not make a sandbox: setting up uid map: Permission denied' } );
     ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
@@ -530,7 +539,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
 
     # The count is of the failures above, whether or not this machine has bwrap.
     my $local = Test::MockModule->new('Trog::Local');
-    $local->redefine( sandbox_error => sub { undef } );
+    $local->redefine( $_ => sub { undef } ) for qw{sandbox_error sandbox_program_error guest_keys_error};
 
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;

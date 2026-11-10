@@ -21,6 +21,28 @@ Trog::Utils - the small things more than one of these programs needs
     my $answer = Trog::Utils::prompt('Destroy it and rebuild, or stop? [destroy/stop]:');
     my $secret = Trog::Utils::prompt( 'Enter password:', -echo => '*' );
 
+=head1 VARIABLES
+
+=head2 $LIBEXEC
+
+Where a machine that guests fetch from keeps the programs that sshd runs for
+their keys, owned by root: F</usr/local/libexec/trog-provisioner>.
+F<scripts/setup_transfer_user> installs them there.
+
+=cut
+
+our $LIBEXEC = '/usr/local/libexec/trog-provisioner';
+
+=head2 $GUEST_KEYS
+
+The directory of the guest keys that sshd lets in on such a machine:
+F</var/lib/trog-provisioner/guest-keys>.  F<scripts/guest_authorized_keys>
+reads it for sshd, and C<authorize_guest_key> in L<Trog::Local> writes it.
+
+=cut
+
+our $GUEST_KEYS = '/var/lib/trog-provisioner/guest-keys';
+
 =head1 SUBROUTINES
 
 =head2 prompt($message, %opts)

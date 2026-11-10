@@ -20,7 +20,6 @@ use Trog::Steps();
 use File::Basename();
 use File::Glob();
 use File::Path();
-use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
 use List::Util   qw{uniq sum};
 use Pod::Usage   qw{pod2usage};
@@ -232,8 +231,8 @@ sub main {
             destroy_disks( $domain, $dryrun );
         }
 
-        # 3. Remove its keys from authorized_keys, here and on the hypervisors
-        remove_authorized_key( $domain, $dryrun );
+        # 3. Stop its key fetching from here
+        remove_guest_key( $domain, $dryrun );
         remove_rsync_modules( $domain, $dryrun );
 
         # And what its recipes changed on other machines, such as the key and
@@ -341,35 +340,21 @@ sub destroy_disks {
     return;
 }
 
-=head2 remove_authorized_key($domain, $dryrun)
+=head2 remove_guest_key($domain, $dryrun)
 
-Take the line with the public key of the domain out of the authorized_keys file
-of this machine.  The key is the F<key.rsa.pub> in the domain directory.  Does
-nothing when that file is not there, or when no line has the key.  With
-C<$dryrun>, does nothing and prints nothing.
-
-Dies, and changes nothing, when the authorized_keys file cannot be read, or when
-the key is on more than one line of it.  See C<replace_line> in
-L<Trog::Machine>.
+Stops the key of the guest of the domain fetching from this machine: removes
+the file that C<authorize_guest_key> in F<bin/provision> wrote for it.  Does
+nothing when there is none.  With C<$dryrun>, does nothing and prints nothing.
+Dies when it cannot remove the file.  See L<Trog::Local/THE KEYS OF GUESTS>.
 
 =cut
 
-sub remove_authorized_key {
+sub remove_guest_key {
     my ( $domain, $dryrun ) = @_;
     return if $dryrun;
 
-    # This machine, because the guest fetches its payload from here, so
-    # bin/provision authorized the key here.
-    my $this_machine = Trog::Local->new();
-    my $pubkey_file  = Trog::HV->new()->domain_dir . "/$domain/key.rsa.pub";
-    my $pubkey       = eval { File::Slurper::read_text($pubkey_file) };
-    return unless defined $pubkey;
-    chomp $pubkey;
-
-    my $ak = $this_machine->authorized_keys;
-
-    my $had = $this_machine->replace_line( $ak, $pubkey, undef );
-    print $had ? "Removed the SSH key of the domain from $ak\n" : "Domain SSH key not found in $ak, skipping.\n";
+    my $had = Trog::Local->new()->revoke_guest_key($domain);
+    print $had ? "Removed the SSH key of the domain from $Trog::Utils::GUEST_KEYS\n" : "Domain SSH key not found in $Trog::Utils::GUEST_KEYS, skipping.\n";
     return;
 }
 

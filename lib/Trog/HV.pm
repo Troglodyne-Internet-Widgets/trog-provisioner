@@ -595,7 +595,10 @@ sub domain_dir ($self) { return $self->{domain_dir} // $self->default_domain_dir
 
 =head2 default_domain_dir
 
-Returns the directory for domains when nothing else sets one.
+Returns the directory for domains when nothing else sets one: the C<basedir>
+in the C<_global> of C<_base> in F<recipes.yaml>, where C<bin/new_config>
+writes the directory of each domain, or F</opt/domains> when that names none.
+It reads the file at each call.
 
 It is a class method, so C<bin/provision> and C<bin/restore> can call it before
 they have a hypervisor.  C<bin/provision> needs the path to find
@@ -604,7 +607,11 @@ here only, so that the two cannot disagree.
 
 =cut
 
-sub default_domain_dir { return '/opt/domains' }
+sub default_domain_dir {
+    my $conf = eval { YAML::XS::Load( File::Slurper::read_binary( Trog::Config->path('recipes.yaml') ) ) };
+    my $base = ref $conf eq 'HASH' ? $conf->{_base}{_global}{basedir} : undef;
+    return $base // '/opt/domains';
+}
 
 =head1 WHICH WAY A GUEST GETS BUILT
 
@@ -1313,18 +1320,34 @@ FIX
 
 =head2 $result = $hv->check_sandbox()
 
-Checks that bubblewrap can make the sandbox on this machine that the fetches of
-a guest run in.  Without it, C<bin/provision> refuses to authorize the key of a
-guest, because the key would fetch nothing.  See C<sandbox_error> in
-L<Trog::Local>.  It asks only this machine, because the guest fetches from here
-and not from the hypervisor.
+Checks that the sandbox program that the fetches of a guest run in is
+installed on this machine, owned by root, that this account can write the
+directory of guest keys, and that bubblewrap can make the sandbox.  Without
+them, C<bin/provision> refuses to authorize the key of a guest, because the key
+would fetch nothing.  See L<Trog::Local/THE KEYS OF
+GUESTS>.  It asks only this machine, because the guest fetches from here and
+not from the hypervisor.
 
 =cut
 
 sub check_sandbox {
     my ($self) = @_;
 
-    my $why = Trog::Local->new()->sandbox_error;
+    my $local = Trog::Local->new();
+    if ( my $missing = $local->sandbox_program_error // $local->guest_keys_error ) {
+        return $self->verdict( 0, "No sandbox for the fetches of a guest on this machine: $missing", <<'FIX' );
+The key of each guest runs only the sandbox program, which root must own, so
+that the account that writes a domain directory cannot change what the key
+runs.  This account lets the key in by writing it into the directory of guest
+keys.  As root, with the account that guests connect as:
+
+    sudo scripts/setup_transfer_user USER
+
+The trogrunner recipe does the same on a guest that it builds.
+FIX
+    }
+
+    my $why = $local->sandbox_error;
     return $self->verdict( 1, 'bubblewrap can confine the fetches of a guest', q{} ) unless $why;
 
     return $self->verdict( 0, "No sandbox for the fetches of a guest on this machine: $why", <<'FIX' );

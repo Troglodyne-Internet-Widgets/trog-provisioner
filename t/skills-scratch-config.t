@@ -143,6 +143,13 @@ subtest 'its data source is its own' => sub {
     ok( -d "$dir/data", 'and the directory is there to be read' );
 };
 
+subtest 'and so are its domain directories, so that an account that cannot write those of the installation can build a guest' => sub {
+    my ( $recipes, $dir ) = scratch();
+
+    is( $recipes->{_base}{_global}{basedir}, "$dir/domains", 'inside the scratch directory, and not the basedir of the installation' );
+    ok( -d "$dir/domains", 'and the directory is there to be written' );
+};
+
 subtest 'its address pool is the one of the installation, so a real guest cannot take what a scratch one holds' => sub {
     my $source = installation();
     my ( undef, $dir ) = scratch( source => $source );

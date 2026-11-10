@@ -49,14 +49,14 @@ subtest 'a template stands for the recipe that renders it' => sub {
     );
     is_deeply( [ $map->('openssl.conf') ], ['bin/new_config'], 'and the openssl.conf of its ssl target, for what copies it' );
 
-    my @sandbox = $map->('rsyncd_sandbox');
-    ok( ( grep { $_ eq 'bin/new_config' } @sandbox ),        'the sandbox of a fetch, for what copies it' ) or diag "got: @sandbox";
-    ok( ( grep { $_ eq 't/new_config-rsyncd.t' } @sandbox ), 'and for the test that fetches through it' )   or diag "got: @sandbox";
 };
 
 subtest 'a script stands for the tests that name it, and the one that packs it' => sub {
     my @tests = $map->('scripts/setup-ufw-rules');
     ok( ( grep { $_ eq 't/setup-ufw-rules.t' } @tests ), 'its own test' ) or diag "got: @tests";
+
+    my @sandbox = $map->('scripts/rsyncd_sandbox');
+    ok( ( grep { $_ eq 't/new_config-rsyncd.t' } @sandbox ), 'and the sandbox of a fetch, the test that fetches through it' ) or diag "got: @sandbox";
 
     @tests = $map->('scripts/escalations.sh');
     ok( ( grep { $_ eq 't/log-watchers.t' } @tests ), 'a test that names it by its file name alone' ) or diag "got: @tests";

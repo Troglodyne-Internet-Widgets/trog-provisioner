@@ -117,6 +117,30 @@ F<trogrunner-owner.sh> does this in the postrun, after every target.  A
 recipe such as C<claude> makes the account in a target that can run after this
 one.  The script fails when the account does not exist by then.
 
+=head3 THE TRANSFER ACCOUNT
+
+Each guest that the runner builds fetches its payload from the runner over ssh,
+as C<transfer_user> of C<config>, or as the provisioning account when that is
+empty.  The key of the guest may run only the rsync daemon of its domain, in a
+sandbox.  F<scripts/setup_transfer_user> sets that up in the postrun, after
+F<trogrunner-owner.sh>.  It makes the transfer account if it is not there,
+puts it in the group of the provisioning account, installs the sandbox,
+and gives sshd the program that lets the keys of guests in.  See
+L<Trog::Local/THE KEYS OF GUESTS>.
+
+sshd runs the command of a key through the shell of the account, so the
+transfer account needs one.  The service user of a domain is made with
+F<nologin>, so when the transfer account is the service user, which it is with
+the defaults, the script gives it F</bin/sh>.  Another account keeps the shell
+that it has, and the script stops, and says so, when that is none.  So name a
+transfer account when the provisioning account must not have a shell, as the
+C<agent_user> of L<Provisioner::Recipe::clod> must not:
+
+    trogrunner:
+        provision_user: clod-agent
+        config:
+            transfer_user: clod-transfer
+
 =head3 What it needs from the guest, and how long it takes
 
 The build was measured on four vCPUs and 8GB.  Nobody tuned these numbers.
@@ -501,6 +525,7 @@ sub enrich {
     $opts{recipes}{_base}{_global} = { %global, %{ $opts{recipes}{_base}{_global} // {} } };
 
     $opts{provision_user} //= $opts{user};
+    $opts{transfer_account} = $opts{config}{transfer_user} || $opts{provision_user};
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !$opts{checkout_dir} || $opts{checkout_dir} eq '.' );

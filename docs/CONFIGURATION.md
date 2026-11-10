@@ -87,6 +87,20 @@ machine's `sshd_config` says, and the address to whichever of ours a guest on
 the hypervisor's network can route to. Set `transfer_ip` when this machine has
 more than one way to be reached and the kernel picks the wrong one.
 
+Whatever the account, sshd on this machine must let the keys of guests in for
+it.  Run this once, as root, with the account that guests connect as:
+
+```
+sudo scripts/setup_transfer_user ACCOUNT
+```
+
+It installs the sandbox that each key runs, and gives sshd a helper that reads
+the key of each guest from `/var/lib/trog-provisioner/guest-keys`, where
+`bin/provision` writes it.  The account needs a shell, because sshd runs the
+command of a key through it.  When the account that runs the tool has none,
+name another account as `transfer_user`, and give the account that runs the
+tool as the second argument.  `bin/preflight` says when this is missing.
+
 `bin/new_config tickle.test.test` writes a configuration for that name at that
 address. It populates a `users.yaml` creating the admin user, granting them
 admin rights and authorizing the keys from `admin_authorized_keys`; you can add
