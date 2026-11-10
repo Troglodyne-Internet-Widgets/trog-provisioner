@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use File::Copy();
+use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage;
 
@@ -16,6 +16,7 @@ use FindBin::libs;
 
 use Trog::Guest();
 use Trog::HV();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -92,8 +93,7 @@ sub main {
     # removed.
     die "$out is already there.  Move it aside, or pick another name.\n" if -e $out;
 
-    File::Copy::copy( $path, $out ) or die "Could not write $out: $!\n";
-    chmod 0600, $out or die "Could not make $out private: $!\n";
+    Trog::Utils::write_binary_mode( $out, File::Slurper::read_binary($path), oct('0600') );
 
     warn "$out is the way in to $domain, and it will stay there until you remove it.\n";
     return print_line($out);

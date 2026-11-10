@@ -13,8 +13,7 @@ t/Provisioner-Utils.t - the helpers more than one module leans on
 
 use Test::More;
 use Test::NoWarnings;
-use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use File::Temp qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 
@@ -96,48 +95,16 @@ subtest 'host_of reads the host out of the forms a repo_url takes' => sub {
     is( Provisioner::Utils::host_of(undef),       undef, 'without warning about it' );
 };
 
-my $CERT = "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n";
+subtest 'write_ssh_keypair: the private half for its owner alone, whatever the umask' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $umask  = umask oct('0000');
+    my $public = Provisioner::Utils::write_ssh_keypair( "$dir/key", Ed25519 => 256, 'probe' );
+    umask $umask;
 
-subtest 'write_pem puts a PEM on disk byte for byte' => sub {
-    my $dir  = tempdir( CLEANUP => 1 );
-    my $path = "$dir/thing.crt";
-
-    Provisioner::Utils::write_pem( $path, $CERT, 0644 );
-
-    is( File::Slurper::read_binary($path), $CERT, 'the PEM, unchanged' );
-};
-
-subtest 'and with the mode it was asked for, which is the whole point for a key' => sub {
-    my $dir = tempdir( CLEANUP => 1 );
-
-    Provisioner::Utils::write_pem( "$dir/key.pem",  "key\n",  0600 );
-    Provisioner::Utils::write_pem( "$dir/cert.pem", "cert\n", 0644 );
-
-    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
-    is( sprintf( '%04o', ( stat "$dir/key.pem" )[2] & 07777 ),  '0600', 'a key is readable by its owner alone' );
-    is( sprintf( '%04o', ( stat "$dir/cert.pem" )[2] & 07777 ), '0644', 'and a certificate, being public, by anybody' );
-    ## use critic
-};
-
-subtest 'writing over one that is already there replaces both' => sub {
-    my $dir  = tempdir( CLEANUP => 1 );
-    my $path = "$dir/rolled.pem";
-
-    Provisioner::Utils::write_pem( $path, "old\n", 0644 );
-    Provisioner::Utils::write_pem( $path, "new\n", 0600 );
-
-    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
-    is( File::Slurper::read_binary($path),            "new\n", 'the content is the new one' );
-    is( sprintf( '%04o', ( stat $path )[2] & 07777 ), '0600',  'and the mode is not the old one' );
-    ## use critic
-};
-
-subtest 'somewhere it cannot write is fatal, not silent' => sub {
-    my $dir = tempdir( CLEANUP => 1 );
-
-    # A key that was not written is a service that will not start.  Whoever is
-    # reading the build output should be told, rather than finding out later.
-    ok( exception { Provisioner::Utils::write_pem( "$dir/no/such/dir/key.pem", "key\n", 0600 ) }, 'a directory that does not exist' );
+    is( sprintf( '%04o', ( stat "$dir/key" )[2] & oct('0777') ),     '0600',                                        'the private half is its owner alone, under a umask that takes nothing away' );
+    is( sprintf( '%04o', ( stat "$dir/key.pub" )[2] & oct('0777') ), '0644',                                        'and the public half is anybody' );
+    is( File::Slurper::read_text("$dir/key.pub"),                    "$public\n",                                   'the public half on disk is the one it returns' );
+    is( Provisioner::Utils::ssh_pubkey_from_private("$dir/key"),     join( q{ }, ( split q{ }, $public )[ 0, 1 ] ), 'and the private half on disk is its pair' );
 };
 
 subtest 'new_ssh_private_key is the private half, as the store keeps it' => sub {

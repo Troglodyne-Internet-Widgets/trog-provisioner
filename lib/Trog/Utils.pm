@@ -9,6 +9,7 @@ use re '/aasx';
 
 use IO::Prompter();
 use IO::Interactive::Tiny();
+use Encode();
 use File::Slurper::Temp();
 
 =head1 NAME
@@ -46,24 +47,40 @@ our $GUEST_KEYS = '/var/lib/trog-provisioner/guest-keys';
 
 =head1 SUBROUTINES
 
+=head2 write_binary_mode($path, $bytes, $mode)
+
+Writes C<$bytes> to C<$path> whole, through L<File::Slurper::Temp>, with the
+mode C<$mode>, whatever the umask of the process is and whatever mode a file
+already at C<$path> has.  The temporary file has C<$mode> from the start, and
+the rename that puts it in place is atomic, so no reader ever sees C<$path>
+partly written or with another mode.  A private key must never be readable by
+more than its owner, and a file that another account reads, such as sshd as
+C<nobody>, must not lose a bit of its mode to the umask of whoever wrote it.
+Returns 1, and dies if it cannot write.
+
+=cut
+
+sub write_binary_mode {
+    my ( $path, $bytes, $mode ) = @_;
+
+    # File::Temp hands the mode to sysopen, which takes the umask off it.
+    local $File::Slurper::Temp::FILE_TEMP_PERMS = $mode;
+    my $umask = umask 0;
+    my $ok    = eval { File::Slurper::Temp::write_binary( $path, $bytes ); 1 };
+    umask $umask;
+    die $@ unless $ok;
+    return 1;
+}
+
 =head2 write_text_mode($path, $text, $mode)
 
-Writes C<$text> to C<$path> whole, as L<File::Slurper::Temp> does, and gives a
-new file C<$mode> whatever the umask of the process is.  A file that another
-account reads, such as sshd as C<nobody>, must not lose a bit of its mode to
-the umask of whoever wrote it.  Returns 1, and dies if it cannot write.
+C<write_binary_mode> for text, which it encodes as C<UTF-8> first.
 
 =cut
 
 sub write_text_mode {
     my ( $path, $text, $mode ) = @_;
-
-    local $File::Slurper::Temp::FILE_TEMP_PERMS = $mode;
-    my $umask = umask 0;
-    my $ok    = eval { File::Slurper::Temp::write_text( $path, $text ); 1 };
-    umask $umask;
-    die $@ unless $ok;
-    return 1;
+    return write_binary_mode( $path, Encode::encode( 'UTF-8', $text ), $mode );
 }
 
 =head2 prompt($message, %opts)

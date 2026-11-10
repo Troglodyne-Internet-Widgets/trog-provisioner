@@ -153,6 +153,23 @@ subtest 'slot_steps: a path of slots_in, back into its steps' => sub {
     is_deeply( [ Trog::Utils::slot_steps( $deep->[0] ) ], [ 'a', 0, 'b' ], 'which is the path that slots_in gave' );
 };
 
+subtest 'write_binary_mode: the bytes, byte for byte, with the mode asked for' => sub {
+    my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+    my $cert = "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n";
+
+    Trog::Utils::write_binary_mode( "$dir/cert.pem", $cert,   oct('0644') );
+    Trog::Utils::write_binary_mode( "$dir/key.pem",  "key\n", oct('0600') );
+    is( File::Slurper::read_binary("$dir/cert.pem"), $cert, 'the bytes, unchanged' );
+    is( sprintf( '%04o', ( stat "$dir/key.pem" )[2] & oct('0777') ),  '0600', 'a key readable by its owner alone' );
+    is( sprintf( '%04o', ( stat "$dir/cert.pem" )[2] & oct('0777') ), '0644', 'and a certificate, which is public, by anybody' );
+
+    # File::Slurper::Temp gives a new file the mode of the one it replaces,
+    # unless it is told one.
+    Trog::Utils::write_binary_mode( "$dir/cert.pem", "new\n", oct('0600') );
+    is( File::Slurper::read_binary("$dir/cert.pem"),                  "new\n", 'writing over a file replaces its content' );
+    is( sprintf( '%04o', ( stat "$dir/cert.pem" )[2] & oct('0777') ), '0600',  'and its mode, not keeping the old one' );
+};
+
 subtest 'write_text_mode: the mode asked for, whatever the umask' => sub {
     my $dir   = File::Temp::tempdir( CLEANUP => 1 );
     my $umask = umask;

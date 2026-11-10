@@ -79,6 +79,11 @@ subtest 'the manifest says where a secret goes, never what it is' => sub {
 
     ## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
     is( ( stat $manifest )[2] & 07777, 0600, 'and the manifest is ours alone' );
+
+    chmod 0644, $manifest;
+    Trog::Provisioner::Config::Generator::write_guest_secrets( $dir, 'vm.test', \%wanted, $kdbx, 'throwaway' );
+    is( ( stat $manifest )[2] & 07777, 0600, 'also when it replaces one that anybody could read' );
+    ## use critic
 };
 
 subtest 'the same domain provisioned twice gets the same secret' => sub {

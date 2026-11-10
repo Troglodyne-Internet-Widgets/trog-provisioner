@@ -1559,8 +1559,7 @@ sub write_guest_secrets {
         }
     } keys %$wanted;
 
-    File::Slurper::Temp::write_binary( $manifest, YAML::XS::Dump( \%manifest ) );
-    chmod 0600, $manifest;
+    Trog::Utils::write_binary_mode( $manifest, YAML::XS::Dump( \%manifest ), oct('0600') );
 
     print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- " . ( $manifest{$_}{ref} // "issued by $manifest{$_}{issue}{guest}" ) . "\n" } sort keys %manifest );
 
@@ -1665,8 +1664,7 @@ sub restore_sealed_key {
     my $sealed = Trog::Guest->key_path( $fqdn, $private );
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether each half is already the file we want
     if ( defined $sealed && $sealed ne $private && !-f $private ) {
-        File::Slurper::Temp::write_binary( $private, File::Slurper::read_binary($sealed) );
-        chmod 0600, $private;
+        Trog::Utils::write_binary_mode( $private, File::Slurper::read_binary($sealed), oct('0600') );
     }
     if ( -f $private && !-f "$private.pub" ) {
         File::Slurper::Temp::write_text( "$private.pub", Provisioner::Utils::ssh_pubkey_from_private($private) . " $fqdn\n" );
