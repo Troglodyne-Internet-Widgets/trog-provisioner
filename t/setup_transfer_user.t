@@ -98,6 +98,7 @@ subtest 'a new transfer account, beside the provisioning account' => sub {
     }
     ok( ( grep { $_ eq "install -d -o root -g agent-group -m 2775 $root/state/guest-keys" } @log ), 'the keys go where the provisioning account can write, and everybody read' );
     ok( ( grep { $_ eq 'systemctl try-reload-or-restart ssh' } @log ),                              'and sshd reloads its configuration, if it runs' );
+    ok( ( grep { $_ eq 'systemctl reload ssh-fastlane' } @log ),                                    'and so does the fast lane, which the stand-in says runs' );
 
     is( File::Slurper::read_text("$root/sshd_config.d/50-trog-transfer-fetcher.conf"), <<"CONF", 'which asks the helper, as nobody, for the keys of the transfer account alone' );
 # Written by setup_transfer_user of trog-provisioner.  Do not edit by hand.

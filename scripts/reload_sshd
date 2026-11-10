@@ -1,0 +1,18 @@
+#!/bin/sh
+# Reloads every sshd on this machine that reads /etc/ssh/sshd_config, after a
+# change to it or to a file in sshd_config.d:
+#
+#   reload_sshd
+#
+# That is ssh, and the fast lane of Provisioner::Recipe::sshfastlane where it
+# runs, because its configuration includes the main one.  A login sends each
+# later connection from the same address to the fast lane, so a change that
+# reaches only ssh works once from an address and is refused after that.
+#
+# try-reload, because on a guest that starts sshd from ssh.socket the service
+# is not running, and then each new connection reads the new configuration.
+set -e
+systemctl try-reload-or-restart ssh
+if systemctl is-active --quiet ssh-fastlane; then
+    systemctl reload ssh-fastlane
+fi

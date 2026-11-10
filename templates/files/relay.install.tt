@@ -5,7 +5,7 @@
     places it on every guest. -%]
 install -o root -g root -m 0644 relay.sshd.conf /etc/ssh/sshd_config.d/relay-bans.conf
 [% script_dir %]/check_sshd_config
-[% script_dir %]/queue_postrun_task systemctl try-reload-or-restart ssh
+[% script_dir %]/queue_postrun_task [% script_dir %]/reload_sshd
 install -d -o root -g root -m 0755 /etc/nginx/relay-stream.d
 install -o root -g root -m 0644 relay.stream.conf /etc/nginx/modules-enabled/99-relay-stream.conf
 install -d -o root -g root -m 0700 /var/lib/[% ban_set %]
