@@ -60,7 +60,10 @@ subtest 'or when --config names one first' => sub {
     }
     my ( $said, $rc ) = run_link( undef, 'provision', '--config' );
     isnt( $rc, 0, 'a --config with no directory fails' );
-    like( $said, qr/needs[ ]the[ ]directory/, 'and says why' );
+    like( $said, qr/TROG_PROVISIONER_CONFIG[ ]is[ ]not[ ]set/, 'and says why' );
+
+    ( $said, $rc ) = run_link( undef, qw{new_guest --help --config}, tempdir( CLEANUP => 1 ) );
+    isnt( $rc, 0, 'a --config after an argument of the tool is not taken, because those go to the tool unread' );
 };
 
 subtest 'run_bin under its own name runs nothing' => sub {

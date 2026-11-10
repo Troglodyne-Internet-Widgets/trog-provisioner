@@ -71,6 +71,11 @@ not one is this script's to do, not C<bin/destroy>'s.
 
 =over 4
 
+=item B<--config> DIR
+
+The configuration to use, in place of C<TROG_PROVISIONER_CONFIG>, for this
+script and the tools it runs.  For a caller that cannot set a variable.
+
 =item B<--keep-config>
 
 Leave the scratch configuration alone, this domain's file in it included.  For
@@ -102,18 +107,19 @@ our $MARKER = '.trog-scratch-config';
 
 sub main {
     my @args = @_;
-    config_option( \@args );
 
     my ( $keep_config, $keep_data, $hv_name, $hvconf, $dryrun, $help );
     GetOptionsFromArray(
         \@args,
+        'config=s'     => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] },
         'keep-config'  => \$keep_config,
         'keep-data'    => \$keep_data,
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
         'dryrun'       => \$dryrun,
         'help'         => \$help,
-    );
+    )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my $domain = shift @args;
@@ -166,28 +172,6 @@ sub destroy_guest {
 }
 
 =head1 SUBROUTINES
-
-=head2 config_option(\@args)
-
-Takes C<--config DIR> or C<--config=DIR> off the front of @args, and puts DIR
-in C<TROG_PROVISIONER_CONFIG> for this process and every tool it runs.  So a
-caller that cannot set a variable, such as a Claude Code session, whose rules
-refuse a command that begins with one, can still name the configuration.  It
-must come before every other argument, because a wrapper passes the rest to its
-tool unread.  Without it, nothing changes.  Dies when it names no directory.
-
-=cut
-
-sub config_option {
-    my ($args) = @_;
-    return unless @$args && $args->[0] =~ m{\A --config (?: = (.*) )? \z}s;
-    my $dir = $1;
-    shift @$args;
-    $dir //= shift @$args;
-    die "--config needs the directory of a configuration.\n" unless defined $dir && length $dir;
-    $ENV{TROG_PROVISIONER_CONFIG} = $dir;
-    return $dir;
-}
 
 =head2 require_config()
 

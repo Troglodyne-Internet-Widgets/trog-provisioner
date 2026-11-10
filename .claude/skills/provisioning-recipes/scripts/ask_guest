@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use Cwd();
 use File::Basename();
+use Getopt::Long();
 
 use Trog::Hypervisors();
 
@@ -45,7 +46,9 @@ exit main(@ARGV) unless caller;
 
 sub main {
     my @args = @_;
-    Trog::Skill::Teardown::config_option( \@args );
+    # Only a --config before the domain, so that the command keeps its options.
+    my $options = Getopt::Long::Parser->new( config => [qw{require_order pass_through}] );
+    $options->getoptionsfromarray( \@args, 'config=s' => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] } );
     my ( $domain, @command ) = @args;
     die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
     Trog::Skill::Teardown::require_config();

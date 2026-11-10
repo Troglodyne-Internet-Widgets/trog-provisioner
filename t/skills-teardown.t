@@ -177,31 +177,31 @@ subtest 'a run with no configuration named refuses, and does not fall back to th
     is_deeply( \@asked, [], 'before it asks bin/destroy for anything' );
 };
 
-subtest 'config_option' => sub {
+subtest 'the configuration can come from --config' => sub {
     local $ENV{TROG_PROVISIONER_CONFIG};
-    my @args = qw{--config /bogus/scratch --keep-data vm.test};
-    is( Trog::Skill::Teardown::config_option( \@args ), '/bogus/scratch', 'a leading --config DIR names the configuration' );
-    is( $ENV{TROG_PROVISIONER_CONFIG},                  '/bogus/scratch', 'for this process and what it runs' );
-    is_deeply( \@args, [ '--keep-data', 'vm.test' ], 'and leaves the rest of the arguments' );
-
-    @args = ( '--config=/bogus/other', 'vm.test' );
-    Trog::Skill::Teardown::config_option( \@args );
-    is_deeply( [ $ENV{TROG_PROVISIONER_CONFIG}, @args ], [ '/bogus/other', 'vm.test' ], 'and so does --config=DIR' );
-
-    @args = qw{vm.test --config /bogus/late};
-    is( Trog::Skill::Teardown::config_option( \@args ), undef,          'one after another argument is not taken, because a wrapper passes those on unread' );
-    is( $ENV{TROG_PROVISIONER_CONFIG},                  '/bogus/other', 'and changes nothing' );
-
-    like( exception { Trog::Skill::Teardown::config_option( ['--config'] ) },  qr/needs[ ]the[ ]directory/, 'a --config with nothing after it dies' );
-    like( exception { Trog::Skill::Teardown::config_option( ['--config='] ) }, qr/needs[ ]the[ ]directory/, 'and so does an empty one' );
-
     my @asked;
     my $script = Test::MockModule->new( 'Trog::Skill::Teardown', no_auto => 1 );
     $script->redefine( destroy_guest => sub { push @asked, [@_]; return 0 } );
     $script->redefine( remove_config => sub { return 0 } );
-    delete $ENV{TROG_PROVISIONER_CONFIG};
-    is( Trog::Skill::Teardown::main(qw{--config /bogus/scratch vm.test}), 0,         'teardown takes the configuration from --config' );
-    is( $asked[0][0],                                                     'vm.test', 'and tears down the domain after it' );
+    $script->redefine( pod2usage     => sub { my %usage = @_; die "usage $usage{-exitval}\n" } );
+
+    foreach my $args ( [qw{--config /bogus/scratch vm.test}], [qw{--config=/bogus/scratch vm.test}], [qw{--keep-config --config /bogus/scratch vm.test}] ) {
+        delete $ENV{TROG_PROVISIONER_CONFIG};
+        @asked = ();
+        my $rc;
+        capture { $rc = Trog::Skill::Teardown::main(@$args) };
+        is( $rc,                           0,                "teardown @$args exits 0, with no variable set" );
+        is( $ENV{TROG_PROVISIONER_CONFIG}, '/bogus/scratch', 'and names the configuration for itself and what it runs' );
+        is( $asked[0][0],                  'vm.test',        'and tears down the domain after it' );
+    }
+
+    @asked = ();
+    my $refused;
+    capture {
+        $refused = exception { Trog::Skill::Teardown::main(qw{--keep-confg vm.test}) }
+    };
+    is( $refused, "usage 2\n", 'an option that it does not know stops it with its usage' );
+    is_deeply( \@asked, [], 'before it tears anything down' );
 };
 
 subtest 'the POD documents the interface' => sub {

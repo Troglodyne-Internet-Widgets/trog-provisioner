@@ -12,6 +12,7 @@ use re '/aasx';
 
 use Cwd();
 use File::Basename();
+use Getopt::Long();
 use IPC::Run3();
 
 # For the check of the configuration in play, which teardown owns.
@@ -50,7 +51,9 @@ sub main {
     die "run_bin runs a tool by the name of its link: one of " . join( ', ', sort keys %TOOLS ) . ".\n"
       unless $TOOLS{$tool};
 
-    Trog::Skill::Teardown::config_option( \@args );
+    # Only a --config before the arguments of the tool, which go to it unread.
+    my $options = Getopt::Long::Parser->new( config => [qw{require_order pass_through}] );
+    $options->getoptionsfromarray( \@args, 'config=s' => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] } );
     Trog::Skill::Teardown::require_config();
 
     my $bin = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../../../bin' ) . "/$tool";
