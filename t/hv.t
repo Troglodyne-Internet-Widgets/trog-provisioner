@@ -130,6 +130,20 @@ subtest 'pool and domain paths default the way they always did' => sub {
     is( $set->domain_dir, '/srv/domains', 'domain_dir override' );
 };
 
+# bin/new_config writes the directory of each domain under basedir, and
+# bin/provision reads provision.conf under the default.
+subtest 'the default domain directory is the basedir that the configuration names' => sub {
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    is( Trog::HV->default_domain_dir, '/opt/domains', 'with no recipes.yaml, /opt/domains' );
+
+    File::Slurper::Temp::write_text( Trog::Config->path('recipes.yaml'), "_base:\n    _global:\n        admin_user: someadmin\n" );
+    is( Trog::HV->default_domain_dir, '/opt/domains', 'and with one that names no basedir' );
+
+    File::Slurper::Temp::write_text( Trog::Config->path('recipes.yaml'), "_base:\n    _global:\n        basedir: /bogus/domains\n" );
+    is( Trog::HV->default_domain_dir, '/bogus/domains', 'and its basedir when it names one' );
+    is( fresh()->domain_dir,          '/bogus/domains', 'which a hypervisor with none of its own takes' );
+};
+
 subtest 'a backend that leaves something out is told what' => sub {
     my @owed = qw{
       build config_keys capacity client_module

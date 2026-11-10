@@ -595,7 +595,10 @@ sub domain_dir ($self) { return $self->{domain_dir} // $self->default_domain_dir
 
 =head2 default_domain_dir
 
-Returns the directory for domains when nothing else sets one.
+Returns the directory for domains when nothing else sets one: the C<basedir>
+in the C<_global> of C<_base> in F<recipes.yaml>, where C<bin/new_config>
+writes the directory of each domain, or F</opt/domains> when that names none.
+It reads the file at each call.
 
 It is a class method, so C<bin/provision> and C<bin/restore> can call it before
 they have a hypervisor.  C<bin/provision> needs the path to find
@@ -604,7 +607,11 @@ here only, so that the two cannot disagree.
 
 =cut
 
-sub default_domain_dir { return '/opt/domains' }
+sub default_domain_dir {
+    my $conf = eval { YAML::XS::Load( File::Slurper::read_binary( Trog::Config->path('recipes.yaml') ) ) };
+    my $base = ref $conf eq 'HASH' ? $conf->{_base}{_global}{basedir} : undef;
+    return $base // '/opt/domains';
+}
 
 =head1 WHICH WAY A GUEST GETS BUILT
 
