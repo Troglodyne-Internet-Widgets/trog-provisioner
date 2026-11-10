@@ -344,7 +344,7 @@ sub slice_cpu_quota ( $self, $unit ) {
     # CPUQuotaPerSecUSec is the CPU time that the slice gets in each second,
     # such as 4s for 400% or 500ms for 50%.  A long fraction is written as
     # 1.500000s, and a mix of units as 1s 500ms, so each part adds up.
-    my $span = $self->capture_cmd("systemctl show -p CPUQuotaPerSecUSec --value $unit") // q{};
+    my $span = $self->capture_cmd("systemctl --no-pager show -p CPUQuotaPerSecUSec --value $unit") // q{};
     chomp $span;
 
     my $seconds = 0;

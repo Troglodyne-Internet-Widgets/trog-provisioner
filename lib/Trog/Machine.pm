@@ -287,6 +287,13 @@ Takes an argv list and returns the exit code.  This module escapes the
 arguments, so they can contain any character.  A single argument goes to the
 shell of the far side instead, and that is how you write a pipeline.
 
+On a remote machine, both run their command with C<SYSTEMD_PAGER> and
+C<PAGER> set to C<cat>, as C<unpaged> writes it.  L<Net::OpenSSH::More> gives
+each of these commands a terminal, and on a terminal C<systemctl>,
+C<journalctl> and C<git> start a pager, which waits for a key that nobody
+presses.  A command under C<sudo> loses both, because sudo resets the
+environment, so it passes C<--no-pager> itself.
+
 These names say what the methods do.  They are not C<run> and C<capture>,
 because Perl::Critic::Policy::PreferredBinaries reads those names as local
 runners.  These methods run their command on whatever machine this is.  That is
@@ -354,6 +361,22 @@ my sub unhang ( $self, $what, $code ) {
     return wantarray ? @result : $result[0];
 }
 
+=head2 Trog::Machine::unpaged(@command)
+
+C<@command> as C<capture_cmd> and C<run_cmd> send it to the far side, with no
+pager: C<SYSTEMD_PAGER> and C<PAGER> set to C<cat>.  A single argument is a
+string for the shell of the far side, so the variables are exported in front
+of it, and a pipeline sees them too.  A list gets C<env> in front.
+
+=cut
+
+our @NO_PAGER = qw{SYSTEMD_PAGER=cat PAGER=cat};
+
+sub unpaged (@command) {
+    return "export @NO_PAGER; $command[0]" if @command == 1;
+    return ( 'env', @NO_PAGER, @command );
+}
+
 sub capture_cmd {
     my ( $self, $cmd ) = @_;
     if ( $self->is_local ) {
@@ -365,14 +388,14 @@ sub capture_cmd {
         return $out;
     }
 
-    return unhang( $self, $cmd, sub { ( $self->ssh->cmd($cmd) )[0] } );
+    return unhang( $self, $cmd, sub { ( $self->ssh->cmd( unpaged($cmd) ) )[0] } );
 }
 
 sub run_cmd {
     my ( $self, @argv ) = @_;
     return system(@argv) >> 8 if $self->is_local;
 
-    return unhang( $self, join( ' ', @argv ), sub { $self->ssh->cmd_exit_code(@argv) } );
+    return unhang( $self, join( ' ', @argv ), sub { $self->ssh->cmd_exit_code( unpaged(@argv) ) } );
 }
 
 =head1 SUDO

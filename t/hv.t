@@ -454,6 +454,14 @@ subtest 'a guest gets a TPM only where one means something' => sub {
 # real one without a real hypervisor.  Mock it, and assert on what we ask it to
 # do -- which since nothing goes through sftp any more is entirely commands and
 # the streams we hand them.
+# The command that the far side runs, once its shell has set the variables
+# that Trog::Machine::unpaged puts in front of it.
+sub as_run (@cmd) {
+    return ( $cmd[0] =~ s/\Aexport\ [^;]*;\ //r ) if @cmd == 1;
+    splice @cmd, 0, 1 + @Trog::Machine::NO_PAGER if $cmd[0] eq 'env';
+    return @cmd;
+}
+
 subtest 'remote work goes through commands with an exit status' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@fakehv:2222/system' );
 
@@ -523,6 +531,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
     $mock->redefine(
         cmd => sub {
             my ( $self, @cmd ) = @_;
+            @cmd = as_run(@cmd);
             push @commands, { cmd => [@cmd] };
             return ( '/tmp/staged.XXXX', '', 0 ) if "@cmd" eq 'mktemp';
             return ( "output of @cmd",   '', 0 );
@@ -531,6 +540,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
     $mock->redefine(
         cmd_exit_code => sub {
             my ( $self, @cmd ) = @_;
+            @cmd = as_run(@cmd);
             push @commands, { cmd => [@cmd] };
             my @argv = @cmd;
             shift @argv if $argv[0] eq 'sudo';
