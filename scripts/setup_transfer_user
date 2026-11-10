@@ -95,6 +95,8 @@ mv -f "$conf.new" "$conf"
 "$here/check_sshd_config" || die "sshd refuses $conf, so it is not reloaded"
 sshd -T -C "user=$user,host=localhost,addr=127.0.0.1" | grep -qx "authorizedkeyscommand $LIBEXEC/guest_authorized_keys $GUEST_KEYS" ||
     die "sshd did not take $conf for $user: an earlier file names another AuthorizedKeysCommand"
-systemctl reload ssh 2>/dev/null || systemctl reload sshd
+# try-reload, because on a guest that starts sshd from ssh.socket the service
+# is not running, and then each new connection reads the new configuration.
+systemctl try-reload-or-restart ssh
 
 echo "Guests fetch as $user, with keys that $provisioner puts in $GUEST_KEYS."

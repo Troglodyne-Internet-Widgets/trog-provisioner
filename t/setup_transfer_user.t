@@ -97,7 +97,7 @@ subtest 'a new transfer account, beside the provisioning account' => sub {
         ok( ( grep { index( $_, 'install -o root -g root -m 0755 ' ) == 0 && index( $_, "/$program " ) > 0 } @log ), 'owned by root, and run by everybody' );
     }
     ok( ( grep { $_ eq "install -d -o root -g agent-group -m 2775 $root/state/guest-keys" } @log ), 'the keys go where the provisioning account can write, and everybody read' );
-    ok( ( grep { $_ eq 'systemctl reload ssh' } @log ),                                             'and sshd reloads its configuration' );
+    ok( ( grep { $_ eq 'systemctl try-reload-or-restart ssh' } @log ),                              'and sshd reloads its configuration, if it runs' );
 
     is( File::Slurper::read_text("$root/sshd_config.d/50-trog-transfer-fetcher.conf"), <<"CONF", 'which asks the helper, as nobody, for the keys of the transfer account alone' );
 # Written by setup_transfer_user of trog-provisioner.  Do not edit by hand.
