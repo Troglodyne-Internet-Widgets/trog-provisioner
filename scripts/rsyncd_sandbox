@@ -28,6 +28,10 @@ if [ ! -f "$dir/rsyncd.conf" ]; then
     echo "rsyncd_sandbox: $dir holds no rsyncd.conf" >&2
     exit 2
 fi
+if [ ! -r "$dir/rsyncd.conf" ]; then
+    echo "rsyncd_sandbox: $(id -un) cannot read $dir/rsyncd.conf" >&2
+    exit 2
+fi
 
 set --
 for binds in "$dir"/rsyncd.d/*.binds; do

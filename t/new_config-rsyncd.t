@@ -178,6 +178,16 @@ subtest 'code in the daemon reaches what the guest may fetch, and nothing else' 
     is( scalar( () = $out =~ m/:/g ), 1, 'and it has no network but loopback' ) or diag $out;
 };
 
+# The transfer account is another account than the one that wrote them, in its
+# group, and the sandbox runs as the transfer account.
+subtest 'the group can read what the sandbox reads' => sub {
+    foreach my $file ( "$host/rsyncd.conf", "$host/rsyncd.d/host.test.conf", "$host/rsyncd.d/host.test.binds" ) {
+        my $mode = ( stat $file )[2] & oct('0777');
+        is( sprintf( '%04o', $mode & oct('0640') ), '0640', "$file is readable by its owner and its group" );
+        is( $mode & oct('0137'),                    0,      'and by nobody else, and writable by nobody but its owner' );
+    }
+};
+
 subtest 'the sandbox runs only for a domain directory' => sub {
     foreach my $case ( [ 'host.test', 'a relative path' ], [ "$root/data", 'a directory with no rsyncd.conf' ], [ q{}, 'no directory at all' ] ) {
         my ( $dir, $what ) = @$case;
@@ -185,6 +195,17 @@ subtest 'the sandbox runs only for a domain directory' => sub {
         IPC::Run3::run3( [ $sandbox_program, $dir ], \undef, \$out, \$err );
         is( $? >> 8, 2, "$what is refused" );
         like( $err, qr/rsyncd_sandbox:/, 'saying why' );
+    }
+
+  SKIP: {
+        skip 'root reads a file whatever its mode', 2 unless $>;
+        my $unreadable = tempdir( CLEANUP => 1 );
+        File::Slurper::Temp::write_text( "$unreadable/rsyncd.conf", "list = no\n" );
+        chmod 0, "$unreadable/rsyncd.conf";
+        my ( $out, $err );
+        IPC::Run3::run3( [ $sandbox_program, $unreadable ], \undef, \$out, \$err );
+        is( $? >> 8, 2, 'a configuration that the account cannot read is refused' );
+        like( $err, qr/cannot[ ]read/, 'saying so, rather than leaving it to rsync' );
     }
 };
 
