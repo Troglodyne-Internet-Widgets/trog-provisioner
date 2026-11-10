@@ -795,6 +795,11 @@ subtest 'the CPUQuota of a slice, from what systemctl says' => sub {
         is( $hv->slice_cpu_quota('machine-runner.slice'), $said{$span}, "'$span' is " . ( $said{$span} // 'no quota' ) );
     }
 
+    # systemctl on the terminal that a remote command gets: its pager asks for
+    # a key, unless it is told to use none.
+    $mock->redefine( capture_cmd => sub ( $, $cmd ) { return $cmd =~ m/--no-pager/ ? "4s\n" : "WARNING: terminal is not fully functional\nPress RETURN to continue" } );
+    is( $hv->slice_cpu_quota('user-996.slice'), 4, 'systemctl is asked with no pager, which on a terminal would wait for a key' );
+
     like( exception { $hv->slice_cpu_quota(q{x'; reboot; '.slice}) }, qr/not[ ]the[ ]name[ ]of[ ]a[ ]slice/, 'a unit name that is not one never reaches the shell' );
     is( Trog::HV::Libvirt::partition_slice('/machine/runner'),   'machine-runner.slice',   'a partition is the slice that libvirt makes for it' );
     is( Trog::HV::Libvirt::partition_slice('/machine/a/runner'), 'machine-a-runner.slice', 'and a deeper one too' );

@@ -362,6 +362,28 @@ sub sudo_reads ($said) {
     return "something else: exit $rc after $ssh->{sent} commands, saying '$stderr'";
 }
 
+subtest 'a remote command runs with no pager' => sub {
+
+    # The far side, played here: one argument goes to a shell, and a list runs
+    # as it is, as Net::OpenSSH::More sends them.
+    my $far = Test::MockModule->new( 'Trog::Machine::FarSide', no_auto => 1 );
+    $far->define(
+        cmd => sub ( $, @command ) {
+            IPC::Run3::run3( @command == 1 ? [ 'sh', '-c', $command[0] ] : \@command, \undef, \my $out, \undef );
+            return ( $out, q{}, $? >> 8 );
+        }
+    );
+    $far->define( cmd_exit_code => sub ( $self, @command ) { return ( $self->cmd(@command) )[2] } );
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( ssh => sub { return bless {}, 'Trog::Machine::FarSide' } );
+
+    local @ENV{qw{SYSTEMD_PAGER PAGER}} = qw{less less};
+    is( remote()->capture_cmd(q{echo "$SYSTEMD_PAGER $PAGER" | cat}),                 "cat cat\n", 'a shell string, a pipeline too, sees no pager' );
+    is( remote()->run_cmd( 'sh', '-c', q{test "$SYSTEMD_PAGER $PAGER" = "cat cat"} ), 0,           'and so does a list' );
+    is( remote()->run_cmd(q{test "$SYSTEMD_PAGER $PAGER" = "cat cat"}),               0,           'and a single string to run_cmd' );
+    is( remote()->capture_cmd(q{timeout 5 echo ok}),                                  "ok\n",      'and the command still runs as it was written' );
+};
+
 subtest 'what sudo says when it wants a password it cannot ask for' => sub {
     is( sudo_reads("sudo: a password is required\n"),                                                'asked', 'sudo -n with no passwordless sudo' );
     is( sudo_reads("sudo: password is required\n"),                                                  'asked', 'and without the article' );
