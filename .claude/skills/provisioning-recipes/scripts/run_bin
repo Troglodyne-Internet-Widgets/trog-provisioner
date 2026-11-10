@@ -12,6 +12,7 @@ use re '/aasx';
 
 use Cwd();
 use File::Basename();
+use Getopt::Long();
 use IPC::Run3();
 
 # For the check of the configuration in play, which teardown owns.
@@ -27,13 +28,15 @@ run_bin - run a tool of bin/ only when the configuration it is to use is named
     .claude/skills/provisioning-recipes/scripts/new_config --credentials --dryrun vm.test
     .claude/skills/provisioning-recipes/scripts/provision --credentials vm.test
     .claude/skills/provisioning-recipes/scripts/destroy --orphans --dryrun
+    .claude/skills/provisioning-recipes/scripts/provision --config /path/to/scratch --credentials vm.test
 
 =head1 DESCRIPTION
 
 Each of C<new_guest>, C<new_config>, C<provision> and C<destroy> in this
 directory is a link to this script.  It dies unless C<TROG_PROVISIONER_CONFIG>
-is set, and then it runs the tool of the same name in F<bin/>, with the same
-arguments and standard input, and exits with its status.
+is set, or C<--config DIR> comes first.  Then it runs the tool of the same name
+in F<bin/>, with the other arguments and the same standard input, and exits
+with its status.
 
 See C<require_config> in F<teardown> for why.
 
@@ -48,6 +51,9 @@ sub main {
     die "run_bin runs a tool by the name of its link: one of " . join( ', ', sort keys %TOOLS ) . ".\n"
       unless $TOOLS{$tool};
 
+    # Only a --config before the arguments of the tool, which go to it unread.
+    my $options = Getopt::Long::Parser->new( config => [qw{require_order pass_through}] );
+    $options->getoptionsfromarray( \@args, 'config=s' => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] } );
     Trog::Skill::Teardown::require_config();
 
     my $bin = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../../../bin' ) . "/$tool";

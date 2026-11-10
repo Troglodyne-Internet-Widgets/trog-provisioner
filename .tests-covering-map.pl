@@ -197,7 +197,7 @@ return sub {
         return @tests;
     }
 
-    return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example' || $path =~ m{\Acompletions/[^/]+\z};
+    return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example' || $path eq 'clod.json' || $path =~ m{\Acompletions/[^/]+\z};
     return ( 'lib/Trog/HV/Libvirt.pm', tests_naming($path) ) if $path eq 'virtiofs-better';
     return 'lib/Provisioner/IPPool.pm'                       if $path =~ m{\Aschema/ips(?:[.]v\d+[.]update)?[.]sql\z};
 

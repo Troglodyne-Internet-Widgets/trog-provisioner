@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use Cwd();
 use File::Basename();
+use Getopt::Long();
 
 use Trog::Hypervisors();
 
@@ -28,6 +29,7 @@ ask_guest - ask a live guest a question, rather than reasoning about it
 
     ask_guest vm.test 'postconf -h mydestination'
     ask_guest vm.test 'configd status postfix'
+    ask_guest --config /path/to/scratch vm.test 'ss -lnt'
 
 =head1 DESCRIPTION
 
@@ -43,7 +45,11 @@ Runs as root, because everything worth asking here is.
 exit main(@ARGV) unless caller;
 
 sub main {
-    my ( $domain, @command ) = @_;
+    my @args = @_;
+    # Only a --config before the domain, so that the command keeps its options.
+    my $options = Getopt::Long::Parser->new( config => [qw{require_order pass_through}] );
+    $options->getoptionsfromarray( \@args, 'config=s' => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] } );
+    my ( $domain, @command ) = @args;
     die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
     Trog::Skill::Teardown::require_config();
 

@@ -1,0 +1,8 @@
+{
+    "run": [
+        "bin/preflight",
+        "bin/provision",
+        "bin/destroy",
+        ".claude/skills/provisioning-recipes/scripts/*"
+    ]
+}

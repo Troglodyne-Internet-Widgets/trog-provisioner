@@ -40,6 +40,7 @@ collect_artifacts - pull the logs off a guest that say what its recipes actually
 
     collect_artifacts vm.test
     collect_artifacts --into /tmp/evidence vm.test
+    collect_artifacts --config /path/to/scratch vm.test
 
 =head1 DESCRIPTION
 
@@ -111,6 +112,11 @@ finding.  A guest with no setup.log never got as far as the Makefile.
 
 =over 4
 
+=item B<--config> DIR
+
+The configuration to use, in place of C<TROG_PROVISIONER_CONFIG>.  For a
+caller that cannot set a variable.
+
 =item B<--into> DIR
 
 Where to put them.  The default is a new directory, whose path is printed.
@@ -136,6 +142,7 @@ sub main {
     my ( $into, $user, $key, $host, $hv_name, $hvconf, $help );
     GetOptionsFromArray(
         \@args,
+        'config=s'     => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] },
         'into=s'       => \$into,
         'user=s'       => \$user,
         'key=s'        => \$key,
@@ -143,7 +150,8 @@ sub main {
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
         'help'         => \$help,
-    );
+    )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my $domain = shift @args;

@@ -28,6 +28,7 @@ teardown - take the throwaway guest and the throwaway configuration back out aga
 
     teardown vm.test
     teardown --keep-config vm.test
+    teardown --config /path/to/scratch vm.test
 
 and for what a run that ended without one left behind, which is C<bin/destroy>'s:
 
@@ -70,6 +71,11 @@ not one is this script's to do, not C<bin/destroy>'s.
 
 =over 4
 
+=item B<--config> DIR
+
+The configuration to use, in place of C<TROG_PROVISIONER_CONFIG>, for this
+script and the tools it runs.  For a caller that cannot set a variable.
+
 =item B<--keep-config>
 
 Leave the scratch configuration alone, this domain's file in it included.  For
@@ -105,13 +111,15 @@ sub main {
     my ( $keep_config, $keep_data, $hv_name, $hvconf, $dryrun, $help );
     GetOptionsFromArray(
         \@args,
+        'config=s'     => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] },
         'keep-config'  => \$keep_config,
         'keep-data'    => \$keep_data,
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
         'dryrun'       => \$dryrun,
         'help'         => \$help,
-    );
+    )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my $domain = shift @args;
@@ -182,7 +190,7 @@ sub require_config {
     return $dir if defined $dir && length $dir;
 
     die "TROG_PROVISIONER_CONFIG is not set, so this would use $Trog::Config::DIR.\n"
-      . "Set it to the directory that scratch_config made.  For a run against $Trog::Config::DIR, set it to that path.\n";
+      . "Set it, or pass --config first, to the directory that scratch_config made.  For a run against $Trog::Config::DIR, name that path.\n";
 }
 
 =head2 is_scratch()
