@@ -170,21 +170,30 @@ subtest 'write_binary_mode: the bytes, byte for byte, with the mode asked for' =
     is( sprintf( '%04o', ( stat "$dir/cert.pem" )[2] & oct('0777') ), '0600',  'and its mode, not keeping the old one' );
 };
 
-subtest 'write_text_mode: the mode asked for, whatever the umask' => sub {
+# A path in a key file can hold UTF-8, as bytes, which must not be encoded a
+# second time.
+subtest 'write_binary_mode: bytes above 127 as they are' => sub {
+    my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+    my $utf8 = '/bogus/caf' . pack( 'C*', 0xc3, 0xa9 ) . "\n";
+    Trog::Utils::write_binary_mode( "$dir/utf8", $utf8, oct('0644') );
+    is( File::Slurper::read_binary("$dir/utf8"), $utf8, 'written as they are, not encoded again' );
+};
+
+subtest 'write_binary_mode: the mode asked for, whatever the umask' => sub {
     my $dir   = File::Temp::tempdir( CLEANUP => 1 );
     my $umask = umask;
     foreach my $case ( [ oct('0077'), oct('0644') ], [ oct('0007'), oct('0644') ], [ oct('0077'), oct('0640') ] ) {
         my ( $mask, $mode ) = @$case;
         my $file = sprintf( '%s/umask-%04o-mode-%04o', $dir, $mask, $mode );
         umask $mask;
-        is( Trog::Utils::write_text_mode( $file, "text\n", $mode ), 1, sprintf( 'written under umask %04o', $mask ) );
+        is( Trog::Utils::write_binary_mode( $file, "text\n", $mode ), 1, sprintf( 'written under umask %04o', $mask ) );
         umask $umask;
         is( sprintf( '%04o', ( stat $file )[2] & oct('0777') ), sprintf( '%04o', $mode ), 'with the mode asked for' );
-        is( File::Slurper::read_text($file),                    "text\n",                 'and the text' );
+        is( File::Slurper::read_binary($file),                  "text\n",                 'and the bytes' );
     }
     is( umask, $umask, 'and the umask of the process is as it was' );
 
-    like( ( eval { Trog::Utils::write_text_mode( "$dir/no/such/dir/file", "text\n", oct('0644') ); 1 } ? q{} : $@ ), qr/\S/, 'a file that it cannot write dies' );
+    like( ( eval { Trog::Utils::write_binary_mode( "$dir/no/such/dir/file", "text\n", oct('0644') ); 1 } ? q{} : $@ ), qr/\S/, 'a file that it cannot write dies' );
     is( umask, $umask, 'and leaves the umask as it was too' );
 };
 

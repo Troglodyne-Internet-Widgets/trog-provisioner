@@ -330,7 +330,7 @@ sub authorize_guest_key {
     die "sshd cannot be given '$dir' in a key line: it must be an absolute path of letters, digits and ._/+-\n"
       unless $dir =~ $GUEST_DIR;
 
-    return Trog::Utils::write_text_mode( "$Trog::Utils::GUEST_KEYS/$name", "$dir\n$pubkey\n", oct('0644') );
+    return Trog::Utils::write_binary_mode( "$Trog::Utils::GUEST_KEYS/$name", "$dir\n$pubkey\n", oct('0644') );
 }
 
 =head2 $had = revoke_guest_key($name)

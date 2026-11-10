@@ -9,7 +9,6 @@ use re '/aasx';
 
 use IO::Prompter();
 use IO::Interactive::Tiny();
-use Encode();
 use File::Slurper::Temp();
 
 =head1 NAME
@@ -49,8 +48,8 @@ our $GUEST_KEYS = '/var/lib/trog-provisioner/guest-keys';
 
 =head2 write_binary_mode($path, $bytes, $mode)
 
-Writes C<$bytes> to C<$path> whole, through L<File::Slurper::Temp>, with the
-mode C<$mode>, whatever the umask of the process is and whatever mode a file
+Writes C<$bytes> to C<$path> whole, through L<File::Slurper::Temp>, as they
+are, with the mode C<$mode>, whatever the umask of the process is and whatever mode a file
 already at C<$path> has.  The temporary file has C<$mode> from the start, and
 the rename that puts it in place is atomic, so no reader ever sees C<$path>
 partly written or with another mode.  A private key must never be readable by
@@ -70,17 +69,6 @@ sub write_binary_mode {
     umask $umask;
     die $@ unless $ok;
     return 1;
-}
-
-=head2 write_text_mode($path, $text, $mode)
-
-C<write_binary_mode> for text, which it encodes as C<UTF-8> first.
-
-=cut
-
-sub write_text_mode {
-    my ( $path, $text, $mode ) = @_;
-    return write_binary_mode( $path, Encode::encode( 'UTF-8', $text ), $mode );
 }
 
 =head2 prompt($message, %opts)

@@ -1638,9 +1638,9 @@ sub write_rsyncd_conf {
     # The transfer account reads these through the group: see Trog::Local/THE
     # KEYS OF GUESTS.  They hold paths, and nothing secret.
     my $group_reads = oct('0640');
-    Trog::Utils::write_text_mode( "$machine_dir/rsyncd.d/$fqdn.binds", $binds,                                                                                                                                                     $group_reads );
-    Trog::Utils::write_text_mode( "$machine_dir/rsyncd.d/$fqdn.conf",  $part,                                                                                                                                                      $group_reads );
-    Trog::Utils::write_text_mode( "$machine_dir/rsyncd.conf",          "use chroot = no\nread only = yes\nlist = no\nrefuse options = copy-links copy-dirlinks copy-unsafe-links keep-dirlinks\n&include $machine_dir/rsyncd.d\n", $group_reads );
+    Trog::Utils::write_binary_mode( "$machine_dir/rsyncd.d/$fqdn.binds", $binds,                                                                                                                                                     $group_reads );
+    Trog::Utils::write_binary_mode( "$machine_dir/rsyncd.d/$fqdn.conf",  $part,                                                                                                                                                      $group_reads );
+    Trog::Utils::write_binary_mode( "$machine_dir/rsyncd.conf",          "use chroot = no\nread only = yes\nlist = no\nrefuse options = copy-links copy-dirlinks copy-unsafe-links keep-dirlinks\n&include $machine_dir/rsyncd.d\n", $group_reads );
 
     return;
 }

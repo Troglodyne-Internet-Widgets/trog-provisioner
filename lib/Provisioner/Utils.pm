@@ -389,15 +389,15 @@ sub write_ssh_keypair {
     # one, which File::Temp makes 0600.
     my $tmp = File::Temp->new();
     $key->write_private( $tmp->filename );
-    my $pem = File::Slurper::read_text( $tmp->filename );
+    my $pem = File::Slurper::read_binary( $tmp->filename );
     if ( my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})} ) {
         $body =~ s/\s//g;
         $pem = join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n";
     }
-    Trog::Utils::write_text_mode( $path, $pem, oct('0600') );
+    Trog::Utils::write_binary_mode( $path, $pem, oct('0600') );
 
     my $public = $key->dump_public;
-    Trog::Utils::write_text_mode( "$path.pub", "$public\n", oct('0644') );
+    Trog::Utils::write_binary_mode( "$path.pub", "$public\n", oct('0644') );
 
     return $public;
 }
