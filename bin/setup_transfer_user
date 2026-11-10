@@ -28,8 +28,8 @@ A guest fetches its payload from the machine that provisions it, over ssh, as
 C<transfer_user>.  Its key may run only the rsync daemon of its domain, in a
 sandbox.  This sets that up on this machine for the account C<USER>, and lets
 C<PROVISION_USER>, the account that runs F<bin/provision>, let the key of
-each guest in.  C<PROVISION_USER> defaults to the account that ran sudo, and
-can be C<USER>.
+each guest in.  C<PROVISION_USER> defaults to the account that ran sudo, or
+to C<USER> without sudo.
 
 It runs F<scripts/setup_transfer_user> of this checkout, which says what each
 step does.  L<Provisioner::Recipe::trogrunner> runs the same script on a guest

@@ -127,17 +127,17 @@ subtest 'the provisioning account comes from sudo when it is not named' => sub {
     my ( $rc, $said, $log ) = setup( { SUDO_USER => 'agent' }, 'fetcher' );
     like( $log, qr/^usermod[ ]-a[ ]-G[ ]agent-group[ ]fetcher$/m, 'the account that ran sudo' );
 
-    ( $rc, $said ) = setup( { SUDO_USER => q{} }, 'fetcher' );
-    is( $rc, 1, 'and without sudo it stops' );
-    like( $said, qr/name[ ]the[ ]account[ ]that[ ]runs[ ]bin\/provision/, 'saying what to name' );
+    ( $rc, $said, $log ) = setup( { SUDO_USER => q{}, FAKE_USERS => 'agent fetcher' }, 'fetcher' );
+    is( $rc, 0, 'and without sudo it is the transfer account' ) or diag $said;
+    unlike( $log, qr/^usermod/m, 'which is in its own group already' );
 };
 
 subtest 'and it stops, before sshd reloads, when' => sub {
     my %case = (
-        'it is not root'                        => [ { FAKE_UID       => 1000 },                                               qr/run[ ]it[ ]as[ ]root/ ],
-        'the transfer account has no shell'     => [ { FAKE_USERS     => 'agent fetcher', FAKE_SHELL => '/usr/sbin/nologin' }, qr/usermod[ ]-s[ ]\/bin\/sh[ ]fetcher/ ],
-        'sshd refuses its configuration'        => [ { FAKE_SSHD_T    => 255 },                                                qr/sshd[ ]refuses/ ],
-        'an earlier file names another command' => [ { FAKE_OTHER_AKC => '/bogus/other' },                                     qr/an[ ]earlier[ ]file/ ],
+        'it is not root'                        => [ { FAKE_UID => 1000, SUDO_USER => q{} },                               qr{as[ ]root:[ ]sudo[ ]\N*[ ]fetcher[ ]agent} ],
+        'the transfer account has no shell'     => [ { FAKE_USERS => 'agent fetcher', FAKE_SHELL => '/usr/sbin/nologin' }, qr/usermod[ ]-s[ ]\/bin\/sh[ ]fetcher/ ],
+        'sshd refuses its configuration'        => [ { FAKE_SSHD_T => 255 },                                               qr/sshd[ ]refuses/ ],
+        'an earlier file names another command' => [ { FAKE_OTHER_AKC => '/bogus/other' },                                 qr/an[ ]earlier[ ]file/ ],
     );
     foreach my $what ( sort keys %case ) {
         my ( $env, $why ) = @{ $case{$what} };

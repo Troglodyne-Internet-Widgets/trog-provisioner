@@ -5,7 +5,7 @@
 #
 # PROVISION_USER is the account that runs bin/provision, and lets the key of
 # each guest in by writing a file into the directory of guest keys.  It defaults
-# to the account that ran sudo, and can be USER.  Run it as root, again whenever
+# to the account that ran sudo, or to USER without sudo.  Run it as root, again whenever
 # you like: each step leaves alone what is already right.
 #
 # It does this:
@@ -41,10 +41,9 @@ if [ "${1:-}" = --give-shell ]; then
     shift
 fi
 [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: setup_transfer_user [--give-shell] USER [PROVISION_USER]"
+[ "$(id -u)" = 0 ] || die "it changes accounts and sshd, so run it as root: sudo $0 $*"
 user=$1
-provisioner=${2:-${SUDO_USER:-}}
-[ -n "$provisioner" ] || die "name the account that runs bin/provision, because sudo did not"
-[ "$(id -u)" = 0 ] || die "run it as root"
+provisioner=${2:-${SUDO_USER:-$user}}
 
 here=$(dirname "$(readlink -f "$0")")
 for program in rsyncd_sandbox guest_authorized_keys; do
