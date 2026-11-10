@@ -1,32 +1,43 @@
 #!/bin/bash
-# Mount a virtiofs share from the hypervisor as a systemd mount unit and an
-# automount unit.
+# Mount a virtiofs share from the hypervisor with a systemd mount unit:
+#
+#   mount_virtiofs <device-key> <mountpoint> [type]
+#
+# Exits 0 only when the share is mounted at the mountpoint.  Otherwise it says
+# why and exits 1, so the build stops.
 set -eu
 
-TARGET=${1:?usage: mount_virtiofs <device-key> <mountpoint> <type>}
-LINK_NAME=${2:?usage: mount_virtiofs <device-key> <mountpoint> <type>}
+TARGET=${1:?usage: mount_virtiofs <device-key> <mountpoint> [type]}
+LINK_NAME=${2:?usage: mount_virtiofs <device-key> <mountpoint> [type]}
 TYPE=${3:-virtiofs}
-
-[ -f /root/devices.map ] || { echo "mount_virtiofs: no /root/devices.map" >&2; exit 1; }
-
-ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F '=' '{print $2}')
-[ -n "$ACTUAL_TARGET" ] || {
-    echo "mount_virtiofs: no device for '$TARGET' in /root/devices.map" >&2
-    exit 1
-}
+UNIT_DIR=${UNIT_DIR:-/usr/lib/systemd/system}
 
 # The name of a mount unit must be its mountpoint as systemd-escape escapes it.
-MNTFILE="/usr/lib/systemd/system/$(systemd-escape -p --suffix=mount "$LINK_NAME")"
-AUTOMNTFILE="/usr/lib/systemd/system/$(systemd-escape -p --suffix=automount "$LINK_NAME")"
+UNIT=$(systemd-escape -p --suffix=mount "$LINK_NAME")
 
-mkdir -p "$LINK_NAME"
+# The mountpoint is an empty directory on the root disk, made immutable.  So
+# while the share is not mounted, a write under it fails, and does not land on
+# the root disk where the share hides it once it mounts.
+if ! mountpoint -q "$LINK_NAME"; then
+    mkdir -p "$LINK_NAME"
+    if [ -n "$(ls -A "$LINK_NAME")" ]; then
+        echo "mount_virtiofs: $LINK_NAME is not mounted, and holds files on the root disk that the share would hide." >&2
+        echo "mount_virtiofs: move them out of $LINK_NAME, then build again." >&2
+        exit 1
+    fi
+    chattr +i "$LINK_NAME"
+fi
 
-# Written, not appended, so that a second provision does not duplicate each
-# section.
-cat > "$MNTFILE" <<UNIT
+# After the mountpoint, so that it refuses writes when the map has no device.
+ACTUAL_TARGET=$("$(dirname "$0")/device_for" "$TARGET")
+
+# No After= or Before=.  The default dependencies of a mount unit order it
+# before local-fs.target, so every service with default dependencies starts
+# after it.  Wanted and not required, so a share that does not mount does not
+# stop the boot: the immutable mountpoint refuses the writes instead.
+cat > "$UNIT_DIR/$UNIT" <<UNIT
 [Unit]
-Description=Shared dir from HV
-After=multi-user.target
+Description=virtiofs share $TARGET from the hypervisor
 
 [Mount]
 What=$ACTUAL_TARGET
@@ -34,22 +45,19 @@ Where=$LINK_NAME
 Type=$TYPE
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=local-fs.target
 UNIT
 
-cat > "$AUTOMNTFILE" <<UNIT
-[Unit]
-Description=Automount $LINK_NAME
-ConditionPathExists=$LINK_NAME
-
-[Automount]
-Where=$LINK_NAME
-TimeoutIdleSec=10
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+# An older mount_virtiofs left an automount unit here, which nothing enables.
+rm -f "$UNIT_DIR/$(systemd-escape -p --suffix=automount "$LINK_NAME")"
 
 systemctl daemon-reload
-systemctl enable "$(basename "$MNTFILE")"
-systemctl start "$(basename "$MNTFILE")"
+
+# reenable, so that a guest whose unit multi-user.target wanted loses that link.
+systemctl reenable "$UNIT"
+
+if ! systemctl start "$UNIT" || ! mountpoint -q "$LINK_NAME"; then
+    echo "mount_virtiofs: could not mount $TARGET from the hypervisor at $LINK_NAME, as $ACTUAL_TARGET:" >&2
+    systemctl status --no-pager --full --lines=20 "$UNIT" >&2 || true
+    exit 1
+fi

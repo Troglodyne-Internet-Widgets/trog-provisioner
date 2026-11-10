@@ -8,16 +8,9 @@ TYPE=${3:?usage: add_to_fstab <device-key> <mountpoint> <type> <options> [partit
 OPTIONS=${4:?usage: add_to_fstab <device-key> <mountpoint> <type> <options> [partition]}
 PARTITION=${5:-1}
 
-[ -f /root/devices.map ] || { echo "add_to_fstab: no /root/devices.map to look '$TARGET' up in" >&2; exit 1; }
-
-ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F '=' '{print $2}')
-
-# Refuse an unknown device, because its fstab line is broken and the guest can
-# fail to boot.
-[ -n "$ACTUAL_TARGET" ] || {
-    echo "add_to_fstab: no device for '$TARGET' in /root/devices.map" >&2
-    exit 1
-}
+# device_for refuses an unknown device, because its fstab line is broken and
+# the guest can fail to boot.
+ACTUAL_TARGET=$("$(dirname "$0")/device_for" "$TARGET")
 
 if [ "$PARTITION" = 'NONE' ]; then
     PARTITION=''

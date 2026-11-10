@@ -47,6 +47,13 @@ Otherwise, give an absolute path to the file or device.
 
 A disk can name a partition number.  The default is 1.
 
+A device that is a directory on the hypervisor is shared in over virtiofs, and
+F<scripts/mount_virtiofs> mounts it on the guest.  The build fails when the
+share does not mount.  The mount point under the share is an empty immutable
+directory, so while the share is not mounted, a write to the mount point fails
+and does not go to the root disk.  The share mounts before local-fs.target on
+each boot, so before the services of the guest start.
+
 =cut
 
 use parent qw{Provisioner::Recipe};
