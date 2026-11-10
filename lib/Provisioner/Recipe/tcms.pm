@@ -54,17 +54,21 @@ clones C<repo_branch> of C<repo_url>.  That happens for a domain that never exis
 data directory somebody emptied.
 
 This recipe leaves a checkout that is already there exactly as it is, in any
-state.  It is the site that somebody runs, so this recipe does not reset,
-update or reconcile it.  C<config/> is partly tracked, so a write into the
-working tree replaces a live configuration with what master says today.
+state, except for the two hosts in L</THE HOSTS OF TCMS>.  It is the site that
+somebody runs, so this recipe does not reset, update or reconcile it.
+C<config/> is partly tracked, so a write into the working tree replaces a live
+configuration with what master says today.
 
 The fragment does set the owner of the checkout, which the service user and
 its own group own.  C<www/> is the exception, and has the group C<www-data>.
 The first time tPSGI serves a file out of C<www/>, it hard-links the file into
 the F<www/static> of the domain, where nginx serves it from then on.  A hard
 link has the group and the mode of the file, so nginx reads a linked file only
-through its group.  Nothing else in the checkout is for nginx, and the group
-of the service user keeps it out.
+through its group.  Nothing else in the checkout is for nginx.  The group
+of the service user keeps nginx out only while others have no permissions.  A
+clone leaves the checkout readable by everyone, so the fragment removes every
+permission of others from it.  A checkout that came down from the last guest
+is already closed by the C<data> target.
 
 After the checkout is in place, the fragment runs the C<install> target of F<Installer.mk> in the
 checkout, as the service user.  That target makes the directories that tCMS
@@ -83,9 +87,12 @@ serves.  The guest test asks C<make -q> whether any is still missing.
 The guest test asks tCMS for its front page.  tCMS offers the page that
 registers the first user only until it answers its first request, which
 touches F<config/setup>.  So when that flag was not there before the test, the
-test runs the C<reset> target of F<Installer.mk> and restarts tCMS.  A fresh
-guest is then offered the setup page again.  A checkout that came down from
-the last guest already has the flag, and the test leaves it alone.
+test runs the C<reset> target of F<Installer.mk> and restarts tCMS and its job
+worker, which had the deleted databases open.  The reset also deletes
+F<config/main.cfg>, so the test keeps the hosts that the fragment wrote there,
+and puts them back.  A fresh guest is then offered the setup page again.
+A checkout that came down from the last guest already has the flag, and the
+test leaves it alone.
 
 TODO: let the configuration name a commit to check out (#223).
 
@@ -97,25 +104,32 @@ libvirt of the guest.  Without the pin, cpm takes the newest, and its build
 wants a libvirt far newer than the distribution ships.
 L<Provisioner::Recipe::trogrunner> pins it for the same reason.
 
-=head2 A SITE BEHIND A RELAY
+=head2 THE HOSTS OF TCMS
+
+tCMS builds its links and its redirects from C<general.hostname>, which must
+be the domain.  A checkout that came down from another name, such as a staging
+site whose data started as a copy of the live one, holds the other name.
 
 A relay caches the pages of a public name, so a site behind one keeps its
 logins on another name, which passes through.  See
-L<Provisioner::Recipe::nginx/Cached names>.  tCMS needs both names:
-C<general.hostname> is the domain, where it sends readers, and
-C<general.secure_host> is C<secure_host>, where it sends every page that needs
-a login.
+L<Provisioner::Recipe::nginx/Cached names>.  For such a site,
+C<general.secure_host> is C<secure_host>, where tCMS sends every page that
+needs a login.  A site without a relay, such as an internal one, leaves
+C<secure_host> out.  Then C<general.secure_host> is empty, and tCMS serves
+every page on every name.
 
-When C<secure_host> is set, the fragment queues F<bin/tcms-hostname> of the
-checkout to write both into F<config/main.cfg>, as the service user.  It is the
-one change that this recipe makes to a checkout that is already there, and
-only these two settings.  It runs after the C<perl> recipe has built the
-modules that tCMS loads, and before the service of tPSGI starts.  The
-F<bin/tcms-hostname> of the checkout must take C<--secure>, which a checkout
-older than that does not, and then the task fails.
+So the fragment queues F<bin/tcms-hostname> of the checkout to write both into
+F<config/main.cfg>, as the service user, on every build.  Without
+C<secure_host>, it writes an empty secure host, which clears one that came down
+with the checkout.  It is the one change that this recipe makes to a checkout
+that is already there, and only these two settings.  It runs after the C<perl>
+recipe has built the modules that tCMS loads, and before the service of tPSGI
+starts.  The F<bin/tcms-hostname> of the checkout must take C<--secure>, which
+a checkout older than that does not, and then the task fails.
 
-The guest test asks tCMS for F</login> on the domain, and expects a redirect
-to C<secure_host>.
+The guest test asks F<bin/tcms-hostname> for the hostname, and expects the
+domain.  With C<secure_host>, it also asks tCMS for F</login> on the domain,
+and expects a redirect to C<secure_host>.
 
 =head2 THE JOB WORKER
 

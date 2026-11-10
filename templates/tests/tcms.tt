@@ -54,9 +54,12 @@ is($code, '200', 'tCMS answers its front page');
 
 # tCMS builds its links and its redirects from this.  bin/tcms-hostname with no
 # argument prints it.
-my $hostname = `cd '$dir' && sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' /opt/perl5/current/bin/perl bin/tcms-hostname 2>&1`;
-chomp $hostname;
-is($hostname, '[% domain %]', 'the hostname of tCMS is the domain');
+my $hostname = sub {
+    my $said = `cd '$dir' && sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' /opt/perl5/current/bin/perl bin/tcms-hostname 2>&1`;
+    chomp $said;
+    return $said;
+};
+is($hostname->(), '[% domain %]', 'the hostname of tCMS is the domain');
 
 [% IF secure_host -%]
 # Asked after the front page, which set tCMS up: before that, every path is the
@@ -75,12 +78,15 @@ isnt(system(qw{runuser -u www-data -- test -r}, "$dir/config/default.cfg"), 0, '
 
 # Asking took the first-time setup away from a fresh install, so give it back.
 # The running workers opened the databases that the reset deletes, so restart
-# them too.
+# them too.  The reset also deletes config/main.cfg, which holds the hosts
+# that the recipe wrote, so keep it aside and put it back.
 SKIP: {
-    skip 'the checkout was set up before this test', 2 if $was_set_up;
-    my $reset = `sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '$dir' -f Installer.mk reset 2>&1 && systemctl restart '[% domain %]' 2>&1`;
-    is($?, 0, 'a fresh install is reset, and tCMS restarted') or diag $reset;
+    skip 'the checkout was set up before this test', 3 if $was_set_up;
+    my $as_user = "sudo -u [% user %] HOME='[% install_dir %]/[% domain %]'";
+    my $reset   = `cd '$dir' && $as_user cp -p config/main.cfg config/main.cfg.kept && $as_user make -f Installer.mk reset 2>&1 && $as_user mv config/main.cfg.kept config/main.cfg && systemctl restart '[% domain %]' 'tcms-worker-[% domain %].service' 2>&1`;
+    is($?, 0, 'a fresh install is reset, and tCMS and its job worker restarted') or diag $reset;
     ok(!-e "$dir/config/setup", 'so its first visitor is offered the setup page');
+    is($hostname->(), '[% domain %]', 'and tCMS still has the domain as its hostname');
 }
 
 # The Minion worker transcodes the uploaded videos, and the units of the

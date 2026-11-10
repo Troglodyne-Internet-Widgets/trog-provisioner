@@ -3,9 +3,10 @@
     recipe leaves it alone.  See Provisioner::Recipe::tcms. -%]
 [ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/tCMS'
 [%# www/ has the group of nginx, which serves the files that tPSGI links out of
-    it.  See Provisioner::Recipe::tcms. -%]
+    it, and others get nothing.  See Provisioner::Recipe::tcms. -%]
 chown -R [% user %]: '[% install_dir %]/[% domain %]/tCMS'
 chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/tCMS/www'
+chmod -R o-rwx '[% install_dir %]/[% domain %]/tCMS'
 [%# The directories that tCMS needs and does not track, data/ among them.  It
     makes only what is missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk install
@@ -13,12 +14,10 @@ sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir
     they are missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk prereq-frontend
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'
-[% IF secure_host -%]
-[%# The two hosts of a site behind a relay, which tCMS writes itself, once the
-    perl target has built what it loads.  See A SITE BEHIND A RELAY in
-    Provisioner::Recipe::tcms. -%]
+[%# The hostname and the secure host, which tCMS writes itself, once the perl
+    target has built what it loads.  An empty secure host clears it.  See THE
+    HOSTS OF TCMS in Provisioner::Recipe::tcms. -%]
 [% script_dir %]/queue_postrun_task "cd '[% install_dir %]/[% domain %]/tCMS' && sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' /opt/perl5/current/bin/perl bin/tcms-hostname --secure '[% secure_host %]' '[% domain %]'"
-[% END -%]
 [%# The worker of the job queue.  restart, so that a provision of a running
     guest loads the new checkout, after the perl target has built what the
     worker loads.  See THE JOB WORKER in Provisioner::Recipe::tcms. -%]

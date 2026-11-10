@@ -75,8 +75,8 @@ subtest 'the job worker is a unit that starts after tPSGI and restarts on failur
     like( $unit, qr{^Restart=on-failure$}m,                     'and restarts on failure' );
 };
 
-# A SITE BEHIND A RELAY in Provisioner::Recipe::tcms.
-subtest 'a secure host is written by tCMS, after the perl target' => sub {
+# THE HOSTS OF TCMS in Provisioner::Recipe::tcms.
+subtest 'the hosts of tCMS are written by tCMS, after the perl target' => sub {
 
     # A recipe for each render, since validated() keeps the first options that it is given.
     my $recipe = sub {
@@ -91,7 +91,9 @@ subtest 'a secure host is written by tCMS, after the perl target' => sub {
         return grep { m/tcms-hostname/ } Provisioner::Recipe->fragment_commands( $recipe->()->render( %base, %opts ) );
     };
 
-    is( scalar $hostname->(), 0, 'without one, the recipe leaves the hosts of tCMS alone' );
+    my @one = $hostname->();
+    is( scalar @one, 1, 'without a secure host, the recipe still sets the hosts once' );
+    like( $one[0], qr{bin/tcms-hostname[ ]--secure[ ]''[ ]'web[.]test[.]test'}, 'clearing the secure host, with the domain as the hostname' );
 
     my @set = $hostname->( secure_host => 'secure.web.test.test' );
     is( scalar @set, 1, 'with one, it sets them once' );
