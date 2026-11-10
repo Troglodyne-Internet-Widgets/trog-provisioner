@@ -38,8 +38,11 @@ my $guest = Test::MockModule->new('Trog::Guest');
 $guest->redefine( key_path => sub { my ( undef, undef, $on_disk ) = @_; return -e $on_disk ? $on_disk : $held } );
 
 # What a teardown leaves: the key in the store, and no domain directory.
-my $cfg = File::Temp::tempdir( CLEANUP => 1 );
+my $cfg   = File::Temp::tempdir( CLEANUP => 1 );
+my $umask = umask oct('0000');
 Trog::Provisioner::Config::Generator::restore_sealed_key( 'guest.test', $cfg );
+umask $umask;
+is( sprintf( '%04o', ( stat "$cfg/key.rsa" )[2] & oct('0777') ), '0600', 'the private half is its owner alone, whatever the umask' );
 
 is( File::Slurper::read_binary("$cfg/key.rsa"), File::Slurper::read_binary($stored), 'the private half comes back from the store' );
 my ($public) = File::Slurper::read_text("$cfg/key.rsa.pub") =~ m/\A(\S+[ ]\S+)/;

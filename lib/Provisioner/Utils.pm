@@ -24,7 +24,7 @@ use Crypt::PK::Ed25519();
 use Crypt::PRNG();
 use Net::SSH::Perl::Key();
 use File::Slurper();
-use File::Slurper::Temp();
+use Trog::Utils();
 use Crypt::PK::ECC();
 use Crypt::PK::RSA();
 ## use critic
@@ -350,30 +350,12 @@ sub in_zone {
     return $n eq $z || $n =~ m/[.]\Q$z\E\z/;
 }
 
-=head3 write_pem($path, $pem, $mode)
-
-Writes a PEM to C<$path> and sets its mode.  The PEM is a certificate, a key,
-or several of them joined.  Dies if it cannot set the mode.
-
-It writes through L<File::Slurper::Temp>, so no reader sees a partial key.  The
-partial file is a temporary file, and the rename that puts it in place is
-atomic.  The mode changes after the rename, so C<$path> has the mode of the
-temporary file until the C<chmod> completes.
-
-=cut
-
-sub write_pem {
-    my ( $path, $pem, $mode ) = @_;
-
-    File::Slurper::Temp::write_binary( $path, $pem );
-    chmod( $mode, $path ) or die "Could not set the mode of $path: $!\n";
-    return;
-}
-
 =head3 write_ssh_keypair($path, $type, $bits, $comment)
 
 Makes an ssh keypair and writes both halves.  The private key goes to C<$path>
-and the public key to C<$path.pub>, in the format that C<ssh-keygen> writes.
+with mode 0600, and the public key to C<$path.pub> with mode 0644, in the
+format that C<ssh-keygen> writes.  Each is written whole with that mode, so the
+private key is never readable by more than its owner.
 
 C<$type> is a L<Net::SSH::Perl::Key> type: C<RSA>, C<Ed25519> or C<ECDSA>.
 Types with only one size ignore C<$bits>.  The key never has a passphrase,
@@ -403,15 +385,19 @@ sub write_ssh_keypair {
     my $key = Net::SSH::Perl::Key->keygen( $type, $bits );
     $key->{comment} = $comment if defined $comment;
 
-    $key->write_private($path);
-    my $pem = File::Slurper::read_text($path);
+    # write_private opens the file it is given itself, so it gets a temporary
+    # one, which File::Temp makes 0600.
+    my $tmp = File::Temp->new();
+    $key->write_private( $tmp->filename );
+    my $pem = File::Slurper::read_binary( $tmp->filename );
     if ( my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})} ) {
         $body =~ s/\s//g;
-        File::Slurper::Temp::write_text( $path, join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n" );
+        $pem = join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n";
     }
+    Trog::Utils::write_binary_mode( $path, $pem, oct('0600') );
 
     my $public = $key->dump_public;
-    File::Slurper::Temp::write_text( "$path.pub", "$public\n" );
+    Trog::Utils::write_binary_mode( "$path.pub", "$public\n", oct('0644') );
 
     return $public;
 }

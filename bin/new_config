@@ -35,6 +35,7 @@ use Trog::Credentials();
 use Trog::Secrets();
 use Trog::Guest();
 use Trog::Hypervisors();
+use Trog::Utils();
 use Trog::Local();
 use File::Copy qw{copy};
 use File::Find();
@@ -1558,8 +1559,7 @@ sub write_guest_secrets {
         }
     } keys %$wanted;
 
-    File::Slurper::Temp::write_binary( $manifest, YAML::XS::Dump( \%manifest ) );
-    chmod 0600, $manifest;
+    Trog::Utils::write_binary_mode( $manifest, YAML::XS::Dump( \%manifest ), oct('0600') );
 
     print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- " . ( $manifest{$_}{ref} // "issued by $manifest{$_}{issue}{guest}" ) . "\n" } sort keys %manifest );
 
@@ -1637,10 +1637,10 @@ sub write_rsyncd_conf {
 
     # The transfer account reads these through the group: see Trog::Local/THE
     # KEYS OF GUESTS.  They hold paths, and nothing secret.
-    local $File::Slurper::Temp::FILE_TEMP_PERMS = oct('0640');
-    File::Slurper::Temp::write_text( "$machine_dir/rsyncd.d/$fqdn.binds", $binds );
-    File::Slurper::Temp::write_text( "$machine_dir/rsyncd.d/$fqdn.conf",  $part );
-    File::Slurper::Temp::write_text( "$machine_dir/rsyncd.conf",          "use chroot = no\nread only = yes\nlist = no\nrefuse options = copy-links copy-dirlinks copy-unsafe-links keep-dirlinks\n&include $machine_dir/rsyncd.d\n" );
+    my $group_reads = oct('0640');
+    Trog::Utils::write_binary_mode( "$machine_dir/rsyncd.d/$fqdn.binds", $binds,                                                                                                                                                     $group_reads );
+    Trog::Utils::write_binary_mode( "$machine_dir/rsyncd.d/$fqdn.conf",  $part,                                                                                                                                                      $group_reads );
+    Trog::Utils::write_binary_mode( "$machine_dir/rsyncd.conf",          "use chroot = no\nread only = yes\nlist = no\nrefuse options = copy-links copy-dirlinks copy-unsafe-links keep-dirlinks\n&include $machine_dir/rsyncd.d\n", $group_reads );
 
     return;
 }
@@ -1664,8 +1664,7 @@ sub restore_sealed_key {
     my $sealed = Trog::Guest->key_path( $fqdn, $private );
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether each half is already the file we want
     if ( defined $sealed && $sealed ne $private && !-f $private ) {
-        File::Slurper::Temp::write_binary( $private, File::Slurper::read_binary($sealed) );
-        chmod 0600, $private;
+        Trog::Utils::write_binary_mode( $private, File::Slurper::read_binary($sealed), oct('0600') );
     }
     if ( -f $private && !-f "$private.pub" ) {
         File::Slurper::Temp::write_text( "$private.pub", Provisioner::Utils::ssh_pubkey_from_private($private) . " $fqdn\n" );

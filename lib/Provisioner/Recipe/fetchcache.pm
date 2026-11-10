@@ -18,6 +18,7 @@ use IO::Socket::SSL::Utils();
 use Time::HiRes qw{time};
 use Provisioner::Cookbook();
 use Provisioner::Utils();
+use Trog::Utils();
 use Provisioner::Vars();
 use Readonly;
 use Trog::Config();
@@ -541,8 +542,8 @@ sub authority {
     );
 
     # The key first, because the pair counts as made only when both files exist.
-    Provisioner::Utils::write_pem( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
-    Provisioner::Utils::write_pem( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
+    Trog::Utils::write_binary_mode( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   oct('0600') );
+    Trog::Utils::write_binary_mode( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), oct('0644') );
 
     IO::Socket::SSL::Utils::CERT_free($cert);
     IO::Socket::SSL::Utils::KEY_free($key);
@@ -578,8 +579,8 @@ sub certify {
         ext       => [ { sn => 'subjectAltName', data => join( ',', map { "DNS:$_" } @hosts ) } ],
     );
 
-    Provisioner::Utils::write_pem( "$output_dir/fetchcache.key", IO::Socket::SSL::Utils::PEM_key2string($key),                                                    0600 );
-    Provisioner::Utils::write_pem( "$output_dir/fetchcache.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert) . File::Slurper::read_text( $authority->{cert} ), 0644 );
+    Trog::Utils::write_binary_mode( "$output_dir/fetchcache.key", IO::Socket::SSL::Utils::PEM_key2string($key),                                                    oct('0600') );
+    Trog::Utils::write_binary_mode( "$output_dir/fetchcache.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert) . File::Slurper::read_text( $authority->{cert} ), oct('0644') );
     ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;

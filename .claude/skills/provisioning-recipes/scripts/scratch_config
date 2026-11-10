@@ -29,6 +29,7 @@ use Trog::Hypervisors::Config();
 use Provisioner::Cookbook();
 use Trog::Secrets();
 use Provisioner::Utils();
+use Trog::Utils();
 use Provisioner::IPPool();
 
 =head1 NAME
@@ -355,11 +356,6 @@ sub build {
     else {
         Provisioner::Utils::write_ssh_keypair( "$dir/scratch_admin_key", Ed25519 => $ED25519_BITS, 'scratch' );
 
-        # It sets no mode of its own, so the umask decides and the private half
-        # lands readable by anyone on this machine.  Setting it is the caller's,
-        # the same way Provisioner::Recipe::ubuntu's guest_keypair does it.
-        chmod 0600, "$dir/scratch_admin_key", "$dir/scratch_admin_key.pub";
-
         copy( "$dir/scratch_admin_key.pub", "$dir/admin_authorized_keys" )
           or die "Could not write a throwaway key into the scratch config: $!\n";
     }
@@ -386,8 +382,8 @@ sub build {
     # Provisioner::Recipe::fetchcache->authority makes a new one here, and a
     # guest then refuses the certificate of the cache.
     if ( my $fleet = $opts{fleet} ) {
-        my %mode = ( crt => 0644, key => 0600 );
-        Provisioner::Utils::write_pem( "$dir/fetchcache-ca.$_", File::Slurper::read_binary( $fleet->{authority}{$_} ), $mode{$_} ) for sort keys %mode;
+        my %mode = ( crt => oct('0644'), key => oct('0600') );
+        Trog::Utils::write_binary_mode( "$dir/fetchcache-ca.$_", File::Slurper::read_binary( $fleet->{authority}{$_} ), $mode{$_} ) for sort keys %mode;
         $global{cache} = $fleet->{address};
     }
 
@@ -447,7 +443,7 @@ sub read_token {
     my $token = readline STDIN;
     die "No temporary token on standard input for $ref.\n" unless defined $token;
     chomp $token;
-    die "The temporary token for $ref is empty.\n" unless length $token;
+    die "The temporary token for $ref is empty.\n" if $token eq q{};
     return $token;
 }
 

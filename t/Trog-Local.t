@@ -164,10 +164,13 @@ subtest 'the key of a guest is a file of its own, which sshd can read' => sub {
 
     is( $this_machine->guest_keys_error, undef, 'a directory that this account can write' );
 
+    # A umask that would take every bit from the group and the world.
+    my $umask = umask oct('0077');
     is( $this_machine->authorize_guest_key( 'vm.test.test', '/bogus/domains/vm.test.test', 'ssh-rsa AAAA vm' ), 1, 'is written' );
+    umask $umask;
     my $file = "$Trog::Utils::GUEST_KEYS/vm.test.test";
     is( File::Slurper::read_text($file), "/bogus/domains/vm.test.test\nssh-rsa AAAA vm\n", 'with the domain directory, and then the key' );
-    is( ( stat $file )[2] & oct('0777'), oct('0644'),                                      'and everybody can read it, because sshd reads it as nobody' );
+    is( ( stat $file )[2] & oct('0777'), oct('0644'),                                      'and everybody can read it, whatever the umask of the writer, because sshd reads it as nobody' );
 
     like( exception { $this_machine->authorize_guest_key( '../escape',    '/bogus/d',              'ssh-rsa AAAA' ) }, qr/not[ ]a[ ]domain[ ]name/,          'a name that is not a domain is refused' );
     like( exception { $this_machine->authorize_guest_key( 'vm.test.test', '/bogus/d",command="sh', 'ssh-rsa AAAA' ) }, qr/must[ ]be[ ]an[ ]absolute[ ]path/, 'and so is a directory that a key line cannot hold' );
