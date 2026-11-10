@@ -13,7 +13,6 @@ use Time::HiRes qw{alarm};
 use File::Which();
 use IPC::Run3();
 use Fcntl qw{S_ISREG};
-use File::Slurper::Temp();
 use File::Temp();
 use Trog::Utils();
 
@@ -331,9 +330,7 @@ sub authorize_guest_key {
     die "sshd cannot be given '$dir' in a key line: it must be an absolute path of letters, digits and ._/+-\n"
       unless $dir =~ $GUEST_DIR;
 
-    local $File::Slurper::Temp::FILE_TEMP_PERMS = oct('0644');
-    File::Slurper::Temp::write_text( "$Trog::Utils::GUEST_KEYS/$name", "$dir\n$pubkey\n" );
-    return 1;
+    return Trog::Utils::write_text_mode( "$Trog::Utils::GUEST_KEYS/$name", "$dir\n$pubkey\n", oct('0644') );
 }
 
 =head2 $had = revoke_guest_key($name)

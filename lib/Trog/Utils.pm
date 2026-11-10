@@ -9,6 +9,7 @@ use re '/aasx';
 
 use IO::Prompter();
 use IO::Interactive::Tiny();
+use File::Slurper::Temp();
 
 =head1 NAME
 
@@ -44,6 +45,26 @@ reads it for sshd, and C<authorize_guest_key> in L<Trog::Local> writes it.
 our $GUEST_KEYS = '/var/lib/trog-provisioner/guest-keys';
 
 =head1 SUBROUTINES
+
+=head2 write_text_mode($path, $text, $mode)
+
+Writes C<$text> to C<$path> whole, as L<File::Slurper::Temp> does, and gives a
+new file C<$mode> whatever the umask of the process is.  A file that another
+account reads, such as sshd as C<nobody>, must not lose a bit of its mode to
+the umask of whoever wrote it.  Returns 1, and dies if it cannot write.
+
+=cut
+
+sub write_text_mode {
+    my ( $path, $text, $mode ) = @_;
+
+    local $File::Slurper::Temp::FILE_TEMP_PERMS = $mode;
+    my $umask = umask 0;
+    my $ok    = eval { File::Slurper::Temp::write_text( $path, $text ); 1 };
+    umask $umask;
+    die $@ unless $ok;
+    return 1;
+}
 
 =head2 prompt($message, %opts)
 

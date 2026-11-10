@@ -16,6 +16,7 @@ t/Trog-Utils.t - Trog::Utils: the small things more than one program needs
 use Test::More;
 use Test::MockModule qw{strict};
 use File::Temp();
+use File::Slurper();
 
 use FindBin::libs;
 
@@ -150,6 +151,24 @@ subtest 'slot_steps: a path of slots_in, back into its steps' => sub {
     my $config = { a => [ { b => 'c' } ] };
     my ($deep) = grep { ref ${ $_->[1] } eq q{} } Trog::Utils::slots_in( \$config );
     is_deeply( [ Trog::Utils::slot_steps( $deep->[0] ) ], [ 'a', 0, 'b' ], 'which is the path that slots_in gave' );
+};
+
+subtest 'write_text_mode: the mode asked for, whatever the umask' => sub {
+    my $dir   = File::Temp::tempdir( CLEANUP => 1 );
+    my $umask = umask;
+    foreach my $case ( [ oct('0077'), oct('0644') ], [ oct('0007'), oct('0644') ], [ oct('0077'), oct('0640') ] ) {
+        my ( $mask, $mode ) = @$case;
+        my $file = sprintf( '%s/umask-%04o-mode-%04o', $dir, $mask, $mode );
+        umask $mask;
+        is( Trog::Utils::write_text_mode( $file, "text\n", $mode ), 1, sprintf( 'written under umask %04o', $mask ) );
+        umask $umask;
+        is( sprintf( '%04o', ( stat $file )[2] & oct('0777') ), sprintf( '%04o', $mode ), 'with the mode asked for' );
+        is( File::Slurper::read_text($file),                    "text\n",                 'and the text' );
+    }
+    is( umask, $umask, 'and the umask of the process is as it was' );
+
+    like( ( eval { Trog::Utils::write_text_mode( "$dir/no/such/dir/file", "text\n", oct('0644') ); 1 } ? q{} : $@ ), qr/\S/, 'a file that it cannot write dies' );
+    is( umask, $umask, 'and leaves the umask as it was too' );
 };
 
 done_testing();
