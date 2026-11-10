@@ -20,7 +20,8 @@
 #   3. Makes the directory of guest keys, which the group of PROVISION_USER can
 #      write and everybody can read.
 #   4. Gives sshd guest_authorized_keys as the AuthorizedKeysCommand of USER
-#      alone, makes sure that sshd took it, and reloads sshd.
+#      alone, makes sure that sshd took it, and reloads every sshd that reads
+#      it, with reload_sshd.
 #
 # The paths are those of $LIBEXEC and $GUEST_KEYS in Trog::Utils.  The
 # variables below move them, for a test.
@@ -95,8 +96,6 @@ mv -f "$conf.new" "$conf"
 "$here/check_sshd_config" || die "sshd refuses $conf, so it is not reloaded"
 sshd -T -C "user=$user,host=localhost,addr=127.0.0.1" | grep -qx "authorizedkeyscommand $LIBEXEC/guest_authorized_keys $GUEST_KEYS" ||
     die "sshd did not take $conf for $user: an earlier file names another AuthorizedKeysCommand"
-# try-reload, because on a guest that starts sshd from ssh.socket the service
-# is not running, and then each new connection reads the new configuration.
-systemctl try-reload-or-restart ssh
+"$here/reload_sshd"
 
 echo "Guests fetch as $user, with keys that $provisioner puts in $GUEST_KEYS."
