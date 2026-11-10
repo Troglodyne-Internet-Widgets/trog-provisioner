@@ -1,7 +1,7 @@
 #!/bin/sh
 # Sets up this machine so that guests fetch their payload from it as USER:
 #
-#   setup_transfer_user USER [PROVISION_USER]
+#   setup_transfer_user [--give-shell] USER [PROVISION_USER]
 #
 # PROVISION_USER is the account that runs bin/provision, and lets the key of
 # each guest in by writing a file into the directory of guest keys.  It defaults
@@ -11,7 +11,9 @@
 # It does this:
 #   1. Makes USER, if it is not there, as a system account with a shell, because
 #      sshd runs the forced command of a key through the shell of the account.
-#      Another USER joins the group of PROVISION_USER, to read the payload.
+#      If USER has no shell, it stops, unless --give-shell says to give it
+#      /bin/sh.  Another USER joins the group of PROVISION_USER, to read the
+#      payload.
 #   2. Installs rsyncd_sandbox and guest_authorized_keys, from beside this
 #      script, owned by root, so that neither account can change what a key
 #      runs.
@@ -33,7 +35,12 @@ die() {
     exit 1
 }
 
-[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: setup_transfer_user USER [PROVISION_USER]"
+give_shell=
+if [ "${1:-}" = --give-shell ]; then
+    give_shell=1
+    shift
+fi
+[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: setup_transfer_user [--give-shell] USER [PROVISION_USER]"
 user=$1
 provisioner=${2:-${SUDO_USER:-}}
 [ -n "$provisioner" ] || die "name the account that runs bin/provision, because sudo did not"
@@ -53,7 +60,9 @@ fi
 shell=$(getent passwd "$user" | cut -d: -f7)
 case $shell in
 */nologin | */false | '')
-    die "$user has $shell for a shell, so sshd cannot run the command of a guest key.  Give it one with: usermod -s /bin/sh $user"
+    [ -n "$give_shell" ] ||
+        die "$user has $shell for a shell, so sshd cannot run the command of a guest key.  Give it one with: usermod -s /bin/sh $user"
+    usermod -s /bin/sh "$user"
     ;;
 esac
 if [ "$user" != "$provisioner" ]; then

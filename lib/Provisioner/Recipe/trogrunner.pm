@@ -129,17 +129,17 @@ and gives sshd the program that lets the keys of guests in.  See
 L<Trog::Local/THE KEYS OF GUESTS>.
 
 sshd runs the command of a key through the shell of the account, so the
-transfer account needs one.  Name a transfer account when the provisioning
-account has none, as the C<agent_user> of L<Provisioner::Recipe::clod> does
-not:
+transfer account needs one.  The service user of a domain is made with
+F<nologin>, so when the transfer account is the service user, which it is with
+the defaults, the script gives it F</bin/sh>.  Another account keeps the shell
+that it has, and the script stops, and says so, when that is none.  So name a
+transfer account when the provisioning account must not have a shell, as the
+C<agent_user> of L<Provisioner::Recipe::clod> must not:
 
     trogrunner:
         provision_user: clod-agent
         config:
             transfer_user: clod-transfer
-
-Without one, the script stops, and says so, when the provisioning account has
-no shell.
 
 =head3 What it needs from the guest, and how long it takes
 

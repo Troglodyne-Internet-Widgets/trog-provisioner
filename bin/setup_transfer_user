@@ -20,7 +20,7 @@ setup_transfer_user - let guests fetch their payload from this machine as an acc
 
 =head1 SYNOPSIS
 
-    sudo bin/setup_transfer_user USER [PROVISION_USER]
+    sudo bin/setup_transfer_user [--give-shell] USER [PROVISION_USER]
 
 =head1 DESCRIPTION
 
@@ -42,6 +42,12 @@ right.  Then run F<bin/preflight> as C<PROVISION_USER>.
 
 =over 4
 
+=item B<--give-shell>
+
+Gives C<USER> F</bin/sh> if it has no shell, such as F</usr/sbin/nologin>.
+Without it, the script stops on such an account, because sshd runs the
+command of a guest key through the shell of the account.
+
 =item B<--help>
 
 Prints this.
@@ -53,13 +59,13 @@ Prints this.
 sub main {
     my @args = @_;
 
-    my $help;
-    GetOptionsFromArray( \@args, 'help' => \$help )
+    my ( $help, $give_shell );
+    GetOptionsFromArray( \@args, 'help' => \$help, 'give-shell' => \$give_shell )
       or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ ) unless @args == 1 || @args == 2;
 
-    return run_script(@args);
+    return run_script( $give_shell ? ('--give-shell') : (), @args );
 }
 
 # The script, rather than this in perl, because a guest runs it too, and a

@@ -108,6 +108,15 @@ Match User fetcher
 CONF
 };
 
+subtest 'an account with no shell, which --give-shell gives one' => sub {
+    my ( $rc, $said, $log ) = setup( { FAKE_USERS => 'agent fetcher', FAKE_SHELL => '/usr/sbin/nologin' }, qw{--give-shell fetcher agent} );
+    is( $rc, 0, 'it exits 0' ) or diag $said;
+    ok( ( grep { $_ eq 'usermod -s /bin/sh fetcher' } split /\n/, $log ), 'and gives the account /bin/sh' );
+
+    ( $rc, $said, $log ) = setup( { FAKE_USERS => 'agent fetcher' }, qw{--give-shell fetcher agent} );
+    unlike( $log, qr/usermod[ ]-s/, 'but leaves the shell of an account that has one' );
+};
+
 subtest 'an account that already provisions and fetches' => sub {
     my ( $rc, $said, $log ) = setup( { FAKE_USERS => 'agent' }, 'agent', 'agent' );
     is( $rc, 0, 'it exits 0' ) or diag $said;
