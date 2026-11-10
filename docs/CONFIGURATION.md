@@ -91,7 +91,7 @@ Whatever the account, sshd on this machine must let the keys of guests in for
 it.  Run this once, as root, with the account that guests connect as:
 
 ```
-sudo bin/setup_transfer_user ACCOUNT
+sudo scripts/setup_transfer_user ACCOUNT
 ```
 
 It installs the sandbox that each key runs, and gives sshd a helper that reads

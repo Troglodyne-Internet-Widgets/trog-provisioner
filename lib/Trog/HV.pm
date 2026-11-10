@@ -1334,7 +1334,7 @@ that the account that writes a domain directory cannot change what the key
 runs.  This account lets the key in by writing it into the directory of guest
 keys.  As root, with the account that guests connect as:
 
-    bin/setup_transfer_user USER
+    sudo scripts/setup_transfer_user USER
 
 The trogrunner recipe does the same on a guest that it builds.
 FIX

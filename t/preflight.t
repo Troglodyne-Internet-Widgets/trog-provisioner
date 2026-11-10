@@ -289,7 +289,7 @@ subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest c
         ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
         ok( !$result->{ok}, "a machine that fails $check fails" );
         like( $result->{what}, qr/the[ ]reason[ ]of[ ]\Q$check\E/, 'with the reason' );
-        like( $result->{fix},  qr/bin\/setup_transfer_user/,       'and what sets it up' );
+        like( $result->{fix},  qr/scripts\/setup_transfer_user/,   'and what sets it up' );
         $local->redefine( $check => sub { undef } );
     }
 
