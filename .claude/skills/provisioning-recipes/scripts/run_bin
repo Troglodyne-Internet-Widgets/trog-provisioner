@@ -32,7 +32,8 @@ run_bin - run a tool of bin/ only when the configuration it is to use is named
 
 =head1 DESCRIPTION
 
-Each of C<new_guest>, C<new_config>, C<provision> and C<destroy> in this
+Each of C<new_guest>, C<new_config>, C<provision>, C<destroy>,
+C<add_mail_user>, C<reset_mail_password> and C<remove_mail_user> in this
 directory is a link to this script.  It dies unless C<TROG_PROVISIONER_CONFIG>
 is set, or C<--config DIR> comes first.  Then it runs the tool of the same name
 in F<bin/>, with the other arguments and the same standard input, and exits
@@ -42,7 +43,7 @@ See C<require_config> in F<teardown> for why.
 
 =cut
 
-our %TOOLS = map { $_ => 1 } qw{new_guest new_config provision destroy};
+our %TOOLS = map { $_ => 1 } qw{new_guest new_config provision destroy add_mail_user reset_mail_password remove_mail_user};
 
 sub main {
     my @args = @_;

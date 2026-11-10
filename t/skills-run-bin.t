@@ -35,7 +35,7 @@ sub run_link {
 }
 
 subtest 'each tool refuses when no configuration is named' => sub {
-    foreach my $tool (qw{new_guest new_config provision destroy}) {
+    foreach my $tool (qw{new_guest new_config provision destroy add_mail_user reset_mail_password remove_mail_user}) {
         my ( $said, $rc ) = run_link( undef, $tool, '--help' );
         isnt( $rc, 0, "$tool fails" );
         like( $said, qr/TROG_PROVISIONER_CONFIG[ ]is[ ]not[ ]set/, 'and says why' );
@@ -44,7 +44,7 @@ subtest 'each tool refuses when no configuration is named' => sub {
 
 subtest 'and runs the tool of bin/ by the same name when one is' => sub {
     my $config = tempdir( CLEANUP => 1 );
-    foreach my $tool (qw{new_guest new_config provision destroy}) {
+    foreach my $tool (qw{new_guest new_config provision destroy add_mail_user reset_mail_password remove_mail_user}) {
         my ( $said, $rc ) = run_link( $config, $tool, '--help' );
         is( $rc, 0, "$tool --help exits 0" ) or diag $said;
         like( $said, qr/\b\Q$tool\E\b/, 'and it is the help of that tool' );
