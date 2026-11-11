@@ -29,6 +29,12 @@ use it.  A guest gets a DHCP lease on it at first boot.  The provisioner finds
 a new guest on a local hypervisor by that lease, and a guest fetches its
 payload over it when this machine is the hypervisor.
 
+A block can give a guest more adapters with `nics`, or put the primary bridge
+on a libvirt network of its own instead of the network of the hypervisor.
+Then the static addresses are on the subnet of that network, and only the
+hypervisor and its guests reach them.  See "The adapters of a guest" in
+[CONFIGURATION.md](CONFIGURATION.md#the-adapters-of-a-guest).
+
 ## What the configuration names
 
 In the block of a hypervisor in `hypervisors.conf`:

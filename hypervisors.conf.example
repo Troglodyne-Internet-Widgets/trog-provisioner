@@ -23,9 +23,19 @@
 ; because we need its filesystem as well as its libvirt.
 libvirt_uri    = qemu+ssh://root@hv1.example.net/system
 
-; Skip autodetection when `brctl show | tail -n1` guesses wrong.
+; Skip autodetection.  Without them, bridge_device is the last bridge that
+; `brctl show` lists, which can be wrong, and virbr_device is the bridge of the
+; default network of libvirt.
 bridge_device  = br0
 virbr_device   = virbr0
+
+; The bridge of each adapter of a guest, in order.  Unset means the two above,
+; NAT first.  The adapter on virbr_device takes a lease, the one on
+; bridge_device gets the address from the pool, and any other comes up with no
+; address.  Naming it means naming both of those, and naming them here.  See
+; "The adapters of a guest" in docs/CONFIGURATION.md, and bin/guest_network for
+; a network of their own.
+;nics           = virbr0, br0, virbr1
 
 ;
 ; Where the storage pool lives on that machine, and what it is called.  The

@@ -210,7 +210,7 @@ subtest 'the adapters of the guests of the runner reach its hypervisors.conf' =>
     my ($dir) = built( hypervisors => { hv1 => \%guests } );
 
     my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
-    is_deeply( [ $hv1->setting_list(q{nics}) ], [qw{virbr0 virbr1}], 'read back as the runner reads it, an adapter on each bridge' );
+    is_deeply( [ $hv1->nic_bridges ], [qw{virbr0 virbr1}], 'read back as the runner reads it, an adapter on each bridge' );
 
     like( exception { built( hypervisors => { hv1 => { %guests, nics => [qw{virbr0 virbr0}] } } ) }, qr/nics/, 'a bridge named twice is refused here, not on the runner' );
 };

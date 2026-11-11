@@ -1,0 +1,164 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::GuestNetwork;
+
+#ABSTRACT: Make the libvirt network that the guests of a block of hypervisors.conf take their addresses on.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+use Trog::Hypervisors();
+use Trog::HV::Libvirt();
+use Trog::Steps();
+
+=head1 NAME
+
+guest_network - make the libvirt network that the guests of a block of
+hypervisors.conf take their addresses on
+
+=head1 SYNOPSIS
+
+    bin/guest_network --hypervisor clod --via hv1 [--name clod] [--prefix 24] [--dryrun]
+
+=head1 DESCRIPTION
+
+A block of F<hypervisors.conf> can give its guests an adapter on a bridge of a
+libvirt network of their own, with their addresses from its pool: see C<nics>
+in L<Trog::HV::Libvirt>.  This command makes that network on the hypervisor,
+from the block:
+
+=over 4
+
+=item * The bridge is the C<bridge_device> of the block.
+
+=item * The address of the hypervisor on the network is the C<gateway> of the
+block, with the prefix of C<--prefix>.
+
+=item * Each block and address of C<pool_cidr> and C<pool_addresses> must be
+inside the network, or it changes nothing and says which.
+
+=back
+
+It defines the network on the system daemon, persistent, with NAT and no DHCP,
+starts it, and starts it with the host.  For a block on a session URI, it also
+lets the user of the URI join the bridge, in the file of qemu-bridge-helper for
+that user.  C<guest_network_steps> and C<runner_bridge_steps> in
+L<Trog::HV::Libvirt> say what each step does.
+
+Each step first asks whether it is done, and skips itself if it is.  So a second
+run changes nothing.  It prints the XML of the network first, also with
+C<--dryrun>.
+
+C<bin/preflight> checks what this makes, and its failures say to run this.
+
+=head2 Whose account it runs as
+
+A network of the system daemon can be defined only by an account that can use
+the system URI, and the file of qemu-bridge-helper needs root.  A block on a
+session URI is neither, so C<--via> names a block of the same host that is: the
+account of the operator, with sudo for everything, as for F<bin/runner_account>.
+
+=head2 Reaching a guest on the network
+
+With C<forward mode='nat'>, libvirt lets a guest start a connection out and
+refuses a new connection in from outside the host.  So this machine reaches each
+guest by the lease of its NAT adapter, as before.  For a network that other
+machines route to, define it with C<< <forward mode='route'/> >> by hand, and
+give the router of the LAN a route to it through the hypervisor.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--hypervisor> NAME
+
+The block whose guests take their addresses on the network.  Required.
+
+=item B<--via> NAME
+
+The block to act through, on the system URI of the same host.  Required when
+the block of C<--hypervisor> is on a session URI, and that block otherwise.
+
+=item B<--name> NAME
+
+The name of the network in libvirt.  The default is the C<network> of the
+block.
+
+=item B<--prefix> LENGTH
+
+The length of the prefix of the network.  The default is 24.
+
+=item B<--dryrun>
+
+Ask the hypervisor what is done, print what would change, and change nothing.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  The default is the one in the configuration directory
+of L<Trog::Config>.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my %opt = ( prefix => 24 );
+    GetOptionsFromArray( \@args, \%opt, qw{hypervisor=s via=s name=s prefix=s dryrun hvconf=s help} )
+      or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Missing: --hypervisor' ) unless defined $opt{hypervisor};
+
+    my $fleet  = Trog::Hypervisors->load( $opt{hvconf} // Trog::Hypervisors->default_path() );
+    my $guests = libvirt_block( $fleet, $opt{hypervisor} );
+    my $via    = defined $opt{via} ? libvirt_block( $fleet, $opt{via} ) : $guests;
+
+    die "$opt{hypervisor} is on a session URI, which cannot define a network of the system daemon.  Name a block of the same host on its system URI with --via.\n"
+      if $via->is_session;
+    die "$opt{via} is " . $via->describe . ", and $opt{hypervisor} is " . $guests->describe . ".  --via names a block of the same host.\n"
+      if ( $via->ssh_host // q{} ) ne ( $guests->ssh_host // q{} );
+
+    my $plan = Trog::HV::Libvirt->guest_network_plan(
+        name    => $opt{name}                        // ( $guests->network || undef ) // die("$opt{hypervisor} names no network, so name the libvirt network with --name.\n"),
+        bridge  => $guests->setting('bridge_device') // die("$opt{hypervisor} names no bridge_device, which is the bridge of the network.\n"),
+        address => $guests->configured_gateway       // die("$opt{hypervisor} names no gateway, which is the address of the hypervisor on the network.\n"),
+        prefix  => $opt{prefix},
+        pool    => $guests->guest_pool,
+    );
+
+    print "The network $plan->{name}, on " . $via->describe . ":\n\n" . Trog::HV::Libvirt->guest_network_xml($plan) . "\n";
+
+    my @steps = (
+        $via->guest_network_steps($plan),
+        $guests->is_session ? $via->runner_bridge_steps( $guests->ssh_user, $plan->{bridge} ) : (),
+    );
+    my $changed = Trog::Steps::run( \@steps, $opt{dryrun} );
+
+    print $opt{dryrun} ? "Nothing changed: $changed step(s) would run.\n" : "Done: $changed step(s) ran.\n";
+    return 0;
+}
+
+=head2 $hv = libvirt_block($fleet, $name)
+
+The hypervisor of the block C<$name>.  Dies when the block is not a libvirt one,
+because only libvirt has networks to make.
+
+=cut
+
+sub libvirt_block ( $fleet, $name ) {
+    my $hv = $fleet->hypervisor($name);
+    die "$name is not a libvirt hypervisor, and only libvirt has networks to make\n" unless $hv->isa('Trog::HV::Libvirt');
+    return $hv;
+}
+
+exit main(@ARGV) unless caller;
+1;

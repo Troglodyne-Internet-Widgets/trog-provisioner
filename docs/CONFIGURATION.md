@@ -557,6 +557,11 @@ recipes write its address into a record, such as `pdns` and `mail`.
 `bin/new_config` refuses such a guest there. See
 [Networks](#networks).
 
+A guest whose address goes into a record needs an address from a pool, also
+when nothing else must reach it.  For guests on a network of their own on the
+hypervisor, name `nics`, `bridge_device` and `virbr_device` in the entry, and
+see [The adapters of a guest](#the-adapters-of-a-guest).
+
 Four more parts are worth knowing before writing one.
 
 **It takes longer than the default budget allows.** A runner builds perl from
@@ -738,6 +743,82 @@ are `A` records at the address.  `needs_address` in `perldoc
 Provisioner::Recipe` says which.  Give that block a pool, its gateway and
 `bridge_device`, the bridge on that subnet, or build the guest without those
 recipes.
+
+### The adapters of a guest
+
+A guest of a libvirt hypervisor has two adapters.  The first is on the NAT
+bridge, `virbr_device`, where it takes a lease that this machine finds it by.
+The second is on `bridge_device`, where it gets its address from the pool, or
+none when the pool has none for it.  `nics` lists the bridges of every adapter,
+in the order of the adapters in the guest:
+
+```ini
+nics = virbr0, virbr1
+```
+
+With `nics`, the block names `virbr_device` and `bridge_device` too, and
+`nics` names both of them.  Each entry is the name of a bridge, and no bridge is
+named twice.  A block that breaks either rule cannot be built, and
+`bin/preflight` says so.
+
+Whatever the order, the adapter on `virbr_device` takes the lease, and the
+adapter on `bridge_device` gets the address from the pool and the route to
+`gateway`.  Every other adapter comes up with no address.  The order decides
+the PCI slot of each adapter, and so the name that the guest gives it: the
+first is `ens3`, the next `ens4`, and so on.  A block without `nics` is
+`nics = virbr_device, bridge_device`, and its guests get the same domain and the
+same network configuration as before `nics` existed.
+
+`nics` is for libvirt.  A block for Linode, OpenStack or SolusVM that names it
+cannot be built.  Linode can give a guest a VLAN or a VPC interface, and Nova a
+port on each of several networks, so `nics` could name those one day.  This
+software asks for none of them yet.
+
+The case it is for is an installation whose guests build in a session of
+libvirt and need an address that a recipe can put in a record.  Without a pool,
+such a guest has only its lease on the NAT network, and nothing records that
+address.  Give it a network of its own on the hypervisor, with the pool on that
+network:
+
+```ini
+[runner-hv]
+libvirt_uri    = qemu+ssh://$user@hv1.test.test/session
+network        = guests
+resolvers      = 10.0.0.1
+virbr_device   = virbr0
+bridge_device  = virbr1
+nics           = virbr0, virbr1
+gateway        = 10.0.0.1
+pool_cidr      = 10.0.0.64/26
+```
+
+`bin/guest_network` makes that network from the block.  The block of a session
+cannot define a network of the system daemon, so `--via` names the block of
+an account on the system URI of the same host, with sudo:
+
+```
+bin/guest_network --hypervisor runner-hv --via hv1 --dryrun
+bin/guest_network --hypervisor runner-hv --via hv1
+```
+
+It defines the network `guests` with NAT on `virbr1`, at `10.0.0.1/24`, with no
+DHCP, starts it, and starts it with the host.  Then it lets `$user` join
+`virbr1` through qemu-bridge-helper.  It refuses a pool that is not inside the
+network.  A second run changes nothing.  `--prefix` changes the `/24`, and
+`--name` the name of the network.
+
+`bin/preflight --hypervisor runner-hv` then asks whether each bridge of `nics`
+is there, whether each network that owns one runs and starts with the host,
+whether qemu-bridge-helper lets `$user` join each one, and whether the pool is
+inside the network of `bridge_device`, behind `gateway`.
+
+libvirt lets a guest of a NAT network start a connection out, and refuses a new
+connection in from outside the host.  So this machine still reaches the guest by
+its lease on `virbr0`, and the guests of the network reach each other and the
+hypervisor.  A machine elsewhere does not reach them.  When one must, define
+the network with `<forward mode='route'/>` instead, by hand with `virsh
+net-define`, and give the router of the network of the hypervisor a route to
+`10.0.0.0/24` through the hypervisor.
 
 ## Upstream guests
 

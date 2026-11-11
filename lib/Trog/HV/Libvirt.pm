@@ -21,6 +21,8 @@ use File::Basename();
 use File::Slurper();
 use List::Util();
 use Cpanel::JSON::XS();
+use Net::CIDR();
+use Net::IP();
 use Provisioner::Cookbook();
 use Provisioner::Vars();
 
@@ -35,6 +37,11 @@ my $BACKUP_SUFFIX = '.bak-qcow2';
 # Where distributions put the libvirt lease helper, which release_dhcp_lease
 # runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
 my @LEASE_HELPERS = qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
+
+# The file that tells qemu-bridge-helper which bridges a user may join.  The
+# steps of a runner account write it, and check_bridge_acl reads it.  At the top
+# for the reason $PRISTINE_SNAPSHOT is.
+my $BRIDGE_CONF = '/etc/qemu/bridge.conf';
 
 # A name that the kernel takes for a link, such as a bridge: at most 15 bytes,
 # and none of the characters that a path or the address of an alias would read.
@@ -1222,7 +1229,7 @@ always had.
 Each adapter has an I<index>, which is not its place in C<nics>.  The adapter
 on L</virbr_device> is 0, and the one on L</bridge_device> is 1.  The rest are
 2 and up, in the order of C<nics>.  The index is what L</guest_mac($domain, $index)>,
-L</nic_slots> and L</nic_names> go by.  So adapter 0 is always
+L</nic_slots>, L</nic_names> and L</nic_bridges> go by.  So adapter 0 is always
 the one whose lease L</lease_ip($network, %opts)> reads, and adapter 1 always the one that gets
 the addresses of the guest from the pool, whatever the order of C<nics>.  The
 order in C<nics> decides only where each adapter is on the bus of the guest,
@@ -1246,6 +1253,12 @@ The indexes of the adapters, in the order of the adapters in the domain.  C<(0,
 
 The bridges of the adapters from index 2 up, in their order: every bridge of
 L</nics> but L</virbr_device> and L</bridge_device>.  Empty without C<nics>.
+
+=head2 nic_bridges
+
+The bridge of each adapter, by index.  It asks for L</virbr_device> and
+L</bridge_device>, so it probes the hypervisor for one that the configuration
+does not name.
 
 =head2 nic_slots
 
@@ -1300,6 +1313,8 @@ sub extra_nics ($self) {
     my %primary = map { $_ => 1 } grep { defined } @{$self}{qw{virbr_device bridge_device}};
     return grep { !$primary{$_} } $self->setting_list('nics');
 }
+
+sub nic_bridges ($self) { return ( $self->virbr_device, $self->bridge_device, $self->extra_nics ) }
 
 sub nic_slots ($self) {
     my @order = $self->nic_order;
@@ -2055,6 +2070,228 @@ sub virbr_ip {
     return $self->{virbr_ip} = $ip;
 }
 
+=head1 GUEST NETWORKS
+
+A guest can have adapters on libvirt networks other than C<default>: see
+L</nics>.  F<bin/guest_network> makes such a network through
+C<guest_network_steps>.  The preflight checks C<check_guest_bridges>,
+C<check_guest_networks>, C<check_bridge_acl> and C<check_guest_pool> ask
+whether each bridge of a guest is there, up and allowed, and whether the pool
+of the guests is on the network of its bridge.  They only read.
+
+=cut
+
+# The name of a network in libvirt, as guest_network_plan takes it.
+my $NETWORK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,49} \z/;
+
+# The block of the network on which the host has $address/$prefix.  addr2cidr
+# gives each block that holds the address, from the /32 down to the /0.
+my sub network_of ( $address, $prefix ) { return ( Net::CIDR::addr2cidr($address) )[ 32 - $prefix ] }
+
+# The blocks and addresses of $pool, a guest_pool, that are not inside the
+# block $cidr.
+my sub outside_of ( $cidr, $pool ) {
+    my $network = Net::IP->new($cidr);
+    return grep {
+        my $item = Net::IP->new($_);
+        my $how  = $item ? $item->overlaps($network) // 0 : 0;
+        $how != $Net::IP::IP_A_IN_B_OVERLAP && $how != $Net::IP::IP_IDENTICAL;
+    } map { @{ $pool->{$_} // [] } } qw{cidr addresses};
+}
+
+# The attributes of an element, from the text of its start tag.
+my sub attributes ($tag) {
+    my %attribute;
+    while ( $tag =~ m{([\w-]+) \s* = \s* (['"]) (.*?) \2}g ) {
+        $attribute{$1} = $3;
+    }
+    return \%attribute;
+}
+
+# What the XML of a libvirt network says about the guests on it: bridge, the
+# name of its bridge; forward, its forward mode, or none for an isolated
+# network; address, the address of the host on it, and cidr, its block, from
+# the first IPv4 address; and leases, the blocks of every DHCP range.  A key
+# that the XML does not give is left out.
+my sub network_facts ($xml) {
+    my %facts = ( leases => [] );
+
+    my ($bridge) = $xml =~ m{(<bridge\b[^>]*>)};
+    $facts{bridge} = attributes($bridge)->{name} if $bridge;
+
+    # A forward element with no mode is NAT, and no forward element at all is
+    # an isolated network.
+    my ($forward) = $xml =~ m{(<forward\b[^>]*>)};
+    $facts{forward} = $forward ? attributes($forward)->{mode} // 'nat' : 'none';
+
+    my ($ip) = grep { ( $_->{family} // 'ipv4' ) eq 'ipv4' && defined $_->{address} } map { attributes($_) } $xml =~ m{(<ip\b[^>]*>)}g;
+    if ($ip) {
+        $facts{address} = $ip->{address};
+        $facts{cidr}    = defined $ip->{prefix} ? network_of( $ip->{address}, $ip->{prefix} ) : eval { Net::CIDR::addrandmask2cidr( $ip->{address}, $ip->{netmask} ) };
+    }
+
+    $facts{leases} = [ map { Net::CIDR::range2cidr("$_->{start}-$_->{end}") } grep { defined $_->{start} && defined $_->{end} } map { attributes($_) } $xml =~ m{(<range\b[^>]*>)}g ];
+    return \%facts;
+}
+
+# The network of the system daemon whose bridge is $bridge, or undef.  A
+# network with no bridge, such as one of macvtap, has no bridge name to give.
+my sub network_on ( $self, $bridge ) {
+    return List::Util::first {
+        ( eval { $_->get_bridge_name } // q{} ) eq $bridge
+    }
+    $self->network_vmm->list_all_networks;
+}
+
+=head2 \%plan = Trog::HV::Libvirt->guest_network_plan(%args)
+
+The network that C<guest_network_steps> makes, from these arguments:
+
+=over 4
+
+=item C<name>
+
+The name of the network in libvirt: a letter or a digit, then up to 49 letters,
+digits, C<_>, C<.> and C<->.
+
+=item C<bridge>
+
+Its bridge, a name that the kernel takes for a link.
+
+=item C<address>
+
+The IPv4 address of the hypervisor on it, which is the gateway of its guests.
+
+=item C<prefix>
+
+The length of its prefix, from 8 to 30.
+
+=item C<pool>
+
+The pool of the guests, as L<Trog::HV/guest_pool> gives it.  Optional.
+
+=back
+
+Returns them, with C<cidr>, the block of the network.  Dies with the reason on
+a value that is not one of these, on an address that is the address of the
+block itself, and on an address or a block of the pool that is not inside the
+network, because a guest with that address could not reach its gateway.
+
+=cut
+
+sub guest_network_plan ( $, %args ) {
+    my %plan = %args{qw{name bridge address prefix}};
+    $plan{$_} //= q{} for keys %plan;
+
+    die "The name of a guest network in libvirt is a letter or a digit, then letters, digits, _, . and -, and '$plan{name}' is not\n" unless $plan{name}   =~ $NETWORK_NAME;
+    die "The bridge of a guest network is the name of a link, and '$plan{bridge}' is not\n"                                           unless $plan{bridge} =~ $LINK_NAME;
+
+    my $ip = Net::IP->new( $plan{address} );
+    die "The address of the hypervisor on a guest network is an IPv4 address, and '$plan{address}' is not\n" unless $ip && $ip->version == 4 && $ip->size == 1;
+    die "The prefix of a guest network is a number from 8 to 30, and '$plan{prefix}' is not\n" if $plan{prefix} !~ m/\A \d{1,2} \z/ || $plan{prefix} < 8 || $plan{prefix} > 30;
+
+    $plan{cidr} = network_of( $plan{address}, $plan{prefix} );
+    die "$plan{address} is the address of the block $plan{cidr} itself, which no host on it can have\n" if index( $plan{cidr}, "$plan{address}/" ) == 0;
+
+    my @outside = outside_of( $plan{cidr}, $args{pool} // {} );
+    die 'The pool of the guests has ' . join( ', ', @outside ) . " outside $plan{cidr}, so a guest with one of those addresses could not reach its gateway $plan{address}\n" if @outside;
+
+    return \%plan;
+}
+
+=head2 $xml = Trog::HV::Libvirt->guest_network_xml(\%plan, $uuid)
+
+The libvirt XML of the network of C<\%plan>.  It forwards by NAT to the networks
+of the host, on the bridge of the plan, with the address of the plan.  It has no
+DHCP, because each guest on it has a static address from the pool, which its
+network configuration gives it.
+
+With C<$uuid>, the XML keeps the uuid of the network that it defines again,
+because libvirt refuses a definition under a name that it knows with another
+uuid.
+
+With C<forward mode='nat'>, libvirt lets a guest on the network start a
+connection out, and refuses a new connection in from outside the host.  So this
+machine still reaches a guest by the lease of its NAT adapter.  "The adapters
+of a guest" in F<docs/CONFIGURATION.md> says when to make a network with
+C<mode='route'> instead, by hand.
+
+=cut
+
+sub guest_network_xml ( $, $plan, $uuid = undef ) {
+    return join "\n", '<network>', "  <name>$plan->{name}</name>", ( defined $uuid ? "  <uuid>$uuid</uuid>" : () ), "  <forward mode='nat'/>", "  <bridge name='$plan->{bridge}' stp='on' delay='0'/>", "  <ip address='$plan->{address}' prefix='$plan->{prefix}'/>", '</network>', q{};
+}
+
+=head2 @actions = $hv->guest_network_steps(\%plan)
+
+The actions that make the network of C<\%plan> on the system daemon of this
+hypervisor, for L<Trog::Steps/run>, in order:
+
+=over 4
+
+=item 1. Define it, persistent, unless it is defined already with the bridge,
+the forward mode, the address and the prefix of the plan, and no DHCP.  A
+network with that name and other values is defined again with the values of the
+plan, under its own uuid.  If it is running, it keeps what it had until it
+restarts, and the action prints how to restart it, because a restart takes the
+link away from each guest on it.
+
+=item 2. Start it.
+
+=item 3. Start it with the host.
+
+=back
+
+Before the first, it dies when this hypervisor is a session, because nothing
+outside a session can join one of its networks, and when another network has
+the bridge of the plan.
+
+=cut
+
+sub guest_network_steps ( $hv, $plan ) {
+    die 'A guest network belongs to the system daemon, and ' . $hv->describe . " is a session.  Name the block of an account on the system URI of the same host, as bin/guest_network --via does.\n"
+      if $hv->is_session;
+
+    my $vmm  = $hv->vmm;
+    my $name = $plan->{name};
+
+    my $other = network_on( $hv, $plan->{bridge} );
+    die "The bridge $plan->{bridge} on " . $hv->describe . ' belongs to the network ' . $other->get_name . ", so the network $name cannot have it\n"
+      if $other && $other->get_name ne $name;
+
+    my $network = sub {
+        return eval { $vmm->get_network_by_name($name) } || undef;
+    };
+    my $restart = join q{ }, 'virsh -c', $hv->uri, "net-destroy $name &&", 'virsh -c', $hv->uri, "net-start $name";
+
+    return (
+        {
+            what => "define the network $name, NAT on $plan->{bridge} at $plan->{address}/$plan->{prefix}, with no DHCP",
+            done => sub {
+                my $net  = $network->();
+                my $has  = $net ? network_facts( $net->get_xml_description( Sys::Virt::Network::XML_INACTIVE() ) ) : {};
+                my %want = ( %$plan, forward => 'nat' );
+                return ( List::Util::all { ( $has->{$_} // q{} ) eq $want{$_} } qw{bridge forward address cidr} ) && !@{ $has->{leases} // [] };
+            },
+            do => sub {
+                my $old = $network->();
+                $vmm->define_network( Trog::HV::Libvirt->guest_network_xml( $plan, $old ? $old->get_uuid_string : undef ) );
+                print "        It runs with what it had until it restarts, which takes the link from each guest on it:\n" . "        $restart\n" if $old && $old->is_active;
+            },
+        },
+        {
+            what => "start the network $name",
+            done => sub { my $net = $network->(); $net && $net->is_active },
+            do   => sub { $network->()->create },
+        },
+        {
+            what => "start the network $name with the host",
+            done => sub { my $net = $network->(); $net && $net->get_autostart },
+            do   => sub { $network->()->set_autostart(1) },
+        },
+    );
+}
+
 =head1 CAPACITY
 
 What the hypervisor has and what its guests already have.  L<Trog::HV> uses
@@ -2374,7 +2611,7 @@ order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
 
 =cut
 
-sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_pool_writable check_config} }
+sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_guest_bridges check_guest_networks check_bridge_acl check_guest_pool check_pool_writable check_config} }
 sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()
@@ -2650,6 +2887,191 @@ Either bring this machine to $there:
 or provision from a machine whose libvirt already does.  Installing a Sys::Virt
 that does not match the local libvirt-dev will not build.
 
+FIX
+}
+
+=head2 Checks of the bridges of the guests
+
+The four checks below ask whether the guests of the block can have their
+adapters: see L</nics>.  They only read.  Each one fails with what to run to fix
+it, and F<bin/guest_network> is that for a network that the block of
+F<hypervisors.conf> describes.
+
+=cut
+
+# What to run to make the network of the bridge of this block, for the fix of a
+# check.
+my sub guest_network_fix ($self) {
+    my $name = $self->name // 'NAME';
+    my $via  = $self->is_session ? ' --via ADMIN' : q{};
+    return <<"FIX";
+For the network of the bridge_device of [$name], which this block describes:
+
+    bin/guest_network --hypervisor $name$via --dryrun
+
+and again without --dryrun.  It defines the network on the system daemon,
+starts it, starts it with the host, and lets the account of a session join its
+bridge.@{[ $via ? "  ADMIN is the block of an account on the system URI of the\nsame host, with sudo." : q{} ]}
+FIX
+}
+
+# The bridges of the guests, or a failed verdict that says why there are none.
+my sub bridges_or_verdict ($self) {
+    my @bridges = eval { $self->nic_bridges };
+    return ( undef, @bridges ) if @bridges;
+    return $self->verdict( 0, 'Could not work out the bridges of the guests', $@ );
+}
+
+=head2 $result = $hv->check_guest_bridges()
+
+Passes when each bridge of L</nic_bridges> is a bridge on the hypervisor.  It
+asks for F</sys/class/net/BRIDGE/bridge>, which the kernel has for a bridge and
+for nothing else.
+
+=cut
+
+sub check_guest_bridges ($self) {
+    my ( $failed, @bridges ) = bridges_or_verdict($self);
+    return $failed if $failed;
+
+    my @absent = grep { $self->run_cmd( qw{test -d}, "/sys/class/net/$_/bridge" ) != 0 } @bridges;
+    return $self->verdict( 1, 'The guests join ' . join( ', ', @bridges ), q{} ) unless @absent;
+
+    return $self->verdict( 0, 'No bridge ' . join( ', ', @absent ) . ' on ' . $self->describe, guest_network_fix($self) . <<'FIX' );
+
+A bridge of the host itself, such as the one on its LAN, is made in the network
+configuration of the host, and the bridge of the default network by libvirt.
+FIX
+}
+
+=head2 $result = $hv->check_guest_networks()
+
+Passes when each bridge of L</nic_bridges> that a libvirt network owns belongs
+to a network that runs and starts with the host.  A bridge that no network owns,
+such as the bridge of the LAN of the host, passes, because libvirt does not
+start it.
+
+=cut
+
+sub check_guest_networks ($self) {
+    my ( $failed, @bridges ) = bridges_or_verdict($self);
+    return $failed if $failed;
+
+    my @networks = eval {
+        map { network_on( $self, $_ ) // () } @bridges;
+    };
+    return $self->verdict( 0, 'Could not ask libvirt for its networks', $@ ) if $@;
+
+    my @down = grep { !( $_->is_active && $_->get_autostart ) } @networks;
+    return $self->verdict( 1, 'Each network of a bridge of the guests runs, and starts with the host', q{} ) unless @down;
+
+    my @names = map { $_->get_name } @down;
+    return $self->verdict( 0, 'The network ' . join( ', ', @names ) . ' does not run, or does not start with the host', guest_network_fix($self) . <<"FIX" );
+
+For the default network, or any other one, on the hypervisor:
+
+@{[ join "\n", map { "    virsh net-start $_; virsh net-autostart $_" } @names ]}
+FIX
+}
+
+=head2 $result = $hv->check_bridge_acl()
+
+Passes on the system URI, whose daemon joins its guests to a bridge itself.  On
+a session, passes when F</etc/qemu/bridge.conf>, and each file that it includes,
+let the account join each bridge of L</nic_bridges>.  qemu-bridge-helper lets a
+user join a bridge when an C<allow> line names it or C<all>, and no C<deny> line
+does.
+
+=cut
+
+sub check_bridge_acl ($self) {
+    return $self->verdict( 1, 'The system daemon joins its guests to their bridges itself', q{} ) unless $self->is_session;
+
+    my ( $failed, @bridges ) = bridges_or_verdict($self);
+    return $failed if $failed;
+
+    # The rules of bridge.conf and of each file that it includes, as pairs of
+    # a verb and a bridge.  qemu reads an include as deep as it goes, and a
+    # loop of includes would not end, so this stops after a number of files.
+    my ( @rules, @files );
+    my @to_read = ($BRIDGE_CONF);
+    while ( defined( my $file = shift @to_read ) ) {
+        push @files, $file;
+        return $self->verdict( 0, 'Could not read what qemu-bridge-helper allows', "$BRIDGE_CONF includes more files than this reads: " . join( ', ', @files ) . "\n" ) if @files > 32;
+
+        my $text = eval { $self->read_text($file) } // return $self->verdict( 0, 'Could not read what qemu-bridge-helper allows', "Could not read $file on " . $self->describe . "\n" );
+        foreach my $line ( split m/\n/, $text ) {
+            my ( $verb, $what ) = $line =~ m/\A \s* (allow|deny|include) \s+ (\S+)/ or next;
+            if   ( $verb eq 'include' ) { push @to_read, $what }
+            else                        { push @rules,   [ $verb, $what ] }
+        }
+    }
+
+    my $user = $self->ssh_user // 'this account';
+
+    my $says = sub ( $verb, $bridge ) {
+        List::Util::any { $_->[0] eq $verb && ( $_->[1] eq 'all' || $_->[1] eq $bridge ) } @rules;
+    };
+    my @refused = grep { !$says->( 'allow', $_ ) || $says->( 'deny', $_ ) } @bridges;
+    return $self->verdict( 1, "qemu-bridge-helper lets $user join " . join( ', ', @bridges ), q{} ) unless @refused;
+
+    return $self->verdict( 0, "qemu-bridge-helper does not let $user join " . join( ', ', @refused ), guest_network_fix($self) . <<"FIX" );
+
+For the NAT bridge and the outbound bridge, from the machine that provisions:
+
+    bin/runner_account --hypervisor ADMIN --user $user ...
+
+Each writes an allow line into $BRIDGE_CONF, or a file that it includes.
+FIX
+}
+
+=head2 $result = $hv->check_guest_pool()
+
+Passes when the block names no pool, or when the bridge of the pool,
+L</bridge_device>, belongs to no libvirt network, because then nothing here
+knows the network of the bridge.  Otherwise it passes when the gateway of the
+block is the address of the host on that network, each block and address of
+the pool is inside the network, and no DHCP range of the network overlaps the
+pool.
+
+A guest with an address outside the network of its bridge cannot reach its
+gateway.  A DHCP range over the pool can lease an address of the pool to
+something else.
+
+Each of these four fails with what to run to fix it, and
+F<bin/guest_network> is that for a network that this block of
+F<hypervisors.conf> describes.
+
+=cut
+
+sub check_guest_pool ($self) {
+    my $pool = $self->guest_pool;
+    return $self->verdict( 1, 'The guests take no address from a pool', q{} ) unless %$pool;
+
+    my $bridge = eval { $self->bridge_device };
+    return $self->verdict( 0, 'Could not work out the bridge of the pool', $@ ) unless $bridge;
+
+    my $network = eval { network_on( $self, $bridge ) };
+    return $self->verdict( 0, 'Could not ask libvirt for its networks',                                                   $@ ) if $@;
+    return $self->verdict( 1, "The pool is on $bridge, which no libvirt network owns, so nothing here knows its network", q{} ) unless $network;
+
+    my $name    = $network->get_name;
+    my $facts   = network_facts( $network->get_xml_description(0) );
+    my $gateway = eval { $self->configured_gateway } // 'none';
+    my @pool    = map { @{ $pool->{$_} // [] } } qw{cidr addresses};
+
+    my @wrong = (
+        ( $facts->{cidr}                                                    ? ()                                                                                                : "$name has no IPv4 address" ),
+        ( $facts->{cidr} && $gateway ne $facts->{address}                   ? "the gateway of the block is $gateway, and the address of the host on $name is $facts->{address}" : () ),
+        ( map { "$_ of the pool is outside $facts->{cidr}" } $facts->{cidr} ? outside_of( $facts->{cidr}, $pool )                                                               : () ),
+        ( map { "$_ of the pool is in a DHCP range of $name" } grep { Net::CIDR::cidrlookup( $_, @{ $facts->{leases} } ) } @pool ),
+    );
+    return $self->verdict( 1, "The pool is inside $facts->{cidr}, the network $name of $bridge, behind its gateway", q{} ) unless @wrong;
+
+    return $self->verdict( 0, "The pool does not fit the network $name of $bridge", join( q{}, map { "$_.\n" } @wrong ) . "\n" . guest_network_fix($self) . <<'FIX' );
+
+It refuses a pool that is not inside the network, and makes the network
+with no DHCP.  Or change gateway, pool_cidr and pool_addresses in the block.
 FIX
 }
 
@@ -3156,7 +3578,6 @@ runs as the account, so its domains can open only what the account can open.
 # The place of qemu-bridge-helper, by distribution, and the file of the
 # account that tells it which bridges the account may use.
 my @BRIDGE_HELPERS  = qw{/usr/lib/qemu/qemu-bridge-helper /usr/libexec/qemu-bridge-helper};
-my $BRIDGE_CONF     = '/etc/qemu/bridge.conf';
 my $BRIDGE_APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
 my sub bridge_acl ($user) { return "/etc/qemu/trog-runner-$user.conf" }
 my sub sudoers_of ($user) { return "/etc/sudoers.d/90-trog-runner-$user" }
@@ -3292,6 +3713,61 @@ sub runner_account_plan {
     return { map { $_ => $args{$_} } qw{user pool_name pool_path quota cores io_weight} };
 }
 
+=head2 @actions = $hv->runner_bridge_steps($user, @bridges)
+
+The actions that let C<$user> put the guests of its session on each of
+C<@bridges>, through qemu-bridge-helper, in order:
+
+=over 4
+
+=item 1. An C<allow> line for each bridge in F</etc/qemu/trog-runner-USER.conf>.
+A line that is there already stays, also for a bridge that is not in
+C<@bridges>.  So C<runner_account_steps> and F<bin/guest_network> each add
+their bridges, and neither takes away the bridge of the other.
+
+=item 2. An C<include> of that file in F</etc/qemu/bridge.conf>.
+
+=back
+
+=cut
+
+sub runner_bridge_steps ( $hv, $user, @bridges ) {
+    my $acl     = bridge_acl($user);
+    my $include = "include $acl";
+
+    # The lines of the file, and the lines that it would have with every bridge
+    # allowed.
+    my $now = sub {
+        grep { $_ ne q{} } split m/\n/, root_reads( $hv, $acl );
+    };
+    my $missing = sub {
+        my %has = map { $_ => 1 } $now->();
+        return grep { !$has{$_} } map { "allow $_" } @bridges;
+    };
+
+    return (
+        {
+            what => "let $user join " . join( ' and ', @bridges ) . " in $acl",
+            done => sub { !$missing->() },
+            do   => sub {
+                as_root( $hv, qw{install -d -m 0755 /etc/qemu} );
+                my $text = join q{}, map { "$_\n" } $now->(), $missing->();
+                $hv->write_text( $acl, $text, sudo => 1, mode => '0644' ) or die "Could not write $acl\n";
+            },
+        },
+        {
+            what => "include $acl in $BRIDGE_CONF",
+            done => sub {
+                List::Util::any { $_ eq $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
+            },
+            do => sub {
+                my @lines = ( ( grep { $_ ne $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF ) ), $include );
+                $hv->write_text( $BRIDGE_CONF, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_CONF\n";
+            },
+        },
+    );
+}
+
 =head2 @actions = $hv->runner_account_steps(\%plan)
 
 The actions that make the account of C<\%plan>, in order:
@@ -3322,9 +3798,9 @@ next one.  C<max_memory> is the budget that refuses it instead.  See QUOTAS in
 L<Provisioner::Recipe::trogrunner>.
 
 =item 6. The bridges that qemu-bridge-helper lets the user join: the NAT
-bridge, L</virbr_device>, and the outbound bridge, L</bridge_device>.  They go
-in F</etc/qemu/trog-runner-USER.conf>, and F</etc/qemu/bridge.conf> includes
-that file.
+bridge, L</virbr_device>, the outbound bridge, L</bridge_device>, and any other
+bridge of L</nics>.  These are the bridges of the block of this object.  See
+C<runner_bridge_steps>.
 
 =item 7. The C<cap_net_admin> capability on qemu-bridge-helper, and an apt
 hook that sets it again after each package upgrade.  Ubuntu installs the helper
@@ -3339,12 +3815,12 @@ is installed.
 
 The capability lets every user who can run the helper join a bridge that
 F<bridge.conf> allows.  That is what the helper is for, and the bridges are
-the two that every guest already joins.
+the ones that the guests of the block already join.
 
 Before the first, it makes sure that the hypervisor has what every step needs,
 and dies with the reason if one is missing: a quota in the plan, sudo 1.9.10
 or later for the pattern of the grant, the lease helper, F</dev/kvm>,
-qemu-bridge-helper, apt for the hook, both bridges, and ZFS under the parent
+qemu-bridge-helper, apt for the hook, a name for each bridge, and ZFS under the parent
 of the pool.  On a filesystem other than ZFS, the message says how to put a
 quota there, which is the advice of C<note_pool_quota>.
 
@@ -3365,7 +3841,7 @@ sub runner_account_steps {
     my $helper = bridge_helper($hv) or die 'There is no qemu-bridge-helper on ' . $hv->describe . ", which a session needs to put a guest on a bridge.\n";
     $hv->run_cmd(qw{test -d /etc/apt/apt.conf.d}) == 0
       or die 'There is no apt on ' . $hv->describe . ", so nothing would set the capability of $helper again after a package upgrade.\n";
-    my @bridges = ( $hv->virbr_device, $hv->bridge_device );
+    my @bridges = $hv->nic_bridges;
 
     my $parent = File::Basename::dirname($path);
     my $fstype = $hv->path_fstype($parent);
@@ -3397,10 +3873,7 @@ sub runner_account_steps {
         };
     }
 
-    my $acl      = bridge_acl($user);
-    my $acl_text = join q{}, map { "allow $_\n" } @bridges;
-    my $include  = "include $acl";
-    my $hook     = join "\n", '// Written by trog-provisioner for the runner accounts on this hypervisor.  A new',
+    my $hook = join "\n", '// Written by trog-provisioner for the runner accounts on this hypervisor.  A new',
       '// qemu package puts back a qemu-bridge-helper without the capability that lets', '// an account put the guests of its session on a bridge.  See runner_account_steps',
       '// in Trog::HV::Libvirt.',                                                        qq{DPkg::Post-Invoke { "if [ -e $helper ]; then setcap cap_net_admin+ep $helper; fi"; };};
 
@@ -3466,24 +3939,7 @@ sub runner_account_steps {
             },
         },
         @slice,
-        {
-            what => "let $user join " . join( ' and ', @bridges ) . " in $acl",
-            done => sub { root_reads( $hv, $acl ) . "\n" eq $acl_text },
-            do   => sub {
-                as_root( $hv, qw{install -d -m 0755 /etc/qemu} );
-                $hv->write_text( $acl, $acl_text, sudo => 1, mode => '0644' ) or die "Could not write $acl\n";
-            },
-        },
-        {
-            what => "include $acl in $BRIDGE_CONF",
-            done => sub {
-                List::Util::any { $_ eq $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
-            },
-            do => sub {
-                my @lines = ( ( grep { $_ ne $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF ) ), $include );
-                $hv->write_text( $BRIDGE_CONF, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_CONF\n";
-            },
-        },
+        $hv->runner_bridge_steps( $user, @bridges ),
         {
             what => "give $helper the capability cap_net_admin",
             done => sub { said( $hv, 'getcap ' . q1($helper) ) =~ m/cap_net_admin/ },

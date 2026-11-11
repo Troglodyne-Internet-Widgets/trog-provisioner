@@ -1651,14 +1651,16 @@ subtest 'nics: one adapter on each bridge, numbered NAT first whatever its place
     my %primary = ( virbr_device => 'virbr0', bridge_device => 'virbr1' );
     my $hv      = Trog::HV->candidate( uri => 'qemu+ssh://runner@hv.test.test/session', %primary, nics => 'virbr1, br9 virbr0' );
 
-    is_deeply( [ $hv->nic_order ],  [ 1, 2, 0 ],          'the index of each adapter, in the order of the domain' );
-    is_deeply( [ $hv->nic_slots ],  [ 5, 3, 4 ],          'the slot of each index: the NAT adapter is third on the bus' );
-    is_deeply( [ $hv->nic_names ],  [qw{ens5 ens3 ens4}], 'so is its name, and the names still come NAT first' );
-    is_deeply( [ $hv->extra_nics ], ['br9'],              'and the ones past the two of every guest' );
+    is_deeply( [ $hv->nic_order ],   [ 1, 2, 0 ],             'the index of each adapter, in the order of the domain' );
+    is_deeply( [ $hv->nic_slots ],   [ 5, 3, 4 ],             'the slot of each index: the NAT adapter is third on the bus' );
+    is_deeply( [ $hv->nic_names ],   [qw{ens5 ens3 ens4}],    'so is its name, and the names still come NAT first' );
+    is_deeply( [ $hv->nic_bridges ], [qw{virbr0 virbr1 br9}], 'the bridge of each index' );
+    is_deeply( [ $hv->extra_nics ],  ['br9'],                 'and the ones past the two of every guest' );
 
     my $plain = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', bridge_device => 'br0', virbr_device => 'virbr0' );
-    is_deeply( [ $plain->nic_order ],  [ 0, 1 ], 'without nics, NAT and then bridge, as before' );
-    is_deeply( [ $plain->extra_nics ], [],       'and nothing else' );
+    is_deeply( [ $plain->nic_order ],   [ 0, 1 ],         'without nics, NAT and then bridge, as before' );
+    is_deeply( [ $plain->nic_bridges ], [qw{virbr0 br0}], 'on the two bridges of the block' );
+    is_deeply( [ $plain->extra_nics ],  [],               'and nothing else' );
 
     my $refused = sub (%block) {
         exception { Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', name => 'hv1', %primary, %block ) }

@@ -551,7 +551,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     like( $out, qr/ISO[ ]builder/,                 'and the ISO builder' );
     like( $out, qr/libvirt/,                       'and libvirt' );
     like( $out, qr/Missing[ ]or[ ]empty[ ]in/,     'and the configuration' );
-    like( $out, qr/7[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run' );
+    like( $out, qr/9[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run, the checks of the bridges of the guests among them' );
 };
 
 subtest '--credentials reads the passwords before any check asks for one' => sub {
@@ -1015,6 +1015,153 @@ subtest 'the client of the hypervisor being checked is the first thing checked' 
     my $result = $hv->check_client;
     is( $result->{ok}, 0, 'a hypervisor whose client is not here fails it' );
     like( $result->{fix}, qr/cpanm[ ]Trog::No::Such::Client/, 'saying what to install' );
+};
+
+# A libvirt network of the system daemon, as Sys::Virt gives one: its name, its
+# bridge, whether it runs and starts with the host, and its XML.
+{
+
+    package Test::PreflightNetwork;
+    sub new                 ( $class, %a ) { return bless {%a}, $class }
+    sub get_name            ($self)        { return $self->{name} }
+    sub get_bridge_name     ($self)        { return $self->{bridge} }
+    sub is_active           ($self)        { return $self->{active} }
+    sub get_autostart       ($self)        { return $self->{autostart} }
+    sub get_xml_description ( $self, @ )   { return $self->{xml} }
+
+    package Test::PreflightVmm;
+    sub new               ( $class, @networks ) { return bless { networks => \@networks }, $class }
+    sub list_all_networks ($self)               { return @{ $self->{networks} } }
+}
+
+# The hypervisor of the case that nics is for: a session whose guests have a
+# lease on virbr0, and an address from a pool on the network of virbr1.
+sub guest_network_hv (%block) {
+    Trog::HV->forget();
+    return Trog::HV->new(
+        uri            => 'qemu+ssh://runner@hv1.test.test/session',
+        name           => 'clod',
+        virbr_device   => 'virbr0',
+        bridge_device  => 'virbr1',
+        nics           => 'virbr0, virbr1',
+        gateway        => '10.0.0.1',
+        pool_cidr      => '10.0.0.64/26',
+        pool_addresses => '10.0.0.5',
+        %block,
+    );
+}
+
+sub default_network (%a) {
+    return Test::PreflightNetwork->new(
+        name => 'default', bridge => 'virbr0', active => 1, autostart => 1,
+        xml  => "<network><name>default</name><forward mode='nat'/><bridge name='virbr0'/><ip address='192.168.122.1' netmask='255.255.255.0'><dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp></ip></network>",
+        %a,
+    );
+}
+
+sub guest_network (%a) {
+    return Test::PreflightNetwork->new(
+        name => 'clod', bridge => 'virbr1', active => 1, autostart => 1,
+        xml  => "<network><name>clod</name><forward mode='nat'/><bridge name='virbr1' stp='on' delay='0'/><ip address='10.0.0.1' prefix='24'/></network>",
+        %a,
+    );
+}
+
+subtest 'each bridge of a guest has to be on the hypervisor' => sub {
+    my $mock    = Test::MockModule->new('Trog::HV::Libvirt');
+    my %bridges = map { $_ => 1 } qw{virbr0 virbr1};
+    $mock->redefine( run_cmd => sub ( $hv, @argv ) { "@argv" =~ m{\Atest[ ]-d[ ]/sys/class/net/(\S+)/bridge\z} or die "not expecting @argv\n"; return $bridges{$1} ? 0 : 1 } );
+
+    my $hv = guest_network_hv();
+    my ($result) = quietly( sub { $hv->check_guest_bridges } );
+    ok( $result->{ok}, 'both there' );
+    like( $result->{what}, qr/virbr0,[ ]virbr1/, 'naming them' );
+
+    delete $bridges{virbr1};
+    ($result) = quietly( sub { $hv->check_guest_bridges } );
+    ok( !$result->{ok}, 'one missing fails' );
+    like( $result->{what}, qr/No[ ]bridge[ ]virbr1[ ]on/,                                'naming it' );
+    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod[ ]--via[ ]ADMIN/, 'and the helper that makes its network, through an account that can' );
+};
+
+subtest 'a network that owns a bridge of a guest runs, and starts with the host' => sub {
+    my $mock     = Test::MockModule->new('Trog::HV::Libvirt');
+    my @networks = ( default_network(), guest_network() );
+    $mock->redefine( network_vmm => sub { Test::PreflightVmm->new(@networks) } );
+
+    my $hv = guest_network_hv( nics => 'virbr0 virbr1 br0' );
+    my ($result) = quietly( sub { $hv->check_guest_networks } );
+    ok( $result->{ok}, 'both up, and br0 belongs to no network, so nothing starts it' );
+
+    @networks = ( default_network(), guest_network( autostart => 0 ) );
+    ($result) = quietly( sub { $hv->check_guest_networks } );
+    ok( !$result->{ok}, 'a network that would not come back after a reboot fails' );
+    like( $result->{what}, qr/network[ ]clod[ ]does[ ]not[ ]run/,                        'naming it' );
+    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod/,                 'with the helper' );
+    like( $result->{fix},  qr/virsh[ ]net-start[ ]clod;[ ]virsh[ ]net-autostart[ ]clod/, 'and what virsh would do' );
+
+    @networks = ( default_network( active => 0 ), guest_network() );
+    ($result) = quietly( sub { $hv->check_guest_networks } );
+    like( $result->{what}, qr/network[ ]default[ ]does[ ]not[ ]run/, 'and so does a default network that is down' );
+};
+
+subtest 'qemu-bridge-helper has to let the account of a session join each bridge' => sub {
+    my $mock  = Test::MockModule->new('Trog::HV::Libvirt');
+    my %files = (
+        '/etc/qemu/bridge.conf'             => "# the bridges of the host\nallow br0\ninclude /etc/qemu/trog-runner-runner.conf\n",
+        '/etc/qemu/trog-runner-runner.conf' => "allow virbr0\nallow virbr1\n",
+    );
+    $mock->redefine( read_text => sub ( $hv, $path ) { return $files{$path} // die "no $path\n" } );
+
+    my $hv = guest_network_hv();
+    my ($result) = quietly( sub { $hv->check_bridge_acl } );
+    ok( $result->{ok}, 'each bridge allowed, one of them in an included file' );
+    like( $result->{what}, qr/lets[ ]runner[ ]join[ ]virbr0,[ ]virbr1/, 'naming the account and the bridges' );
+
+    $files{'/etc/qemu/trog-runner-runner.conf'} = "allow virbr0\n";
+    ($result) = quietly( sub { $hv->check_bridge_acl } );
+    ok( !$result->{ok}, 'a bridge that nothing allows fails' );
+    like( $result->{what}, qr/does[ ]not[ ]let[ ]runner[ ]join[ ]virbr1\z/,              'naming it, and only it' );
+    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod[ ]--via[ ]ADMIN/, 'with the helper that adds it' );
+
+    $files{'/etc/qemu/trog-runner-runner.conf'} = "allow all\ndeny virbr1\n";
+    ($result) = quietly( sub { $hv->check_bridge_acl } );
+    like( $result->{what}, qr/does[ ]not[ ]let[ ]runner[ ]join[ ]virbr1\z/, 'a deny wins over allow all, as it does in the helper' );
+
+    delete $files{'/etc/qemu/trog-runner-runner.conf'};
+    ($result) = quietly( sub { $hv->check_bridge_acl } );
+    ok( !$result->{ok}, 'an include that cannot be read fails' );
+    like( $result->{fix}, qr{Could[ ]not[ ]read[ ]/etc/qemu/trog-runner-runner[.]conf}, 'saying which' );
+
+    ($result) = quietly( sub { guest_network_hv( uri => 'qemu+ssh://root@hv1.test.test/system' )->check_bridge_acl } );
+    ok( $result->{ok}, 'and the system daemon needs none of it' );
+};
+
+subtest 'the pool of the guests is inside the network of its bridge, behind its gateway' => sub {
+    my $mock     = Test::MockModule->new('Trog::HV::Libvirt');
+    my @networks = ( default_network(), guest_network() );
+    $mock->redefine( network_vmm => sub { Test::PreflightVmm->new(@networks) } );
+
+    my ($result) = quietly( sub { guest_network_hv()->check_guest_pool } );
+    ok( $result->{ok}, 'a pool inside 10.0.0.0/24, behind 10.0.0.1' ) or diag explain $result;
+    like( $result->{what}, qr{0/24,[ ]the[ ]network[ ]clod[ ]of[ ]virbr1}, 'saying where' );
+
+    ($result) = quietly( sub { guest_network_hv( gateway => '10.0.0.254', pool_cidr => '10.0.1.0/26' )->check_guest_pool } );
+    ok( !$result->{ok}, 'a wrong gateway and a block outside the network fail' );
+    like( $result->{fix}, qr/gateway[ ]of[ ]the[ ]block[ ]is[ ]10[.]0[.]0[.]254,/, 'saying what the gateway is' );
+    like( $result->{fix}, qr/host[ ]on[ ]clod[ ]is[ ]10[.]0[.]0[.]1[.]/,           'and what it should be' );
+    like( $result->{fix}, qr{1[.]0/26[ ]of[ ]the[ ]pool[ ]is[ ]outside},           'and which block is outside' );
+    like( $result->{fix}, qr/bin\/guest_network[ ]--hypervisor[ ]clod/,            'and the helper' );
+
+    ($result) = quietly( sub { guest_network_hv( bridge_device => 'virbr0', nics => 'virbr1, virbr0', virbr_device => 'virbr1', gateway => '192.168.122.1', pool_cidr => '192.168.122.64/26', pool_addresses => '' )->check_guest_pool } );
+    ok( !$result->{ok}, 'a pool on a network that leases the same addresses fails' );
+    like( $result->{fix}, qr{64/26[ ]of[ ]the[ ]pool[ ]is[ ]in[ ]a[ ]DHCP[ ]range}, 'saying so' );
+
+    ($result) = quietly( sub { guest_network_hv( bridge_device => 'br0', nics => 'virbr0, br0' )->check_guest_pool } );
+    ok( $result->{ok}, 'a pool on a bridge that no network owns is not for this to judge' );
+
+    ($result) = quietly( sub { guest_network_hv( pool_cidr => '', pool_addresses => '' )->check_guest_pool } );
+    ok( $result->{ok}, 'and nor is a block with no pool' );
 };
 
 done_testing();
