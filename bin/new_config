@@ -19,6 +19,7 @@ use File::Slurper;
 use File::Slurper::Temp;
 use Cwd();
 use File::Basename();
+use POSIX();
 use Clone qw{clone};
 use Hash::Merge();
 
@@ -1069,6 +1070,11 @@ sub handle_domain {
         $target_is_up = !$ssh->error;
     }
 
+    # What the salvages of this run take out of the data directory, in one
+    # directory for the run.  The domain directory, because the guest is given
+    # the data directory whole.  The time is UTC, so that the names sort.
+    my $deleted_to = "$cfg_dir/salvage-deleted/" . POSIX::strftime( '%Y%m%dT%H%M%SZ', gmtime );
+
     # The distro recipe goes in, so that the depsolver configures it and pulls
     # in the vm recipe.  Both come out again below.
     my @modules = ( $distro_name, sort keys( %{ $rconf->{$domain} } ) );
@@ -1232,6 +1238,7 @@ sub handle_domain {
                     user        => $admin_user,
                     remote      => $to_fetch,
                     destination => "$data_dir/$tg{$to_fetch}",
+                    deleted_to  => "$deleted_to/$tg{$to_fetch}",
                     exclude     => \@skip,
                 );
                 next unless $gap;
@@ -1754,6 +1761,12 @@ root, and says whether the salvage lost state.  C<exclude> lists what stays on
 the guest: see C<remote_skip> in L<Provisioner::Recipe>.  C<recipe>, C<host>
 and C<user> name the recipe, the guest and the user for the message.
 
+C<destination> mirrors the path on the guest.  A file that the guest no longer
+has moves out of C<destination> into C<deleted_to>, an absolute path outside
+it, and is not removed.  See C<get_dir> in L<Trog::Machine>.  Without the
+delete, a file that an update of the guest removed comes back on every guest
+built from the salvage.  Dies without C<deleted_to>.
+
 Returns nothing if C<destination> holds a file after the fetch.  Otherwise
 returns a hash reference with C<recipe>, C<remote>, C<message>, and
 C<alarming>, which is true when the salvage lost state.
@@ -1771,6 +1784,7 @@ path.
 =cut
 
 sub salvage_path (%args) {
+    die "salvage_path needs deleted_to, the directory for what the guest no longer has\n" unless $args{deleted_to};
 
     # The result is ignored, because the destination tells more, and part of
     # the state is better than none.
@@ -1780,6 +1794,8 @@ sub salvage_path (%args) {
 
         # Left on the live guest, not fetched and then deleted.
         exclude => $args{exclude} // [],
+
+        deleted_to => $args{deleted_to},
 
         # A copy on the guest that is older than ours is not fetched.
         update => 1,

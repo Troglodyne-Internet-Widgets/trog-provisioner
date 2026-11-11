@@ -996,6 +996,13 @@ can.
 It is also where `remote_files` puts what it salvages off an existing guest, so
 the data directory is both what you restore from and what a backup tars up.
 
+The salvage mirrors the guest. If the guest no longer has a file, the file
+leaves the data directory too, and is not lost: it moves to
+`salvage-deleted/<UTC time>/` in the domain directory, at the same relative
+path. Without that, a file that an update of the guest removed comes back on
+every guest built from the salvage. Nothing removes `salvage-deleted/`. If
+you need the space, look in it and empty it.
+
 ## Recipes that pull in other recipes
 
 Most recipes that need another one configure it themselves, so asking for the
