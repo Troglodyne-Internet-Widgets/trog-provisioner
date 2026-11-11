@@ -16,6 +16,7 @@ use Test::Fatal;
 use Test::MockModule qw{strict};
 use File::Basename();
 use File::Slurper();
+use File::Slurper::Temp();
 use File::Temp();
 use POSIX();
 
@@ -113,7 +114,7 @@ subtest 'guest_address: the guest that runs a domain, and its address' => sub {
 subtest 'reachable_address: the guests reach a guest through its tunnel when it has one' => sub {
     my %held;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { return {%held} } );
+    $pool->redefine( main_addresses => sub { return {%held} } );
 
     %held = ( guests => '192.0.2.5' );
     is( Provisioner::IPPool::reachable_address('relay.test'), '192.0.2.5', 'a guest on the LAN, at its address there' );
@@ -131,7 +132,7 @@ subtest 'reachable_address: the guests reach a guest through its tunnel when it 
 subtest 'reached_through: the guest that routes the tunnel of a guest' => sub {
     my %held;
     my $mock = Test::MockModule->new('Provisioner::IPPool');
-    $mock->redefine( holdings => sub { return {%held} } );
+    $mock->redefine( main_addresses => sub { return {%held} } );
     my $pool = { bins => { guests => { cidr => '192.0.2.0/25' }, vpnclients => { cidr => '198.51.100.0/25', via => 'vpn.test' }, plain => { cidr => '203.0.113.0/25' } } };
 
     %held = ( guests => '192.0.2.5', vpnclients => '198.51.100.5' );
@@ -236,17 +237,17 @@ subtest 'assign: an address on each bridge, and the first is the address of the 
     is( Provisioner::IPPool::assign( 'a.test', $pool, undef, 'br0' ), '192.0.2.10', 'which it keeps' );
     is( Provisioner::IPPool::held_by('a.test'),                       '10.0.0.10',  'the address of the guest is the one on the first' );
     is( Provisioner::IPPool::held_by( 'a.test', undef, 'br0' ),       '192.0.2.10', 'and the one on a bridge is asked for by the bridge' );
-    is_deeply( Provisioner::IPPool::assignments(),          { 'a.test' => '10.0.0.10' },                      'ipmap names the address of the guest, and nothing else' );
-    is_deeply( Provisioner::IPPool::holdings('a.test'),     { guests   => '10.0.0.10' },                      'and so do its holdings, which the tunnels are read out of' );
-    is_deeply( Provisioner::IPPool::nic_holdings('a.test'), { virbr1   => '10.0.0.10', br0 => '192.0.2.10' }, 'while each bridge has its own' );
+    is_deeply( Provisioner::IPPool::assignments(),            { 'a.test' => '10.0.0.10' },                      'ipmap names the address of the guest, and nothing else' );
+    is_deeply( Provisioner::IPPool::main_addresses('a.test'), { guests   => '10.0.0.10' },                      'and so do its main addresses, which the tunnels are read out of' );
+    is_deeply( Provisioner::IPPool::nic_addresses('a.test'),  { virbr1   => '10.0.0.10', br0 => '192.0.2.10' }, 'while each bridge has its own' );
 
     # The order of static_nics is the configuration of today, and the row says
     # which one is the address of the guest.
     Provisioner::IPPool::assign( 'a.test', two_bridges('br0') );
     is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '192.0.2.10' }, 'a block that puts br0 first makes that the address of the guest' );
 
-    is_deeply( Provisioner::IPPool::release('a.test'),      { guests => '192.0.2.10', 'guests on virbr1' => '10.0.0.10' }, 'and both go back, each named' );
-    is_deeply( Provisioner::IPPool::nic_holdings('a.test'), {},                                                            'leaving nothing' );
+    is_deeply( Provisioner::IPPool::release('a.test'),       { guests => '192.0.2.10', 'guests on virbr1' => '10.0.0.10' }, 'and both go back, each named' );
+    is_deeply( Provisioner::IPPool::nic_addresses('a.test'), {},                                                            'leaving nothing' );
 };
 
 subtest 'assign: an address from before the database knew bridges is kept' => sub {
@@ -257,7 +258,7 @@ subtest 'assign: an address from before the database knew bridges is kept' => su
     is_deeply( Provisioner::IPPool::assignments(), { 'old.test' => '192.0.2.11' }, 'it is still the address of its guest' );
 
     is( Provisioner::IPPool::assign( 'old.test', two_bridges('br0') ), '192.0.2.11', 'and the bridge whose pool holds it gets it' );
-    is_deeply( Provisioner::IPPool::nic_holdings('old.test'), { br0 => '192.0.2.11' }, 'which the row records now' );
+    is_deeply( Provisioner::IPPool::nic_addresses('old.test'), { br0 => '192.0.2.11' }, 'which the row records now' );
     is( Provisioner::IPPool::assign( 'old.test', two_bridges('br0'), undef, 'virbr1' ), '10.0.0.10', 'while a bridge that does not hold it gets an address of its own' );
 };
 
@@ -455,6 +456,54 @@ subtest 'a database from before bins keeps every row, in the guests bin' => sub 
     is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '10.9.9.10' }, 'the guest is still there' );
     is( Provisioner::IPPool::taken()->{'10.9.9.11'},                  'hv:somewhere', 'and so is the reservation' );
     is( Provisioner::IPPool::assign( 'a.test', $pool, 'vpnclients' ), '10.8.0.130',   'and the domain can hold a second address now' );
+};
+
+subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
+    fresh_db();
+
+    # The schema as version 2 left it: the files up to v2 in a directory of
+    # their own, which Trog::SQLite takes as the whole of the schema.
+    my $schema = File::Temp::tempdir( CLEANUP => 1 );
+    my $source = File::Basename::dirname( Provisioner::IPPool::schema_path() );
+    File::Slurper::Temp::write_text( "$schema/$_", File::Slurper::read_text("$source/$_") ) for qw{ips.sql ips.v1.update.sql ips.v2.update.sql};
+    my $old = Trog::SQLite::dbh( "$schema/ips.sql", Provisioner::IPPool::db_path() );
+    $old->do( q{INSERT INTO ips (ip, domain, kind, bin, nic, main, noted) VALUES (?, ?, ?, ?, ?, ?, ?)}, undef, @$_ )
+      for (
+        [ qw{10.9.9.10 a.test domain guests br0},            1,   '2026-01-02 03:04:05' ],
+        [ qw{10.0.0.10 a.test domain guests virbr1},         0,   '2026-01-02 03:04:06' ],
+        [ qw{10.8.0.130 a.test domain vpnclients},           q{}, 1, '2026-01-02 03:04:07' ],
+        [ qw{10.9.9.1 gateway:10.9.9.1 reserved guests br0}, 1,   '2026-01-02 03:04:08' ],
+      );
+    Trog::SQLite::forget();
+
+    my $db   = Provisioner::IPPool::dbh();
+    my $rows = $db->selectall_arrayref('SELECT ip, domain, kind, bin, nic, main, assigned_at FROM ips ORDER BY assigned_at');
+    is_deeply(
+        $rows,
+        [
+            [ qw{10.9.9.10 a.test domain guests br0},            1,   '2026-01-02 03:04:05' ],
+            [ qw{10.0.0.10 a.test domain guests virbr1},         0,   '2026-01-02 03:04:06' ],
+            [ qw{10.8.0.130 a.test domain vpnclients},           q{}, 1, '2026-01-02 03:04:07' ],
+            [ qw{10.9.9.1 gateway:10.9.9.1 reserved guests br0}, 1,   '2026-01-02 03:04:08' ],
+        ],
+        'every row reads as it was, with noted as assigned_at'
+    );
+    is( $db->selectrow_array(q{SELECT type FROM sqlite_master WHERE name = 'ips'}), 'view', 'and ips is a view now' );
+    is_deeply( $db->selectcol_arrayref('SELECT name FROM address_bins ORDER BY name'), [qw{guests vpnclients}], 'each bin is stored once' );
+    is_deeply( $db->selectcol_arrayref('SELECT name FROM address_nics ORDER BY name'), [ q{}, qw{br0 virbr1} ], 'and each bridge' );
+
+    is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br0}),                   1, 'a write through the view counts its row' );
+    is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br0}),                   0, 'and one that it ignores counts none' );
+    is( $db->selectrow_array(q{SELECT count(*) FROM address_nics WHERE name = 'br0'}), 1, 'without a second row for the bridge' );
+    Provisioner::IPPool::record(qw{10.9.9.20 b.test br9});
+    is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '10.9.9.20'}), 'br9', 'a bridge that it has not seen is added' );
+    $db->do(q{UPDATE ips SET nic = 'br0' WHERE ip = '10.9.9.20'});
+    is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '10.9.9.20'}), 'br0', 'an update through the view changes the row' );
+    is( Provisioner::IPPool::clear_reservations(),                           2,     'and a delete through it counts what it took away' );
+
+    like( exception { $db->do(q{INSERT INTO ips (ip, domain, kind) VALUES ('10.9.9.30', 'c.test', 'borrowed')}) }, qr/ips:[ ]no[ ]such[ ]kind/, 'a kind that is not in the list is refused' );
+    like( exception { $db->do(q{UPDATE ips SET kind = 'borrowed' WHERE ip = '10.9.9.10'}) },                       qr/ips:[ ]no[ ]such[ ]kind/, 'by an update too' );
+    like( exception { $db->do(q{INSERT INTO ips (ip, domain) VALUES ('10.9.9.10', 'c.test')}) },                   qr/UNIQUE/,                  'and an address that is taken still is' );
 };
 
 {

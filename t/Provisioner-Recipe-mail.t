@@ -187,7 +187,7 @@ subtest 'a relay that is a mail relay of this installation takes every sender, w
     $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $config{$domain} // {} } );
     $cookbook->redefine( host_of       => sub { return } );
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
+    $pool->redefine( main_addresses => sub { return { guests => '192.0.2.5' } } );
 
     my %ours = ( relay => { host => 'relay.test.test' } );
     is_deeply(

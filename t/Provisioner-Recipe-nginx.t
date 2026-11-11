@@ -238,7 +238,7 @@ subtest 'the ports of the proxy get the limits of the ports that it fronts' => s
 
 subtest 'the jails of a domain with a relay ban through it' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
+    $pool->redefine( main_addresses => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
 
     my %public = ( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } );
     my $opts   = enriched( %public, relay => 'relay.test.test' );
@@ -289,7 +289,7 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
 
 subtest 'a media name is fetched by the relay on 8080, and gets a certificate of its own' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
+    $pool->redefine( main_addresses => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
 
     my %media = ( %VPN, sites => ['web.test.test'], relay => 'relay.test.test', media_names => { 'media.web.test.test' => 'web.test.test' } );
     my $opts  = enriched(%media);
@@ -363,7 +363,7 @@ sub deployed {
 
 subtest 'a cached name is fetched by the relay on 8080, on a certificate that names it alone' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
+    $pool->redefine( main_addresses => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
 
     my %cached = (
         %VPN,

@@ -89,7 +89,7 @@ subtest 'check_tunnel: a route through a tunnel to the address of the guest in t
 
 subtest 'edge_addresses: each address of the edge in the pool, then the one this machine reaches it at' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { return $_[0] eq 'edge.test' ? { vpnclients => '10.8.0.129', guests => '192.168.1.9' } : {} } );
+    $pool->redefine( main_addresses => sub { return $_[0] eq 'edge.test' ? { vpnclients => '10.8.0.129', guests => '192.168.1.9' } : {} } );
     is_deeply( [ Provisioner::Bin::check_edge::edge_addresses( machine(), 'edge.test' ) ],  [qw{10.8.0.129 192.168.1.9 192.0.2.10}], 'all of them' );
     is_deeply( [ Provisioner::Bin::check_edge::edge_addresses( machine(), 'cloud.test' ) ], ['192.0.2.10'],                          'and only the last when the pool has none' );
 };

@@ -86,8 +86,8 @@ $tcms->redefine( fetch => sub { return $TCMS_DECLARATION } );
 
 # The mail relay binds its relay to its own address in the pool, which bin/new_config
 # assigns before it renders, and this file never does.
-my $holdings = Test::MockModule->new('Provisioner::IPPool');
-$holdings->redefine( holdings => sub { return { guests => '192.0.2.100' } } );
+my $main_addresses = Test::MockModule->new('Provisioner::IPPool');
+$main_addresses->redefine( main_addresses => sub { return { guests => '192.0.2.100' } } );
 
 # The search path bin/new_config builds: a distribution's own directory first,
 # then the generic one.  Every fragment lives under ubuntu/ today, being written

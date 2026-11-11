@@ -219,9 +219,53 @@ from before it has no bridge, and is the address of its guest.  C<assign> gives
 it the bridge whose pool holds it, the first time that its domain asks for an
 address on that bridge, so a guest keeps its address.
 
+F<schema/ips.v3.update.sql> puts the rows in the table C<addresses>, with the
+kind, the bin and the bridge of each as the id of a name in C<address_kinds>,
+C<address_bins> and C<address_nics>, and makes C<ips> a view with the columns
+that it had, which takes writes too.  C<noted> is C<assigned_at> there.  A kind
+other than C<domain> and C<reserved> is refused.  A write through the view
+reports no rows, so where the number matters, count the rows of C<ips>.
+
 =cut
 
 sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
+
+# Runs $code in one transaction of $db, and returns what it returns.  Rolls
+# back and dies when $code dies, with $failed when it died with nothing.  Not
+# DEFERRED: a deferred transaction takes no lock until its first write, and by
+# then another run can read the same free address.
+my sub in_transaction ( $db, $failed, $code ) {
+    $db->do('BEGIN IMMEDIATE');
+    my @result;
+    my $ok = eval {
+        @result = $code->();
+        $db->do('COMMIT');
+        1;
+    };
+    if ( !$ok ) {
+        my $err = $@ || $failed;
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
+        die $err;
+    }
+    return wantarray ? @result : $result[0];
+}
+
+# The number of rows that $sql, a write to ips with @bind, adds or takes away.
+# ips is a view, and SQLite counts no row that its triggers write, so this
+# counts the rows of ips before and after, in one transaction.
+my sub rows_written ( $sql, @bind ) {
+    my $db = dbh();
+    return in_transaction(
+        $db,
+        "Could not write to ips\n",
+        sub {
+            my ($before) = $db->selectrow_array('SELECT count(*) FROM ips');
+            $db->do( $sql, undef, @bind );
+            my ($after) = $db->selectrow_array('SELECT count(*) FROM ips');
+            return abs( $after - $before );
+        }
+    );
+}
 
 =head2 assignments()
 
@@ -285,28 +329,32 @@ sub held_by {
     return $row ? $row->[0] : undef;
 }
 
-=head2 holdings($domain)
+=head2 main_addresses($domain)
 
 Returns a hash reference of each bin in which C<$domain> has an address, to
-that address: in the C<guests> bin, the address of the guest.  It is empty when
-the domain has none.  Like C<held_by>, it looks at domains only, not at
-reservations.  C<nic_holdings> has the addresses on each bridge.
-
-=head2 nic_holdings($domain)
-
-Returns a hash reference of each bridge on which C<$domain> has an address in
-the C<guests> bin, to that address.  An address from before the database
-recorded bridges is not in it until C<assign> gives it its bridge.
+its main address there: in the C<guests> bin, the address of the guest, on the
+first of its C<static_nics>, and not the addresses on its other bridges.  It is
+empty when the domain has none.  Like C<held_by>, it looks at domains only, not
+at reservations.
 
 =cut
 
-sub holdings {
+sub main_addresses {
     my ($domain) = @_;
     my $rows = dbh()->selectall_arrayref( "SELECT bin, ip FROM ips WHERE domain = ? AND kind = 'domain' AND main = 1", { Slice => {} }, $domain );
     return { map { $_->{bin} => $_->{ip} } @$rows };
 }
 
-sub nic_holdings {
+=head2 nic_addresses($domain)
+
+Returns a hash reference of each bridge on which C<$domain> has an address in
+the C<guests> bin, to that address, the main one among them.  An address from
+before the database recorded bridges is not in it until C<assign> gives it its
+bridge.
+
+=cut
+
+sub nic_addresses {
     my ($domain) = @_;
     my $rows = dbh()->selectall_arrayref( "SELECT nic, ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic != ''", { Slice => {} }, $domain, $GUESTS );
     return { map { $_->{nic} => $_->{ip} } @$rows };
@@ -330,7 +378,7 @@ my sub tunnel_bin ( $domain, $held ) {
 
 sub reachable_address {
     my ($domain) = @_;
-    my $held     = holdings($domain);
+    my $held     = main_addresses($domain);
     my $tunnel   = tunnel_bin( $domain, $held );
 
     my $address = $held->{ $tunnel // $GUESTS };
@@ -351,7 +399,7 @@ C<$domain> has an address in two tunnels.
 
 sub reached_through {
     my ( $domain, $pool ) = @_;
-    my $tunnel = tunnel_bin( $domain, holdings($domain) ) // return undef;
+    my $tunnel = tunnel_bin( $domain, main_addresses($domain) ) // return undef;
     my %bins   = bins($pool);
     return $bins{$tunnel} ? $bins{$tunnel}{via} : undef;
 }
@@ -369,8 +417,7 @@ every start, and it records the same addresses each time.
 
 sub reserve {
     my ( $ip, $name, $nic ) = @_;
-    my $rows = dbh()->do( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", undef, $ip, $name, $nic // q{} );
-    return $rows && $rows != 0 ? 1 : 0;
+    return rows_written( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", $ip, $name, $nic // q{} ) ? 1 : 0;
 }
 
 =head2 record($ip, $domain, $nic, $main)
@@ -384,15 +431,14 @@ not one that C<assign> gave out.  Returns true if this call wrote the row.
 
 sub record {
     my ( $ip, $domain, $nic, $main ) = @_;
-    my $rows = dbh()->do( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", undef, $ip, $domain, $nic // q{}, ( $main // 1 ) ? 1 : 0 );
-    return $rows && $rows != 0 ? 1 : 0;
+    return rows_written( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", $ip, $domain, $nic // q{}, ( $main // 1 ) ? 1 : 0 ) ? 1 : 0;
 }
 
 =head2 release($domain)
 
 Gives back every address of C<$domain>, in every bin and on every bridge.
 Returns what it gave back: a hash reference of each bin to its address, as
-C<holdings> gives it, and of C<guests on NIC> to the address on each bridge
+C<main_addresses> gives it, and of C<guests on NIC> to the address on each bridge
 that is not the address of the guest.
 
 C<bin/destroy> calls this, and C<bin/reseed_ips> calls it for a domain that no
@@ -404,7 +450,7 @@ sub release {
     my ($domain) = @_;
 
     my $db   = dbh();
-    my $held = holdings($domain);
+    my $held = main_addresses($domain);
     my $rows = $db->selectall_arrayref( "SELECT nic, ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND main = 0", { Slice => {} }, $domain, $GUESTS );
     $db->do( "DELETE FROM ips WHERE domain = ? AND kind = 'domain'", undef, $domain );
 
@@ -673,17 +719,7 @@ sub refresh_via {
     my %clients = via_clients($via);
 
     my $db = dbh();
-    $db->do('BEGIN IMMEDIATE');
-    my $ok = eval {
-        note_clients( $db, $bin, $bins{$bin}, \%clients );
-        $db->do('COMMIT');
-        1;
-    };
-    if ( !$ok ) {
-        my $err = $@ || "Could not note the VPN clients of $via\n";
-        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
-        die $err;
-    }
+    in_transaction( $db, "Could not note the VPN clients of $via\n", sub { note_clients( $db, $bin, $bins{$bin}, \%clients ) } );
 
     return scalar keys %clients;
 }
@@ -765,52 +801,40 @@ sub assign {
     my %in_bin  = map { $_ => 1 } @pool_ips;
 
     my $db = dbh();
+    return in_transaction(
+        $db,
+        "Could not assign an IP to $domain\n",
+        sub {
+            my $held = held_by( $domain, $bin, $nic );
 
-    # Not DEFERRED: a deferred transaction takes no lock until its first write,
-    # and by then the other run can read the same free address.
-    $db->do('BEGIN IMMEDIATE');
-
-    my $chosen = eval {
-        my $held = held_by( $domain, $bin, $nic );
-
-        # An address from before the database recorded bridges, in the pool of
-        # this one, is the address that the guest has on it.
-        my $old = !defined $held && $nic ne q{} ? held_by( $domain, $bin, q{} ) : undef;
-        if ( defined $old && $in_bin{$old} ) {
-            $db->do( "UPDATE ips SET nic = ? WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ''", undef, $nic, $domain, $bin );
-            $held = $old;
-        }
-
-        if ($held) {
-            if ($guest) {
-                $db->do( "UPDATE ips SET main = CASE WHEN nic = ? THEN 1 ELSE 0 END WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $nic,    $domain, $bin ) if $main;
-                $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?",                       undef, $domain, $bin,    $nic ) unless $main;
+            # An address from before the database recorded bridges, in the pool of
+            # this one, is the address that the guest has on it.
+            my $old = !defined $held && $nic ne q{} ? held_by( $domain, $bin, q{} ) : undef;
+            if ( defined $old && $in_bin{$old} ) {
+                $db->do( "UPDATE ips SET nic = ? WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ''", undef, $nic, $domain, $bin );
+                $held = $old;
             }
-            $db->do('COMMIT');
-            return $held;
+
+            if ($held) {
+                if ($guest) {
+                    $db->do( "UPDATE ips SET main = CASE WHEN nic = ? THEN 1 ELSE 0 END WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $nic,    $domain, $bin ) if $main;
+                    $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?",                       undef, $domain, $bin,    $nic ) unless $main;
+                }
+                return $held;
+            }
+
+            note_clients( $db, $bin, $conf, \%clients, $domain ) if $ask;
+
+            my $taken = taken();
+            my $own   = $clients{$domain};
+            my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @pool_ips;
+            die "IP pool exhausted: no IPs available for $domain" . ( $nic ne q{} ? " on $nic" : q{} ) . "\n" unless $free;
+
+            $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin ) if $guest && $main;
+            $db->do( "INSERT INTO ips (ip, domain, kind, bin, nic, main) VALUES (?, ?, 'domain', ?, ?, ?)", undef, $free, $domain, $bin, $nic, $main );
+            return $free;
         }
-
-        note_clients( $db, $bin, $conf, \%clients, $domain ) if $ask;
-
-        my $taken = taken();
-        my $own   = $clients{$domain};
-        my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @pool_ips;
-        die "IP pool exhausted: no IPs available for $domain" . ( $nic ne q{} ? " on $nic" : q{} ) . "\n" unless $free;
-
-        $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin ) if $guest && $main;
-        $db->do( "INSERT INTO ips (ip, domain, kind, bin, nic, main) VALUES (?, ?, 'domain', ?, ?, ?)", undef, $free, $domain, $bin, $nic, $main );
-        $db->do('COMMIT');
-
-        return $free;
-    };
-
-    if ( !defined $chosen ) {
-        my $err = $@ || "Could not assign an IP to $domain\n";
-        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
-        die $err;
-    }
-
-    return $chosen;
+    );
 }
 
 =head2 forget_seeding()
@@ -840,8 +864,7 @@ during a sweep does not make its address free.
 =cut
 
 sub clear_reservations {
-    my $rows = dbh()->do("DELETE FROM ips WHERE kind = 'reserved'");
-    return $rows && $rows ne '0E0' ? $rows : 0;
+    return rows_written("DELETE FROM ips WHERE kind = 'reserved'");
 }
 
 =head2 ensure_seeded()
