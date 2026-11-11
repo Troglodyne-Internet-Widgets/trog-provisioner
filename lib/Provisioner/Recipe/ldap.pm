@@ -12,6 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 use Cpanel::JSON::XS();
 use Text::Xslate();
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::ldap
 
@@ -157,10 +158,10 @@ sub args {
                 required    => [qw{org}],
                 description => 'An account for each member of a GitHub organization, kept in step each hour.  The token is in the secret store: see ACCOUNTS FROM GITHUB in perldoc Provisioner::Recipe::ldap.',
                 properties  => {
-                    org         => { type => 'string',  pattern => '^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$', description => 'The organization, by its login.' },
-                    admin_group => { type => 'string',  pattern => '^[a-z_][a-z0-9_-]*$', default => 'github-admins', description => 'The group of the owners of the organization.  Name it in sudo_groups of sssd for sudo without a password.' },
-                    admin_gid   => { type => 'integer', minimum => 1000,                  default => 10001,           description => 'The gidNumber of admin_group.' },
-                    uid_base    => { type => 'integer', minimum => 1000,                  default => 1000000,         description => 'Added to the id of a member on GitHub to make its uidNumber.' },
+                    org         => { type => 'string',  pattern => "$Trog::Patterns::GITHUB_LOGIN", description => 'The organization, by its login.' },
+                    admin_group => { type => 'string',  pattern => "$Trog::Patterns::ACCOUNT_NAME", default     => 'github-admins', description => 'The group of the owners of the organization.  Name it in sudo_groups of sssd for sudo without a password.' },
+                    admin_gid   => { type => 'integer', minimum => 1000,                            default     => 10001,           description => 'The gidNumber of admin_group.' },
+                    uid_base    => { type => 'integer', minimum => 1000,                            default     => 1000000,         description => 'Added to the id of a member on GitHub to make its uidNumber.' },
                 },
             },
             users => {

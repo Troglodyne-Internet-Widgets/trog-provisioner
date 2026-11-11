@@ -298,6 +298,10 @@ has a certificate from connecting.
 
 sub is_multi_tenant { return 0 }
 
+# An IPv4 network as an address and a prefix length.
+my $OCTET = qr/[[:digit:]]{1,3}/;
+my $CIDR  = qr/\A $OCTET (?: [.] $OCTET ){3} \/ [[:digit:]]{1,2} \z/;
+
 sub args {
     return (
         properties => {
@@ -347,7 +351,7 @@ sub args {
             routes => {
                 type        => 'array',
                 description => 'The networks a client sends through the tunnel, as CIDR blocks.  The default is each cidr of ip_pool as its two halves, and each of its addresses as a /32.',
-                items       => { type => 'string', pattern => '^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$' },
+                items       => { type => 'string', pattern => "$CIDR" },
             },
         },
     );

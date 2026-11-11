@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use List::Util qw{any uniq};
+use Trog::Patterns();
 
 use parent qw{Provisioner::Recipe};
 
@@ -174,8 +175,8 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            mode  => { type => 'integer', enum    => [ 0, 1, 2 ],           default => 1 },
-            group => { type => 'string',  pattern => '^[a-z_][a-z0-9_-]*$', default => 'io_uring' },
+            mode  => { type => 'integer', enum    => [ 0, 1, 2 ],                     default => 1 },
+            group => { type => 'string',  pattern => "$Trog::Patterns::ACCOUNT_NAME", default => 'io_uring' },
 
             # Not `users`, which is a global template variable.  See members in the POD.
             members => { type => 'array', items => { type => 'string' }, default => [] },

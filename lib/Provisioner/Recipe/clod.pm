@@ -20,6 +20,7 @@ use Provisioner::Packager();
 use Provisioner::Recipe::claude();
 use Provisioner::Recipe::servicesudo();
 use Provisioner::Utils();
+use Trog::Patterns();
 
 # One copy for args and fetch_hosts, so that two copies do not drift apart.
 our $DEFAULT_REPO = 'https://github.com/Troglodyne-Internet-Widgets/App-Clod.git';
@@ -214,13 +215,14 @@ C<deps> is in L<Provisioner::Recipe::Ubuntu::clod>.
 =cut
 
 # A word that goes into clod.conf between single quotes, and into a quoted
-# string of the guest test.  GitHub logins and repository names fit it.
-my %NAME = ( type => 'string', pattern => '^[A-Za-z0-9_.-]+$' );
-my %REPO = ( type => 'string', pattern => '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' );
+# string of the guest test, and the GitHub logins and repositories, which fit it.
+my %NAME  = ( type => 'string', pattern => "" . qr/\A [[:alnum:]_.-]+ \z/ );
+my %LOGIN = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_LOGIN" );
+my %REPO  = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_REPO" );
 
 # A permission rule of Claude Code: a tool, or a tool and what it may do.
 # perl_string quotes it, so this only holds it to that shape, on one line.
-my $RULE = q{^[A-Za-z][A-Za-z0-9_]*(?:[(][^\n\r'"\\\\]+[)])?\z};
+my $RULE = qr/\A [[:alpha:]] [[:alnum:]_]* (?: [(] [^\n\r'"\\]+ [)] )? \z/;
 
 sub args {
     return (
@@ -234,10 +236,10 @@ sub args {
             repo_url    => { type => 'string', default => $DEFAULT_REPO, description => 'Where to clone App::Clod from.' },
             repo_branch => { type => 'string', default => 'master',      description => 'The branch of repo_url that the services run.' },
 
-            bot                => { %NAME, description => 'The GitHub login of the bot.' },
-            github_token       => { type => 'string', 'x-secret' => 1,                                description => 'A classic token of the bot account, with the repo scope.' },
-            claude_oauth_token => { type => 'string', 'x-secret' => 1,                                description => 'The long-lived OAuth token that claude setup-token makes.' },
-            bot_email          => { type => 'string', pattern    => q{^[^\\s"'\\\\]+@[^\\s"'\\\\]+$}, description => 'The address of the commits of the bot.  Unset is the GitHub no-reply address of the bot.' },
+            bot                => { %LOGIN, description => 'The GitHub login of the bot.' },
+            github_token       => { type => 'string', 'x-secret' => 1,                               description => 'A classic token of the bot account, with the repo scope.' },
+            claude_oauth_token => { type => 'string', 'x-secret' => 1,                               description => 'The long-lived OAuth token that claude setup-token makes.' },
+            bot_email          => { type => 'string', pattern    => "$Trog::Patterns::COMMIT_EMAIL", description => 'The address of the commits of the bot.  Unset is the GitHub no-reply address of the bot.' },
 
             spokes => {
                 type        => 'array',
@@ -254,11 +256,11 @@ sub args {
             spoke_orgs => {
                 type        => 'array',
                 minItems    => 1,
-                items       => {%NAME},
+                items       => {%LOGIN},
                 description => 'Organizations whose public repositories are spokes, except forks and archived ones.  App::Clod lists them every fifteen minutes.',
             },
-            authorized_users => { type => 'array', default => [], items => {%NAME}, description => 'The logins whose assignments, review requests and mentions the bot acts on.  The bot ignores everyone else.' },
-            owners           => { type => 'array', default => [], items => {%NAME}, description => 'The users and organizations whose repositories are ours.  A fix that belongs anywhere else goes back to a person.' },
+            authorized_users => { type => 'array', default => [], items => {%LOGIN}, description => 'The logins whose assignments, review requests and mentions the bot acts on.  The bot ignores everyone else.' },
+            owners           => { type => 'array', default => [], items => {%LOGIN}, description => 'The users and organizations whose repositories are ours.  A fix that belongs anywhere else goes back to a person.' },
 
             dashboard_user     => { %NAME, default => 'admin', description => 'The user name of HTTP basic authentication for the health page.' },
             dashboard_password => { type => 'string', 'x-secret' => 1, minLength => 1, description => 'The password of the health page.  clod.conf gets only its SHA-256.' },
@@ -272,11 +274,11 @@ sub args {
             extra_tools => {
                 type        => 'array',
                 default     => [],
-                items       => { type => 'string', pattern => $RULE },
+                items       => { type => 'string', pattern => "$RULE" },
                 description => 'Claude Code permission rules, such as Bash(bin/provision:*), that App::Clod adds to its allowed_tools for the runs that change a repository, and never for triage.',
             },
-            spoke_prompt => { type => 'string', minLength => 1,                     description => 'Text that App::Clod appends to the system prompt of every spoke run, and shows to triage, so that it knows how each spoke tests.' },
-            agent_user   => { type => 'string', pattern   => '^[a-z_][a-z0-9_-]*$', description => 'The account that every claude run of the bot runs as, through sudo, so that the agent cannot read the token of the bot.  See THE AGENT ACCOUNT.' },
+            spoke_prompt => { type => 'string', minLength => 1,                               description => 'Text that App::Clod appends to the system prompt of every spoke run, and shows to triage, so that it knows how each spoke tests.' },
+            agent_user   => { type => 'string', pattern   => "$Trog::Patterns::ACCOUNT_NAME", description => 'The account that every claude run of the bot runs as, through sudo, so that the agent cannot read the token of the bot.  See THE AGENT ACCOUNT.' },
         },
     );
 }
@@ -486,7 +488,7 @@ recipe does not declare a second time, so the check is here.
 sub enrich {
     my ( $self, %opts ) = @_;
     die "clod: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
-      unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
+      unless $opts{user} =~ $Trog::Patterns::ACCOUNT_NAME;
     $opts{agent_home} = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
     $opts{local_lib}  = "$opts{install_dir}/$opts{domain}/perl5";
     $opts{agent_lib}  = "$opts{install_dir}/$opts{domain}/agent-perl5";

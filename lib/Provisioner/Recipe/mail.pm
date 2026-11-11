@@ -345,6 +345,9 @@ sub required_recipes {
     );
 }
 
+# A value with no colon and no line break in it.
+my $NO_COLON = qr/\A [^:\r\n]* \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -367,7 +370,7 @@ sub args {
                         },
                         gecos => {
                             type    => 'string',
-                            pattern => '\A[^:\r\n]*\z',
+                            pattern => "$NO_COLON",
 
                             # The passwd-file has no way to quote a colon.
                             description => 'The full name of the account.  It cannot hold a colon or a line break.',

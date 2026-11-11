@@ -230,12 +230,15 @@ download, or C<latest> for the newest stable one.  C<enrich> looks that up.
 
 =cut
 
+# latest, or the tag of a release.
+my $VERSION_TAG = qr/\A (?: latest | v [[:digit:]]+ [.] [[:digit:]]+ [.] [[:digit:]]+ ) \z/;
+
 sub args {
     my $self = shift;
     return (
         type       => 'object',
         properties => {
-            version            => { type => 'string',  default => 'latest', pattern => '\A(?:latest|v[0-9]+[.][0-9]+[.][0-9]+)\z' },
+            version            => { type => 'string',  default => 'latest', pattern => "$VERSION_TAG" },
             data_dir           => { type => 'string',  default => '/var/lib/garage/data' },
             metadata_dir       => { type => 'string',  default => '/var/lib/garage/meta' },
             replication_factor => { type => 'integer', default => 1 },

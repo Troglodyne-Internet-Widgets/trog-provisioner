@@ -84,6 +84,9 @@ sub required_recipes {
     );
 }
 
+# The name of a Perl module.
+my $MODULE = qr/\A \w+ (?: :: \w+ )* \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -93,7 +96,7 @@ sub args {
             routers => { type => 'array',  items       => { type => 'string' } },
             loggers => {
                 type        => 'array',
-                items       => { type => 'string', pattern => '^\\w+(?:::\\w+)*$' },
+                items       => { type => 'string', pattern => "$MODULE" },
                 description => 'Log::Dispatch output classes that tPSGI adds to its log, and that it hands to the application.  It loads each by name, so a class can live beside a router.',
             },
         },

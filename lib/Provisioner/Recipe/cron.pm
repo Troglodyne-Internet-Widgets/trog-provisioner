@@ -122,6 +122,9 @@ sub enrich {
     return %opts;
 }
 
+# The name of a job, which names its file in cron.d.
+my $JOB_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]* \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -136,8 +139,8 @@ sub args {
 
                 # One path component each, so that no name or file leaves its
                 # directory.
-                propertyNames        => { pattern => '\A[A-Za-z0-9][A-Za-z0-9_.-]*\z' },
-                additionalProperties => { type    => 'string', pattern => '\A[A-Za-z0-9][A-Za-z0-9_.-]*\z' },
+                propertyNames        => { pattern => "$JOB_NAME" },
+                additionalProperties => { type    => 'string', pattern => "$JOB_NAME" },
             },
             user_scripts => {
                 type  => 'array',

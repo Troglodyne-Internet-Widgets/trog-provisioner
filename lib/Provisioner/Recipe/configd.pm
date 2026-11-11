@@ -119,6 +119,9 @@ version of a source until it unpacks it.
 
 =cut
 
+# The name of a language of configd.
+my $LANGUAGE = qr/\A \w+ \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -129,7 +132,7 @@ sub args {
 
                 # A language name comes from the configuration, and becomes part
                 # of a module name and a shell argument.
-                items => { type => 'string', pattern => '^\w+$' },
+                items => { type => 'string', pattern => "$LANGUAGE" },
             },
 
             # A guest with two mail domains needs every list that each domain

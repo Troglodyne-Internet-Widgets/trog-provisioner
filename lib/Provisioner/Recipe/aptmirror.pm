@@ -172,6 +172,9 @@ passes.
 
 =cut
 
+# The five fields of a cron schedule.
+my $CRON_SCHEDULE = qr/\A \S+ (?: \s+ \S+ ){4} \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -223,7 +226,7 @@ sub args {
             refresh => {
                 type        => 'string',
                 default     => '15 2 * * *',
-                pattern     => '\A\S+\s+\S+\s+\S+\s+\S+\s+\S+\z',
+                pattern     => "$CRON_SCHEDULE",
                 description => 'Cron schedule for the refresh, in the five usual fields.',
             },
             nthreads => {

@@ -25,6 +25,7 @@ use File::Temp();
 use List::Util qw{any};
 use Clone      qw{clone};
 use Trog::Utils();
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::trogrunner
 
@@ -390,8 +391,8 @@ sub args {
                         # The adapters of a guest, and the pool and the
                         # gateway of each static one.  See ADAPTERS in
                         # Trog::HV::Libvirt.
-                        dhcp_nics      => { type => 'array', items => { type => 'string', pattern => "$Trog::Utils::LINK_NAME" }, uniqueItems => 1 },
-                        static_nics    => { type => 'array', items => { type => 'string', pattern => "$Trog::Utils::LINK_NAME" }, uniqueItems => 1 },
+                        dhcp_nics      => { type => 'array', items => { type => 'string', pattern => "$Trog::Patterns::LINK_NAME" }, uniqueItems => 1 },
+                        static_nics    => { type => 'array', items => { type => 'string', pattern => "$Trog::Patterns::LINK_NAME" }, uniqueItems => 1 },
                         reserve_memory => { type => 'integer' },
                         reserve_cpus   => { type => 'integer' },
                         reserve_disk   => { type => 'integer' },
@@ -430,7 +431,7 @@ sub args {
 
             # The account that runs bin/provision, if it is not the service
             # user.  See THE PROVISIONING ACCOUNT.
-            provision_user => { type => 'string', pattern => '^[a-z_][a-z0-9_-]*$' },
+            provision_user => { type => 'string', pattern => "$Trog::Patterns::ACCOUNT_NAME" },
 
             hypervisor_access  => { type => 'string',  enum    => [qw{none least full}], default => 'none' },
             restrict_key_to_ip => { type => 'boolean', default => 1 },
