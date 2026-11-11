@@ -225,7 +225,7 @@ C<address_bins> and C<address_nics>, and makes C<ips> a view with the columns
 that it had, which takes writes too.  C<noted> is C<assigned_at> there.  A kind
 other than C<domain> and C<reserved> is refused.  A write through the view
 reports no rows, so where the number matters, count the rows of C<addresses>
-that SQLite reports to C<sqlite_update_hook> of L<DBD::SQLite>.
+with C<do_with_update_hook> of L<Trog::SQLite>.
 
 =cut
 
@@ -251,18 +251,11 @@ my sub in_transaction ( $db, $failed, $code ) {
     return wantarray ? @result : $result[0];
 }
 
-# The number of rows of addresses that $sql, a write to ips with @bind,
-# writes.  ips is a view, and SQLite counts no row that its triggers write, but
-# it reports each one to the update hook, with its table.  The hook belongs to
-# the handle, which Trog::SQLite shares, so the one before is put back.
+# The number of rows of addresses that $sql, a write to the view ips with
+# @bind, writes, which do cannot count.
 my sub rows_written ( $sql, @bind ) {
-    my $db   = dbh();
     my $rows = 0;
-    my $was  = $db->sqlite_update_hook( sub ( $action, $database, $table, $rowid ) { $rows++ if $table eq 'addresses' } );
-    my $ok   = eval { $db->do( $sql, undef, @bind ); 1 };
-    my $err  = $@;
-    $db->sqlite_update_hook($was);
-    die $err unless $ok;
+    Trog::SQLite::do_with_update_hook( dbh(), sub ( $action, $database, $table, $rowid ) { $rows++ if $table eq 'addresses' }, $sql, @bind );
     return $rows;
 }
 
