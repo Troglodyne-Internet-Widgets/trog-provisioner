@@ -552,7 +552,10 @@ hypervisor `gateway`, `pool_addresses` and `pool_cidr` when something other
 than the runner must reach its guests there. Without an address pool, each guest that it builds takes a lease on the
 NAT network of its hypervisor, and its bridged interface stays unconfigured. The
 runner reaches it there, because the runner is itself a guest of that
-hypervisor. That is enough for throwaway guests.
+hypervisor. That is enough for throwaway guests, but not for a guest whose
+recipes write its address into a record, such as `pdns` and `mail`.
+`bin/new_config` refuses such a guest there. See
+[Networks](#networks).
 
 Four more parts are worth knowing before writing one.
 
@@ -724,6 +727,17 @@ pools of two networks must not overlap.  `bin/new_config` refuses a pool with
 no gateway.  A cloud gives its guests their addresses and their route, so a
 block for a cloud names neither.  `bin/assign_ip --hypervisor` takes an address
 from the pool of one block.
+
+A block with no pool and no cloud behind it leaves each guest a lease on the
+NAT network of its hypervisor, and its bridged interface unconfigured.  The
+configuration then assigns the guest no address.  So `bin/new_config` refuses
+a guest whose recipes write its address into a record, and names them.  These
+are `pdns`, whose zone names the guest at its address, and each recipe that
+has `addressed_names`, such as `mail`, whose `mail.` and `autodiscover.` names
+are `A` records at the address.  `needs_address` in `perldoc
+Provisioner::Recipe` says which.  Give that block a pool, its gateway and
+`bridge_device`, the bridge on that subnet, or build the guest without those
+recipes.
 
 ## Upstream guests
 

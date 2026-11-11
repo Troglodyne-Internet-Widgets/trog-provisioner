@@ -59,8 +59,10 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 
 # Runs the generator for vm.test.test on a hypervisor with the pool $pool and
 # the gateway $gateway, which is or is not on its NAT network, with $bins as
-# the bins of the ip_pool of _global.  Returns what it printed, what it died
-# with, and each domain that assign was asked about, with the pool it was given.
+# the bins of the ip_pool of _global.  $recipes is the configuration of the
+# domain, ntp alone unless it says otherwise, and $dryrun passes --dryrun.
+# Returns what it printed, what it died with, and each domain that assign was
+# asked about, with the pool it was given.
 sub generate (%args) {
     File::Slurper::Temp::write_text(
         $RECIPES,
@@ -76,7 +78,7 @@ sub generate (%args) {
                         ( $args{bins} ? ( ip_pool => { bins => $args{bins} } ) : () ),
                     },
                 },
-                'vm.test.test' => { ntp => undef },
+                'vm.test.test' => $args{recipes} // { ntp => undef },
             }
         )
     );
@@ -92,7 +94,7 @@ sub generate (%args) {
     Provisioner::Cookbook->forget();
     my $died;
     my $said = capture_stdout {
-        $died = exception { Trog::Provisioner::Config::Generator::main( '--recipes', $RECIPES, '--skip_ssh', 'vm.test.test' ) }
+        $died = exception { Trog::Provisioner::Config::Generator::main( '--recipes', $RECIPES, '--skip_ssh', ( $args{dryrun} ? '--dryrun' : () ), 'vm.test.test' ) }
     };
     return ( $said, $died // q{}, \@assigned );
 }
@@ -127,6 +129,31 @@ subtest 'unless this machine could not reach that lease' => sub {
     like( $died, qr/this[ ]machine[ ]is[ ]not[ ]on[ ]that[ ]network/, 'it is refused before anything is built' );
     like( $died, qr/Name[ ]pool_cidr[ ]or[ ]pool_addresses/,          'naming the fix' );
     is_deeply( $assigned, [], 'and the pool was not asked' );
+};
+
+# mail writes mail.DOMAIN into the zone as an A record at the address of the
+# guest, and pdns writes the apex and ns1 there.  On a lease of the NAT network
+# the configuration has no address, and the zone came out with an A record
+# that named none, which breaks the zone.
+subtest 'a domain whose recipes write its address is refused where it would have none' => sub {
+    foreach my $recipe (qw{mail pdns}) {
+        foreach my $dryrun ( 0, 1 ) {
+            my $run = $dryrun ? 'with --dryrun' : 'without --dryrun';
+            my ( $said, $died ) = generate( pool => undef, on_nat_network => 1, recipes => { $recipe => undef }, dryrun => $dryrun );
+            my @lines = split( m/\n/, $died );
+            is( $lines[0], "vm.test.test runs recipes that write the address of the guest into a record: $recipe.",                                                                   "$recipe is refused $run, naming the domain and the recipe" );
+            is( $lines[1], 'The block of hv1 in hypervisors.conf names no address pool, so vm.test.test would have only a lease on the NAT network of hv1, and no address to write.', 'and the block of the hypervisor' );
+            is( $lines[2], 'Give the block of hv1 an address pool: pool_cidr or pool_addresses, the gateway of that subnet, and bridge_device, the bridge on it.',                    'and what to give it' );
+            is( $lines[3], 'See Networks in docs/CONFIGURATION.md.  Or take those recipes off vm.test.test.',                                                                         'and where that is written down' );
+            unlike( $said, qr/takes[ ]a[ ]lease/, 'before it goes on to take the lease' );
+        }
+    }
+};
+
+subtest 'the same domain with an address of the pool is not refused' => sub {
+    my ( undef, $died, $assigned ) = generate( pool => { cidr => ['192.0.2.0/24'] }, on_nat_network => 0, recipes => { mail => undef } );
+    like( $died, qr/\Afar[ ]enough$/m, 'got past the address' );
+    is( scalar @$assigned, 1, 'which the pool gave it' );
 };
 
 done_testing();

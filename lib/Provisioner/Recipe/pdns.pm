@@ -174,6 +174,18 @@ sub subdomains {
     return qw{dnsapi};
 }
 
+=head2 $bool = $recipe->needs_address(%opts)
+
+True.  The zone of the domain names the guest at its address, in the C<A>
+record of the domain and in that of C<ns1>, the nameserver of the zone.  See
+L<Provisioner::Recipe>.
+
+=cut
+
+sub needs_address {
+    return 1;
+}
+
 =head2 %required = $recipe->required_recipes(%opts)
 
 Adds C<nostubresolver> and C<lexicon>, C<perl>, which installs the API proxy,

@@ -149,6 +149,17 @@ subtest 'the apex is the origin, not a name of its own' => sub {
     like( $zone, qr/^\@\s+300\s+IN\s+NS\s+\Qns1.$DOMAIN\E\./m, 'with an absolute nameserver' );
 };
 
+subtest 'a domain with no address gets no A record with no address in it' => sub {
+
+    # pdns loads such a zone and then cannot answer for any name in it.
+    my $with = zone( modules => ['mail'] );
+    like( $with, qr/^\Qmail.$DOMAIN\E\.\s+IN\s+A\s+192\.0\.2\.50$/m, 'with an address, mail.DOMAIN is an A record at it' );
+
+    my $without = zone( modules => ['mail'], ipmap => {} );
+    unlike( $without, qr/\bIN\s+A[ \t]*$/m, 'without one, no A record is written empty' ) or diag $without;
+    is( scalar( grep { $_->type eq 'A' } Net::DNS::ZoneFile->parse( \$without ) ), 0, 'and a DNS parser finds no A record at all' );
+};
+
 subtest 'the submission SRV records name the ports postfix listens on' => sub {
 
     # Asked of a zone that serves mail, since the mail records are written only

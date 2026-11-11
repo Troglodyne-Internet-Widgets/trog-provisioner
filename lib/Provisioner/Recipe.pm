@@ -1618,6 +1618,23 @@ sub addressed_names {
     return;
 }
 
+=head3 $bool = $recipe->needs_address(%opts)
+
+True when this recipe writes the address of the guest into a record, so that
+it cannot work where the installation assigns the guest no address.  That is a
+recipe with C<addressed_names>, because each of those names is an C<A> record
+at the address.  F<bin/new_config> refuses such a domain on a hypervisor whose
+block names no address pool, where the guest has only a lease on its NAT
+network.  It reads only C<$opts{domain}>.
+
+=cut
+
+sub needs_address {
+    my ( $self, %opts ) = @_;
+    my @names = $self->addressed_names(%opts);
+    return @names ? 1 : 0;
+}
+
 =head3 @records = $recipe->dns_records(%opts)
 
 The records of this recipe in the zone of the domain, other than its names.
