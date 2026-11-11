@@ -27,9 +27,13 @@ ns1     IN A    [% public_address // ipmap.$subdo %]
 [% END -%]
 
 [%# The target of an MX or an SRV must not be a CNAME.  See addressed_names in
-    Provisioner::Recipe. -%]
+    Provisioner::Recipe.  None where the domain has no address, as with the A
+    record of the domain above.  An A record with no address breaks the whole
+    zone in pdns. -%]
+[% IF ipmap.$domain %]
 [% FOREACH name IN address_names %]
 [% name %]. IN A [% ipmap.$domain %]
+[% END -%]
 [% END -%]
 
 [%# The records of the recipes other than names, such as the MX of mail.  See
