@@ -370,7 +370,7 @@ this machine reaches it at.
 
 sub edge_addresses {
     my ( $edge, $edge_domain ) = @_;
-    return ( sort( values %{ Provisioner::IPPool::holdings($edge_domain) } ), $edge->ssh_host );
+    return ( sort( values %{ Provisioner::IPPool::main_addresses($edge_domain) } ), $edge->ssh_host );
 }
 
 =head2 [$ok, $label, $why] = check_client_address($guest, $token, $client, @edge_addresses)

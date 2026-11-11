@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::mariadb
 
@@ -116,7 +117,7 @@ sub args {
             # TODO fetch latest mariadb version by default
             # A full release, not a series.  MariaDB publishes a repository per
             # release, so "10.11" names no repository.
-            version => { type => 'string', pattern => '^[0-9]+[.][0-9]+[.][0-9]+$' },
+            version => { type => 'string', pattern => "$Trog::Patterns::DOTTED_VERSION" },
         },
     );
 }

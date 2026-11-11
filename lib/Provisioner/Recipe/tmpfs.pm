@@ -79,6 +79,9 @@ specifiers in C<Options=>, and a single C<%> there starts one.
 
 =cut
 
+# A size as tmpfs takes it: bytes, a percent of memory, or k, m or g.
+my $TMPFS_SIZE = qr/\A [1-9] [[:digit:]]* (?: % | [kKmMgG] )? \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -88,7 +91,7 @@ sub args {
                 # Checked here because a bad size otherwise fails the mount at
                 # boot, and /tmp stays on the disk with nobody told.
                 type    => 'string',
-                pattern => '^[1-9][0-9]*(?:%|[kKmMgG])?$',
+                pattern => "$TMPFS_SIZE",
                 default => '50%',
             },
         },

@@ -270,7 +270,7 @@ values use the units of nginx, for example C<10m>, C<1h> and C<365d>.
 =cut
 
 sub args {
-    my $duration = '\A\d+(?:ms|[smhdwMy])?\z';
+    my $duration = "" . qr/\A [[:digit:]]+ (?: ms | [smhdwMy] )? \z/;
     return (
         type       => 'object',
         properties => {

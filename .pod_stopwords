@@ -285,6 +285,7 @@ gpg
 grafana
 grafanasyslog
 greppable
+groupadd
 hardcoded
 hardcoding
 hashref
@@ -378,6 +379,7 @@ openvpnclient
 orgs
 overcommit
 overcommitting
+passwd
 passwordless
 pcre
 pdns
@@ -502,6 +504,7 @@ unlinked
 untuned
 upgrader
 uri
+useradd
 uuid
 vCPUs
 validator

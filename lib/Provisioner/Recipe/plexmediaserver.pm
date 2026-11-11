@@ -118,6 +118,9 @@ sub listens {
     return ( ( map { "127.0.0.1:$_" } 32401, 32600 ), map { "$_/udp" } 1901, 32410, 32412 .. 32414 );
 }
 
+# A claim token from plex.tv/claim.
+my $CLAIM_TOKEN = qr/\A claim- [[:alnum:]_-]+ \z/;
+
 sub args {
     return (
         required   => [qw{plex_login_name admin_mail}],
@@ -127,7 +130,7 @@ sub args {
             media_dirs      => { type => 'array', items => { type => 'string' }, default => [] },
 
             # The fragment writes it into a sed expression in single quotes.
-            claim_token => { type => 'string', 'x-secret' => 1, pattern => '^claim-[A-Za-z0-9_-]+$', description => 'A token from https://plex.tv/claim that links a new server to the Plex account on its first start.  Only a server that has never been linked needs one.' },
+            claim_token => { type => 'string', 'x-secret' => 1, pattern => "$CLAIM_TOKEN", description => 'A token from https://plex.tv/claim that links a new server to the Plex account on its first start.  Only a server that has never been linked needs one.' },
         },
     );
 }

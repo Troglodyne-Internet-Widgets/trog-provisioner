@@ -35,6 +35,9 @@ sub required_recipes {
     return ( perl => sub { () } );
 }
 
+# A release of ImageMagick, such as 7.1.1-38.
+my $RELEASE = qr/\A [[:digit:]]+ [.] [[:digit:]]+ [.] [[:digit:]]+ - [[:digit:]]+ \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -44,7 +47,7 @@ sub args {
             # TODO default to the latest imagemagick version available on github releases
             # A full release with the patch number, because the archive names
             # its tarballs that way: "7.1.0" is a 404.
-            version => { type => 'string', pattern => '^[0-9]+[.][0-9]+[.][0-9]+-[0-9]+$' },
+            version => { type => 'string', pattern => "$RELEASE" },
         },
     );
 }

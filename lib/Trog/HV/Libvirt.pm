@@ -26,6 +26,7 @@ use Net::IP();
 use Provisioner::Cookbook();
 use Provisioner::Vars();
 use Trog::HV::Libvirt::BridgeHelper();
+use Trog::Patterns();
 
 # The snapshot of a new, empty overlay, which a rebuild that keeps the disk
 # reverts to.  create_disk takes it and clear_guest reverts to it.  It is
@@ -38,10 +39,6 @@ my $BACKUP_SUFFIX = '.bak-qcow2';
 # Where distributions put the libvirt lease helper, which release_dhcp_lease
 # runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
 my @LEASE_HELPERS = qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
-
-# A name that the kernel takes for a link, such as a bridge: at most 15 bytes,
-# and none of the characters that a path or the address of an alias would read.
-my $LINK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,14} \z/;
 
 =head1 NAME
 
@@ -184,7 +181,7 @@ sub build {
     my @dhcp   = $self->setting_list('dhcp_nics');
     my @static = $self->setting_list('static_nics');
 
-    my ($bad) = grep { !m/$LINK_NAME/ } @dhcp, @static;
+    my ($bad) = grep { !m/$Trog::Patterns::LINK_NAME/ } @dhcp, @static;
     die "The adapters of $who name '$bad', which is not the name of a bridge\n" if defined $bad;
 
     my %seen;
@@ -2218,7 +2215,7 @@ sub guest_network_plan ( $, %args ) {
     $plan{$_} //= q{} for keys %plan;
 
     die "The name of a guest network in libvirt is a letter or a digit, then letters, digits, _, . and -, and '$plan{name}' is not\n" unless $plan{name}   =~ $NETWORK_NAME;
-    die "The bridge of a guest network is the name of a link, and '$plan{bridge}' is not\n"                                           unless $plan{bridge} =~ $LINK_NAME;
+    die "The bridge of a guest network is the name of a link, and '$plan{bridge}' is not\n"                                           unless $plan{bridge} =~ $Trog::Patterns::LINK_NAME;
 
     my $ip = Net::IP->new( $plan{address} );
     die "The address of the hypervisor on a guest network is an IPv4 address, and '$plan{address}' is not\n" unless $ip && $ip->version == 4 && $ip->size == 1;
@@ -3707,7 +3704,7 @@ sub runner_sudoers {
     # to be in these.
     foreach my $key (qw{user lease_helper}) {
         my $value = $args{$key} // die "runner_sudoers needs $key\n";
-        my $ok    = $key eq 'user' ? qr/\A[[:lower:]_][[:lower:]\d_-]*\z/ : qr{\A(?:/[\w.-]+)+\z};
+        my $ok    = $key eq 'user' ? $Trog::Patterns::ACCOUNT_NAME : qr{\A(?:/[\w.-]+)+\z};
         die "runner_sudoers: '$value' is not a $key that a sudoers file can hold as written\n" unless $value =~ $ok;
     }
     my ( $user, $lease ) = @args{qw{user lease_helper}};
@@ -3746,7 +3743,7 @@ sub runner_account_plan {
 
     # The match is ASCII under /aa, so \w and \d mean what useradd, zfs and
     # systemd accept.
-    die "user '$args{user}' is not a name useradd takes\n"                  unless $args{user}      =~ m/\A[[:lower:]_][[:lower:]\d_-]{0,31}\z/;
+    die "user '$args{user}' is not a name useradd takes\n"                  unless $args{user}      =~ $Trog::Patterns::ACCOUNT_NAME;
     die "pool_name '$args{pool_name}' has to be letters, digits, _ and -\n" unless $args{pool_name} =~ m/\A[\w-]+\z/;
     die "pool_path '$args{pool_path}' has to be an absolute path of letters, digits, _ . and -\n"
       if $args{pool_path} !~ m{\A(?:/[\w.-]+)+\z} || $args{pool_path} =~ m{/[.]{1,2}(?:/|\z)};

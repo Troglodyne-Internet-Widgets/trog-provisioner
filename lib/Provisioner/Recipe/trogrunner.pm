@@ -25,6 +25,7 @@ use File::Temp();
 use List::Util qw{any};
 use Clone      qw{clone};
 use Trog::Utils();
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::trogrunner
 
@@ -247,11 +248,8 @@ runner has a cap.
 
 my $ED25519_BITS = 256;
 
-# The name of a bridge, as the schema checks one of dhcp_nics or static_nics,
-# and the keys of the pool and the gateway of a static adapter.  Trog::HV::Libvirt
-# checks the same on the runner.
-my $LINK_NAME = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$';
-my $NIC_KEY   = qr/\A (?:ip_pool|ip_addresses|gateway|prefix) _ ./;
+# The keys of the pool and the gateway of a static adapter.
+my $NIC_KEY = qr/\A (?:ip_pool|ip_addresses|gateway|prefix) _ ./;
 
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
@@ -393,8 +391,8 @@ sub args {
                         # The adapters of a guest, and the pool and the
                         # gateway of each static one.  See ADAPTERS in
                         # Trog::HV::Libvirt.
-                        dhcp_nics      => { type => 'array', items => { type => 'string', pattern => $LINK_NAME }, uniqueItems => 1 },
-                        static_nics    => { type => 'array', items => { type => 'string', pattern => $LINK_NAME }, uniqueItems => 1 },
+                        dhcp_nics      => { type => 'array', items => { type => 'string', pattern => "$Trog::Patterns::LINK_NAME" }, uniqueItems => 1 },
+                        static_nics    => { type => 'array', items => { type => 'string', pattern => "$Trog::Patterns::LINK_NAME" }, uniqueItems => 1 },
                         reserve_memory => { type => 'integer' },
                         reserve_cpus   => { type => 'integer' },
                         reserve_disk   => { type => 'integer' },
@@ -433,7 +431,7 @@ sub args {
 
             # The account that runs bin/provision, if it is not the service
             # user.  See THE PROVISIONING ACCOUNT.
-            provision_user => { type => 'string', pattern => '^[a-z_][a-z0-9_-]*$' },
+            provision_user => { type => 'string', pattern => "$Trog::Patterns::ACCOUNT_NAME" },
 
             hypervisor_access  => { type => 'string',  enum    => [qw{none least full}], default => 'none' },
             restrict_key_to_ip => { type => 'boolean', default => 1 },

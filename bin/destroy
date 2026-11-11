@@ -281,8 +281,8 @@ it, the pool fills with entries for guests that do not exist.
 sub release_ip {
     my ( $domain, $dryrun ) = @_;
 
-    my $held = Provisioner::IPPool::holdings($domain);
-    my $nics = Provisioner::IPPool::nic_holdings($domain);
+    my $held = Provisioner::IPPool::main_addresses($domain);
+    my $nics = Provisioner::IPPool::nic_addresses($domain);
     my %on   = reverse %$nics;
     my %main = map { $_ => 1 } values %$held;
     my @all  = (

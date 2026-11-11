@@ -145,6 +145,12 @@ sub listens {
     return ( '0.0.0.0:' . ( $opts{port} // $DEFAULT_PORT ) );
 }
 
+# A port, or a port and a range as port:low:high.
+my $PORTS = qr/\A [[:digit:]]+ (?: : [[:digit:]]+ : [[:digit:]]+ )? \z/;
+
+# One word, or two words, in lower case.
+my $NAMES = qr/\A [[:lower:][:digit:]]+ (?: [ ] [[:lower:][:digit:]]+ )? \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -159,7 +165,7 @@ sub args {
             },
             max_startups => {
                 type        => 'string',
-                pattern     => q{\A\d+(?::\d+:\d+)?\z},
+                pattern     => "$PORTS",
                 default     => '100:30:200',
                 description => 'The MaxStartups of the fast lane sshd, in the syntax of sshd_config.  Only sources that logged in before reach it, so this is far above the default of the main sshd.',
             },
@@ -172,7 +178,7 @@ sub args {
             },
             ipqos => {
                 type        => 'string',
-                pattern     => q{\A[a-z\d]+(?:\ [a-z\d]+)?\z},
+                pattern     => "$NAMES",
                 default     => 'ef none',
                 description => 'The IPQoS of the fast lane sshd: the DSCP mark for interactive sessions, then for bulk transfers, in the syntax of sshd_config.  The default marks a shell expedited and leaves an rsync unmarked.  OpenSSH 9.6 marks bulk transfers cs1, which a network that honors DSCP serves after everything else.  Most of the internet ignores the mark.',
             },

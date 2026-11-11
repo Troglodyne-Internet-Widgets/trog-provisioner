@@ -63,7 +63,7 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
 
 subtest 'the relay listens at the address where the guests reach it, on its port' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( holdings => sub { return { guests => '192.0.2.5' } } );
+    $pool->redefine( main_addresses => sub { return { guests => '192.0.2.5' } } );
     my %config;
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $config{$domain} // {} } );

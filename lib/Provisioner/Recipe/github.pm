@@ -80,6 +80,9 @@ L<Provisioner::Recipe::koan> clones its projects that way.
 
 =cut
 
+# An absolute path.
+my $ABSOLUTE = qr/\A \//;
+
 sub args {
     return (
         type       => 'object',
@@ -88,8 +91,8 @@ sub args {
             github_user  => { type => 'string', description => 'The GitHub account to log in as.' },
             github_token => { type => 'string', 'x-secret'  => 1, description => 'A personal access token for that account.  It is written into the login state of the account on the guest, so it is as secret as the guest is.' },
 
-            git_protocol => { type => 'string', enum    => [qw{https ssh}], default => 'https', description => 'What gh clones with.  ssh where the account has a key, which Provisioner::Recipe::git gives it; https otherwise, which authenticates with the token.' },
-            config_dir   => { type => 'string', pattern => '^/', description => 'Where the login state goes, as an absolute path, in place of .config/gh in the home of the account.  For a second login beside the one the account has, which a program reaches with GH_CONFIG_DIR.  Its parent must exist.' },
+            git_protocol => { type => 'string', enum    => [qw{https ssh}], default     => 'https', description => 'What gh clones with.  ssh where the account has a key, which Provisioner::Recipe::git gives it; https otherwise, which authenticates with the token.' },
+            config_dir   => { type => 'string', pattern => "$ABSOLUTE",     description => 'Where the login state goes, as an absolute path, in place of .config/gh in the home of the account.  For a second login beside the one the account has, which a program reaches with GH_CONFIG_DIR.  Its parent must exist.' },
         },
     );
 }

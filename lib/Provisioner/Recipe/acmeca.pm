@@ -18,6 +18,7 @@ use Provisioner::Cookbook();
 use Provisioner::Vars();
 use Provisioner::Utils();
 use Trog::Utils();
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::acmeca
 
@@ -157,13 +158,24 @@ sub listens {
 
 =cut
 
+# An absolute path that does not end in a slash.
+my $ABSOLUTE_PATH = qr/\A \/ [^\0]* [^\/\0] \z/;
+
+# One label of a host name, in lower case, which starts and ends with a letter
+# or a digit.
+my $LABEL_END = qr/[[:lower:][:digit:]]/;
+my $LABEL     = qr/\A $LABEL_END (?: [[:lower:][:digit:]-]* $LABEL_END )? \z/;
+
+# A duration in whole hours, as step-ca takes it.
+my $HOURS = qr/\A [[:digit:]]+ h \z/;
+
 sub args {
     return (
         type       => 'object',
         properties => {
             steppath => {
                 type        => 'string',
-                pattern     => q{\A/[^\0]*[^/\0]\z},
+                pattern     => "$ABSOLUTE_PATH",
                 default     => '/etc/step-ca',
                 description => "Where step-ca keeps its certificates, its key and its database.  The fragment, the unit and ca.json are all written from this one value, so they cannot disagree about where the CA lives.",
             },
@@ -176,24 +188,24 @@ sub args {
             },
             version => {
                 type        => 'string',
-                pattern     => q{\A\d+[.]\d+[.]\d+\z},
+                pattern     => "$Trog::Patterns::DOTTED_VERSION",
                 default     => $STEP_CA_VERSION,
                 description => 'The step-ca release to install.  Pinned rather than tracked: see MAINTENANCE.md.',
             },
             constrain_to => {
                 type        => 'string',
-                pattern     => q{\A[a-z\d]([a-z\d-]*[a-z\d])?\z},
+                pattern     => "$LABEL",
                 description => "The one top-level domain this CA is allowed to issue for, written into the intermediate as a name constraint.  It is what stops a key shipped to a throwaway guest from being trusted for anybody else: see perldoc Provisioner::Recipe::acmeca.  Defaults to the top-level domain of the guest this CA is built for, which is the only name it has any business issuing.",
             },
             default_duration => {
                 type        => 'string',
-                pattern     => q{\A\d+h\z},
+                pattern     => "$HOURS",
                 default     => '24h',
                 description => 'How long a certificate this CA issues is good for when the client asks for no particular lifetime.',
             },
             max_duration => {
                 type        => 'string',
-                pattern     => q{\A\d+h\z},
+                pattern     => "$HOURS",
                 default     => '2160h',
                 description => 'The longest lifetime this CA will issue, whatever the client asks for.  Ninety days by default, which is what the public CA this stands in for allows.',
             },

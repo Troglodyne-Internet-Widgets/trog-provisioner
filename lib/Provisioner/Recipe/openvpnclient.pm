@@ -149,6 +149,12 @@ only copy that must exist.
 
 =cut
 
+# A host name or an address.
+my $HOST = qr/\A [[:alnum:]] [[:alnum:].-]* \z/;
+
+# The name of a tun device: a letter, then up to 14 more.
+my $DEVICE = qr/\A [[:lower:]] [[:lower:][:digit:]_-]{0,14} \z/;
+
 sub args {
     return (
         required   => [qw{server}],
@@ -157,7 +163,7 @@ sub args {
 
             # A name or an address, because it goes into a command that root
             # runs on the server of issue_from.
-            server   => { type => 'string', pattern => q{\A[A-Za-z0-9][A-Za-z0-9.-]*\z} },
+            server   => { type => 'string', pattern => "$HOST" },
             cert_dir => { type => 'string' },
 
             issue_from => {
@@ -170,7 +176,7 @@ sub args {
 
             device => {
                 type        => 'string',
-                pattern     => q{\A[a-z][a-z\d_-]{0,14}\z},
+                pattern     => "$DEVICE",
                 description => 'The tunnel interface this domain gets.  No default is declared here because it comes from the domain: two tunnels on one guest cannot share an interface, and the kernel will not take a name longer than fifteen characters.  Name one to pin it.',
             },
         },

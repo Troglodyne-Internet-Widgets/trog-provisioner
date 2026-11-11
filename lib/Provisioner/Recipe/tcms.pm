@@ -184,6 +184,14 @@ that the branch declares now, and not those of the commit that it serves.
 
 =cut
 
+# A git remote: an https, ssh, git or file URL, or user@host:path.
+my $URL_REMOTE = qr/(?: https? | ssh | git | file ) :\/\/ \S+/;
+my $SCP_REMOTE = qr/[^\/\s@]+ @ [[:alnum:]] [[:alnum:].-]* : \S+/;
+my $GIT_REMOTE = qr/\A (?: $URL_REMOTE | $SCP_REMOTE ) \z/;
+
+# The name of a git branch.
+my $BRANCH = qr/\A [[:alnum:]_.] [[:alnum:]_.\/-]* \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -191,12 +199,12 @@ sub args {
             repo_url => {
                 type             => 'string',
                 default          => $DEFAULT_REPO,
-                pattern          => q{^(?:(?:https?|ssh|git|file)://\S+|[^/\s@]+@[A-Za-z0-9][A-Za-z0-9.-]*:\S+)$},
+                pattern          => "$GIT_REMOTE",
                 'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
                 description      => 'The git repository to clone tCMS from, which declares its system packages.',
             },
-            repo_branch => { type => 'string',  default => 'master',   pattern     => q{^[A-Za-z0-9_.][A-Za-z0-9_./-]*$}, description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
-            worker_jobs => { type => 'integer', default => 1,          minimum     => 1,                                  description => 'How many jobs the Minion worker of tCMS runs at once.  A job is one video transcode, and each one uses every core it can.' },
+            repo_branch => { type => 'string',  default => 'master',   pattern     => "$BRANCH", description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+            worker_jobs => { type => 'integer', default => 1,          minimum     => 1,         description => 'How many jobs the Minion worker of tCMS runs at once.  A job is one video transcode, and each one uses every core it can.' },
             secure_host => { type => 'string',  format  => 'hostname', description => 'The name that carries the logins of a site behind a relay, and that the relay passes through.  tCMS then sends the pages that need a login there, and readers to the domain.' },
         },
     );
