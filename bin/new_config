@@ -173,31 +173,36 @@ protect, except the key that opens a guest that is up now.
 
 =head2 IP POOL
 
-The IP pool is the set of static addresses that new guests can get.  The pool
-and its gateway are on the network of a hypervisor, so its block of
-F<hypervisors.conf> names them:
+The IP pool is the set of static addresses that new guests can get.  Each
+static adapter of a guest, a bridge of C<static_nics>, has a pool and a gateway
+on the network of that bridge, so the block of the hypervisor names them:
 
     [hv1]
-    libvirt_uri    = qemu+ssh://hv1.test.test/system
-    resolvers      = 192.0.2.1, 1.1.1.1
-    gateway        = 192.0.2.1
+    libvirt_uri         = qemu+ssh://hv1.test.test/system
+    resolvers           = 192.0.2.1, 1.1.1.1
+    dhcp_nics           = virbr0
+    static_nics         = br0
+    gateway_br0         = 192.0.2.1
 
     # Every address of the static pool.
-    pool_addresses = 192.0.2.10, 192.0.2.11, 192.0.2.12
+    ip_addresses_br0    = 192.0.2.10, 192.0.2.11, 192.0.2.12
 
     # Or a CIDR block to expand.  Both keys can appear, and the
     # addresses are merged.
-    pool_cidr      = 192.0.2.0/24
+    ip_pool_br0         = 192.0.2.0/24
 
-The two keys are the bin named C<guests>.  The C<bins> of the C<ip_pool> of
-C<_global> name other bins beside it, and a guest never gets an address out of
-those.  See L<Provisioner::IPPool/BINS>.  Hypervisors on one network name the
-same pool.  A block with a pool and no gateway is refused.
+They are the bin named C<guests>, one pool for each bridge.  The C<bins> of the
+C<ip_pool> of C<_global> name other bins beside it, and a guest never gets an
+address out of those.  See L<Provisioner::IPPool/BINS>.  Blocks on one network
+name the same pool for a bridge of the same name.  The first of C<static_nics>
+must have a gateway.
 
-new_config gives each domain an address from the pool, and records it in the
-address database of L<Provisioner::IPPool>.  A domain keeps its address when you
-provision it again.  If the hypervisor gives its guests their addresses,
-new_config does not use the pool.
+new_config gives each domain an address from the pool of each of its static
+adapters, and records them in the address database of L<Provisioner::IPPool>.
+The address on the first is the address of the guest, in C<ips> and in
+C<ipmap>.  A domain keeps its addresses when you provision it again.  If the
+hypervisor gives its guests their addresses, new_config does not use the
+pool.
 
 To see which addresses are assigned and which are free, run
 C<bin/list_ip_pool>:
@@ -820,36 +825,36 @@ sub handle_domain {
     # The recipes get the pool of this hypervisor, because the addresses of
     # the guests and their route are facts of the network that they are on.
     my $pool_conf = Provisioner::IPPool::pool_of( $hv, $global_config->{ip_pool} );
-    my $gateway   = $hv->manages_addresses ? undef : $hv->configured_gateway;
+    my $first_nic = $pool_conf->{first_nic};
+    my $gateway   = defined $first_nic ? $hv->nic_gateway($first_nic) : undef;
     $global_config->{ip_pool} = $pool_conf;
 
     # No pool when the hypervisor gives its guests their addresses, because an
     # address from the pool stays reserved for a guest that never uses it.
-    my ( $static_ip, $ip_conf ) = ( undef, {} );
+    my ( $static_ip, $ip_conf, %nic_ips ) = ( undef, {} );
     if ( !$hv->manages_addresses ) {
         if ( Provisioner::IPPool::offers($pool_conf) ) {
-            die "The block of " . ( $hv->name // $hv->describe ) . " in hypervisors.conf names a pool but no gateway, so its guests have no route off their subnet.\n" . "Name the gateway of that subnet, for example:  gateway = 192.0.2.1\n"
-              unless defined $gateway;
             Provisioner::IPPool::ensure_seeded();
 
-            # One transaction, so that two provisions cannot get the same
-            # address.  A domain that you provision again keeps its address.
+            # One transaction each, so that two provisions cannot get the same
+            # address.  A domain that you provision again keeps its addresses.
             $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
+            %nic_ips   = map { $_ => Provisioner::IPPool::assign( $domain, $pool_conf, undef, $_ ) } grep { $_ ne $first_nic } $hv->static_nics;
         }
         else {
-            die "The ip pool offers no addresses, so $fqdn would have only a lease on the NAT network of " . $hv->describe . ",\n" . "and this machine is not on that network to reach it.  Name pool_cidr or pool_addresses in its block of hypervisors.conf, or run this from a guest of that hypervisor.\n"
+            die "The ip pool offers no addresses, so $fqdn would have only a lease on the NAT network of " . $hv->describe . ",\n" . "and this machine is not on that network to reach it.  Name static_nics, with ip_pool_NIC and gateway_NIC, in its block of hypervisors.conf, or run this from a guest of that hypervisor.\n"
               unless $hv->on_nat_network;
             if ( my @needing = recipes_needing_address( $domain, $rconf, $global_config ) ) {
                 my $block = $hv->name // $hv->describe;
                 die "$fqdn runs recipes that write the address of the guest into a record: "
                   . join( ', ', @needing ) . ".\n"
-                  . "The block of $block in hypervisors.conf names no address pool, so $fqdn would have only a lease on the NAT network of "
+                  . "The block of $block in hypervisors.conf names no static adapter with an address pool, so $fqdn would have only a lease on the NAT network of "
                   . $hv->describe
                   . ", and no address to write.\n"
-                  . "Give the block of $block an address pool: pool_cidr or pool_addresses, the gateway of that subnet, and bridge_device, the bridge on it.\n"
+                  . "Give the block of $block a static adapter: static_nics, with ip_pool_NIC and gateway_NIC.\n"
                   . "See Networks in docs/CONFIGURATION.md.  Or take those recipes off $fqdn.\n";
             }
-            print "The ip pool offers no addresses, so $fqdn takes a lease on the NAT network of " . $hv->describe . ", and its bridged interface stays unconfigured.\n";
+            print "The ip pool offers no addresses, so $fqdn takes a lease on the NAT network of " . $hv->describe . ", and it has no static adapter.\n";
         }
     }
 
@@ -1374,6 +1379,7 @@ sub handle_domain {
         package_conflicts => \@conflicts,
         %fetch_cache,
         ips           => [ grep { defined } $static_ip ],
+        nic_ips       => \%nic_ips,
         gateway       => $gateway,
         contact_email => $admin_email,
         ( defined $dryrun ? ( dryrun         => $dryrun )                            : () ),

@@ -4,7 +4,8 @@
     and gets one block for the libvirt of this guest, with the resolvers of this
     guest, which its guests reach through its NAT, and no pool.  A block must
     name the resolvers of its guests, see configured_resolvers in Trog::HV, and
-    names their pool and gateway, see guest_pool there.
+    names their adapters, and the pool and the gateway of each static one, see
+    ADAPTERS in Trog::HV::Libvirt.
 
     pool_name with pool_path, and partition, are the only two limits on a
     guest.  See QUOTAS in Provisioner::Recipe::trogrunner. -%]
@@ -13,11 +14,12 @@
 [[% name %]]
 libvirt_uri    = [% hv.libvirt_uri %]
 resolvers      = [% hv.resolvers.join(', ') %]
-[% IF hv.gateway %]gateway        = [% hv.gateway %]
+[% IF hv.dhcp_nics.size() %]dhcp_nics      = [% hv.dhcp_nics.join(', ') %]
 [% END -%]
-[% IF hv.pool_cidr.size() %]pool_cidr      = [% hv.pool_cidr.join(', ') %]
+[% IF hv.static_nics.size() %]static_nics    = [% hv.static_nics.join(', ') %]
 [% END -%]
-[% IF hv.pool_addresses.size() %]pool_addresses = [% hv.pool_addresses.join(', ') %]
+[% FOR line IN hv.nic_lines -%]
+[% line.key %] = [% line.value %]
 [% END -%]
 [% IF hv.pool_path %]pool_path      = [% hv.pool_path %]
 [% END -%]
@@ -26,12 +28,6 @@ resolvers      = [% hv.resolvers.join(', ') %]
 [% IF hv.partition %]partition      = [% hv.partition %]
 [% END -%]
 [% IF hv.domain_dir %]domain_dir     = [% hv.domain_dir %]
-[% END -%]
-[% IF hv.bridge_device %]bridge_device  = [% hv.bridge_device %]
-[% END -%]
-[% IF hv.virbr_device %]virbr_device   = [% hv.virbr_device %]
-[% END -%]
-[% IF hv.nics.size() %]nics           = [% hv.nics.join(', ') %]
 [% END -%]
 [% IF hv.reserve_memory %]reserve_memory = [% hv.reserve_memory %]
 [% END -%]

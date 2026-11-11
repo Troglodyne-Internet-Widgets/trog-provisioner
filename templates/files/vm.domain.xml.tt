@@ -126,8 +126,10 @@
       <boot order='2'/>
     </disk>
 
-    <!-- Two interfaces: the libvirt NAT for the hypervisor to reach it by
-         lease, and the outbound bridge for its real address.
+    <!-- One interface for each bridge of dhcp_nics and then static_nics in
+         the block of the hypervisor.  The first is on the libvirt NAT, for the
+         hypervisor to reach it by lease.  The first static one has its real
+         address.
 
          The MAC is derived from the domain name, so it is the same on every
          rebuild: the DHCP lease stays put, and the network configuration
@@ -141,9 +143,7 @@
          devices sit behind PCIe root ports that libvirt allocates, and the
          name comes from the path.  So the address is left out there, and the
          rename above is what settles the name. -->
-[%# Each adapter of interfaces, in the order of the domain.  Two without nics
-    in the block of the hypervisor, NAT and then bridge, which the comment
-    above still describes.  See nics in Trog::HV::Libvirt. -%]
+[%# See ADAPTERS in Trog::HV::Libvirt. -%]
 [% FOR nic IN interfaces -%]
 [% IF nic.nat && !session -%]
     <interface type='network'>

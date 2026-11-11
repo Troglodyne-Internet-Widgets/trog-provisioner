@@ -44,21 +44,20 @@ my $BRIDGES = '/etc/qemu/bridge.conf';
 
 sub hvconf (%clod) {
     my %block = (
-        libvirt_uri    => 'qemu+ssh://runner@hv1.test.test/session',
-        network        => 'clod',
-        resolvers      => '10.0.0.1',
-        virbr_device   => 'virbr0',
-        bridge_device  => 'virbr1',
-        nics           => 'virbr0, virbr1',
-        gateway        => '10.0.0.1',
-        pool_cidr      => '10.0.0.64/26',
-        pool_addresses => '10.0.0.5',
+        libvirt_uri         => 'qemu+ssh://runner@hv1.test.test/session',
+        network             => 'clod',
+        resolvers           => '10.0.0.1',
+        dhcp_nics           => 'virbr0',
+        static_nics         => 'virbr1',
+        gateway_virbr1      => '10.0.0.1',
+        ip_pool_virbr1      => '10.0.0.64/26',
+        ip_addresses_virbr1 => '10.0.0.5',
         %clod,
     );
     my $file = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
     File::Slurper::Temp::write_text(
         $file,
-        "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv1.test.test/system\nbridge_device = br0\nvirbr_device = virbr0\n\n[other]\nlibvirt_uri = qemu+ssh://someadmin\@hv2.test.test/system\n\n[clod]\n" . join( q{}, map { "$_ = $block{$_}\n" } grep { $block{$_} ne q{} } sort keys %block )
+        "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv1.test.test/system\ndhcp_nics = virbr0\n\n[other]\nlibvirt_uri = qemu+ssh://someadmin\@hv2.test.test/system\n\n[clod]\n" . join( q{}, map { "$_ = $block{$_}\n" } grep { $block{$_} ne q{} } sort keys %block )
     );
     return $file;
 }
@@ -150,7 +149,7 @@ sub run_tool ( $state, @args ) {
     return ( $rc, $said );
 }
 
-my @run = ( qw{--hypervisor clod --via hv1}, '--hvconf', hvconf() );
+my @run = ( qw{--hypervisor clod --nic virbr1 --via hv1}, '--hvconf', hvconf() );
 
 subtest 'a dry run prints the network and what it would change, and changes nothing' => sub {
     my $state = fresh_state();
@@ -159,7 +158,7 @@ subtest 'a dry run prints the network and what it would change, and changes noth
     is( $rc, 0, 'it exits 0' );
     like( $said, qr{<name>clod</name>},                                'the network, named after the network of the block' );
     like( $said, qr{<forward[ ]mode='nat'/>},                          'with NAT' );
-    like( $said, qr{<bridge[ ]name='virbr1'[ ]stp='on'[ ]delay='0'/>}, 'on the bridge_device of the block' );
+    like( $said, qr{<bridge[ ]name='virbr1'[ ]stp='on'[ ]delay='0'/>}, 'on the bridge of --nic' );
     like( $said, qr{<ip[ ]address='10[.]0[.]0[.]1'[ ]prefix='24'/>},   'at its gateway' );
     unlike( $said, qr/<dhcp/, 'and no DHCP, because every guest on it has its address from the pool' );
     like( $said, qr/would[ ]define[ ]the[ ]network[ ]clod/,                    'it says that it would define it' );
@@ -212,13 +211,15 @@ subtest 'the bridge of a runner account stays allowed, and the network is define
 subtest 'what it refuses to make' => sub {
     my $state = fresh_state();
 
-    like( exception { run_tool( $state, qw{--hypervisor clod},             '--hvconf', hvconf() ) },                                              qr/session[ ]URI.*--via/,                               'a session block with no account on the system URI to act through' );
-    like( exception { run_tool( $state, qw{--hypervisor clod --via other}, '--hvconf', hvconf() ) },                                              qr/--via[ ]names[ ]a[ ]block[ ]of[ ]the[ ]same[ ]host/, 'an account of another host' );
-    like( exception { run_tool( $state, @run[ 0 .. 3 ],                    '--hvconf', hvconf( pool_cidr => '10.0.1.0/26' ) ) },                  qr{10[.]0[.]1[.]0/26[ ]outside[ ]10[.]0[.]0[.]0/24},    'a pool outside the network' );
-    like( exception { run_tool( $state, @run[ 0 .. 3 ],                    '--hvconf', hvconf( network => q{} ) ) },                              qr/--name/,                                             'a block that names no network, without --name' );
-    like( exception { run_tool( $state, @run[ 0 .. 3 ],                    '--hvconf', hvconf( gateway => q{} ) ) },                              qr/no[ ]gateway/,                                       'or no gateway' );
-    like( exception { run_tool( $state, @run,                              '--name',   'bad name' ) },                                            qr/name[ ]of[ ]a[ ]guest[ ]network/,                    'a name libvirt would not take' );
-    like( exception { run_tool( $state, @run[ 0 .. 3 ],                    '--hvconf', hvconf( bridge_device => 'virbr0', nics => 'virbr0' ) ) }, qr/virbr0/,                                             'a block whose bridge is the NAT one' );
+    my @block = qw{--hypervisor clod --nic virbr1 --via hv1};
+    like( exception { run_tool( $state, qw{--hypervisor clod --nic virbr1},             '--hvconf', hvconf() ) },                                  qr/session[ ]URI.*--via/,                               'a session block with no account on the system URI to act through' );
+    like( exception { run_tool( $state, qw{--hypervisor clod --nic virbr1 --via other}, '--hvconf', hvconf() ) },                                  qr/--via[ ]names[ ]a[ ]block[ ]of[ ]the[ ]same[ ]host/, 'an account of another host' );
+    like( exception { run_tool( $state, @block,                                         '--hvconf', hvconf( ip_pool_virbr1 => '10.0.1.0/26' ) ) }, qr{10[.]0[.]1[.]0/26[ ]outside[ ]10[.]0[.]0[.]0/24},    'a pool outside the network' );
+    like( exception { run_tool( $state, @block,                                         '--hvconf', hvconf( network => q{} ) ) },                  qr/--name/,                                             'a block that names no network, without --name' );
+    my %second = ( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26' );
+    like( exception { run_tool( $state, qw{--hypervisor clod --nic br0 --via hv1},    '--hvconf', hvconf(%second) ) }, qr/no[ ]gateway_br0/,                       'a static adapter with no gateway, which is the address of the network' );
+    like( exception { run_tool( $state, @run,                                         '--name',   'bad name' ) },      qr/name[ ]of[ ]a[ ]guest[ ]network/,        'a name libvirt would not take' );
+    like( exception { run_tool( $state, qw{--hypervisor clod --nic virbr0 --via hv1}, '--hvconf', hvconf() ) },        qr/names[ ]no[ ]virbr0[ ]in[ ]static_nics/, 'and a bridge that is not one of static_nics' );
 
     $state->{networks}{other} = { xml => "<network><name>other</name><bridge name='virbr1'/></network>", active => 1, autostart => 1 };
     like( exception { run_tool( $state, @run ) }, qr/virbr1[ ]on[ ].*belongs[ ]to[ ]the[ ]network[ ]other/, 'and a bridge that another network has' );

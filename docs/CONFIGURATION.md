@@ -530,9 +530,11 @@ runner.example.test:
             hv1:
                 libvirt_uri:    qemu+ssh://runner@hv1.example.test/system
                 resolvers:      [192.0.2.254, 1.1.1.1]
-                gateway:        192.0.2.254
-                pool_addresses: [192.0.2.180, 192.0.2.181]
-                pool_cidr:      [192.0.2.192/28]
+                dhcp_nics:        [virbr0]
+                static_nics:      [br0]
+                gateway_br0:      192.0.2.254
+                ip_addresses_br0: [192.0.2.180, 192.0.2.181]
+                ip_pool_br0:      [192.0.2.192/28]
                 pool_path:   /srv/vm-disks/runner
                 pool_name:   runner_disks
                 partition:   /machine/runner
@@ -548,19 +550,19 @@ runner.example.test:
 Nothing in it is required, and `config` inherits `admin_user`, `admin_email`
 and `admin_keys` from the guest's own -- a runner administers what it
 builds the way this installation administers it, unless told otherwise. Give a
-hypervisor `gateway`, `pool_addresses` and `pool_cidr` when something other
-than the runner must reach its guests there. Without an address pool, each guest that it builds takes a lease on the
-NAT network of its hypervisor, and its bridged interface stays unconfigured. The
-runner reaches it there, because the runner is itself a guest of that
-hypervisor. That is enough for throwaway guests, but not for a guest whose
+hypervisor `static_nics`, with the pool and the gateway of each, when something
+other than the runner must reach its guests there. Without a static adapter,
+each guest that it builds takes only a lease on the NAT network of its
+hypervisor. The runner reaches it there, because the runner is itself a guest of
+that hypervisor. That is enough for throwaway guests, but not for a guest whose
 recipes write its address into a record, such as `pdns` and `mail`.
 `bin/new_config` refuses such a guest there. See
 [Networks](#networks).
 
 A guest whose address goes into a record needs an address from a pool, also
 when nothing else must reach it.  For guests on a network of their own on the
-hypervisor, name `nics`, `bridge_device` and `virbr_device` in the entry, and
-see [The adapters of a guest](#the-adapters-of-a-guest).
+hypervisor, see [A network of their own for the guests of a
+session](#a-network-of-their-own-for-the-guests-of-a-session).
 
 Four more parts are worth knowing before writing one.
 
@@ -713,104 +715,137 @@ network of the installation can name its gateway.  A guest on a cloud cannot
 reach that gateway, and each of its lookups waits for the gateway to time out.
 So a block for a cloud names resolvers that a guest there reaches.
 
-A block for a hypervisor on a network of ours also names the static addresses
-of its guests, and their gateway:
+A block for a libvirt hypervisor names the adapters of its guests, and the
+static addresses and the gateway of each static adapter.  See
+[The adapters of a guest](#the-adapters-of-a-guest).
 
 ```ini
 [hv1]
-libvirt_uri    = qemu+ssh://hv1.test.test/system
-network        = office
-resolvers      = 192.0.2.254, 1.1.1.1
-gateway        = 192.0.2.254
-pool_addresses = 192.0.2.10, 192.0.2.11
-pool_cidr      = 192.0.2.64/26
+libvirt_uri      = qemu+ssh://hv1.test.test/system
+network          = office
+resolvers        = 192.0.2.254, 1.1.1.1
+dhcp_nics        = virbr0
+static_nics      = br0
+gateway_br0      = 192.0.2.254
+ip_addresses_br0 = 192.0.2.10, 192.0.2.11
+ip_pool_br0      = 192.0.2.64/26
 ```
 
-These are the bin named `guests`, see `BINS` in `perldoc Provisioner::IPPool`.
-Hypervisors on one network name the same pool and share its addresses.  The
-pools of two networks must not overlap.  `bin/new_config` refuses a pool with
-no gateway.  A cloud gives its guests their addresses and their route, so a
-block for a cloud names neither.  `bin/assign_ip --hypervisor` takes an address
-from the pool of one block.
+The pools are the bin named `guests`, see `BINS` in `perldoc
+Provisioner::IPPool`.  A cloud gives its guests their addresses and their
+route, so a block for a cloud names none of these keys, and one that does
+cannot be built.  `bin/assign_ip --hypervisor` takes an address from the pool
+of one block.
 
-A block with no pool and no cloud behind it leaves each guest a lease on the
-NAT network of its hypervisor, and its bridged interface unconfigured.  The
-configuration then assigns the guest no address.  So `bin/new_config` refuses
+A block with no static adapter and no cloud behind it leaves each guest only a
+lease on the NAT network of its hypervisor.  The configuration then assigns the
+guest no address.  So `bin/new_config` refuses
 a guest whose recipes write its address into a record, and names them.  These
 are `pdns`, whose zone names the guest at its address, and each recipe that
 has `addressed_names`, such as `mail`, whose `mail.` and `autodiscover.` names
 are `A` records at the address.  `needs_address` in `perldoc
-Provisioner::Recipe` says which.  Give that block a pool, its gateway and
-`bridge_device`, the bridge on that subnet, or build the guest without those
-recipes.
+Provisioner::Recipe` says which.  Give that block a static adapter, with
+`static_nics`, `ip_pool_NIC` and `gateway_NIC`, or build the guest without
+those recipes.
 
 ### The adapters of a guest
 
-A guest of a libvirt hypervisor has two adapters.  The first is on the NAT
-bridge, `virbr_device`, where it takes a lease that this machine finds it by.
-The second is on `bridge_device`, where it gets its address from the pool, or
-none when the pool has none for it.  `nics` lists the bridges of every adapter,
-in the order of the adapters in the guest:
+A guest of a libvirt hypervisor has one adapter for each bridge of two lists in
+the block of the hypervisor:
 
 ```ini
-nics = virbr0, virbr1
+dhcp_nics       = virbr0
+static_nics     = virbr1, br0
+ip_pool_virbr1  = 10.0.0.0/25
+gateway_virbr1  = 10.0.0.1
+ip_pool_br0     = 192.0.2.64/26
+gateway_br0     = 192.0.2.254
 ```
 
-With `nics`, the block names `virbr_device` and `bridge_device` too, and
-`nics` names both of them.  Each entry is the name of a bridge, and no bridge is
-named twice.  A block that breaks either rule cannot be built, and
-`bin/preflight` says so.
+- **`dhcp_nics`**: each adapter takes a lease.  The first one takes the lease
+  that this machine finds the guest by, so it is the bridge of the `default`
+  network of libvirt.  Without `dhcp_nics`, a guest has that one adapter, on the
+  bridge that libvirt says the `default` network has.  The others take a lease
+  and no route from it.
+- **`static_nics`**: each adapter gets an address from the pool of its bridge:
+  `ip_pool_NIC`, one or more CIDR blocks, and `ip_addresses_NIC`, single
+  addresses, for the bridge `NIC`.  Every static adapter needs a pool.  The
+  first one gets the address of the guest: the one in `ipmap`, in its records,
+  its certificates and `provision.conf`, and the only default route, through
+  `gateway_NIC`, which it must name.  The others get an address on their own
+  subnet and no route.  Without `static_nics`, the guest gets no address from a
+  pool.
 
-Whatever the order, the adapter on `virbr_device` takes the lease, and the
-adapter on `bridge_device` gets the address from the pool and the route to
-`gateway`.  Every other adapter comes up with no address.  The order decides
-the PCI slot of each adapter, and so the name that the guest gives it: the
-first is `ens3`, the next `ens4`, and so on.  A block without `nics` is
-`nics = virbr_device, bridge_device`, and its guests get the same domain and the
-same network configuration as before `nics` existed.
+The adapters are in the guest in that order, `dhcp_nics` and then
+`static_nics`, in PCI slots 3, 4, 5 and so on, so the guest calls them `ens3`,
+`ens4`, `ens5`.  The MAC of each comes from its place.  So a block with one
+bridge in each list gives its guests the same two adapters, MACs and names as
+they had before these keys.
 
-`nics` is for libvirt.  A block for Linode, OpenStack or SolusVM that names it
-cannot be built.  Linode can give a guest a VLAN or a VPC interface, and Nova a
-port on each of several networks, so `nics` could name those one day.  This
-software asks for none of them yet.
+A guest has no adapter on any other bridge.  A block that names a bridge twice,
+a static adapter without a pool, a first static adapter without a gateway, or a
+pool or a gateway for a bridge that `static_nics` does not name cannot be
+built, and `bin/preflight` says so.
 
-The case it is for is an installation whose guests build in a session of
-libvirt and need an address that a recipe can put in a record.  Without a pool,
-such a guest has only its lease on the NAT network, and nothing records that
-address.  Give it a network of its own on the hypervisor, with the pool on that
-network:
+The address database records the bridge of each address.  A guest with two
+static adapters holds two addresses, one in the pool of each bridge, and keeps
+them when it is built again.  Two blocks that name the same pool for a bridge of
+the same name share its addresses: that is one network, such as the LAN of two
+hypervisors, and its bridge must have the same name on both.  Pools that overlap
+and are not the same, or the same pool under two bridge names, are refused,
+because then one address would belong to two networks, or the database could
+not tell on which bridge a guest holds it.  `network` stays: it says which
+guests reach each other, which placement asks, and a pool does not say that.
+
+These keys replaced `virbr_device`, `bridge_device`, `gateway`, `pool_cidr` and
+`pool_addresses`.  A block that still names one of them cannot be built, and the
+error says what to name instead.
+
+`dhcp_nics` and `static_nics` are for libvirt.  A block for Linode, OpenStack
+or SolusVM that names them cannot be built.  Linode can give a guest a VLAN or a
+VPC interface, and Nova a port on each of several networks, so the lists could
+name those one day.  This software asks for none of them yet.
+
+#### A network of their own for the guests of a session
+
+An installation whose guests build in a session of libvirt and need an address
+that a recipe can put in a record has no bridge to the LAN.  Give its guests a
+network of their own on the hypervisor, with the pool on that network:
 
 ```ini
 [runner-hv]
 libvirt_uri    = qemu+ssh://$user@hv1.test.test/session
 network        = guests
 resolvers      = 10.0.0.1
-virbr_device   = virbr0
-bridge_device  = virbr1
-nics           = virbr0, virbr1
-gateway        = 10.0.0.1
-pool_cidr      = 10.0.0.64/26
+dhcp_nics      = virbr0
+static_nics    = virbr1
+ip_pool_virbr1 = 10.0.0.64/26
+gateway_virbr1 = 10.0.0.1
 ```
 
-`bin/guest_network` makes that network from the block.  The block of a session
-cannot define a network of the system daemon, so `--via` names the block of
-an account on the system URI of the same host, with sudo:
+`bin/guest_network` makes the network of a static adapter from the block.  The
+block of a session cannot define a network of the system daemon, so `--via`
+names the block of an account on the system URI of the same host, with sudo:
 
 ```
-bin/guest_network --hypervisor runner-hv --via hv1 --dryrun
-bin/guest_network --hypervisor runner-hv --via hv1
+bin/guest_network --hypervisor runner-hv --nic virbr1 --via hv1 --dryrun
+bin/guest_network --hypervisor runner-hv --nic virbr1 --via hv1
 ```
 
 It defines the network `guests` with NAT on `virbr1`, at `10.0.0.1/24`, with no
 DHCP, starts it, and starts it with the host.  Then it lets `$user` join
 `virbr1` through qemu-bridge-helper.  It refuses a pool that is not inside the
 network.  A second run changes nothing.  `--prefix` changes the `/24`, and
-`--name` the name of the network.
+`--name` the name of the network.  A guest gives each of its static addresses a
+`/24` prefix, so a network with another prefix needs its addresses written with
+one, in `ip_addresses_NIC`.
 
-`bin/preflight --hypervisor runner-hv` then asks whether each bridge of `nics`
-is there, whether each network that owns one runs and starts with the host,
-whether qemu-bridge-helper lets `$user` join each one, and whether the pool is
-inside the network of `bridge_device`, behind `gateway`.
+`bin/preflight --hypervisor runner-hv` then asks whether each bridge of the two
+lists is there, whether the first of `dhcp_nics` is the bridge of the `default`
+network, whether each network that owns a bridge runs and starts with the host,
+whether qemu-bridge-helper lets `$user` join each one, and whether each pool is
+inside the network of its bridge, behind its gateway, and outside its DHCP
+ranges.
 
 libvirt lets a guest of a NAT network start a connection out, and refuses a new
 connection in from outside the host.  So this machine still reaches the guest by

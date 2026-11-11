@@ -14,6 +14,8 @@ t/Provisioner-IPPool.t - the static address pool: parsing it, and handing out of
 use Test::More;
 use Test::Fatal;
 use Test::MockModule qw{strict};
+use File::Basename();
+use File::Slurper();
 use File::Temp();
 use POSIX();
 
@@ -207,6 +209,72 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
     );
 };
 
+# --- Bridges -------------------------------------------------------------------
+#
+# A guest has one address on the bridge of each of its static adapters, out of
+# the pool of that bridge, and the one on the first is the address of the guest.
+
+# The pool of a guest of a hypervisor with two static adapters, as pool_of
+# makes it, with $first first.
+sub two_bridges ($first) {
+    my %nics = ( br0 => { addresses => '192.0.2.10 192.0.2.11' }, virbr1 => { addresses => '10.0.0.10 10.0.0.11' } );
+    return { %{ $nics{$first} }, first_nic => $first, nics => \%nics, bins => {} };
+}
+
+subtest 'assign: an address on each bridge, and the first is the address of the guest' => sub {
+    fresh_db();
+    my $pool = two_bridges('virbr1');
+
+    is( Provisioner::IPPool::assign( 'a.test', $pool ),               '10.0.0.10',  'the first static adapter, by default' );
+    is( Provisioner::IPPool::assign( 'a.test', $pool, undef, 'br0' ), '192.0.2.10', 'and the other, out of its own pool' );
+    is( Provisioner::IPPool::assign( 'a.test', $pool, undef, 'br0' ), '192.0.2.10', 'which it keeps' );
+    is( Provisioner::IPPool::held_by('a.test'),                       '10.0.0.10',  'the address of the guest is the one on the first' );
+    is( Provisioner::IPPool::held_by( 'a.test', undef, 'br0' ),       '192.0.2.10', 'and the one on a bridge is asked for by the bridge' );
+    is_deeply( Provisioner::IPPool::assignments(),          { 'a.test' => '10.0.0.10' },                      'ipmap names the address of the guest, and nothing else' );
+    is_deeply( Provisioner::IPPool::holdings('a.test'),     { guests   => '10.0.0.10' },                      'and so do its holdings, which the tunnels are read out of' );
+    is_deeply( Provisioner::IPPool::nic_holdings('a.test'), { virbr1   => '10.0.0.10', br0 => '192.0.2.10' }, 'while each bridge has its own' );
+
+    # The order of static_nics is the configuration of today, and the row says
+    # which one is the address of the guest.
+    Provisioner::IPPool::assign( 'a.test', two_bridges('br0') );
+    is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '192.0.2.10' }, 'a block that puts br0 first makes that the address of the guest' );
+
+    is_deeply( Provisioner::IPPool::release('a.test'),      { guests => '192.0.2.10', 'guests on virbr1' => '10.0.0.10' }, 'and both go back, each named' );
+    is_deeply( Provisioner::IPPool::nic_holdings('a.test'), {},                                                            'leaving nothing' );
+};
+
+subtest 'assign: an address from before the database knew bridges is kept' => sub {
+    fresh_db();
+
+    # What schema/ips.v2.update.sql leaves of a row from before it.
+    Provisioner::IPPool::record( '192.0.2.11', 'old.test', q{}, 1 );
+    is_deeply( Provisioner::IPPool::assignments(), { 'old.test' => '192.0.2.11' }, 'it is still the address of its guest' );
+
+    is( Provisioner::IPPool::assign( 'old.test', two_bridges('br0') ), '192.0.2.11', 'and the bridge whose pool holds it gets it' );
+    is_deeply( Provisioner::IPPool::nic_holdings('old.test'), { br0 => '192.0.2.11' }, 'which the row records now' );
+    is( Provisioner::IPPool::assign( 'old.test', two_bridges('br0'), undef, 'virbr1' ), '10.0.0.10', 'while a bridge that does not hold it gets an address of its own' );
+};
+
+subtest 'dbh: a database from before bridges opens, and keeps its rows' => sub {
+    fresh_db();
+
+    # The schema and its first update, as a database of the last release has
+    # them, with one guest and one reservation.
+    require DBI;
+    my $old        = DBI->connect( 'dbi:SQLite:dbname=' . Provisioner::IPPool::db_path(), q{}, q{}, { RaiseError => 1 } );
+    my $dir        = File::Basename::dirname( Provisioner::IPPool::schema_path() );
+    my @statements = map { split m/;\s*$/m, File::Slurper::read_text("$dir/$_") } qw{ips.sql ips.v1.update.sql};
+    $old->do($_) foreach grep { m/\S/ } @statements;
+    $old->do('PRAGMA user_version = 1');
+    $old->do(q{INSERT INTO ips (ip, domain, kind, bin) VALUES ('192.0.2.11', 'old.test', 'domain', 'guests'), ('192.0.2.1', 'gateway:192.0.2.1', 'reserved', 'guests')});
+    $old->disconnect;
+    Trog::SQLite::forget();
+
+    is_deeply( Provisioner::IPPool::assignments(), { 'old.test' => '192.0.2.11' }, 'the guest is still in ipmap' );
+    is( Provisioner::IPPool::taken()->{'192.0.2.1'},                                                   'gateway:192.0.2.1', 'and the reservation still holds its address' );
+    is( Provisioner::IPPool::dbh()->selectrow_array(q{SELECT nic FROM ips WHERE domain = 'old.test'}), q{},                 'with no bridge, until the guest asks for its address' );
+};
+
 # --- Bins ----------------------------------------------------------------------
 #
 # A bin is a named part of the pool that hands out only its own addresses, so
@@ -387,13 +455,19 @@ subtest 'a database from before bins keeps every row, in the guests bin' => sub 
     # A stand-in hypervisor, which is also its own libvirt connection.  The
     # sweep is the command that pings, and the other command lists the guests.
     package FakeHV;
-    sub new                ( $class, %said ) { return bless {%said}, $class }
-    sub manages_addresses  ($self)           { return $self->{cloud} // 0 }
-    sub guest_pool         ($self)           { return $self->{pool}  // {} }
-    sub configured_gateway ($self)           { return $self->{gateway} }
-    sub bridge_device      ($self)           { return $self->{bridge} // die "no bridge\n" }
-    sub capture_cmd        ( $self, $cmd )   { return $cmd =~ m/ping/ ? $self->{sweep} : $self->{guests} }
-    sub vmm                ($self)           { return $self }
+    sub new               ( $class, %said ) { return bless {%said}, $class }
+    sub manages_addresses ($self)           { return $self->{cloud} // 0 }
+
+    # The pool of each static adapter: pools by bridge, or one pool on br0.
+    sub static_pools ($self) {
+        return $self->{pools} if $self->{pools};
+        return $self->{pool} && %{ $self->{pool} } ? { br0 => $self->{pool} } : {};
+    }
+    sub static_nics ($self)         { return $self->{nics} ? @{ $self->{nics} } : sort keys %{ $self->static_pools } }
+    sub address_nic ($self)         { return ( $self->static_nics )[0] }
+    sub nic_gateway ( $self, $nic ) { return $self->{gateways}                               ? $self->{gateways}{$nic} : $self->{gateway} }
+    sub capture_cmd ( $self, $cmd ) { push @{ $self->{asked} }, $cmd; return $cmd =~ m/ping/ ? $self->{sweep}          : $self->{guests} }
+    sub vmm         ($self)         { return $self }
 
     sub list_all_domains ($self) {
         return map { FakeDomain->new($_) } @{ $self->{names} };
@@ -430,7 +504,6 @@ subtest 'seed: what is answering on the wire' => sub {
     my $recorded = seed_from(
         { cidr => '192.0.2.32/27' },
         '192.0.2.62',
-        bridge => 'br0',
         host   => '192.0.2.33',
         names  => [qw{guest.test quiet.test}],
         guests => "guest.test\t192.0.2.40\nquiet.test\t\nguest.test\t10.0.0.9\nguest.test\t192.0.2.40\n",
@@ -481,7 +554,7 @@ subtest 'seed: each hypervisor is seeded from its own pool, with its own gateway
 
     # Two networks.  A guest of hv2 that reports an address on the network of
     # hv1 is not on that network, so the address of hv1 stays free.
-    my %common = ( bridge => 'br0', sweep => q{} );
+    my %common = ( sweep => q{} );
     my $mock   = Test::MockModule->new('Trog::Hypervisors');
     $mock->redefine(
         load => sub {
@@ -503,9 +576,13 @@ subtest 'seed: each hypervisor is seeded from its own pool, with its own gateway
 
 subtest 'pool_of: the pool of a guest is the pool of its hypervisor and the bins of _global' => sub {
     my %bins = ( vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test' } );
-    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new( pool => { cidr => ['192.0.2.0/28'] } ),             { bins => \%bins } ), { cidr => ['192.0.2.0/28'], bins => \%bins }, 'the guests bin at the top, beside the other bins' );
-    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new( cloud => 1, pool => { cidr => ['192.0.2.0/28'] } ), { bins => \%bins } ), { bins => \%bins },                           'and no guests bin on a hypervisor that gives its guests their addresses' );
-    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new(),                                                   undef ),              { bins => {} },                               'and nothing at all when nothing names a pool' );
+    is_deeply(
+        Provisioner::IPPool::pool_of( FakeHV->new( pools => { br0 => { cidr => ['192.0.2.0/28'] }, virbr1 => { cidr => ['10.0.0.0/25'] } }, nics => [qw{br0 virbr1}] ), { bins => \%bins } ),
+        { cidr => ['192.0.2.0/28'], first_nic => 'br0', nics => { br0 => { cidr => ['192.0.2.0/28'] }, virbr1 => { cidr => ['10.0.0.0/25'] } }, bins => \%bins },
+        'the pool of each static adapter by bridge, the first one at the top as the guests bin, beside the other bins'
+    );
+    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new( cloud => 1, pool => { cidr => ['192.0.2.0/28'] } ), { bins => \%bins } ), { bins => \%bins },         'and no guests bin on a hypervisor that gives its guests their addresses' );
+    is_deeply( Provisioner::IPPool::pool_of( FakeHV->new(),                                                   undef ),              { bins => {}, nics => {} }, 'and nothing at all when nothing names a pool' );
 };
 
 subtest 'guest_pools: two networks cannot share an address' => sub {
@@ -514,8 +591,8 @@ subtest 'guest_pools: two networks cannot share an address' => sub {
     };
 
     my %one = ( cidr => ['192.0.2.0/28'] );
-    is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => {%one}, hv3 => {} ) ) }, { hv1 => \%one, hv2 => \%one }, 'two hypervisors on one network share its pool, and one with none is left out' );
-    is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { cidr => ['192.0.2.16/28'] } ) ) }, { hv1 => \%one, hv2 => { cidr => ['192.0.2.16/28'] } }, 'and two networks that do not overlap have one each' );
+    is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => {%one}, hv3 => {} ) ) }, { hv1 => { br0 => \%one }, hv2 => { br0 => \%one } }, 'two hypervisors on one network share the pool of its bridge, and one with none is left out' );
+    is_deeply( { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { cidr => ['192.0.2.16/28'] } ) ) }, { hv1 => { br0 => \%one }, hv2 => { br0 => { cidr => ['192.0.2.16/28'] } } }, 'and two networks that do not overlap have one each' );
 
     my $err = ( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => { addresses => ['192.0.2.9'] } ) ) } ) // q{};
     like( $err, qr/hv1 .* 192[.]0[.]2[.]0\/28/, 'an address inside the pool of another network is refused, naming the one block' );
@@ -523,27 +600,48 @@ subtest 'guest_pools: two networks cannot share an address' => sub {
     like( $err, qr/which[ ]overlap/,            'and saying why' );
     like(
         exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => {%one}, hv2 => {%one}, hv3 => { cidr => ['192.0.2.0/24'] } ) ) },
-        qr/pool[ ]of[ ]hv1,[ ]hv2[ ]/,
+        qr/pool[ ]of[ ]br0[ ]of[ ]hv1,[ ]br0[ ]of[ ]hv2[ ]/,
         'and a pool that holds the pool of a shared network is refused, naming every hypervisor on that network'
     );
-    like( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => { cidr => ['192.0.2.0/33'] } ) ) }, qr/Invalid[ ]CIDR .* hv1/, 'and so is a block that is not one, by its hypervisor' );
+    like( exception { Provisioner::IPPool::guest_pools( $fleet->( hv1 => { cidr => ['192.0.2.0/33'] } ) ) }, qr/Invalid[ ]CIDR .* ip_pool_br0[ ]of[ ]hv1/, 'and so is a block that is not one, by its bridge and its hypervisor' );
+
+    my $renamed = FakeFleet->new( hv1 => FakeHV->new( pools => { br0 => {%one} } ), hv2 => FakeHV->new( pools => { lan0 => {%one} } ) );
+    like( exception { Provisioner::IPPool::guest_pools($renamed) }, qr/br0[ ]of[ ]hv1 .* lan0[ ]of[ ]hv2 .* overlap/, 'and so is one pool under two names of a bridge, whose addresses the database could not place' );
+
+    my $two = FakeFleet->new( hv1 => FakeHV->new( pools => { br0 => {%one}, virbr1 => { cidr => ['192.0.2.8/29'] } } ) );
+    like( exception { Provisioner::IPPool::guest_pools($two) }, qr/br0[ ]of[ ]hv1 .* virbr1[ ]of[ ]hv1/, 'and two bridges of one hypervisor whose pools overlap' );
 };
 
-subtest 'seed: a hypervisor with no bridge is not swept' => sub {
+subtest 'seed: each bridge is swept, and each address recorded on the bridge of its pool' => sub {
     fresh_db();
 
-    # A hypervisor that will not say what bridge it is on cannot be asked what
-    # is on it, and that is not a reason to stop seeding.
-    my $recorded = seed_from(
-        { cidr => '192.0.2.32/27' },
-        undef,
-        names  => ['guest.test'],
-        guests => "guest.test\t192.0.2.40\n",
-        sweep  => "LIVE 192.0.2.43\n",
+    my $hv = FakeHV->new(
+        pools    => { br0 => { cidr => ['192.0.2.32/27'] }, virbr1 => { cidr => ['10.0.0.0/28'] } },
+        nics     => [qw{virbr1 br0}],
+        gateways => { virbr1 => '10.0.0.1', br0 => '192.0.2.62' },
+        names    => ['guest.test'],
+        guests   => "guest.test\t10.0.0.5\nguest.test\t192.0.2.40\n",
+        sweep    => q{},
     );
+    my $mock = Test::MockModule->new('Trog::Hypervisors');
+    $mock->redefine( load => sub { return FakeFleet->new( hv1 => $hv ) } );
+    Provisioner::IPPool::seed();
 
-    is( $recorded, 1, 'one row' );
-    is_deeply( Provisioner::IPPool::taken(), { '192.0.2.40' => 'guest.test' }, 'the guest, and no sweep' );
+    my @swept = map { m/neigh[ ]show[ ]dev[ ]([\w.-]+)/ ? $1 : () } @{ $hv->{asked} };
+    is_deeply( [ sort @swept ], [qw{br0 virbr1}], 'the neighbours of each bridge are asked' );
+
+    my $rows = Provisioner::IPPool::dbh()->selectall_hashref( 'SELECT ip, domain, nic, main FROM ips', 'ip' );
+    is_deeply(
+        { map { $_ => [ @{ $rows->{$_} }{qw{domain nic main}} ] } keys %$rows },
+        {
+            '10.0.0.1'   => [ 'gateway:10.0.0.1',   'virbr1', 1 ],
+            '192.0.2.62' => [ 'gateway:192.0.2.62', 'br0',    1 ],
+            '10.0.0.5'   => [ 'guest.test',         'virbr1', 1 ],
+            '192.0.2.40' => [ 'guest.test',         'br0',    0 ],
+        },
+        'each gateway and each address of the guest on the bridge of its pool, and the one on the first of static_nics is its address'
+    ) or diag explain $rows;
+    is_deeply( Provisioner::IPPool::assignments(), { 'guest.test' => '10.0.0.5' }, 'which is the one in ipmap' );
 };
 
 subtest 'a seed that could not finish is retried, not remembered' => sub {

@@ -42,27 +42,34 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 
 # A hypervisor that does not give its guests their addresses, as libvirt does
 # not, and that stops the run once the address of the guest is settled.  Its
-# pool and its gateway are what its block would name.
+# static adapters, with their pools, and its gateway are what its block would
+# name.
 {
 
     package PoolProbe::HV;
     sub configured_resolvers { return ('192.0.2.254') }
-    sub configured_gateway   { my ($self) = @_; return $self->{gateway} }
-    sub guest_pool           { my ($self) = @_; return $self->{pool} // {} }
-    sub name                 { return 'hv1' }
-    sub new                  { my ( $class, %o ) = @_; return bless {%o}, $class }
-    sub manages_addresses    { return 0 }
-    sub on_nat_network       { my ($self) = @_; return $self->{on_nat_network} }
-    sub describe             { return 'hv1' }
-    sub virbr_ip             { die "far enough\n" }
+    sub static_nics          { my ($self) = @_; return @{ $self->{nics} // [] } }
+    sub address_nic          { my ($self) = @_; return ( $self->static_nics )[0] }
+
+    sub static_pools {
+        my ($self) = @_;
+        return { map { $_ => $self->{pools}{$_} // {} } $self->static_nics };
+    }
+    sub nic_gateway       { my ($self) = @_; return $self->{gateway} }
+    sub name              { return 'hv1' }
+    sub new               { my ( $class, %o ) = @_; return bless {%o}, $class }
+    sub manages_addresses { return 0 }
+    sub on_nat_network    { my ($self) = @_; return $self->{on_nat_network} }
+    sub describe          { return 'hv1' }
+    sub virbr_ip          { die "far enough\n" }
 }
 
-# Runs the generator for vm.test.test on a hypervisor with the pool $pool and
-# the gateway $gateway, which is or is not on its NAT network, with $bins as
-# the bins of the ip_pool of _global.  $recipes is the configuration of the
-# domain, ntp alone unless it says otherwise, and $dryrun passes --dryrun.
-# Returns what it printed, what it died with, and each domain that assign was
-# asked about, with the pool it was given.
+# Runs the generator for vm.test.test on a hypervisor with the static adapters
+# $nics and their $pools, which is or is not on its NAT network, with $bins as
+# the bins of the ip_pool of _global.  Returns what it printed, what it died
+# with, and each domain that assign was asked about, with the pool it was given
+# and the bridge.  $recipes is the configuration of the domain, ntp alone
+# unless it says otherwise, and $dryrun passes --dryrun.
 sub generate (%args) {
     File::Slurper::Temp::write_text(
         $RECIPES,
@@ -85,10 +92,10 @@ sub generate (%args) {
 
     my @assigned;
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
-    $fleet->redefine( choose => sub { return PoolProbe::HV->new( on_nat_network => $args{on_nat_network}, pool => $args{pool}, gateway => exists $args{gateway} ? $args{gateway} : '192.0.2.254' ) } );
+    $fleet->redefine( choose => sub { return PoolProbe::HV->new( on_nat_network => $args{on_nat_network}, nics => $args{nics}, pools => $args{pools}, gateway => '192.0.2.254' ) } );
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( ensure_seeded => sub { return 0 } );
-    $pool->redefine( assign        => sub ( $domain, $from, @ ) { push @assigned, [ $domain, $from ]; return '192.0.2.10' } );
+    $pool->redefine( assign        => sub ( $domain, $from, $bin = undef, $nic = undef ) { push @assigned, [ $domain, $from, $nic ]; return defined $nic ? '10.0.0.10' : '192.0.2.10' } );
     $pool->redefine( assignments   => sub { return {} } );
 
     Provisioner::Cookbook->forget();
@@ -100,24 +107,28 @@ sub generate (%args) {
 }
 
 subtest 'a pool with addresses gives the guest one, as it always did' => sub {
-    my %vpn = ( vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } );
-    my ( undef, $died, $assigned ) = generate( pool => { cidr => ['192.0.2.0/24'] }, bins => \%vpn, on_nat_network => 0 );
+    my %vpn   = ( vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } );
+    my %pools = ( br0        => { cidr => ['192.0.2.0/24'] } );
+    my ( undef, $died, $assigned ) = generate( nics => ['br0'], pools => \%pools, bins => \%vpn, on_nat_network => 0 );
     like( $died, qr/\Afar[ ]enough$/m, 'got past the address, on a hypervisor whose NAT network this machine is not on' );
-    is_deeply( $assigned, [ [ 'vm.test.test', { cidr => ['192.0.2.0/24'], bins => \%vpn } ] ], 'out of the pool of its hypervisor, beside the bins of _global' );
+    is_deeply(
+        $assigned,
+        [ [ 'vm.test.test', { cidr => ['192.0.2.0/24'], nics => \%pools, first_nic => 'br0', bins => \%vpn }, undef ] ],
+        'out of the pool of its first static adapter, beside the bins of _global'
+    );
 };
 
-subtest 'a pool with no gateway is refused' => sub {
-    my ( undef, $died, $assigned ) = generate( pool => { cidr => ['192.0.2.0/24'] }, gateway => undef, on_nat_network => 0 );
-    like( $died, qr/names[ ]a[ ]pool[ ]but[ ]no[ ]gateway/, 'it says what is missing' );
-    like( $died, qr/hv1[ ]in[ ]hypervisors[.]conf/,         'and names the block' );
-    like( $died, qr/gateway[ ]=[ ]/,                        'and the line to add' );
-    is_deeply( $assigned, [], 'before the pool is asked' );
+subtest 'a guest gets an address on each of its static adapters' => sub {
+    my %pools = ( br0 => { cidr => ['192.0.2.0/24'] }, virbr1 => { cidr => ['10.0.0.0/25'] } );
+    my ( undef, $died, $assigned ) = generate( nics => [qw{br0 virbr1}], pools => \%pools, on_nat_network => 0 );
+    like( $died, qr/\Afar[ ]enough$/m, 'got past the addresses' );
+    is_deeply( [ map { $_->[2] } @$assigned ], [ undef, 'virbr1' ], 'the address of the guest, on the first, and then one on the other bridge' );
 };
 
 subtest 'a pool with no addresses leaves the guest to its lease' => sub {
-    foreach my $pool ( undef, { addresses => [], cidr => q{} } ) {
-        my $which = defined $pool ? 'a pool that names nothing' : 'no pool at all';
-        my ( $said, $died, $assigned ) = generate( pool => $pool, on_nat_network => 1 );
+    foreach my $case ( [ [], {}, 'no static adapter at all' ], [ ['br0'], { br0 => { addresses => [], cidr => q{} } }, 'a pool that names nothing' ] ) {
+        my ( $nics, $pools, $which )    = @$case;
+        my ( $said, $died,  $assigned ) = generate( nics => $nics, pools => $pools, on_nat_network => 1 );
         like( $died, qr/\Afar[ ]enough$/m, "got past the address, with $which" );
         is_deeply( $assigned, [], 'without asking the pool for one' );
         like( $said, qr/takes[ ]a[ ]lease[ ]on[ ]the[ ]NAT[ ]network[ ]of[ ]hv1/, 'and says where its address comes from' );
@@ -125,9 +136,9 @@ subtest 'a pool with no addresses leaves the guest to its lease' => sub {
 };
 
 subtest 'unless this machine could not reach that lease' => sub {
-    my ( undef, $died, $assigned ) = generate( pool => { addresses => [] }, on_nat_network => 0 );
-    like( $died, qr/this[ ]machine[ ]is[ ]not[ ]on[ ]that[ ]network/, 'it is refused before anything is built' );
-    like( $died, qr/Name[ ]pool_cidr[ ]or[ ]pool_addresses/,          'naming the fix' );
+    my ( undef, $died, $assigned ) = generate( nics => [], on_nat_network => 0 );
+    like( $died, qr/this[ ]machine[ ]is[ ]not[ ]on[ ]that[ ]network/,              'it is refused before anything is built' );
+    like( $died, qr/Name[ ]static_nics,[ ]with[ ]ip_pool_NIC[ ]and[ ]gateway_NIC/, 'naming the fix' );
     is_deeply( $assigned, [], 'and the pool was not asked' );
 };
 
@@ -139,11 +150,11 @@ subtest 'a domain whose recipes write its address is refused where it would have
     foreach my $recipe (qw{mail pdns}) {
         foreach my $dryrun ( 0, 1 ) {
             my $run = $dryrun ? 'with --dryrun' : 'without --dryrun';
-            my ( $said, $died ) = generate( pool => undef, on_nat_network => 1, recipes => { $recipe => undef }, dryrun => $dryrun );
+            my ( $said, $died ) = generate( nics => [], on_nat_network => 1, recipes => { $recipe => undef }, dryrun => $dryrun );
             my @lines = split( m/\n/, $died );
             is( $lines[0], "vm.test.test runs recipes that write the address of the guest into a record: $recipe.",                                                                   "$recipe is refused $run, naming the domain and the recipe" );
-            is( $lines[1], 'The block of hv1 in hypervisors.conf names no address pool, so vm.test.test would have only a lease on the NAT network of hv1, and no address to write.', 'and the block of the hypervisor' );
-            is( $lines[2], 'Give the block of hv1 an address pool: pool_cidr or pool_addresses, the gateway of that subnet, and bridge_device, the bridge on it.',                    'and what to give it' );
+            is( $lines[1], 'The block of hv1 in hypervisors.conf names no static adapter with an address pool, so vm.test.test would have only a lease on the NAT network of hv1, and no address to write.', 'and the block of the hypervisor' );
+            is( $lines[2], 'Give the block of hv1 a static adapter: static_nics, with ip_pool_NIC and gateway_NIC.',                    'and what to give it' );
             is( $lines[3], 'See Networks in docs/CONFIGURATION.md.  Or take those recipes off vm.test.test.',                                                                         'and where that is written down' );
             unlike( $said, qr/takes[ ]a[ ]lease/, 'before it goes on to take the lease' );
         }
@@ -151,7 +162,7 @@ subtest 'a domain whose recipes write its address is refused where it would have
 };
 
 subtest 'the same domain with an address of the pool is not refused' => sub {
-    my ( undef, $died, $assigned ) = generate( pool => { cidr => ['192.0.2.0/24'] }, on_nat_network => 0, recipes => { mail => undef } );
+    my ( undef, $died, $assigned ) = generate( nics => ['br0'], pools => { br0 => { cidr => ['192.0.2.0/24'] } }, on_nat_network => 0, recipes => { mail => undef } );
     like( $died, qr/\Afar[ ]enough$/m, 'got past the address' );
     is( scalar @$assigned, 1, 'which the pool gave it' );
 };

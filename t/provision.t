@@ -285,13 +285,13 @@ subtest 'a dry run applies nothing' => sub {
     fetchable( $loc, [] );
 
     # The parts a dry run is supposed to do, faked out so the run reaches the end.
-    $hv->redefine( virbr_device => sub { 'virbr0' } );
-    $hv->redefine( virbr_ip     => sub { '192.168.122.1' } );
-    $hv->redefine( sshd_port    => sub { 22 } );
-    $hv->redefine( guest_mac    => sub { '52:54:00:aa:bb:cc' } );
-    $hv->redefine( lease_ip     => sub { '192.168.122.50' } );
-    $hv->redefine( is_local     => sub { 1 } );
-    $hv->redefine( describe     => sub { 'the hypervisor' } );
+    $hv->redefine( lease_nic => sub { 'virbr0' } );
+    $hv->redefine( virbr_ip  => sub { '192.168.122.1' } );
+    $hv->redefine( sshd_port => sub { 22 } );
+    $hv->redefine( guest_mac => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip  => sub { '192.168.122.50' } );
+    $hv->redefine( is_local  => sub { 1 } );
+    $hv->redefine( describe  => sub { 'the hypervisor' } );
 
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
@@ -347,7 +347,8 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     $hv->redefine( pool          => sub { 1 } );
     $hv->redefine( base_image    => sub { '/bogus/pool/baseimage-qcow2' } );
     $hv->redefine( create_disk   => sub { '/bogus/pool/vm.test-qcow2' } );
-    $hv->redefine( bridge_device => sub { 'br0' } );
+    $hv->redefine( static_nics   => sub { ('br0') } );
+    $hv->redefine( lease_nic     => sub { 'virbr0' } );
     $hv->redefine( has_tpm       => sub { 0 } );
     $hv->redefine( guest_mac     => sub { '52:54:00:aa:bb:cc' } );
     $hv->redefine( lease_ip      => sub { '192.168.122.50' } );
@@ -439,7 +440,8 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     $hv->redefine( pool                   => sub { 1 } );
     $hv->redefine( base_image             => sub { '/bogus/pool/baseimage-qcow2' } );
     $hv->redefine( create_disk            => sub { '/bogus/pool/vm.test-qcow2' } );
-    $hv->redefine( bridge_device          => sub { 'br0' } );
+    $hv->redefine( static_nics            => sub { ('br0') } );
+    $hv->redefine( lease_nic              => sub { 'virbr0' } );
     $hv->redefine( has_tpm                => sub { 0 } );
     $hv->redefine( guest_mac              => sub { '52:54:00:aa:bb:cc' } );
     $hv->redefine( lease_ip               => sub { '192.168.122.98' } );
@@ -527,7 +529,8 @@ sub rebuild_answering {
     $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
     $hv->redefine( create_disk          => sub { '/bogus/pool/vm.test-qcow2' } );
     $hv->redefine( cloudinit_iso        => sub { '/bogus/pool/seed.iso' } );
-    $hv->redefine( bridge_device        => sub { 'br0' } );
+    $hv->redefine( static_nics          => sub { ('br0') } );
+    $hv->redefine( lease_nic            => sub { 'virbr0' } );
     $hv->redefine( has_tpm              => sub { 0 } );
     $hv->redefine( guest_mac            => sub { '52:54:00:aa:bb:cc' } );
     $hv->redefine( lease_ip             => sub { '192.168.122.50' } );
@@ -660,6 +663,10 @@ subtest 'a domain directory with no recipes is built as it stands' => sub {
 subtest 'the outbound adapter is found by MAC, not by name' => sub {
     my $mac = '52:54:00:AA:BB:CC';
 
+    # A hypervisor whose guests have a lease and then an address, as most do.
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( static_nics => sub { ('br0') } );
+
     # cloud-init writes the MAC it matched on, so the entry identifies itself
     # whatever the guest ended up calling it.
     my $renamed = {
@@ -701,6 +708,46 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
     like( $err, qr/enp0s9/,                                        'listing what the guest does have' );
 
     like( exception { Trog::Bin::Provisioner::primary_adapter( {}, $mac ) }, qr/No[ ]ethernets[ ]at[ ]all/, 'and a netplan with no ethernets is its own error' );
+};
+
+# A guest that answers what netplan it has, and takes a new one.
+{
+
+    package Test::NetplanGuest;
+    sub new         ( $class, $netplan )   { return bless { netplan => $netplan, put => [] }, $class }
+    sub capture_cmd ( $self, $cmd )        { push @{ $self->{asked} }, $cmd;                                                return $cmd =~ m/cat/ ? YAML::XS::Dump( $self->{netplan} ) : q{} }
+    sub put_file    ( $self, $from, $, % ) { push @{ $self->{put} },   YAML::XS::Load( File::Slurper::read_binary($from) ); return 1 }
+}
+
+subtest 'the addresses of a domain go on the adapter of the first static bridge' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    my @macs;
+    $hv->redefine( guest_mac     => sub ( $self, $domain, $index ) { push @macs, $index; return "52:54:00:00:00:0$index" } );
+    $hv->redefine( address_index => sub { 2 } );
+
+    my $netplan = { network => { ethernets => { ens5 => { match => { macaddress => '52:54:00:00:00:02' }, addresses => ['10.0.0.5/24'] }, ens3 => { match => { macaddress => '52:54:00:00:00:00' } } } } };
+    my $guest   = Test::NetplanGuest->new($netplan);
+    my $dir     = tempdir( CLEANUP => 1 );
+    mkdir "$dir/web.test";
+    my $config = { ips => '10.0.0.9' };
+    my %args   = ( guest => $guest, hv => Trog::HV->new(), domain_dir => $dir, domain => 'web.test', built_for => 'host.test' );
+
+    my $param = Test::MockModule->new('Config::Simple');
+    $param->redefine( param => sub ( $self, $key ) { return $self->{$key} // () } );
+    quietly( sub { Trog::Bin::Provisioner::merge_guest_addresses( %args, config => bless( {%$config}, 'Config::Simple' ) ) } );
+    is_deeply( \@macs,                                                [2],                              'the MAC of the adapter whose address is the address of the guest' );
+    is_deeply( $guest->{put}[0]{network}{ethernets}{ens5}{addresses}, [ '10.0.0.5/24', '10.0.0.9/24' ], 'which gets the address of the domain beside its own' );
+
+    my $none = Test::NetplanGuest->new($netplan);
+    is( Trog::Bin::Provisioner::merge_guest_addresses( %args, guest => $none, config => bless( {}, 'Config::Simple' ) ), 1, 'a domain with no address changes nothing' );
+    ok( !$none->{asked}, 'and does not ask the guest' );
+
+    $hv->redefine( address_index => sub { undef } );
+    like(
+        exception { Trog::Bin::Provisioner::merge_guest_addresses( %args, config => bless( {%$config}, 'Config::Simple' ) ) },
+        qr/names[ ]no[ ]static_nics/,
+        'and an address with no static adapter to put it on is refused'
+    );
 };
 
 # What a reprovision did, without doing any of it: which machine it connected

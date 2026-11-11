@@ -71,7 +71,8 @@ them now.  See L<Provisioner::Cookbook/declared_globals>.
 
 =item * C<[ip_pool]> stays behind, and the report names it.  It is the pool of
 the guests of a network, and the block of each hypervisor on that network names
-it now, as C<pool_addresses> and C<pool_cidr>.  See L<Trog::HV/guest_pool>.
+it now, as C<ip_pool_NIC> and C<ip_addresses_NIC> for the bridge NIC of that
+network.  See L<Trog::HV/nic_pool($nic)>.
 
 =item * C<[nameservers]> stays behind, and the report names it.  A zone that a
 pdns guest holds names only the C<ns1> of that guest.
@@ -178,7 +179,7 @@ sub move_into {
         push( @moved, "[global] $key -> _base._global.$key" );
     }
 
-    push( @dropped, '[ip_pool], which is pool_addresses and pool_cidr in the block of each hypervisor in hypervisors.conf' )
+    push( @dropped, '[ip_pool], which is ip_pool_NIC and ip_addresses_NIC, for a bridge NIC of static_nics, in the block of each hypervisor in hypervisors.conf' )
       if %{ $from->param( -block => 'ip_pool' ) // {} };
 
     push( @dropped, '[nameservers], because a zone of a pdns guest names only its own ns1' )

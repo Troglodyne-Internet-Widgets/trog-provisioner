@@ -26,6 +26,9 @@ use List::Util qw{any uniq};
 use Net::IP();
 use Provisioner::Vars();
 
+# The pool and the gateway of one static adapter, by its bridge.  See NIC_KEY.
+our $NIC_KEY = qr/\A (?:ip_pool|ip_addresses|gateway) _ (.+) \z/;
+
 =head1 NAME
 
 Trog::HV - the hypervisor we are provisioning against, whichever kind it is
@@ -232,10 +235,11 @@ at once to compare them, and only the winner becomes current.  Takes the same
 options as C<new>.  Dies where C<backend_for> or the C<build> of the backend
 dies.
 
-Also dies when the options name C<nics> and the backend does not read it.
-C<options_from_block> reads the keys of every backend, so a cloud block that
-names C<nics> would otherwise be built as if it did not, and its guests would
-get none of the adapters that it asks for.
+Also dies when the options name the adapters of a guest, C<dhcp_nics>,
+C<static_nics> or a key of L</NIC_KEY>, and the backend does not read
+C<static_nics>.  C<options_from_block> reads the keys of every backend, so a
+cloud block that names them would otherwise be built as if it did not, and its
+guests would get none of the adapters or addresses that it asks for.
 
 =cut
 
@@ -247,9 +251,10 @@ sub candidate {
     # Called on a backend class, use that backend.  Called on this class, choose one.
     my $backend = $class eq __PACKAGE__ ? $class->backend_for(%given) : $class;
 
-    my %reads = $backend->config_keys;
-    die 'nics for ' . ( $given{name} // $backend->marker_key ) . " names the adapters of a guest on bridges of the hypervisor, and $backend gives its guests the adapters of its service.  Remove nics from the block.\n"
-      if $given{nics} && !$reads{nics};
+    my %reads    = $backend->config_keys;
+    my @nic_keys = sort grep { $_ eq 'dhcp_nics' || $_ eq 'static_nics' || m/$NIC_KEY/ } keys %given;
+    die join( ', ', @nic_keys ) . ' for ' . ( $given{name} // $backend->marker_key ) . " name the adapters of a guest on bridges of the hypervisor, and their addresses, and $backend gives its guests the adapters and the addresses of its service.  Remove them from the block.\n"
+      if @nic_keys && !$reads{static_nics};
 
     return $backend->build(%given);
 }
@@ -366,8 +371,24 @@ which backend it describes.  So all keys must be read before that decision.
 Each backend names its own keys in C<config_keys>.  This class reads the
 placement limits, because placement belongs to this class, and C<transfer_ip>
 and C<transfer_port>, because every kind of hypervisor has guests that fetch
-from us.  It reads C<network>, C<resolvers>, C<gateway>, C<pool_cidr> and
-C<pool_addresses>, because what a guest can reach depends on where it is.
+from us.  It reads C<network> and C<resolvers>, because what a guest can reach
+depends on where it is, and each key of L</NIC_KEY>, because the pool and the
+gateway of each static adapter of a guest are on the network of its bridge.
+
+=head2 NIC_KEY
+
+The keys of a block that name the pool and the gateway of one static adapter of
+a guest: C<ip_pool_NIC>, C<ip_addresses_NIC> and C<gateway_NIC>, where NIC is
+the bridge of the adapter in C<static_nics>.  See L</nic_pool($nic)> and
+L</nic_gateway($nic)>.
+
+=head2 @keys = Trog::HV->replaced_keys($block)
+
+The keys of C<$block>, a block of F<hypervisors.conf> or the settings of
+F<provision.conf>, that name the adapters and the pool of a guest in the way
+that C<dhcp_nics> and C<static_nics> replaced, each with what replaced it, as
+pairs.  Empty for a block that names none.  L<Trog::Hypervisors> refuses a block
+that has one, and so does C<from_config>.
 
 =cut
 
@@ -376,10 +397,24 @@ my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_over
 # Where a guest of this hypervisor reaches us, which is any backend's question.
 my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
-# The network of the guests of this hypervisor: what they reach, and the
-# addresses and route they get there.  See network, configured_resolvers,
-# configured_gateway and guest_pool.
-my @NETWORK_KEYS = qw{network resolvers gateway pool_cidr pool_addresses};
+# The network of the guests of this hypervisor, and what they reach.  See
+# network and configured_resolvers.
+my @NETWORK_KEYS = qw{network resolvers};
+
+# What took the place of each key of the two adapters that a guest used to
+# have.  See replaced_keys.
+my %REPLACED = (
+    virbr_device   => 'dhcp_nics, whose first bridge takes the lease',
+    bridge_device  => 'static_nics',
+    nics           => 'dhcp_nics and static_nics',
+    gateway        => 'gateway_NIC, for the bridge NIC of static_nics',
+    pool_cidr      => 'ip_pool_NIC, for the bridge NIC of static_nics',
+    pool_addresses => 'ip_addresses_NIC, for the bridge NIC of static_nics',
+);
+
+sub replaced_keys ( $, $block ) {
+    return map { $_ => $REPLACED{$_} } sort grep { defined $block->{$_} } keys %REPLACED;
+}
 
 sub options_from_block {
     my ( $class, $block ) = @_;
@@ -393,7 +428,7 @@ sub options_from_block {
         }
     }
 
-    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS, @NETWORK_KEYS;
+    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS, @NETWORK_KEYS, grep { m/$NIC_KEY/ } keys %$block;
 
     return %opts;
 }
@@ -407,7 +442,8 @@ still answers for it.  A false C<$config> is allowed, and means that every value
 takes its default.
 
 It reads every key that a backend names in C<config_keys>: C<libvirt_uri> for
-C<uri>, and the rest under their own names.
+C<uri>, and the rest under their own names, and each key of L</NIC_KEY>.  Dies
+on a key of C<replaced_keys>, with what to name instead.
 
 =cut
 
@@ -418,7 +454,25 @@ sub from_config {
     # which backend it describes.
     my %key = map { $_->config_keys } $class->backends;
 
+    my %said     = map { $_ => $class->config_value( $config, $_ ) } $class->config_keys_of($config);
+    my %replaced = $class->replaced_keys( \%said );
+    die 'The configuration names ' . join( ', ', map { "$_, which is now $replaced{$_}" } sort keys %replaced ) . ".  See The adapters of a guest in docs/CONFIGURATION.md.\n" if %replaced;
+
+    $key{$_} = $_ for grep { m/$NIC_KEY/ } keys %said;
     return $class->new( map { $_ => ( $override{$_} || $class->config_value( $config, $key{$_} ) ) } keys %key );
+}
+
+=head2 @keys = Trog::HV->config_keys_of($config)
+
+The names of the keys that C<$config> sets, a L<Config::Simple> object of a
+file with no blocks or a plain hashref.  Empty for no configuration.
+
+=cut
+
+sub config_keys_of ( $, $config ) {
+    return () unless $config;
+    return keys %$config if ref $config eq 'HASH';
+    return map { s/\A default [.]//r } keys %{ $config->vars };
 }
 
 =head2 config_value($config, $key)
@@ -554,45 +608,71 @@ sub configured_resolvers ($self) {
     return @resolvers;
 }
 
-=head2 configured_gateway
+=head2 static_nics
 
-The default route of a guest of this hypervisor that has an address from
-C<guest_pool>, from C<gateway> in its block of F<hypervisors.conf>, or undef
-when the block names none.  A guest that a cloud addresses gets its route from
-the cloud, so a block for a cloud names none.  Dies on a value that is not an
-IPv4 address.
+The bridges of the static adapters of a guest of this hypervisor, from
+C<static_nics> in its block of F<hypervisors.conf>, in order.  Each one gets an
+address from its own pool, see C<nic_pool>.  The first one gets the address of
+the guest, the one in C<ipmap>, its records and its default route.  Empty for a
+block that names none, and for every hypervisor of a service, which gives its
+guests their addresses.
 
-=cut
+=head2 address_nic
 
-sub configured_gateway ($self) {
-    my $gateway = $self->setting('gateway') // return;
-    my $ip      = Net::IP->new($gateway);
-    die "gateway for " . ( $self->name // $self->describe ) . " is '$gateway', which is not an IPv4 address\n"
-      unless $ip && $ip->version == 4 && $ip->size == 1;
-    return $gateway;
-}
-
-=head2 guest_pool
-
-The addresses that the guests of this hypervisor get, on the subnet of its
-bridge, as the bin named C<guests> of L<Provisioner::IPPool/BINS>: a hash
-reference with C<cidr> from C<pool_cidr> and C<addresses> from
-C<pool_addresses> in its block of F<hypervisors.conf>, each a list.  A key the
-block does not name is left out, so the hash is empty for a block that names
-neither.  The block separates the items with commas or spaces.
-
-Hypervisors on one network name the same pool, and share its addresses in
-F<ips.db>.
+The first of C<static_nics>, whose address is the address of the guest, or
+undef when there is none.
 
 =cut
 
-sub guest_pool ($self) {
+sub static_nics ($self) { return $self->setting_list('static_nics') }
+sub address_nic ($self) { return ( $self->static_nics )[0] }
+
+=head2 nic_pool($nic)
+
+The addresses that a static adapter on the bridge C<$nic> gets, as a bin of
+L<Provisioner::IPPool/BINS>: a hash reference with C<cidr> from C<ip_pool_NIC>
+and C<addresses> from C<ip_addresses_NIC> in the block of this hypervisor, each
+a list.  A key that the block does not name is left out.
+
+Two blocks that name the same pool for the same bridge share its addresses in
+F<ips.db>.  See L<Provisioner::IPPool/guest_pools>.
+
+=head2 static_pools
+
+The pool of each of C<static_nics>, as a hash reference of the bridge to what
+C<nic_pool> gives.
+
+=cut
+
+sub nic_pool ( $self, $nic ) {
     my %pool;
-    foreach my $key (qw{cidr addresses}) {
-        my @items = $self->setting_list("pool_$key");
-        $pool{$key} = \@items if @items;
+    my %key = ( cidr => "ip_pool_$nic", addresses => "ip_addresses_$nic" );
+    foreach my $part ( sort keys %key ) {
+        my @items = $self->setting_list( $key{$part} );
+        $pool{$part} = \@items if @items;
     }
     return \%pool;
+}
+
+sub static_pools ($self) {
+    return { map { $_ => $self->nic_pool($_) } $self->static_nics };
+}
+
+=head2 nic_gateway($nic)
+
+The gateway of the subnet of the static adapter on the bridge C<$nic>, from
+C<gateway_NIC> in the block of this hypervisor, or undef when the block names
+none.  The first of C<static_nics> routes everything through it.  Dies on a
+value that is not an IPv4 address.
+
+=cut
+
+sub nic_gateway ( $self, $nic ) {
+    my $gateway = $self->setting("gateway_$nic") // return;
+    my $ip      = Net::IP->new($gateway);
+    die "gateway_$nic for " . ( $self->name // $self->describe ) . " is '$gateway', which is not an IPv4 address\n"
+      unless $ip && $ip->version == 4 && $ip->size == 1;
+    return $gateway;
 }
 
 sub configured_transfer_port ($self) {

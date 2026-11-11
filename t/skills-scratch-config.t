@@ -283,8 +283,9 @@ subtest 'a hypervisor that needs a credential is left out, unless it is kept' =>
 [local]
 libvirt_uri = qemu+ssh://somebody@local.test.test/system
 resolvers   = 192.0.2.254
-gateway     = 192.0.2.254
-pool_cidr   = 192.0.2.0/26
+static_nics = br0
+gateway_br0 = 192.0.2.254
+ip_pool_br0 = 192.0.2.0/26
 
 [node1]
 solusvm       = node.test.test
@@ -306,8 +307,8 @@ CONF
     is_deeply( [ $fleet->secret_references ], [],                'and the scratch fleet names no secret' );
 
     my $local = Trog::Hypervisors->load("$dir/hypervisors.conf")->hypervisor('local');
-    is( $local->configured_gateway, '192.0.2.254', 'a scratch guest reaches the network the same way' );
-    is_deeply( $local->guest_pool, { cidr => ['192.0.2.0/26'] }, 'and draws from the same pool, so it cannot take an address a real guest has' );
+    is( $local->nic_gateway('br0'), '192.0.2.254', 'a scratch guest reaches the network the same way' );
+    is_deeply( $local->nic_pool('br0'), { cidr => ['192.0.2.0/26'] }, 'and draws from the same pool, so it cannot take an address a real guest has' );
     ok( !-e "$source/secrets.kdbx", 'the installation has no store here, so nothing could have opened one' );
 };
 

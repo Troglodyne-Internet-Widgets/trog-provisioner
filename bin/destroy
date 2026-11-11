@@ -269,7 +269,7 @@ sub main {
 =head2 release_ip($domain, $dryrun)
 
 Give the static addresses of the domain back to the pool, one in each bin
-that it holds one in.  Returns 1 if it released an address, and 0 if the domain
+that it holds one in, and in the C<guests> bin one on each bridge.  Returns 1 if it released an address, and 0 if the domain
 had none or C<$dryrun> is true.
 
 Only destroy releases an address.  C<bin/provision> keeps the address that the
@@ -282,12 +282,19 @@ sub release_ip {
     my ( $domain, $dryrun ) = @_;
 
     my $held = Provisioner::IPPool::holdings($domain);
-    unless (%$held) {
+    my $nics = Provisioner::IPPool::nic_holdings($domain);
+    my %on   = reverse %$nics;
+    my %main = map { $_ => 1 } values %$held;
+    my @all  = (
+        ( map { my $ip = $held->{$_}; "$ip ($_" . ( $on{$ip} ? " on $on{$ip}" : q{} ) . ')' } sort keys %$held ),
+        ( map { "$nics->{$_} ($Provisioner::IPPool::GUESTS on $_)" } grep { !$main{ $nics->{$_} } } sort keys %$nics ),
+    );
+    unless (@all) {
         print "No address was assigned to $domain\n";
         return 0;
     }
 
-    my $said = join ', ', map { "$held->{$_} ($_)" } sort keys %$held;
+    my $said = join ', ', @all;
     if ($dryrun) {
         print "[DRY RUN] Would return $said to the pool\n";
         return 0;

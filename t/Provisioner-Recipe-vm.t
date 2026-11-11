@@ -51,6 +51,10 @@ use Trog::HV();
 use Trog::HV::Libvirt();
 use Provisioner::Cookbook();
 
+# The adapters of a guest on most hypervisors: a lease on the NAT bridge, and an
+# address from the pool on the bridge of the LAN.
+my %TWO_ADAPTERS = ( dhcp_nics => 'virbr0', static_nics => 'br0', ip_pool_br0 => '192.0.2.0/28', gateway_br0 => '192.0.2.1' );
+
 # What bin/provision does with the recipe, in one call: make the storage the XML
 # is going to name, then generate the files.  Reads back what was written rather
 # than what was returned, because the file is what libvirt is handed.
@@ -102,12 +106,11 @@ subtest 'the seed is built from all three NoCloud files' => sub {
 
     my %got;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( bridge_device => sub { 'br0' } );
-    $hv_mock->redefine( has_tpm       => sub { 0 } );
-    $hv_mock->redefine( pool          => sub { 1 } );
-    $hv_mock->redefine( base_image    => sub { '/pool/baseimage-qcow2' } );
-    $hv_mock->redefine( create_disk   => sub { '/pool/vm.example.test-qcow2' } );
-    $hv_mock->redefine( domain_dir    => sub { $_[0]->{domain_dir} } );
+    $hv_mock->redefine( has_tpm     => sub { 0 } );
+    $hv_mock->redefine( pool        => sub { 1 } );
+    $hv_mock->redefine( base_image  => sub { '/pool/baseimage-qcow2' } );
+    $hv_mock->redefine( create_disk => sub { '/pool/vm.example.test-qcow2' } );
+    $hv_mock->redefine( domain_dir  => sub { $_[0]->{domain_dir} } );
 
     # An unanswerable hypervisor is the untuned case: every disk knob is gated
     # on a version, and a version we could not ask for reads as "assume not".
@@ -128,7 +131,7 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     mkdir "$dir/vm.example.test";
     Trog::HV->forget();
-    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir, %TWO_ADAPTERS );
 
     my %seed = (
         'user-data'      => "#cloud-config\n",
@@ -190,7 +193,6 @@ sub tuned_xml {
     );
 
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( bridge_device        => sub { $opts{hv}{bridge_device} // 'br0' } );
     $hv_mock->redefine( has_tpm              => sub { 0 } );
     $hv_mock->redefine( pool                 => sub { 1 } );
     $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
@@ -208,7 +210,7 @@ sub tuned_xml {
     Trog::HV->new(
         uri        => $opts{uri} // 'qemu+ssh://root@hv/system',
         domain_dir => $dir,
-        %{ $opts{hv} // {} },
+        %{ $opts{hv} // \%TWO_ADAPTERS },
     );
 
     my %seed = (
@@ -259,7 +261,6 @@ subtest 'a rebuild that keeps its disk writes the uuid libvirt already gave it' 
     );
 
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( bridge_device        => sub { 'br0' } );
     $hv_mock->redefine( has_tpm              => sub { 0 } );
     $hv_mock->redefine( pool                 => sub { 1 } );
     $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
@@ -274,7 +275,7 @@ subtest 'a rebuild that keeps its disk writes the uuid libvirt already gave it' 
     my $dir = tempdir( CLEANUP => 1 );
     mkdir "$dir/vm.example.test";
     Trog::HV->forget();
-    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir, %TWO_ADAPTERS );
 
     my %seed = (
         'user-data'      => "#cloud-config\n",
@@ -463,14 +464,14 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
     my $confined = tuned_xml(
         libvirt => libvirt( 10, 0, 0 ),
         qemu    => libvirt( 9,  0, 0 ),
-        hv      => { partition => '/machine/runner', pool_name => 'runner_disks' },
+        hv      => { %TWO_ADAPTERS, partition => '/machine/runner', pool_name => 'runner_disks' },
     );
     like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );                                                       ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $confined, qr/<source[ ]pool='runner_disks'/,                                     'out of the pool it was given, rather than the literal that used to be here' );
 };
 
 subtest 'a guest of a session joins the NAT bridge, and asks for nothing the session cannot give' => sub {
-    my %session = ( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), uri => 'qemu+ssh://runner@hv/session', hv => { virbr_device => 'virbr0' } );
+    my %session = ( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), uri => 'qemu+ssh://runner@hv/session', hv => \%TWO_ADAPTERS );
 
     my $xml = tuned_xml(%session);
     like( $xml, qr{<interface[ ]type='bridge'>\s*<mac[ ]address='[^']+'/>\s*<source[ ]bridge='virbr0'/>}, 'the NAT interface is on the bridge of the network, through the bridge helper' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
@@ -555,11 +556,11 @@ sub interfaces ($xml) {
 
 sub mac_of ($index) { return Trog::HV::Libvirt->guest_mac( 'vm.example.test', $index ) }
 
-# What master rendered for these two guests before nics existed, byte for byte.
-# A block without nics has to keep getting exactly this, or every guest built
-# on it changes on its next rebuild.
+# What master rendered for these two guests before dhcp_nics and static_nics,
+# from a block with virbr0 and br0, byte for byte.  A block with one bridge in
+# each list gives its guests exactly this, so a guest whose block moves to the
+# new keys does not change on its next rebuild.
 my $ADAPTERS_OF_THE_SYSTEM = <<'XML';
-         rename above is what settles the name. -->
     <interface type='network'>
       <mac address='52:54:00:cb:96:28'/>
       <source network='default'/>
@@ -572,12 +573,9 @@ my $ADAPTERS_OF_THE_SYSTEM = <<'XML';
       <model type='virtio'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
     </interface>
-
-    <!-- Cloud images expect a console, and do not boot cleanly without one:
 XML
 
 my $ADAPTERS_OF_A_SESSION = <<'XML';
-         rename above is what settles the name. -->
     <interface type='bridge'>
       <mac address='52:54:00:cb:96:28'/>
       <source bridge='virbr0'/>
@@ -588,42 +586,38 @@ my $ADAPTERS_OF_A_SESSION = <<'XML';
       <source bridge='br0'/>
       <model type='virtio'/>
     </interface>
-
-    <!-- Cloud images expect a console, and do not boot cleanly without one:
 XML
 
-subtest 'a block without nics gives the two adapters that it always gave' => sub {
-    my $from    = qr/\N*rename[ ]above[ ]is[ ]what[ ]settles/;
-    my $to      = qr/Cloud[ ]images[ ]expect\N*\n/;
-    my $between = sub ($xml) { return $xml =~ m{($from.*?$to)} ? $1 : $xml };
+subtest 'one bridge in each list gives the two adapters that a guest always had' => sub {
+    my $between = sub ($xml) { return join( q{}, $xml =~ m{(\N*<interface\b.*?</interface>\n)}g ) };
 
     my $system = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { machine => 'pc' } );
-    is( $between->($system), $ADAPTERS_OF_THE_SYSTEM, 'on the system URI, the same text as before nics' );
+    is( $between->($system), $ADAPTERS_OF_THE_SYSTEM, 'on the system URI, the same text as before' );
 
-    my $session = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), uri => 'qemu+ssh://runner@hv/session', hv => { virbr_device => 'virbr0' } );
+    my $session = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), uri => 'qemu+ssh://runner@hv/session', hv => \%TWO_ADAPTERS );
     is( $between->($session), $ADAPTERS_OF_A_SESSION, 'and on a session' );
 };
 
-subtest 'nics gives the guest an adapter on each bridge, in its order' => sub {
+subtest 'a guest has an adapter on each bridge, dhcp_nics and then static_nics' => sub {
     my %versions = ( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ) );
 
     my $system = tuned_xml(
         %versions,
-        config => { machine      => 'pc' },
-        hv     => { virbr_device => 'virbr0', bridge_device => 'br0', nics => 'br0, virbr0, virbr1' },
+        config => { machine   => 'pc' },
+        hv     => { dhcp_nics => 'virbr0 virbr2', static_nics => 'virbr1 br0', ip_pool_virbr1 => '10.0.0.0/25', gateway_virbr1 => '10.0.0.1', ip_pool_br0 => '192.0.2.0/28' },
     );
     is_deeply(
         [ interfaces($system) ],
-        [ [ 'bridge', mac_of(1), 'br0', '0x03' ], [ 'network', mac_of(0), 'default', '0x04' ], [ 'bridge', mac_of(2), 'virbr1', '0x05' ] ],
-        'the slots follow the order of nics, and the MACs the index, so the NAT one keeps its lease and the bridged one its address'
+        [ [ 'network', mac_of(0), 'default', '0x03' ], [ 'bridge', mac_of(1), 'virbr2', '0x04' ], [ 'bridge', mac_of(2), 'virbr1', '0x05' ], [ 'bridge', mac_of(3), 'br0', '0x06' ] ],
+        'in that order, the first on the default network, and the MAC and the slot of each from its place'
     ) or diag explain [ interfaces($system) ];
 
-    # The block of the case that nics is for: an installation whose guests
-    # build in a session, and get their addresses on a network of their own.
+    # An installation whose guests build in a session, and get their
+    # addresses on a network of their own.
     my $session = tuned_xml(
         %versions,
         uri => 'qemu+ssh://runner@hv/session',
-        hv  => { virbr_device => 'virbr0', bridge_device => 'virbr1', nics => [qw{virbr0 virbr1}] },
+        hv  => { dhcp_nics => ['virbr0'], static_nics => ['virbr1'], ip_pool_virbr1 => '10.0.0.0/25', gateway_virbr1 => '10.0.0.1' },
     );
     is_deeply(
         [ interfaces($session) ],
@@ -637,7 +631,7 @@ subtest 'nics gives the guest an adapter on each bridge, in its order' => sub {
         my $file = tempdir( CLEANUP => 1 ) . '/domain.xml';
         File::Slurper::Temp::write_text( $file, $system );
         IPC::Run3::run3( [ $validate, $file, 'domain' ], \undef, \my $out, \my $err );
-        is( $? >> 8, 0, 'the schema of libvirt takes the domain with three adapters' ) or diag $out, $err;
+        is( $? >> 8, 0, 'the schema of libvirt takes the domain with four adapters' ) or diag $out, $err;
     }
 };
 

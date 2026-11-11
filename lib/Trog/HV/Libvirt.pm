@@ -117,7 +117,7 @@ sub client_module { return 'Sys::Virt' }
 sub config_keys {
     return (
         uri => 'libvirt_uri',
-        map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device nics partition max_memory},
+        map { $_ => $_ } qw{pool_path pool_name domain_dir dhcp_nics static_nics partition max_memory},
     );
 }
 
@@ -131,8 +131,8 @@ changes.
 
 Dies if the URI does not parse.  Also dies if the hypervisor is remote and the
 transport gives no shell, because files and bridge detection need one.  Also
-dies if it gets a L</max_memory> and no L</partition>, and if L</nics> is not a
-list of bridges that the guest can have.
+dies if it gets a L</max_memory> and no L</partition>, and if the adapters of
+the block are not ones that a guest can have: see L</ADAPTERS>.
 
 =cut
 
@@ -181,26 +181,38 @@ sub build {
     die "The hypervisor at $uri is remote, but its transport gives us no shell.\n" . "Use an ssh transport instead, e.g. qemu+ssh://root\@" . ( $self->{host} // 'hypervisor' ) . "/system, so we can reach its filesystem.\n"
       if !$self->is_local && !defined $self->ssh_host;
 
-    # A list of every adapter is checked here, against the two bridges that
-    # every guest has, because nothing probes for it later.  See nics.
-    my $who  = $given{name} // $uri;
-    my @nics = $self->setting_list('nics');
-    if (@nics) {
-        my ($bad) = grep { !m/$LINK_NAME/ } @nics;
-        die "nics for $who names '$bad', which is not the name of a bridge\n" if defined $bad;
+    # The adapters of the block, and the pool and the gateway of each static
+    # one, are checked here, because a list of bridges cannot be probed for
+    # later.  See ADAPTERS.
+    my $who    = $given{name} // $uri;
+    my @dhcp   = $self->setting_list('dhcp_nics');
+    my @static = $self->setting_list('static_nics');
 
-        my %seen;
-        my ($twice) = grep { $seen{$_}++ } @nics;
-        die "nics for $who names $twice twice, and a guest has one adapter on each bridge\n" if defined $twice;
+    my ($bad) = grep { !m/$LINK_NAME/ } @dhcp, @static;
+    die "The adapters of $who name '$bad', which is not the name of a bridge\n" if defined $bad;
 
-        foreach my $key (qw{virbr_device bridge_device}) {
-            my $bridge = $self->{$key};
-            die "nics for $who is a list of every adapter of a guest, so the block must name $key as well, and nics must name it\n" unless defined $bridge;
-            die "nics for $who does not name $bridge, which is the $key of the block\n"                                             unless $seen{$bridge};
-        }
-        die "virbr_device and bridge_device for $who are both $self->{virbr_device}, and with nics they name two adapters\n"
-          if $self->{virbr_device} eq $self->{bridge_device};
+    my %seen;
+    my ($twice) = grep { $seen{$_}++ } @dhcp, @static;
+    die "The adapters of $who name $twice twice, and a guest has one adapter on each bridge\n" if defined $twice;
+
+    my %static = map { $_ => 1 } @static;
+    foreach my $key ( sort grep { m/$Trog::HV::NIC_KEY/ } keys %$self ) {
+        my ($nic) = $key =~ m/$Trog::HV::NIC_KEY/;
+        die "$key for $who is for the bridge $nic, which static_nics does not name.  A pool and a gateway are for a static adapter, and a guest has no adapter outside dhcp_nics and static_nics.\n"
+          unless $static{$nic};
     }
+
+    foreach my $nic (@static) {
+        my $pool = $self->nic_pool($nic);
+        die "$nic in static_nics for $who has no pool.  Name ip_pool_$nic, or ip_addresses_$nic, with the addresses that its adapter takes.\n" unless %$pool;
+        foreach my $item ( map { @{ $pool->{$_} // [] } } qw{cidr addresses} ) {
+            my $ip = Net::IP->new($item);
+            die "The pool of $nic for $who names '$item', which is not an IPv4 address or block\n" unless $ip && $ip->version == 4;
+        }
+        $self->nic_gateway($nic);
+    }
+    die "$static[0], the first of static_nics for $who, gives the guest its address and its default route, so name its gateway: gateway_$static[0]\n"
+      if @static && !defined $self->nic_gateway( $static[0] );
 
     return $self;
 }
@@ -236,7 +248,7 @@ narrow.  See L</RUNNER ACCOUNTS>.  It changes four things here:
 =over 4
 
 =item * The NAT interface of a guest is a C<bridge> interface on
-L</virbr_device>, through C<qemu-bridge-helper>, because a session cannot use
+L</lease_nic>, through C<qemu-bridge-helper>, because a session cannot use
 a network of the system daemon.
 
 =item * The leases of the NAT network come from a read-only connection to the
@@ -800,7 +812,7 @@ sub lease_ips {
 =head2 release_dhcp_lease($ip, $bridge)
 
 Removes a stale lease, so that the lease table does not fill up.  C<$bridge>
-defaults to L</virbr_device>.  Returns 1 if the release worked.  Returns 0 if
+defaults to L</lease_nic>.  Returns 1 if the release worked.  Returns 0 if
 it failed, if C<$ip> is empty, or if there is no lease helper.
 
 This is the only libvirt operation that runs a command.  libvirt gives DHCP
@@ -812,7 +824,7 @@ this runs the libvirt lease helper on the hypervisor, as root.
 sub release_dhcp_lease {
     my ( $self, $ip, $bridge ) = @_;
     return 0 unless $ip;
-    $bridge //= $self->virbr_device;
+    $bridge //= $self->lease_nic;
 
     my $helper = $self->lease_helper;
     unless ($helper) {
@@ -1202,6 +1214,48 @@ sub define_domain {
     return $domain;
 }
 
+=head1 ADAPTERS
+
+A block of F<hypervisors.conf> names the bridges of the adapters of a guest in
+two lists:
+
+    dhcp_nics       = virbr0
+    static_nics     = virbr1, br0
+    ip_pool_virbr1  = 10.0.0.0/25
+    gateway_virbr1  = 10.0.0.1
+    ip_pool_br0     = 192.0.2.64/26
+
+=over 4
+
+=item C<dhcp_nics>
+
+Each adapter takes a lease.  The first one takes the lease that this machine
+finds the guest by, as L</lease_nic> says.  Its default is the bridge of the
+C<default> network.
+
+=item C<static_nics>
+
+Each adapter gets an address from its own pool, C<ip_pool_NIC> or
+C<ip_addresses_NIC>.  See L<Trog::HV/nic_pool($nic)>.  The first one gets the
+address of the guest, the one in C<ipmap> and in its records, and the only
+default route, through C<gateway_NIC>.  The others get only their own subnet.
+The default is none.
+
+=back
+
+The adapters are in the domain in that order, C<dhcp_nics> and then
+C<static_nics>, and the place of each one is its I<index>, from 0.  The index
+decides its MAC, L</guest_mac($domain, $index)>, its PCI slot, L</nic_slots>,
+and its name, L</nic_names>.  So the adapter of the lease is always index 0,
+and a block with one bridge in each list gives its guests the MACs, slots and
+names that the two adapters of a guest always had.
+
+C<build> dies when a list names something that is not a bridge, when a bridge
+is named twice, when a static adapter has no pool, when the first has no
+gateway, and when a pool or a gateway is for a bridge that C<static_nics> does
+not name.  L<Trog::Hypervisors> refuses a block that still names the keys that
+these replaced: see L<Trog::HV/replaced_keys>.
+
 =head1 GUEST IDENTITY
 
 =head2 guest_mac($domain, $index)
@@ -1218,53 +1272,28 @@ C<52:54:00> is the QEMU/KVM prefix.  The other three bytes come from a digest of
 the domain and the interface index.  Two guests can get the same MAC, but that
 becomes likely only with a few thousand guests.
 
-=head2 nics
+=head2 dhcp_nics
 
-The adapters of a guest, from C<nics> in the block of F<hypervisors.conf>: one
-bridge of the hypervisor for each adapter, in the order of the adapters in the
-domain.  The block separates them with commas or spaces.  Without C<nics>, a
-guest has two adapters, on L</virbr_device> and then on L</bridge_device>, as it
-always had.
-
-Each adapter has an I<index>, which is not its place in C<nics>.  The adapter
-on L</virbr_device> is 0, and the one on L</bridge_device> is 1.  The rest are
-2 and up, in the order of C<nics>.  The index is what L</guest_mac($domain, $index)>,
-L</nic_slots>, L</nic_names> and L</nic_bridges> go by.  So adapter 0 is always
-the one whose lease L</lease_ip($network, %opts)> reads, and adapter 1 always the one that gets
-the addresses of the guest from the pool, whatever the order of C<nics>.  The
-order in C<nics> decides only where each adapter is on the bus of the guest,
-and so the name that the kernel would give it.
-
-With C<nics>, the block must name L</virbr_device> and L</bridge_device>, and
-C<nics> must name both, because there is nothing to probe a list against.  Each
-entry is a name that the kernel takes for a link, and no bridge is named twice.
-C<build> dies on a list that breaks any of that.
-
-The network configuration of the guest gives adapter 0 a lease, adapter 1 the
-addresses of the guest, or none when it has none, and the others no address.
-See F<templates/ubuntu/files/ubuntu.network-config.tt>.
-
-=head2 nic_order
-
-The indexes of the adapters, in the order of the adapters in the domain.  C<(0,
-1)> without L</nics>.
-
-=head2 extra_nics
-
-The bridges of the adapters from index 2 up, in their order: every bridge of
-L</nics> but L</virbr_device> and L</bridge_device>.  Empty without C<nics>.
+The bridges of the adapters of a guest that take a lease, from C<dhcp_nics> in
+the block of F<hypervisors.conf>, in order.  The first one takes the lease that
+this machine reaches the guest by: see L</lease_nic>.  Without C<dhcp_nics>, it
+is L</lease_nic> alone.
 
 =head2 nic_bridges
 
-The bridge of each adapter, by index.  It asks for L</virbr_device> and
-L</bridge_device>, so it probes the hypervisor for one that the configuration
-does not name.
+The bridge of each adapter of a guest, by index: C<dhcp_nics>, then
+C<static_nics>.  See L</ADAPTERS>.
+
+=head2 address_index
+
+The index of the adapter whose address is the address of the guest, the first
+of C<static_nics>, or undef when the block names none.  L</guest_mac($domain,
+$index)> of it is the MAC that the network configuration of the guest matches
+for that address.
 
 =head2 nic_slots
 
-The PCI slots of the adapters, by index.  The first adapter in the domain is in
-slot 3, the next one in slot 4, and so on.  So without L</nics>, they are 3 and
-4.  systemd names a PCI NIC after its hotplug slot.  So fixed slots keep the
+The PCI slots of the adapters, by index: 3, 4, and so on.  systemd names a PCI NIC after its hotplug slot.  So fixed slots keep the
 names the same when the device list changes.
 
 =head2 nic_prefix
@@ -1280,7 +1309,7 @@ overrides this.
 
 =head2 nic_names
 
-The names that the adapters of a guest get, by index, so NAT first.
+The names that the adapters of a guest get, by index.
 
 This is a prediction.  cloud-init finds each interface by its MAC, which we
 choose, and gives it the name in the configuration.  So each interface gets the
@@ -1301,27 +1330,27 @@ sub guest_mac {
 # host bridge, the ISA bridge and the VGA card.
 my $FIRST_NIC_SLOT = 3;
 
-sub nic_order ($self) {
-    my @nics = $self->setting_list('nics') or return ( 0, 1 );
-
-    my %index = ( $self->{virbr_device} => 0, $self->{bridge_device} => 1 );
-    my $next  = 2;
-    return map { $index{$_} // $next++ } @nics;
+sub dhcp_nics ($self) {
+    my @nics = $self->setting_list('dhcp_nics');
+    return @nics ? @nics : $self->lease_nic;
 }
 
-sub extra_nics ($self) {
-    my %primary = map { $_ => 1 } grep { defined } @{$self}{qw{virbr_device bridge_device}};
-    return grep { !$primary{$_} } $self->setting_list('nics');
-}
+sub nic_bridges ($self) { return ( $self->dhcp_nics, $self->static_nics ) }
 
-sub nic_bridges ($self) { return ( $self->virbr_device, $self->bridge_device, $self->extra_nics ) }
+# How many adapters take a lease, without asking the hypervisor: those of
+# dhcp_nics, or the one of lease_nic.
+my sub dhcp_count ($self) {
+    my @nics = $self->setting_list('dhcp_nics');
+    return @nics || 1;
+}
 
 sub nic_slots ($self) {
-    my @order = $self->nic_order;
-    my @slots;
-    $slots[ $order[$_] ] = $FIRST_NIC_SLOT + $_ for 0 .. $#order;
-    return @slots;
+    my @static = $self->static_nics;
+    my $count  = dhcp_count($self) + @static;
+    return map { $FIRST_NIC_SLOT + $_ } 0 .. $count - 1;
 }
+
+sub address_index ($self) { return defined $self->address_nic ? dhcp_count($self) : undef }
 
 sub nic_prefix { return 'ens' }
 
@@ -2010,58 +2039,39 @@ sub disk_snapshot_names {
     return map { ( split q{ }, $_ )[1] } grep { m/\A \s* \d+ \s+ \S/ } split m/\n/, $said;
 }
 
-=head2 bridge_device
+=head2 lease_nic
 
-The outbound bridge for the public interface of a guest.
-
-=head2 virbr_device
-
-The libvirt NAT bridge: the bridge of the C<default> network, whose leases
-L</lease_ip($network, %opts)> reads.
+The bridge of the adapter whose lease this machine reaches a guest by: the
+first of C<dhcp_nics> in the block, or else the bridge of the C<default>
+network, whose leases L</lease_ip($network, %opts)> reads.  It asks libvirt for
+that through L</network_vmm>, and dies when it finds nothing.
 
 =head2 virbr_ip
 
-The address of the hypervisor on the NAT bridge.  The guest fetches its files
-from this address and sends its logs to it.
-
-The templates for a guest need these three values.  Each one comes from the
-configuration if it is set there.  If not, the method asks the hypervisor, and
-dies if it finds nothing.  L</virbr_device> asks libvirt for the bridge of the
-C<default> network, through L</network_vmm>.  L</bridge_device> takes the last
-bridge that C<brctl> lists whose name does not start with C<virbr>, and that
-guess is sometimes wrong, so set the value when it is.  L</virbr_ip> reads
-C<ip> on the hypervisor.
+The address of the hypervisor on L</lease_nic>.  The guest fetches its files
+from this address and sends its logs to it.  It reads C<ip> on the hypervisor,
+and dies when that finds nothing.
 
 =cut
 
-sub bridge_device {
-    my ($self) = @_;
-    return $self->{bridge_device} if defined $self->{bridge_device};
-
-    my $device = $self->capture_cmd(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
-    chomp $device if defined $device;
-    die "Could not determine outbound bridge device on " . $self->uri . "!\n" . "Set bridge_device in this hypervisor's block of hypervisors.conf, or in provision.conf if there is no hypervisors.conf.\n"
-      unless $device;
-
-    return $self->{bridge_device} = $device;
-}
-
-sub virbr_device {
-    my ($self) = @_;
-    return $self->{virbr_device} if defined $self->{virbr_device};
+sub lease_nic {
+    my ($self)  = @_;
+    my ($first) = $self->setting_list('dhcp_nics');
+    return $first             if defined $first;
+    return $self->{lease_nic} if defined $self->{lease_nic};
 
     my $device = eval { $self->network_vmm->get_network_by_name('default')->get_bridge_name };
-    die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set virbr_device in this hypervisor's block of hypervisors.conf, or in provision.conf if there is no hypervisors.conf.\n"
+    die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set dhcp_nics in this hypervisor's block of hypervisors.conf, or in provision.conf if there is no hypervisors.conf.\n"
       unless $device;
 
-    return $self->{virbr_device} = $device;
+    return $self->{lease_nic} = $device;
 }
 
 sub virbr_ip {
     my ($self) = @_;
     return $self->{virbr_ip} if defined $self->{virbr_ip};
 
-    my $device = $self->virbr_device;
+    my $device = $self->lease_nic;
     my $ip     = $self->capture_cmd("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
     die "Could not determine IP address for $device\n" unless $ip;
     chomp $ip;
@@ -2073,7 +2083,7 @@ sub virbr_ip {
 =head1 GUEST NETWORKS
 
 A guest can have adapters on libvirt networks other than C<default>: see
-L</nics>.  F<bin/guest_network> makes such a network through
+L</ADAPTERS>.  F<bin/guest_network> makes such a network through
 C<guest_network_steps>.  The preflight checks C<check_guest_bridges>,
 C<check_guest_networks>, C<check_bridge_acl> and C<check_guest_pool> ask
 whether each bridge of a guest is there, up and allowed, and whether the pool
@@ -2088,7 +2098,7 @@ my $NETWORK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,49} \z/;
 # gives each block that holds the address, from the /32 down to the /0.
 my sub network_of ( $address, $prefix ) { return ( Net::CIDR::addr2cidr($address) )[ 32 - $prefix ] }
 
-# The blocks and addresses of $pool, a guest_pool, that are not inside the
+# The blocks and addresses of $pool, a nic_pool, that are not inside the
 # block $cidr.
 my sub outside_of ( $cidr, $pool ) {
     my $network = Net::IP->new($cidr);
@@ -2168,7 +2178,7 @@ The length of its prefix, from 8 to 30.
 
 =item C<pool>
 
-The pool of the guests, as L<Trog::HV/guest_pool> gives it.  Optional.
+The pool of its static adapter, as L<Trog::HV/nic_pool($nic)> gives it.  Optional.
 
 =back
 
@@ -2893,21 +2903,22 @@ FIX
 =head2 Checks of the bridges of the guests
 
 The four checks below ask whether the guests of the block can have their
-adapters: see L</nics>.  They only read.  Each one fails with what to run to fix
+adapters: see L</ADAPTERS>.  They only read.  Each one fails with what to run to fix
 it, and F<bin/guest_network> is that for a network that the block of
 F<hypervisors.conf> describes.
 
 =cut
 
-# What to run to make the network of the bridge of this block, for the fix of a
-# check.
-my sub guest_network_fix ($self) {
+# What to run to make the network of the static adapter $nic of this block, for
+# the fix of a check.
+my sub guest_network_fix ( $self, $nic = 'NIC' ) {
     my $name = $self->name // 'NAME';
     my $via  = $self->is_session ? ' --via ADMIN' : q{};
     return <<"FIX";
-For the network of the bridge_device of [$name], which this block describes:
+For the network of a bridge of static_nics in [$name], which the block describes
+with ip_pool_$nic and gateway_$nic:
 
-    bin/guest_network --hypervisor $name$via --dryrun
+    bin/guest_network --hypervisor $name --nic $nic$via --dryrun
 
 and again without --dryrun.  It defines the network on the system daemon,
 starts it, starts it with the host, and lets the account of a session join its
@@ -2937,7 +2948,7 @@ sub check_guest_bridges ($self) {
     my @absent = grep { $self->run_cmd( qw{test -d}, "/sys/class/net/$_/bridge" ) != 0 } @bridges;
     return $self->verdict( 1, 'The guests join ' . join( ', ', @bridges ), q{} ) unless @absent;
 
-    return $self->verdict( 0, 'No bridge ' . join( ', ', @absent ) . ' on ' . $self->describe, guest_network_fix($self) . <<'FIX' );
+    return $self->verdict( 0, 'No bridge ' . join( ', ', @absent ) . ' on ' . $self->describe, guest_network_fix( $self, $absent[0] ) . <<'FIX' );
 
 A bridge of the host itself, such as the one on its LAN, is made in the network
 configuration of the host, and the bridge of the default network by libvirt.
@@ -2946,10 +2957,11 @@ FIX
 
 =head2 $result = $hv->check_guest_networks()
 
-Passes when each bridge of L</nic_bridges> that a libvirt network owns belongs
-to a network that runs and starts with the host.  A bridge that no network owns,
-such as the bridge of the LAN of the host, passes, because libvirt does not
-start it.
+Passes when L</lease_nic> is the bridge of the C<default> network, whose leases
+L</lease_ip($network, %opts)> reads, and each bridge of L</nic_bridges> that a
+libvirt network owns belongs to a network that runs and starts with the host.  A
+bridge that no network owns, such as the bridge of the LAN of the host, passes,
+because libvirt does not start it.
 
 =cut
 
@@ -2961,6 +2973,15 @@ sub check_guest_networks ($self) {
         map { network_on( $self, $_ ) // () } @bridges;
     };
     return $self->verdict( 0, 'Could not ask libvirt for its networks', $@ ) if $@;
+
+    my ($lease) = grep { $_->get_name eq 'default' } @networks;
+    return $self->verdict( 0, "$bridges[0], the first of dhcp_nics, is not the bridge of the default network", <<"FIX" ) unless $lease && $lease->get_bridge_name eq $bridges[0];
+This machine finds a guest by its lease on the default network of libvirt, and
+the first adapter of dhcp_nics is the one that takes that lease.  Name the
+bridge of the default network first in dhcp_nics:
+
+    virsh net-info default
+FIX
 
     my @down = grep { !( $_->is_active && $_->get_autostart ) } @networks;
     return $self->verdict( 1, 'Each network of a bridge of the guests runs, and starts with the host', q{} ) unless @down;
@@ -3015,9 +3036,9 @@ sub check_bridge_acl ($self) {
     my @refused = grep { !$says->( 'allow', $_ ) || $says->( 'deny', $_ ) } @bridges;
     return $self->verdict( 1, "qemu-bridge-helper lets $user join " . join( ', ', @bridges ), q{} ) unless @refused;
 
-    return $self->verdict( 0, "qemu-bridge-helper does not let $user join " . join( ', ', @refused ), guest_network_fix($self) . <<"FIX" );
+    return $self->verdict( 0, "qemu-bridge-helper does not let $user join " . join( ', ', @refused ), guest_network_fix( $self, $refused[0] ) . <<"FIX" );
 
-For the NAT bridge and the outbound bridge, from the machine that provisions:
+For every bridge of the block, from the machine that provisions:
 
     bin/runner_account --hypervisor ADMIN --user $user ...
 
@@ -3027,51 +3048,67 @@ FIX
 
 =head2 $result = $hv->check_guest_pool()
 
-Passes when the block names no pool, or when the bridge of the pool,
-L</bridge_device>, belongs to no libvirt network, because then nothing here
-knows the network of the bridge.  Otherwise it passes when the gateway of the
-block is the address of the host on that network, each block and address of
-the pool is inside the network, and no DHCP range of the network overlaps the
-pool.
+Passes when each pool of L<Trog::HV/static_pools> fits the network of its
+bridge.  A bridge that belongs to no libvirt network passes, because then
+nothing here knows its network.  For one that does, the pool passes when the
+gateway of the bridge, if the block names one, is the address of the host on
+that network, each block and address of the pool is inside the network, and no
+DHCP range of the network overlaps the pool.
 
-A guest with an address outside the network of its bridge cannot reach its
-gateway.  A DHCP range over the pool can lease an address of the pool to
-something else.
-
-Each of these four fails with what to run to fix it, and
-F<bin/guest_network> is that for a network that this block of
-F<hypervisors.conf> describes.
+A guest with an address outside the network of its bridge cannot reach it.  A
+DHCP range over the pool can lease an address of the pool to something else.
 
 =cut
 
 sub check_guest_pool ($self) {
-    my $pool = $self->guest_pool;
-    return $self->verdict( 1, 'The guests take no address from a pool', q{} ) unless %$pool;
+    my @nics = $self->static_nics;
+    return $self->verdict( 1, 'The guests take no address from a pool', q{} ) unless @nics;
 
-    my $bridge = eval { $self->bridge_device };
-    return $self->verdict( 0, 'Could not work out the bridge of the pool', $@ ) unless $bridge;
+    # The network that libvirt says the static adapter $nic is on, and what is
+    # wrong with its pool for that network, as sentences.  Nothing when no
+    # libvirt network owns the bridge.
+    my $faults = sub ($nic) {
+        my $network = network_on( $self, $nic ) // return;
+        my $name    = $network->get_name;
+        my $facts   = network_facts( $network->get_xml_description(0) );
+        my $pool    = $self->nic_pool($nic);
+        my $gateway = eval { $self->nic_gateway($nic) };
+        my @pool    = map { @{ $pool->{$_} // [] } } qw{cidr addresses};
 
-    my $network = eval { network_on( $self, $bridge ) };
-    return $self->verdict( 0, 'Could not ask libvirt for its networks',                                                   $@ ) if $@;
-    return $self->verdict( 1, "The pool is on $bridge, which no libvirt network owns, so nothing here knows its network", q{} ) unless $network;
+        return ( "the network $name", "$nic belongs to the network $name, which has no IPv4 address" ) unless $facts->{cidr};
+        my @wrong = (
+            ( defined $gateway && $gateway ne $facts->{address} ? "gateway_$nic is $gateway, and the address of the host on $name is $facts->{address}" : () ),
+            ( map { "$_ of ip_pool_$nic is outside $facts->{cidr}, the network $name" } outside_of( $facts->{cidr}, $pool ) ),
+            ( map { "$_ of ip_pool_$nic is in a DHCP range of $name" } grep { Net::CIDR::cidrlookup( $_, @{ $facts->{leases} } ) } @pool ),
+        );
+        return ( "$facts->{cidr}, the network $name", @wrong );
+    };
 
-    my $name    = $network->get_name;
-    my $facts   = network_facts( $network->get_xml_description(0) );
-    my $gateway = eval { $self->configured_gateway } // 'none';
-    my @pool    = map { @{ $pool->{$_} // [] } } qw{cidr addresses};
+    my ( @fits, %wrong );
+    foreach my $nic (@nics) {
+        my ( $where, @wrong ) = eval { $faults->($nic) };
+        return $self->verdict( 0, 'Could not ask libvirt for its networks', $@ ) if $@;
+        if (@wrong) { $wrong{$nic} = \@wrong }
+        else        { push @fits, defined $where ? "$nic in $where" : "$nic, which no libvirt network owns" }
+    }
+    return $self->verdict( 1, 'Each pool fits its bridge: ' . join( '; ', @fits ), q{} ) unless %wrong;
 
-    my @wrong = (
-        ( $facts->{cidr}                                                    ? ()                                                                                                : "$name has no IPv4 address" ),
-        ( $facts->{cidr} && $gateway ne $facts->{address}                   ? "the gateway of the block is $gateway, and the address of the host on $name is $facts->{address}" : () ),
-        ( map { "$_ of the pool is outside $facts->{cidr}" } $facts->{cidr} ? outside_of( $facts->{cidr}, $pool )                                                               : () ),
-        ( map { "$_ of the pool is in a DHCP range of $name" } grep { Net::CIDR::cidrlookup( $_, @{ $facts->{leases} } ) } @pool ),
-    );
-    return $self->verdict( 1, "The pool is inside $facts->{cidr}, the network $name of $bridge, behind its gateway", q{} ) unless @wrong;
+    my ($first) = sort keys %wrong;
+    return $self->verdict(
+        0, 'The pool of ' . join( ', ', sort keys %wrong ) . ' does not fit the network of its bridge',
+        join(
+            q{},
+            map {
+                my $nic = $_;
+                map { "$_.\n" } @{ $wrong{$nic} }
+            } sort keys %wrong
+          )
+          . "\n"
+          . guest_network_fix( $self, $first )
+          . <<"FIX" );
 
-    return $self->verdict( 0, "The pool does not fit the network $name of $bridge", join( q{}, map { "$_.\n" } @wrong ) . "\n" . guest_network_fix($self) . <<'FIX' );
-
-It refuses a pool that is not inside the network, and makes the network
-with no DHCP.  Or change gateway, pool_cidr and pool_addresses in the block.
+It refuses a pool that is not inside the network, and makes the network with
+no DHCP.  Or change ip_pool_$first and gateway_$first in the block.
 FIX
 }
 
@@ -3797,9 +3834,8 @@ memory, because C<MemoryMax> on a slice kills a guest rather than refusing the
 next one.  C<max_memory> is the budget that refuses it instead.  See QUOTAS in
 L<Provisioner::Recipe::trogrunner>.
 
-=item 6. The bridges that qemu-bridge-helper lets the user join: the NAT
-bridge, L</virbr_device>, the outbound bridge, L</bridge_device>, and any other
-bridge of L</nics>.  These are the bridges of the block of this object.  See
+=item 6. The bridges that qemu-bridge-helper lets the user join: each of
+L</nic_bridges>, the bridges of the block of this object.  See
 C<runner_bridge_steps>.
 
 =item 7. The C<cap_net_admin> capability on qemu-bridge-helper, and an apt

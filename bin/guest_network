@@ -15,6 +15,8 @@ use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
+use List::Util();
+
 use Trog::Hypervisors();
 use Trog::HV::Libvirt();
 use Trog::Steps();
@@ -26,23 +28,23 @@ hypervisors.conf take their addresses on
 
 =head1 SYNOPSIS
 
-    bin/guest_network --hypervisor clod --via hv1 [--name clod] [--prefix 24] [--dryrun]
+    bin/guest_network --hypervisor clod --nic virbr1 --via hv1 [--name clod] [--prefix 24] [--dryrun]
 
 =head1 DESCRIPTION
 
-A block of F<hypervisors.conf> can give its guests an adapter on a bridge of a
-libvirt network of their own, with their addresses from its pool: see C<nics>
-in L<Trog::HV::Libvirt>.  This command makes that network on the hypervisor,
-from the block:
+A block of F<hypervisors.conf> can give its guests a static adapter on a bridge
+of a libvirt network of their own, with their addresses from the pool of that
+bridge: see ADAPTERS in L<Trog::HV::Libvirt>.  This command makes that network
+on the hypervisor, from the block:
 
 =over 4
 
-=item * The bridge is the C<bridge_device> of the block.
+=item * The bridge is C<--nic>, one of the C<static_nics> of the block.
 
-=item * The address of the hypervisor on the network is the C<gateway> of the
-block, with the prefix of C<--prefix>.
+=item * The address of the hypervisor on the network is C<gateway_NIC>, with
+the prefix of C<--prefix>.
 
-=item * Each block and address of C<pool_cidr> and C<pool_addresses> must be
+=item * Each block and address of C<ip_pool_NIC> and C<ip_addresses_NIC> must be
 inside the network, or it changes nothing and says which.
 
 =back
@@ -82,6 +84,10 @@ give the router of the LAN a route to it through the hypervisor.
 
 The block whose guests take their addresses on the network.  Required.
 
+=item B<--nic> BRIDGE
+
+The bridge of the network, one of the C<static_nics> of the block.  Required.
+
 =item B<--via> NAME
 
 The block to act through, on the system URI of the same host.  Required when
@@ -113,10 +119,11 @@ sub main {
     my @args = @_;
 
     my %opt = ( prefix => 24 );
-    GetOptionsFromArray( \@args, \%opt, qw{hypervisor=s via=s name=s prefix=s dryrun hvconf=s help} )
+    GetOptionsFromArray( \@args, \%opt, qw{hypervisor=s nic=s via=s name=s prefix=s dryrun hvconf=s help} )
       or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
-    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Missing: --hypervisor' ) unless defined $opt{hypervisor};
+    my @missing = grep { !defined $opt{$_} } qw{hypervisor nic};
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Missing: ' . join( ', ', map { "--$_" } @missing ) ) if @missing;
 
     my $fleet  = Trog::Hypervisors->load( $opt{hvconf} // Trog::Hypervisors->default_path() );
     my $guests = libvirt_block( $fleet, $opt{hypervisor} );
@@ -127,12 +134,14 @@ sub main {
     die "$opt{via} is " . $via->describe . ", and $opt{hypervisor} is " . $guests->describe . ".  --via names a block of the same host.\n"
       if ( $via->ssh_host // q{} ) ne ( $guests->ssh_host // q{} );
 
+    my $nic = $opt{nic};
+    die "$opt{hypervisor} names no $nic in static_nics, and the network is for a static adapter, with its pool\n" unless List::Util::any { $_ eq $nic } $guests->static_nics;
     my $plan = Trog::HV::Libvirt->guest_network_plan(
-        name    => $opt{name}                        // ( $guests->network || undef ) // die("$opt{hypervisor} names no network, so name the libvirt network with --name.\n"),
-        bridge  => $guests->setting('bridge_device') // die("$opt{hypervisor} names no bridge_device, which is the bridge of the network.\n"),
-        address => $guests->configured_gateway       // die("$opt{hypervisor} names no gateway, which is the address of the hypervisor on the network.\n"),
+        name    => $opt{name} // ( $guests->network || undef ) // die("$opt{hypervisor} names no network, so name the libvirt network with --name.\n"),
+        bridge  => $nic,
+        address => $guests->nic_gateway($nic) // die("$opt{hypervisor} names no gateway_$nic, which is the address of the hypervisor on the network.\n"),
         prefix  => $opt{prefix},
-        pool    => $guests->guest_pool,
+        pool    => $guests->nic_pool($nic),
     );
 
     print "The network $plan->{name}, on " . $via->describe . ":\n\n" . Trog::HV::Libvirt->guest_network_xml($plan) . "\n";

@@ -1146,8 +1146,10 @@ C<domain_dir>, C<domain> and C<built_for>.  It returns 1.
 It writes netplan only when the addresses change, because C<netplan apply> on
 the same file restarts the network of the guest for no reason.
 
-The interface belongs to C<built_for>, the domain that the machine was built
-for.  The addresses belong to C<domain>.  On a shared host, these are two
+The interface is the one whose address is the address of the guest, the first
+of C<static_nics>, and it belongs to C<built_for>, the domain that the machine
+was built for.  The addresses belong to C<domain>.  With no addresses, it does
+nothing, and with addresses and no static adapter, it dies.  On a shared host, these are two
 different names.
 
 It dies if it cannot install the new netplan file, and through
@@ -1158,11 +1160,14 @@ C<primary_adapter>.
 sub merge_guest_addresses (%args) {
     my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @args{qw{guest hv config domain_dir domain built_for}};
 
-    my $ips         = [ $config->param('ips') ];
+    my $ips = [ grep { defined && $_ ne q{} } $config->param('ips') ];
+    return 1 unless @$ips;
+    my $index = $hv->address_index // die "$domain has the addresses @$ips, and " . ( $hv->name // $hv->describe ) . " names no static_nics, so no adapter of the guest can have them\n";
+
     my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
     my $parsed      = YAML::XS::Load($existing_nc);
 
-    my $adapter   = primary_adapter( $parsed, $hv->guest_mac( $built_for, 1 ) );
+    my $adapter   = primary_adapter( $parsed, $hv->guest_mac( $built_for, $index ) );
     my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
 
     my $num_ips = scalar @$addresses;
@@ -1212,10 +1217,12 @@ sub primary_adapter {
         return $name if lc $match->{macaddress} eq lc $mac;
     }
 
-    my ( undef, $named ) = Trog::HV->new()->nic_names;
-    return $named if ref $ethernets->{$named} eq 'HASH';
+    my $hv    = Trog::HV->new();
+    my $index = $hv->address_index;
+    my $named = defined $index ? ( $hv->nic_names )[$index] : undef;
+    return $named if defined $named && ref $ethernets->{$named} eq 'HASH';
 
-    die "Could not find the outbound adapter in the guest's netplan: nothing matches\n" . "$mac, and there is no $named either.  It has: " . join( ', ', sort keys %$ethernets ) . "\n";
+    die "Could not find the outbound adapter in the guest's netplan: nothing matches\n" . "$mac, and there is " . ( defined $named ? "no $named either" : 'no static adapter to name it' ) . ".  It has: " . join( ', ', sort keys %$ethernets ) . "\n";
 }
 
 =head2 %seed = read_seed($config)

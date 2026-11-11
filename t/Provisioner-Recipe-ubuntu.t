@@ -90,7 +90,8 @@ sub settings (%overrides) {
 }
 
 # Generate the five, and hand back the directory they landed in.  hv is what
-# the block of the hypervisor names, such as nics.
+# the block of the hypervisor names, by default a lease on virbr0 and an address
+# on br0.
 sub generated {
     my (%extra) = @_;
 
@@ -99,7 +100,7 @@ sub generated {
     # only while the recipe constructed its own.
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( virbr_ip => sub { return '192.168.122.1' } );
-    my $hv = bless { %{ delete $extra{hv} // {} } }, 'Trog::HV::Libvirt';
+    my $hv = bless { %{ delete $extra{hv} // { dhcp_nics => 'virbr0', static_nics => 'br0' } } }, 'Trog::HV::Libvirt';
 
     my $dir    = tempdir( CLEANUP => 1 );
     my $recipe = Provisioner::Cookbook->load('ubuntu')->new(
@@ -441,8 +442,9 @@ subtest 'a bin that another guest routes to gets a route through that guest, onc
     cmp_deeply( $routes->($dir), [ { to => 'default', via => '192.0.2.254' } ], 'as does a guest that cannot know where its via is' );
 };
 
-# What master wrote for this guest before nics existed, byte for byte.  A block
-# without nics has to keep getting exactly this.
+# What master wrote for this guest from a block with virbr0 and br0, before
+# dhcp_nics and static_nics, byte for byte.  A block with one bridge in each
+# list gives its guests exactly this.
 my $NETWORK_CONFIG_BEFORE_NICS = <<'YAML';
 ---
 network:
@@ -471,31 +473,45 @@ network:
       dhcp-identifier: mac
 YAML
 
-subtest 'a block without nics gives the network configuration that it always gave' => sub {
+subtest 'one bridge in each list gives the network configuration that it always gave' => sub {
     my ( $dir, undef ) = generated();
-    is( File::Slurper::read_text("$dir/network-config"), $NETWORK_CONFIG_BEFORE_NICS, 'the same text as before nics' );
+    is( File::Slurper::read_text("$dir/network-config"), $NETWORK_CONFIG_BEFORE_NICS, 'the same text as before' );
 };
 
-subtest 'nics gives each adapter its part of the network configuration' => sub {
+subtest 'each adapter gets its part of the network configuration' => sub {
     my $mac = sub ($index) { Trog::HV::Libvirt->guest_mac( $DOMAIN, $index ) };
 
-    # The NAT bridge second and a bridge of no address last: what matches is
-    # the MAC of each index, wherever nics put the adapter.
-    my ( $dir, undef ) = generated( hv => { virbr_device => 'virbr0', bridge_device => 'virbr1', nics => 'virbr1, virbr0, br9' } );
+    my ( $dir, undef ) = generated( hv => { dhcp_nics => 'virbr0 virbr2', static_nics => 'virbr1 br0' }, nic_ips => { br0 => '192.0.2.70' } );
     my $ethernets = loaded( $dir, 'network-config' )->{network}{ethernets};
 
-    cmp_deeply( [ sort keys %$ethernets ], [qw{ens3 ens4 ens5}], 'one entry for each adapter, named after its slot' );
+    cmp_deeply( [ sort keys %$ethernets ], [qw{ens3 ens4 ens5 ens6}],                                                                             'one entry for each adapter, named after its slot' );
+    cmp_deeply( $ethernets->{ens3},        superhashof( { match => { macaddress => $mac->(0) }, dhcp4 => bool(1), 'dhcp-identifier' => 'mac' } ), 'the lease on the first of dhcp_nics' );
+    ok( !exists $ethernets->{ens3}{'dhcp4-overrides'}, 'with its routes' );
     cmp_deeply(
-        $ethernets->{ens3},
-        superhashof( { match => { macaddress => $mac->(1) }, addresses => ['192.0.2.10/24'], routes => [ { to => 'default', via => '192.0.2.254' } ] } ),
-        'the address from the pool on the adapter of bridge_device, which nics put first'
+        $ethernets->{ens4},
+        superhashof( { match => { macaddress => $mac->(1) }, dhcp4 => bool(1), 'dhcp4-overrides' => { 'use-routes' => bool(0) }, optional => bool(1) } ),
+        'a lease on the other, and no route from it'
     );
-    cmp_deeply( $ethernets->{ens4}, superhashof( { match => { macaddress => $mac->(0) }, dhcp4 => bool(1) } ), 'the lease on the adapter of virbr_device' );
     cmp_deeply(
         $ethernets->{ens5},
-        { match => { macaddress => $mac->(2) }, 'set-name' => 'ens5', optional => bool(1) },
-        'and the other bridge up, with no address, and nothing that the boot waits for'
+        superhashof( { match => { macaddress => $mac->(2) }, addresses => ['192.0.2.10/24'], routes => [ { to => 'default', via => '192.0.2.254' } ] } ),
+        'the address of the guest and the default route on the first of static_nics'
     );
+    cmp_deeply(
+        $ethernets->{ens6},
+        { match => { macaddress => $mac->(3) }, 'set-name' => 'ens6', addresses => ['192.0.2.70/24'], optional => bool(1) },
+        'and the address of the other static adapter, with no route, so the guest routes through the first'
+    );
+};
+
+subtest 'a guest with no static adapter takes its nameservers on its lease' => sub {
+    my ( $dir, undef ) = generated( hv => { dhcp_nics => 'virbr0' }, ips => [], gateway => undef );
+    my $ethernets = loaded( $dir, 'network-config' )->{network}{ethernets};
+
+    cmp_deeply( [ keys %$ethernets ],                       ['ens3'],   'one adapter' );
+    cmp_deeply( $ethernets->{ens3}{nameservers}{addresses}, $RESOLVERS, 'and the resolvers of the block are on it' );
+
+    like( exception { generated( hv => { dhcp_nics => 'virbr0' } ) }, qr/hypervisor[ ]names[ ]no[ ]static_nics/, 'while an address with no static adapter to put it on is refused' );
 };
 
 subtest 'a guest with no addresses takes a lease on the NAT side, and leaves the bridge alone' => sub {
@@ -531,7 +547,7 @@ subtest 'the key a domain already has is kept, on a real run and a dry one' => s
     # only while the recipe constructed its own.
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( virbr_ip => sub { return '192.168.122.1' } );
-    my $hv = bless {}, 'Trog::HV::Libvirt';
+    my $hv = bless { dhcp_nics => 'virbr0', static_nics => 'br0' }, 'Trog::HV::Libvirt';
 
     my $dir   = tempdir( CLEANUP => 1 );
     my $build = sub {

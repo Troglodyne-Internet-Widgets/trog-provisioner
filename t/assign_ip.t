@@ -24,6 +24,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Test::More;
 use Test::MockModule qw{strict};
 use Capture::Tiny    qw{capture};
+use Test::Fatal      qw{exception};
 use IPC::Run3();
 use File::Slurper::Temp();
 use YAML::XS();
@@ -59,7 +60,8 @@ Provisioner::Cookbook->forget();
     package AssignProbe::HV;
     sub new ( $class, %said ) { return bless {%said}, $class }
     sub manages_addresses     { return 0 }
-    sub guest_pool ($self)    { return $self->{pool} }
+    sub static_pools ($self) { return $self->{pools} }
+    sub address_nic  ($self) { return ( sort keys %{ $self->{pools} } )[0] }
 
     package AssignProbe::Fleet;
     sub new        ( $class, %hvs ) { return bless {%hvs}, $class }
@@ -67,12 +69,12 @@ Provisioner::Cookbook->forget();
 }
 
 my $fleet = Test::MockModule->new('Trog::Hypervisors');
-$fleet->redefine( load => sub { return AssignProbe::Fleet->new( hv1 => AssignProbe::HV->new( pool => { cidr => ['192.0.2.0/28'] } ) ) } );
+$fleet->redefine( load => sub { return AssignProbe::Fleet->new( hv1 => AssignProbe::HV->new( pools => { br0 => { cidr => ['192.0.2.0/28'] }, virbr1 => { cidr => ['10.0.0.0/28'] } } ) ) } );
 
 my @asked;
 my $pool = Test::MockModule->new('Provisioner::IPPool');
 $pool->redefine( ensure_seeded => sub { return 0 } );
-$pool->redefine( assign        => sub ( $domain, $from, $bin ) { push( @asked, [ $domain, $from, $bin ] ); return '192.0.2.5' } );
+$pool->redefine( assign        => sub ( $domain, $from, $bin, $nic = undef ) { push( @asked, [ $domain, $from, $bin, $nic ] ); return '192.0.2.5' } );
 
 # Runs it with @args, and returns what it printed, what it said on stderr, and
 # what main returned.
@@ -85,13 +87,20 @@ subtest 'an address of the guests comes from the pool of the hypervisor it names
     my ( $out, $err, $rc ) = run(qw{--hypervisor hv1 guest.test.test});
     is( $rc,  0,             'it exits 0' ) or diag $err;
     is( $out, "192.0.2.5\n", 'and prints the address' );
-    is_deeply( \@asked, [ [ 'guest.test.test', { cidr => ['192.0.2.0/28'], bins => \%BINS }, undef ] ], 'out of the pool of hv1, beside the bins of _global' );
+    my %pools = ( br0 => { cidr => ['192.0.2.0/28'] }, virbr1 => { cidr => ['10.0.0.0/28'] } );
+    is_deeply( \@asked, [ [ 'guest.test.test', { cidr => ['192.0.2.0/28'], first_nic => 'br0', nics => \%pools, bins => \%BINS }, undef, undef ] ], 'out of the pool of the first static adapter of hv1, beside the bins of _global' );
+
+    ( $out, $err, $rc ) = run(qw{--hypervisor hv1 --nic virbr1 guest.test.test});
+    is( $rc,          0,        'with --nic, it exits 0' ) or diag $err;
+    is( $asked[0][3], 'virbr1', 'and the address is on that bridge' );
+
+    like( exception { run(qw{--hypervisor hv1 --nic br9 guest.test.test}) }, qr/hv1[ ]names[ ]no[ ]br9[ ]in[ ]static_nics/, 'a bridge that is not a static adapter is refused' );
 };
 
 subtest 'an address of another bin comes from _global' => sub {
     my ( undef, $err, $rc ) = run(qw{--bin vpnclients laptop.test.test});
     is( $rc, 0, 'it exits 0' ) or diag $err;
-    is_deeply( \@asked, [ [ 'laptop.test.test', { bins => \%BINS }, 'vpnclients' ] ], 'with no guests bin in the pool' );
+    is_deeply( \@asked, [ [ 'laptop.test.test', { bins => \%BINS }, 'vpnclients', undef ] ], 'with no guests bin in the pool' );
 };
 
 # pod2usage exits, so these have to be real runs.  Both refusals come before

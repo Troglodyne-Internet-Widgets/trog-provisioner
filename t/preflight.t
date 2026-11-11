@@ -1034,21 +1034,23 @@ subtest 'the client of the hypervisor being checked is the first thing checked' 
     sub list_all_networks ($self)               { return @{ $self->{networks} } }
 }
 
-# The hypervisor of the case that nics is for: a session whose guests have a
-# lease on virbr0, and an address from a pool on the network of virbr1.
-sub guest_network_hv (%block) {
+# The hypervisor of a session whose guests have a lease on virbr0, and an
+# address from a pool on the network of virbr1.  Its keys are refused when they
+# are undef, so a subtest takes one away with undef.
+sub guest_network_hv (%changed) {
     Trog::HV->forget();
-    return Trog::HV->new(
-        uri            => 'qemu+ssh://runner@hv1.test.test/session',
-        name           => 'clod',
-        virbr_device   => 'virbr0',
-        bridge_device  => 'virbr1',
-        nics           => 'virbr0, virbr1',
-        gateway        => '10.0.0.1',
-        pool_cidr      => '10.0.0.64/26',
-        pool_addresses => '10.0.0.5',
-        %block,
+    my %block = (
+        uri                 => 'qemu+ssh://runner@hv1.test.test/session',
+        name                => 'clod',
+        dhcp_nics           => 'virbr0',
+        static_nics         => 'virbr1',
+        gateway_virbr1      => '10.0.0.1',
+        ip_pool_virbr1      => '10.0.0.64/26',
+        ip_addresses_virbr1 => '10.0.0.5',
+        %changed,
     );
+    delete @block{ grep { !defined $block{$_} } keys %block };
+    return Trog::HV->new(%block);
 }
 
 sub default_network (%a) {
@@ -1080,8 +1082,8 @@ subtest 'each bridge of a guest has to be on the hypervisor' => sub {
     delete $bridges{virbr1};
     ($result) = quietly( sub { $hv->check_guest_bridges } );
     ok( !$result->{ok}, 'one missing fails' );
-    like( $result->{what}, qr/No[ ]bridge[ ]virbr1[ ]on/,                                'naming it' );
-    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod[ ]--via[ ]ADMIN/, 'and the helper that makes its network, through an account that can' );
+    like( $result->{what}, qr/No[ ]bridge[ ]virbr1[ ]on/,                            'naming it' );
+    like( $result->{fix},  qr/--hypervisor[ ]clod[ ]--nic[ ]virbr1[ ]--via[ ]ADMIN/, 'and the helper that makes its network, through an account that can' );
 };
 
 subtest 'a network that owns a bridge of a guest runs, and starts with the host' => sub {
@@ -1089,9 +1091,9 @@ subtest 'a network that owns a bridge of a guest runs, and starts with the host'
     my @networks = ( default_network(), guest_network() );
     $mock->redefine( network_vmm => sub { Test::PreflightVmm->new(@networks) } );
 
-    my $hv = guest_network_hv( nics => 'virbr0 virbr1 br0' );
+    my $hv = guest_network_hv( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26' );
     my ($result) = quietly( sub { $hv->check_guest_networks } );
-    ok( $result->{ok}, 'both up, and br0 belongs to no network, so nothing starts it' );
+    ok( $result->{ok}, 'both up, and br0 belongs to no network, so nothing starts it' ) or diag explain $result;
 
     @networks = ( default_network(), guest_network( autostart => 0 ) );
     ($result) = quietly( sub { $hv->check_guest_networks } );
@@ -1103,6 +1105,13 @@ subtest 'a network that owns a bridge of a guest runs, and starts with the host'
     @networks = ( default_network( active => 0 ), guest_network() );
     ($result) = quietly( sub { $hv->check_guest_networks } );
     like( $result->{what}, qr/network[ ]default[ ]does[ ]not[ ]run/, 'and so does a default network that is down' );
+
+    # lease_ip reads the leases of the default network, so the adapter of the
+    # lease has to be on its bridge.
+    @networks = ( default_network(), guest_network() );
+    ($result) = quietly( sub { guest_network_hv( dhcp_nics => 'virbr1', static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef )->check_guest_networks } );
+    ok( !$result->{ok}, 'a first DHCP adapter that is not on the default network fails' );
+    like( $result->{what}, qr/dhcp_nics,[ ]is[ ]not[ ]the[ ]bridge[ ]of[ ]the[ ]default/, 'saying so' );
 };
 
 subtest 'qemu-bridge-helper has to let the account of a session join each bridge' => sub {
@@ -1121,8 +1130,8 @@ subtest 'qemu-bridge-helper has to let the account of a session join each bridge
     $files{'/etc/qemu/trog-runner-runner.conf'} = "allow virbr0\n";
     ($result) = quietly( sub { $hv->check_bridge_acl } );
     ok( !$result->{ok}, 'a bridge that nothing allows fails' );
-    like( $result->{what}, qr/does[ ]not[ ]let[ ]runner[ ]join[ ]virbr1\z/,              'naming it, and only it' );
-    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod[ ]--via[ ]ADMIN/, 'with the helper that adds it' );
+    like( $result->{what}, qr/does[ ]not[ ]let[ ]runner[ ]join[ ]virbr1\z/,          'naming it, and only it' );
+    like( $result->{fix},  qr/--hypervisor[ ]clod[ ]--nic[ ]virbr1[ ]--via[ ]ADMIN/, 'with the helper that adds it' );
 
     $files{'/etc/qemu/trog-runner-runner.conf'} = "allow all\ndeny virbr1\n";
     ($result) = quietly( sub { $hv->check_bridge_acl } );
@@ -1144,24 +1153,29 @@ subtest 'the pool of the guests is inside the network of its bridge, behind its 
 
     my ($result) = quietly( sub { guest_network_hv()->check_guest_pool } );
     ok( $result->{ok}, 'a pool inside 10.0.0.0/24, behind 10.0.0.1' ) or diag explain $result;
-    like( $result->{what}, qr{0/24,[ ]the[ ]network[ ]clod[ ]of[ ]virbr1}, 'saying where' );
+    like( $result->{what}, qr{virbr1[ ]in[ ]10[.]0[.]0[.]0/24,[ ]the[ ]network[ ]clod}, 'saying where' );
 
-    ($result) = quietly( sub { guest_network_hv( gateway => '10.0.0.254', pool_cidr => '10.0.1.0/26' )->check_guest_pool } );
+    ($result) = quietly( sub { guest_network_hv( gateway_virbr1 => '10.0.0.254', ip_pool_virbr1 => '10.0.1.0/26' )->check_guest_pool } );
     ok( !$result->{ok}, 'a wrong gateway and a block outside the network fail' );
-    like( $result->{fix}, qr/gateway[ ]of[ ]the[ ]block[ ]is[ ]10[.]0[.]0[.]254,/, 'saying what the gateway is' );
-    like( $result->{fix}, qr/host[ ]on[ ]clod[ ]is[ ]10[.]0[.]0[.]1[.]/,           'and what it should be' );
-    like( $result->{fix}, qr{1[.]0/26[ ]of[ ]the[ ]pool[ ]is[ ]outside},           'and which block is outside' );
-    like( $result->{fix}, qr/bin\/guest_network[ ]--hypervisor[ ]clod/,            'and the helper' );
+    like( $result->{fix}, qr/gateway_virbr1[ ]is[ ]10[.]0[.]0[.]254,/,                   'saying what the gateway is' );
+    like( $result->{fix}, qr/host[ ]on[ ]clod[ ]is[ ]10[.]0[.]0[.]1[.]/,                 'and what it should be' );
+    like( $result->{fix}, qr{1[.]0/26[ ]of[ ]ip_pool_virbr1[ ]is[ ]outside},             'and which block is outside' );
+    like( $result->{fix}, qr/bin\/guest_network[ ]--hypervisor[ ]clod[ ]--nic[ ]virbr1/, 'and the helper' );
 
-    ($result) = quietly( sub { guest_network_hv( bridge_device => 'virbr0', nics => 'virbr1, virbr0', virbr_device => 'virbr1', gateway => '192.168.122.1', pool_cidr => '192.168.122.64/26', pool_addresses => '' )->check_guest_pool } );
+    # A second static adapter on the default network, with its pool in the
+    # range of its DHCP.
+    my %on_default = ( static_nics => 'virbr1 virbr0', dhcp_nics => 'virbr9', ip_pool_virbr0 => '192.168.122.64/26' );
+    ($result) = quietly( sub { guest_network_hv(%on_default)->check_guest_pool } );
     ok( !$result->{ok}, 'a pool on a network that leases the same addresses fails' );
-    like( $result->{fix}, qr{64/26[ ]of[ ]the[ ]pool[ ]is[ ]in[ ]a[ ]DHCP[ ]range}, 'saying so' );
+    like( $result->{what}, qr/pool[ ]of[ ]virbr0[ ]does[ ]not[ ]fit/,                    'naming the bridge, and only that one' );
+    like( $result->{fix},  qr{64/26[ ]of[ ]ip_pool_virbr0[ ]is[ ]in[ ]a[ ]DHCP[ ]range}, 'saying so' );
 
-    ($result) = quietly( sub { guest_network_hv( bridge_device => 'br0', nics => 'virbr0, br0' )->check_guest_pool } );
+    ($result) = quietly( sub { guest_network_hv( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26' )->check_guest_pool } );
     ok( $result->{ok}, 'a pool on a bridge that no network owns is not for this to judge' );
+    like( $result->{what}, qr/br0,[ ]which[ ]no[ ]libvirt[ ]network[ ]owns/, 'and says so' );
 
-    ($result) = quietly( sub { guest_network_hv( pool_cidr => '', pool_addresses => '' )->check_guest_pool } );
-    ok( $result->{ok}, 'and nor is a block with no pool' );
+    ($result) = quietly( sub { guest_network_hv( static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef )->check_guest_pool } );
+    ok( $result->{ok}, 'and nor is a block with no static adapter' );
 };
 
 done_testing();

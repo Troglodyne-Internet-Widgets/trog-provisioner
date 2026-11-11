@@ -467,16 +467,16 @@ L<Trog::HV::Libvirt/is_session>.
 
 =item C<interfaces>
 
-The adapters of the guest, in the order of the domain, which
-L<Trog::HV::Libvirt/nics> decides.  Each has C<nat>, which is 1 for the adapter
-whose lease the hypervisor reads, and C<mac>, C<bridge> and C<slot>.  The MAC
-and the slot come from the index of the adapter, see
-L<Trog::HV::Libvirt/guest_mac($domain, $index)> and L<Trog::HV::Libvirt/nic_slots>.
+The adapters of the guest, by index, which L<Trog::HV::Libvirt/ADAPTERS>
+decides.  Each has C<nat>, which is 1 for the adapter whose lease the hypervisor
+reads, and C<mac>, C<bridge> and C<slot>.  The MAC and the slot come from the
+index of the adapter, see L<Trog::HV::Libvirt/guest_mac($domain, $index)> and
+L<Trog::HV::Libvirt/nic_slots>.
 
-The NAT adapter joins the C<default> network on the system URI, and has no
-C<bridge>.  A session cannot use a network of the system daemon, so there it
-joins the bridge of that network, L<Trog::HV::Libvirt/virbr_device>, through
-qemu-bridge-helper.  Every other adapter joins its bridge.
+The NAT adapter joins the C<default> network on the system URI.  A session
+cannot use a network of the system daemon, so there it joins the bridge of that
+network, L<Trog::HV::Libvirt/lease_nic>, through qemu-bridge-helper.  Every
+other adapter joins its bridge.
 
 =back
 
@@ -573,12 +573,10 @@ sub enrich {
     # bus that the machine has.
     $opts{pcie} = ( $opts{machine} // q{} ) =~ m/q35/ ? 1 : 0;
 
-    # Each adapter by its index.  The NAT one is asked for its bridge only on a
-    # session, because on the system URI it joins the default network by name.
-    # The PCI slots are as libvirt writes them.  On i440fx the hypervisor
-    # decides them, because the interface names on the guest come from the
-    # slot.  See Trog::HV::nic_names.
-    my @bridges = ( $hv->is_session ? $hv->virbr_device : undef, $hv->bridge_device, $hv->extra_nics );
+    # Each adapter by its index.  The PCI slots are as libvirt writes them.  On
+    # i440fx the hypervisor decides them, because the interface names on the
+    # guest come from the slot.  See Trog::HV::nic_names.
+    my @bridges = $hv->nic_bridges;
     my @slots   = $hv->nic_slots;
     $opts{interfaces} = [
         map {
@@ -588,7 +586,7 @@ sub enrich {
                 bridge => $bridges[$_],
                 slot   => sprintf( '0x%02x', $slots[$_] ),
             }
-        } $hv->nic_order
+        } 0 .. $#bridges
     ];
 
     my @disks = ( disk( \%tuning, format => 'qcow2', dev => 'vda', boot => 1, index => 0, primary => 1 ) );

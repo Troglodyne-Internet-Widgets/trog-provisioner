@@ -353,10 +353,14 @@ That key is how this machine gets back in to run the makefile again.  It goes
 on the account that can sudo, not on root.  The makefile limits the root login
 to keys.
 
-C<other_nics> are the adapters of the guest besides the NAT one and the
-bridged one, each with its C<name> and C<mac>, which the network-config brings
-up with no address.  See L<Trog::HV::Libvirt/nics>.  Empty for a guest that a
-service builds.
+C<nat_mac> and C<dhcp_devname> are the MAC and the name of the adapter that
+takes the lease, the first of C<dhcp_nics>.  C<bridge_mac> and C<bridge_devname>
+are those of the adapter that gets the address of the guest, C<ips>, the first
+of C<static_nics>, and are absent when there is none.  C<other_dhcp> are the
+other adapters of C<dhcp_nics>, each with its C<name> and C<mac>, and
+C<other_static> the other adapters of C<static_nics>, each also with its
+C<addresses>, from C<nic_ips>.  See L<Trog::HV::Libvirt/ADAPTERS>.  All of them
+are absent or empty for a guest that a service builds.
 
 C<addresses> are C<ips> with a prefix, for the network-config.  An address with
 none gets C</24>, which cloud-init gave it in the version 1 format.
@@ -383,7 +387,8 @@ has made its first state file.  A reboot of a built guest then leaves its hosts
 alone.  C<refresh_cloud_init> in F<bin/provision> runs it again for a domain
 added to a guest that is up, whose state directory is not there yet.
 
-Dies if C<ips> is set without C<gateway>, or if C<contact_email> is not set.
+Dies if C<ips> is set without C<gateway>, or with no static adapter to put it
+on, or if C<contact_email> is not set.
 
 =cut
 
@@ -401,17 +406,32 @@ sub enrich {
     # A service that builds a guest by API assigns the MAC, and the image picks
     # the name.  So they stay unset, and the network-config leaves the network
     # to the platform, as a cloud image expects.
-    $opts{other_nics} = [];
+    #
+    # The adapters are by index, dhcp_nics and then static_nics: see ADAPTERS in
+    # Trog::HV::Libvirt.
+    @opts{qw{other_dhcp other_static}} = ( [], [] );
     unless ( $hv->builds_by_api ) {
-        my ( $nat_name, $bridge_name, @other_names ) = $hv->nic_names;
-        $opts{dhcp_devname}   //= $nat_name;
-        $opts{bridge_devname} //= $bridge_name;
-        $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
-        $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
+        my @names   = $hv->nic_names;
+        my $address = $hv->address_index;
+        my $mac     = sub ($index) { $hv->guest_mac( $opts{domain}, $index ) };
 
-        # The adapters from index 2 up, on the other bridges of nics.  See nics
-        # in Trog::HV::Libvirt.
-        $opts{other_nics} = [ map { +{ name => $other_names[$_], mac => $hv->guest_mac( $opts{domain}, $_ + 2 ) } } 0 .. $#other_names ];
+        $opts{dhcp_devname} //= $names[0];
+        $opts{nat_mac}      //= $mac->(0);
+        if ( defined $address ) {
+            $opts{bridge_devname} //= $names[$address];
+            $opts{bridge_mac}     //= $mac->($address);
+        }
+
+        my @static     = $hv->static_nics;
+        my %ip_of      = %{ $opts{nic_ips} // {} };
+        my $dhcp_count = defined $address ? $address : scalar @names;
+        $opts{other_dhcp}   = [ map { +{ name => $names[$_], mac => $mac->($_) } } 1 .. $dhcp_count - 1 ];
+        $opts{other_static} = [
+            map {
+                my $nic = $static[ $_ - $address ];
+                +{ name => $names[$_], mac => $mac->($_), addresses => [ map { index( $_, q{/} ) < 0 ? "$_/24" : $_ } grep { defined } $ip_of{$nic} ] }
+            } defined $address ? ( $address + 1 .. $#names ) : ()
+        ];
     }
 
     # mirror_insecure follows from mirror_uri, so it cannot be a schema default.
@@ -424,6 +444,8 @@ sub enrich {
 
     die "MUST SET gateway in provision.conf when ips are set\n"
       if @{ $opts{ips} } && !$opts{gateway};
+    die "ips are set, and the hypervisor names no static_nics, so no adapter of the guest can have them\n"
+      if @{ $opts{ips} } && !$hv->builds_by_api && !defined $opts{bridge_mac};
 
     $opts{addresses} = [ map { index( $_, q{/} ) < 0 ? "$_/24" : $_ } @{ $opts{ips} } ];
 

@@ -40,6 +40,7 @@ use Provisioner::Vars();
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
+use Trog::Hypervisors();
 use Provisioner::Cookbook();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
@@ -388,7 +389,10 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
               libvirt_uri=qemu+ssh://confuser@confhv/system
               pool_path=/srv/pool
               domain_dir=/srv/domains
-              bridge_device=br7
+              dhcp_nics=virbr7
+              static_nics=br7
+              ip_pool_br7=192.0.2.0/28
+              gateway_br7=192.0.2.1
               pool_name=runner_disks
               partition=/machine/runner
             }
@@ -400,13 +404,15 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
 
     Trog::HV->forget();
     my $from_conf = Trog::HV->from_config($config);
-    is( $from_conf->uri,           'qemu+ssh://confuser@confhv/system', 'uri from config' );
-    is( $from_conf->ssh_target,    'confuser@confhv',                   'ssh host/user inferred from it' );
-    is( $from_conf->pool_path,     '/srv/pool',                         'pool_path from config' );
-    is( $from_conf->domain_dir,    '/srv/domains',                      'domain_dir from config' );
-    is( $from_conf->bridge_device, 'br7',                               'bridge_device from config, no probing' );
-    is( $from_conf->pool_name,     'runner_disks',                      'pool_name from config' );
-    is( $from_conf->partition,     '/machine/runner',                   'partition from config' );
+    is( $from_conf->uri,        'qemu+ssh://confuser@confhv/system', 'uri from config' );
+    is( $from_conf->ssh_target, 'confuser@confhv',                   'ssh host/user inferred from it' );
+    is( $from_conf->pool_path,  '/srv/pool',                         'pool_path from config' );
+    is( $from_conf->domain_dir, '/srv/domains',                      'domain_dir from config' );
+    is_deeply( [ $from_conf->nic_bridges ], [qw{virbr7 br7}],             'the adapters from config, no probing' );
+    is_deeply( $from_conf->nic_pool('br7'), { cidr => ['192.0.2.0/28'] }, 'and the pool of the static one, by a key that no backend names' );
+    is( $from_conf->nic_gateway('br7'), '192.0.2.1',       'and its gateway' );
+    is( $from_conf->pool_name,          'runner_disks',    'pool_name from config' );
+    is( $from_conf->partition,          '/machine/runner', 'partition from config' );
 
     my $overridden = Trog::HV->from_config( $config, uri => 'qemu+ssh://cli/system' );
     is( $overridden->uri, 'qemu+ssh://cli/system', 'a uri passed here beats the one in the config' );
@@ -419,6 +425,12 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
 
     Trog::HV->forget();
     ok( Trog::HV->from_config(undef)->is_local, 'a missing config is just the local hypervisor' );
+
+    like(
+        exception { Trog::HV->from_config( { libvirt_uri => 'qemu:///system', bridge_device => 'br0', pool_cidr => '192.0.2.0/24' } ) },
+        qr/now[ ]static_nics,[ ]pool_cidr,[ ]which/,
+        'and a key that the adapters replaced is refused, with what to name instead'
+    );
 };
 
 subtest 'a bridge nothing can find says where to name it' => sub {
@@ -428,11 +440,9 @@ subtest 'a bridge nothing can find says where to name it' => sub {
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test/system' );
 
     # The same key is read from either file, depending on whether there is a fleet.
-    for my $key (qw{bridge_device virbr_device}) {
-        my $why = exception { $hv->$key() };
-        like( $why, qr/Set[ ]$key[ ]in[ ]this[ ]hypervisor's[ ]block/, "$key: in hypervisors.conf, where a fleet reads it" );
-        like( $why, qr/in[ ]provision[.]conf[ ]if[ ]there[ ]is[ ]no/,  "$key: or in provision.conf, without one" );
-    }
+    my $why = exception { $hv->lease_nic };
+    like( $why, qr/Set[ ]dhcp_nics[ ]in[ ]this[ ]hypervisor's[ ]block/, 'in hypervisors.conf, where a fleet reads it' );
+    like( $why, qr/in[ ]provision[.]conf[ ]if[ ]there[ ]is[ ]no/,       'or in provision.conf, without one' );
 };
 
 # --- has_tpm ------------------------------------------------------------------
@@ -1600,11 +1610,12 @@ subtest 'a guest MAC is derived from its name and does not move' => sub {
         'and so does another hypervisor'
     );
 
-    is_deeply( [ $hv->nic_slots ], [ 3, 4 ], 'the slots are pinned, so a guest calls its interfaces the same thing every time' );
+    my $two = fresh( dhcp_nics => 'virbr0', static_nics => 'br0', ip_pool_br0 => '192.0.2.0/28', gateway_br0 => '192.0.2.1' );
+    is_deeply( [ $two->nic_slots ], [ 3, 4 ], 'the slots are pinned, so a guest calls its interfaces the same thing every time' );
 };
 
 subtest 'what a guest will call its interfaces is the hypervisor to say' => sub {
-    my $hv = fresh();
+    my $hv = fresh( dhcp_nics => 'virbr0', static_nics => 'br0', ip_pool_br0 => '192.0.2.0/28', gateway_br0 => '192.0.2.1' );
 
     is_deeply( [ $hv->nic_names ],   [qw{ens3 ens4}], 'the prefix and the pinned slots, NAT first' );
     is_deeply( [ $hv->guest_disks ], ['vd*'],         'and its disks are on virtio, so not sda, which is the seed' );
@@ -1644,46 +1655,72 @@ subtest 'the NAT bridge is the bridge of the default network, and not the last v
     $mock->redefine( network_vmm => sub { Test::HvNetworks->new( default => Test::HvNetwork->new( bridge => 'virbr0' ), guests => Test::HvNetwork->new( bridge => 'virbr1' ) ) } );
 
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system' );
-    is( $hv->virbr_device, 'virbr0', 'a second network on virbr1 does not move the NAT adapter of every guest onto it' );
+    is( $hv->lease_nic, 'virbr0', 'a second network on virbr1 does not move the NAT adapter of every guest onto it' );
+    is_deeply( [ $hv->dhcp_nics ], ['virbr0'], 'and without dhcp_nics, that is the one adapter that takes a lease' );
 };
 
-subtest 'nics: one adapter on each bridge, numbered NAT first whatever its place' => sub {
-    my %primary = ( virbr_device => 'virbr0', bridge_device => 'virbr1' );
-    my $hv      = Trog::HV->candidate( uri => 'qemu+ssh://runner@hv.test.test/session', %primary, nics => 'virbr1, br9 virbr0' );
-
-    is_deeply( [ $hv->nic_order ],   [ 1, 2, 0 ],             'the index of each adapter, in the order of the domain' );
-    is_deeply( [ $hv->nic_slots ],   [ 5, 3, 4 ],             'the slot of each index: the NAT adapter is third on the bus' );
-    is_deeply( [ $hv->nic_names ],   [qw{ens5 ens3 ens4}],    'so is its name, and the names still come NAT first' );
-    is_deeply( [ $hv->nic_bridges ], [qw{virbr0 virbr1 br9}], 'the bridge of each index' );
-    is_deeply( [ $hv->extra_nics ],  ['br9'],                 'and the ones past the two of every guest' );
-
-    my $plain = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', bridge_device => 'br0', virbr_device => 'virbr0' );
-    is_deeply( [ $plain->nic_order ],   [ 0, 1 ],         'without nics, NAT and then bridge, as before' );
-    is_deeply( [ $plain->nic_bridges ], [qw{virbr0 br0}], 'on the two bridges of the block' );
-    is_deeply( [ $plain->extra_nics ],  [],               'and nothing else' );
-
-    my $refused = sub (%block) {
-        exception { Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', name => 'hv1', %primary, %block ) }
-    };
-    like( $refused->( nics => 'virbr0, virbr1, bad/name' ),                  qr{hv1[ ]names[ ]'bad/name',[ ]which[ ]is[ ]not},            'a name that is not a link' );
-    like( $refused->( nics => 'virbr0 virbr1 averyveryverylongname' ),       qr/not[ ]the[ ]name[ ]of[ ]a[ ]bridge/,                      'one longer than the kernel takes' );
-    like( $refused->( nics => 'virbr0, virbr1, virbr0' ),                    qr/names[ ]virbr0[ ]twice/,                                  'a bridge named twice' );
-    like( $refused->( nics => 'virbr0, br9' ),                               qr/not[ ]name[ ]virbr1,[ ]which[ ]is[ ]the[ ]bridge_device/, 'a list without the bridge of the pool' );
-    like( $refused->( nics => 'virbr1, br9' ),                               qr/not[ ]name[ ]virbr0,[ ]which[ ]is[ ]the[ ]virbr_device/,  'or without the NAT bridge' );
-    like( $refused->( nics => 'virbr0, virbr1', bridge_device => 'virbr0' ), qr/both[ ]virbr0/,                                           'one bridge for both' );
-    like(
-        exception { Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', name => 'hv1', virbr_device => 'virbr0', nics => 'virbr0' ) },
-        qr/must[ ]name[ ]bridge_device[ ]as[ ]well/,
-        'and a block that leaves a bridge to be probed, which a list cannot be checked against'
+subtest 'dhcp_nics and static_nics: one adapter on each bridge, in that order' => sub {
+    my %block = (
+        uri            => 'qemu+ssh://runner@hv.test.test/session',
+        dhcp_nics      => 'virbr0, virbr2',
+        static_nics    => 'virbr1 br0',
+        ip_pool_virbr1 => '10.0.0.0/25',
+        gateway_virbr1 => '10.0.0.1',
+        ip_pool_br0    => '192.0.2.64/26',
     );
+    my $hv = Trog::HV->candidate(%block);
+
+    is_deeply( [ $hv->nic_bridges ], [qw{virbr0 virbr2 virbr1 br0}], 'the bridge of each index: dhcp_nics and then static_nics' );
+    is_deeply( [ $hv->nic_slots ],   [ 3, 4, 5, 6 ],                 'in slots from 3' );
+    is_deeply( [ $hv->nic_names ],   [qw{ens3 ens4 ens5 ens6}],      'so named in that order' );
+    is( $hv->lease_nic,     'virbr0', 'the first of dhcp_nics takes the lease' );
+    is( $hv->address_nic,   'virbr1', 'the first of static_nics has the address of the guest' );
+    is( $hv->address_index, 2,        'at the index after the adapters of dhcp_nics' );
+    is_deeply( $hv->static_pools, { virbr1 => { cidr => ['10.0.0.0/25'] }, br0 => { cidr => ['192.0.2.64/26'] } }, 'and each static adapter has its own pool' );
+
+    my $plain = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', dhcp_nics => 'virbr0', static_nics => 'br0', ip_pool_br0 => '192.0.2.0/28', gateway_br0 => '192.0.2.1' );
+    is_deeply( [ $plain->nic_slots ], [ 3, 4 ], 'one bridge in each list is the two adapters that a guest always had' );
+    is( $plain->address_index, 1, 'with its address on the second' );
+
+    my $leased = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', dhcp_nics => 'virbr0' );
+    is( $leased->address_index, undef, 'and a block with no static adapter gives its guests no address' );
+
+    my $refused = sub (%changed) {
+        my %args = ( %block, name => 'hv1', %changed );
+        delete @args{ grep { !defined $args{$_} } keys %args };
+        my $why = exception { Trog::HV->candidate(%args) };
+        return $why // q{};
+    };
+    like( $refused->( static_nics    => 'virbr1 bad/name' ),              qr{hv1[ ]name[ ]'bad/name',[ ]which[ ]is[ ]not},             'a name that is not a link' );
+    like( $refused->( dhcp_nics      => 'virbr0 averyveryverylongname' ), qr/not[ ]the[ ]name[ ]of[ ]a[ ]bridge/,                      'one longer than the kernel takes' );
+    like( $refused->( dhcp_nics      => 'virbr0, virbr1' ),               qr/name[ ]virbr1[ ]twice/,                                   'a bridge in both lists' );
+    like( $refused->( ip_pool_br0    => undef ),                          qr/br0[ ]in[ ]static_nics[ ]for[ ]hv1[ ]has[ ]no[ ]pool/,    'a static adapter with no pool' );
+    like( $refused->( gateway_virbr1 => undef ),                          qr/name[ ]its[ ]gateway:[ ]gateway_virbr1/,                  'a first static adapter with no gateway' );
+    like( $refused->( gateway_virbr1 => '2001:db8::1' ),                  qr/'2001:db8::1',[ ]which[ ]is[ ]not[ ]an[ ]IPv4/,           'a gateway that is not IPv4' );
+    like( $refused->( ip_pool_br0    => 'lan' ),                          qr/pool[ ]of[ ]br0[ ]for[ ]hv1[ ]names[ ]'lan'/,             'a pool that names no address' );
+    like( $refused->( ip_pool_br9    => '198.51.100.0/24' ),              qr/bridge[ ]br9,[ ]which[ ]static_nics[ ]does[ ]not[ ]name/, 'and a pool of a bridge outside the two lists' );
 };
 
-subtest 'a hypervisor of a service refuses nics' => sub {
+subtest 'a block that names the keys that the adapters replaced is refused' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $file = "$dir/hypervisors.conf";
+    File::Slurper::Temp::write_text( $file, "[hv1]\nlibvirt_uri = qemu+ssh://root\@hv.test.test/system\nvirbr_device = virbr0\nbridge_device = br0\ngateway = 192.0.2.1\npool_addresses = 192.0.2.5\n" );
+
+    my $why = exception { Trog::Hypervisors->load($file)->hypervisor('hv1') };
+    $why //= q{};
+    like( $why, qr/\[hv1\][ ]in[ ] .* names[ ]/,                           'naming the block' );
+    like( $why, qr/bridge_device,[ ]which[ ]is[ ]now[ ]static_nics/,       'and each key, with what took its place' );
+    like( $why, qr/virbr_device,[ ]which[ ]is[ ]now[ ]dhcp_nics/,          'the NAT bridge' );
+    like( $why, qr/gateway,[ ]which[ ]is[ ]now[ ]gateway_NIC/,             'the gateway' );
+    like( $why, qr/pool_addresses,[ ]which[ ]is[ ]now[ ]ip_addresses_NIC/, 'and the pool' );
+};
+
+subtest 'a hypervisor of a service refuses the adapters of a guest' => sub {
     foreach my $block ( [ linode_token => 'secret:linode/api/password' ], [ cloud => 'testcloud' ], [ solusvm => 'https://solusvm.test.test' ] ) {
         like(
-            exception { Trog::HV->candidate( @$block, name => 'cloud1', nics => 'br0, virbr0' ) },
-            qr/nics[ ]for[ ]cloud1[ ]names[ ]the[ ]adapters.*Remove[ ]nics/,
-            "$block->[0]: rather than building guests without the adapters that the block asks for"
+            exception { Trog::HV->candidate( @$block, name => 'cloud1', static_nics => 'br0', ip_pool_br0 => '192.0.2.0/24' ) },
+            qr/static_nics[ ]for[ ]cloud1[ ]name[ ]the[ ]adapters.*Remove/,
+            "$block->[0]: rather than building guests without the adapters and addresses that the block asks for"
         );
     }
 };
@@ -2167,18 +2204,18 @@ subtest 'runner_sudoers grants the lease release, with its arguments pinned' => 
     like( exception { Trog::HV::Libvirt->runner_sudoers( %args, user         => 'ALL' ) },                 qr/sudoers[ ]file[ ]can[ ]hold/, 'and a user that is a keyword' );
 };
 
-subtest 'configured_gateway and guest_pool: the network of a block of hypervisors.conf' => sub {
-    my $hv = sub { my (%block) = @_; return Trog::HV->new( Trog::HV->options_from_block( { libvirt_uri => 'qemu:///system', %block } ) ) };
+subtest 'nic_gateway and nic_pool: the network of a static adapter' => sub {
+    my $hv   = sub { my (%block) = @_; return Trog::HV->new( Trog::HV->options_from_block( { libvirt_uri => 'qemu:///system', static_nics => 'br0', %block } ) ) };
+    my %pool = ( ip_pool_br0 => '192.0.2.0/26' );
 
-    is( $hv->( gateway => '192.0.2.1' )->configured_gateway, '192.0.2.1', 'the gateway that the block names' );
-    is( $hv->()->configured_gateway,                         undef,       'and none when it names none' );
-    like( exception { $hv->( gateway => 'gw.test.test' )->configured_gateway }, qr/'gw[.]test[.]test',[ ]which[ ]is[ ]not[ ]an[ ]IPv4[ ]address/, 'a name in place of an address is refused' );
-    like( exception { $hv->( gateway => '192.0.2.0/24' )->configured_gateway }, qr/not[ ]an[ ]IPv4[ ]address/,                                    'and so is a network' );
-    like( exception { $hv->( gateway => '2001:db8::1' )->configured_gateway },  qr/not[ ]an[ ]IPv4[ ]address/,                                    'and so is IPv6' );
+    is( $hv->( %pool, gateway_br0 => '192.0.2.1' )->nic_gateway('br0'),       '192.0.2.1', 'the gateway that the block names for the bridge' );
+    is( Trog::HV->new( libvirt_uri => 'qemu:///system' )->nic_gateway('br0'), undef,       'and none when it names none' );
+    like( exception { $hv->( %pool, gateway_br0 => 'gw.test.test' ) }, qr/'gw[.]test[.]test',[ ]which[ ]is[ ]not[ ]an[ ]IPv4[ ]address/, 'a name in place of an address is refused' );
+    like( exception { $hv->( %pool, gateway_br0 => '192.0.2.0/24' ) }, qr/not[ ]an[ ]IPv4[ ]address/,                                    'and so is a network' );
 
-    is_deeply( $hv->( pool_cidr => '192.0.2.0/26, 192.0.2.128/27', pool_addresses => '192.0.2.200 192.0.2.201' )->guest_pool, { cidr => [qw{192.0.2.0/26 192.0.2.128/27}], addresses => [qw{192.0.2.200 192.0.2.201}] }, 'the bin of the guests, each key a list, whether commas or spaces separate it' );
-    is_deeply( $hv->( pool_cidr => [qw{192.0.2.0/26 192.0.2.128/27}] )->guest_pool,                                           { cidr => [qw{192.0.2.0/26 192.0.2.128/27}] },                                             'from the list that Config::Simple makes of one, without a key the block does not name' );
-    is_deeply( $hv->()->guest_pool, {}, 'and empty when the block names no pool' );
+    my %gw = ( gateway_br0 => '192.0.2.1' );
+    is_deeply( $hv->( %gw, ip_pool_br0 => '192.0.2.0/26, 192.0.2.128/27', ip_addresses_br0 => '192.0.2.200 192.0.2.201' )->nic_pool('br0'), { cidr => [qw{192.0.2.0/26 192.0.2.128/27}], addresses => [qw{192.0.2.200 192.0.2.201}] }, 'the pool of the bridge, each key a list, whether commas or spaces separate it' );
+    is_deeply( $hv->( %gw, ip_pool_br0 => [qw{192.0.2.0/26 192.0.2.128/27}] )->nic_pool('br0'), { cidr => [qw{192.0.2.0/26 192.0.2.128/27}] }, 'from the list that Config::Simple makes of one, without a key the block does not name' );
 };
 
 done_testing;
