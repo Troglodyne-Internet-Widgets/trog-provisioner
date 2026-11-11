@@ -52,8 +52,18 @@
 
   <!-- host-passthrough by default, so the guest sees the real CPU, AVX
        included.  Software that probes cpuid for vector extensions needs it.
-       The cost is that the guest cannot migrate to a host with another CPU. -->
-  <cpu mode='[% cpu_mode %]'/>
+       The cost is that the guest cannot migrate to a host with another CPU.
+
+       The topology is one socket that holds every vCPU as a core.  With no
+       topology, libvirt gives qemu one socket for each vCPU, and software
+       that sizes its threads or its caches from the topology sees a machine
+       with many single core packages.  One thread for each core, because the
+       vCPUs are not pinned to sibling threads of the host, so the guest has
+       no siblings to schedule around.  No dies attribute: libvirt takes one
+       die when it is absent, and the attribute needs libvirt 6.1. -->
+  <cpu mode='[% cpu_mode %]'>
+    <topology sockets='1' cores='[% cpus %]' threads='1'/>
+  </cpu>
   <clock offset='utc'/>
 
   <!-- virtiofs needs shared memory, and memfd is how you get it without

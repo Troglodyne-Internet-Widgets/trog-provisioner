@@ -34,6 +34,7 @@ use Test::MockModule qw{strict};
 use Config::Simple();
 use File::Which();
 use IPC::Run3();
+use Mojo::DOM();
 
 use FindBin::libs;
 
@@ -233,6 +234,21 @@ sub tuned_output {
 # so does everything that compares one here.  Spelled out because 0.9.8 and
 # 9.8.0 are two very different numbers and only one of them is a real libvirt.
 sub libvirt { my ( $major, $minor, $release ) = @_; return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + $release }
+
+# Whether the schema of libvirt takes a domain, as virt-xml-validate judges it.
+# A skip where the tool is not installed, since it comes with libvirt.
+sub libvirt_takes {
+    my ( $xml, $name ) = @_;
+  SKIP: {
+        my $validate = File::Which::which('virt-xml-validate');
+        skip 'no virt-xml-validate here to read the domain', 1 unless $validate;
+        my $file = tempdir( CLEANUP => 1 ) . '/domain.xml';
+        File::Slurper::Temp::write_text( $file, $xml );
+        IPC::Run3::run3( [ $validate, $file, 'domain' ], \undef, \my $out, \my $err );
+        is( $? >> 8, 0, $name ) or diag $out, $err;
+    }
+    return;
+}
 
 subtest 'a rebuild that keeps its disk writes the uuid libvirt already gave it' => sub {
     my $config = Config::Simple->new(
@@ -461,14 +477,7 @@ subtest 'a guest of a session joins the NAT bridge, and asks for nothing the ses
     unlike( $xml, qr/<source[ ]network=/, 'and names no network of the system daemon, which a session cannot use' );
     like( tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ) ), qr/<source[ ]network='default'/, 'while a guest of the system daemon stays on the network' );
 
-  SKIP: {
-        my $validate = File::Which::which('virt-xml-validate');
-        skip 'no virt-xml-validate here to read the domain', 1 unless $validate;
-        my $file = tempdir( CLEANUP => 1 ) . '/domain.xml';
-        File::Slurper::Temp::write_text( $file, $xml );
-        IPC::Run3::run3( [ $validate, $file, 'domain' ], \undef, \my $out, \my $err );
-        is( $? >> 8, 0, 'the schema of libvirt takes the domain' ) or diag $out, $err;
-    }
+    libvirt_takes( $xml, 'the schema of libvirt takes the domain' );
 
     like( tuned_xml( %session, mounts => "file=/bogus/disk.qcow2\nfuse=/bogus/fuse\n" ), qr{<source[ ]file='/bogus/disk[.]qcow2'/>}, 'an image file, which the account opens as itself' );
     like( exception { tuned_xml( %session, mounts => "dir=/bogus/share\n" ) },     qr/virtiofs[ ]share.*\#537/,                        'a virtiofs share, which waits on issue #537' );
@@ -497,6 +506,37 @@ subtest 'a guest is a q35 unless it is configured otherwise' => sub {
     my $pinned = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { machine => 'pc-q35-8.2' } );
     like( $pinned, qr/machine='pc-q35-8[.]2'/, 'a version can be named' );
     unlike( $pinned, qr/<address[ ]type='pci'[^>]*slot='0x0[34]'/, 'and it is still a PCIe machine' );
+};
+
+# --- The CPU topology the guest sees ------------------------------------------
+#
+# libvirt with no <topology> hands qemu one socket for each vCPU.  What libvirt
+# reads is the product of the topology against <vcpu>, so these parse the
+# domain and check that, rather than look for a line.
+subtest 'a guest sees one socket with each vCPU as a core' => sub {
+    foreach my $cpus ( 1, 4, 32 ) {
+        my $xml = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { cpus => $cpus } );
+        my $dom = Mojo::DOM->new->xml(1)->parse($xml);
+
+        my $topology = $dom->at('domain > cpu > topology');
+        ok( $topology, "a guest of $cpus vCPUs has a topology under its cpu" ) or do { diag $xml; next };
+        my %t = map { $_ => $topology->attr($_) // 1 } qw{sockets dies cores threads};
+
+        is( $t{sockets},                                      1,                               "$cpus vCPUs: one socket" );
+        is( $t{cores},                                        $cpus,                           "$cpus vCPUs: a core for each vCPU" );
+        is( $t{threads},                                      1,                               "$cpus vCPUs: no sibling threads, the vCPUs being unpinned" );
+        is( $t{sockets} * $t{dies} * $t{cores} * $t{threads}, $dom->at('domain > vcpu')->text, "$cpus vCPUs: the topology adds up to the vcpu count, which libvirt refuses otherwise" );
+        is( $dom->at('domain > cpu')->attr('mode'),           'host-passthrough',              "$cpus vCPUs: and the cpu mode is the one configured" );
+        libvirt_takes( $xml, "$cpus vCPUs: the schema of libvirt takes the domain" );
+    }
+
+    # A socket of no cores is no machine.  The schema refuses it, before
+    # libvirt is asked.
+    like(
+        exception { tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { cpus => 0 } ) },
+        qr{/cpus:[ ]0[ ]<[ ]minimum\(1\)},
+        'a guest of no vCPUs is refused by the schema of the recipe'
+    );
 };
 
 # --- Which netplan entry gets the static IP ----------------------------------
