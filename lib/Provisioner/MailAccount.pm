@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Data::Validate::Domain();
 use File::Slurper();
 use List::Util qw{any};
 use YAML::XS();
@@ -40,9 +41,23 @@ of the recipe and C<bin/add_mail_user>, C<bin/reset_mail_password> and
 C<bin/remove_mail_user> all call C<passwd_line>.  So the tools write the same
 line that a build would write.
 
-The tools change three things, and keep them the same: the secret store, the
-configuration of the domain, and the passwd-file on the running guest.  A
-rebuild then makes the account that the tool made.
+Postfix has three tables of its own for the accounts of a domain.  The recipe
+renders them in F</etc/postfix/domains/$domain/>.  C<sender_login> says who owns
+each sender address.  C<virtual_maps> says which mailbox gets the mail of each
+address.  C<virtual_aliases> ends in a wildcard line that sends every address
+without a line of its own to the catchall, so an account needs a line there to
+keep its mail.  An address that is in none of them cannot send, and its mail
+goes to the catchall mailbox.  C<sender_login_line>, C<virtual_maps_line> and
+C<virtual_aliases_line> are the one place that knows the lines of these tables.
+The templates and the tools call them.
+
+The tools change four things, and keep them the same: the secret store, the
+configuration of the domain, the passwd-file on the running guest, and the three
+postfix tables.  A rebuild then makes the account that the tool made.
+C<add> and C<remove> change all three tables.  C<reset_password> changes none,
+because no table holds the password.  Each table is written through a
+temporary file and a rename, and then C<postmap> builds its database.  Postfix
+rereads a changed C<hash:> table, so nothing reloads postfix.
 
 =head1 SUBROUTINES
 
@@ -50,6 +65,13 @@ rebuild then makes the account that the tool made.
 
 # Where the mail stores of a guest are.  A test points it at a scratch directory.
 our $MAIL_ROOT = '/mail';
+
+# Where the postfix tables of the domains of a guest are.  A test points it too.
+our $POSTFIX_ROOT = '/etc/postfix/domains';
+
+# The postfix tables that hold a line for each account, in the order that the
+# tools write them.
+our @TABLES = qw{sender_login virtual_aliases virtual_maps};
 
 # What the template puts in the uid and the gid fields.  The build replaces it
 # with the uid of dovecot on the guest, which only the guest knows.
@@ -98,6 +120,23 @@ sub check_name ($name) {
     return 1;
 }
 
+=head2 check_domain($domain)
+
+Returns 1 for a domain that a path, a shell command and a table line can all
+hold: a domain in lower case, as L<Data::Validate::Domain> judges it, without
+a dot at the end.  The check of the top-level domain is off, because a guest can
+sit under a private or reserved one.  The label of such a domain holds letters,
+digits and hyphens, so a colon, a space, a slash, a line break and an
+underscore are all refused.  Dies for any other.
+
+=cut
+
+sub check_domain ($domain) {
+    my $ok = defined $domain && $domain eq lc $domain && $domain !~ m/\.\z/ && Data::Validate::Domain::is_domain( $domain, { domain_disable_tld_validation => 1 } );
+    die "The domain of a mail account is a domain name in lower case, with letters, digits, dots and hyphens, not '" . ( $domain // q{} ) . "'.\n" unless $ok;
+    return 1;
+}
+
 =head2 passwd_line(%args)
 
 The line of the passwd-file for one account.  Takes C<domain>, C<name>,
@@ -115,7 +154,7 @@ sub passwd_line (%args) {
     my $incomplete = length( $name // q{} ) == 0 || length( $domain // q{} ) == 0 || !( defined $args{password} || defined $args{hash} );
     die "A mail account needs a name, a domain and a password or hash.\n" if $incomplete;
     check_name($name);
-    die "The domain of a mail account is letters, digits, dots and hyphens, not '$domain'.\n" unless $domain =~ m/\A[\w.-]+\z/;
+    check_domain($domain);
     $gecos //= q{};
     die "The gecos of $name\@$domain holds a colon or a line break, which the passwd-file cannot hold.\n" if $gecos =~ m/[:\n\r]/;
 
@@ -207,6 +246,105 @@ sub remove_line ( $text, $address ) {
     return $text;
 }
 
+=head2 $line = sender_login_line($address, $owner)
+
+The line of the C<sender_login> table: C<$address> and the login that owns it,
+with a space between.  C<$owner> is C<$address> where it is left out, which is
+the line of an account.  The recipe also calls it for an alias, whose owner is
+the address that it delivers to.  Dies for an address with a space or a line
+break in it, because the table has no way to quote one.
+
+=cut
+
+sub sender_login_line ( $address, $owner = $address ) {
+    foreach my $field ( $address, $owner ) {
+        die "An address in the sender_login table holds a space or a line break: '" . ( $field // q{} ) . "'.\n" unless ( $field // q{} ) =~ m/\A\S+\z/;
+    }
+    return "$address $owner";
+}
+
+=head2 $line = virtual_aliases_line($domain, $name)
+
+The line of the C<virtual_aliases> table for one account: its address, and the
+same address as the target.  Postfix tries the whole address before the
+wildcard line at the end of the table, so this line keeps the mail of the
+account out of the catchall.  The recipe calls it for each name of
+C<mail.names>.
+
+=cut
+
+sub virtual_aliases_line ( $domain, $name ) {
+    check_domain($domain);
+    check_name($name);
+    my $address = address( $domain, $name );
+    return "$address $address";
+}
+
+=head2 $line = virtual_maps_line($domain, $name)
+
+The line of the C<virtual_maps> table for one account: its address, and its
+mailbox C<$domain/$name> under the mail store of the domain.  The recipe calls
+it for each name of C<mail.names>.
+
+=cut
+
+sub virtual_maps_line ( $domain, $name ) {
+    check_domain($domain);
+    check_name($name);
+    return address( $domain, $name ) . " $domain/$name";
+}
+
+# The lines of a postfix table that are entries, as [ key, line ].  The key is
+# the first field.
+my sub entries_of ($text) {
+    return map { m/\A(\S+)\s+\S/ ? [ $1, $_ ] : () } grep { !m/\A\s*(?:\#|\z)/ } split( m/\n/, $text // q{} );
+}
+
+=head2 $text = add_table_line($text, $line, $domain)
+
+C<$text> with C<$line> in it, above the catchall line C<@$domain>, so that the
+catchall stays the last entry as the build renders it.  A table with no
+catchall line gets the line at the end.  A line that is already there changes
+nothing.  Dies if the key of the line is in C<$text> with another value,
+because the table would then hold two answers for one address.
+
+=cut
+
+sub add_table_line ( $text, $line, $domain ) {
+    $text //= q{};
+    my ($key) = $line =~ m/\A(\S+)\s+\S/ or die "Not a table line: $line\n";
+
+    my @hits = grep { $_->[0] eq $key } entries_of($text);
+    if (@hits) {
+        return $text if @hits == 1 && $hits[0][1] eq $line;
+        die "$key is already in the table, with another value.\n";
+    }
+
+    my $catchall = "\@$domain";
+    return $text if $text =~ s/^(?=\Q$catchall\E\s)/$line\n/m;
+
+    $text .= "\n" if length($text) > 0 && $text !~ m/\n\z/;
+    return "$text$line\n";
+}
+
+=head2 $text = remove_table_line($text, $key)
+
+C<$text> without the entries whose key is C<$key>.  A table that has none comes
+back as it was, because a guest whose account was made before the tools wrote
+the tables has no line to remove.
+
+=cut
+
+sub remove_table_line ( $text, $key ) {
+    foreach my $hit ( grep { $_->[0] eq $key } entries_of($text) ) {
+        my $old = $hit->[1];
+
+        # Anchored at both ends, so a line that holds this one as its head is kept.
+        $text =~ s/^\Q$old\E(?:\n|\z)//m;
+    }
+    return $text;
+}
+
 =head2 $accounts = configured_accounts($domain)
 
 The C<mail.names> of C<$domain>, as the configuration says them, with the
@@ -271,6 +409,35 @@ my sub root_out ( $guest, $script ) {
     return $guest->capture_cmd( 'sudo -n sh -c ' . shq($script) ) // q{};
 }
 
+# The text of the file at $path on the guest, or undef where it is not there.
+my sub read_file ( $guest, $path ) {
+    return if root( $guest, 'test -f ' . shq($path) );
+    return root_out( $guest, 'cat ' . shq($path) );
+}
+
+# Replaces $dir/$file on the guest with $text, through a temporary file in $dir
+# that has the owner and the mode of the file it replaces, and a rename.  Dies,
+# and removes the temporary file, if any step fails.
+my sub replace_file ( $guest, $dir, $file, $text ) {
+    my $path = "$dir/$file";
+
+    my $tmp = root_out( $guest, 'mktemp ' . shq("$dir/.$file.XXXXXX") );
+    chomp $tmp;
+    die "Could not make a temporary file in $dir on the guest.\n" unless $tmp =~ m{\A\Q$dir\E/[.]\Q$file\E[.]\w+\z};
+
+    my $moved = eval {
+        $guest->write_text( $tmp, $text, sudo => 1, mode => '0600' ) or die "Could not write $tmp on the guest.\n";
+        root( $guest, 'chown --reference=' . shq($path) . q{ } . shq($tmp) . ' && chmod --reference=' . shq($path) . q{ } . shq($tmp) . ' && mv -f ' . shq($tmp) . q{ } . shq($path) ) == 0;
+    };
+    my $why = $@;
+    unless ($moved) {
+        root( $guest, 'rm -f ' . shq($tmp) );
+        die $why || "Could not move $tmp over $path on the guest.\n";
+    }
+
+    return 1;
+}
+
 =head2 $text = read_passwd($guest, $domain)
 
 The passwd-file of C<$domain> on the guest, or undef where the file is not there.
@@ -278,9 +445,7 @@ The passwd-file of C<$domain> on the guest, or undef where the file is not there
 =cut
 
 sub read_passwd ( $guest, $domain ) {
-    my $path = "$MAIL_ROOT/$domain/passwd";
-    return if root( $guest, 'test -f ' . shq($path) );
-    return root_out( $guest, 'cat ' . shq($path) );
+    return read_file( $guest, "$MAIL_ROOT/$domain/passwd" );
 }
 
 =head2 write_passwd($guest, $domain, $text)
@@ -294,24 +459,73 @@ temporary file, if any step fails.
 =cut
 
 sub write_passwd ( $guest, $domain, $text ) {
-    my $dir  = "$MAIL_ROOT/$domain";
-    my $path = "$dir/passwd";
+    return replace_file( $guest, "$MAIL_ROOT/$domain", 'passwd', $text );
+}
 
-    my $tmp = root_out( $guest, 'mktemp ' . shq("$dir/.passwd.XXXXXX") );
-    chomp $tmp;
-    die "Could not make a temporary file in $dir on the guest.\n" unless $tmp =~ m{\A\Q$dir\E/[.]passwd[.]\w+\z};
+=head2 $text = read_table($guest, $domain, $table)
 
-    my $moved = eval {
-        $guest->write_text( $tmp, $text, sudo => 1, mode => '0600' ) or die "Could not write $tmp on the guest.\n";
-        root( $guest, 'chown --reference=' . shq($path) . q{ } . shq($tmp) . ' && chmod --reference=' . shq($path) . q{ } . shq($tmp) . ' && mv -f ' . shq($tmp) . q{ } . shq($path) ) == 0;
-    };
-    my $why = $@;
-    unless ($moved) {
-        root( $guest, 'rm -f ' . shq($tmp) );
-        die $why || "Could not move $tmp over $path on the guest.\n";
-    }
+The postfix table C<$table> (one of C<@TABLES>) of C<$domain>
+on the guest, or undef where the file is not there.
 
+=cut
+
+sub read_table ( $guest, $domain, $table ) {
+    return read_file( $guest, "$POSTFIX_ROOT/$domain/$table" );
+}
+
+=head2 write_table($guest, $domain, $table, $text)
+
+Replaces the postfix table C<$table> of C<$domain> on the guest with C<$text>, as
+C<write_passwd> does for the passwd-file, and then runs C<postmap> on it.
+Postfix rereads a changed C<hash:> table without a reload, so this does not
+reload postfix.  Dies if C<postmap> fails.  The file is then already replaced.
+
+=cut
+
+sub write_table ( $guest, $domain, $table, $text ) {
+    my $dir = "$POSTFIX_ROOT/$domain";
+    replace_file( $guest, $dir, $table, $text );
+    root( $guest, 'postmap ' . shq("hash:$dir/$table") ) == 0 or die "postmap failed on $dir/$table on the guest.\n";
     return 1;
+}
+
+# The text of each postfix table of $domain on the guest, in a hash keyed by the
+# name of the table.  A table that is not there is undef.
+my sub read_tables ( $guest, $domain ) {
+    my %text;
+    foreach my $table (@TABLES) {
+
+        # Scalar, because read_table returns an empty list for a table that is not there.
+        $text{$table} = read_table( $guest, $domain, $table );
+    }
+    return \%text;
+}
+
+# Writes each table whose text in %$new differs from %$old, in the order of
+# @TABLES, and then runs $code.  If a table or $code dies, it writes the old text
+# back into each table that it touched, runs postmap again, and dies with the
+# first reason.  So a failure leaves the tables as they were, and nothing for a
+# second run to refuse.
+my sub with_tables ( $guest, $domain, $old, $new, $code ) {
+    my @touched;
+    my $done = eval {
+        foreach my $table (@TABLES) {
+            next if !defined $new->{$table} || $new->{$table} eq ( $old->{$table} // q{} );
+
+            # Before the write, because a postmap that fails leaves the file replaced.
+            push @touched, $table;
+            write_table( $guest, $domain, $table, $new->{$table} );
+        }
+        $code->();
+        1;
+    };
+    return 1 if $done;
+
+    my $why = $@ || "The change to the postfix tables of $domain failed.\n";
+    foreach my $table ( reverse @touched ) {
+        eval { write_table( $guest, $domain, $table, $old->{$table} ); 1 } or $why .= "It could not put the old $table back: $@";
+    }
+    die $why;
 }
 
 =head2 $uid = dovecot_uid($guest)
@@ -391,10 +605,13 @@ my sub guest_for ( $domain, %opts ) {
 Makes the account.  Takes C<domain>, C<name>, C<gecos>, C<mailboxes> (an array
 reference), C<password>, C<secrets> (the path of the store), and C<guest>.
 Refuses an account that is in the configuration or in the passwd-file of the
-guest, before it changes anything.  Then it stores the password, adds the line
-and the mailboxes on the guest, and adds the account to the configuration.
-The configuration comes last, so that a failure on the guest leaves nothing
-behind that a second run refuses.
+guest, or whose address is in a postfix table with another value, before it
+changes anything.  Then it stores the password, adds the line to the
+C<sender_login>, C<virtual_aliases> and C<virtual_maps> tables of the guest, adds
+the line to the passwd-file and makes the mailboxes, and adds the account to the
+configuration.  The tables come before the passwd-file.  If the passwd-file
+cannot be written, all three tables are put back as they were.  The configuration comes last, so that a
+failure on the guest leaves nothing behind that a second run refuses.
 
 =cut
 
@@ -425,12 +642,24 @@ sub add (%args) {
         hash   => Provisioner::Utils::dovecot_password_hash( $args{password} ),
     );
 
+    # Read and built here too, for the same reason.  A guest with no table was
+    # not built by the mail recipe, as one with no passwd-file was not.
+    my $old = read_tables( $guest, $domain );
+    foreach my $table (@TABLES) {
+        defined $old->{$table} or die "$POSTFIX_ROOT/$domain/$table does not exist on the guest of $domain.  Is the mail recipe built there?\n";
+    }
+    my $new = {
+        sender_login    => add_table_line( $old->{sender_login},    sender_login_line($address),            $domain ),
+        virtual_aliases => add_table_line( $old->{virtual_aliases}, virtual_aliases_line( $domain, $name ), $domain ),
+        virtual_maps    => add_table_line( $old->{virtual_maps},    virtual_maps_line( $domain, $name ),    $domain ),
+    };
+
     # overwrite: nothing refers to this reference while the account is in
     # neither the configuration nor the guest, so a value left by a run that
     # stopped is not worth refusing for.
     Trog::Secrets->put( $args{secrets}, Trog::Credentials->store_password(), ref => $ref, value => $args{password}, overwrite => 1 );
 
-    write_passwd( $guest, $domain, add_line( $passwd, $line ) );
+    with_tables( $guest, $domain, $old, $new, sub { write_passwd( $guest, $domain, add_line( $passwd, $line ) ) } );
     make_mailboxes( $guest, $address, @boxes );
 
     add_to_configuration( $domain, $name, password => $ref, gecos => $gecos, ( @boxes ? ( mailboxes => \@boxes ) : () ) );
@@ -474,10 +703,14 @@ sub reset_password (%args) {
 
 Takes the account away.  Takes C<domain>, C<name>, C<secrets>, C<guest> and
 C<kick>.  Refuses an account that is in neither the configuration nor the
-passwd-file.  It removes the account from the configuration, then its line from
-the passwd-file, then its entry from the store.  The mailboxes stay on the
-disk of the guest, because they hold mail, and a tool that deletes mail on a
-typing error is worse than one that leaves it.
+passwd-file.  It removes the account from the configuration, then its lines
+from the C<sender_login>, C<virtual_aliases> and C<virtual_maps> tables, then its
+line from the passwd-file, then its entry from the store.  A table that has no
+line for the account is left alone, as is a table that is not there, because an
+account that an older version of the tool made has none.  If the passwd-file
+cannot be written, all three tables are put back as they were.  The mailboxes stay on the disk
+of the guest, because they hold mail, and a tool that deletes mail on a typing
+error is worse than one that leaves it.
 
 =cut
 
@@ -492,8 +725,11 @@ sub remove (%args) {
 
     die "$address is not in mail.names of $domain, and not in $MAIL_ROOT/$domain/passwd on the guest.  Nothing was changed.\n" unless $account || $on_guest;
 
-    remove_from_configuration( $domain, $name )                       if $account;
-    write_passwd( $guest, $domain, remove_line( $passwd, $address ) ) if $on_guest;
+    remove_from_configuration( $domain, $name ) if $account;
+
+    my $old = read_tables( $guest, $domain );
+    my $new = { map { $_ => defined $old->{$_} ? remove_table_line( $old->{$_}, $address ) : undef } @TABLES };
+    with_tables( $guest, $domain, $old, $new, sub { $on_guest && write_passwd( $guest, $domain, remove_line( $passwd, $address ) ) } );
 
     my $ref = ( $account // {} )->{password} // q{};
     Trog::Secrets->forget( $args{secrets}, Trog::Credentials->store_password(), $ref ) if $ref =~ m/\Asecret:/;

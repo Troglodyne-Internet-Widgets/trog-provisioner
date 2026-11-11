@@ -191,6 +191,21 @@ half of it, and dovecot needs no restart. C<reset_mail_password> replaces the
 value in the secret store and the hash in the one line. See the POD of each
 tool.
 
+Postfix has three tables of its own, F</etc/postfix/domains/DOMAIN/sender_login>,
+F</etc/postfix/domains/DOMAIN/virtual_aliases> and
+F</etc/postfix/domains/DOMAIN/virtual_maps>. Without a line in the first, the
+account cannot send. Without one in the second or the third, its mail goes to
+the catchall mailbox, because postfix reads the wildcard line at the end of
+C<virtual_aliases> for every address that has no line of its own.
+C<add_mail_user> adds a line to each, above the catchall line, and
+C<remove_mail_user> takes the lines out. C<reset_mail_password> changes none,
+because no table holds the password. The lines come from C<sender_login_line>,
+C<virtual_aliases_line> and C<virtual_maps_line> in L<Provisioner::MailAccount>,
+which the templates call too. Each table is written through a temporary file
+and a rename, and then C<postmap> builds its database. Postfix rereads it, so
+nothing reloads postfix. The tables are written before the passwd-file. If the
+passwd-file cannot be written, the tables are put back.
+
 An account that you add by hand on the guest, with none of these tools, is not
 in C<mail.names>. The next build does not make it. See C<unlisted_accounts>.
 
@@ -715,6 +730,13 @@ sub formatters {
                 return Provisioner::MailAccount::passwd_line( domain => $domain, name => $name, gecos => $gecos, password => $password );
             }
         ),
+
+        # The lines of the two postfix tables, from the same place, so that
+        # the tools write what a build writes.
+        mail_sender_login_line => Text::Xslate::html_builder( \&Provisioner::MailAccount::sender_login_line ),
+        mail_virtual_maps_line => Text::Xslate::html_builder( \&Provisioner::MailAccount::virtual_maps_line ),
+
+        mail_virtual_aliases_line => Text::Xslate::html_builder( \&Provisioner::MailAccount::virtual_aliases_line ),
     );
 }
 

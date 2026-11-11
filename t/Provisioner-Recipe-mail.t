@@ -99,6 +99,39 @@ subtest 'the template renders the line that the tools write' => sub {
     like( exception { $names->( someone    => { password => 'x', gecos => "x\ny" } ) }, qr{/names/someone/gecos}, 'or a line break' );
 };
 
+# bin/add_mail_user and bin/remove_mail_user write a line to each postfix table
+# of a running guest.  A build renders the same tables, so both must make the
+# same lines, or the tools would leave a table that a rebuild changes.
+subtest 'the templates render the postfix lines that the tools write' => sub {
+    my $fresh = sub {
+        return Provisioner::Cookbook->load( 'mail', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => '/nonexistent', distro => 'ubuntu' );
+    };
+    my %names = ( someuser => { password => 'x', gecos => 'Some User' }, other => { password => 'x', gecos => 'Other' } );
+
+    my $maps = $fresh->()->render_file( 'files/mail.virtual_maps.tt', %BASE, names => {%names} );
+    foreach my $name ( sort keys %names ) {
+        my $line = Provisioner::MailAccount::virtual_maps_line( $BASE{domain}, $name );
+        is( scalar( () = $maps =~ m/^\Q$line\E$/mg ), 1, "virtual_maps has the line of $name once, byte for byte" );
+    }
+    like( $maps, qr/\n\@\Q$BASE{domain}\E[ ]\Q$BASE{domain}\E\/catchall\n\z/, 'and the catchall line last, which is where the tools add above' );
+
+    my $aliases = $fresh->()->render_file( 'files/mail.virtual_aliases.tt', %BASE, names => {%names} );
+    foreach my $name ( sort keys %names ) {
+        my $line = Provisioner::MailAccount::virtual_aliases_line( $BASE{domain}, $name );
+        is( scalar( () = $aliases =~ m/^\Q$line\E$/mg ), 1, "virtual_aliases has the line of $name once, byte for byte" );
+    }
+    like( $aliases, qr/\n\@\Q$BASE{domain}\E[ ]catchall\@\Q$BASE{domain}\E\n\z/, 'and the wildcard line last, which is where the tools add above' );
+
+    my $logins = $fresh->()->render_file( 'files/mail.sender_login.tt', %BASE, names => {%names}, mail_aliases => [ { from => 'sales', to => 'someuser' } ] );
+    foreach my $name ( sort keys %names ) {
+        my $address = Provisioner::MailAccount::address( $BASE{domain}, $name );
+        my $line    = Provisioner::MailAccount::sender_login_line($address);
+        is( scalar( () = $logins =~ m/^\Q$line\E$/mg ), 1, "sender_login has the line of $name once, byte for byte" );
+    }
+    my $alias = Provisioner::MailAccount::sender_login_line( "sales\@$BASE{domain}", "someuser\@$BASE{domain}" );
+    like( $logins, qr/^\Q$alias\E$/m, 'and the line of an alias, with its owner' );
+};
+
 subtest 'an account that only the salvaged passwd-file holds is refused, or kept, and named' => sub {
     my %names = ( names => { someuser => { password => 'x', gecos => 'Some User' } }, script_dir => '/nonexistent', install_dir => '/nonexistent' );
 
