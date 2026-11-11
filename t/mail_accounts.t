@@ -72,6 +72,7 @@ require_ok("$FindBin::Bin/../bin/remove_mail_user")    or die "could not require
     sub write_text {
         my ( $self, $path, $content, %opts ) = @_;
         return 0 if $self->{refuse_writes};
+        return 0 if $self->{refuse_matching} && $path =~ $self->{refuse_matching};
         File::Slurper::Temp::write_text( $path, $content );
         return 1;
     }
@@ -86,6 +87,24 @@ my $bin = File::Temp::tempdir( CLEANUP => 1 );
     close($fh) or die "doveadm: $!";
     chmod 0755, "$bin/doveadm";
 }
+
+# A postmap that writes down what it was asked, and can be told to fail.
+{
+    open( my $fh, '>', "$bin/postmap" ) or die "postmap: $!";
+    print {$fh} qq{#!/bin/sh\necho "\$*" >> "\$POSTMAP_LOG"\nexit \${POSTMAP_EXIT:-0}\n};
+    close($fh) or die "postmap: $!";
+    chmod 0755, "$bin/postmap";
+}
+
+# The postfix tables of the guest: the lines of two accounts, and the catchall
+# line of the build, last.
+my %TABLE = (
+    sender_login => "# Who can put what in MAIL FROM, for $DOMAIN.\n\nold\@$DOMAIN old\@$DOMAIN\nghost\@$DOMAIN ghost\@$DOMAIN\n",
+    virtual_maps => "\nold\@$DOMAIN $DOMAIN/old\nghost\@$DOMAIN $DOMAIN/ghost\n\@$DOMAIN $DOMAIN/catchall\n",
+
+    # The wildcard line at the end is why an account needs a line of its own here.
+    virtual_aliases => "\nroot\@$DOMAIN someone\@elsewhere.test\n\nold\@$DOMAIN old\@$DOMAIN\nghost\@$DOMAIN ghost\@$DOMAIN\ncatchall\@$DOMAIN catchall\@$DOMAIN\n\@$DOMAIN catchall\@$DOMAIN\n",
+);
 
 # The passwd-file of the guest, the store, and the configuration.
 my $OLD_HASH = '{ARGON2ID}$argon2id$v=19$m=65536,t=3,p=1$b2xkc2FsdA$b2xkaGFzaA';
@@ -112,6 +131,14 @@ sub world {
     mkdir "$root/$DOMAIN" or die "mkdir: $!";
     File::Slurper::Temp::write_text( "$root/$DOMAIN/passwd", $PASSWD );
     chmod 0640, "$root/$DOMAIN/passwd";
+
+    mkdir "$root/postfix"         or die "mkdir: $!";
+    mkdir "$root/postfix/$DOMAIN" or die "mkdir: $!";
+    foreach my $table ( keys %TABLE ) {
+        File::Slurper::Temp::write_text( "$root/postfix/$DOMAIN/$table", $TABLE{$table} );
+        chmod 0600, "$root/postfix/$DOMAIN/$table";
+    }
+    File::Slurper::Temp::write_text( "$root/postmap.log", q{} );
 
     my $dir = "$CONFIG/recipes.d";
     mkdir $dir unless -d $dir;
@@ -143,9 +170,11 @@ sub run_tool {
     my $mock = Test::MockModule->new('Trog::Hypervisors');
     $mock->redefine( guest_of => sub { return $guest } );
 
-    local $Provisioner::MailAccount::MAIL_ROOT = $root;
-    local $ENV{PATH}                           = "$bin:$ENV{PATH}";
-    local $ENV{DOVEADM_LOG}                    = "$root/doveadm.log";
+    local $Provisioner::MailAccount::MAIL_ROOT    = $root;
+    local $Provisioner::MailAccount::POSTFIX_ROOT = "$root/postfix";
+    local $ENV{PATH}                              = "$bin:$ENV{PATH}";
+    local $ENV{DOVEADM_LOG}                       = "$root/doveadm.log";
+    local $ENV{POSTMAP_LOG}                       = "$root/postmap.log";
     open( local *STDIN, '<', $fh->filename ) or die "stdin: $!";
 
     my $main = "Provisioner::Bin::${tool}::main";
@@ -154,7 +183,14 @@ sub run_tool {
 }
 
 sub passwd_of { my ($root) = @_; return File::Slurper::read_text("$root/$DOMAIN/passwd") }
-sub own_file  { return File::Slurper::read_binary("$CONFIG/recipes.d/$DOMAIN.yaml") }
+sub table_of { my ( $root, $table ) = @_; return File::Slurper::read_text("$root/postfix/$DOMAIN/$table") }
+
+# The tables that postmap was run on, in order.
+sub postmapped {
+    my ($root) = @_;
+    return map { s{\Ahash:\Q$root\E/postfix/\Q$DOMAIN\E/}{}r } split( m/\n/, File::Slurper::read_text("$root/postmap.log") );
+}
+sub own_file { return File::Slurper::read_binary("$CONFIG/recipes.d/$DOMAIN.yaml") }
 
 # undef where the store has no such entry, or no such group, which it says by dying.
 sub secret_of {
@@ -338,9 +374,11 @@ subtest 'an account is removed from all three, and its mail stays' => sub {
     {
         my $mock = Test::MockModule->new('Trog::Hypervisors');
         $mock->redefine( guest_of => sub { return $guest } );
-        local $Provisioner::MailAccount::MAIL_ROOT = $root;
-        local $ENV{PATH}                           = "$bin:$ENV{PATH}";
-        local $ENV{DOVEADM_LOG}                    = "$root/doveadm.log";
+        local $Provisioner::MailAccount::MAIL_ROOT    = $root;
+        local $Provisioner::MailAccount::POSTFIX_ROOT = "$root/postfix";
+        local $ENV{PATH}                              = "$bin:$ENV{PATH}";
+        local $ENV{DOVEADM_LOG}                       = "$root/doveadm.log";
+        local $ENV{POSTMAP_LOG}                       = "$root/postmap.log";
         is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'newbie' ), 0, 'it reports success' );
         is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'old' ),    0, 'and one that was there from the start' );
         like( exception { Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'nobody' ) }, qr/Nothing[ ]was[ ]changed/, 'an account that is nowhere is refused' );
@@ -366,6 +404,168 @@ subtest 'an account that recipes.yaml holds cannot be changed from recipes.d' =>
     is( own_file(),                                                $before, 'without a change to recipes.d' );
     is( passwd_of($root),                                          $PASSWD, 'or to the guest, which is the reason to ask first' );
     is( secret_of( $kdbx, "secret:mail/$DOMAIN-newbie/password" ), undef,   'or to the store' );
+};
+
+subtest 'the lines of the postfix tables' => sub {
+    is( Provisioner::MailAccount::sender_login_line("someone\@$DOMAIN"),                     "someone\@$DOMAIN someone\@$DOMAIN", 'an account owns its own address' );
+    is( Provisioner::MailAccount::sender_login_line( "sales\@$DOMAIN", "someone\@$DOMAIN" ), "sales\@$DOMAIN someone\@$DOMAIN",   'and an alias has its owner' );
+    is( Provisioner::MailAccount::virtual_maps_line( $DOMAIN, 'someone' ),                   "someone\@$DOMAIN $DOMAIN/someone",  'the mailbox is under the domain' );
+    is( Provisioner::MailAccount::virtual_aliases_line( $DOMAIN, 'someone' ),                "someone\@$DOMAIN someone\@$DOMAIN", 'an alias line keeps the address' );
+
+    like( exception { Provisioner::MailAccount::sender_login_line('a b') },                 qr/space/,              'a space in an address is refused' );
+    like( exception { Provisioner::MailAccount::sender_login_line( 'a', "b\nc" ) },         qr/line[ ]break/,       'and a line break in an owner' );
+    like( exception { Provisioner::MailAccount::virtual_maps_line( $DOMAIN, 'some one' ) }, qr/not[ ]'some[ ]one'/, 'a name that the table cannot hold is refused' );
+    like( exception { Provisioner::MailAccount::virtual_maps_line( 'a b', 'someone' ) },    qr/not[ ]'a[ ]b'/,      'and a domain' );
+};
+
+subtest 'a table line is added above the catchall, and removed alone' => sub {
+    my $line = Provisioner::MailAccount::virtual_maps_line( $DOMAIN, 'newbie' );
+
+    my $added = Provisioner::MailAccount::add_table_line( $TABLE{virtual_maps}, $line, $DOMAIN );
+    is( $added,                                                             "\nold\@$DOMAIN $DOMAIN/old\nghost\@$DOMAIN $DOMAIN/ghost\n$line\n\@$DOMAIN $DOMAIN/catchall\n", 'it is above the catchall line, and every other line is as it was' );
+    is( Provisioner::MailAccount::add_table_line( $added, $line, $DOMAIN ), $added,                                                                                          'a line that is there changes nothing' );
+    like( exception { Provisioner::MailAccount::add_table_line( $added, "newbie\@$DOMAIN elsewhere", $DOMAIN ) }, qr/another[ ]value/, 'but the same address with another value is refused' );
+
+    is( Provisioner::MailAccount::add_table_line( $TABLE{sender_login}, "newbie\@$DOMAIN newbie\@$DOMAIN", $DOMAIN ), "$TABLE{sender_login}newbie\@$DOMAIN newbie\@$DOMAIN\n", 'a table with no catchall line gets it at the end' );
+    is( Provisioner::MailAccount::add_table_line( 'x@y y/x',            "n\@y y/n",                        'y' ),     "x\@y y/x\nn\@y y/n\n",                                  'also where the last line has no line break' );
+
+    is( Provisioner::MailAccount::remove_table_line( $added,                              "newbie\@$DOMAIN" ), $TABLE{virtual_maps}, 'a removed line takes only its own' );
+    is( Provisioner::MailAccount::remove_table_line( $TABLE{virtual_maps},                "nobody\@$DOMAIN" ), $TABLE{virtual_maps}, 'and an address that is not there changes nothing' );
+    is( Provisioner::MailAccount::remove_table_line( "xold\@$DOMAIN a\nold\@$DOMAIN b\n", "old\@$DOMAIN" ),    "xold\@$DOMAIN a\n",  'a line that ends like it is kept' );
+};
+
+subtest 'an added account is in both tables, above the catchall, and postmap ran on each' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+    my @inode = map { ( stat "$root/postfix/$DOMAIN/$_" )[1] } qw{sender_login virtual_aliases virtual_maps};
+
+    is( run_tool( 'add_mail_user', $guest, $root, 'new-secret', '--secrets', $kdbx, $DOMAIN, 'newbie' ), 0, 'it reports success' );
+
+    is( table_of( $root, 'sender_login' ), "$TABLE{sender_login}newbie\@$DOMAIN newbie\@$DOMAIN\n", 'the sender may use its own address' );
+    is(
+        table_of( $root, 'virtual_maps' ),
+        "\nold\@$DOMAIN $DOMAIN/old\nghost\@$DOMAIN $DOMAIN/ghost\nnewbie\@$DOMAIN $DOMAIN/newbie\n\@$DOMAIN $DOMAIN/catchall\n",
+        'its mail goes to its own mailbox, and the catchall is still last'
+    );
+    is( table_of( $root, 'virtual_aliases' ), $TABLE{virtual_aliases} =~ s/^(?=\@)/newbie\@$DOMAIN newbie\@$DOMAIN\n/mr, 'and it keeps its own mail out of the wildcard line, which is still last' );
+    is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps}], 'postmap ran on each table, once' );
+
+    foreach my $table (qw{sender_login virtual_aliases virtual_maps}) {
+        is( ( stat "$root/postfix/$DOMAIN/$table" )[2] & oct 7777, oct 600, "$table keeps its mode" );
+    }
+    my @now = map { ( stat "$root/postfix/$DOMAIN/$_" )[1] } qw{sender_login virtual_aliases virtual_maps};
+    isnt( $now[0], $inode[0], 'and each is a new file in place of the old one, which is how a rename leaves it' );
+    isnt( $now[1], $inode[1], 'both of them' );
+    is_deeply( [ grep { m/\A[.](?:sender_login|virtual_aliases|virtual_maps)[.]/ } map { s{.*/}{}r } glob "'$root/postfix/$DOMAIN'/.*" ], [], 'no temporary file is left' );
+    my $dir = quotemeta "$root/postfix/$DOMAIN";
+    like( join( "\n", @{ $guest->{log} } ), qr{mv[ ]-f[ ]'$dir/[.]sender_login[.]\w+'[ ]'$dir/sender_login'}, 'it was a rename of a temporary file in the same directory' );
+    unlike( join( "\n", @{ $guest->{log} } ), qr/postfix[ ]reload|systemctl/, 'and postfix did not reload' );
+};
+
+subtest 'a removed account is in neither table, and postmap ran' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+
+    my $mock = Test::MockModule->new('Trog::Hypervisors');
+    $mock->redefine( guest_of => sub { return $guest } );
+    {
+        local $Provisioner::MailAccount::MAIL_ROOT    = $root;
+        local $Provisioner::MailAccount::POSTFIX_ROOT = "$root/postfix";
+        local $ENV{PATH}                              = "$bin:$ENV{PATH}";
+        local $ENV{DOVEADM_LOG}                       = "$root/doveadm.log";
+        local $ENV{POSTMAP_LOG}                       = "$root/postmap.log";
+        is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'old' ), 0, 'it reports success' );
+    }
+
+    is( table_of( $root, 'sender_login' ),    $TABLE{sender_login}    =~ s/^old\N*\n//mr, 'the sender table lost its line' );
+    is( table_of( $root, 'virtual_maps' ),    $TABLE{virtual_maps}    =~ s/^old\N*\n//mr, 'and so did the mailbox table, which keeps the others and the catchall' );
+    is( table_of( $root, 'virtual_aliases' ), $TABLE{virtual_aliases} =~ s/^old\N*\n//mr, 'and the alias table, which keeps the wildcard line' );
+    unlike( table_of( $root, $_ ), qr/^old\@/m, "no line for it in $_" ) for qw{sender_login virtual_aliases virtual_maps};
+    is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps}], 'postmap ran on each table' );
+};
+
+subtest 'an added account can be removed, and the tables are as they were' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+    is( run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ), 0, 'an account to remove' );
+
+    {
+        my $mock = Test::MockModule->new('Trog::Hypervisors');
+        $mock->redefine( guest_of => sub { return $guest } );
+        local $Provisioner::MailAccount::MAIL_ROOT    = $root;
+        local $Provisioner::MailAccount::POSTFIX_ROOT = "$root/postfix";
+        local $ENV{PATH}                              = "$bin:$ENV{PATH}";
+        local $ENV{DOVEADM_LOG}                       = "$root/doveadm.log";
+        local $ENV{POSTMAP_LOG}                       = "$root/postmap.log";
+        is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'newbie' ), 0, 'it reports success' );
+    }
+    is( table_of( $root, $_ ), $TABLE{$_}, "$_ is byte for byte as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps sender_login virtual_aliases virtual_maps}], 'and postmap ran after each change' );
+};
+
+subtest 'an account with no lines in the tables is removed, and the tables stay' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+
+    # An account that a tool without the tables made: it has a passwd line only.
+    File::Slurper::Temp::write_text( "$root/postfix/$DOMAIN/$_", $TABLE{$_} =~ s/^(?:old|ghost)\N*\n//mgr ) for qw{sender_login virtual_aliases virtual_maps};
+    my %before = map { $_ => table_of( $root, $_ ) } qw{sender_login virtual_aliases virtual_maps};
+
+    my $mock = Test::MockModule->new('Trog::Hypervisors');
+    $mock->redefine( guest_of => sub { return $guest } );
+    {
+        local $Provisioner::MailAccount::MAIL_ROOT    = $root;
+        local $Provisioner::MailAccount::POSTFIX_ROOT = "$root/postfix";
+        local $ENV{PATH}                              = "$bin:$ENV{PATH}";
+        local $ENV{DOVEADM_LOG}                       = "$root/doveadm.log";
+        local $ENV{POSTMAP_LOG}                       = "$root/postmap.log";
+        is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'old' ), 0, 'it reports success' );
+    }
+    unlike( passwd_of($root), qr/^old\@/m, 'the passwd line is gone' );
+    is( table_of( $root, $_ ), $before{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    is_deeply( [ postmapped($root) ], [], 'and postmap did not run' );
+};
+
+subtest 'a reset does not touch the tables' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+
+    is( run_tool( 'reset_mail_password', $guest, $root, 'again', '--secrets', $kdbx, $DOMAIN, 'old' ), 0,          'the reset succeeds' );
+    is( table_of( $root, $_ ),                                                                         $TABLE{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    is_deeply( [ postmapped($root) ], [], 'and postmap did not run' );
+    unlike( join( "\n", @{ $guest->{log} } ), qr{postfix}, 'the guest was not asked about postfix at all' );
+};
+
+subtest 'a passwd-file that cannot be written puts both tables back' => sub {
+    my ( $guest, $root, $kdbx ) = world( refuse_matching => qr{/[.]passwd[.]} );
+    my $before = own_file();
+
+    like( exception { run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ) }, qr/Could[ ]not[ ]write/, 'it stops, and says so' );
+    is( table_of( $root, $_ ), $TABLE{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps virtual_maps virtual_aliases sender_login}], 'postmap ran after the write and again after the restore, in the opposite order' );
+    is( passwd_of($root), $PASSWD, 'the passwd-file is whole' );
+    is( own_file(),       $before, 'and the configuration does not name the account' );
+    is_deeply( [ grep { m/\A[.]/ && !m/\A[.]{1,2}\z/ } map { s{.*/}{}r } glob("'$root/postfix/$DOMAIN'/.*"), glob("'$root/$DOMAIN'/.*") ], [], 'no temporary file is left in either directory' );
+
+    # Nothing is left that a second run refuses.
+    $guest->{refuse_matching} = undef;
+    is( run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ), 0, 'a second run succeeds' );
+    like( table_of( $root, 'sender_login' ), qr/^newbie\@\Q$DOMAIN\E[ ]newbie\@\Q$DOMAIN\E$/m, 'and the tables hold the account' );
+};
+
+subtest 'a postmap that fails puts the tables back too' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+    local $ENV{POSTMAP_EXIT} = 1;
+
+    like( exception { run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ) }, qr/postmap[ ]failed/, 'it stops, and says so' );
+    is( table_of( $root, $_ ), $TABLE{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    is( passwd_of($root),      $PASSWD,    'and the passwd-file was never written' );
+};
+
+subtest 'a guest with no tables is refused before anything changes' => sub {
+    my ( $guest, $root, $kdbx ) = world();
+    unlink "$root/postfix/$DOMAIN/virtual_maps";
+    my $before = own_file();
+
+    like( exception { run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ) }, qr/virtual_maps[ ]does[ ]not[ ]exist/, 'it says which table is missing' );
+    is( passwd_of($root),                                          $PASSWD, 'the guest is as it was' );
+    is( own_file(),                                                $before, 'and the configuration' );
+    is( secret_of( $kdbx, "secret:mail/$DOMAIN-newbie/password" ), undef,   'and nothing was stored' );
 };
 
 subtest 'the usage errors' => sub {

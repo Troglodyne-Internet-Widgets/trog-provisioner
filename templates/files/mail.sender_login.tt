@@ -11,5 +11,5 @@
 #
 # This table does not apply to unauthenticated senders.  DMARC deals with them.
 [% FOR login IN sender_logins %]
-[% login.address %] [% login.owner %]
+[% mail_sender_login_line(login.address, login.owner) %]
 [%- END %]

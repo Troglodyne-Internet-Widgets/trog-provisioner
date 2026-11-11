@@ -318,8 +318,12 @@ takes `--credentials` for a run with nobody at the terminal.
 
 `add_mail_user` stores the password as `secret:mail/DOMAIN-NAME/password`,
 adds the account to `recipes.d/DOMAIN.yaml` with that reference, and adds the
-line to `/mail/DOMAIN/passwd` on the guest. `reset_mail_password` replaces the
-value in the store and the hash in the one line. The tools refuse an account
+line to `/mail/DOMAIN/passwd` on the guest. It also adds a line to the postfix
+tables `/etc/postfix/domains/DOMAIN/sender_login`, `virtual_aliases` and
+`virtual_maps`, so that the account can send and its mail reaches its own
+mailbox. `remove_mail_user` takes those lines out. `reset_mail_password`
+replaces the value in the store and the hash in the one line, and changes no
+table. The tools refuse an account
 that is in the wrong state for the job, before they change anything. They cannot
 change an account that `recipes.yaml` holds, because `recipes.d` does not
 override it. Change it there.

@@ -23,9 +23,11 @@ use Trog::Credentials();
 
     remove_mail_user [--credentials] [--kick] [--secrets FILE] DOMAIN NAME
 
-Takes C<NAME@DOMAIN> out of the configuration, out of F</mail/DOMAIN/passwd> on
-the running guest, and out of the secret store.  It is the opposite of
-C<bin/add_mail_user>.
+Takes C<NAME@DOMAIN> out of the configuration, out of F</mail/DOMAIN/passwd> and
+the postfix tables F</etc/postfix/domains/DOMAIN/sender_login>,
+F</etc/postfix/domains/DOMAIN/virtual_aliases> and
+F</etc/postfix/domains/DOMAIN/virtual_maps> on the running guest, and out of the
+secret store.  It is the opposite of C<bin/add_mail_user>.
 
 =head1 DESCRIPTION
 
@@ -37,6 +39,13 @@ left behind.
 It removes the account from the configuration first.  If F<recipes.yaml> holds
 the account, it stops there with nothing changed, and says to take it out of
 that file.
+
+Then it removes the line of the account from each postfix table, and runs
+C<postmap> on the table.  Postfix needs no reload.  A table with no line for the
+account is left alone, because an account that an older version of
+C<bin/add_mail_user> made has none.  It does this before it changes the
+passwd-file.  If the passwd-file cannot be written, it puts the three tables
+back as they were.
 
 B<The mailboxes stay.>  The directory F</mail/DOMAIN/NAME> on the guest holds
 mail, and this tool does not delete mail.  Delete it by hand when you are sure.

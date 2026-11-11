@@ -1,4 +1,4 @@
 [% FOREACH name IN names.keys().sort() %]
-[% name %]@[% domain %] [% domain %]/[% name %]
+[% mail_virtual_maps_line(domain, name) %]
 [%- END %]
 @[% domain %] [% domain %]/catchall

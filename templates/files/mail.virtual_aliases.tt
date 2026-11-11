@@ -12,7 +12,7 @@
 root@[% domain %] [% admin_email %]
 [% END %]
 [% FOREACH name IN names.keys().sort() %]
-[% name %]@[% domain %] [% name %]@[% domain %]
+[% mail_virtual_aliases_line(domain, name) %]
 [%- END %]
 catchall@[% domain %] catchall@[% domain %]
 @[% domain %] catchall@[% domain %]

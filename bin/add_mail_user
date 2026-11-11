@@ -43,12 +43,21 @@ F</mail/DOMAIN/passwd> on the guest.  Nothing has changed at that point.
 =item 3. Stores the password as C<secret:mail/DOMAIN-NAME/password>, as
 C<bin/add_secret> would.
 
-=item 4. Adds the line to F</mail/DOMAIN/passwd> on the guest, with the same
-Argon2id hash that F<templates/ubuntu/mail.tt> renders.  It writes a temporary
-file and renames it, and dovecot needs no restart.  Then it makes the mailboxes
-with C<doveadm mailbox create>.
+=item 4. Adds a line to each postfix table of the domain on the guest, above
+the catchall line: F</etc/postfix/domains/DOMAIN/sender_login>, so that the
+account can send, and F</etc/postfix/domains/DOMAIN/virtual_aliases> and
+F</etc/postfix/domains/DOMAIN/virtual_maps>, so that its mail reaches its own
+mailbox and not the catchall.  The lines are the ones that the build renders.
+It writes a temporary file and renames it, and runs C<postmap> on the table.
+Postfix needs no reload.
 
-=item 5. Adds the account to F<recipes.d/DOMAIN.yaml>, with the C<secret:>
+=item 5. Adds the line to F</mail/DOMAIN/passwd> on the guest, with the same
+Argon2id hash that F<templates/ubuntu/mail.tt> renders.  It writes a temporary
+file and renames it, and dovecot needs no restart.  If this fails, it puts the three
+postfix tables back as they were.  Then it makes the mailboxes with
+C<doveadm mailbox create>.
+
+=item 6. Adds the account to F<recipes.d/DOMAIN.yaml>, with the C<secret:>
 reference.
 
 =back
