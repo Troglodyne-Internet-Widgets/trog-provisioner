@@ -446,6 +446,26 @@ subtest 'the bridge helper keeps its capability while another account needs it' 
     ok( exists $state->{files}{$APT_HOOK}, 'with its hook' );
 };
 
+subtest 'bridge.conf keeps the lines of others, and is not rewritten from a failed read' => sub {
+    my $state = fresh_state();
+    $state->{files}{$BRIDGES} = "allow virbr0\ninclude /etc/qemu/someone-else.conf";
+
+    run_tool( $state, @create );
+    is( $state->{files}{$BRIDGES}, "allow virbr0\ninclude /etc/qemu/someone-else.conf\ninclude $ACL", 'the include goes after the lines that were there' );
+    run_tool( $state, @remove );
+    is( $state->{files}{$BRIDGES}, "allow virbr0\ninclude /etc/qemu/someone-else.conf", 'and the removal takes out only the include' );
+
+    $state->{unreadable}{$BRIDGES} = 1;
+    like( exception { run_tool( $state, @create ) }, qr/refusing[ ]to[ ]rewrite[ ]it[ ]blind/, 'a bridge.conf that could not be read is not rewritten' );
+    is( $state->{files}{$BRIDGES}, "allow virbr0\ninclude /etc/qemu/someone-else.conf", 'and keeps every line in it' );
+
+    delete $state->{unreadable}{$BRIDGES};
+    run_tool( $state, @create );
+    $state->{unreadable}{$BRIDGES} = 1;
+    run_tool( $state, @remove );
+    is( $state->{files}{$BRIDGES}, "allow virbr0\ninclude /etc/qemu/someone-else.conf\ninclude $ACL", 'nor by the removal' );
+};
+
 subtest 'the key of a runner replaces its old line, and comes out again' => sub {
     my $state = fresh_state();
     run_tool( $state, @create );

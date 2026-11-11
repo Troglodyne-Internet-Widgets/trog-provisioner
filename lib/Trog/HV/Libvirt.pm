@@ -3692,6 +3692,25 @@ my sub slice_dropin ($uid) { return "/etc/systemd/system/user-$uid.slice.d/50-tr
 # True when root finds no $file on the hypervisor.
 my sub absent ( $hv, $file ) { return $hv->run_cmd( qw{sudo -n test ! -e}, $file ) == 0 }
 
+# True when root reads $line, whole, in $file on the hypervisor.
+my sub holds_line ( $hv, $file, $line ) {
+    return List::Util::any { $_ eq $line } split m/\n/, root_reads( $hv, $file );
+}
+
+# Writes $file as root, with $mode, keeping each of its lines for which $keep
+# is true and putting @add after them.  Dies rather than write a file that has
+# lines in it from an empty read, which would drop every line of somebody else.
+my sub rewrite_lines ( $hv, $file, $mode, $keep, @add ) {
+    my $text = root_reads( $hv, $file );
+    die "Could not read $file on " . $hv->describe . "; refusing to rewrite it blind\n"
+      if $text eq q{} && $hv->run_cmd( qw{sudo -n test -s}, $file ) == 0;
+
+    my @lines = ( ( grep { $keep->($_) } split m/\n/, $text ), @add );
+    $hv->write_text( $file, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => $mode )
+      or die "Could not write $file on " . $hv->describe . "\n";
+    return 1;
+}
+
 # The first qemu-bridge-helper that the hypervisor has, or undef.
 my sub bridge_helper ($hv) {
     return List::Util::first { $hv->file_exists($_) } @BRIDGE_HELPERS;
@@ -3835,12 +3854,9 @@ sub runner_bridge_steps ( $hv, $user, @bridges ) {
         },
         {
             what => "include $acl in $BRIDGE_CONF",
-            done => sub {
-                List::Util::any { $_ eq $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
-            },
-            do => sub {
-                my @lines = ( ( grep { $_ ne $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF ) ), $include );
-                $hv->write_text( $BRIDGE_CONF, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_CONF\n";
+            done => sub { holds_line( $hv, $BRIDGE_CONF, $include ) },
+            do   => sub {
+                rewrite_lines( $hv, $BRIDGE_CONF, '0644', sub ($line) { $line ne $include }, $include );
             },
         },
     );
@@ -4090,12 +4106,9 @@ sub runner_removal_steps {
         },
         {
             what => "take $acl out of $BRIDGE_CONF",
-            done => sub {
-                !List::Util::any { $_ eq $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
-            },
-            do => sub {
-                my @lines = grep { $_ ne $include } split m/\n/, root_reads( $hv, $BRIDGE_CONF );
-                $hv->write_text( $BRIDGE_CONF, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_CONF\n";
+            done => sub { !holds_line( $hv, $BRIDGE_CONF, $include ) },
+            do   => sub {
+                rewrite_lines( $hv, $BRIDGE_CONF, '0644', sub ($line) { $line ne $include } );
             },
         },
         {
@@ -4153,18 +4166,10 @@ sub runner_removal_steps {
     );
 }
 
-# Writes $path, an authorized_keys file, as root, without the lines that hold
-# $material and with @add after them.  Dies rather than write a file that has
-# keys in it from an empty read, which would lock out every other key.
+# Writes $path, an authorized_keys file, without the lines that hold $material
+# and with @add after them.
 my sub rewrite_keys ( $hv, $path, $material, @add ) {
-    my $text = root_reads( $hv, $path );
-    die "Could not read $path on " . $hv->describe . "; refusing to rewrite it blind\n"
-      if $text eq q{} && $hv->run_cmd( qw{sudo -n test -s}, $path ) == 0;
-
-    my @lines = ( ( grep { index( $_, $material ) < 0 } split m/\n/, $text ), @add );
-    $hv->write_text( $path, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => '0600' )
-      or die "Could not write $path on " . $hv->describe . "\n";
-    return 1;
+    return rewrite_lines( $hv, $path, '0600', sub ($line) { index( $line, $material ) < 0 }, @add );
 }
 
 =head2 @actions = $hv->runner_key_steps($user, $line)
