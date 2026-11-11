@@ -171,7 +171,8 @@ sub args {
             cpus => {
                 type        => 'integer',
                 default     => 4,
-                description => 'Virtual CPUs.  Overcommitted across the fleet, unlike memory; see hypervisors.conf.  Defaulted alongside memory, and for the same build.',
+                minimum     => 1,
+                description => 'Virtual CPUs.  The guest sees them as the cores of one socket, one thread each.  Overcommitted across the fleet, unlike memory; see hypervisors.conf.  Defaulted alongside memory, and for the same build.',
             },
             size => {
                 type        => 'integer',
