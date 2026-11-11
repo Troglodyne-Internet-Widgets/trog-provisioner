@@ -424,6 +424,7 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
 subtest 'a bridge nothing can find says where to name it' => sub {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( capture_cmd => sub { return q{} } );
+    $mock->redefine( network_vmm => sub { die "no default network\n" } );
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test/system' );
 
     # The same key is read from either file, depending on whether there is a fleet.
@@ -1624,6 +1625,26 @@ subtest 'what a guest will call its interfaces is the hypervisor to say' => sub 
         [qw{enp0s3 enp0s4}],
         'and a hypervisor whose guests name them otherwise says so once'
     );
+};
+
+# A stand-in for one network of Sys::Virt, with the bridge that it names.
+{
+
+    package Test::HvNetwork;
+    sub new             ( $class, %a ) { return bless {%a}, $class }
+    sub get_bridge_name ($self)        { return $self->{bridge} }
+
+    package Test::HvNetworks;
+    sub new                 ( $class, %by_name ) { return bless {%by_name}, $class }
+    sub get_network_by_name ( $self, $name )     { return $self->{$name} // die "Network not found: no network with matching name '$name'\n" }
+}
+
+subtest 'the NAT bridge is the bridge of the default network, and not the last virbr' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( network_vmm => sub { Test::HvNetworks->new( default => Test::HvNetwork->new( bridge => 'virbr0' ), guests => Test::HvNetwork->new( bridge => 'virbr1' ) ) } );
+
+    my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system' );
+    is( $hv->virbr_device, 'virbr0', 'a second network on virbr1 does not move the NAT adapter of every guest onto it' );
 };
 
 subtest 'setting: a block may hold a secret: reference, as recipes.yaml may' => sub {

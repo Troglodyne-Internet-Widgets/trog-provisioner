@@ -1915,7 +1915,8 @@ The outbound bridge for the public interface of a guest.
 
 =head2 virbr_device
 
-The libvirt NAT bridge.
+The libvirt NAT bridge: the bridge of the C<default> network, whose leases
+L</lease_ip($network, %opts)> reads.
 
 =head2 virbr_ip
 
@@ -1923,9 +1924,12 @@ The address of the hypervisor on the NAT bridge.  The guest fetches its files
 from this address and sends its logs to it.
 
 The templates for a guest need these three values.  Each one comes from the
-configuration if it is set there.  If not, the method reads it from C<brctl>
-or C<ip> on the hypervisor, and dies if it finds nothing.  The C<brctl> guess
-is sometimes wrong, so set the value when it is.
+configuration if it is set there.  If not, the method asks the hypervisor, and
+dies if it finds nothing.  L</virbr_device> asks libvirt for the bridge of the
+C<default> network, through L</network_vmm>.  L</bridge_device> takes the last
+bridge that C<brctl> lists whose name does not start with C<virbr>, and that
+guess is sometimes wrong, so set the value when it is.  L</virbr_ip> reads
+C<ip> on the hypervisor.
 
 =cut
 
@@ -1945,8 +1949,7 @@ sub virbr_device {
     my ($self) = @_;
     return $self->{virbr_device} if defined $self->{virbr_device};
 
-    my $device = $self->capture_cmd(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
-    chomp $device if defined $device;
+    my $device = eval { $self->network_vmm->get_network_by_name('default')->get_bridge_name };
     die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set virbr_device in this hypervisor's block of hypervisors.conf, or in provision.conf if there is no hypervisors.conf.\n"
       unless $device;
 
