@@ -172,6 +172,18 @@ site of the nginx package away, which would be a second default server.
 
 =cut
 
+# A size as nginx takes it, in k, m or g.
+my $SIZE = qr/\A [1-9] [[:digit:]]* [kmg] \z/;
+
+# A size as nginx takes it, or 0 for none.
+my $SIZE_OR_ZERO = qr/\A (?: 0 | [1-9] [[:digit:]]* [kmg] ) \z/;
+
+# A time as nginx takes it, in m, h or d.
+my $LONG_TIME = qr/\A [1-9] [[:digit:]]* [mhd] \z/;
+
+# A time as nginx takes it, in s, m or h.
+my $SHORT_TIME = qr/\A [1-9] [[:digit:]]* [smh] \z/;
+
 sub args {
     return (
         properties => {
@@ -184,31 +196,31 @@ sub args {
             },
             media_cache_size => {
                 type        => 'string',
-                pattern     => '^[1-9][0-9]*[kmg]$',
+                pattern     => "$SIZE",
                 default     => '1g',
                 description => 'The most that the cache of the media names holds on disk, in the units of nginx, such as 512m or 4g.  See "Media names".',
             },
             media_cache_valid => {
                 type        => 'string',
-                pattern     => '^[1-9][0-9]*[mhd]$',
+                pattern     => "$LONG_TIME",
                 default     => '7d',
                 description => 'How long the cache of the media names keeps a file, in the units of nginx, such as 12h or 30d.  See "Media names".',
             },
             cache_min_free => {
                 type        => 'string',
-                pattern     => '^(0|[1-9][0-9]*[kmg])$',
+                pattern     => "$SIZE_OR_ZERO",
                 default     => '2g',
                 description => 'The free space to leave on the disk of the caches, in the units of nginx.  Below it, nginx removes the least recently used files of both caches, whatever their sizes say.  0 turns it off.  See "Media names".',
             },
             page_cache_size => {
                 type        => 'string',
-                pattern     => '^[1-9][0-9]*[kmg]$',
+                pattern     => "$SIZE",
                 default     => '256m',
                 description => 'The most that the cache of the page names holds on disk, in the units of nginx.  See "Page names".',
             },
             page_cache_valid => {
                 type        => 'string',
-                pattern     => '^[1-9][0-9]*[smh]$',
+                pattern     => "$SHORT_TIME",
                 default     => '1m',
                 description => 'How long the cache of the page names serves a page before it asks the guest whether the page changed, in the units of nginx, such as 30s or 5m.  A reader sees a page up to this late.  See "Page names".',
             },

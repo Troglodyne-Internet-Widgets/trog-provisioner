@@ -128,6 +128,9 @@ and this directory only grows.
 
 =cut
 
+# A host and a port, as host:port.
+my $HOST_PORT = qr/\A [^:\s]+ : [[:digit:]]+ \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -178,7 +181,7 @@ sub args {
 
                 # Validated here, not in enrich, so that the error names the
                 # bad destination and its field.
-                items       => { type => 'string', pattern => '^[^:\s]+:[0-9]+$' },
+                items       => { type => 'string', pattern => "$HOST_PORT" },
                 default     => [],
                 description => 'host:port destinations each received message is copied to, above the ruleset stop.  For a consumer on this guest, such as the telegraf grafanasyslog configures.  A bracketed IPv6 literal is refused rather than supported: the consumers this exists for are on loopback.',
             },

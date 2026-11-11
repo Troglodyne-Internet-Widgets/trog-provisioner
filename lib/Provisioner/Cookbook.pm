@@ -28,6 +28,9 @@ use Trog::Hypervisors::Config();
 use Trog::Secrets();
 use Trog::Utils();
 
+# The name of a bin of the ip_pool.
+my $BIN_NAME = qr/\A [[:lower:]] [[:lower:][:digit:]_-]* \z/;
+
 =head1 NAME
 
 Provisioner::Cookbook - what recipes there are, what each takes, and what a
@@ -1811,7 +1814,7 @@ sub global_schema {
                     bins => {
                         type                 => 'object',
                         description          => 'The parts of the pool, by name, such as vpnclients.  Each hands out only its own addresses, so one cannot use up another.  Only a guest, out of the bin named guests, gets an A record.',
-                        propertyNames        => { pattern => '^[a-z][a-z0-9_-]*$', not => { const => 'guests' } },
+                        propertyNames        => { pattern => "$BIN_NAME", not => { const => 'guests' } },
                         additionalProperties => {
                             type       => 'object',
                             properties => {

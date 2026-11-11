@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::claude
 
@@ -174,14 +175,14 @@ sub args {
             # Each of these goes into the JSON of the settings and into a quoted
             # string of the guest test, so each is held to characters that need
             # no quoting in either.
-            github_user  => { type => 'string', pattern    => '^[A-Za-z0-9-]+$',                description => 'The GitHub account of a bot that the agent acts as.  See A BOT FOR THE AGENT.' },
-            github_token => { type => 'string', 'x-secret' => 1,                                description => 'A personal access token for that account.' },
-            git_email    => { type => 'string', pattern    => q{^[^\\s"'\\\\]+@[^\\s"'\\\\]+$}, description => 'The address that the commits of the bot carry.  GitHub links a commit to the account that has this address.' },
-            pr_assignee  => { type => 'string', pattern    => '^[A-Za-z0-9-]+$',                description => 'The login that each pull request of the agent is assigned to, as PERL_SLOP_ASSIGNEE.' },
+            github_user  => { type => 'string', pattern    => "$Trog::Patterns::GITHUB_LOGIN", description => 'The GitHub account of a bot that the agent acts as.  See A BOT FOR THE AGENT.' },
+            github_token => { type => 'string', 'x-secret' => 1,                               description => 'A personal access token for that account.' },
+            git_email    => { type => 'string', pattern    => "$Trog::Patterns::COMMIT_EMAIL", description => 'The address that the commits of the bot carry.  GitHub links a commit to the account that has this address.' },
+            pr_assignee  => { type => 'string', pattern    => "$Trog::Patterns::GITHUB_LOGIN", description => 'The login that each pull request of the agent is assigned to, as PERL_SLOP_ASSIGNEE.' },
 
             restricted_user => {
                 type        => 'string',
-                pattern     => '^[a-z_][a-z0-9_-]*$',
+                pattern     => "$Trog::Patterns::ACCOUNT_NAME",
                 description => 'An account to make, with a home and settings of its own, that a program runs claude as.  See A RESTRICTED AGENT.',
             },
         },

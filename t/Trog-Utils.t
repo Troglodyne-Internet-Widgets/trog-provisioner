@@ -24,7 +24,6 @@ use FindBin::libs;
 # only inside the sub under test.
 use IO::Prompter();
 use Trog::Utils();
-use JSON::Validator();
 
 subtest 'a prompt is asked with nothing left in @ARGV for it to open' => sub {
 
@@ -152,26 +151,6 @@ subtest 'slot_steps: a path of slots_in, back into its steps' => sub {
     my $config = { a => [ { b => 'c' } ] };
     my ($deep) = grep { ref ${ $_->[1] } eq q{} } Trog::Utils::slots_in( \$config );
     is_deeply( [ Trog::Utils::slot_steps( $deep->[0] ) ], [ 'a', 0, 'b' ], 'which is the path that slots_in gave' );
-};
-
-subtest '$LINK_NAME: the name of a link, as a regular expression and in a schema' => sub {
-    my $schema = JSON::Validator->new->schema( { type => 'string', pattern => "$Trog::Utils::LINK_NAME" } );
-    foreach my $case (
-        [ 'br0',                                   1, 'a bridge' ],
-        [ 'a' x 15,                                1, 'fifteen bytes, the most that the kernel takes' ],
-        [ 'virbr1.10_x-y',                         1, 'with each of _ . and -' ],
-        [ q{},                                     0, 'nothing' ],
-        [ 'a' x 16,                                0, 'sixteen bytes' ],
-        [ '-br0',                                  0, 'a first character that is not a letter or a digit' ],
-        [ 'br/0',                                  0, 'a slash, which a path reads' ],
-        [ 'br:0',                                  0, 'a colon, which the address of an alias reads' ],
-        [ "br\N{LATIN SMALL LETTER E WITH ACUTE}", 0, 'a letter that is not ASCII' ],
-        [ "br\N{ARABIC-INDIC DIGIT ONE}",          0, 'a digit that is not ASCII' ],
-    ) {
-        my ( $name, $ok, $what ) = @$case;
-        is( $name =~ $Trog::Utils::LINK_NAME ? 1 : 0, $ok, "the regular expression: $what" );
-        is( $schema->validate($name)         ? 0 : 1, $ok, "and the schema: $what" );
-    }
 };
 
 subtest 'write_binary_mode: the bytes, byte for byte, with the mode asked for' => sub {

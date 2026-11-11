@@ -219,6 +219,9 @@ sub required_recipes {
     );
 }
 
+# The name of an authentication key of a zone.
+my $AUTH_KEY = qr/\A auth- [[:digit:]]+ \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -247,7 +250,7 @@ sub args {
             # presentation address".
             repo_branch => {
                 type    => 'string', default => 'auth-51',
-                pattern => '^auth-[0-9]+$'
+                pattern => "$AUTH_KEY"
             },
 
             # Zones to forward to another resolver, as zone => address.

@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::servicesudo
 
@@ -80,6 +81,9 @@ a domain that names the admin as its C<user>.
 
 =cut
 
+# An absolute path, and the words of its arguments, with no comma.
+my $COMMAND = qr/\A \/ [^\s,]+ (?: [ ] [^\s,]+ )* \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -90,7 +94,7 @@ sub args {
                 uniqueItems => 1,
                 items       => {
                     type    => 'string',
-                    pattern => q{^/[^\s,]+(?: [^\s,]+)*\z},
+                    pattern => "$COMMAND",
                 },
                 description => 'Commands, in sudoers syntax, that the service user may run as root with sudo and no password.  An absolute path and its fixed arguments.  A command with no arguments allows any.',
             },
@@ -112,7 +116,7 @@ sub enrich {
 
     return %opts if $opts{user} eq $opts{admin_user};
     die "servicesudo: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
-      unless $opts{user} =~ m/\A[[:lower:]_][[:lower:][:digit:]_-]*\z/;
+      unless $opts{user} =~ $Trog::Patterns::ACCOUNT_NAME;
 
     return %opts;
 }

@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::perllsp
 
@@ -90,12 +91,15 @@ wrapper and the shim that L</The profile that each file gets> describes.
 
 =cut
 
+# The full sha of a git commit, in lower case.
+my $COMMIT = qr/\A [[:digit:]a-f]{40} \z/;
+
 my %PLUGIN = (
     type       => 'object',
     required   => [qw{repo ref}],
     properties => {
-        repo => { type => 'string', pattern => '\A[\w.-]+/[\w.-]+\z' },
-        ref  => { type => 'string', pattern => '\A[0-9a-f]{40}\z' },
+        repo => { type => 'string', pattern => "$Trog::Patterns::GITHUB_REPO" },
+        ref  => { type => 'string', pattern => "$COMMIT" },
     },
 );
 

@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::perl
 
@@ -105,7 +106,7 @@ If a step fails, the makefile stops, the same as when the perl fails to build.
 =cut
 
 # A word that reaches cpan_install whole, single-quoted in a makefile line.
-my %WORD = ( type => 'string', pattern => q{\A[^'"$`\\\\\n]+\z} );
+my %WORD = ( type => 'string', pattern => "" . qr/\A [^'"\$`\\\n]+ \z/ );
 
 my %STEP = (
     type                 => 'object',
@@ -140,7 +141,7 @@ sub args {
             },
             version => {
                 type        => 'string',
-                pattern     => '\A\d+[.]\d+[.]\d+\z',
+                pattern     => "$Trog::Patterns::DOTTED_VERSION",
                 description => 'The perl release to build, such as 5.40.2.  Unset builds the latest stable, so two guests built a month apart can have different perls, and a release made yesterday can break a build that worked the day before.  A guest rebuilt with another version keeps both, and the one named here is the one everything installs into.',
             },
             cpan_notest => {

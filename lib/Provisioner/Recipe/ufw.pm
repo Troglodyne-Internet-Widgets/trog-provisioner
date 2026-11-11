@@ -116,6 +116,9 @@ sub resolve_conflict {
     return $self->SUPER::resolve_conflict( $path, $mine, $theirs );
 }
 
+# A port, and /udp for one that is not tcp.
+my $PORT_KEY = qr/\A [[:digit:]]+ (?: \/udp )? \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -153,7 +156,7 @@ sub args {
                 type                 => 'object',
                 default              => {},
                 description          => 'The recipe that binds each address of each port, where :: is every address.  Two recipes on one address are refused, and so is a second recipe on a port that one binds on every address.',
-                propertyNames        => { pattern => '^\d+(?:/udp)?$' },
+                propertyNames        => { pattern => "$PORT_KEY" },
                 additionalProperties => {
                     type                 => 'object',
                     propertyNames        => { anyOf => [ { type => 'string', format => 'ipv4' }, { type => 'string', format => 'ipv6' } ] },

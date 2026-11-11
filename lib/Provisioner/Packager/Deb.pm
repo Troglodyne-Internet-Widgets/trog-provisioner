@@ -94,18 +94,33 @@ to C<*>.  It pins by the host of C<uri>.
 # The first line of an armored key, which apt reads from a .asc.
 my $ARMORED = qr/\A\s*-----BEGIN[ ]PGP[ ]PUBLIC[ ]KEY[ ]BLOCK-----/;
 
+# The name of an apt source, which names its file in sources.list.d.
+my $SOURCE_NAME = qr/\A [[:lower:][:digit:]] [[:lower:][:digit:].-]* \z/;
+
+# The start of an http or https URL with a host.
+my $HTTP_URL = qr/\A https? :\/\/ [^\/]+/;
+
+# One word of a deb822 field, with no white space in it.
+my $WORD = qr/\A \S+ \z/;
+
+# The name of a Debian architecture.
+my $ARCHITECTURE = qr/\A [[:lower:][:digit:]]+ \z/;
+
+# The fingerprint of an OpenPGP key, in hex.
+my $FINGERPRINT = qr/\A [[:xdigit:]]{40} \z/;
+
 my %SCHEMA = (
     type                 => 'object',
     required             => [qw{name uri suites components key}],
     additionalProperties => 0,
     properties           => {
-        name          => { type => 'string', pattern  => '^[a-z0-9][a-z0-9.-]*$' },
-        uri           => { type => 'string', pattern  => '^https?://[^/]+' },
-        key           => { type => 'string', pattern  => '^https?://[^/]+' },
-        suites        => { type => 'array',  minItems => 1, items => { type => 'string', pattern => '^[^\s]+$' } },
-        components    => { type => 'array',  items    => { type => 'string', pattern => '^[^\s]+$' } },
-        architectures => { type => 'array',  items    => { type => 'string', pattern => '^[a-z0-9]+$' } },
-        fingerprint   => { type => 'string', pattern  => '^[0-9A-Fa-f]{40}$' },
+        name          => { type => 'string', pattern  => "$SOURCE_NAME" },
+        uri           => { type => 'string', pattern  => "$HTTP_URL" },
+        key           => { type => 'string', pattern  => "$HTTP_URL" },
+        suites        => { type => 'array',  minItems => 1, items => { type => 'string', pattern => "$WORD" } },
+        components    => { type => 'array',  items    => { type => 'string', pattern => "$WORD" } },
+        architectures => { type => 'array',  items    => { type => 'string', pattern => "$ARCHITECTURE" } },
+        fingerprint   => { type => 'string', pattern  => "$FINGERPRINT" },
         pin           => {
             type                 => 'object',
             required             => ['priority'],

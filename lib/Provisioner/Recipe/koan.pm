@@ -278,6 +278,9 @@ not get its own koan.  It rewrites those units to point at itself.
 
 sub is_multi_tenant { return 0 }
 
+# An absolute path.
+my $ABSOLUTE = qr/\A \//;
+
 sub args {
     return (
         type       => 'object',
@@ -322,7 +325,7 @@ sub args {
                     type       => 'object',
                     required   => [qw{path}],
                     properties => {
-                        path         => { type => 'string', pattern => '^/' },
+                        path         => { type => 'string', pattern => "$ABSOLUTE" },
                         cli_provider => { type => 'string', enum    => [qw{claude codex copilot local}], default => 'claude' },
                         github_url   => { type => 'string' },
                         base_branch  => { type => 'string', default => 'master' },

@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
+use Trog::Patterns();
 
 =head1 Provisioner::Recipe::sssd
 
@@ -72,7 +73,7 @@ sub args {
             sudo_groups => {
                 type        => 'array',
                 default     => [],
-                items       => { type => 'string', pattern => '^[a-z_][a-z0-9_-]*$' },
+                items       => { type => 'string', pattern => "$Trog::Patterns::ACCOUNT_NAME" },
                 description => 'Groups of the directory whose members get sudo without a password on this guest.',
             },
         },

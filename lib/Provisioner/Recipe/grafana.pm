@@ -168,6 +168,12 @@ one dashboard can be the home page.
 
 =cut
 
+# An interval as Grafana takes it, such as 30s or 7d.
+my $INTERVAL = qr/\A [[:digit:]]+ [smhdw] \z/;
+
+# The name of a JSON file, with no directory.
+my $JSON_FILE = qr/\A [^\/]+ [.] json \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -202,13 +208,13 @@ sub args {
             },
             retention => {
                 type        => 'string',
-                pattern     => '^[0-9]+[smhdw]$',
+                pattern     => "$INTERVAL",
                 default     => '90d',
                 description => 'How long measurements are kept, as an InfluxDB duration such as 90d.',
             },
             home_dashboard => {
                 type        => 'string',
-                pattern     => '^[^/]+[.]json$',
+                pattern     => "$JSON_FILE",
                 description => 'File name, in /var/lib/grafana/dashboards, of the dashboard grafana opens on after a login.  Unset leaves the stock home page.',
             },
             ipv6 => {
