@@ -58,6 +58,7 @@ my $hv_network = Test::MockModule->new('Trog::HV');
 $hv_network->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
 $hv_network->redefine( static_nics          => sub { return ('br0') } );
 $hv_network->redefine( nic_gateway          => sub { return '192.0.2.254' } );
+$hv_network->redefine( nic_prefix_length    => sub { return 24 } );
 $hv_network->redefine( nic_pool             => sub { return { addresses => ['192.0.2.100'] } } );
 
 # A vendor libdir laid out as this checkout is: a recipe, its version for one

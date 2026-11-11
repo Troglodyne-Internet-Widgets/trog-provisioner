@@ -49,6 +49,10 @@ In the block of a hypervisor in `hypervisors.conf`:
   bridge of the same name.
 - `gateway_NIC` is the gateway of that subnet.  The first of `static_nics` must
   name one, and the guest routes everything else through it.
+- `prefix_NIC` is the length of the prefix of that subnet, which each static
+  address on it gets.  A pool that is the whole subnet, with the gateway in it,
+  can leave it out.  See "The adapters of a guest" in
+  [CONFIGURATION.md](CONFIGURATION.md#the-adapters-of-a-guest).
 
 In the `_global` of `_base` in `recipes.yaml`:
 

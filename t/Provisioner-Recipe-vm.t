@@ -604,7 +604,7 @@ subtest 'a guest has an adapter on each bridge, dhcp_nics and then static_nics' 
     my $system = tuned_xml(
         %versions,
         config => { machine   => 'pc' },
-        hv     => { dhcp_nics => 'virbr0 virbr2', static_nics => 'virbr1 br0', ip_pool_virbr1 => '10.0.0.0/25', gateway_virbr1 => '10.0.0.1', ip_pool_br0 => '192.0.2.0/28' },
+        hv     => { dhcp_nics => 'virbr0 virbr2', static_nics => 'virbr1 br0', ip_pool_virbr1 => '10.0.0.0/25', gateway_virbr1 => '10.0.0.1', ip_pool_br0 => '192.0.2.0/28', prefix_br0 => 24 },
     );
     is_deeply(
         [ interfaces($system) ],

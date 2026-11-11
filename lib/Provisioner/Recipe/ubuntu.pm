@@ -362,8 +362,11 @@ C<other_static> the other adapters of C<static_nics>, each also with its
 C<addresses>, from C<nic_ips>.  See L<Trog::HV::Libvirt/ADAPTERS>.  All of them
 are absent or empty for a guest that a service builds.
 
-C<addresses> are C<ips> with a prefix, for the network-config.  An address with
-none gets C</24>, which cloud-init gave it in the version 1 format.
+C<addresses> are C<ips> with a prefix, for the network-config.
+F<bin/new_config> writes each with the prefix of the network of its bridge, see
+L<Trog::HV/address_prefix($nic, $address)>.  An address with none, which only a
+F<provision.conf> written by hand has, gets C</24>, which cloud-init gave it in
+the version 1 format.
 
 C<bin_routes> are the routes to each bin of C<ip_pool> that names another guest
 in C<via>, through the address of that guest in C<ipmap>, each as C<to>, a

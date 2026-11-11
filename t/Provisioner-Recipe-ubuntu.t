@@ -504,6 +504,50 @@ subtest 'each adapter gets its part of the network configuration' => sub {
     );
 };
 
+# A guest whose pools are not /24 networks: its address on a /26, and another
+# on a /27.  bin/new_config writes each address with the prefix of the network
+# of its bridge, and the network configuration keeps it.
+my $NETWORK_CONFIG_OF_PREFIXES = <<'YAML';
+---
+network:
+  version: 2
+  ethernets:
+    ens4:
+      match:
+        macaddress: 52:54:00:e3:de:7f
+      set-name: ens4
+      nameservers:
+        search:
+          - vm.test.test
+        addresses:
+          - 192.0.2.253
+          - 8.8.8.8
+      addresses:
+        - 10.0.0.70/26
+      routes:
+        - to: default
+          via: 10.0.0.1
+    ens5:
+      match:
+        macaddress: MAC2
+      set-name: ens5
+      addresses:
+        - 192.0.2.70/27
+      optional: true
+    ens3:
+      match:
+        macaddress: 52:54:00:5f:7b:e3
+      set-name: ens3
+      dhcp4: true
+      dhcp-identifier: mac
+YAML
+
+subtest 'a static address keeps the prefix of the network of its bridge' => sub {
+    my ( $dir, undef ) = generated( hv => { dhcp_nics => 'virbr0', static_nics => 'virbr1 br0' }, ips => ['10.0.0.70/26'], gateway => '10.0.0.1', nic_ips => { br0 => '192.0.2.70/27' } );
+    my $mac2 = Trog::HV::Libvirt->guest_mac( $DOMAIN, 2 );
+    is( File::Slurper::read_text("$dir/network-config"), $NETWORK_CONFIG_OF_PREFIXES =~ s/MAC2/$mac2/r, 'each address with its own prefix, and no /24' );
+};
+
 subtest 'a guest with no static adapter takes its nameservers on its lease' => sub {
     my ( $dir, undef ) = generated( hv => { dhcp_nics => 'virbr0' }, ips => [], gateway => undef );
     my $ethernets = loaded( $dir, 'network-config' )->{network}{ethernets};

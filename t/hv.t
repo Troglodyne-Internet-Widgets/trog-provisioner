@@ -1667,6 +1667,7 @@ subtest 'dhcp_nics and static_nics: one adapter on each bridge, in that order' =
         ip_pool_virbr1 => '10.0.0.0/25',
         gateway_virbr1 => '10.0.0.1',
         ip_pool_br0    => '192.0.2.64/26',
+        prefix_br0     => 24,
     );
     my $hv = Trog::HV->candidate(%block);
 
@@ -1699,6 +1700,33 @@ subtest 'dhcp_nics and static_nics: one adapter on each bridge, in that order' =
     like( $refused->( gateway_virbr1 => '2001:db8::1' ),                  qr/'2001:db8::1',[ ]which[ ]is[ ]not[ ]an[ ]IPv4/,           'a gateway that is not IPv4' );
     like( $refused->( ip_pool_br0    => 'lan' ),                          qr/pool[ ]of[ ]br0[ ]for[ ]hv1[ ]names[ ]'lan'/,             'a pool that names no address' );
     like( $refused->( ip_pool_br9    => '198.51.100.0/24' ),              qr/bridge[ ]br9,[ ]which[ ]static_nics[ ]does[ ]not[ ]name/, 'and a pool of a bridge outside the two lists' );
+};
+
+subtest 'a static address gets the prefix of the network of its bridge' => sub {
+    my $hv = sub (%block) {
+        delete @block{ grep { !defined $block{$_} } keys %block };
+        return Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', name => 'hv1', static_nics => 'virbr1', gateway_virbr1 => '10.0.0.1', %block );
+    };
+
+    my $own = $hv->( ip_pool_virbr1 => '10.0.0.0/26' );
+    is( $own->nic_prefix_length('virbr1'), 26,            'the prefix of a pool that holds the gateway, because the pool is the network' );
+    is( $own->nic_network('virbr1'),       '10.0.0.0/26', 'which is the network of the bridge' );
+
+    my $part = $hv->( ip_pool_virbr1 => '10.0.0.64/26', prefix_virbr1 => 24, ip_addresses_virbr1 => '10.0.0.9 10.0.0.200/25' );
+    is( $part->nic_prefix_length('virbr1'),              24,            'prefix_NIC for a pool that is a part of a larger network' );
+    is( $part->nic_network('virbr1'),                    '10.0.0.0/24', 'around the gateway' );
+    is( $part->address_prefix( 'virbr1', '10.0.0.70' ),  24,            'so an address of the pool gets the prefix of the network, and not the /26 of the pool' );
+    is( $part->address_prefix( 'virbr1', '10.0.0.9' ),   24,            'and so does an address written with none' );
+    is( $part->address_prefix( 'virbr1', '10.0.0.200' ), 25,            'while one written with a prefix keeps it' );
+
+    my $refused = sub (%block) {
+        my $why = exception { $hv->(%block) };
+        return $why // q{};
+    };
+    like( $refused->( ip_pool_virbr1 => '10.0.0.64/26' ), qr/no[ ]prefix[ ]that[ ]its[ ]block[ ]says .* prefix_virbr1[ ]=/, 'a part of a larger network with no prefix_NIC, rather than a guest that cannot reach its gateway' );
+    like( $refused->( ip_pool_virbr1 => '10.0.1.0/26', prefix_virbr1       => 24 ),            qr{10[.]0[.]1[.]0/26[ ]outside[ ]10[.]0[.]0[.]0/24}, 'a pool outside the network of its gateway' );
+    like( $refused->( ip_pool_virbr1 => '10.0.0.0/26', prefix_virbr1       => 31 ),            qr/prefix_virbr1[ ]for[ ]hv1[ ]is[ ]'31'/,           'a prefix longer than a network of guests can have' );
+    like( $refused->( ip_pool_virbr1 => '10.0.0.0/26', ip_addresses_virbr1 => '10.0.0.9/33' ), qr{names[ ]'10[.]0[.]0[.]9/33'},                     'and an address with a prefix that is not one' );
 };
 
 subtest 'a block that names the keys that the adapters replaced is refused' => sub {
@@ -2213,7 +2241,7 @@ subtest 'nic_gateway and nic_pool: the network of a static adapter' => sub {
     like( exception { $hv->( %pool, gateway_br0 => 'gw.test.test' ) }, qr/'gw[.]test[.]test',[ ]which[ ]is[ ]not[ ]an[ ]IPv4[ ]address/, 'a name in place of an address is refused' );
     like( exception { $hv->( %pool, gateway_br0 => '192.0.2.0/24' ) }, qr/not[ ]an[ ]IPv4[ ]address/,                                    'and so is a network' );
 
-    my %gw = ( gateway_br0 => '192.0.2.1' );
+    my %gw = ( gateway_br0 => '192.0.2.1', prefix_br0 => 24 );
     is_deeply( $hv->( %gw, ip_pool_br0 => '192.0.2.0/26, 192.0.2.128/27', ip_addresses_br0 => '192.0.2.200 192.0.2.201' )->nic_pool('br0'), { cidr => [qw{192.0.2.0/26 192.0.2.128/27}], addresses => [qw{192.0.2.200 192.0.2.201}] }, 'the pool of the bridge, each key a list, whether commas or spaces separate it' );
     is_deeply( $hv->( %gw, ip_pool_br0 => [qw{192.0.2.0/26 192.0.2.128/27}] )->nic_pool('br0'), { cidr => [qw{192.0.2.0/26 192.0.2.128/27}] }, 'from the list that Config::Simple makes of one, without a key the block does not name' );
 };

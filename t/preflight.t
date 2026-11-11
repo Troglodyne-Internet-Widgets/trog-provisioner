@@ -1047,6 +1047,7 @@ sub guest_network_hv (%changed) {
         gateway_virbr1      => '10.0.0.1',
         ip_pool_virbr1      => '10.0.0.64/26',
         ip_addresses_virbr1 => '10.0.0.5',
+        prefix_virbr1       => 24,
         %changed,
     );
     delete @block{ grep { !defined $block{$_} } keys %block };
@@ -1091,7 +1092,7 @@ subtest 'a network that owns a bridge of a guest runs, and starts with the host'
     my @networks = ( default_network(), guest_network() );
     $mock->redefine( network_vmm => sub { Test::PreflightVmm->new(@networks) } );
 
-    my $hv = guest_network_hv( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26' );
+    my $hv = guest_network_hv( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26', prefix_br0 => 24 );
     my ($result) = quietly( sub { $hv->check_guest_networks } );
     ok( $result->{ok}, 'both up, and br0 belongs to no network, so nothing starts it' ) or diag explain $result;
 
@@ -1109,7 +1110,7 @@ subtest 'a network that owns a bridge of a guest runs, and starts with the host'
     # lease_ip reads the leases of the default network, so the adapter of the
     # lease has to be on its bridge.
     @networks = ( default_network(), guest_network() );
-    ($result) = quietly( sub { guest_network_hv( dhcp_nics => 'virbr1', static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef )->check_guest_networks } );
+    ($result) = quietly( sub { guest_network_hv( dhcp_nics => 'virbr1', static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef, prefix_virbr1 => undef )->check_guest_networks } );
     ok( !$result->{ok}, 'a first DHCP adapter that is not on the default network fails' );
     like( $result->{what}, qr/dhcp_nics,[ ]is[ ]not[ ]the[ ]bridge[ ]of[ ]the[ ]default/, 'saying so' );
 };
@@ -1151,30 +1152,55 @@ subtest 'the pool of the guests is inside the network of its bridge, behind its 
     my @networks = ( default_network(), guest_network() );
     $mock->redefine( network_vmm => sub { Test::PreflightVmm->new(@networks) } );
 
+    # The address of the host on a bridge that no libvirt network owns.
+    my %on_host = ( br0 => '192.0.2.5/24' );
+    $mock->redefine( capture_cmd => sub ( $hv, $cmd ) { my ($dev) = $cmd =~ m/dev[ ](\S+)/; return defined $on_host{$dev} ? "2: $dev    inet $on_host{$dev} brd 192.0.2.255 scope global $dev\n" : q{} } );
+
     my ($result) = quietly( sub { guest_network_hv()->check_guest_pool } );
     ok( $result->{ok}, 'a pool inside 10.0.0.0/24, behind 10.0.0.1' ) or diag explain $result;
     like( $result->{what}, qr{virbr1[ ]in[ ]10[.]0[.]0[.]0/24,[ ]the[ ]network[ ]clod}, 'saying where' );
 
-    ($result) = quietly( sub { guest_network_hv( gateway_virbr1 => '10.0.0.254', ip_pool_virbr1 => '10.0.1.0/26' )->check_guest_pool } );
-    ok( !$result->{ok}, 'a wrong gateway and a block outside the network fail' );
+    ($result) = quietly( sub { guest_network_hv( gateway_virbr1 => '10.0.0.254' )->check_guest_pool } );
+    ok( !$result->{ok}, 'a gateway that is not the host on the network fails' );
     like( $result->{fix}, qr/gateway_virbr1[ ]is[ ]10[.]0[.]0[.]254,/,                   'saying what the gateway is' );
     like( $result->{fix}, qr/host[ ]on[ ]clod[ ]is[ ]10[.]0[.]0[.]1[.]/,                 'and what it should be' );
-    like( $result->{fix}, qr{1[.]0/26[ ]of[ ]ip_pool_virbr1[ ]is[ ]outside},             'and which block is outside' );
     like( $result->{fix}, qr/bin\/guest_network[ ]--hypervisor[ ]clod[ ]--nic[ ]virbr1/, 'and the helper' );
+
+    # The guests would be given a /25 on a network that is a /24.
+    ($result) = quietly( sub { guest_network_hv( prefix_virbr1 => 25 )->check_guest_pool } );
+    ok( !$result->{ok}, 'a prefix that is not the one of the network of the bridge fails' );
+    like( $result->{fix}, qr{clod[ ]is[ ]10[.]0[.]0[.]0/24},                  'naming the network' );
+    like( $result->{fix}, qr{block[ ]puts[ ]virbr1[ ]in[ ]10[.]0[.]0[.]0/25}, 'and the one of the block' );
+
+    # The pool that the block names, against the network that libvirt says.
+    @networks = ( default_network(), guest_network( xml => "<network><name>clod</name><forward mode='nat'/><bridge name='virbr1'/><ip address='10.0.0.1' prefix='24'/></network>" ) );
+    ($result) = quietly( sub { guest_network_hv( ip_pool_virbr1 => '10.0.0.0/23', prefix_virbr1 => 23, ip_addresses_virbr1 => undef )->check_guest_pool } );
+    like( $result->{fix}, qr{0/23[ ]of[ ]ip_pool_virbr1[ ]is[ ]outside}, 'and a pool that is larger than that network' );
+    @networks = ( default_network(), guest_network() );
 
     # A second static adapter on the default network, with its pool in the
     # range of its DHCP.
-    my %on_default = ( static_nics => 'virbr1 virbr0', dhcp_nics => 'virbr9', ip_pool_virbr0 => '192.168.122.64/26' );
+    my %on_default = ( static_nics => 'virbr1 virbr0', dhcp_nics => 'virbr9', ip_pool_virbr0 => '192.168.122.64/26', prefix_virbr0 => 24 );
     ($result) = quietly( sub { guest_network_hv(%on_default)->check_guest_pool } );
     ok( !$result->{ok}, 'a pool on a network that leases the same addresses fails' );
     like( $result->{what}, qr/pool[ ]of[ ]virbr0[ ]does[ ]not[ ]fit/,                    'naming the bridge, and only that one' );
     like( $result->{fix},  qr{64/26[ ]of[ ]ip_pool_virbr0[ ]is[ ]in[ ]a[ ]DHCP[ ]range}, 'saying so' );
 
-    ($result) = quietly( sub { guest_network_hv( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26' )->check_guest_pool } );
-    ok( $result->{ok}, 'a pool on a bridge that no network owns is not for this to judge' );
-    like( $result->{what}, qr/br0,[ ]which[ ]no[ ]libvirt[ ]network[ ]owns/, 'and says so' );
+    my %lan = ( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26', prefix_br0 => 24 );
+    ($result) = quietly( sub { guest_network_hv(%lan)->check_guest_pool } );
+    ok( $result->{ok}, 'a bridge that no libvirt network owns is judged by the address of the host on it' ) or diag explain $result;
+    like( $result->{what}, qr{0/24,[ ]where[ ]the[ ]host[ ]is[ ]192[.]0[.]2[.]5/24}, 'and says so' );
 
-    ($result) = quietly( sub { guest_network_hv( static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef )->check_guest_pool } );
+    ($result) = quietly( sub { guest_network_hv( %lan, prefix_br0 => 25 )->check_guest_pool } );
+    ok( !$result->{ok}, 'where a prefix that is not the one of the host fails' );
+    like( $result->{fix}, qr{block[ ]puts[ ]br0[ ]in[ ]192[.]0[.]2[.]0/25}, 'naming both' );
+
+    delete $on_host{br0};
+    ($result) = quietly( sub { guest_network_hv(%lan)->check_guest_pool } );
+    ok( $result->{ok}, 'and a bridge with no address of the host on it is not for this to judge' );
+    like( $result->{what}, qr/br0,[ ]whose[ ]network[ ]nothing[ ]here[ ]knows/, 'which it says' );
+
+    ($result) = quietly( sub { guest_network_hv( static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef, prefix_virbr1 => undef )->check_guest_pool } );
     ok( $result->{ok}, 'and nor is a block with no static adapter' );
 };
 

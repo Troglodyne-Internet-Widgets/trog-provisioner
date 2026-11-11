@@ -31,6 +31,7 @@ use Test::Fatal      qw{exception};
 use Capture::Tiny    qw{capture_stdout};
 use File::Slurper::Temp();
 use YAML::XS();
+use File::Temp();
 
 use Provisioner::Cookbook();
 
@@ -56,12 +57,14 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
         return { map { $_ => $self->{pools}{$_} // {} } $self->static_nics };
     }
     sub nic_gateway       { my ($self) = @_; return $self->{gateway} }
+    sub address_prefix    { my ( $self, $nic ) = @_; return $nic eq 'virbr1' ? 25 : 24 }
     sub name              { return 'hv1' }
     sub new               { my ( $class, %o ) = @_; return bless {%o}, $class }
     sub manages_addresses { return 0 }
     sub on_nat_network    { my ($self) = @_; return $self->{on_nat_network} }
     sub describe          { return 'hv1' }
-    sub virbr_ip          { die "far enough\n" }
+    sub virbr_ip          { my ($self) = @_; return $self->{virbr_ip} // die "far enough\n" }
+    sub guest_disks       { return ('vd*') }
 }
 
 # Runs the generator for vm.test.test on a hypervisor with the static adapters
@@ -77,7 +80,8 @@ sub generate (%args) {
             {
                 _base => {
                     _global => {
-                        basedir       => '/bogus/domains',
+                        basedir => $args{dir} ? "$args{dir}/domains" : '/bogus/domains',
+                        ( $args{dir} ? ( data_source => "$args{dir}/data" ) : () ),
                         transfer_user => 'someadmin',
                         admin_user    => 'someadmin',
                         admin_email   => 'bogus@test.test',
@@ -92,7 +96,7 @@ sub generate (%args) {
 
     my @assigned;
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
-    $fleet->redefine( choose => sub { return PoolProbe::HV->new( on_nat_network => $args{on_nat_network}, nics => $args{nics}, pools => $args{pools}, gateway => '192.0.2.254' ) } );
+    $fleet->redefine( choose => sub { return PoolProbe::HV->new( on_nat_network => $args{on_nat_network}, nics => $args{nics}, pools => $args{pools}, gateway => '192.0.2.254', virbr_ip => $args{virbr_ip} ) } );
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( ensure_seeded => sub { return 0 } );
     $pool->redefine( assign        => sub ( $domain, $from, $bin = undef, $nic = undef ) { push @assigned, [ $domain, $from, $nic ]; return defined $nic ? '10.0.0.10' : '192.0.2.10' } );
@@ -165,6 +169,26 @@ subtest 'the same domain with an address of the pool is not refused' => sub {
     my ( undef, $died, $assigned ) = generate( nics => ['br0'], pools => { br0 => { cidr => ['192.0.2.0/24'] } }, on_nat_network => 0, recipes => { mail => undef } );
     like( $died, qr/\Afar[ ]enough$/m, 'got past the address' );
     is( scalar @$assigned, 1, 'which the pool gave it' );
+};
+
+subtest 'each address reaches the network configuration of the guest' => sub {
+    my %pools = ( br0 => { cidr => ['192.0.2.0/24'] }, virbr1 => { cidr => ['10.0.0.0/25'] } );
+
+    # As far as the files that the guest first boots from, which the distro
+    # recipe writes, and no further.
+    my %handed;
+    my $gen = Test::MockModule->new( 'Trog::Provisioner::Config::Generator', no_auto => 1 );
+    $gen->redefine( transfer_to         => sub { return ( ['192.0.2.50'], 22, 'someadmin' ) } );
+    $gen->redefine( write_guest_secrets => sub { return 1 } );
+    my $distro = Test::MockModule->new('Provisioner::Recipe::ubuntu');
+    $distro->redefine( generate_files => sub ( $self, $dir, %args ) { %handed = %args; die "far enough\n" } );
+
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/$_" for qw{domains data};
+    my ( undef, $died ) = generate( nics => [qw{br0 virbr1}], pools => \%pools, on_nat_network => 0, virbr_ip => '192.168.122.1', dir => $dir );
+    like( $died, qr/\Afar[ ]enough$/m, 'got as far as the distro recipe' ) or return;
+    is_deeply( $handed{ips},     ['192.0.2.10/24'],            'the address of the guest, with the prefix of the network of its bridge' );
+    is_deeply( $handed{nic_ips}, { virbr1 => '10.0.0.10/25' }, 'and the address on each other static adapter, with the prefix of its own' );
 };
 
 done_testing();

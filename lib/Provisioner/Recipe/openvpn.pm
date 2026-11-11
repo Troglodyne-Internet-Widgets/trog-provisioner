@@ -503,7 +503,7 @@ sub enrich {
             my $base = Provisioner::IPPool::address_to_int($address);
             push @routes, map { Provisioner::IPPool::int_to_address( $base + $_ * $half ) . '/' . ( $prefix + 1 ) } 0, 1;
         }
-        push @routes, map { "$_/32" } Provisioner::IPPool::pool_items( $_->{addresses} ) for @bins{ sort keys %bins };
+        push @routes, map { "$_/32" } Provisioner::IPPool::addresses_of($_) for @bins{ sort keys %bins };
 
         # A bin inside the VPN subnet holds the clients themselves, which the
         # tunnel already reaches.

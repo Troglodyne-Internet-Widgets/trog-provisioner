@@ -535,6 +535,7 @@ runner.example.test:
                 gateway_br0:      192.0.2.254
                 ip_addresses_br0: [192.0.2.180, 192.0.2.181]
                 ip_pool_br0:      [192.0.2.192/28]
+                prefix_br0:       24
                 pool_path:   /srv/vm-disks/runner
                 pool_name:   runner_disks
                 partition:   /machine/runner
@@ -729,6 +730,7 @@ static_nics      = br0
 gateway_br0      = 192.0.2.254
 ip_addresses_br0 = 192.0.2.10, 192.0.2.11
 ip_pool_br0      = 192.0.2.64/26
+prefix_br0       = 24
 ```
 
 The pools are the bin named `guests`, see `BINS` in `perldoc
@@ -760,6 +762,7 @@ ip_pool_virbr1  = 10.0.0.0/25
 gateway_virbr1  = 10.0.0.1
 ip_pool_br0     = 192.0.2.64/26
 gateway_br0     = 192.0.2.254
+prefix_br0      = 24
 ```
 
 - **`dhcp_nics`**: each adapter takes a lease.  The first one takes the lease
@@ -781,6 +784,28 @@ The adapters are in the guest in that order, `dhcp_nics` and then
 `ens4`, `ens5`.  The MAC of each comes from its place.  So a block with one
 bridge in each list gives its guests the same two adapters, MACs and names as
 they had before these keys.
+
+Each static address gets the length of the prefix of the network of its
+bridge, in the network configuration of the guest, which is what its netmask
+must be for it to reach its gateway and its neighbours:
+
+- `prefix_NIC` when the block names it, from 8 to 30.  A pool that is a part
+  of a larger network needs it: `ip_pool_br0 = 192.0.2.64/26` on a LAN whose
+  gateway is `192.0.2.254` names `prefix_br0 = 24`, and its guests get
+  addresses such as `192.0.2.65/24`, not `/26`.
+- Otherwise the prefix of `ip_pool_NIC`, when that is one block and holds
+  `gateway_NIC`, because then the pool is the network itself:
+  `ip_pool_virbr1 = 10.0.0.0/25` with `gateway_virbr1 = 10.0.0.1` gives `/25`.
+- Otherwise the block cannot be built, and the error asks for `prefix_NIC`.
+  The prefix of a pool that is a part of a network is never taken for the
+  prefix of the network, because a guest with it could not reach its gateway.
+
+An address of `ip_addresses_NIC` may carry its own prefix, `10.0.0.5/26`, and
+keeps it.  One with none gets the prefix of the network.  The gateway and every
+block and address of the pool must be inside that one network, or the block
+cannot be built.  `bin/guest_network` builds the network with that prefix, and
+`bin/preflight` checks it against the network that the bridge is on: the one of
+the libvirt network that owns it, or the address that the host has on it.
 
 A guest has no adapter on any other bridge.  A block that names a bridge twice,
 a static adapter without a pool, a first static adapter without a gateway, or a
@@ -821,6 +846,7 @@ dhcp_nics      = virbr0
 static_nics    = virbr1
 ip_pool_virbr1 = 10.0.0.64/26
 gateway_virbr1 = 10.0.0.1
+prefix_virbr1  = 24
 ```
 
 `bin/guest_network` makes the network of a static adapter from the block.  The
@@ -835,17 +861,16 @@ bin/guest_network --hypervisor runner-hv --nic virbr1 --via hv1
 It defines the network `guests` with NAT on `virbr1`, at `10.0.0.1/24`, with no
 DHCP, starts it, and starts it with the host.  Then it lets `$user` join
 `virbr1` through qemu-bridge-helper.  It refuses a pool that is not inside the
-network.  A second run changes nothing.  `--prefix` changes the `/24`, and
-`--name` the name of the network.  A guest gives each of its static addresses a
-`/24` prefix, so a network with another prefix needs its addresses written with
-one, in `ip_addresses_NIC`.
+network.  A second run changes nothing.  The `/24` is `prefix_virbr1`, the
+prefix that each guest gets with its address, so the network and its guests
+cannot disagree about it.  `--name` changes the name of the network.
 
 `bin/preflight --hypervisor runner-hv` then asks whether each bridge of the two
 lists is there, whether the first of `dhcp_nics` is the bridge of the `default`
 network, whether each network that owns a bridge runs and starts with the host,
 whether qemu-bridge-helper lets `$user` join each one, and whether each pool is
-inside the network of its bridge, behind its gateway, and outside its DHCP
-ranges.
+inside the network of its bridge, with its prefix, behind its gateway, and
+outside its DHCP ranges.
 
 libvirt lets a guest of a NAT network start a connection out, and refuses a new
 connection in from outside the host.  So this machine still reaches the guest by

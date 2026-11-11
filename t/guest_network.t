@@ -52,12 +52,13 @@ sub hvconf (%clod) {
         gateway_virbr1      => '10.0.0.1',
         ip_pool_virbr1      => '10.0.0.64/26',
         ip_addresses_virbr1 => '10.0.0.5',
+        prefix_virbr1       => 24,
         %clod,
     );
     my $file = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
     File::Slurper::Temp::write_text(
         $file,
-        "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv1.test.test/system\ndhcp_nics = virbr0\n\n[other]\nlibvirt_uri = qemu+ssh://someadmin\@hv2.test.test/system\n\n[clod]\n" . join( q{}, map { "$_ = $block{$_}\n" } grep { $block{$_} ne q{} } sort keys %block )
+        "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv1.test.test/system\ndhcp_nics = virbr0\n\n[other]\nlibvirt_uri = qemu+ssh://someadmin\@hv2.test.test/system\n\n[clod]\n" . join( q{}, map { "$_ = $block{$_}\n" } grep { defined $block{$_} && $block{$_} ne q{} } sort keys %block )
     );
     return $file;
 }
@@ -173,6 +174,20 @@ subtest 'a dry run prints the network and what it would change, and changes noth
     is_deeply( $state->{root}, [], 'and nothing ran as root' );
 };
 
+subtest 'the network has the prefix that the guests get' => sub {
+    my $prefix_of = sub (%block) {
+        my ( undef, $said ) = run_tool( fresh_state(), qw{--hypervisor clod --nic virbr1 --via hv1 --dryrun}, '--hvconf', hvconf(%block) );
+        return $said =~ m{<ip[ ]address='[^']+'[ ]prefix='(\d+)'/>} ? $1 : 'none';
+    };
+    is( $prefix_of->( prefix_virbr1 => 25 ),                                                                   25, 'prefix_NIC, which is what each address on the bridge is written with' );
+    is( $prefix_of->( prefix_virbr1 => undef, ip_pool_virbr1 => '10.0.0.0/26', ip_addresses_virbr1 => undef ), 26, 'or the prefix of a pool that holds the gateway, which is the network itself' );
+    like(
+        exception { $prefix_of->( prefix_virbr1 => undef ) },
+        qr/no[ ]prefix[ ]that[ ]its[ ]block[ ]says .* prefix_virbr1/,
+        'and a pool that is a part of a larger network, with no prefix_NIC, is refused rather than given the prefix of the pool'
+    );
+};
+
 subtest 'a run makes the network once, and a second run finds nothing to do' => sub {
     my $state = fresh_state();
     my ( $rc, $said ) = run_tool( $state, @run );
@@ -216,7 +231,7 @@ subtest 'what it refuses to make' => sub {
     like( exception { run_tool( $state, qw{--hypervisor clod --nic virbr1 --via other}, '--hvconf', hvconf() ) },                                  qr/--via[ ]names[ ]a[ ]block[ ]of[ ]the[ ]same[ ]host/, 'an account of another host' );
     like( exception { run_tool( $state, @block,                                         '--hvconf', hvconf( ip_pool_virbr1 => '10.0.1.0/26' ) ) }, qr{10[.]0[.]1[.]0/26[ ]outside[ ]10[.]0[.]0[.]0/24},    'a pool outside the network' );
     like( exception { run_tool( $state, @block,                                         '--hvconf', hvconf( network => q{} ) ) },                  qr/--name/,                                             'a block that names no network, without --name' );
-    my %second = ( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26' );
+    my %second = ( static_nics => 'virbr1 br0', ip_pool_br0 => '192.0.2.64/26', prefix_br0 => 24 );
     like( exception { run_tool( $state, qw{--hypervisor clod --nic br0 --via hv1},    '--hvconf', hvconf(%second) ) }, qr/no[ ]gateway_br0/,                       'a static adapter with no gateway, which is the address of the network' );
     like( exception { run_tool( $state, @run,                                         '--name',   'bad name' ) },      qr/name[ ]of[ ]a[ ]guest[ ]network/,        'a name libvirt would not take' );
     like( exception { run_tool( $state, qw{--hypervisor clod --nic virbr0 --via hv1}, '--hvconf', hvconf() ) },        qr/names[ ]no[ ]virbr0[ ]in[ ]static_nics/, 'and a bridge that is not one of static_nics' );

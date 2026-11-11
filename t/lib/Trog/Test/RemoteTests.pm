@@ -111,6 +111,7 @@ sub run {
     $hv_mock->redefine( configured_resolvers => sub { return qw{192.0.2.254 8.8.8.8 1.1.1.1} } );
     $hv_mock->redefine( static_nics          => sub { return ('br0') } );
     $hv_mock->redefine( nic_gateway          => sub { return '192.0.2.254' } );
+    $hv_mock->redefine( nic_prefix_length    => sub { return 24 } );
 
     # One address per domain out of the pool.  A hundred is more than there are
     # recipes, and none is the gateway or the .50 that these settings say is us.

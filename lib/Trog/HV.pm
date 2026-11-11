@@ -23,11 +23,12 @@ use YAML::XS();
 use File::Which();
 use Time::Piece();
 use List::Util qw{any uniq};
+use Net::CIDR();
 use Net::IP();
 use Provisioner::Vars();
 
 # The pool and the gateway of one static adapter, by its bridge.  See NIC_KEY.
-our $NIC_KEY = qr/\A (?:ip_pool|ip_addresses|gateway) _ (.+) \z/;
+our $NIC_KEY = qr/\A (?:ip_pool|ip_addresses|gateway|prefix) _ (.+) \z/;
 
 =head1 NAME
 
@@ -377,10 +378,10 @@ gateway of each static adapter of a guest are on the network of its bridge.
 
 =head2 NIC_KEY
 
-The keys of a block that name the pool and the gateway of one static adapter of
-a guest: C<ip_pool_NIC>, C<ip_addresses_NIC> and C<gateway_NIC>, where NIC is
-the bridge of the adapter in C<static_nics>.  See L</nic_pool($nic)> and
-L</nic_gateway($nic)>.
+The keys of a block that name the pool, the gateway and the prefix of one static
+adapter of a guest: C<ip_pool_NIC>, C<ip_addresses_NIC>, C<gateway_NIC> and
+C<prefix_NIC>, where NIC is the bridge of the adapter in C<static_nics>.  See
+L</nic_pool($nic)>, L</nic_gateway($nic)> and L</nic_prefix_length($nic)>.
 
 =head2 @keys = Trog::HV->replaced_keys($block)
 
@@ -625,7 +626,7 @@ undef when there is none.
 =cut
 
 sub static_nics ($self) { return $self->setting_list('static_nics') }
-sub address_nic ($self) { return ( $self->static_nics )[0] }
+sub address_nic ($self) { my ($first) = $self->static_nics; return $first }
 
 =head2 nic_pool($nic)
 
@@ -673,6 +674,70 @@ sub nic_gateway ( $self, $nic ) {
     die "gateway_$nic for " . ( $self->name // $self->describe ) . " is '$gateway', which is not an IPv4 address\n"
       unless $ip && $ip->version == 4 && $ip->size == 1;
     return $gateway;
+}
+
+=head2 nic_prefix_length($nic)
+
+The length of the prefix of the network of the bridge C<$nic> of
+C<static_nics>, which a static address on it gets unless C<ip_addresses_NIC>
+writes one of its own.  It is C<prefix_NIC> when the block names it.  Otherwise
+it is the prefix of C<ip_pool_NIC>, when that is one block and holds
+C<gateway_NIC>, because then the pool is the network itself.
+
+Dies when neither is so.  A pool that is a part of a larger network, such as
+C<10.0.0.64/26> on a network whose gateway is C<10.0.0.1>, does not say how
+large that network is, and a guest given the prefix of its pool could not
+reach its gateway.  Also dies on a C<prefix_NIC> that is not from 8 to 30.
+
+=head2 address_prefix($nic, $address)
+
+The length of the prefix that the static address C<$address> on the bridge
+C<$nic> gets in the network configuration of a guest: the one that
+C<ip_addresses_NIC> writes after it, such as C<10.0.0.5/26>, or else
+C<nic_prefix_length>.
+
+=cut
+
+sub nic_prefix_length ( $self, $nic ) {
+    my $who = $self->name // $self->describe;
+    if ( defined( my $prefix = $self->setting("prefix_$nic") ) ) {
+        die "prefix_$nic for $who is '$prefix', which is not a length of a prefix from 8 to 30\n" unless is_prefix_length($prefix);
+        return $prefix;
+    }
+
+    my @blocks  = @{ $self->nic_pool($nic)->{cidr} // [] };
+    my $gateway = $self->nic_gateway($nic);
+    my $pool    = @blocks == 1 ? Net::IP->new( $blocks[0] ) : undef;
+    my $holds   = $pool && defined $gateway && ( Net::IP->new($gateway)->overlaps($pool) // 0 ) == $Net::IP::IP_A_IN_B_OVERLAP;
+    return $pool->prefixlen if $holds;
+
+    die "The network of $nic for $who has no prefix that its block says.  ip_pool_$nic is not one block that holds gateway_$nic, so it is a part of a larger network, and a guest given the prefix of the pool could not reach its gateway.  Name the length of the prefix of the network of $nic: prefix_$nic = 24, for example.\n";
+}
+
+=head2 $cidr = Trog::HV::network_of($address, $prefix)
+
+The block of the network of the length C<$prefix> that holds C<$address>, such
+as C<10.0.0.0/24> for C<10.0.0.1> and 24.
+
+=cut
+
+# addr2cidr gives each block that holds the address, from the /32 down to the
+# /0.
+sub network_of ( $address, $prefix ) { return ( Net::CIDR::addr2cidr($address) )[ 32 - $prefix ] }
+
+=head2 $bool = Trog::HV::is_prefix_length($prefix)
+
+Whether C<$prefix> is the length of the prefix of a network of guests: a whole
+number from 8 to 30.  A /31 and a /32 have no address for a host beside the
+gateway.
+
+=cut
+
+sub is_prefix_length ($prefix) { return ( $prefix // q{} ) =~ m/\A \d{1,2} \z/ && $prefix >= 8 && $prefix <= 30 ? 1 : 0 }
+
+sub address_prefix ( $self, $nic, $address ) {
+    my ($written) = map { m{\A \Q$address\E / (\d+) \z} ? $1 : () } @{ $self->nic_pool($nic)->{addresses} // [] };
+    return $written // $self->nic_prefix_length($nic);
 }
 
 sub configured_transfer_port ($self) {

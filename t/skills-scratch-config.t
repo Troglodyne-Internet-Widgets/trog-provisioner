@@ -286,6 +286,7 @@ resolvers   = 192.0.2.254
 static_nics = br0
 gateway_br0 = 192.0.2.254
 ip_pool_br0 = 192.0.2.0/26
+prefix_br0  = 24
 
 [node1]
 solusvm       = node.test.test

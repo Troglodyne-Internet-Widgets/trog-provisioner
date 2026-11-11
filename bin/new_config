@@ -200,7 +200,9 @@ must have a gateway.
 new_config gives each domain an address from the pool of each of its static
 adapters, and records them in the address database of L<Provisioner::IPPool>.
 The address on the first is the address of the guest, in C<ips> and in
-C<ipmap>.  A domain keeps its addresses when you provision it again.  If the
+C<ipmap>.  The network configuration of the guest gives each address the
+length of the prefix of the network of its bridge: see
+L<Trog::HV/address_prefix($nic, $address)>.  A domain keeps its addresses when you provision it again.  If the
 hypervisor gives its guests their addresses, new_config does not use the
 pool.
 
@@ -1378,8 +1380,8 @@ sub handle_domain {
         package_answers   => \@answers,
         package_conflicts => \@conflicts,
         %fetch_cache,
-        ips           => [ grep { defined } $static_ip ],
-        nic_ips       => \%nic_ips,
+        ips           => [ map { "$_/" . $hv->address_prefix( $first_nic, $_ ) } grep { defined } $static_ip ],
+        nic_ips       => { map { $_ => "$nic_ips{$_}/" . $hv->address_prefix( $_, $nic_ips{$_} ) } keys %nic_ips },
         gateway       => $gateway,
         contact_email => $admin_email,
         ( defined $dryrun ? ( dryrun         => $dryrun )                            : () ),

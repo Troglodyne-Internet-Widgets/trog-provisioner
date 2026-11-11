@@ -54,6 +54,7 @@ use Trog::Utils();
                     dhcp_nics:        ["virbr0"]
                     static_nics:      ["virbr1"]
                     gateway_virbr1:   "10.0.0.1"
+                    prefix_virbr1:    24
                     ip_addresses_virbr1: ["10.0.0.180", "10.0.0.181"]
                     ip_pool_virbr1:   ["10.0.0.192/28"]
                     pool_path:   "/srv/vm-disks/runner"
@@ -250,7 +251,7 @@ my $ED25519_BITS = 256;
 # and the keys of the pool and the gateway of a static adapter.  Trog::HV::Libvirt
 # checks the same on the runner.
 my $LINK_NAME = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$';
-my $NIC_KEY   = qr/\A (?:ip_pool|ip_addresses|gateway) _ ./;
+my $NIC_KEY   = qr/\A (?:ip_pool|ip_addresses|gateway|prefix) _ ./;
 
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
@@ -372,9 +373,10 @@ sub args {
                     type              => 'object',
                     required          => [qw{libvirt_uri resolvers}],
                     patternProperties => {
-                        '^ip_pool_'      => { type => 'array',  items  => { type => 'string' } },
-                        '^ip_addresses_' => { type => 'array',  items  => { type => 'string' } },
-                        '^gateway_'      => { type => 'string', format => 'ipv4' },
+                        '^ip_pool_'      => { type => 'array',   items   => { type => 'string' } },
+                        '^ip_addresses_' => { type => 'array',   items   => { type => 'string' } },
+                        '^gateway_'      => { type => 'string',  format  => 'ipv4' },
+                        '^prefix_'       => { type => 'integer', minimum => 8, maximum => 30 },
                     },
                     properties => {
                         libvirt_uri => { type => 'string' },

@@ -116,9 +116,10 @@ our $GUESTS = 'guests';
 
 C<$pool> is one bin, as a hash reference, such as the pool of one bridge that
 L<Trog::HV/nic_pool($nic)> returns.
-C<addresses> is a list of addresses and C<cidr> is a list of CIDR blocks.
-Either may be written as a YAML list or as one string with whitespace between
-the items.
+C<addresses> is a list of addresses, each of which may carry the length of the
+prefix of its network, such as C<10.0.0.5/26>, and C<cidr> is a list of CIDR
+blocks.  Either may be written as a YAML list or as one string with whitespace
+between the items.
 
 Returns each address in the pool once, in order.  Dies if a CIDR block is not
 valid, or is not IPv4.
@@ -129,7 +130,7 @@ sub pool_ips {
     my ($pool) = @_;
     my ( %seen, @ips );
 
-    foreach my $ip ( pool_items( $pool->{addresses} ) ) {
+    foreach my $ip ( addresses_of($pool) ) {
         push @ips, $ip unless $seen{$ip}++;
     }
 
@@ -569,7 +570,19 @@ blocks: each C<cidr> as it is, then each of its C<addresses> as a C</32>.
 
 sub blocks {
     my ($bin) = @_;
-    return ( pool_items( $bin->{cidr} ), map { "$_/32" } pool_items( $bin->{addresses} ) );
+    return ( pool_items( $bin->{cidr} ), map { "$_/32" } addresses_of($bin) );
+}
+
+=head2 @addresses = addresses_of($bin)
+
+The C<addresses> of C<$bin>, without the length of a prefix that one is written
+with.
+
+=cut
+
+sub addresses_of {
+    my ($bin) = @_;
+    return map { s{/\d+\z}{}r } pool_items( $bin->{addresses} );
 }
 
 =head2 %clients = via_clients($via)

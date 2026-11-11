@@ -46,6 +46,12 @@ subtest 'pool_ips: CIDR expansion' => sub {
     like $ips[0], qr/^192\.0\.2\./, 'IPs are in correct subnet';
 };
 
+subtest 'pool_ips and blocks: an address written with the prefix of its network' => sub {
+    my $pool = { addresses => '10.0.0.5/26 10.0.0.6', cidr => '10.0.0.8/30' };
+    is_deeply( [ Provisioner::IPPool::pool_ips($pool) ], [qw{10.0.0.5 10.0.0.6 10.0.0.9 10.0.0.10}], 'is handed out without it' );
+    is_deeply( [ Provisioner::IPPool::blocks($pool) ],   [qw{10.0.0.8/30 10.0.0.5/32 10.0.0.6/32}],  'and is a block of one address' );
+};
+
 subtest 'pool_ips: deduplicates overlap' => sub {
     my @ips = Provisioner::IPPool::pool_ips(
         {

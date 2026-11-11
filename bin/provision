@@ -1148,8 +1148,10 @@ the same file restarts the network of the guest for no reason.
 
 The interface is the one whose address is the address of the guest, the first
 of C<static_nics>, and it belongs to C<built_for>, the domain that the machine
-was built for.  The addresses belong to C<domain>.  With no addresses, it does
-nothing, and with addresses and no static adapter, it dies.  On a shared host, these are two
+was built for.  The addresses belong to C<domain>, and each gets the length of
+the prefix of the network of that adapter, as L<Trog::HV/address_prefix($nic,
+$address)> says.  With no addresses, it does nothing, and with addresses and no
+static adapter, it dies.  On a shared host, these are two
 different names.
 
 It dies if it cannot install the new netplan file, and through
@@ -1171,7 +1173,7 @@ sub merge_guest_addresses (%args) {
     my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
 
     my $num_ips = scalar @$addresses;
-    @$addresses = uniq( @$addresses, map { "$_/24" } @$ips );
+    @$addresses = uniq( @$addresses, map { "$_/" . $hv->address_prefix( $hv->address_nic, $_ ) } @$ips );
     return 1 if $num_ips == scalar @$addresses;
 
     my $new_config = "$domain_dir/$domain/network-config-merged.yaml";

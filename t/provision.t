@@ -722,8 +722,10 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 subtest 'the addresses of a domain go on the adapter of the first static bridge' => sub {
     my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     my @macs;
-    $hv->redefine( guest_mac     => sub ( $self, $domain, $index ) { push @macs, $index; return "52:54:00:00:00:0$index" } );
-    $hv->redefine( address_index => sub { 2 } );
+    $hv->redefine( guest_mac      => sub ( $self, $domain, $index ) { push @macs, $index; return "52:54:00:00:00:0$index" } );
+    $hv->redefine( address_index  => sub { 2 } );
+    $hv->redefine( address_nic    => sub { 'virbr1' } );
+    $hv->redefine( address_prefix => sub ( $self, $nic, $address ) { return $nic eq 'virbr1' ? 26 : 0 } );
 
     my $netplan = { network => { ethernets => { ens5 => { match => { macaddress => '52:54:00:00:00:02' }, addresses => ['10.0.0.5/24'] }, ens3 => { match => { macaddress => '52:54:00:00:00:00' } } } } };
     my $guest   = Test::NetplanGuest->new($netplan);
@@ -736,7 +738,7 @@ subtest 'the addresses of a domain go on the adapter of the first static bridge'
     $param->redefine( param => sub ( $self, $key ) { return $self->{$key} // () } );
     quietly( sub { Trog::Bin::Provisioner::merge_guest_addresses( %args, config => bless( {%$config}, 'Config::Simple' ) ) } );
     is_deeply( \@macs,                                                [2],                              'the MAC of the adapter whose address is the address of the guest' );
-    is_deeply( $guest->{put}[0]{network}{ethernets}{ens5}{addresses}, [ '10.0.0.5/24', '10.0.0.9/24' ], 'which gets the address of the domain beside its own' );
+    is_deeply( $guest->{put}[0]{network}{ethernets}{ens5}{addresses}, [ '10.0.0.5/24', '10.0.0.9/26' ], 'which gets the address of the domain beside its own, with the prefix of the network of its bridge' );
 
     my $none = Test::NetplanGuest->new($netplan);
     is( Trog::Bin::Provisioner::merge_guest_addresses( %args, guest => $none, config => bless( {}, 'Config::Simple' ) ), 1, 'a domain with no address changes nothing' );

@@ -80,6 +80,7 @@ my %HYPERVISORS = (
         dhcp_nics   => ['virbr0'],
         static_nics => ['br0'],
         gateway_br0 => '192.0.2.254',
+        prefix_br0  => 24,
         ip_pool_br0 => ['192.0.2.64/27'],
         pool_path   => '/srv/vm-disks/runner',
         pool_name   => 'runner_disks',
@@ -209,15 +210,16 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
 };
 
 subtest 'the adapters of the guests of the runner reach its hypervisors.conf' => sub {
-    my %guests = ( %SESSION, dhcp_nics => ['virbr0'], static_nics => ['virbr1'], ip_pool_virbr1 => ['10.0.0.0/25'], ip_addresses_virbr1 => ['10.0.0.200'], gateway_virbr1 => '10.0.0.1' );
-    delete @guests{qw{ip_pool_br0 gateway_br0}};
+    my %guests = ( %SESSION, dhcp_nics => ['virbr0'], static_nics => ['virbr1'], ip_pool_virbr1 => ['10.0.0.0/25'], ip_addresses_virbr1 => ['10.0.0.200'], gateway_virbr1 => '10.0.0.1', prefix_virbr1 => 24 );
+    delete @guests{qw{ip_pool_br0 gateway_br0 prefix_br0}};
     my ($dir) = built( hypervisors => { hv1 => \%guests } );
 
     my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
     is_deeply( [ $hv1->nic_bridges ], [qw{virbr0 virbr1}], 'read back as the runner reads it, an adapter on each bridge' );
 
     is_deeply( $hv1->nic_pool('virbr1'), { cidr => ['10.0.0.0/25'], addresses => ['10.0.0.200'] }, 'with the pool of each static adapter, by a key that the schema matches by its start' );
-    is( $hv1->nic_gateway('virbr1'), '10.0.0.1', 'and its gateway' );
+    is( $hv1->nic_gateway('virbr1'),       '10.0.0.1', 'and its gateway' );
+    is( $hv1->nic_prefix_length('virbr1'), 24,         'and the prefix of its network' );
 
     like( exception { built( hypervisors => { hv1 => { %guests, static_nics    => [qw{virbr1 virbr1}] } } ) }, qr/static_nics/,    'a bridge named twice is refused here, not on the runner' );
     like( exception { built( hypervisors => { hv1 => { %guests, gateway_virbr1 => 'gw.test.test' } } ) },      qr/gateway_virbr1/, 'and so is a gateway that is not an address' );

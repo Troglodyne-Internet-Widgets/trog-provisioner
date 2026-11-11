@@ -202,17 +202,35 @@ sub build {
           unless $static{$nic};
     }
 
+    die "$static[0], the first of static_nics for $who, gives the guest its address and its default route, so name its gateway: gateway_$static[0]\n"
+      if @static && !defined $self->nic_gateway( $static[0] );
+
     foreach my $nic (@static) {
         my $pool = $self->nic_pool($nic);
         die "$nic in static_nics for $who has no pool.  Name ip_pool_$nic, or ip_addresses_$nic, with the addresses that its adapter takes.\n" unless %$pool;
-        foreach my $item ( map { @{ $pool->{$_} // [] } } qw{cidr addresses} ) {
+
+        # An address may carry its own prefix, and each other one gets the
+        # prefix of the network of the bridge, inside which it has to be.
+        my @bare = @{ $pool->{cidr} // [] };
+        foreach my $item ( @{ $pool->{addresses} // [] } ) {
+            my ( $address, $prefix ) = split m{/}, $item, 2;
+            my $ip = Net::IP->new($address);
+            die "The pool of $nic for $who names '$item', which is not an IPv4 address, with or without the length of its prefix\n"
+              if !$ip || $ip->version != 4 || $ip->size != 1 || defined $prefix && !Trog::HV::is_prefix_length($prefix);
+            push @bare, $address unless defined $prefix;
+        }
+        foreach my $item (@bare) {
             my $ip = Net::IP->new($item);
             die "The pool of $nic for $who names '$item', which is not an IPv4 address or block\n" unless $ip && $ip->version == 4;
         }
         $self->nic_gateway($nic);
+        next unless @bare;
+
+        my $network = Net::IP->new( $self->nic_network($nic) );
+        my @outside = grep { my $how = Net::IP->new($_)->overlaps($network) // 0; $how != $Net::IP::IP_A_IN_B_OVERLAP && $how != $Net::IP::IP_IDENTICAL } @bare;
+        die "The pool of $nic for $who has " . join( ', ', @outside ) . ' outside ' . $self->nic_network($nic) . ", the network of $nic, so a guest with one of those addresses could not reach anything on it\n"
+          if @outside;
     }
-    die "$static[0], the first of static_nics for $who, gives the guest its address and its default route, so name its gateway: gateway_$static[0]\n"
-      if @static && !defined $self->nic_gateway( $static[0] );
 
     return $self;
 }
@@ -1284,6 +1302,12 @@ is L</lease_nic> alone.
 The bridge of each adapter of a guest, by index: C<dhcp_nics>, then
 C<static_nics>.  See L</ADAPTERS>.
 
+=head2 nic_network($nic)
+
+The block of the network of the bridge C<$nic>, such as C<10.0.0.0/24>: the
+network of C<gateway_NIC>, or of the first address of the pool when the block
+names no gateway, with the prefix of C<nic_prefix_length>.
+
 =head2 address_index
 
 The index of the adapter whose address is the address of the guest, the first
@@ -1348,6 +1372,13 @@ sub nic_slots ($self) {
     my @static = $self->static_nics;
     my $count  = dhcp_count($self) + @static;
     return map { $FIRST_NIC_SLOT + $_ } 0 .. $count - 1;
+}
+
+sub nic_network ( $self, $nic ) {
+    my $pool  = $self->nic_pool($nic);
+    my ($any) = map { s{/\d+\z}{}r } @{ $pool->{cidr} // [] }, @{ $pool->{addresses} // [] };
+    my $at    = $self->nic_gateway($nic) // $any // die "$nic names neither a gateway nor a pool, so it has no network\n";
+    return Trog::HV::network_of( $at, $self->nic_prefix_length($nic) );
 }
 
 sub address_index ($self) { return defined $self->address_nic ? dhcp_count($self) : undef }
@@ -2094,10 +2125,6 @@ of the guests is on the network of its bridge.  They only read.
 # The name of a network in libvirt, as guest_network_plan takes it.
 my $NETWORK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,49} \z/;
 
-# The block of the network on which the host has $address/$prefix.  addr2cidr
-# gives each block that holds the address, from the /32 down to the /0.
-my sub network_of ( $address, $prefix ) { return ( Net::CIDR::addr2cidr($address) )[ 32 - $prefix ] }
-
 # The blocks and addresses of $pool, a nic_pool, that are not inside the
 # block $cidr.
 my sub outside_of ( $cidr, $pool ) {
@@ -2106,7 +2133,7 @@ my sub outside_of ( $cidr, $pool ) {
         my $item = Net::IP->new($_);
         my $how  = $item ? $item->overlaps($network) // 0 : 0;
         $how != $Net::IP::IP_A_IN_B_OVERLAP && $how != $Net::IP::IP_IDENTICAL;
-    } map { @{ $pool->{$_} // [] } } qw{cidr addresses};
+    } @{ $pool->{cidr} // [] }, map { s{/\d+\z}{}r } @{ $pool->{addresses} // [] };
 }
 
 # The attributes of an element, from the text of its start tag.
@@ -2137,7 +2164,7 @@ my sub network_facts ($xml) {
     my ($ip) = grep { ( $_->{family} // 'ipv4' ) eq 'ipv4' && defined $_->{address} } map { attributes($_) } $xml =~ m{(<ip\b[^>]*>)}g;
     if ($ip) {
         $facts{address} = $ip->{address};
-        $facts{cidr}    = defined $ip->{prefix} ? network_of( $ip->{address}, $ip->{prefix} ) : eval { Net::CIDR::addrandmask2cidr( $ip->{address}, $ip->{netmask} ) };
+        $facts{cidr}    = defined $ip->{prefix} ? Trog::HV::network_of( $ip->{address}, $ip->{prefix} ) : eval { Net::CIDR::addrandmask2cidr( $ip->{address}, $ip->{netmask} ) };
     }
 
     $facts{leases} = [ map { Net::CIDR::range2cidr("$_->{start}-$_->{end}") } grep { defined $_->{start} && defined $_->{end} } map { attributes($_) } $xml =~ m{(<range\b[^>]*>)}g ];
@@ -2198,9 +2225,9 @@ sub guest_network_plan ( $, %args ) {
 
     my $ip = Net::IP->new( $plan{address} );
     die "The address of the hypervisor on a guest network is an IPv4 address, and '$plan{address}' is not\n" unless $ip && $ip->version == 4 && $ip->size == 1;
-    die "The prefix of a guest network is a number from 8 to 30, and '$plan{prefix}' is not\n" if $plan{prefix} !~ m/\A \d{1,2} \z/ || $plan{prefix} < 8 || $plan{prefix} > 30;
+    die "The prefix of a guest network is a number from 8 to 30, and '$plan{prefix}' is not\n"               unless Trog::HV::is_prefix_length( $plan{prefix} );
 
-    $plan{cidr} = network_of( $plan{address}, $plan{prefix} );
+    $plan{cidr} = Trog::HV::network_of( $plan{address}, $plan{prefix} );
     die "$plan{address} is the address of the block $plan{cidr} itself, which no host on it can have\n" if index( $plan{cidr}, "$plan{address}/" ) == 0;
 
     my @outside = outside_of( $plan{cidr}, $args{pool} // {} );
@@ -3049,11 +3076,14 @@ FIX
 =head2 $result = $hv->check_guest_pool()
 
 Passes when each pool of L<Trog::HV/static_pools> fits the network of its
-bridge.  A bridge that belongs to no libvirt network passes, because then
-nothing here knows its network.  For one that does, the pool passes when the
-gateway of the bridge, if the block names one, is the address of the host on
-that network, each block and address of the pool is inside the network, and no
-DHCP range of the network overlaps the pool.
+bridge.  The network is the one of the libvirt network that owns the bridge, or
+for a bridge that no libvirt network owns, such as the bridge of the LAN, the
+first IPv4 address that the host has on it.  A bridge with neither passes,
+because then nothing here knows its network.  The pool passes when that network
+is L</nic_network($nic)>, so the guests get the prefix of the network,
+and for a libvirt network also when the gateway of the bridge, if the block
+names one, is the address of the host on it, and no DHCP range of it overlaps
+the pool.
 
 A guest with an address outside the network of its bridge cannot reach it.  A
 DHCP range over the pool can lease an address of the pool to something else.
@@ -3064,20 +3094,30 @@ sub check_guest_pool ($self) {
     my @nics = $self->static_nics;
     return $self->verdict( 1, 'The guests take no address from a pool', q{} ) unless @nics;
 
-    # The network that libvirt says the static adapter $nic is on, and what is
-    # wrong with its pool for that network, as sentences.  Nothing when no
-    # libvirt network owns the bridge.
+    # The network that the host says the static adapter $nic is on, and what
+    # is wrong with the pool and the prefix of the block for that network, as
+    # sentences.  Nothing when nothing here knows the network of the bridge.
     my $faults = sub ($nic) {
-        my $network = network_on( $self, $nic ) // return;
+        my $said = eval { $self->nic_network($nic) };
+        chomp( $said = $@ ) unless defined $said;
+        my $network = network_on( $self, $nic );
+        if ( !$network ) {
+            my ($on) = ( $self->capture_cmd("ip -o -4 addr show dev $nic 2>/dev/null") // q{} ) =~ m{\binet[ ](\d+(?:[.]\d+){3}/\d+)};
+            return unless $on;
+            my ( $address, $prefix ) = split m{/}, $on;
+            my $real = Trog::HV::network_of( $address, $prefix );
+            return ( "$real, where the host is $on", $real eq $said ? () : "the host is $on on $nic, in $real, and the block puts $nic in $said" );
+        }
         my $name    = $network->get_name;
         my $facts   = network_facts( $network->get_xml_description(0) );
         my $pool    = $self->nic_pool($nic);
         my $gateway = eval { $self->nic_gateway($nic) };
-        my @pool    = map { @{ $pool->{$_} // [] } } qw{cidr addresses};
+        my @pool    = ( @{ $pool->{cidr} // [] }, map { s{/\d+\z}{}r } @{ $pool->{addresses} // [] } );
 
         return ( "the network $name", "$nic belongs to the network $name, which has no IPv4 address" ) unless $facts->{cidr};
         my @wrong = (
-            ( defined $gateway && $gateway ne $facts->{address} ? "gateway_$nic is $gateway, and the address of the host on $name is $facts->{address}" : () ),
+            ( $facts->{cidr} ne $said                           ? "$name is $facts->{cidr}, and the block puts $nic in $said, which the guests would take the prefix of" : () ),
+            ( defined $gateway && $gateway ne $facts->{address} ? "gateway_$nic is $gateway, and the address of the host on $name is $facts->{address}"                  : () ),
             ( map { "$_ of ip_pool_$nic is outside $facts->{cidr}, the network $name" } outside_of( $facts->{cidr}, $pool ) ),
             ( map { "$_ of ip_pool_$nic is in a DHCP range of $name" } grep { Net::CIDR::cidrlookup( $_, @{ $facts->{leases} } ) } @pool ),
         );
@@ -3089,7 +3129,7 @@ sub check_guest_pool ($self) {
         my ( $where, @wrong ) = eval { $faults->($nic) };
         return $self->verdict( 0, 'Could not ask libvirt for its networks', $@ ) if $@;
         if (@wrong) { $wrong{$nic} = \@wrong }
-        else        { push @fits, defined $where ? "$nic in $where" : "$nic, which no libvirt network owns" }
+        else        { push @fits, defined $where ? "$nic in $where" : "$nic, whose network nothing here knows" }
     }
     return $self->verdict( 1, 'Each pool fits its bridge: ' . join( '; ', @fits ), q{} ) unless %wrong;
 
@@ -3108,7 +3148,8 @@ sub check_guest_pool ($self) {
           . <<"FIX" );
 
 It refuses a pool that is not inside the network, and makes the network with
-no DHCP.  Or change ip_pool_$first and gateway_$first in the block.
+no DHCP and the prefix of the block.  Or change ip_pool_$first, gateway_$first
+and prefix_$first in the block.
 FIX
 }
 

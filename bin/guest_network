@@ -28,7 +28,7 @@ hypervisors.conf take their addresses on
 
 =head1 SYNOPSIS
 
-    bin/guest_network --hypervisor clod --nic virbr1 --via hv1 [--name clod] [--prefix 24] [--dryrun]
+    bin/guest_network --hypervisor clod --nic virbr1 --via hv1 [--name clod] [--dryrun]
 
 =head1 DESCRIPTION
 
@@ -42,7 +42,9 @@ on the hypervisor, from the block:
 =item * The bridge is C<--nic>, one of the C<static_nics> of the block.
 
 =item * The address of the hypervisor on the network is C<gateway_NIC>, with
-the prefix of C<--prefix>.
+the length of the prefix of the network of the bridge, which
+L<Trog::HV/nic_prefix_length($nic)> says, and which each guest gets with its
+address.  So the network and its guests cannot disagree about it.
 
 =item * Each block and address of C<ip_pool_NIC> and C<ip_addresses_NIC> must be
 inside the network, or it changes nothing and says which.
@@ -98,10 +100,6 @@ the block of C<--hypervisor> is on a session URI, and that block otherwise.
 The name of the network in libvirt.  The default is the C<network> of the
 block.
 
-=item B<--prefix> LENGTH
-
-The length of the prefix of the network.  The default is 24.
-
 =item B<--dryrun>
 
 Ask the hypervisor what is done, print what would change, and change nothing.
@@ -118,8 +116,8 @@ of L<Trog::Config>.
 sub main {
     my @args = @_;
 
-    my %opt = ( prefix => 24 );
-    GetOptionsFromArray( \@args, \%opt, qw{hypervisor=s nic=s via=s name=s prefix=s dryrun hvconf=s help} )
+    my %opt;
+    GetOptionsFromArray( \@args, \%opt, qw{hypervisor=s nic=s via=s name=s dryrun hvconf=s help} )
       or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
     my @missing = grep { !defined $opt{$_} } qw{hypervisor nic};
@@ -140,7 +138,7 @@ sub main {
         name    => $opt{name} // ( $guests->network || undef ) // die("$opt{hypervisor} names no network, so name the libvirt network with --name.\n"),
         bridge  => $nic,
         address => $guests->nic_gateway($nic) // die("$opt{hypervisor} names no gateway_$nic, which is the address of the hypervisor on the network.\n"),
-        prefix  => $opt{prefix},
+        prefix  => $guests->nic_prefix_length($nic),
         pool    => $guests->nic_pool($nic),
     );
 
