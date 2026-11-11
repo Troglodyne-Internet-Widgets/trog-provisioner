@@ -46,10 +46,11 @@ target does this before the fragment runs, and the fragment loads the schema
 only when no database is there.  Nobody can type a contact list back in, so the
 only other choice is to lose it.
 
-Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, so it
+Expects IMAP on port 143 and submission on port 587 of its own guest, so it
 requires L<Provisioner::Recipe::mail> and is served from the same guest.  That
-is the only arrangement this configures: config.inc.php names mail.[domain] and
-has no way to be told to name anything else.  Pointing a webmail install at a
+is the only arrangement this configures: config.inc.php names localhost, with
+the peer name mail.[domain] for the certificate check, and has no way to be told
+to name anything else.  Pointing a webmail install at a
 mailserver somewhere else wants an IMAP provider a domain can choose, the way it
 chooses the server of its zone -- see L<Provisioner::Recipe::registrar>.
 
