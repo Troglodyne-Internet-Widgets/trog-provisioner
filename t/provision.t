@@ -47,9 +47,9 @@ use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 ## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
 
 # No skip_all if the prereqs are missing: a suite that passes because it never
-# ran is worse than one that fails.  bin/provision uses XML::Twig,
-# Net::OpenSSH::More and Net::EmptyPort itself, so this explodes and tells you
-# the kit is wrong rather than quietly reporting success.
+# ran is worse than one that fails.  bin/provision loads Net::OpenSSH::More and
+# Net::EmptyPort through Trog::Machine and Trog::Guest, so this explodes and
+# tells you the kit is wrong rather than quietly reporting success.
 my $script = "$FindBin::Bin/../bin/provision";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
