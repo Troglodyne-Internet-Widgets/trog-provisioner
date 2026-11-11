@@ -231,26 +231,6 @@ with C<do_with_update_hook> of L<Trog::SQLite>.
 
 sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 
-# Runs $code in one transaction of $db, and returns what it returns.  Rolls
-# back and dies when $code dies, with $failed when it died with nothing.  Not
-# DEFERRED: a deferred transaction takes no lock until its first write, and by
-# then another run can read the same free address.
-my sub in_transaction ( $db, $failed, $code ) {
-    $db->do('BEGIN IMMEDIATE');
-    my @result;
-    my $ok = eval {
-        @result = $code->();
-        $db->do('COMMIT');
-        1;
-    };
-    if ( !$ok ) {
-        my $err = $@ || $failed;
-        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
-        die $err;
-    }
-    return wantarray ? @result : $result[0];
-}
-
 # The number of rows of addresses that $sql, a write to the view ips with
 # @bind, writes, which do cannot count.
 my sub rows_written ( $sql, @bind ) {
@@ -732,7 +712,7 @@ sub refresh_via {
     my %clients = via_clients($via);
 
     my $db = dbh();
-    in_transaction( $db, "Could not note the VPN clients of $via\n", sub { note_clients( $db, $bin, $bins{$bin}, \%clients ) } );
+    Trog::SQLite::transaction( $db, sub { note_clients( $db, $bin, $bins{$bin}, \%clients ) } );
 
     return scalar keys %clients;
 }
@@ -784,10 +764,12 @@ server.
 Dies if the bin has no addresses, or if no address in it is free.  For a bin
 with C<via>, it also dies as C<refresh_via> does.
 
-Choosing the address and writing it are one transaction.  C<BEGIN IMMEDIATE>
-takes the write lock before the search for a free address.  So if two
-provisions run at the same time, the second waits, searches again, and finds
-the address taken.
+Choosing the address and writing it are one transaction, from
+C<transaction> of L<Trog::SQLite>.  It begins with C<BEGIN IMMEDIATE>, because
+C<sqlite_use_immediate_transaction> of L<DBD::SQLite> is on by default, so the
+transaction takes the write lock before the search for a free address.  So if
+two provisions run at the same time, the second waits, searches again, and
+finds the address taken.
 
 =cut
 
@@ -814,9 +796,9 @@ sub assign {
     my %in_bin  = map { $_ => 1 } @pool_ips;
 
     my $db = dbh();
-    return in_transaction(
+    my $address;
+    Trog::SQLite::transaction(
         $db,
-        "Could not assign an IP to $domain\n",
         sub {
             my $held = held_by( $domain, $bin, $nic );
 
@@ -833,7 +815,8 @@ sub assign {
                     $db->do( "UPDATE ips SET main = CASE WHEN nic = ? THEN 1 ELSE 0 END WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $nic,    $domain, $bin ) if $main;
                     $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?",                       undef, $domain, $bin,    $nic ) unless $main;
                 }
-                return $held;
+                $address = $held;
+                return;
             }
 
             note_clients( $db, $bin, $conf, \%clients, $domain ) if $ask;
@@ -845,9 +828,11 @@ sub assign {
 
             $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin ) if $guest && $main;
             $db->do( "INSERT INTO ips (ip, domain, kind, bin, nic, main) VALUES (?, ?, 'domain', ?, ?, ?)", undef, $free, $domain, $bin, $nic, $main );
-            return $free;
+            $address = $free;
+            return;
         }
     );
+    return $address;
 }
 
 =head2 forget_seeding()
