@@ -18,11 +18,13 @@ HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '
     target has built what it loads.  An empty secure host clears it.  See THE
     HOSTS OF TCMS in Provisioner::Recipe::tcms. -%]
 [% script_dir %]/queue_postrun_task "cd '[% install_dir %]/[% domain %]/tCMS' && sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' /opt/perl5/current/bin/perl bin/tcms-hostname --secure '[% secure_host %]' '[% domain %]'"
-[%# The worker of the job queue.  restart, so that a provision of a running
-    guest loads the new checkout, after the perl target has built what the
-    worker loads.  See THE JOB WORKER in Provisioner::Recipe::tcms. -%]
+[%# The worker of the job queue.  reenable, so that a guest built before the
+    service of tPSGI wanted the worker loses its old link.  restart, so that a
+    provision of a running guest loads the new checkout, after the perl target
+    has built what the worker loads.  See THE JOB WORKER in
+    Provisioner::Recipe::tcms. -%]
 install -o root -g root -m 0644 tcms-worker.service '/etc/systemd/system/tcms-worker-[% domain %].service'
 systemctl daemon-reload
-systemctl enable 'tcms-worker-[% domain %].service'
+systemctl reenable 'tcms-worker-[% domain %].service'
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl restart 'tcms-worker-[% domain %].service'

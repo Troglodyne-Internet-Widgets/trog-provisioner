@@ -94,6 +94,16 @@ SKIP: {
 my $worker = `systemctl is-active 'tcms-worker-[% domain %].service' 2>&1`;
 chomp $worker;
 is($worker, 'active', 'the tCMS job worker is active') or diag `journalctl -u 'tcms-worker-[% domain %].service' -n 20 --no-pager 2>&1`;
+
+# The build starts the worker itself, so ask whether a boot would.  verify
+# plans the start of the default target as a boot does, and names each
+# ordering cycle that it breaks; it warns about other units as well, so only
+# the cycles at the worker count.  THE JOB WORKER in Provisioner::Recipe::tcms.
+my $enabled = `systemctl is-enabled 'tcms-worker-[% domain %].service' 2>&1`;
+chomp $enabled;
+is($enabled, 'enabled', 'the tCMS job worker is enabled');
+my @cycles = grep { /ordering cycle/ && /tcms-worker-\Q[% domain %]\E[.]service/ } `systemd-analyze verify default.target 2>&1`;
+is_deeply(\@cycles, [], 'and a start of the default target breaks no ordering cycle at it') or diag @cycles;
 my $ffmpeg = `ffmpeg -version 2>&1`;
 is($? >> 8, 0, 'ffmpeg, which the worker transcodes with, runs') or diag $ffmpeg;
 [% IF user != admin_user -%]
