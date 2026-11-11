@@ -719,12 +719,17 @@ these:
 
 =over 4
 
-=item * With an C<account>, the account, from C<runner_account_steps> of
-L<Trog::HV::Libvirt>, and then the key of the runner in the
-F<authorized_keys> of the account, through C<runner_key_steps>.  Both run as
-the account of the block of the same name in F<hypervisors.conf>, which needs
-sudo for everything.  So the key of the operator never goes into the account
-of the runner.  See L</ACCOUNTS>.
+=item * With an C<account>, first the network of each of its C<static_nics>,
+from C<runner_network_steps> of L<Trog::HV::Libvirt>: NAT, at its
+C<gateway_NIC>, with the prefix of its pool, and named C<USER-BRIDGE>.  A
+bridge of the host that no network of libvirt owns, such as one that bridges
+the LAN, is left alone.  Then the account, from C<runner_account_steps>, which
+lets the account join the bridges of this block and no other.  Then the key of
+the runner in the F<authorized_keys> of the account, through
+C<runner_key_steps>.  All of them run as the account of the block of the same
+name in F<hypervisors.conf>, which needs sudo for everything.  So the key of
+the operator never goes into the account of the runner, and the bridges of
+that block are not the bridges of the runner.  See L</ACCOUNTS>.
 
 =item * Without one, the key of the runner in the F<authorized_keys> of the
 user of C<libvirt_uri>, written as that user.  That user must exist, and let
@@ -738,13 +743,17 @@ is on.  A domain that holds no address gets a warning, and its key goes in
 unrestricted.  The public half also goes beside the domain as
 F<hypervisor-key.pub>.  A dry run has no store, so it reads that file.
 
-F<bin/destroy> takes each step back, last first: the key, and then the account.
+F<bin/destroy> takes each step back, last first: the key, the account, and then
+the networks.
 It reads the key from F<hypervisor-key.pub>, so a teardown never stops to ask
 for the password of the store.  It removes every line that has the key
 material in it, not only the line that a provision wrote, because somebody can
 edit the C<from=> or the comment on the hypervisor.  The key is made for one
 domain and kept in the store, so no other line can have it.  The account does
 not go while its pool holds the disk of a guest.  See C<runner_removal_steps>.
+A network goes only when nothing else joins its bridge: not the account, which
+has not gone while its pool holds a guest, not a guest of the system daemon,
+and not another runner account.  See C<runner_network_removal_steps>.
 The steps of a block with C<hypervisor_access> of C<none> have only the
 revert, so that a teardown still takes back what a provision let in before
 somebody took the access away.
@@ -813,11 +822,23 @@ sub outside_steps {
         if ( ref $block->{account} eq 'HASH' ) {
             my %plan = ( user => $user, %{$block}{qw{pool_name pool_path}}, %{ $block->{account} } );
             delete @plan{ grep { !defined $plan{$_} } keys %plan };
+            my $adapters = sub ($hv) { return { $hv->runner_adapters( $block, $user ) } };
             push @steps, {
+                id      => "trogrunner:networks:$name",
+                machine => { hypervisor => $name },
+                when    => 'secrets',
+                apply   => sub ( $hv, %context ) {
+                    return map { $hv->runner_network_steps($_) } @{ $adapters->($hv)->{networks} };
+                },
+                revert => sub ( $hv, %context ) {
+                    return map { $hv->runner_network_removal_steps( $_, $user ) } @{ $adapters->($hv)->{networks} };
+                },
+              },
+              {
                 id      => "trogrunner:account:$name",
                 machine => { hypervisor => $name },
                 when    => 'secrets',
-                apply   => sub ( $hv, %context ) { return $hv->runner_account_steps( $hv->runner_account_plan(%plan) ) },
+                apply   => sub ( $hv, %context ) { return $hv->runner_account_steps( $hv->runner_account_plan( %plan, bridges => $adapters->($hv)->{bridges} ) ) },
                 revert  => sub ( $hv, %context ) { return $hv->runner_removal_steps( $hv->runner_account_plan(%plan) ) },
               },
               {

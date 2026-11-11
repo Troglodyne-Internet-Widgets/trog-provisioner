@@ -119,6 +119,15 @@ of the host that the guests get together, in whole cores, such as 16, and the
 slice gets it as C<CPUQuota>.  C<--io-weight> is C<IOWeight> as systemd reads
 it.
 
+=item B<--bridge> NAME
+
+A bridge that the guests of the account may join, through qemu-bridge-helper.
+Can be given more than once.  The default is the C<dhcp_nics> of the block of
+B<--hypervisor>, the bridges of the leases, and not its C<static_nics>: the
+block that makes the account is not the block of the runner, and its static
+bridge can be the bridge of the LAN.  A bridge that the account was allowed
+before and is not given here goes.
+
 =item B<--authorize> FILE
 
 A file of public keys to add to the F<authorized_keys> of the user.  Can be
@@ -144,22 +153,23 @@ of L<Trog::Config>.
 sub main {
     my @args = @_;
 
-    my %opt = ( authorize => [] );
+    my %opt = ( authorize => [], bridge => [] );
     GetOptionsFromArray(
         \@args, \%opt,
-        qw{hypervisor=s user=s pool-name=s pool-path=s quota=s cores=i io-weight=s authorize=s@ remove dryrun hvconf=s help},
+        qw{hypervisor=s user=s pool-name=s pool-path=s quota=s cores=i io-weight=s authorize=s@ bridge=s@ remove dryrun hvconf=s help},
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
 
     my @missing = grep { !defined $opt{$_} } ( qw{hypervisor user pool-name pool-path}, $opt{remove} ? () : 'quota' );
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Missing: ' . join( ', ', map { "--$_" } @missing ) ) if @missing;
 
-    my $plan = Trog::HV::Libvirt->runner_account_plan( map { (tr/-/_/r) => $opt{$_} } grep { defined $opt{$_} } qw{user pool-name pool-path quota cores io-weight} );
-    my @keys = keys_in( @{ $opt{authorize} } );
-
     my $fleet = Trog::Hypervisors->load( $opt{hvconf} // Trog::Hypervisors->default_path() );
     my $hv    = $fleet->hypervisor( $opt{hypervisor} );
     die "$opt{hypervisor} is not a libvirt hypervisor, and only libvirt has accounts to give\n" unless $hv->isa('Trog::HV::Libvirt');
+
+    my @bridges = $opt{remove} ? () : @{ $opt{bridge} } ? @{ $opt{bridge} } : $hv->dhcp_nics;
+    my $plan    = Trog::HV::Libvirt->runner_account_plan( ( map { (tr/-/_/r) => $opt{$_} } grep { defined $opt{$_} } qw{user pool-name pool-path quota cores io-weight} ), ( @bridges ? ( bridges => \@bridges ) : () ) );
+    my @keys    = keys_in( @{ $opt{authorize} } );
 
     my @steps =
         $opt{remove}

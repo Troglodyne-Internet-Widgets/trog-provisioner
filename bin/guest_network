@@ -58,6 +58,12 @@ lets the user of the URI join the bridge, in the file of qemu-bridge-helper for
 that user.  C<guest_network_steps> in L<Trog::HV::Libvirt> and C<grant_steps> in
 L<Trog::HV::Libvirt::BridgeHelper> say what each step does.
 
+The runner of the C<trogrunner> recipe that has an C<account> does not need this
+command: F<bin/provision> makes the network of each of its C<static_nics> when it
+builds the runner.  See C<outside_steps> in L<Provisioner::Recipe::trogrunner>.
+That provision also sets the file of the account to the bridges of its block,
+so a bridge that this command adds for such an account goes again.
+
 Each step first asks whether it is done, and skips itself if it is.  So a second
 run changes nothing.  It prints the XML of the network first, also with
 C<--dryrun>.
