@@ -51,6 +51,10 @@ to a different guest is the failure that this database prevents.
 Thus a usual run only adds assignments.  It adds one for each guest on a
 hypervisor that the database did not know about.
 
+It also fills in the bridge of an assignment from before the database recorded
+bridges, when a hypervisor reports that address on a bridge for the same guest.
+That changes nothing about who holds the address.
+
 =head2 --prune
 
 Also remove the assignment of each domain that no hypervisor runs.
@@ -90,6 +94,7 @@ sub main {
 
     my $db     = Provisioner::IPPool::dbh();
     my %before = %{ Provisioner::IPPool::taken() };
+    my %on     = %{ Provisioner::IPPool::bridges() };
 
     # All of it or none of it.  A reseed that stops halfway leaves no
     # reservations, and then the database says that the gateway is free.
@@ -109,12 +114,13 @@ sub main {
         die $err;
     }
 
-    my %after = %{ Provisioner::IPPool::taken() };
+    my %after    = %{ Provisioner::IPPool::taken() };
+    my %on_after = %{ Provisioner::IPPool::bridges() };
 
     # Read the result before the rollback, because the rollback removes it.
     $db->do( $dryrun ? 'ROLLBACK' : 'COMMIT' );
 
-    report( \%before, \%after, $dryrun );
+    report( \%before, \%after, $dryrun, \%on, \%on_after );
     return 0;
 }
 
@@ -157,32 +163,39 @@ sub prune_absent {
     return $gone;
 }
 
-=head2 report($before, $after, $dryrun)
+=head2 report($before, $after, $dryrun, $on, $on_after)
 
 Prints each address that changed, and then a summary line.  C<$before> and
-C<$after> are hash references from C<Provisioner::IPPool::taken>.  Returns 0.
+C<$after> are hash references from C<Provisioner::IPPool::taken>, and C<$on>
+and C<$on_after> from C<Provisioner::IPPool::bridges>, before and after the
+reseed.  An address that had no bridge before and has one after is printed as
+given that bridge.  Returns 0.
 
 =cut
 
 sub report {
-    my ( $before, $after, $dryrun ) = @_;
+    my ( $before, $after, $dryrun, $on, $on_after ) = @_;
+    $on       //= {};
+    $on_after //= {};
 
     my $would   = $dryrun ? 'would be ' : q{};
     my @added   = grep { !$before->{$_} } sort keys %$after;
     my @removed = grep { !$after->{$_} } sort keys %$before;
-    my @moved   = grep { $before->{$_} && $after->{$_} && $before->{$_} ne $after->{$_} } sort keys %$after;
+    my @moved   = grep { $before->{$_}     && $after->{$_}     && $before->{$_} ne $after->{$_} } sort keys %$after;
+    my @bridged = grep { defined $on->{$_} && $on->{$_} eq q{} && ( $on_after->{$_} // q{} ) ne q{} } sort keys %$on_after;
 
     my $summary = join(
         q{},
         ( map { sprintf "  %-18s %s\n", $_, "${would}recorded as $after->{$_}" } @added ),
         ( map { sprintf "  %-18s %s\n", $_, "${would}freed (was $before->{$_})" } @removed ),
         ( map { sprintf "  %-18s %s\n", $_, "${would}now $after->{$_}, was $before->{$_}" } @moved ),
+        ( map { sprintf "  %-18s %s\n", $_, "${would}given the bridge $on_after->{$_}" } @bridged ),
     );
 
     $summary .= sprintf(
-        "%s: %d added, %d freed, %d changed hands; %d addresses spoken for\n",
+        "%s: %d added, %d freed, %d changed hands, %d given a bridge; %d addresses spoken for\n",
         ( $dryrun ? 'Nothing written' : 'Reseeded' ),
-        scalar @added, scalar @removed, scalar @moved, scalar keys %$after
+        scalar @added, scalar @removed, scalar @moved, scalar @bridged, scalar keys %$after
     );
 
     print $summary;

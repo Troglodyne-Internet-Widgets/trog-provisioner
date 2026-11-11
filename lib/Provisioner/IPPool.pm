@@ -308,6 +308,18 @@ sub taken {
     return { map { $_->{ip} => $_->{domain} } @$rows };
 }
 
+=head2 bridges()
+
+Returns a hash reference of each address of a guest in the C<guests> bin to its
+bridge, which is empty for a row from before the database recorded bridges.
+
+=cut
+
+sub bridges {
+    my $rows = dbh()->selectall_arrayref( "SELECT ip, nic FROM ips WHERE kind = 'domain' AND bin = ?", { Slice => {} }, $GUESTS );
+    return { map { $_->{ip} => $_->{nic} } @$rows };
+}
+
 =head2 held_by($domain, $bin, $nic)
 
 Returns the address that C<$domain> has in C<$bin>, or undef.  C<$bin> defaults
@@ -426,11 +438,20 @@ C<$main> is true when that bridge is the first of C<static_nics>, so that it is
 the address of the guest, and defaults to true.  This is for an address that a hypervisor reports,
 not one that C<assign> gave out.  Returns true if this call wrote the row.
 
+If C<$domain> already holds C<$ip> in a row from before the database recorded
+bridges, this gives that row C<$nic>, as C<assign> does, and leaves the rest of
+it alone.  So a reseed fills in the bridges of the old rows.  It leaves a row
+alone when C<$domain> already has another address on C<$nic>.
+
 =cut
 
 sub record {
     my ( $ip, $domain, $nic, $main ) = @_;
-    return rows_written( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", $ip, $domain, $nic // q{}, ( $main // 1 ) ? 1 : 0 ) ? 1 : 0;
+    $nic //= q{};
+    return 1
+      if $nic ne q{}
+      && rows_written( "UPDATE OR IGNORE ips SET nic = ? WHERE ip = ? AND domain = ? AND kind = 'domain' AND bin = ? AND nic = ''", $nic, $ip, $domain, $GUESTS );
+    return rows_written( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", $ip, $domain, $nic, ( $main // 1 ) ? 1 : 0 ) ? 1 : 0;
 }
 
 =head2 release($domain)

@@ -81,6 +81,18 @@ subtest 'the report says which way each address went' => sub {
     unlike( $said, qr/10[.]0[.]0[.]2/, 'while one that did not move is not mentioned' );
 };
 
+subtest 'the report names each address that a reseed gave its bridge' => sub {
+    my %held     = ( '10.0.0.1' => 'old.test', '10.0.0.2' => 'new.test', '10.0.0.3' => 'still.test' );
+    my %on       = ( '10.0.0.1' => q{},        '10.0.0.3' => q{} );
+    my %on_after = ( '10.0.0.1' => 'br0',      '10.0.0.2' => 'br0', '10.0.0.3' => q{} );
+
+    my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( \%held, \%held, 1, \%on, \%on_after ) };
+
+    like( $said, qr/10[.]0[.]0[.]1\s+would[ ]be[ ]given[ ]the[ ]bridge[ ]br0/, 'an old address that a hypervisor reported on its bridge' );
+    like( $said, qr/1[ ]given[ ]a[ ]bridge/,                                   'counted up' );
+    unlike( $said, qr/10[.]0[.]0[.][23]/, 'while a new address, and an old one that no hypervisor reported, are not mentioned' );
+};
+
 subtest 'a dry run says would, and a real one does not' => sub {
     my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( { '10.0.0.1' => 'a.test' }, {}, 1 ) };
 

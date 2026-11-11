@@ -262,6 +262,33 @@ subtest 'assign: an address from before the database knew bridges is kept' => su
     is( Provisioner::IPPool::assign( 'old.test', two_bridges('br0'), undef, 'virbr1' ), '10.0.0.10', 'while a bridge that does not hold it gets an address of its own' );
 };
 
+subtest 'record: a reseed gives an address from before bridges its bridge' => sub {
+    fresh_db();
+    my $db = Provisioner::IPPool::dbh();
+
+    Provisioner::IPPool::record( '192.0.2.11', 'old.test', q{}, 1 );
+    is( Provisioner::IPPool::record(qw{192.0.2.11 old.test br0 1}), 1, 'the hypervisor reporting it on br0 counts as a write' );
+    is_deeply( Provisioner::IPPool::nic_addresses('old.test'), { br0        => '192.0.2.11' }, 'and the row records the bridge now' );
+    is_deeply( Provisioner::IPPool::assignments(),             { 'old.test' => '192.0.2.11' }, 'and is still the address of its guest' );
+    is( Provisioner::IPPool::record(qw{192.0.2.11 old.test br0 1}), 0, 'a second report writes nothing' );
+
+    Provisioner::IPPool::record( '192.0.2.12', 'other.test', q{}, 1 );
+    is( Provisioner::IPPool::record(qw{192.0.2.12 moved.test br0 1}),         0,   'another domain at that address gets nothing' );
+    is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '192.0.2.12'}), q{}, 'and the row of the first keeps no bridge' );
+
+    Provisioner::IPPool::record( '192.0.2.13', 'two.test', q{}, 1 );
+    Provisioner::IPPool::record(qw{192.0.2.14 two.test br0 0});
+    is( Provisioner::IPPool::record(qw{192.0.2.13 two.test br0 1}),           0,   'a domain that has an address on br0 already gets nothing' );
+    is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '192.0.2.13'}), q{}, 'and the old row keeps no bridge, rather than break the one address per bridge' );
+
+    Provisioner::IPPool::reserve(qw{192.0.2.1 gateway:192.0.2.1 br0});
+    is_deeply(
+        Provisioner::IPPool::bridges(),
+        { '192.0.2.11' => 'br0', '192.0.2.12' => q{}, '192.0.2.13' => q{}, '192.0.2.14' => 'br0' },
+        'bridges gives each address of a guest its bridge, empty where there is none, and leaves out a reservation'
+    );
+};
+
 subtest 'dbh: a database from before bridges opens, and keeps its rows' => sub {
     fresh_db();
 
