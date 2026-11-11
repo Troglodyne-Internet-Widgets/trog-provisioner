@@ -142,8 +142,19 @@ failure.
 
 The unit starts after the service of tPSGI, which is named for the domain.  The
 worker saves the posts that it transcodes, so it needs the checkout in place,
-and it is useful only while tCMS serves.  The guest test asks systemd whether
-the unit is active, and whether C<ffmpeg> runs.
+and it is useful only while tCMS serves.
+
+The service of tPSGI wants the worker, and C<multi-user.target> does not.  A
+target is ordered after each unit that it wants, and the unit of tPSGI is
+ordered after C<multi-user.target>.  So a worker that the target wanted would
+be ordered both before the target and after it, and at boot systemd would drop
+its start to break the cycle.  The recipe enables the unit with
+C<systemctl reenable>, which also takes away the link from
+C<multi-user.target.wants> that an older build of the recipe made.
+
+The guest test asks systemd whether the unit is active and enabled, whether a
+start of the default target would have to break an ordering cycle at the
+worker, and whether C<ffmpeg> runs.
 
 The recipe requires C<servicesudo>, so that the service user can restart the
 unit with sudo and ask for its status.  tCMS updates its own checkout from a

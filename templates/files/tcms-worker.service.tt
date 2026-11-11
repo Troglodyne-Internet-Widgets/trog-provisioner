@@ -24,4 +24,6 @@ Restart=on-failure
 RestartSec=10
 
 [Install]
-WantedBy=multi-user.target
+# tPSGI pulls the worker in when it starts.  See THE JOB WORKER in
+# Provisioner::Recipe::tcms.
+WantedBy=[% domain %].service
