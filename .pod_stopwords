@@ -359,6 +359,7 @@ netplan
 nginx
 nginxdirindex
 nginxproxy
+nics
 nodejs
 noeviction
 nonreusable

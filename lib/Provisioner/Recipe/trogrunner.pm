@@ -379,6 +379,10 @@ sub args {
                         domain_dir     => { type => 'string' },
                         bridge_device  => { type => 'string' },
                         virbr_device   => { type => 'string' },
+
+                        # The bridge of each adapter of a guest, in order.  See
+                        # nics in Trog::HV::Libvirt.
+                        nics           => { type => 'array', items => { type => 'string', pattern => '^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$' }, uniqueItems => 1 },
                         reserve_memory => { type => 'integer' },
                         reserve_cpus   => { type => 'integer' },
                         reserve_disk   => { type => 'integer' },

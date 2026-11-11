@@ -4,7 +4,9 @@
 
     It has two interfaces.  The outbound bridge carries the addresses that
     reach this guest.  The libvirt NAT is how the hypervisor finds the guest
-    before those addresses work.
+    before those addresses work.  A hypervisor whose block names nics gives the
+    guest an adapter on each of its other bridges too, which comes up with no
+    address.  See nics in Trog::HV::Libvirt.
 
     Each interface matches on its MAC address, not on its name.  The names below
     are what the guest calls each interface.  We choose the MAC address and the
@@ -51,6 +53,15 @@ network:
         - to: [% r.to | yaml %]
           via: [% r.gateway | yaml %]
 [% END -%]
+[% END -%]
+[%# Up, with no address, and optional, so that the boot does not wait for an
+    address that nothing gives it. -%]
+[% FOR nic IN other_nics -%]
+    [% nic.name | yaml %]:
+      match:
+        macaddress: [% nic.mac | yaml %]
+      set-name: [% nic.name | yaml %]
+      optional: true
 [% END -%]
 [%# With no ips, the bridge gets no addresses and no routes, so it comes up with
     no address.  The guest takes its lease and its default route on the NAT

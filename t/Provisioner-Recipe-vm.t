@@ -46,9 +46,9 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Trog::HV();
 
-# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
-# backend lazily, and it is named only as a string below.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+# Loaded so Test::MockModule has a package to attach to, because Trog::HV
+# requires its backend lazily, and for the MACs that guest_mac gives a guest.
+use Trog::HV::Libvirt();
 use Provisioner::Cookbook();
 
 # What bin/provision does with the recipe, in one call: make the storage the XML
@@ -190,7 +190,7 @@ sub tuned_xml {
     );
 
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( bridge_device        => sub { 'br0' } );
+    $hv_mock->redefine( bridge_device        => sub { $opts{hv}{bridge_device} // 'br0' } );
     $hv_mock->redefine( has_tpm              => sub { 0 } );
     $hv_mock->redefine( pool                 => sub { 1 } );
     $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
@@ -540,6 +540,107 @@ subtest 'a guest sees one socket with each vCPU as a core' => sub {
 };
 
 # --- Which netplan entry gets the static IP ----------------------------------
+# --- The adapters of the guest, and the bridges that they join ---------------
+
+# Each <interface> of a domain, in order, as its type, MAC, source and PCI slot.
+sub interfaces ($xml) {
+    return map {
+        my ($type)   = m{<interface[ ]type='(\w+)'>};
+        my ($mac)    = m{<mac[ ]address='([^']+)'/>};
+        my ($source) = m{<source[ ](?:network|bridge)='([^']+)'/>};
+        my ($slot)   = m{slot='(0x\w+)'};
+        [ $type, $mac, $source, $slot // 'none' ];
+    } $xml =~ m{(<interface\b.*?</interface>)}g;
+}
+
+sub mac_of ($index) { return Trog::HV::Libvirt->guest_mac( 'vm.example.test', $index ) }
+
+# What master rendered for these two guests before nics existed, byte for byte.
+# A block without nics has to keep getting exactly this, or every guest built
+# on it changes on its next rebuild.
+my $ADAPTERS_OF_THE_SYSTEM = <<'XML';
+         rename above is what settles the name. -->
+    <interface type='network'>
+      <mac address='52:54:00:cb:96:28'/>
+      <source network='default'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+    </interface>
+    <interface type='bridge'>
+      <mac address='52:54:00:cf:1d:0e'/>
+      <source bridge='br0'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
+    </interface>
+
+    <!-- Cloud images expect a console, and do not boot cleanly without one:
+XML
+
+my $ADAPTERS_OF_A_SESSION = <<'XML';
+         rename above is what settles the name. -->
+    <interface type='bridge'>
+      <mac address='52:54:00:cb:96:28'/>
+      <source bridge='virbr0'/>
+      <model type='virtio'/>
+    </interface>
+    <interface type='bridge'>
+      <mac address='52:54:00:cf:1d:0e'/>
+      <source bridge='br0'/>
+      <model type='virtio'/>
+    </interface>
+
+    <!-- Cloud images expect a console, and do not boot cleanly without one:
+XML
+
+subtest 'a block without nics gives the two adapters that it always gave' => sub {
+    my $from    = qr/\N*rename[ ]above[ ]is[ ]what[ ]settles/;
+    my $to      = qr/Cloud[ ]images[ ]expect\N*\n/;
+    my $between = sub ($xml) { return $xml =~ m{($from.*?$to)} ? $1 : $xml };
+
+    my $system = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), config => { machine => 'pc' } );
+    is( $between->($system), $ADAPTERS_OF_THE_SYSTEM, 'on the system URI, the same text as before nics' );
+
+    my $session = tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), uri => 'qemu+ssh://runner@hv/session', hv => { virbr_device => 'virbr0' } );
+    is( $between->($session), $ADAPTERS_OF_A_SESSION, 'and on a session' );
+};
+
+subtest 'nics gives the guest an adapter on each bridge, in its order' => sub {
+    my %versions = ( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ) );
+
+    my $system = tuned_xml(
+        %versions,
+        config => { machine      => 'pc' },
+        hv     => { virbr_device => 'virbr0', bridge_device => 'br0', nics => 'br0, virbr0, virbr1' },
+    );
+    is_deeply(
+        [ interfaces($system) ],
+        [ [ 'bridge', mac_of(1), 'br0', '0x03' ], [ 'network', mac_of(0), 'default', '0x04' ], [ 'bridge', mac_of(2), 'virbr1', '0x05' ] ],
+        'the slots follow the order of nics, and the MACs the index, so the NAT one keeps its lease and the bridged one its address'
+    ) or diag explain [ interfaces($system) ];
+
+    # The block of the case that nics is for: an installation whose guests
+    # build in a session, and get their addresses on a network of their own.
+    my $session = tuned_xml(
+        %versions,
+        uri => 'qemu+ssh://runner@hv/session',
+        hv  => { virbr_device => 'virbr0', bridge_device => 'virbr1', nics => [qw{virbr0 virbr1}] },
+    );
+    is_deeply(
+        [ interfaces($session) ],
+        [ [ 'bridge', mac_of(0), 'virbr0', 'none' ], [ 'bridge', mac_of(1), 'virbr1', 'none' ] ],
+        'a session joins each bridge through the helper, with no network of the system daemon, from a list that Config::Simple made'
+    ) or diag explain [ interfaces($session) ];
+
+  SKIP: {
+        my $validate = File::Which::which('virt-xml-validate');
+        skip 'no virt-xml-validate here to read the domain', 1 unless $validate;
+        my $file = tempdir( CLEANUP => 1 ) . '/domain.xml';
+        File::Slurper::Temp::write_text( $file, $system );
+        IPC::Run3::run3( [ $validate, $file, 'domain' ], \undef, \my $out, \my $err );
+        is( $? >> 8, 0, 'the schema of libvirt takes the domain with three adapters' ) or diag $out, $err;
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

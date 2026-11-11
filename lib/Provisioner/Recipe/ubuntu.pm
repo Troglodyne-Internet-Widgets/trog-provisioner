@@ -353,6 +353,11 @@ That key is how this machine gets back in to run the makefile again.  It goes
 on the account that can sudo, not on root.  The makefile limits the root login
 to keys.
 
+C<other_nics> are the adapters of the guest besides the NAT one and the
+bridged one, each with its C<name> and C<mac>, which the network-config brings
+up with no address.  See L<Trog::HV::Libvirt/nics>.  Empty for a guest that a
+service builds.
+
 C<addresses> are C<ips> with a prefix, for the network-config.  An address with
 none gets C</24>, which cloud-init gave it in the version 1 format.
 
@@ -396,12 +401,17 @@ sub enrich {
     # A service that builds a guest by API assigns the MAC, and the image picks
     # the name.  So they stay unset, and the network-config leaves the network
     # to the platform, as a cloud image expects.
+    $opts{other_nics} = [];
     unless ( $hv->builds_by_api ) {
-        my ( $nat_name, $bridge_name ) = $hv->nic_names;
+        my ( $nat_name, $bridge_name, @other_names ) = $hv->nic_names;
         $opts{dhcp_devname}   //= $nat_name;
         $opts{bridge_devname} //= $bridge_name;
         $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
         $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
+
+        # The adapters from index 2 up, on the other bridges of nics.  See nics
+        # in Trog::HV::Libvirt.
+        $opts{other_nics} = [ map { +{ name => $other_names[$_], mac => $hv->guest_mac( $opts{domain}, $_ + 2 ) } } 0 .. $#other_names ];
     }
 
     # mirror_insecure follows from mirror_uri, so it cannot be a schema default.

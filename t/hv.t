@@ -1647,6 +1647,45 @@ subtest 'the NAT bridge is the bridge of the default network, and not the last v
     is( $hv->virbr_device, 'virbr0', 'a second network on virbr1 does not move the NAT adapter of every guest onto it' );
 };
 
+subtest 'nics: one adapter on each bridge, numbered NAT first whatever its place' => sub {
+    my %primary = ( virbr_device => 'virbr0', bridge_device => 'virbr1' );
+    my $hv      = Trog::HV->candidate( uri => 'qemu+ssh://runner@hv.test.test/session', %primary, nics => 'virbr1, br9 virbr0' );
+
+    is_deeply( [ $hv->nic_order ],  [ 1, 2, 0 ],          'the index of each adapter, in the order of the domain' );
+    is_deeply( [ $hv->nic_slots ],  [ 5, 3, 4 ],          'the slot of each index: the NAT adapter is third on the bus' );
+    is_deeply( [ $hv->nic_names ],  [qw{ens5 ens3 ens4}], 'so is its name, and the names still come NAT first' );
+    is_deeply( [ $hv->extra_nics ], ['br9'],              'and the ones past the two of every guest' );
+
+    my $plain = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', bridge_device => 'br0', virbr_device => 'virbr0' );
+    is_deeply( [ $plain->nic_order ],  [ 0, 1 ], 'without nics, NAT and then bridge, as before' );
+    is_deeply( [ $plain->extra_nics ], [],       'and nothing else' );
+
+    my $refused = sub (%block) {
+        exception { Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', name => 'hv1', %primary, %block ) }
+    };
+    like( $refused->( nics => 'virbr0, virbr1, bad/name' ),                  qr{hv1[ ]names[ ]'bad/name',[ ]which[ ]is[ ]not},            'a name that is not a link' );
+    like( $refused->( nics => 'virbr0 virbr1 averyveryverylongname' ),       qr/not[ ]the[ ]name[ ]of[ ]a[ ]bridge/,                      'one longer than the kernel takes' );
+    like( $refused->( nics => 'virbr0, virbr1, virbr0' ),                    qr/names[ ]virbr0[ ]twice/,                                  'a bridge named twice' );
+    like( $refused->( nics => 'virbr0, br9' ),                               qr/not[ ]name[ ]virbr1,[ ]which[ ]is[ ]the[ ]bridge_device/, 'a list without the bridge of the pool' );
+    like( $refused->( nics => 'virbr1, br9' ),                               qr/not[ ]name[ ]virbr0,[ ]which[ ]is[ ]the[ ]virbr_device/,  'or without the NAT bridge' );
+    like( $refused->( nics => 'virbr0, virbr1', bridge_device => 'virbr0' ), qr/both[ ]virbr0/,                                           'one bridge for both' );
+    like(
+        exception { Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test.test/system', name => 'hv1', virbr_device => 'virbr0', nics => 'virbr0' ) },
+        qr/must[ ]name[ ]bridge_device[ ]as[ ]well/,
+        'and a block that leaves a bridge to be probed, which a list cannot be checked against'
+    );
+};
+
+subtest 'a hypervisor of a service refuses nics' => sub {
+    foreach my $block ( [ linode_token => 'secret:linode/api/password' ], [ cloud => 'testcloud' ], [ solusvm => 'https://solusvm.test.test' ] ) {
+        like(
+            exception { Trog::HV->candidate( @$block, name => 'cloud1', nics => 'br0, virbr0' ) },
+            qr/nics[ ]for[ ]cloud1[ ]names[ ]the[ ]adapters.*Remove[ ]nics/,
+            "$block->[0]: rather than building guests without the adapters that the block asks for"
+        );
+    }
+};
+
 subtest 'setting: a block may hold a secret: reference, as recipes.yaml may' => sub {
     my @opened;
     my $secrets = Test::MockModule->new('Trog::Secrets');

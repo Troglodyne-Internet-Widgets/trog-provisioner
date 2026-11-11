@@ -36,6 +36,10 @@ my $BACKUP_SUFFIX = '.bak-qcow2';
 # runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
 my @LEASE_HELPERS = qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
 
+# A name that the kernel takes for a link, such as a bridge: at most 15 bytes,
+# and none of the characters that a path or the address of an alias would read.
+my $LINK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,14} \z/;
+
 =head1 NAME
 
 Trog::HV::Libvirt - the libvirt backend: domains, storage pools and the facts of
@@ -106,7 +110,7 @@ sub client_module { return 'Sys::Virt' }
 sub config_keys {
     return (
         uri => 'libvirt_uri',
-        map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device partition max_memory},
+        map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device nics partition max_memory},
     );
 }
 
@@ -120,7 +124,8 @@ changes.
 
 Dies if the URI does not parse.  Also dies if the hypervisor is remote and the
 transport gives no shell, because files and bridge detection need one.  Also
-dies if it gets a L</max_memory> and no L</partition>.
+dies if it gets a L</max_memory> and no L</partition>, and if L</nics> is not a
+list of bridges that the guest can have.
 
 =cut
 
@@ -168,6 +173,27 @@ sub build {
     # Fail now, not three minutes into a provision.
     die "The hypervisor at $uri is remote, but its transport gives us no shell.\n" . "Use an ssh transport instead, e.g. qemu+ssh://root\@" . ( $self->{host} // 'hypervisor' ) . "/system, so we can reach its filesystem.\n"
       if !$self->is_local && !defined $self->ssh_host;
+
+    # A list of every adapter is checked here, against the two bridges that
+    # every guest has, because nothing probes for it later.  See nics.
+    my $who  = $given{name} // $uri;
+    my @nics = $self->setting_list('nics');
+    if (@nics) {
+        my ($bad) = grep { !m/$LINK_NAME/ } @nics;
+        die "nics for $who names '$bad', which is not the name of a bridge\n" if defined $bad;
+
+        my %seen;
+        my ($twice) = grep { $seen{$_}++ } @nics;
+        die "nics for $who names $twice twice, and a guest has one adapter on each bridge\n" if defined $twice;
+
+        foreach my $key (qw{virbr_device bridge_device}) {
+            my $bridge = $self->{$key};
+            die "nics for $who is a list of every adapter of a guest, so the block must name $key as well, and nics must name it\n" unless defined $bridge;
+            die "nics for $who does not name $bridge, which is the $key of the block\n"                                             unless $seen{$bridge};
+        }
+        die "virbr_device and bridge_device for $who are both $self->{virbr_device}, and with nics they name two adapters\n"
+          if $self->{virbr_device} eq $self->{bridge_device};
+    }
 
     return $self;
 }
@@ -1185,11 +1211,48 @@ C<52:54:00> is the QEMU/KVM prefix.  The other three bytes come from a digest of
 the domain and the interface index.  Two guests can get the same MAC, but that
 becomes likely only with a few thousand guests.
 
+=head2 nics
+
+The adapters of a guest, from C<nics> in the block of F<hypervisors.conf>: one
+bridge of the hypervisor for each adapter, in the order of the adapters in the
+domain.  The block separates them with commas or spaces.  Without C<nics>, a
+guest has two adapters, on L</virbr_device> and then on L</bridge_device>, as it
+always had.
+
+Each adapter has an I<index>, which is not its place in C<nics>.  The adapter
+on L</virbr_device> is 0, and the one on L</bridge_device> is 1.  The rest are
+2 and up, in the order of C<nics>.  The index is what L</guest_mac($domain, $index)>,
+L</nic_slots> and L</nic_names> go by.  So adapter 0 is always
+the one whose lease L</lease_ip($network, %opts)> reads, and adapter 1 always the one that gets
+the addresses of the guest from the pool, whatever the order of C<nics>.  The
+order in C<nics> decides only where each adapter is on the bus of the guest,
+and so the name that the kernel would give it.
+
+With C<nics>, the block must name L</virbr_device> and L</bridge_device>, and
+C<nics> must name both, because there is nothing to probe a list against.  Each
+entry is a name that the kernel takes for a link, and no bridge is named twice.
+C<build> dies on a list that breaks any of that.
+
+The network configuration of the guest gives adapter 0 a lease, adapter 1 the
+addresses of the guest, or none when it has none, and the others no address.
+See F<templates/ubuntu/files/ubuntu.network-config.tt>.
+
+=head2 nic_order
+
+The indexes of the adapters, in the order of the adapters in the domain.  C<(0,
+1)> without L</nics>.
+
+=head2 extra_nics
+
+The bridges of the adapters from index 2 up, in their order: every bridge of
+L</nics> but L</virbr_device> and L</bridge_device>.  Empty without C<nics>.
+
 =head2 nic_slots
 
-The PCI slots of the two interfaces, in order.  systemd names a PCI NIC after
-its hotplug slot.  So fixed slots keep the names the same when the device list
-changes.
+The PCI slots of the adapters, by index.  The first adapter in the domain is in
+slot 3, the next one in slot 4, and so on.  So without L</nics>, they are 3 and
+4.  systemd names a PCI NIC after its hotplug slot.  So fixed slots keep the
+names the same when the device list changes.
 
 =head2 nic_prefix
 
@@ -1204,7 +1267,7 @@ overrides this.
 
 =head2 nic_names
 
-The names that the two interfaces of a guest get, NAT first.
+The names that the adapters of a guest get, by index, so NAT first.
 
 This is a prediction.  cloud-init finds each interface by its MAC, which we
 choose, and gives it the name in the configuration.  So each interface gets the
@@ -1221,7 +1284,30 @@ sub guest_mac {
     return join( ':', qw{52 54 00}, $digest =~ m/\A(\N\N)(\N\N)(\N\N)/ );
 }
 
-sub nic_slots  { return ( 3, 4 ) }
+# The PCI slot of the first adapter of a guest.  Slots 0 to 2 of i440fx are the
+# host bridge, the ISA bridge and the VGA card.
+my $FIRST_NIC_SLOT = 3;
+
+sub nic_order ($self) {
+    my @nics = $self->setting_list('nics') or return ( 0, 1 );
+
+    my %index = ( $self->{virbr_device} => 0, $self->{bridge_device} => 1 );
+    my $next  = 2;
+    return map { $index{$_} // $next++ } @nics;
+}
+
+sub extra_nics ($self) {
+    my %primary = map { $_ => 1 } grep { defined } @{$self}{qw{virbr_device bridge_device}};
+    return grep { !$primary{$_} } $self->setting_list('nics');
+}
+
+sub nic_slots ($self) {
+    my @order = $self->nic_order;
+    my @slots;
+    $slots[ $order[$_] ] = $FIRST_NIC_SLOT + $_ for 0 .. $#order;
+    return @slots;
+}
+
 sub nic_prefix { return 'ens' }
 
 =head2 guest_disks

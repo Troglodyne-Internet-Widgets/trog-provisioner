@@ -232,6 +232,11 @@ at once to compare them, and only the winner becomes current.  Takes the same
 options as C<new>.  Dies where C<backend_for> or the C<build> of the backend
 dies.
 
+Also dies when the options name C<nics> and the backend does not read it.
+C<options_from_block> reads the keys of every backend, so a cloud block that
+names C<nics> would otherwise be built as if it did not, and its guests would
+get none of the adapters that it asks for.
+
 =cut
 
 sub candidate {
@@ -241,6 +246,10 @@ sub candidate {
 
     # Called on a backend class, use that backend.  Called on this class, choose one.
     my $backend = $class eq __PACKAGE__ ? $class->backend_for(%given) : $class;
+
+    my %reads = $backend->config_keys;
+    die 'nics for ' . ( $given{name} // $backend->marker_key ) . " names the adapters of a guest on bridges of the hypervisor, and $backend gives its guests the adapters of its service.  Remove nics from the block.\n"
+      if $given{nics} && !$reads{nics};
 
     return $backend->build(%given);
 }
@@ -471,6 +480,20 @@ sub setting {
     return $self->{_secrets}{$name} = $found{$name};
 }
 
+=head2 @items = $hv->setting_list($name)
+
+One value from the block, as C<setting> gives it, read as a list.  The block
+separates the items with commas or spaces, and L<Config::Simple> already makes a
+list of a value with a comma in it.  An empty list when the block does not name
+it.
+
+=cut
+
+sub setting_list ( $self, $name ) {
+    my $said = $self->setting($name) // return;
+    return grep { $_ ne q{} } map { split m/[\s,]+/ } ( ref $said eq 'ARRAY' ? @$said : $said );
+}
+
 =head1 IDENTITY
 
 =head2 name
@@ -524,8 +547,7 @@ of a home network.  Dies on a value that is not an address.
 =cut
 
 sub configured_resolvers ($self) {
-    my $said      = $self->setting('resolvers') // return;
-    my @resolvers = grep { $_ ne q{} } map { split m/[\s,]+/ } ( ref $said eq 'ARRAY' ? @$said : $said );
+    my @resolvers = $self->setting_list('resolvers') or return;
     foreach my $resolver (@resolvers) {
         Net::IP->new($resolver) or die "resolvers for " . ( $self->name // $self->describe ) . " names '$resolver', which is not an address\n";
     }
@@ -567,8 +589,7 @@ F<ips.db>.
 sub guest_pool ($self) {
     my %pool;
     foreach my $key (qw{cidr addresses}) {
-        my $said  = $self->setting("pool_$key") // next;
-        my @items = grep { $_ ne q{} } map { split m/[\s,]+/ } ( ref $said eq 'ARRAY' ? @$said : $said );
+        my @items = $self->setting_list("pool_$key");
         $pool{$key} = \@items if @items;
     }
     return \%pool;

@@ -205,6 +205,16 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
 
 };
 
+subtest 'the adapters of the guests of the runner reach its hypervisors.conf' => sub {
+    my %guests = ( %SESSION, virbr_device => 'virbr0', bridge_device => 'virbr1', nics => [qw{virbr0 virbr1}] );
+    my ($dir) = built( hypervisors => { hv1 => \%guests } );
+
+    my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
+    is_deeply( [ $hv1->setting_list(q{nics}) ], [qw{virbr0 virbr1}], 'read back as the runner reads it, an adapter on each bridge' );
+
+    like( exception { built( hypervisors => { hv1 => { %guests, nics => [qw{virbr0 virbr0}] } } ) }, qr/nics/, 'a bridge named twice is refused here, not on the runner' );
+};
+
 subtest 'a hypervisor we could not get a shell on is refused here, not on the guest' => sub {
 
     # Trog::HV's rule: a remote hypervisor whose transport gives no shell is

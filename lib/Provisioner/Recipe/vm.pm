@@ -152,9 +152,6 @@ sub args {
             pool_name      => { type => 'string',  readOnly => 1, description => 'Storage pool this disk was made in, as libvirt names it.' },
             disk_volume    => { type => 'string',  readOnly => 1, description => 'Volume holding the guest disk, inside pool_name.' },
             cloudinit      => { type => 'string',  readOnly => 1, description => 'The cloud-init seed ISO built for this guest, as a path on the hypervisor.' },
-            bridge_device  => { type => 'string',  readOnly => 1, description => "Host bridge the guest's bridged interface is attached to." },
-            nat_mac        => { type => 'string',  readOnly => 1, description => "MAC of the guest's NAT interface.  Derived from the domain name, so a rebuild keeps the lease it had." },
-            bridge_mac     => { type => 'string',  readOnly => 1, description => "MAC of the guest's bridged interface, derived the same way." },
             metadata_cache => { type => 'integer', readOnly => 1, description => 'qcow2 metadata cache for this disk, in bytes.  A function of how large the image is, so the hypervisor sizes it rather than the schema defaulting it.' },
             uuid           => { type => 'string',  readOnly => 1, description => 'The uuid libvirt already gave this domain, so a rebuild that kept the disk is redefined under it.  Absent on a first build, where the template leaves the element out.' },
 
@@ -269,9 +266,8 @@ three NoCloud files, C<user-data>, C<meta-data> and C<network-config>.  Dies if
 one is missing, because cloud-init ignores a seed without all three.  The guest
 then boots without a user on it.
 
-Returns C<pool_name>, C<disk_volume>, C<cloudinit>, C<bridge_device>,
-C<nat_mac> and C<bridge_mac>.  It also returns C<metadata_cache> when the disk
-is large enough to need one.
+Returns C<pool_name>, C<disk_volume> and C<cloudinit>.  It also returns
+C<metadata_cache> when the disk is large enough to need one.
 
 =cut
 
@@ -294,12 +290,9 @@ sub create_storage {
     my %qcow2 = $hv->qcow2_tuning( $opts{size} );
 
     return (
-        pool_name     => $hv->pool_name,
-        disk_volume   => $volume,
-        cloudinit     => $hv->cloudinit_iso( $domain, %{ $opts{seed} } ),
-        bridge_device => $hv->bridge_device,
-        nat_mac       => $hv->guest_mac( $domain, 0 ),
-        bridge_mac    => $hv->guest_mac( $domain, 1 ),
+        pool_name   => $hv->pool_name,
+        disk_volume => $volume,
+        cloudinit   => $hv->cloudinit_iso( $domain, %{ $opts{seed} } ),
 
         # Absent, not undef, because the schema declares an integer.
         ( defined $qcow2{metadata_cache} ? ( metadata_cache => $qcow2{metadata_cache} ) : () ),
@@ -351,7 +344,7 @@ Works out what this hypervisor accepts, and from that, what each disk of the
 guest looks like.
 
 Takes the options of the recipe.  Returns them with C<tuning>, C<tpm>,
-C<partition>, C<nat_slot>, C<bridge_slot>, C<disks>, C<filesystems> and
+C<partition>, C<session>, C<pcie>, C<interfaces>, C<disks>, C<filesystems> and
 C<devices_map> added.  Dies if it gets a throttle that the hypervisor does not
 support, or a total throttle together with one of its halves.  Also dies if
 F<mounts.txt> asks for more devices than C<vdb> to C<vdz>.
@@ -468,10 +461,22 @@ the system daemon, and a session has no virtiofs yet.  So a C<raw> or C<dir>
 line, or a line that names a pool, dies with the reason.  See
 L<Trog::HV::Libvirt/is_session>.
 
-=item C<session> and C<virbr_device>
+=item C<session>
 
-On a session URI, C<session> is 1 and C<virbr_device> is the bridge of the NAT
-network, which the NAT interface of the guest joins.  Absent otherwise.
+1 on a session URI, and absent otherwise.
+
+=item C<interfaces>
+
+The adapters of the guest, in the order of the domain, which
+L<Trog::HV::Libvirt/nics> decides.  Each has C<nat>, which is 1 for the adapter
+whose lease the hypervisor reads, and C<mac>, C<bridge> and C<slot>.  The MAC
+and the slot come from the index of the adapter, see
+L<Trog::HV::Libvirt/guest_mac($domain, $index)> and L<Trog::HV::Libvirt/nic_slots>.
+
+The NAT adapter joins the C<default> network on the system URI, and has no
+C<bridge>.  A session cannot use a network of the system daemon, so there it
+joins the bridge of that network, L<Trog::HV::Libvirt/virbr_device>, through
+qemu-bridge-helper.  Every other adapter joins its bridge.
 
 =back
 
@@ -561,22 +566,30 @@ sub enrich {
     # names one to put every guest built here into one systemd slice to cap.
     $opts{partition} = $hv->partition;
 
-    # A session cannot use the NAT network of the system daemon, so its guest
-    # joins the bridge of that network through qemu-bridge-helper.
-    if ( $hv->is_session ) {
-        $opts{session}      = 1;
-        $opts{virbr_device} = $hv->virbr_device;
-    }
+    $opts{session} = 1 if $hv->is_session;
 
     # Whether the machine gives the guest a PCIe topology.  A q35 of any
     # version does; i440fx does not.  The template puts the interfaces on the
     # bus that the machine has.
     $opts{pcie} = ( $opts{machine} // q{} ) =~ m/q35/ ? 1 : 0;
 
-    # The PCI slots of the two interfaces, as libvirt writes them.  On i440fx
-    # the hypervisor decides them, because the interface names on the guest
-    # come from the slot.  See Trog::HV::nic_names.
-    ( $opts{nat_slot}, $opts{bridge_slot} ) = map { sprintf '0x%02x', $_ } $hv->nic_slots;
+    # Each adapter by its index.  The NAT one is asked for its bridge only on a
+    # session, because on the system URI it joins the default network by name.
+    # The PCI slots are as libvirt writes them.  On i440fx the hypervisor
+    # decides them, because the interface names on the guest come from the
+    # slot.  See Trog::HV::nic_names.
+    my @bridges = ( $hv->is_session ? $hv->virbr_device : undef, $hv->bridge_device, $hv->extra_nics );
+    my @slots   = $hv->nic_slots;
+    $opts{interfaces} = [
+        map {
+            +{
+                nat    => $_ == 0 ? 1 : 0,
+                mac    => $hv->guest_mac( $opts{domain}, $_ ),
+                bridge => $bridges[$_],
+                slot   => sprintf( '0x%02x', $slots[$_] ),
+            }
+        } $hv->nic_order
+    ];
 
     my @disks = ( disk( \%tuning, format => 'qcow2', dev => 'vda', boot => 1, index => 0, primary => 1 ) );
     my @filesystems;

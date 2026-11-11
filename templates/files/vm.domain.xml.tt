@@ -141,32 +141,29 @@
          devices sit behind PCIe root ports that libvirt allocates, and the
          name comes from the path.  So the address is left out there, and the
          rename above is what settles the name. -->
-[% IF session -%]
-[%# A session cannot use a network of the system daemon.  So the guest joins
-        the bridge of that network, through qemu-bridge-helper, and the dnsmasq
-        of the network still gives it its lease.  See is_session in
-        Trog::HV::Libvirt. -%]
-    <interface type='bridge'>
-      <mac address='[% nat_mac %]'/>
-      <source bridge='[% virbr_device %]'/>
-[% ELSE -%]
+[%# Each adapter of interfaces, in the order of the domain.  Two without nics
+    in the block of the hypervisor, NAT and then bridge, which the comment
+    above still describes.  See nics in Trog::HV::Libvirt. -%]
+[% FOR nic IN interfaces -%]
+[% IF nic.nat && !session -%]
     <interface type='network'>
-      <mac address='[% nat_mac %]'/>
+      <mac address='[% nic.mac %]'/>
       <source network='default'/>
-[% END -%]
-      <model type='virtio'/>
-[% IF !pcie -%]
-      <address type='pci' domain='0x0000' bus='0x00' slot='[% nat_slot %]' function='0x0'/>
-[% END -%]
-    </interface>
+[% ELSE -%]
+[%# A session cannot use a network of the system daemon.  So the NAT adapter
+        of its guest joins the bridge of that network, through
+        qemu-bridge-helper, and the dnsmasq of the network still gives it its
+        lease.  See is_session in Trog::HV::Libvirt. -%]
     <interface type='bridge'>
-      <mac address='[% bridge_mac %]'/>
-      <source bridge='[% bridge_device %]'/>
+      <mac address='[% nic.mac %]'/>
+      <source bridge='[% nic.bridge %]'/>
+[% END -%]
       <model type='virtio'/>
 [% IF !pcie -%]
-      <address type='pci' domain='0x0000' bus='0x00' slot='[% bridge_slot %]' function='0x0'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='[% nic.slot %]' function='0x0'/>
 [% END -%]
     </interface>
+[% END -%]
 
 [% FOR fs IN filesystems -%]
 [%# virtiofs-better is `virtiofsd --inode-file-handles=mandatory`.  Without
