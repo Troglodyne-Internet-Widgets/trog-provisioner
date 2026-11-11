@@ -418,6 +418,28 @@ subtest 'the lines of the postfix tables' => sub {
     like( exception { Provisioner::MailAccount::virtual_maps_line( 'a b', 'someone' ) },    qr/not[ ]'a[ ]b'/,      'and a domain' );
 };
 
+subtest 'check_domain judges a domain with Data::Validate::Domain' => sub {
+    is( Provisioner::MailAccount::check_domain($DOMAIN),         1, 'a domain under a reserved top-level domain passes' );
+    is( Provisioner::MailAccount::check_domain('mail.private1'), 1, 'and one under a private top-level domain' );
+    is( Provisioner::MailAccount::check_domain('a-b.test'),      1, 'and a hyphen inside a label' );
+
+    my %bad = (
+        'a:b.test'   => 'a colon',
+        'a b.test'   => 'a space',
+        'a/b.test'   => 'a slash',
+        "a.test\n"   => 'a line break',
+        q{}          => 'an empty string',
+        'a_b.test'   => 'an underscore, which the old rule let through',
+        'Mail.Test'  => 'upper case, because the recipe and the paths are in lower case',
+        'a.test.'    => 'a dot at the end',
+        'localhost1' => 'a name of one label',
+    );
+    foreach my $domain ( sort keys %bad ) {
+        like( exception { Provisioner::MailAccount::check_domain($domain) }, qr/domain[ ]name[ ]in[ ]lower[ ]case/, "$bad{$domain} is refused" );
+    }
+    like( exception { Provisioner::MailAccount::check_domain(undef) }, qr/domain[ ]name[ ]in[ ]lower[ ]case/, 'and so is no domain' );
+};
+
 subtest 'a table line is added above the catchall, and removed alone' => sub {
     my $line = Provisioner::MailAccount::virtual_maps_line( $DOMAIN, 'newbie' );
 

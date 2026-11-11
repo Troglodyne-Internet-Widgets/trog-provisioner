@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Data::Validate::Domain();
 use File::Slurper();
 use List::Util qw{any};
 use YAML::XS();
@@ -122,12 +123,17 @@ sub check_name ($name) {
 =head2 check_domain($domain)
 
 Returns 1 for a domain that a path, a shell command and a table line can all
-hold: letters, digits, dots and hyphens.  Dies for any other.
+hold: a domain in lower case, as L<Data::Validate::Domain> judges it, without
+a dot at the end.  The check of the top-level domain is off, because a guest can
+sit under a private or reserved one.  The label of such a domain holds letters,
+digits and hyphens, so a colon, a space, a slash, a line break and an
+underscore are all refused.  Dies for any other.
 
 =cut
 
 sub check_domain ($domain) {
-    die "The domain of a mail account is letters, digits, dots and hyphens, not '$domain'.\n" unless $domain =~ m/\A[\w.-]+\z/;
+    my $ok = defined $domain && $domain eq lc $domain && $domain !~ m/\.\z/ && Data::Validate::Domain::is_domain( $domain, { domain_disable_tld_validation => 1 } );
+    die "The domain of a mail account is a domain name in lower case, with letters, digits, dots and hyphens, not '" . ( $domain // q{} ) . "'.\n" unless $ok;
     return 1;
 }
 
