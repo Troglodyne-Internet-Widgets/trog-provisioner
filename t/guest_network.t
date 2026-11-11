@@ -138,6 +138,12 @@ sub run_tool ( $state, @args ) {
         }
     );
     $mock->redefine(
+        run_cmd => sub ( $hv, @argv ) {
+            "@argv[0..3]" eq 'sudo -n test -s' or die "the fake hypervisor was not expecting: @argv\n";
+            return ( $state->{files}{ $argv[-1] } // q{} ) ne q{} ? 0 : 1;
+        }
+    );
+    $mock->redefine(
         write_text => sub ( $hv, $path, $text, %opts ) {
             push @{ $state->{root} }, "write $path";
             chomp( $state->{files}{$path} = $text );

@@ -25,6 +25,7 @@ use Net::CIDR();
 use Net::IP();
 use Provisioner::Cookbook();
 use Provisioner::Vars();
+use Trog::HV::Libvirt::BridgeHelper();
 
 # The snapshot of a new, empty overlay, which a rebuild that keeps the disk
 # reverts to.  create_disk takes it and clear_guest reverts to it.  It is
@@ -37,11 +38,6 @@ my $BACKUP_SUFFIX = '.bak-qcow2';
 # Where distributions put the libvirt lease helper, which release_dhcp_lease
 # runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
 my @LEASE_HELPERS = qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
-
-# The file that tells qemu-bridge-helper which bridges a user may join.  The
-# steps of a runner account write it, and check_bridge_acl reads it.  At the top
-# for the reason $PRISTINE_SNAPSHOT is.
-my $BRIDGE_CONF = '/etc/qemu/bridge.conf';
 
 # A name that the kernel takes for a link, such as a bridge: at most 15 bytes,
 # and none of the characters that a path or the address of an alias would read.
@@ -267,7 +263,8 @@ narrow.  See L</RUNNER ACCOUNTS>.  It changes four things here:
 
 =item * The NAT interface of a guest is a C<bridge> interface on
 L</lease_nic>, through C<qemu-bridge-helper>, because a session cannot use
-a network of the system daemon.
+a network of the system daemon.  L<Trog::HV::Libvirt::BridgeHelper> has the
+helper, and the ACL that says which bridges the account may join.
 
 =item * The leases of the NAT network come from a read-only connection to the
 system daemon.  See L</network_vmm>.
@@ -3026,9 +3023,8 @@ FIX
 
 Passes on the system URI, whose daemon joins its guests to a bridge itself.  On
 a session, passes when F</etc/qemu/bridge.conf>, and each file that it includes,
-let the account join each bridge of L</nic_bridges>.  qemu-bridge-helper lets a
-user join a bridge when an C<allow> line names it or C<all>, and no C<deny> line
-does.
+let the account join each bridge of L</nic_bridges>, as C<rules> and C<refused>
+in L<Trog::HV::Libvirt::BridgeHelper> read them.
 
 =cut
 
@@ -3038,29 +3034,21 @@ sub check_bridge_acl ($self) {
     my ( $failed, @bridges ) = bridges_or_verdict($self);
     return $failed if $failed;
 
-    # The rules of bridge.conf and of each file that it includes, as pairs of
-    # a verb and a bridge.  qemu reads an include as deep as it goes, and a
-    # loop of includes would not end, so this stops after a number of files.
-    my ( @rules, @files );
-    my @to_read = ($BRIDGE_CONF);
-    while ( defined( my $file = shift @to_read ) ) {
-        push @files, $file;
-        return $self->verdict( 0, 'Could not read what qemu-bridge-helper allows', "$BRIDGE_CONF includes more files than this reads: " . join( ', ', @files ) . "\n" ) if @files > 32;
-
-        my $text = eval { $self->read_text($file) } // return $self->verdict( 0, 'Could not read what qemu-bridge-helper allows', "Could not read $file on " . $self->describe . "\n" );
-        foreach my $line ( split m/\n/, $text ) {
-            my ( $verb, $what ) = $line =~ m/\A \s* (allow|deny|include) \s+ (\S+)/ or next;
-            if   ( $verb eq 'include' ) { push @to_read, $what }
-            else                        { push @rules,   [ $verb, $what ] }
-        }
-    }
+    # read_text dies here on this machine, and returns undef on another one.
+    my $read = sub ($file) {
+        my $text;
+        eval { $text = $self->read_text($file); 1 } or return;
+        return $text;
+    };
+    my $rules;
+    eval { $rules = Trog::HV::Libvirt::BridgeHelper::rules($read); 1 } or do {
+        chomp( my $why = $@ );
+        return $self->verdict( 0, 'Could not read what qemu-bridge-helper allows', "$why, on " . $self->describe . "\n" );
+    };
 
     my $user = $self->ssh_user // 'this account';
 
-    my $says = sub ( $verb, $bridge ) {
-        List::Util::any { $_->[0] eq $verb && ( $_->[1] eq 'all' || $_->[1] eq $bridge ) } @rules;
-    };
-    my @refused = grep { !$says->( 'allow', $_ ) || $says->( 'deny', $_ ) } @bridges;
+    my @refused = Trog::HV::Libvirt::BridgeHelper::refused( $rules, @bridges );
     return $self->verdict( 1, "qemu-bridge-helper lets $user join " . join( ', ', @bridges ), q{} ) unless @refused;
 
     return $self->verdict( 0, "qemu-bridge-helper does not let $user join " . join( ', ', @refused ), guest_network_fix( $self, $refused[0] ) . <<"FIX" );
@@ -3069,7 +3057,7 @@ For every bridge of the block, from the machine that provisions:
 
     bin/runner_account --hypervisor ADMIN --user $user ...
 
-Each writes an allow line into $BRIDGE_CONF, or a file that it includes.
+Each writes an allow line into $Trog::HV::Libvirt::BridgeHelper::CONF, or a file that it includes.
 FIX
 }
 
@@ -3653,11 +3641,6 @@ runs as the account, so its domains can open only what the account can open.
 
 =cut
 
-# The place of qemu-bridge-helper, by distribution, and the file of the
-# account that tells it which bridges the account may use.
-my @BRIDGE_HELPERS  = qw{/usr/lib/qemu/qemu-bridge-helper /usr/libexec/qemu-bridge-helper};
-my $BRIDGE_APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
-my sub bridge_acl ($user) { return "/etc/qemu/trog-runner-$user.conf" }
 my sub sudoers_of ($user) { return "/etc/sudoers.d/90-trog-runner-$user" }
 my sub linger_of  ($user) { return "/var/lib/systemd/linger/$user" }
 
@@ -3671,17 +3654,8 @@ my sub said ( $hv, $cmd ) {
     return $out;
 }
 
-# Dies unless a root command on the hypervisor succeeds.
-my sub as_root ( $hv, @argv ) {
-    $hv->run_sudo(@argv) == 0 or die 'Could not run ' . join( ' ', @argv ) . ' on ' . $hv->describe . "\n";
-    return 1;
-}
-
 # The home directory of $user, or an empty string when there is no such user.
 my sub home_of ( $hv, $user ) { return said( $hv, 'getent passwd ' . q1($user) . ' | cut -d: -f6' ) }
-
-# What root reads in $file, or an empty string.
-my sub root_reads ( $hv, $file ) { return said( $hv, 'sudo -n cat ' . q1($file) ) }
 
 # The uid of $user, or an empty string when there is no such user.
 my sub uid_of ( $hv, $user ) { return said( $hv, 'id -u ' . q1($user) ) }
@@ -3691,30 +3665,6 @@ my sub slice_dropin ($uid) { return "/etc/systemd/system/user-$uid.slice.d/50-tr
 
 # True when root finds no $file on the hypervisor.
 my sub absent ( $hv, $file ) { return $hv->run_cmd( qw{sudo -n test ! -e}, $file ) == 0 }
-
-# True when root reads $line, whole, in $file on the hypervisor.
-my sub holds_line ( $hv, $file, $line ) {
-    return List::Util::any { $_ eq $line } split m/\n/, root_reads( $hv, $file );
-}
-
-# Writes $file as root, with $mode, keeping each of its lines for which $keep
-# is true and putting @add after them.  Dies rather than write a file that has
-# lines in it from an empty read, which would drop every line of somebody else.
-my sub rewrite_lines ( $hv, $file, $mode, $keep, @add ) {
-    my $text = root_reads( $hv, $file );
-    die "Could not read $file on " . $hv->describe . "; refusing to rewrite it blind\n"
-      if $text eq q{} && $hv->run_cmd( qw{sudo -n test -s}, $file ) == 0;
-
-    my @lines = ( ( grep { $keep->($_) } split m/\n/, $text ), @add );
-    $hv->write_text( $file, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => $mode )
-      or die "Could not write $file on " . $hv->describe . "\n";
-    return 1;
-}
-
-# The first qemu-bridge-helper that the hypervisor has, or undef.
-my sub bridge_helper ($hv) {
-    return List::Util::first { $hv->file_exists($_) } @BRIDGE_HELPERS;
-}
 
 =head2 $text = Trog::HV::Libvirt->runner_sudoers(%args)
 
@@ -3810,58 +3760,6 @@ sub runner_account_plan {
     return { map { $_ => $args{$_} } qw{user pool_name pool_path quota cores io_weight} };
 }
 
-=head2 @actions = $hv->runner_bridge_steps($user, @bridges)
-
-The actions that let C<$user> put the guests of its session on each of
-C<@bridges>, through qemu-bridge-helper, in order:
-
-=over 4
-
-=item 1. An C<allow> line for each bridge in F</etc/qemu/trog-runner-USER.conf>.
-A line that is there already stays, also for a bridge that is not in
-C<@bridges>.  So C<runner_account_steps> and F<bin/guest_network> each add
-their bridges, and neither takes away the bridge of the other.
-
-=item 2. An C<include> of that file in F</etc/qemu/bridge.conf>.
-
-=back
-
-=cut
-
-sub runner_bridge_steps ( $hv, $user, @bridges ) {
-    my $acl     = bridge_acl($user);
-    my $include = "include $acl";
-
-    # The lines of the file, and the lines that it would have with every bridge
-    # allowed.
-    my $now = sub {
-        grep { $_ ne q{} } split m/\n/, root_reads( $hv, $acl );
-    };
-    my $missing = sub {
-        my %has = map { $_ => 1 } $now->();
-        return grep { !$has{$_} } map { "allow $_" } @bridges;
-    };
-
-    return (
-        {
-            what => "let $user join " . join( ' and ', @bridges ) . " in $acl",
-            done => sub { !$missing->() },
-            do   => sub {
-                as_root( $hv, qw{install -d -m 0755 /etc/qemu} );
-                my $text = join q{}, map { "$_\n" } $now->(), $missing->();
-                $hv->write_text( $acl, $text, sudo => 1, mode => '0644' ) or die "Could not write $acl\n";
-            },
-        },
-        {
-            what => "include $acl in $BRIDGE_CONF",
-            done => sub { holds_line( $hv, $BRIDGE_CONF, $include ) },
-            do   => sub {
-                rewrite_lines( $hv, $BRIDGE_CONF, '0644', sub ($line) { $line ne $include }, $include );
-            },
-        },
-    );
-}
-
 =head2 @actions = $hv->runner_account_steps(\%plan)
 
 The actions that make the account of C<\%plan>, in order:
@@ -3893,22 +3791,17 @@ L<Provisioner::Recipe::trogrunner>.
 
 =item 6. The bridges that qemu-bridge-helper lets the user join: each of
 L</nic_bridges>, the bridges of the block of this object.  See
-C<runner_bridge_steps>.
+C<grant_steps> in L<Trog::HV::Libvirt::BridgeHelper>.
 
 =item 7. The C<cap_net_admin> capability on qemu-bridge-helper, and an apt
-hook that sets it again after each package upgrade.  Ubuntu installs the helper
-without setuid, and without the capability it cannot add the tap device of a
-guest to a bridge.
+hook that sets it again after each package upgrade.  See C<capability_steps> in
+L<Trog::HV::Libvirt::BridgeHelper>, which says why the helper needs it.
 
 =item 8. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
 C<runner_sudoers> writes.  C<visudo -c> makes sure that it is valid before it
 is installed.
 
 =back
-
-The capability lets every user who can run the helper join a bridge that
-F<bridge.conf> allows.  That is what the helper is for, and the bridges are
-the ones that the guests of the block already join.
 
 Before the first, it makes sure that the hypervisor has what every step needs,
 and dies with the reason if one is missing: a quota in the plan, sudo 1.9.10
@@ -3931,7 +3824,7 @@ sub runner_account_steps {
     my $lease = $hv->lease_helper or die 'There is no libvirt lease helper on ' . $hv->describe . "\n";
     $hv->run_cmd(qw{test -c /dev/kvm}) == 0
       or die 'There is no /dev/kvm on ' . $hv->describe . ", so the guests of a session would run without KVM.\n";
-    my $helper = bridge_helper($hv) or die 'There is no qemu-bridge-helper on ' . $hv->describe . ", which a session needs to put a guest on a bridge.\n";
+    my $helper = Trog::HV::Libvirt::BridgeHelper::helper($hv) or die 'There is no qemu-bridge-helper on ' . $hv->describe . ", which a session needs to put a guest on a bridge.\n";
     $hv->run_cmd(qw{test -d /etc/apt/apt.conf.d}) == 0
       or die 'There is no apt on ' . $hv->describe . ", so nothing would set the capability of $helper again after a package upgrade.\n";
     my @bridges = $hv->nic_bridges;
@@ -3956,19 +3849,15 @@ sub runner_account_steps {
           ( defined $plan->{io_weight} ? "IOWeight=$plan->{io_weight}"                    : () );
         @slice = {
             what => "limit the user slice of $user",
-            done => sub { my $uid = uid_of( $hv, $user ); $uid ne q{} && root_reads( $hv, slice_dropin($uid) ) eq $text },
+            done => sub { my $uid = uid_of( $hv, $user ); $uid ne q{} && $hv->root_text( slice_dropin($uid) ) eq $text },
             do   => sub {
                 my $file = slice_dropin( uid_of( $hv, $user ) );
-                as_root( $hv, qw{install -d -m 0755}, File::Basename::dirname($file) );
+                $hv->run_sudo_or_die( qw{install -d -m 0755}, File::Basename::dirname($file) );
                 $hv->write_text( $file, "$text\n", sudo => 1, mode => '0644' ) or die "Could not write $file\n";
-                as_root( $hv, qw{systemctl daemon-reload} );
+                $hv->run_sudo_or_die(qw{systemctl daemon-reload});
             },
         };
     }
-
-    my $hook = join "\n", '// Written by trog-provisioner for the runner accounts on this hypervisor.  A new',
-      '// qemu package puts back a qemu-bridge-helper without the capability that lets', '// an account put the guests of its session on a bridge.  See runner_account_steps',
-      '// in Trog::HV::Libvirt.',                                                        qq{DPkg::Post-Invoke { "if [ -e $helper ]; then setcap cap_net_admin+ep $helper; fi"; };};
 
     my $sudoers = sudoers_of($user);
     my $grant   = Trog::HV::Libvirt->runner_sudoers( user => $user, lease_helper => $lease );
@@ -3983,34 +3872,34 @@ sub runner_account_steps {
         {
             what => "make the user $user, with no password",
             done => sub { uid_of( $hv, $user ) ne q{} },
-            do   => sub { as_root( $hv, qw{useradd --system --create-home --shell /bin/bash}, $user ) },
+            do   => sub { $hv->run_sudo_or_die( qw{useradd --system --create-home --shell /bin/bash}, $user ) },
         },
         {
             what => "put $user in the kvm group",
             done => sub {
                 List::Util::any { $_ eq 'kvm' } split q{ }, said( $hv, 'id -nG ' . q1($user) );
             },
-            do => sub { as_root( $hv, qw{usermod -aG kvm}, $user ) },
+            do => sub { $hv->run_sudo_or_die( qw{usermod -aG kvm}, $user ) },
         },
         {
             what => "make the ZFS dataset $dataset at $path",
             done => sub { said( $hv, 'zfs list -H -o name ' . q1($dataset) ) eq $dataset },
-            do   => sub { as_root( $hv, qw{zfs create -o}, "quota=$plan->{quota}", $dataset ) },
+            do   => sub { $hv->run_sudo_or_die( qw{zfs create -o}, "quota=$plan->{quota}", $dataset ) },
         },
         {
             what => "set the quota of $dataset to $plan->{quota}",
             done => sub { uc said( $hv, 'zfs get -H -o value quota ' . q1($dataset) ) eq uc $plan->{quota} },
-            do   => sub { as_root( $hv, qw{zfs set}, "quota=$plan->{quota}", $dataset ) },
+            do   => sub { $hv->run_sudo_or_die( qw{zfs set}, "quota=$plan->{quota}", $dataset ) },
         },
         {
             what => "give $path to $user, with mode 0700",
             done => sub { said( $hv, 'stat -c %U:%a ' . q1($path) ) eq "$user:700" },
-            do   => sub { as_root( $hv, 'chown', "$user:", $path ); as_root( $hv, qw{chmod 0700}, $path ) },
+            do   => sub { $hv->run_sudo_or_die( 'chown', "$user:", $path ); $hv->run_sudo_or_die( qw{chmod 0700}, $path ) },
         },
         {
             what => "let the guests of $user run while it is not logged in",
             done => sub { !absent( $hv, linger_of($user) ) },
-            do   => sub { as_root( $hv, qw{loginctl enable-linger}, $user ) },
+            do   => sub { $hv->run_sudo_or_die( qw{loginctl enable-linger}, $user ) },
         },
         {
             what => "define the storage pool $name at $path in the session of $user, started with the session",
@@ -4026,31 +3915,22 @@ sub runner_account_steps {
             # the user, and a session daemon that starts finds it there and
             # marks the pool running, which pool-build then refuses.
             do => sub {
-                as_root( $hv, @virsh, qw{pool-define-as}, $name, qw{dir --target}, $path ) if $session_says->( 'pool-dumpxml', $name ) eq q{};
-                as_root( $hv, @virsh, 'pool-start',       $name ) unless $session_says->( 'pool-info', $name ) =~ m/^State:\s+running$/m;
-                as_root( $hv, @virsh, 'pool-autostart',   $name );
+                $hv->run_sudo_or_die( @virsh, qw{pool-define-as}, $name, qw{dir --target}, $path ) if $session_says->( 'pool-dumpxml', $name ) eq q{};
+                $hv->run_sudo_or_die( @virsh, 'pool-start',       $name ) unless $session_says->( 'pool-info', $name ) =~ m/^State:\s+running$/m;
+                $hv->run_sudo_or_die( @virsh, 'pool-autostart',   $name );
             },
         },
         @slice,
-        $hv->runner_bridge_steps( $user, @bridges ),
-        {
-            what => "give $helper the capability cap_net_admin",
-            done => sub { said( $hv, 'getcap ' . q1($helper) ) =~ m/cap_net_admin/ },
-            do   => sub { as_root( $hv, qw{setcap cap_net_admin+ep}, $helper ) },
-        },
-        {
-            what => "set it again after each upgrade, in $BRIDGE_APT_HOOK",
-            done => sub { root_reads( $hv, $BRIDGE_APT_HOOK ) eq $hook },
-            do   => sub { $hv->write_text( $BRIDGE_APT_HOOK, "$hook\n", sudo => 1, mode => '0644' ) or die "Could not write $BRIDGE_APT_HOOK\n" },
-        },
+        Trog::HV::Libvirt::BridgeHelper::grant_steps( $hv, $user, @bridges ),
+        Trog::HV::Libvirt::BridgeHelper::capability_steps( $hv, $helper ),
         {
             what => "grant $user sudo for the lease release, in $sudoers",
-            done => sub { chomp( my $wanted = $grant ); root_reads( $hv, $sudoers ) eq $wanted },
+            done => sub { chomp( my $wanted = $grant ); $hv->root_text($sudoers) eq $wanted },
             do   => sub {
                 my $staged = said( $hv, 'mktemp' ) or die 'Could not make a temporary file on ' . $hv->describe . "\n";
                 $hv->write_text( $staged, $grant ) or die "Could not stage the sudoers file\n";
                 my $checked = $hv->run_sudo( qw{visudo -c -f}, $staged ) == 0;
-                $checked &&= as_root( $hv, qw{install -o root -g root -m 0440}, $staged, $sudoers );
+                $checked &&= $hv->run_sudo_or_die( qw{install -o root -g root -m 0440}, $staged, $sudoers );
                 $hv->remove($staged);
                 die "visudo refused the sudoers file for $user, so it was not installed\n" unless $checked;
             },
@@ -4080,15 +3960,7 @@ sub runner_removal_steps {
     my ( $user, $path ) = @{$plan}{qw{user pool_path}};
 
     my $dataset = sub { said( $hv, 'zfs list -H -o name ' . q1($path) ) };
-    my $acl     = bridge_acl($user);
-    my $include = "include $acl";
-    my $helper  = bridge_helper($hv);
-    my $own     = File::Basename::basename($acl);
-
-    # True when no other runner account has a bridge ACL in /etc/qemu.
-    my $last = sub {
-        !List::Util::any { m/\Atrog-runner-.+[.]conf\z/ && $_ ne $own } $hv->list_dir('/etc/qemu');
-    };
+    my $helper  = Trog::HV::Libvirt::BridgeHelper::helper($hv);
 
     # The session keeps no volume that the directory does not have.  A base
     # image is a download that any guest can fetch again, and not a disk.
@@ -4102,48 +3974,24 @@ sub runner_removal_steps {
         {
             what => 'remove ' . sudoers_of($user),
             done => sub { absent( $hv, sudoers_of($user) ) },
-            do   => sub { as_root( $hv, qw{rm -f}, sudoers_of($user) ) },
+            do   => sub { $hv->run_sudo_or_die( qw{rm -f}, sudoers_of($user) ) },
         },
-        {
-            what => "take $acl out of $BRIDGE_CONF",
-            done => sub { !holds_line( $hv, $BRIDGE_CONF, $include ) },
-            do   => sub {
-                rewrite_lines( $hv, $BRIDGE_CONF, '0644', sub ($line) { $line ne $include } );
-            },
-        },
-        {
-            what => "remove $acl",
-            done => sub { absent( $hv, $acl ) },
-            do   => sub { as_root( $hv, qw{rm -f}, $acl ) },
-        },
-        {
-            what => "remove $BRIDGE_APT_HOOK, unless another runner account needs it",
-            done => sub { !$last->() || absent( $hv, $BRIDGE_APT_HOOK ) },
-            do   => sub { as_root( $hv, qw{rm -f}, $BRIDGE_APT_HOOK ) },
-        },
-        (
-            $helper
-            ? {
-                what => "take cap_net_admin away from $helper, unless another runner account needs it",
-                done => sub { !$last->() || said( $hv, 'getcap ' . q1($helper) ) !~ m/cap_net_admin/ },
-                do   => sub { as_root( $hv, qw{setcap -r}, $helper ) },
-              }
-            : ()
-        ),
+        Trog::HV::Libvirt::BridgeHelper::revoke_steps( $hv, $user ),
+        Trog::HV::Libvirt::BridgeHelper::capability_removal_steps( $hv, $helper, $user ),
         {
             what => "remove the limits of the user slice of $user",
             done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || absent( $hv, slice_dropin($uid) ) },
             do   => sub {
                 my $file = slice_dropin( uid_of( $hv, $user ) );
-                as_root( $hv, qw{rm -f},                            $file );
-                as_root( $hv, qw{rmdir --ignore-fail-on-non-empty}, File::Basename::dirname($file) );
-                as_root( $hv, qw{systemctl daemon-reload} );
+                $hv->run_sudo_or_die( qw{rm -f},                            $file );
+                $hv->run_sudo_or_die( qw{rmdir --ignore-fail-on-non-empty}, File::Basename::dirname($file) );
+                $hv->run_sudo_or_die(qw{systemctl daemon-reload});
             },
         },
         {
             what => "stop the lingering of $user",
             done => sub { absent( $hv, linger_of($user) ) },
-            do   => sub { as_root( $hv, qw{loginctl disable-linger}, $user ) },
+            do   => sub { $hv->run_sudo_or_die( qw{loginctl disable-linger}, $user ) },
         },
         {
             # By the slice, because a session daemon outlives the login that
@@ -4151,17 +3999,17 @@ sub runner_removal_steps {
             # end.  userdel refuses a user that still has a process.
             what => "stop every process of $user",
             done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || said( $hv, "systemctl is-active user-$uid.slice" ) ne 'active' },
-            do   => sub { as_root( $hv, qw{systemctl stop}, 'user-' . uid_of( $hv, $user ) . '.slice' ) },
+            do   => sub { $hv->run_sudo_or_die( qw{systemctl stop}, 'user-' . uid_of( $hv, $user ) . '.slice' ) },
         },
         {
             what => "destroy the ZFS dataset at $path",
             done => sub { my $set = $dataset->(); !$set || said( $hv, 'zfs get -H -o value mountpoint ' . q1($set) ) ne $path },
-            do   => sub { $refuse_if_full->();    as_root( $hv, qw{zfs destroy}, $dataset->() ) },
+            do   => sub { $refuse_if_full->();    $hv->run_sudo_or_die( qw{zfs destroy}, $dataset->() ) },
         },
         {
             what => "remove the user $user and its home",
             done => sub { uid_of( $hv, $user ) eq q{} },
-            do   => sub { as_root( $hv, qw{userdel --remove}, $user ) },
+            do   => sub { $hv->run_sudo_or_die( qw{userdel --remove}, $user ) },
         },
     );
 }
@@ -4169,7 +4017,7 @@ sub runner_removal_steps {
 # Writes $path, an authorized_keys file, without the lines that hold $material
 # and with @add after them.
 my sub rewrite_keys ( $hv, $path, $material, @add ) {
-    return rewrite_lines( $hv, $path, '0600', sub ($line) { index( $line, $material ) < 0 }, @add );
+    return $hv->rewrite_lines( $path, mode => '0600', keep => sub ($line) { index( $line, $material ) < 0 }, add => \@add );
 }
 
 =head2 @actions = $hv->runner_key_steps($user, $line)
@@ -4198,14 +4046,14 @@ sub runner_key_steps {
     return {
         what => 'let ' . ( $comment || 'a key' ) . " log in as $user",
         done => sub {
-            my @lines = grep { index( $_, $material ) >= 0 } split m/\n/, root_reads( $hv, home_of( $hv, $user ) . '/.ssh/authorized_keys' );
+            my @lines = grep { index( $_, $material ) >= 0 } split m/\n/, $hv->root_text( home_of( $hv, $user ) . '/.ssh/authorized_keys' );
             @lines == 1 && $lines[0] eq $line;
         },
         do => sub {
             my $home = home_of( $hv, $user ) or die "There is no user $user on " . $hv->describe . " to let a key in as\n";
-            as_root( $hv, qw{install -d -m 0700 -o}, $user, '-g', $user, "$home/.ssh" );
+            $hv->run_sudo_or_die( qw{install -d -m 0700 -o}, $user, '-g', $user, "$home/.ssh" );
             rewrite_keys( $hv, "$home/.ssh/authorized_keys", $material, $line );
-            as_root( $hv, 'chown', "$user:", "$home/.ssh/authorized_keys" );
+            $hv->run_sudo_or_die( 'chown', "$user:", "$home/.ssh/authorized_keys" );
         },
     };
 }
@@ -4228,12 +4076,12 @@ sub runner_key_removal_steps {
         what => "take the key ..." . substr( $material, -12 ) . " away from $user",
         done => sub {
             my $path = $file->() // return 1;
-            index( root_reads( $hv, $path ), $material ) < 0;
+            index( $hv->root_text($path), $material ) < 0;
         },
         do => sub {
             my $path = $file->();
             rewrite_keys( $hv, $path, $material );
-            as_root( $hv, 'chown', "$user:", $path );
+            $hv->run_sudo_or_die( 'chown', "$user:", $path );
         },
     };
 }
