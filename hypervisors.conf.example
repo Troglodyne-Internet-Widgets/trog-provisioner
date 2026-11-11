@@ -23,9 +23,21 @@
 ; because we need its filesystem as well as its libvirt.
 libvirt_uri    = qemu+ssh://root@hv1.example.net/system
 
-; Skip autodetection when `brctl show | tail -n1` guesses wrong.
-bridge_device  = br0
-virbr_device   = virbr0
+; The adapters of a guest: one for each bridge of dhcp_nics and then of
+; static_nics.  The first of dhcp_nics takes the lease that we find the guest
+; by, so it is the bridge of the default network of libvirt, which is also its
+; default.  Each of static_nics gets an address from its own pool, ip_pool_NIC
+; (blocks) and ip_addresses_NIC (single addresses).  The first gets the address
+; of the guest and the default route, through gateway_NIC, which it must name.
+; Each address gets the prefix of the network of its bridge: prefix_NIC, or the
+; prefix of ip_pool_NIC when that one block holds gateway_NIC.
+; A guest has no adapter on any other bridge.  See "The adapters of a guest" in
+; docs/CONFIGURATION.md, and bin/guest_network for a network of their own.
+dhcp_nics      = virbr0
+static_nics    = br0
+ip_pool_br0    = 192.0.2.64/26
+gateway_br0    = 192.0.2.1
+prefix_br0     = 24
 
 ;
 ; Where the storage pool lives on that machine, and what it is called.  The

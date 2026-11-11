@@ -1805,7 +1805,7 @@ sub global_schema {
 
             ip_pool => {
                 type                 => 'object',
-                description          => 'The bins of addresses that belong to no hypervisor, such as the clients of a VPN.  bin/assign_ip takes one from here and records it in ips.db.  The block of each hypervisor in hypervisors.conf names the bin named guests, with its gateway: see guest_pool in Trog::HV.',
+                description          => 'The bins of addresses that belong to no hypervisor, such as the clients of a VPN.  bin/assign_ip takes one from here and records it in ips.db.  The block of each hypervisor in hypervisors.conf names the bin named guests, a pool and a gateway for each bridge of its static_nics: see nic_pool in Trog::HV.',
                 additionalProperties => 0,
                 properties           => {
                     bins => {

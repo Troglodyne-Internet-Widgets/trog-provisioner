@@ -47,7 +47,9 @@ sub fleet_file {
     File::Slurper::Temp::write_text( "$dir/hypervisors.conf", <<"CONF" );
 [hv1]
 libvirt_uri=qemu+ssh://root\@hv1.example.test/system
-bridge_device=br0
+static_nics=br0
+ip_pool_br0=192.0.2.0/28
+gateway_br0=192.0.2.1
 reserve_memory=4096
 max_guests=20
 $extra{hv1}
@@ -120,11 +122,11 @@ subtest 'a fleet is read in file order' => sub {
     is_deeply( [ $fleet->names ], [qw{hv1 hv2}], 'both, in order' );
 
     my $hv1 = $fleet->hypervisor('hv1');
-    is( $hv1->name,           'hv1',                                     'name' );
-    is( $hv1->uri,            'qemu+ssh://root@hv1.example.test/system', 'uri' );
-    is( $hv1->bridge_device,  'br0',                                     'bridge_device, so no probing' );
-    is( $hv1->reserve_memory, 4096,                                      'reserve_memory' );
-    is( $hv1->max_guests,     20,                                        'max_guests' );
+    is( $hv1->name, 'hv1',                                     'name' );
+    is( $hv1->uri,  'qemu+ssh://root@hv1.example.test/system', 'uri' );
+    is_deeply( [ $hv1->static_nics ], ['br0'], 'static_nics, so no probing' );
+    is( $hv1->reserve_memory, 4096, 'reserve_memory' );
+    is( $hv1->max_guests,     20,   'max_guests' );
 
     is( $fleet->hypervisor('hv2')->reserve_memory, 2048, 'unset limits fall back to the defaults' );
     is( $fleet->hypervisor('hv2')->cpu_overcommit, 4,    'including the cpu overcommit ratio' );

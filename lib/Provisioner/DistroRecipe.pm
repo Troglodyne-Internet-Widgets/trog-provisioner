@@ -334,10 +334,16 @@ sub args {
 
             # The network configuration of the guest matches its interfaces by MAC,
             # because the kernel can choose any device name.  The hypervisor
-            # derives both MACs from the domain name.  Provisioner::Recipe::vm
-            # puts the same pair into the XML.
-            nat_mac    => { type => 'string', readOnly => 1, description => "MAC of the guest's NAT interface." },
-            bridge_mac => { type => 'string', readOnly => 1, description => "MAC of the guest's bridged interface." },
+            # derives the MACs from the domain name.  Provisioner::Recipe::vm
+            # puts the same ones into the XML.
+            nat_mac    => { type => 'string', readOnly => 1, description => "MAC of the adapter of the guest that takes the lease, the first of dhcp_nics." },
+            bridge_mac => { type => 'string', readOnly => 1, description => "MAC of the adapter of the guest that gets its address, the first of static_nics." },
+            nic_ips    => {
+                type                 => 'object',
+                readOnly             => 1,
+                additionalProperties => { type => 'string' },
+                description          => 'The address of each static adapter of the guest after the first, by its bridge, out of the pool of that bridge.',
+            },
         },
     );
 }

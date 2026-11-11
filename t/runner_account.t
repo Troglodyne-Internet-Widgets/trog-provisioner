@@ -40,7 +40,7 @@ require_ok($script) or BAIL_OUT("$script does not load");
 
 my $dir    = tempdir( CLEANUP => 1 );
 my $hvconf = "$dir/hypervisors.conf";
-File::Slurper::Temp::write_text( $hvconf, "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv.test.test/system\nbridge_device = br0\nvirbr_device = virbr0\n" );
+File::Slurper::Temp::write_text( $hvconf, "[hv1]\nlibvirt_uri = qemu+ssh://someadmin\@hv.test.test/system\ndhcp_nics = virbr0\nstatic_nics = br0\nip_pool_br0 = 192.0.2.0/28\ngateway_br0 = 192.0.2.1\n" );
 
 my $keyfile = "$dir/operator.pub";
 

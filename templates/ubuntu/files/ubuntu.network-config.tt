@@ -2,9 +2,13 @@
     Provisioner::Recipe::ubuntu.  cloud-init hands v2 to netplan nearly as
     written.
 
-    It has two interfaces.  The outbound bridge carries the addresses that
-    reach this guest.  The libvirt NAT is how the hypervisor finds the guest
-    before those addresses work.
+    It has an interface for each bridge of dhcp_nics and static_nics in the
+    block of the hypervisor.  The first static one carries the address that
+    reaches this guest and the default route.  The first DHCP one is the
+    libvirt NAT, which is how the hypervisor finds the guest before that
+    address works.  The other static ones have an address on their own subnet
+    and no route, and the other DHCP ones a lease.  See ADAPTERS in
+    Trog::HV::Libvirt.
 
     Each interface matches on its MAC address, not on its name.  The names below
     are what the guest calls each interface.  We choose the MAC address and the
@@ -13,7 +17,7 @@
     No apostrophes in an Xslate comment.  The lexer reads one as the start of a
     string and swallows the template as far as the next quote. -%]
 ---
-[% IF !bridge_mac -%]
+[% IF !nat_mac -%]
 [%# Nothing here defined this machine, so we do not know its MAC addresses or
     interface names.  A service assigned them when it created the guest.  A
     configuration cannot match on a MAC address that nobody gave us.  The
@@ -25,6 +29,7 @@ network:
 network:
   version: 2
   ethernets:
+[% IF bridge_mac -%]
     [% bridge_devname | yaml %]:
       match:
         macaddress: [% bridge_mac | yaml %]
@@ -52,6 +57,23 @@ network:
           via: [% r.gateway | yaml %]
 [% END -%]
 [% END -%]
+[% END -%]
+[%# An address on its own subnet, and no route, so the default route stays on
+    the first static adapter.  Optional, so that the boot does not wait for
+    it. -%]
+[% FOR nic IN other_static -%]
+    [% nic.name | yaml %]:
+      match:
+        macaddress: [% nic.mac | yaml %]
+      set-name: [% nic.name | yaml %]
+[% IF nic.addresses.size() -%]
+      addresses:
+[% FOR address IN nic.addresses -%]
+        - [% address | yaml %]
+[% END -%]
+[% END -%]
+      optional: true
+[% END -%]
 [%# With no ips, the bridge gets no addresses and no routes, so it comes up with
     no address.  The guest takes its lease and its default route on the NAT
     side.  See offers in Provisioner::IPPool.
@@ -59,11 +81,35 @@ network:
     The NAT side sends its MAC as the DHCP client identifier.  The default is
     a DUID made from the machine-id, which every rebuild makes new, so dnsmasq
     took a rebuilt guest for a new client and leased it a new address.  With the
-    MAC, which comes from the name of the domain, it gets back the lease it had. -%]
+    MAC, which comes from the name of the domain, it gets back the lease it had.
+
+    With no static adapter, the nameservers go here. -%]
     [% dhcp_devname | yaml %]:
       match:
         macaddress: [% nat_mac | yaml %]
       set-name: [% dhcp_devname | yaml %]
+[% IF !bridge_mac -%]
+      nameservers:
+        search:
+          - [% domain | yaml %]
+        addresses:
+[% FOR resolver IN resolvers -%]
+          - [% resolver | yaml %]
+[% END -%]
+[% END -%]
       dhcp4: true
       dhcp-identifier: mac
+[%# A lease, and no route from it, so that the routes of the guest are the ones
+    above. -%]
+[% FOR nic IN other_dhcp -%]
+    [% nic.name | yaml %]:
+      match:
+        macaddress: [% nic.mac | yaml %]
+      set-name: [% nic.name | yaml %]
+      dhcp4: true
+      dhcp-identifier: mac
+      dhcp4-overrides:
+        use-routes: false
+      optional: true
+[% END -%]
 [% END -%]

@@ -10,9 +10,11 @@ network that only it and its guests can use.
 
 ## A libvirt hypervisor
 
-A libvirt hypervisor has two bridges, and each guest has an interface on each.
+A libvirt hypervisor usually has two bridges, and each guest has an interface
+on each: the NAT bridge, the first of `dhcp_nics`, and the primary bridge, the
+first of `static_nics`.
 
-The **primary bridge** (`bridge_device`, the guest's `ens4`) is on the same
+The **primary bridge** (the first of `static_nics`, the guest's `ens4`) is on the same
 subnet as the hypervisor's own primary interface.  A guest's **static
 address** is an address on this subnet.  It is the address that other
 machines use to reach the guest.
@@ -23,21 +25,34 @@ machines use to reach the guest.
   behind your gateway.  A static address is then "public" to every machine on
   that network, and private to the internet.
 
-The **NAT bridge** (`virbr_device`, the guest's `ens3`) is libvirt's own
+The **NAT bridge** (the first of `dhcp_nics`, the guest's `ens3`) is libvirt's own
 network, `192.168.122.0/24` by default.  Only the hypervisor and its guests can
 use it.  A guest gets a DHCP lease on it at first boot.  The provisioner finds
 a new guest on a local hypervisor by that lease, and a guest fetches its
 payload over it when this machine is the hypervisor.
 
+A block can give a guest more adapters, with more bridges in either list, or put
+the primary bridge on a libvirt network of its own instead of the network of the
+hypervisor.
+Then the static addresses are on the subnet of that network, and only the
+hypervisor and its guests reach them.  See "The adapters of a guest" in
+[CONFIGURATION.md](CONFIGURATION.md#the-adapters-of-a-guest).
+
 ## What the configuration names
 
 In the block of a hypervisor in `hypervisors.conf`:
 
-- `pool_addresses` and `pool_cidr` list the static addresses that its guests
-  can get.  They must be on the subnet of the primary bridge.  Keep them out of
-  any range that a DHCP server on that network hands out.  Hypervisors on one
-  network name the same pool.
-- `gateway` is the gateway of that subnet.
+- `ip_addresses_NIC` and `ip_pool_NIC` list the static addresses that its
+  guests can get on the bridge `NIC` of `static_nics`.  They must be on the
+  subnet of that bridge.  Keep them out of any range that a DHCP server on that
+  network hands out.  Hypervisors on one network name the same pool for a
+  bridge of the same name.
+- `gateway_NIC` is the gateway of that subnet.  The first of `static_nics` must
+  name one, and the guest routes everything else through it.
+- `prefix_NIC` is the length of the prefix of that subnet, which each static
+  address on it gets.  A pool that is the whole subnet, with the gateway in it,
+  can leave it out.  See "The adapters of a guest" in
+  [CONFIGURATION.md](CONFIGURATION.md#the-adapters-of-a-guest).
 
 In the `_global` of `_base` in `recipes.yaml`:
 

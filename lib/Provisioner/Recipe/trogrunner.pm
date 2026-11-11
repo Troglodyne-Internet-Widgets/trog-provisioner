@@ -47,13 +47,16 @@ use Trog::Utils();
                     libvirt_uri: "qemu+ssh://runner@hv1.test.test/session"
                     resolvers:   ["192.0.2.254", "1.1.1.1"]
 
-                    # The pool that the runner takes addresses from on hv1,
-                    # and their route.  Without a pool, each guest it builds
-                    # has only a lease on the NAT network of its hypervisor:
-                    # see offers in Provisioner::IPPool.
-                    gateway:        "192.0.2.254"
-                    pool_addresses: ["192.0.2.180", "192.0.2.181"]
-                    pool_cidr:      ["192.0.2.192/28"]
+                    # The adapters of its guests, and the pool and the route
+                    # of the static one.  Without a static adapter, each
+                    # guest it builds has only a lease on the NAT network of
+                    # its hypervisor: see ADAPTERS in Trog::HV::Libvirt.
+                    dhcp_nics:        ["virbr0"]
+                    static_nics:      ["virbr1"]
+                    gateway_virbr1:   "10.0.0.1"
+                    prefix_virbr1:    24
+                    ip_addresses_virbr1: ["10.0.0.180", "10.0.0.181"]
+                    ip_pool_virbr1:   ["10.0.0.192/28"]
                     pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     max_memory:  65536
@@ -244,6 +247,12 @@ runner has a cap.
 
 my $ED25519_BITS = 256;
 
+# The name of a bridge, as the schema checks one of dhcp_nics or static_nics,
+# and the keys of the pool and the gateway of a static adapter.  Trog::HV::Libvirt
+# checks the same on the runner.
+my $LINK_NAME = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$';
+my $NIC_KEY   = qr/\A (?:ip_pool|ip_addresses|gateway|prefix) _ ./;
+
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
 =head3 required_recipes
@@ -361,24 +370,31 @@ sub args {
                 type                 => 'object',
                 default              => {},
                 additionalProperties => {
-                    type       => 'object',
-                    required   => [qw{libvirt_uri resolvers}],
+                    type              => 'object',
+                    required          => [qw{libvirt_uri resolvers}],
+                    patternProperties => {
+                        '^ip_pool_'      => { type => 'array',   items   => { type => 'string' } },
+                        '^ip_addresses_' => { type => 'array',   items   => { type => 'string' } },
+                        '^gateway_'      => { type => 'string',  format  => 'ipv4' },
+                        '^prefix_'       => { type => 'integer', minimum => 8, maximum => 30 },
+                    },
                     properties => {
                         libvirt_uri => { type => 'string' },
 
                         # What a guest of this hypervisor asks.  The runner
                         # writes them into the block of its hypervisors.conf,
                         # see configured_resolvers in Trog::HV.
-                        resolvers      => { type => 'array',  items  => { type => 'string' }, minItems => 1 },
-                        gateway        => { type => 'string', format => 'ipv4' },
-                        pool_cidr      => { type => 'array',  items  => { type => 'string' } },
-                        pool_addresses => { type => 'array',  items  => { type => 'string' } },
-                        pool_path      => { type => 'string' },
-                        pool_name      => { type => 'string' },
-                        partition      => { type => 'string' },
-                        domain_dir     => { type => 'string' },
-                        bridge_device  => { type => 'string' },
-                        virbr_device   => { type => 'string' },
+                        resolvers  => { type => 'array', items => { type => 'string' }, minItems => 1 },
+                        pool_path  => { type => 'string' },
+                        pool_name  => { type => 'string' },
+                        partition  => { type => 'string' },
+                        domain_dir => { type => 'string' },
+
+                        # The adapters of a guest, and the pool and the
+                        # gateway of each static one.  See ADAPTERS in
+                        # Trog::HV::Libvirt.
+                        dhcp_nics      => { type => 'array', items => { type => 'string', pattern => $LINK_NAME }, uniqueItems => 1 },
+                        static_nics    => { type => 'array', items => { type => 'string', pattern => $LINK_NAME }, uniqueItems => 1 },
                         reserve_memory => { type => 'integer' },
                         reserve_cpus   => { type => 'integer' },
                         reserve_disk   => { type => 'integer' },
@@ -456,9 +472,10 @@ sub formatters {
 Fills in the identity of the runner from the identity of the guest, and folds
 C<config> into the C<_global> of C<_base> in C<recipes>, which is where the
 runner reads it.  A setting left empty is left out, so that the runner falls
-back to its own answer for it rather than to an empty string.  The pool and the
-gateway are each hypervisor's, in its block of the F<hypervisors.conf> of the
-runner.
+back to its own answer for it rather than to an empty string.  The adapters,
+pools and gateways are each hypervisor's, in its block of the
+F<hypervisors.conf> of the runner, and C<nic_lines> holds the pool and gateway
+keys of each static adapter, each as a C<key> and a C<value>, for the template.
 
 Splits the URI of each hypervisor into the host, user and port that
 C<ssh-keyscan> needs.  Dies if C<checkout_dir> or C<store> is not a relative
@@ -542,6 +559,10 @@ sub enrich {
         die "trogrunner: could not read a host out of the libvirt_uri for hypervisor '$name': $block->{libvirt_uri}\n"
           unless defined $transport;
         @{$block}{qw{ssh_host ssh_user ssh_port}} = @server;
+
+        # The pool and the gateway of each static adapter, as the block of
+        # hypervisors.conf names them, by a key that the template cannot know.
+        $block->{nic_lines} = [ map { +{ key => $_, value => ref $block->{$_} ? join( ', ', @{ $block->{$_} } ) : $block->{$_} } } sort grep { m/$NIC_KEY/ } keys %$block ];
 
         # Trog::HV needs the filesystem of a remote hypervisor as well as its
         # libvirt, so the runner must reach it over ssh.  Find that out here,

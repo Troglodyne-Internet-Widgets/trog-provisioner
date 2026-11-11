@@ -1261,7 +1261,7 @@ subtest 'the settings of an installation are validated in one place' => sub {
     is( $own->{admin_email}, 'someadmin@test.test', 'and inherits the ones it says nothing about' );
 
     # The block of the hypervisor names them, see Trog::HV/configured_resolvers,
-    # Trog::HV/configured_gateway and Trog::HV/guest_pool.
+    # Trog::HV/nic_gateway and Trog::HV/nic_pool.
     my $own_global = sub (%global) {
         return exception { Provisioner::Cookbook->globals( 'own.test.test', { %said, 'own.test.test' => { _global => \%global } } ) }
     };

@@ -36,30 +36,38 @@ Provisioner::IPPool - assign static IP addresses from a pool, and record which a
     my @ips = Provisioner::IPPool::pool_ips($pool_block);
     my $ip  = Provisioner::IPPool::assign( 'test.test', $pool_block );
 
-    # The pool of the guests of one hypervisor, with the bins of _global.
-    my $pool = Provisioner::IPPool::pool_of( $hv, $globals->{ip_pool} );
-    my $vpn  = Provisioner::IPPool::assign( 'test.test', $pool, 'vpnclients' );
+    # The pools of the guests of one hypervisor, with the bins of _global.
+    my $pool  = Provisioner::IPPool::pool_of( $hv, $globals->{ip_pool} );
+    my $ip    = Provisioner::IPPool::assign( 'test.test', $pool );
+    my $other = Provisioner::IPPool::assign( 'test.test', $pool, undef, 'br0' );
+    my $vpn   = Provisioner::IPPool::assign( 'test.test', $pool, 'vpnclients' );
 
-The addresses of the C<guests> bin are on the subnet of the primary bridge of the
-hypervisor, and its block of F<hypervisors.conf> names them.  See
-L<Trog::HV/guest_pool>.  F<docs/NETWORK.md> says what that means.
+The addresses of the C<guests> bin are on the subnets of the bridges of the
+static adapters of a guest, C<static_nics>, and the block of the hypervisor
+names a pool for each one.  See L<Trog::HV/nic_pool($nic)>.  F<docs/NETWORK.md>
+says what that means.
 
 =head1 BINS
 
 A bin is a named part of the pool.  Each bin hands out only its own addresses,
 so one kind of client cannot use up the addresses of another.  The bin named
-C<guests> is where a guest gets its address.  It is on the network of a
-hypervisor, so the block of that hypervisor names it, and C<pool_of> puts it
-at the top of the pool, as C<addresses> and C<cidr>.  The C<bins> of the
-C<ip_pool> of C<_global> name the others:
+C<guests> is where a guest gets its addresses, one on the bridge of each of its
+static adapters.  Each one is on the network of a hypervisor, so the block of
+that hypervisor names it, and C<pool_of> puts them under C<nics> in the pool,
+by bridge.  The pool of the first of C<static_nics>, which gives the address
+of the guest, is also at the top of the pool, as C<addresses> and C<cidr>.  The
+C<bins> of the C<ip_pool> of C<_global> name the others:
 
     ip_pool:
         bins:
             vpnclients:
                 cidr: 10.8.0.128/25
 
-A domain holds at most one address in each bin.  Only the C<guests> bin goes
-into C<assignments>, so only a guest gets an A record from it.
+A domain holds at most one address in each bin, and in the C<guests> bin one on
+each bridge.  The database records the bridge of each address of the C<guests>
+bin, and which one is the address of the guest, the one on the first of
+C<static_nics>.  Only that one goes into C<assignments>, so a guest gets an A
+record from it and from nothing else.
 
 A bin that names a guest in C<via> holds addresses that only that guest can
 reach, such as the static addresses of the clients of a VPN:
@@ -106,11 +114,12 @@ our $GUESTS = 'guests';
 
 =head2 pool_ips($pool)
 
-C<$pool> is one bin, as a hash reference, such as the C<guests> bin that
-L<Trog::HV/guest_pool> returns.
-C<addresses> is a list of addresses and C<cidr> is a list of CIDR blocks.
-Either may be written as a YAML list or as one string with whitespace between
-the items.
+C<$pool> is one bin, as a hash reference, such as the pool of one bridge that
+L<Trog::HV/nic_pool($nic)> returns.
+C<addresses> is a list of addresses, each of which may carry the length of the
+prefix of its network, such as C<10.0.0.5/26>, and C<cidr> is a list of CIDR
+blocks.  Either may be written as a YAML list or as one string with whitespace
+between the items.
 
 Returns each address in the pool once, in order.  Dies if a CIDR block is not
 valid, or is not IPv4.
@@ -121,7 +130,7 @@ sub pool_ips {
     my ($pool) = @_;
     my ( %seen, @ips );
 
-    foreach my $ip ( pool_items( $pool->{addresses} ) ) {
+    foreach my $ip ( addresses_of($pool) ) {
         push @ips, $ip unless $seen{$ip}++;
     }
 
@@ -204,7 +213,11 @@ sub schema_path {
 
 Returns a handle on the database at C<db_path>, with the schema and its updates
 applied.  F<schema/ips.v1.update.sql> adds bins, and puts every row of a
-database from before them in the C<guests> bin.
+database from before them in the C<guests> bin.  F<schema/ips.v2.update.sql>
+adds the bridge of each address, and marks the address of each guest.  A row
+from before it has no bridge, and is the address of its guest.  C<assign> gives
+it the bridge whose pool holds it, the first time that its domain asks for an
+address on that bridge, so a guest keeps its address.
 
 =cut
 
@@ -212,15 +225,16 @@ sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 
 =head2 assignments()
 
-Returns a hash reference of each guest domain to its address in the C<guests>
-bin.  Reservations and the other bins are not in it.  C<bin/new_config> gives
+Returns a hash reference of each guest domain to the address of the guest: its
+address in the C<guests> bin on the first of its C<static_nics>.  Reservations,
+the other bridges and the other bins are not in it.  C<bin/new_config> gives
 this to the templates as the C<ipmap> variable, which is the address of each
 domain rather than a file, and the pdns zone makes its records from it.
 
 =cut
 
 sub assignments {
-    my $rows = dbh()->selectall_arrayref( "SELECT domain, ip FROM ips WHERE kind = 'domain' AND bin = ?", { Slice => {} }, $GUESTS );
+    my $rows = dbh()->selectall_arrayref( "SELECT domain, ip FROM ips WHERE kind = 'domain' AND bin = ? AND main = 1", { Slice => {} }, $GUESTS );
     return { map { $_->{domain} => $_->{ip} } @$rows };
 }
 
@@ -251,10 +265,11 @@ sub taken {
     return { map { $_->{ip} => $_->{domain} } @$rows };
 }
 
-=head2 held_by($domain, $bin)
+=head2 held_by($domain, $bin, $nic)
 
 Returns the address that C<$domain> has in C<$bin>, or undef.  C<$bin> defaults
-to C<guests>.
+to C<guests>.  In the C<guests> bin, it is the address on the bridge C<$nic>,
+or without C<$nic> the address of the guest.
 
 It looks at guests only.  A reservation is not a domain, and C<release> must
 never report that it gave back the gateway.
@@ -262,23 +277,39 @@ never report that it gave back the gateway.
 =cut
 
 sub held_by {
-    my ( $domain, $bin ) = @_;
-    my $row = dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin // $GUESTS );
+    my ( $domain, $bin, $nic ) = @_;
+    my $row =
+      defined $nic
+      ? dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?", undef, $domain, $bin // $GUESTS, $nic )
+      : dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND main = 1", undef, $domain, $bin // $GUESTS );
     return $row ? $row->[0] : undef;
 }
 
 =head2 holdings($domain)
 
 Returns a hash reference of each bin in which C<$domain> has an address, to
-that address.  It is empty when the domain has none.  Like C<held_by>, it looks
-at domains only, not at reservations.
+that address: in the C<guests> bin, the address of the guest.  It is empty when
+the domain has none.  Like C<held_by>, it looks at domains only, not at
+reservations.  C<nic_holdings> has the addresses on each bridge.
+
+=head2 nic_holdings($domain)
+
+Returns a hash reference of each bridge on which C<$domain> has an address in
+the C<guests> bin, to that address.  An address from before the database
+recorded bridges is not in it until C<assign> gives it its bridge.
 
 =cut
 
 sub holdings {
     my ($domain) = @_;
-    my $rows = dbh()->selectall_arrayref( "SELECT bin, ip FROM ips WHERE domain = ? AND kind = 'domain'", { Slice => {} }, $domain );
+    my $rows = dbh()->selectall_arrayref( "SELECT bin, ip FROM ips WHERE domain = ? AND kind = 'domain' AND main = 1", { Slice => {} }, $domain );
     return { map { $_->{bin} => $_->{ip} } @$rows };
+}
+
+sub nic_holdings {
+    my ($domain) = @_;
+    my $rows = dbh()->selectall_arrayref( "SELECT nic, ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic != ''", { Slice => {} }, $domain, $GUESTS );
+    return { map { $_->{nic} => $_->{ip} } @$rows };
 }
 
 =head2 reachable_address($domain)
@@ -325,10 +356,11 @@ sub reached_through {
     return $bins{$tunnel} ? $bins{$tunnel}{via} : undef;
 }
 
-=head2 reserve($ip, $name)
+=head2 reserve($ip, $name, $nic)
 
 Records C<$ip> as an address that no guest gets, for example a hypervisor or a
-gateway.  C<$name> says what holds it.  Returns true if this call wrote the row.
+gateway, on the bridge C<$nic>.  C<$name> says what holds it.  Returns true if
+this call wrote the row.
 
 An address that is already in the database is not an error.  Seeding runs on
 every start, and it records the same addresses each time.
@@ -336,29 +368,32 @@ every start, and it records the same addresses each time.
 =cut
 
 sub reserve {
-    my ( $ip, $name ) = @_;
-    my $rows = dbh()->do( "INSERT OR IGNORE INTO ips (ip, domain, kind) VALUES (?, ?, 'reserved')", undef, $ip, $name );
+    my ( $ip, $name, $nic ) = @_;
+    my $rows = dbh()->do( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", undef, $ip, $name, $nic // q{} );
     return $rows && $rows != 0 ? 1 : 0;
 }
 
-=head2 record($ip, $domain)
+=head2 record($ip, $domain, $nic, $main)
 
-Records C<$ip> as the address of the guest C<$domain>.  This is for an address
-that a hypervisor reports, not one that C<assign> gave out.  Returns true if
-this call wrote the row.
+Records C<$ip> as the address of the guest C<$domain> on the bridge C<$nic>.
+C<$main> is true when that bridge is the first of C<static_nics>, so that it is
+the address of the guest, and defaults to true.  This is for an address that a hypervisor reports,
+not one that C<assign> gave out.  Returns true if this call wrote the row.
 
 =cut
 
 sub record {
-    my ( $ip, $domain ) = @_;
-    my $rows = dbh()->do( "INSERT OR IGNORE INTO ips (ip, domain, kind) VALUES (?, ?, 'domain')", undef, $ip, $domain );
+    my ( $ip, $domain, $nic, $main ) = @_;
+    my $rows = dbh()->do( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", undef, $ip, $domain, $nic // q{}, ( $main // 1 ) ? 1 : 0 );
     return $rows && $rows != 0 ? 1 : 0;
 }
 
 =head2 release($domain)
 
-Gives back every address of C<$domain>, in every bin.  Returns what it gave
-back, as C<holdings> does: a hash reference of each bin to its address.
+Gives back every address of C<$domain>, in every bin and on every bridge.
+Returns what it gave back: a hash reference of each bin to its address, as
+C<holdings> gives it, and of C<guests on NIC> to the address on each bridge
+that is not the address of the guest.
 
 C<bin/destroy> calls this, and C<bin/reseed_ips> calls it for a domain that no
 hypervisor runs.  A domain that you provision again keeps its address.
@@ -370,9 +405,10 @@ sub release {
 
     my $db   = dbh();
     my $held = holdings($domain);
+    my $rows = $db->selectall_arrayref( "SELECT nic, ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND main = 0", { Slice => {} }, $domain, $GUESTS );
     $db->do( "DELETE FROM ips WHERE domain = ? AND kind = 'domain'", undef, $domain );
 
-    return $held;
+    return { %$held, map { ( "$GUESTS on $_->{nic}" => $_->{ip} ) } @$rows };
 }
 
 =head2 @items = pool_items($said)
@@ -393,7 +429,9 @@ Returns each bin of C<$pool> by name, as a block that C<pool_ips> takes.  The
 C<addresses> and C<cidr> at the top of C<$pool> are the bin named C<guests>.
 
 Dies if C<$pool> has addresses at its top and also a bin named C<guests>, if a
-block of a bin is not valid, or if blocks of two bins overlap.
+block of a bin is not valid, or if blocks of two bins overlap.  The pools of
+the other bridges under C<nics> count as bins of their own for that, because an
+address belongs to one bridge.
 
 =cut
 
@@ -408,9 +446,11 @@ sub bins {
         $bins{$GUESTS} = \%top;
     }
 
+    my %others = map { ( "$GUESTS on $_" => $pool->{nics}{$_} ) } grep { $_ ne ( $pool->{first_nic} // q{} ) } keys %{ $pool->{nics} // {} };
+    my %check  = ( %bins, %others );
     my @seen;
-    foreach my $name ( sort keys %bins ) {
-        foreach my $block ( blocks( $bins{$name} ) ) {
+    foreach my $name ( sort keys %check ) {
+        foreach my $block ( blocks( $check{$name} ) ) {
             Net::IP->new($block)
               or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
             my $other = first { $_->{bin} ne $name && Net::CIDR::cidrlookup( $block, $_->{block} ) } @seen;
@@ -442,17 +482,23 @@ sub bins_via {
 =head2 $pool = pool_of($hv, $installation_pool)
 
 Returns the pool that a guest of the hypervisor C<$hv> takes its addresses
-from: the C<guests> bin of L<Trog::HV/guest_pool> at the top, as C<addresses>
-and C<cidr>, and the C<bins> of C<$installation_pool>, the C<ip_pool> of
-C<_global>.  A hypervisor that gives its guests their addresses has no
-C<guests> bin here, because its guests take none from the pool.
+from: the pool of each of its C<static_nics> under C<nics>, by bridge, as
+L<Trog::HV/static_pools> gives them, the first of them as C<first_nic>, its
+pool also at the top as C<addresses> and C<cidr>, which is the C<guests> bin,
+and the C<bins> of C<$installation_pool>, the C<ip_pool> of C<_global>.  A
+hypervisor that gives its guests their addresses has no C<guests> bin here,
+because its guests take none from the pool.
 
 =cut
 
 sub pool_of {
     my ( $hv, $installation_pool ) = @_;
-    my $guests = $hv->manages_addresses ? {} : $hv->guest_pool;
-    return { %$guests, bins => { %{ ( $installation_pool // {} )->{bins} // {} } } };
+    my %bins = ( bins => { %{ ( $installation_pool // {} )->{bins} // {} } } );
+    return \%bins if $hv->manages_addresses;
+
+    my $nics  = $hv->static_pools;
+    my $first = $hv->address_nic;
+    return { %bins, nics => $nics, ( defined $first ? ( first_nic => $first, %{ $nics->{$first} } ) : () ) };
 }
 
 =head2 $network = network_of($pool)
@@ -470,14 +516,16 @@ sub network_of {
 
 =head2 %pools = guest_pools($fleet)
 
-Returns the C<guests> bin of each hypervisor of the L<Trog::Hypervisors>
-C<$fleet> that names one, by the name of its block, as
-L<Trog::HV/guest_pool> returns it.  A hypervisor that gives its guests their
-addresses is left out.
+Returns the pools of the static adapters of each hypervisor of the
+L<Trog::Hypervisors> C<$fleet> that names any, by the name of its block, each a
+hash reference of the bridge to its pool, as L<Trog::HV/static_pools> returns
+it.  A hypervisor that gives its guests their addresses is left out.
 
-Two hypervisors on one network name the same blocks, and share the addresses.
-Dies when the blocks of two hypervisors overlap and are not the same, because
-then one address belongs to two networks.
+Two blocks that name the same blocks for the same bridge share the addresses:
+they are one network, such as the LAN of two hypervisors, and its bridge has one
+name on both.  Dies when two pools overlap and are not the same blocks on the
+same bridge, because then one address would belong to two networks, or the
+database could not tell on which bridge a guest holds it.
 
 =cut
 
@@ -488,21 +536,26 @@ sub guest_pools {
     foreach my $name ( $fleet->configured ? $fleet->names : () ) {
         my $hv = $fleet->hypervisor($name);
         next if $hv->manages_addresses;
-        my $pool   = $hv->guest_pool;
-        my @blocks = blocks($pool) or next;
-        Net::IP->new($_) // die "Invalid CIDR '$_' in the pool of $name in hypervisors.conf: " . Net::IP::Error() . "\n" foreach @blocks;
-        $pools{$name} = $pool;
+        my $nics = $hv->static_pools;
+        foreach my $nic ( sort keys %$nics ) {
+            Net::IP->new($_) // die "Invalid CIDR '$_' in ip_pool_$nic of $name in hypervisors.conf: " . Net::IP::Error() . "\n" foreach blocks( $nics->{$nic} );
+        }
+        $pools{$name} = $nics if %$nics;
     }
 
-    my %by_network;
-    push @{ $by_network{ network_of( $pools{$_} ) } }, $_ foreach sort keys %pools;
+    # One claim for each pool that a bridge has, with every block that names it.
+    my %by_pool;
+    foreach my $name ( sort keys %pools ) {
+        push @{ $by_pool{ "$_\t" . network_of( $pools{$name}{$_} ) } }, "$_ of $name" foreach sort keys %{ $pools{$name} };
+    }
     my @claims = map {
-        my $names = join( q{, }, @{ $by_network{$_} } );
-        map { +{ block => $_, names => $names } } blocks( $pools{ $by_network{$_}[0] } )
-    } sort keys %by_network;
+        my ( $nic, $network ) = split m/\t/, $_, 2;
+        my $names = join( q{, }, @{ $by_pool{$_} } );
+        map { +{ block => $_, names => $names, nic => $nic } } split m/[ ]/, $network
+    } sort keys %by_pool;
     foreach my $claim (@claims) {
         my $other = first { $_->{names} ne $claim->{names} && Net::CIDR::cidrlookup( $claim->{block}, $_->{block} ) } @claims or next;
-        die "The pool of $claim->{names} in hypervisors.conf has $claim->{block} and the pool of $other->{names} has $other->{block}, which overlap.\n" . "Hypervisors on one network name the same pool_cidr and pool_addresses, and hypervisors on two networks name pools that do not overlap.\n";
+        die "The pool of $claim->{names} in hypervisors.conf has $claim->{block} and the pool of $other->{names} has $other->{block}, which overlap.\n" . "Blocks on one network name the same ip_pool and ip_addresses for a bridge of the same name, and pools of two networks do not overlap.\n";
     }
 
     return %pools;
@@ -517,7 +570,19 @@ blocks: each C<cidr> as it is, then each of its C<addresses> as a C</32>.
 
 sub blocks {
     my ($bin) = @_;
-    return ( pool_items( $bin->{cidr} ), map { "$_/32" } pool_items( $bin->{addresses} ) );
+    return ( pool_items( $bin->{cidr} ), map { "$_/32" } addresses_of($bin) );
+}
+
+=head2 @addresses = addresses_of($bin)
+
+The C<addresses> of C<$bin>, without the length of a prefix that one is written
+with.
+
+=cut
+
+sub addresses_of {
+    my ($bin) = @_;
+    return map { s{/\d+\z}{}r } pool_items( $bin->{addresses} );
 }
 
 =head2 %clients = via_clients($via)
@@ -626,14 +691,15 @@ sub refresh_via {
 =head2 $bool = offers($pool, $bin)
 
 Whether C<$bin> of C<$pool> has an address to give out, free or not.  C<$bin>
-defaults to C<guests>.  False for a pool that names no addresses and no blocks,
-and for a pool that has none at all.
+defaults to C<guests>, which is the pool of the first static adapter.  False
+for a pool that names no addresses and no blocks, and for a pool that has none
+at all.
 
-A guest of a configuration whose C<guests> bin offers nothing gets no address
-from the pool.  It takes a lease on the NAT network of its hypervisor, and its
-bridged interface stays unconfigured.  That is the case of a runner that builds
-throwaway guests, which nothing outside the hypervisor has to reach.  So the
-callers ask this, and not C<assign>, which dies on such a bin.
+A guest of a hypervisor with no static adapter, so whose C<guests> bin offers
+nothing, gets no address from the pool.  It takes a lease on the NAT network of
+its hypervisor.  That is the case of a runner that builds throwaway guests,
+which nothing outside the hypervisor has to reach.  So the callers ask this,
+and not C<assign>, which dies on such a bin.
 
 =cut
 
@@ -645,12 +711,20 @@ sub offers {
     return @blocks ? 1 : 0;
 }
 
-=head2 assign($domain, $pool, $bin)
+=head2 assign($domain, $pool, $bin, $nic)
 
 Returns the address of C<$domain> in C<$bin> of C<$pool>.  C<$bin> defaults to
 C<guests>.  If the domain has no address there, this gives it the first free
-address of that bin.  If it has one, this returns that address and writes
-nothing.
+address of that bin.  If it has one, this returns that address.
+
+In the C<guests> bin, the address is on the bridge C<$nic>, out of its pool in
+C<nics>, and C<$nic> defaults to C<first_nic>, whose address is the address of
+the guest.  The row records the bridge, and whether it is that address, which
+this writes again when the order of C<static_nics> changed.  A domain whose
+address dates from before the database recorded bridges keeps it: the first
+time it asks for an address on the bridge whose pool holds that address, the
+row gets the bridge.  A pool without C<nics>, such as one that a test or a
+script makes, is one bridge with no name.
 
 For a bin with C<via>, a domain with no address there gets one only after the
 server is asked, as L</BINS> says.  If the server already gives the domain an
@@ -669,17 +743,23 @@ the address taken.
 =cut
 
 sub assign {
-    my ( $domain, $pool, $bin ) = @_;
+    my ( $domain, $pool, $bin, $nic ) = @_;
     $bin //= $GUESTS;
 
+    my $first = $pool->{first_nic};
+    my $guest = $bin eq $GUESTS;
+    $nic = $guest ? $nic // $first // q{} : q{};
+    my $main = !$guest || !defined $first || $nic eq $first ? 1 : 0;
+
     my %bins     = bins($pool);
-    my @pool_ips = pool_ips( $bins{$bin} // {} );
-    die "No [ip_pool] section or no IPs found in the $bin bin of the pool: cannot auto-assign IP for $domain\n"
+    my $conf     = $guest && $nic ne q{} && $pool->{nics} ? $pool->{nics}{$nic} : $bins{$bin};
+    my @pool_ips = pool_ips( $conf // {} );
+    die "No [ip_pool] section or no IPs found in the $bin bin of the pool" . ( $nic ne q{} ? " on $nic" : q{} ) . ": cannot auto-assign IP for $domain\n"
       unless @pool_ips;
 
     # The server is asked before the lock, because ssh can take seconds and
     # every other provision waits on the lock.
-    my $via     = $bins{$bin}{via};
+    my $via     = $conf->{via};
     my $ask     = defined $via && !held_by( $domain, $bin );
     my %clients = $ask ? via_clients($via) : ();
     my %in_bin  = map { $_ => 1 } @pool_ips;
@@ -691,20 +771,34 @@ sub assign {
     $db->do('BEGIN IMMEDIATE');
 
     my $chosen = eval {
-        my $held = held_by( $domain, $bin );
+        my $held = held_by( $domain, $bin, $nic );
+
+        # An address from before the database recorded bridges, in the pool of
+        # this one, is the address that the guest has on it.
+        my $old = !defined $held && $nic ne q{} ? held_by( $domain, $bin, q{} ) : undef;
+        if ( defined $old && $in_bin{$old} ) {
+            $db->do( "UPDATE ips SET nic = ? WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ''", undef, $nic, $domain, $bin );
+            $held = $old;
+        }
+
         if ($held) {
+            if ($guest) {
+                $db->do( "UPDATE ips SET main = CASE WHEN nic = ? THEN 1 ELSE 0 END WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $nic,    $domain, $bin ) if $main;
+                $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?",                       undef, $domain, $bin,    $nic ) unless $main;
+            }
             $db->do('COMMIT');
             return $held;
         }
 
-        note_clients( $db, $bin, $bins{$bin}, \%clients, $domain ) if $ask;
+        note_clients( $db, $bin, $conf, \%clients, $domain ) if $ask;
 
         my $taken = taken();
         my $own   = $clients{$domain};
         my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @pool_ips;
-        die "IP pool exhausted: no IPs available for $domain\n" unless $free;
+        die "IP pool exhausted: no IPs available for $domain" . ( $nic ne q{} ? " on $nic" : q{} ) . "\n" unless $free;
 
-        $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'domain', ?)", undef, $free, $domain, $bin );
+        $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin ) if $guest && $main;
+        $db->do( "INSERT INTO ips (ip, domain, kind, bin, nic, main) VALUES (?, ?, 'domain', ?, ?, ?)", undef, $free, $domain, $bin, $nic, $main );
         $db->do('COMMIT');
 
         return $free;
@@ -773,25 +867,26 @@ sub ensure_seeded {
 Records the address of each guest on each hypervisor.  It also reserves the
 addresses of the hypervisors, their gateways, and other machines that answer.
 Returns the number of addresses it recorded.  The pool and the gateway of each
-hypervisor come from its block, see C<guest_pools> and
-L<Trog::HV/configured_gateway>, and it dies as C<guest_pools> does.
+static adapter come from the block of its hypervisor, see C<guest_pools> and
+L<Trog::HV/nic_gateway($nic)>, and it dies as C<guest_pools> does.  Each row
+records the bridge whose pool holds the address.
 
 The list of guests comes from the hypervisors, not from the configuration.  A
 hypervisor reports what it runs, but somebody can edit a file.  The address
 of each guest comes from its own F<provision.conf>, which is what it was built
 with.
 
-It records an address only when it is in the C<guests> bin of the hypervisor
-that runs the guest.  C<assign> cannot give out an address outside the pool, so
-a row for one is noise.
+It records an address only when it is in a pool of the hypervisor that runs the
+guest.  C<assign> cannot give out an address outside the pools, so a row for one
+is noise.  The address in F<provision.conf> is the address of the guest, on the
+first of C<static_nics>.
 
 Another machine that answers is an address in the pool that answers a ping from
 the hypervisor, or that the neighbor table of its bridge holds as C<REACHABLE>,
 and that no guest holds.  Its name is C<insitu:> and its hardware address, or
 C<unknown> if the table has none.  An entry that is out of date reserves an
 address that is free.  That is the safe error, because the other error gives
-out an address that is in use.  A hypervisor that names no bridge device is not
-swept.
+out an address that is in use.  Each bridge of C<static_nics> is swept.
 
 =cut
 
@@ -809,12 +904,21 @@ sub seed {
         # this pool.  It is usually a cloud, which has no libvirt domain list.
         next if $hv->manages_addresses;
 
-        my %in_pool = map { $_ => 1 } pool_ips( $pools{$name} // {} );
+        # The bridge whose pool holds each address.  The pools of one hypervisor
+        # do not overlap: see guest_pools.
+        my $nics = $pools{$name} // {};
+        my %nic_of;
+        foreach my $nic ( sort keys %$nics ) {
+            $nic_of{$_} = $nic foreach pool_ips( $nics->{$nic} );
+        }
+        my $first = $hv->address_nic;
 
-        # The gateway goes first, so that its row names it as the gateway and not
-        # as one more machine that answered.
-        my $gateway = $hv->configured_gateway;
-        $recorded += reserve( $gateway, "gateway:$gateway" ) if defined $gateway && $in_pool{$gateway};
+        # Each gateway goes first, so that its row names it as the gateway and
+        # not as one more machine that answered.
+        foreach my $nic ( sort keys %$nics ) {
+            my $gateway = $hv->nic_gateway($nic);
+            $recorded += reserve( $gateway, "gateway:$gateway", $nic ) if defined $gateway && ( $nic_of{$gateway} // q{} ) eq $nic;
+        }
 
         # Once per hypervisor.  The marker at the end of this loop is written
         # only after the hypervisor answers everything, so a failure is retried.
@@ -823,10 +927,9 @@ sub seed {
         # The sweep goes first, because it fills the neighbor table.  libvirt
         # knows the bridged address of a guest only if the host spoke to it
         # lately.  It runs on the hypervisor, because this machine can be on a
-        # different network.  A hypervisor with no bridge device is not swept.
-        my $bridge = %in_pool && eval { $hv->bridge_device };
-        my $swept  = q{};
-        if ($bridge) {
+        # different network.
+        my $swept = q{};
+        foreach my $nic ( sort keys %$nics ) {
 
             # An answer to the ping is the main signal.  A REACHABLE entry in
             # the table is a second one, and the table also gives the hardware
@@ -835,10 +938,11 @@ sub seed {
             #
             # Do not quote each address.  They are numbers, and a quote inside
             # the script closes the quoting of the sh -c around it.
-            my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } sort keys %in_pool;
-            $script .= " wait; ip -4 neigh show dev $bridge";
+            my @mine   = grep { $nic_of{$_} eq $nic } sort keys %nic_of;
+            my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } @mine;
+            $script .= " wait; ip -4 neigh show dev $nic";
             ( my $quoted = $script ) =~ s/'/'\\''/g;
-            $swept = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
+            $swept .= ( $hv->capture_cmd("sudo sh -c '$quoted'") // q{} ) . "\n";
         }
 
         # STALE is not a signal.  It outlives the machine, so reserving it
@@ -850,7 +954,7 @@ sub seed {
         # knows that a guest exists, but not the address it was built with,
         # and the neighbor table misses a quiet guest and keeps the address of
         # a destroyed one.  No eval, on purpose: see ensure_seeded.
-        my @names = map { $_->get_name() } $hv->vmm->list_all_domains();
+        my @names = %nic_of ? map { $_->get_name() } $hv->vmm->list_all_domains() : ();
         if (@names) {
             my $dir    = $hv->domain_dir;
             my $script = join "\n", map {
@@ -859,7 +963,8 @@ sub seed {
             } @names;
 
             # Also ask libvirt for the address of each guest.  This finds a
-            # guest whose provision.conf is missing or cannot be read.
+            # guest whose provision.conf is missing or cannot be read, and the
+            # addresses of its other static adapters.
             #
             # This runs virsh on the hypervisor, not Sys::Virt from here.  The
             # ARP source reads the neighbor table of the client.  This machine
@@ -877,7 +982,8 @@ sub seed {
             # those addresses, not this pool.
             my @found = $said =~ m/^([^\t\n]+)\t(\d+(?:[.]\d+){3})$/mg;
             while ( my ( $domain, $ip ) = splice( @found, 0, 2 ) ) {
-                $recorded += record( $ip, $domain ) if $in_pool{$ip};
+                my $nic = $nic_of{$ip} // next;
+                $recorded += record( $ip, $domain, $nic, $nic eq ( $first // q{} ) );
             }
         }
 
@@ -887,14 +993,14 @@ sub seed {
         my $host   = eval { $hv->ssh_host };
         my $packed = $host   && Socket::inet_aton($host);
         my $ip     = $packed && Socket::inet_ntoa($packed);
-        $recorded += reserve( $ip, "hv:$name" ) if $ip && $in_pool{$ip};
+        $recorded += reserve( $ip, "hv:$name", $nic_of{$ip} ) if $ip && $nic_of{$ip};
 
         # Other machines that answer, for example a printer or a router.  An
-        # address in the pool that answers and that no guest holds belongs to
+        # address in a pool that answers and that no guest holds belongs to
         # some other machine, so it is reserved.
         my $already = taken();
-        foreach my $found ( grep { $in_pool{$_} && !$already->{$_} } sort keys %live ) {
-            $recorded += reserve( $found, 'insitu:' . ( $mac{$found} // 'unknown' ) );
+        foreach my $found ( grep { $nic_of{$_} && !$already->{$_} } sort keys %live ) {
+            $recorded += reserve( $found, 'insitu:' . ( $mac{$found} // 'unknown' ), $nic_of{$found} );
         }
 
         $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, "hv:$name" );

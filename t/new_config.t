@@ -63,11 +63,13 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
 
 # The resolvers, the gateway and the pool that the block of the hypervisor
 # names, which the local hypervisor of a test has no block for.  See
-# Trog::HV/configured_resolvers and Trog::HV/guest_pool.
+# Trog::HV/configured_resolvers and Trog::HV/nic_pool.
 my $hv_network = Test::MockModule->new('Trog::HV');
 $hv_network->redefine( configured_resolvers => sub { return ('192.0.2.254') } );
-$hv_network->redefine( configured_gateway   => sub { return '192.0.2.254' } );
-$hv_network->redefine( guest_pool           => sub { return { addresses => [ '192.0.2.1', '192.0.2.2' ] } } );
+$hv_network->redefine( static_nics          => sub { return ('br0') } );
+$hv_network->redefine( nic_gateway          => sub { return '192.0.2.254' } );
+$hv_network->redefine( nic_prefix_length    => sub { return 24 } );
+$hv_network->redefine( nic_pool             => sub { return { addresses => [ '192.0.2.1', '192.0.2.2' ] } } );
 
 # Provisioner::Cookbook reads the recipes, which are the program rather than its
 # data: has stats a .pm, and globals lists the directory to learn which _global

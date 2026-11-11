@@ -452,8 +452,9 @@ sub enrich {
 
     my @ours = @{ $opts{transfer_ips} // [] };
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
-    my %bins = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
-    my @pool = map { Provisioner::IPPool::pool_items( ( $bins{$Provisioner::IPPool::GUESTS} // {} )->{$_} ) } qw{cidr addresses};
+    my %bins   = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
+    my $guests = $bins{$Provisioner::IPPool::GUESTS} // {};
+    my @pool   = ( Provisioner::IPPool::pool_items( $guests->{cidr} ), Provisioner::IPPool::addresses_of($guests) );
     $opts{api_allowed} = [ uniq( qw{127.0.0.1 ::1}, @ours, @pool, sort( values %{ $opts{ipmap} // {} } ), @{ $opts{api_allow} } ) ];
 
     # Nobody can ask a server on loopback, and the zone above names this one.

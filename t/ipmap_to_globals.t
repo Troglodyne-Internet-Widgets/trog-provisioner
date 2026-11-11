@@ -81,8 +81,8 @@ subtest 'every block lands where the reader of it now looks' => sub {
     ok( !exists $global->{gateway}, 'and so does the gateway' );
     like( $said, qr/\[global\][ ]gateway/, 'and the report names it' );
     ok( !exists $global->{ip_pool}, 'and so does the pool' );
-    like( $said, qr/\[ip_pool\],[ ]which[ ]is[ ]pool_addresses[ ]and[ ]pool_cidr/, 'and the report says what it is now' );
-    like( $said, qr/in[ ]the[ ]block[ ]of[ ]each[ ]hypervisor/,                    'and where' );
+    like( $said, qr/which[ ]is[ ]ip_pool_NIC[ ]and[ ]ip_addresses_NIC/, 'and the report says what it is now' );
+    like( $said, qr/in[ ]the[ ]block[ ]of[ ]each[ ]hypervisor/,         'and where' );
 
     ok( !exists $global->{nameservers}, 'the nameservers stay behind' );
     like( $said, qr/\[nameservers\],[ ]because/,           'and the report names them' );

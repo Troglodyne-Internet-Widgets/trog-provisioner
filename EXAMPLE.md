@@ -32,13 +32,17 @@ The administrator's public keys are not in here.  They are one per line in
 [hv1]
 libvirt_uri = qemu+ssh://hv1.test.test/system
 resolvers   = 192.0.2.254, 1.1.1.1
-gateway     = 192.0.2.254
-pool_cidr   = 192.0.2.0/26
+dhcp_nics   = virbr0
+static_nics = br0
+gateway_br0 = 192.0.2.254
+ip_pool_br0 = 192.0.2.0/26
+prefix_br0  = 24
 ```
 
-The guests of `hv1` resolve names through `resolvers`, route through `gateway`,
-and get their static addresses from `pool_cidr`.  `docs/CONFIGURATION.md` has
-the rest of the keys of a block.
+The guests of `hv1` resolve names through `resolvers`, take a lease on
+`virbr0`, route through `gateway_br0`, and get their static addresses on `br0`
+from `ip_pool_br0`, each with `prefix_br0`, the prefix of the network of `br0`.
+`docs/CONFIGURATION.md` has the rest of the keys of a block.
 
 ### recipes.yaml, what the guests are made of
 

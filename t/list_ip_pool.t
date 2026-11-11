@@ -48,16 +48,17 @@ my $pool = Test::MockModule->new('Provisioner::IPPool');
 $pool->redefine( ensure_seeded => sub { return 0 } );
 
 # Two hypervisors on one network, and one on another.
-$pool->redefine( guest_pools => sub { return ( hv1 => { addresses => ['192.0.2.10'] }, hv2 => { addresses => ['192.0.2.10'] }, far => { cidr => ['198.51.100.0/30'] } ) } );
+$pool->redefine( guest_pools => sub { return ( hv1 => { br0 => { addresses => ['192.0.2.10'] } }, hv2 => { br0 => { addresses => ['192.0.2.10'] } }, far => { br0 => { cidr => ['198.51.100.0/30'] }, virbr1 => { cidr => ['10.0.0.0/30'] } } ) } );
 
-subtest 'each network has a guests bin, named for the hypervisors on it' => sub {
+subtest 'each pool of a bridge has a guests bin, named for the bridge and the hypervisors on it' => sub {
     $pool->redefine( via_clients => sub { return () } );
 
     my ( $out, $err, $rc ) = capture { Provisioner::Bin::list_ip_pool::main() };
     is( $rc, 0, 'it exits 0' ) or diag $err;
-    like( $out, qr/^Bin[ ]guests:hv1,hv2:[ ]+1[ ]total/m, 'the hypervisors that share a pool share its bin' )           or diag $out;
-    like( $out, qr/^Bin[ ]guests:far:[ ]+2[ ]total/m,     'and the other network has its own, with its own addresses' ) or diag $out;
-    like( $out, qr/^Bin[ ]vpnclients:/m,                  'beside the bins of _global' );
+    like( $out, qr/^Bin[ ]guests:br0:hv1,hv2:[ ]+1[ ]total/m, 'the hypervisors that share a pool share its bin' )           or diag $out;
+    like( $out, qr/^Bin[ ]guests:br0:far:[ ]+2[ ]total/m,     'and the other network has its own, with its own addresses' ) or diag $out;
+    like( $out, qr/^Bin[ ]guests:virbr1:far:[ ]+2[ ]total/m,  'and so does each other bridge, by its name' )                or diag $out;
+    like( $out, qr/^Bin[ ]vpnclients:/m,                      'beside the bins of _global' );
 };
 
 subtest 'the server of a bin with via is asked what it gave out' => sub {

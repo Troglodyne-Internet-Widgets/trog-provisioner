@@ -44,8 +44,10 @@ each block any name you like:
 
     [hv1]
     libvirt_uri    = qemu+ssh://root@hv1.example.test/system
-    bridge_device  = br0
-    virbr_device   = virbr0
+    dhcp_nics      = virbr0
+    static_nics    = br0
+    ip_pool_br0    = 192.0.2.64/26
+    gateway_br0    = 192.0.2.1
     pool_path      = /opt/terraform/disks
     pool_name      = tf_disks
     partition      = /machine/hv1
@@ -235,7 +237,8 @@ sub hypervisor {
 
 Returns the backend class that a block describes, without building it.  Dies if
 the file does not name the block, if the block has the key of more than one kind
-of hypervisor, or if it has none of them.
+of hypervisor, or if it has none of them.  Also dies if it has a key of
+L<Trog::HV/replaced_keys>, with what to name instead.
 
 F<bin/preflight> asks this of every block, so a file that cannot be built on is
 reported before a run rather than when something reaches that block.  Which is
@@ -259,6 +262,10 @@ sub backend_of {
       if @has > 1;
     die "[$name] in " . $self->{path} . ' has none of ' . join( ', ', @markers ) . ", so there is nothing to build on.\n"
       unless @has;
+
+    my %replaced = Trog::HV->replaced_keys($block);
+    die "[$name] in " . $self->{path} . ' names ' . join( ', ', map { "$_, which is now $replaced{$_}" } sort keys %replaced ) . ".  See The adapters of a guest in docs/CONFIGURATION.md.\n"
+      if %replaced;
 
     return Trog::HV->backend_for( Trog::HV->options_from_block($block) );
 }

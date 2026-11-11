@@ -77,8 +77,11 @@ my %HYPERVISORS = (
     hv1 => {
         libvirt_uri => 'qemu+ssh://runner@hv1.test.test:2222/system',
         resolvers   => [ '192.0.2.254', '9.9.9.9' ],
-        gateway     => '192.0.2.254',
-        pool_cidr   => ['192.0.2.64/27'],
+        dhcp_nics   => ['virbr0'],
+        static_nics => ['br0'],
+        gateway_br0 => '192.0.2.254',
+        prefix_br0  => 24,
+        ip_pool_br0 => ['192.0.2.64/27'],
         pool_path   => '/srv/vm-disks/runner',
         pool_name   => 'runner_disks',
         partition   => '/machine/runner',
@@ -183,8 +186,9 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     like( $conf, qr/^\[hv1\]$/m, 'one block per hypervisor' );
     my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
     is_deeply( [ $hv1->configured_resolvers ], [ '192.0.2.254', '9.9.9.9' ], 'with the resolvers that the runner reads back' );
-    is( $hv1->configured_gateway, '192.0.2.254', 'the gateway of its guests' );
-    is_deeply( $hv1->guest_pool, { cidr => ['192.0.2.64/27'] }, 'and their pool, without the addresses it did not name' );
+    is_deeply( [ $hv1->nic_bridges ],          [qw{virbr0 br0}],             'the adapters of its guests' );
+    is( $hv1->nic_gateway('br0'), '192.0.2.254', 'the gateway of the static one' );
+    is_deeply( $hv1->nic_pool('br0'), { cidr => ['192.0.2.64/27'] }, 'and its pool, without the addresses it did not name' );
     like( $conf, qr/^pool_path\s+=[ ]\/srv\/vm-disks\/runner$/m, 'the pool it is confined to' );
     like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,            'named as well as pathed, or libvirt ignores the path' );
     like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,       'and the slice its guests land in' );
@@ -203,6 +207,22 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     is( $got{hypervisors}{hv1}{ssh_user}, 'runner',        'the user' );
     is( $got{hypervisors}{hv1}{ssh_port}, 2222,            'and the port, when it is not 22' );
 
+};
+
+subtest 'the adapters of the guests of the runner reach its hypervisors.conf' => sub {
+    my %guests = ( %SESSION, dhcp_nics => ['virbr0'], static_nics => ['virbr1'], ip_pool_virbr1 => ['10.0.0.0/25'], ip_addresses_virbr1 => ['10.0.0.200'], gateway_virbr1 => '10.0.0.1', prefix_virbr1 => 24 );
+    delete @guests{qw{ip_pool_br0 gateway_br0 prefix_br0}};
+    my ($dir) = built( hypervisors => { hv1 => \%guests } );
+
+    my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
+    is_deeply( [ $hv1->nic_bridges ], [qw{virbr0 virbr1}], 'read back as the runner reads it, an adapter on each bridge' );
+
+    is_deeply( $hv1->nic_pool('virbr1'), { cidr => ['10.0.0.0/25'], addresses => ['10.0.0.200'] }, 'with the pool of each static adapter, by a key that the schema matches by its start' );
+    is( $hv1->nic_gateway('virbr1'),       '10.0.0.1', 'and its gateway' );
+    is( $hv1->nic_prefix_length('virbr1'), 24,         'and the prefix of its network' );
+
+    like( exception { built( hypervisors => { hv1 => { %guests, static_nics    => [qw{virbr1 virbr1}] } } ) }, qr/static_nics/,    'a bridge named twice is refused here, not on the runner' );
+    like( exception { built( hypervisors => { hv1 => { %guests, gateway_virbr1 => 'gw.test.test' } } ) },      qr/gateway_virbr1/, 'and so is a gateway that is not an address' );
 };
 
 subtest 'a hypervisor we could not get a shell on is refused here, not on the guest' => sub {
@@ -228,7 +248,7 @@ subtest 'no fleet is a legitimate answer, and the runner is its own hypervisor' 
     ok( $local, 'the runner gets a block for its own libvirt' ) or return;
     is( $local->uri, 'qemu:///system', 'which is this machine' );
     is_deeply( [ $local->configured_resolvers ], [ '192.0.2.53', '1.1.1.1' ], 'with the resolvers of the runner, which its guests reach through its NAT' );
-    is_deeply( $local->guest_pool,               {},                          'and no pool, so its guests take a lease there' );
+    is_deeply( [ $local->static_nics ],          [],                          'and no static adapter, so its guests take a lease there' );
     like( $recipe->render(%$vars), qr/hypervisors\.conf/, 'and the fragment installs it' );
 };
 

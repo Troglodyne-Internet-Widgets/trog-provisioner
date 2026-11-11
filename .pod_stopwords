@@ -257,6 +257,7 @@ dotfiles
 dryrun
 DUID
 setuid
+subnets
 uid
 virtiofs
 dzil
@@ -359,6 +360,8 @@ netplan
 nginx
 nginxdirindex
 nginxproxy
+nic
+nics
 nodejs
 noeviction
 nonreusable

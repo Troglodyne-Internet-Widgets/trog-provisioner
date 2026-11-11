@@ -31,9 +31,10 @@ of each bin that are assigned and the IPs that are available.  With C<--json>,
 it prints one object, with a key for each bin.  L<Provisioner::IPPool/BINS> says
 what a bin is.
 
-Each network has a C<guests> bin of its own, which the blocks of its
-hypervisors in F<hypervisors.conf> name.  It shows as C<guests:> and the names
-of those blocks, for example C<guests:hv1,hv2>.
+Each pool of a bridge of C<static_nics> is a C<guests> bin of its own, which
+the blocks of the hypervisors in F<hypervisors.conf> on that network name.  It
+shows as C<guests:>, the bridge, and the names of those blocks, for example
+C<guests:br0:hv1,hv2>.
 
 For a bin with C<via>, it first asks that server which addresses it gave to its
 clients, because a client can get one by hand.  That needs the key of the
@@ -42,17 +43,18 @@ asked, it warns and shows that bin as the database has it.
 
 =head2 Where the pool is written
 
-The block of a hypervisor in F<hypervisors.conf> names the C<guests> bin of its
-network, with its gateway:
+The block of a hypervisor in F<hypervisors.conf> names the pool of each bridge
+of C<static_nics>, with its gateway:
 
     [hv1]
-    gateway        = 192.0.2.254
+    static_nics      = br0
+    gateway_br0      = 192.0.2.254
 
     # Every address of the pool.
-    pool_addresses = 192.0.2.10, 192.0.2.11, 192.0.2.12
+    ip_addresses_br0 = 192.0.2.10, 192.0.2.11, 192.0.2.12
 
     # Or one or more CIDR blocks.
-    pool_cidr      = 192.0.2.0/24, 10.0.0.0/28
+    ip_pool_br0      = 192.0.2.0/24, 10.0.0.0/28
 
 You can use both keys.  A bin is the addresses list and the addresses of each
 CIDR block together.  The other bins belong to no hypervisor, and the
@@ -104,14 +106,16 @@ No hypervisor in hypervisors.conf names a pool, and $rfile names no bins.
 Name the pool of a hypervisor in its block, like:
 
   [hv1]
-  gateway        = 192.0.2.254
-  pool_addresses = 192.0.2.10, 192.0.2.11, 192.0.2.12
+  static_nics      = br0
+  gateway_br0      = 192.0.2.254
+  ip_addresses_br0 = 192.0.2.10, 192.0.2.11, 192.0.2.12
 
   OR
 
   [hv1]
-  gateway        = 192.0.2.254
-  pool_cidr      = 192.0.2.0/24
+  static_nics      = br0
+  gateway_br0      = 192.0.2.254
+  ip_pool_br0      = 192.0.2.0/24
 
 GUIDANCE
         ## use critic
@@ -170,21 +174,25 @@ GUIDANCE
 
 =head2 %bins = guest_bins()
 
-The C<guests> bin of each network, as L<Provisioner::IPPool/guest_pools> finds
-them, by its label: C<guests:> and the names of the hypervisors that share it.
+The C<guests> bin of each pool of a bridge, as L<Provisioner::IPPool/guest_pools>
+finds them, by its label: C<guests:>, the bridge, and the names of the
+hypervisors that share it.
 
 =cut
 
 sub guest_bins {
     my %pools = Provisioner::IPPool::guest_pools( Trog::Hypervisors->load( Trog::Hypervisors->default_path() ) );
 
-    my %by_network;
+    my %by_pool;
     foreach my $name ( sort keys %pools ) {
-        my $network = Provisioner::IPPool::network_of( $pools{$name} );
-        push( @{ $by_network{$network}{names} }, $name );
-        $by_network{$network}{pool} = $pools{$name};
+        foreach my $nic ( sort keys %{ $pools{$name} } ) {
+            my $key = "$nic:" . Provisioner::IPPool::network_of( $pools{$name}{$nic} );
+            push( @{ $by_pool{$key}{names} }, $name );
+            $by_pool{$key}{nic}  = $nic;
+            $by_pool{$key}{pool} = $pools{$name}{$nic};
+        }
     }
-    return map { "$Provisioner::IPPool::GUESTS:" . join( q{,}, @{ $_->{names} } ) => $_->{pool} } values %by_network;
+    return map { "$Provisioner::IPPool::GUESTS:$_->{nic}:" . join( q{,}, @{ $_->{names} } ) => $_->{pool} } values %by_pool;
 }
 
 exit main(@ARGV) unless caller;
