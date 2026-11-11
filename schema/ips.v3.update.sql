@@ -4,9 +4,9 @@
 -- ips becomes a view of it that has the columns that ips had, with triggers
 -- that write through it.  So the code that reads and writes ips does not change,
 -- but for one thing: SQLite counts no row that a trigger changes, so a write
--- through ips reports 0 rows.  Provisioner::IPPool counts the rows of ips
--- instead where it needs the number.  Trog::SQLite runs this once, in a
--- transaction.
+-- through ips reports 0 rows.  Provisioner::IPPool counts the rows of
+-- addresses that SQLite reports to its update hook instead, where it needs the
+-- number.  Trog::SQLite runs this once, in a transaction.
 
 -- The kinds are a closed list, so a kind that is not here is refused.
 CREATE TABLE address_kinds (

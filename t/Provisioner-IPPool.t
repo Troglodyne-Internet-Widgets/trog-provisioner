@@ -494,6 +494,7 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
 
     is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br0}),                   1, 'a write through the view counts its row' );
     is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br0}),                   0, 'and one that it ignores counts none' );
+    is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br7}),                   0, 'also when the write it ignored added the name of a new bridge' );
     is( $db->selectrow_array(q{SELECT count(*) FROM address_nics WHERE name = 'br0'}), 1, 'without a second row for the bridge' );
     Provisioner::IPPool::record(qw{10.9.9.20 b.test br9});
     is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '10.9.9.20'}), 'br9', 'a bridge that it has not seen is added' );
@@ -502,8 +503,22 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     is( Provisioner::IPPool::clear_reservations(),                           2,     'and a delete through it counts what it took away' );
 
     like( exception { $db->do(q{INSERT INTO ips (ip, domain, kind) VALUES ('10.9.9.30', 'c.test', 'borrowed')}) }, qr/ips:[ ]no[ ]such[ ]kind/, 'a kind that is not in the list is refused' );
-    like( exception { $db->do(q{UPDATE ips SET kind = 'borrowed' WHERE ip = '10.9.9.10'}) },                       qr/ips:[ ]no[ ]such[ ]kind/, 'by an update too' );
-    like( exception { $db->do(q{INSERT INTO ips (ip, domain) VALUES ('10.9.9.10', 'c.test')}) },                   qr/UNIQUE/,                  'and an address that is taken still is' );
+
+    like( exception { $db->do(q{UPDATE ips SET kind = 'borrowed' WHERE ip = '10.9.9.10'}) },     qr/ips:[ ]no[ ]such[ ]kind/, 'by an update too' );
+    like( exception { $db->do(q{INSERT INTO ips (ip, domain) VALUES ('10.9.9.10', 'c.test')}) }, qr/UNIQUE/,                  'and an address that is taken still is' );
+
+    # The handle is shared, so a hook that somebody else set must survive the count.
+    my $theirs = sub { return };
+    $db->sqlite_update_hook($theirs);
+    Provisioner::IPPool::reserve(qw{10.9.9.3 hv:elsewhere br0});
+    is( $db->sqlite_update_hook(undef), $theirs, 'the update hook that was there before a count is there after it' );
+
+    # Without its trigger, a write to the view fails, which is the last thing
+    # that this database is asked.
+    $db->do('DROP TRIGGER ips_insert');
+    $db->sqlite_update_hook($theirs);
+    like( exception { Provisioner::IPPool::reserve(qw{10.9.9.4 hv:elsewhere br0}) }, qr/view/, 'a write that fails dies' );
+    is( $db->sqlite_update_hook(undef), $theirs, 'and puts the hook back too' );
 };
 
 {
