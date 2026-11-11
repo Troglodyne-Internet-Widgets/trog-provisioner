@@ -132,6 +132,19 @@ subtest 'where the copy lands follows from the upstream' => sub {
     );
 };
 
+subtest 'the user info and the default port of an upstream are not the host' => sub {
+
+    # apt-mirror leaves the user info out of its spool path, so mirror_root
+    # must too, or the vhost serves a directory that is empty.
+    my ($dir) = generated( upstream => 'http://user@test.test:8080/ubuntu', spool => '/srv/mirror' );
+    like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias[ ]/srv/mirror/mirror/test\.test:8080/ubuntu/;}, '$user is not in the path, and the port that the URL gives is' );
+
+    ($dir) = generated( upstream => 'http://test.test:80/ubuntu/', spool => '/srv/mirror' );
+    like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias[ ]/srv/mirror/mirror/test\.test/ubuntu/;}, 'and a default port is not added to a URL that has none, nor a trailing slash kept' );
+
+    like( exception { generated( upstream => 'http://test.test' ) }, qr/upstream[ ]must[ ]be[ ]a[ ]URL/, 'a URL with no path is refused' );
+};
+
 subtest 'nothing depends on it, and it salvages nothing' => sub {
     my ( undef, undef, $recipe ) = generated();
 

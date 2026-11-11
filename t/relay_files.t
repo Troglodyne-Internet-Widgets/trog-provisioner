@@ -101,4 +101,22 @@ subtest 'a ban key runs relay_ban for its domain and set, from its guest alone' 
     is( exception { Trog::RelayFiles::revoke_ban_key( $dir, 'web.test.test' ) }, undef, 'and a key that is gone already is no error' );
 };
 
+subtest 'dns_name: a name of the DNS in lower case, with no empty or edge-hyphen label' => sub {
+    foreach my $good (qw{web.test.test a-b.test x1.y2.test}) {
+        is( Trog::RelayFiles::dns_name($good), 1, "$good is a name" );
+    }
+    foreach my $bad ( qw{-a.test a-.test a..test a.-.test a.test. A.test test a_b.test}, "a.test\n", q{}, undef ) {
+        is( Trog::RelayFiles::dns_name($bad), 0, ( $bad // 'undef' ) =~ s/\n/\\n/gr . ' is not' );
+    }
+};
+
+subtest 'upstream: an IPv4 address and a port of 1 to 65535' => sub {
+    foreach my $good (qw{192.0.2.10:8443 0.0.0.0:1 255.255.255.255:65535}) {
+        is( Trog::RelayFiles::upstream($good), 1, "$good is an upstream" );
+    }
+    foreach my $bad ( qw{999.0.2.1:80 192.0.2.1:99999 192.0.2.1:65536 192.0.2.1:0 192.0.2.1 192.0.2.1: 192.0.2:80 web.test:80}, "192.0.2.1:80\n", undef ) {
+        is( Trog::RelayFiles::upstream($bad), 0, ( $bad // 'undef' ) =~ s/\n/\\n/gr . ' is not' );
+    }
+};
+
 done_testing;

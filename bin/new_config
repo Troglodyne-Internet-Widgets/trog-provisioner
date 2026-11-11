@@ -1495,12 +1495,11 @@ my sub salvage_mtimes ( $guest, $watched ) {
     return () unless @$watched;
 
     my $script = join "\n", map {
-        ( my $q = $_ ) =~ s/'/'\\''/g;
-        "printf '%s\\t%s\\n' '$q' \"\$(find '$q' -printf '%T@\\n' 2>/dev/null | sort -rn | head -1)\""
+        my $q = Trog::Utils::shell_quote($_);
+        "printf '%s\\t%s\\n' $q \"\$(find $q -printf '%T@\\n' 2>/dev/null | sort -rn | head -1)\""
     } @$watched;
 
-    ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
+    my $said = $guest->capture_cmd( 'sudo sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
 
     my %mtime;
     foreach my $line ( split m/\n/, $said ) {

@@ -29,9 +29,13 @@ die "usage: $0 DIR [USER]\n" unless defined $dir;
 
 my $sandbox = File::Spec->rel2abs( File::Basename::dirname($0) ) . '/rsyncd_sandbox';
 
-# The same as $GUEST_NAME and $GUEST_DIR in Trog::Local.  ASCII only, under
-# /a, because each goes into a key line unquoted.
-my $name_re = qr/\A[[:alnum:]][[:alnum:].-]*\z/a;
+# The same as guest_name and $GUEST_DIR in Trog::Local.  ASCII only, under
+# /a, because each goes into a key line unquoted.  The name is written out,
+# where Trog::Local calls is_domain, because the system perl runs this as
+# nobody and loads nothing outside the core.  It is two labels or more, each of
+# letters, digits and hyphens, with no hyphen at either end of a label.
+my $label   = qr/[[:alnum:]](?:[[:alnum:]-]*[[:alnum:]])?/a;
+my $name_re = qr/\A$label(?:[.]$label)+\z/a;
 my $dir_re  = qr{\A/[[:alnum:]._/+-]+\z}a;
 
 # One key of a type that a guest has, and its comment, which is dropped.

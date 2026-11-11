@@ -23,6 +23,7 @@ use Provisioner::IPPool();
 use Provisioner::Cookbook();
 use Trog::Credentials();
 use Trog::Hypervisors();
+use Trog::Utils();
 
 =head1 USAGE
 
@@ -174,8 +175,8 @@ for example because the connection failed.
 
 sub as_root {
     my ( $machine, $command ) = @_;
-    ( my $quoted = $command ) =~ s/'/'\\''/g;
-    my $out    = $machine->capture_cmd("sudo sh -c '$quoted; echo \"check-edge-status=\$?\"'") // q{};
+    my $quoted = Trog::Utils::shell_quote("$command; echo \"check-edge-status=\$?\"");
+    my $out    = $machine->capture_cmd("sudo sh -c $quoted") // q{};
     my $status = $out =~ s/check-edge-status=(\d+)\s*\z//s ? $1 : undef;
     return ( $out, $status );
 }

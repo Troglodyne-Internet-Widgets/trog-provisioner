@@ -291,4 +291,13 @@ subtest 'it takes nothing but names of the DNS' => sub {
     like( ( against( sub { return ( q{}, 1 ) }, 'grant', $ZONE, $CLIENT ) )[2],    qr/usage/, 'and grant needs a name' );
 };
 
+subtest 'dns_name: a name of the DNS in lower case, with no empty or edge-hyphen label' => sub {
+    foreach my $good (qw{web.test.test a-b.test x1.y2.test}) {
+        is( Trog::PdnsClient::dns_name($good), 1, "$good is a name" );
+    }
+    foreach my $bad ( qw{-a.test a-.test a..test a.-.test a.test. A.test test a_b.test}, "a.test\n", q{}, undef ) {
+        is( Trog::PdnsClient::dns_name($bad), 0, ( $bad // 'undef' ) =~ s/\n/\\n/gr . ' is not' );
+    }
+};
+
 done_testing();

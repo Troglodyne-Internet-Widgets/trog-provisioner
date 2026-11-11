@@ -61,6 +61,10 @@ subtest 'and nothing that a writer of the directory adds gets more' => sub {
         'type.test.test'    => "/bogus/d\nssh-dss AAAA\n",
         '.hidden'           => "/bogus/d\n$KEY\n",
         'not_a_name'        => "/bogus/d\n$KEY\n",
+        'a..test'           => "/bogus/d\n$KEY\n",
+        'a-.test'           => "/bogus/d\n$KEY\n",
+        '-a.test'           => "/bogus/d\n$KEY\n",
+        'a.-.test'          => "/bogus/d\n$KEY\n",
     );
     is( $rc, 0, 'it exits 0, because sshd still has the authorized_keys of the account to read' );
     is_deeply( $lines, [], 'and lets none of them in: options, a quote or a space in the path, a relative path, a second key, no key, a type it does not know, or a file that is not named for a domain' );

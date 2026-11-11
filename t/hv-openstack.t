@@ -465,6 +465,23 @@ subtest 'the address we can actually reach' => sub {
       'as is one that is not there';
 };
 
+subtest 'an octet above 255 is not an IPv4 address' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new(
+        networks => [ { name => 'public', 'router:external' => 1 } ],
+        servers  => [
+            {
+                id        => 'a',
+                name      => 'bogus.example.com',
+                status    => 'ACTIVE',
+                addresses => { public => [ { addr => '1234.0.2.1', 'OS-EXT-IPS:type' => 'floating' }, { addr => '10.2.65.134', 'OS-EXT-IPS:type' => 'fixed' } ] },
+            },
+        ]
+    );
+
+    is $hv->guest_ssh_ip( conf_for('bogus.example.com') ), '10.2.65.134', 'the address that is one is used, and the other is passed over';
+};
+
 subtest 'snapshots live in glance, so the guest is in the name' => sub {
     my $hv = cloud();
     $FAKE = Test::FakeCloud->new(

@@ -19,7 +19,7 @@ Provisioner::Recipe::Ubuntu::pdns - Ubuntu's C<deps> and archive for L<Provision
 =cut
 
 sub deps {
-    return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libconfig-simple-perl libnet-dns-perl libjson-perl};
+    return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libconfig-simple-perl libnet-dns-perl libjson-perl libdata-validate-domain-perl};
 }
 
 =head2 @sources = $recipe->package_sources(%opts)

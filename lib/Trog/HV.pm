@@ -23,6 +23,7 @@ use YAML::XS();
 use File::Which();
 use Time::Piece();
 use List::Util qw{any uniq};
+use Module::Runtime();
 use Net::CIDR();
 use Net::IP();
 use Provisioner::Vars();
@@ -274,8 +275,7 @@ sub backends {
     # Loaded with require here, not with use at the top: each backend is a
     # subclass of this class, so a load at compile time makes a cycle.
     foreach my $backend (@backends) {
-        my $path = $backend =~ s{::}{/}gr;
-        require "$path.pm";    ## no critic (Modules::RequireBarewordIncludes)
+        Module::Runtime::require_module($backend);
     }
 
     return @backends;
@@ -344,10 +344,8 @@ sub require_client {
     my ($self) = @_;
 
     my ( $module, $want ) = $self->client_module;
-    my $path = ( $module =~ s{::}{/}gr ) . '.pm';
-
     my $loaded = eval {
-        require $path;
+        Module::Runtime::require_module($module);
         $module->VERSION($want) if defined $want;
         1;
     };

@@ -172,7 +172,10 @@ subtest 'the key of a guest is a file of its own, which sshd can read' => sub {
     is( File::Slurper::read_text($file), "/bogus/domains/vm.test.test\nssh-rsa AAAA vm\n", 'with the domain directory, and then the key' );
     is( ( stat $file )[2] & oct('0777'), oct('0644'),                                      'and everybody can read it, whatever the umask of the writer, because sshd reads it as nobody' );
 
-    like( exception { $this_machine->authorize_guest_key( '../escape',    '/bogus/d',              'ssh-rsa AAAA' ) }, qr/not[ ]a[ ]domain[ ]name/,          'a name that is not a domain is refused' );
+    like( exception { $this_machine->authorize_guest_key( '../escape', '/bogus/d', 'ssh-rsa AAAA' ) }, qr/not[ ]a[ ]domain[ ]name/, 'a name that is not a domain is refused' );
+    foreach my $bad (qw{a..test a-.test -a.test a.-.test a.test.}) {
+        like( exception { $this_machine->authorize_guest_key( $bad, '/bogus/d', 'ssh-rsa AAAA' ) }, qr/not[ ]a[ ]domain[ ]name/, "$bad is refused, as is every name with an empty label or a hyphen at the edge of one" );
+    }
     like( exception { $this_machine->authorize_guest_key( 'vm.test.test', '/bogus/d",command="sh', 'ssh-rsa AAAA' ) }, qr/must[ ]be[ ]an[ ]absolute[ ]path/, 'and so is a directory that a key line cannot hold' );
 
     is( $this_machine->revoke_guest_key('vm.test.test'), 1, 'revoking it' );

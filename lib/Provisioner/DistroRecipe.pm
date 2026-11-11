@@ -12,6 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 use Provisioner::Packager();
 use Provisioner::Utils();
+use Trog::Utils();
 
 use Scalar::Util();
 
@@ -395,7 +396,7 @@ sub cache_address {
 
     my $domain = $opts{domain} // q{};
     my $cache  = $opts{cache}  // q{};
-    return $cache if $cache =~ m/\A(?:\d{1,3}\.){3}\d{1,3}\z/;
+    return $cache if Trog::Utils::is_ipv4($cache);
 
     my ( $kind, $value ) = Provisioner::Utils::fleet_address( $cache, domain => $domain, ipmap => $opts{ipmap} );
     return q{}    if $kind eq 'none';

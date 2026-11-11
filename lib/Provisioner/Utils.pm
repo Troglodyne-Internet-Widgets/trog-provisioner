@@ -268,7 +268,7 @@ sub fleet_address {
 
     # Look for a scheme, not for dots.  A host name has dots too, and only a
     # scheme says how to connect.
-    return ( url => $name ) if $name =~ m{\A[[:alpha:]][[:alnum:]+.-]*://};
+    return ( url => $name ) if $name =~ m{\A$URI::scheme_re://};
 
     return ( self => q{} ) if $name eq ( $opts{domain} // q{} );
 

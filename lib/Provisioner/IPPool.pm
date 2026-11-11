@@ -21,6 +21,7 @@ use Provisioner::Utils();
 use Trog::Config();
 use Trog::SQLite();
 use Trog::Hypervisors();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -645,8 +646,8 @@ sub via_clients {
     # capture_cmd gives no exit status, so the last line says that the
     # command finished.  The stderr goes, because sudo runs the command in a
     # pty that carries it along with stdout.
-    ( my $quoted = "exec 2>/dev/null; $command && echo END" ) =~ s/'/'\\''/g;
-    my $said = $guest->capture_cmd("sudo -n sh -c '$quoted'") // q{};
+    my $quoted = Trog::Utils::shell_quote("exec 2>/dev/null; $command && echo END");
+    my $said   = $guest->capture_cmd("sudo -n sh -c $quoted") // q{};
     die "$via did not say which addresses its VPN clients have.  Run $command there to see why.\n"
       unless $said =~ s/^END\n?\z//m;
 
@@ -962,8 +963,7 @@ sub seed {
             my @mine   = grep { $nic_of{$_} eq $nic } sort keys %nic_of;
             my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } @mine;
             $script .= " wait; ip -4 neigh show dev $nic";
-            ( my $quoted = $script ) =~ s/'/'\\''/g;
-            $swept .= ( $hv->capture_cmd("sudo sh -c '$quoted'") // q{} ) . "\n";
+            $swept  .= ( $hv->capture_cmd( 'sudo sh -c ' . Trog::Utils::shell_quote($script) ) // q{} ) . "\n";
         }
 
         # STALE is not a signal.  It outlives the machine, so reserving it
@@ -979,8 +979,8 @@ sub seed {
         if (@names) {
             my $dir    = $hv->domain_dir;
             my $script = join "\n", map {
-                ( my $q = $_ ) =~ s/'/'\\''/g;
-                "printf '%s\\t%s\\n' '$q' \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' '$dir/$q/provision.conf' 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
+                my ( $q, $conf ) = map { Trog::Utils::shell_quote($_) } $_, "$dir/$_/provision.conf";
+                "printf '%s\\t%s\\n' $q \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' $conf 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
             } @names;
 
             # Also ask libvirt for the address of each guest.  This finds a
@@ -992,12 +992,11 @@ sub seed {
             # is not on the bridge of the guests, so from here it reports only
             # the NAT address.
             $script .= "\n" . join "\n", map {
-                ( my $q = $_ ) =~ s/'/'\\''/g;
-                "virsh domifaddr '$q' --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$q\t|\"";
+                my $q = Trog::Utils::shell_quote($_);
+                "virsh domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
             } @names;
 
-            ( my $quoted = $script ) =~ s/'/'\\''/g;
-            my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
+            my $said = $hv->capture_cmd( 'sudo sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
 
             # A guest also answers on the NAT bridge, and libvirt gives out
             # those addresses, not this pool.

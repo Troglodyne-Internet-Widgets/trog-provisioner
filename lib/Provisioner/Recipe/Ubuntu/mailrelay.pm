@@ -21,7 +21,7 @@ Provisioner::Recipe::Ubuntu::mailrelay - Ubuntu's C<deps> and C<dep_conflicts> f
 # milter a message.  templates/files/milter_client.tt installs milterprobe.
 # The stream module of nginx passes the mail clients, and ipset holds the bans.
 sub deps {
-    return qw{postfix dovecot-core libcryptx-perl postfix-policyd-spf-python opendkim opendmarc libcpanel-json-xs-perl libnginx-mod-stream ipset};
+    return qw{postfix dovecot-core libcryptx-perl postfix-policyd-spf-python opendkim opendmarc libcpanel-json-xs-perl libnginx-mod-stream ipset libdata-validate-domain-perl};
 }
 
 # The relay is postfix, which conflicts with the sendmail of every other guest.

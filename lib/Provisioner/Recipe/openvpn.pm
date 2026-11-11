@@ -12,6 +12,7 @@ use Net::CIDR();
 use Net::IP qw{$IP_A_IN_B_OVERLAP $IP_IDENTICAL $IP_NO_OVERLAP};
 
 use Provisioner::IPPool();
+use Trog::Utils();
 
 use parent qw{Provisioner::Recipe};
 
@@ -298,7 +299,8 @@ has a certificate from connecting.
 
 sub is_multi_tenant { return 0 }
 
-# An IPv4 network as an address and a prefix length.
+# The shape of an IPv4 network, an address and a prefix length.  Whether the
+# octets and the prefix are in range is for network() to say, not a pattern.
 my $OCTET = qr/[[:digit:]]{1,3}/;
 my $CIDR  = qr/\A $OCTET (?: [.] $OCTET ){3} \/ [[:digit:]]{1,2} \z/;
 
@@ -365,8 +367,9 @@ my sub mask ($prefix) {
 # The address of a CIDR block with the host bits cleared, and its prefix
 # length, so that 192.0.2.5/24 gives 192.0.2.0 and 24.
 my sub network ($block) {
-    my ( $address, $prefix ) = $block =~ m{\A(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})\z};
-    die "'$block' is not an IPv4 CIDR block\n" if !defined $prefix || $prefix > 32;
+    my ( $address, $prefix ) = split m{/}, $block, 2;
+    my $valid = Trog::Utils::is_ipv4($address) && defined $prefix && $prefix =~ m/\A[[:digit:]]{1,2}\z/ && $prefix <= 32;
+    die "'$block' is not an IPv4 CIDR block\n" if !$valid;
 
     return ( Provisioner::IPPool::int_to_address( Provisioner::IPPool::address_to_int($address) & mask($prefix) ), $prefix );
 }
@@ -493,6 +496,10 @@ sub enrich {
             die "ip_pool has $block in the bin $name, but $block is in $vpn, the VPN subnet of $domain, which hands out those addresses to its own clients.  " . "Move the bin out of $vpn.  If the bin holds the clients of $domain, give it via: $domain.\n";
         }
     }
+
+    # The pattern in args() gives only the shape of a route.  This is where
+    # 999.0.2.0/24 and a prefix of /99 are refused.
+    network($_) for @{ $opts{routes} // [] };
 
     unless ( $opts{routes} ) {
         my @routes;

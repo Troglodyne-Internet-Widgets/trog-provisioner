@@ -19,6 +19,7 @@ use Provisioner::Vars();
 
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -643,7 +644,7 @@ sub guest_ssh_ip {
     # toolkit uses IPv4 only: the 'ips' in provision.conf is a list of IPv4
     # addresses, so it cannot hold an IPv6 one.
     my $by_network = ref $server->{addresses} eq 'HASH' ? $server->{addresses} : {};
-    my @addresses  = grep { ( $_->{addr} // q{} ) =~ m/\A\d+(?:[.]\d+){3}\z/ } map {
+    my @addresses  = grep { Trog::Utils::is_ipv4( $_->{addr} ) } map {
         my $network = $_;
         map {
             { %$_, network => $network }    ## no critic (ValuesAndExpressions::ProhibitCommaSeparatedStatements) -- an anonymous hash, which PPI reads as a block

@@ -10,6 +10,7 @@ use re '/aasx';
 use IO::Prompter();
 use IO::Interactive::Tiny();
 use File::Slurper::Temp();
+use Socket();
 
 =head1 NAME
 
@@ -185,6 +186,39 @@ sub slot_steps {
         push( @steps, $1 // $2 );
     }
     return @steps;
+}
+
+=head2 $quoted = shell_quote($string)
+
+Returns C<$string> quoted for a POSIX shell, so that the shell reads it back as
+that one word.  It is always in single quotes, and a single quote in it becomes
+C<'\''>.  An empty string comes back as C<''>, which is one empty word, and not
+as nothing, which is no word.
+
+Quote each word of a command that has to be one string, such as the argument of
+C<sh -c>.  Quote the script as a whole for the C<sh -c> around it.
+
+=cut
+
+sub shell_quote {
+    my ($string) = @_;
+
+    return q{'} . ( $string =~ s/'/'\\''/gr ) . q{'};
+}
+
+=head2 is_ipv4($string)
+
+True when C<$string> is one IPv4 address in dotted decimal, with four octets of
+0 to 255.  The answer is 1 or 0.  It is what C<inet_pton> says, so a short form
+such as C<1.2.3>, a leading zero, a newline after the address and a prefix
+length are all refused.
+
+=cut
+
+sub is_ipv4 {
+    my ($string) = @_;
+
+    return defined $string && defined Socket::inet_pton( Socket::AF_INET(), $string ) ? 1 : 0;
 }
 
 1;
