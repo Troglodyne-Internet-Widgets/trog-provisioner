@@ -44,6 +44,20 @@ reads it for sshd, and C<authorize_guest_key> in L<Trog::Local> writes it.
 
 our $GUEST_KEYS = '/var/lib/trog-provisioner/guest-keys';
 
+=head2 $LINK_NAME
+
+A regular expression that matches a name that the kernel takes for a link,
+such as a bridge: from 1 to 15 bytes, of ASCII letters, digits, C<_>, C<.> and
+C<->, the first a letter or a digit.  So no name that it matches holds a
+character that a path or the address of an alias would read.  A schema takes
+it as C<"$LINK_NAME">, because a compiled regular expression keeps its flags
+when it becomes a string, and the C</aa> among them keeps a letter that is not
+ASCII out.
+
+=cut
+
+our $LINK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,14} \z/;
+
 =head1 SUBROUTINES
 
 =head2 write_binary_mode($path, $bytes, $mode)
