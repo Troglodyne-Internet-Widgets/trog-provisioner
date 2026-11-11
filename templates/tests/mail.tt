@@ -180,6 +180,62 @@ SKIP: {
 }
 [% END %]
 [% END %]
+# What a rebuild kept of the store that it salvaged.  The build moves the old
+# passwd-file to passwd.old and writes a new one from mail.names, so an address
+# that only the old one holds has a mailbox and cannot log in.  The build names
+# such an address in its log.  Here, the test names it too, and says what became
+# of it.
+{
+    my $dir       = '/mail/[% domain %]';
+    my $addresses = sub {
+        my ($file) = @_;
+        open( my $fh, '<', $file ) or return;
+        return map { m/\A([^:\s][^:]*):/ ? $1 : () } grep { !m/\A\s*[#]/ } <$fh>;
+    };
+    my %listed   = map { $_ => 1 } ( 'catchall@[% domain %]'[% FOR name IN names.keys().sort() %], '[% name %]@[% domain %]'[% END %] );
+    my %now      = map { $_ => 1 } $addresses->("$dir/passwd");
+    my @unlisted = grep { !$listed{$_} } $addresses->("$dir/passwd.old");
+    diag "the salvaged passwd-file holds accounts that mail.names does not list: @unlisted" if @unlisted;
+[% IF unlisted_accounts == 'keep' %]
+    my @lost = grep { !$now{$_} } @unlisted;
+    is( scalar @lost, 0, 'every account of the salvaged passwd-file is in the new one, because unlisted_accounts is keep' ) or diag "@lost";
+[% ELSE %]
+    is( scalar @unlisted, 0, 'the salvaged passwd-file holds no account that mail.names does not list' ) or diag "@unlisted";
+[% END %]
+}
+
+# Each account of mail.names, as dovecot sees it.  The guest holds only the hash
+# of a password, so this cannot log in with it.  It asks dovecot to find the
+# account in the passwd-file, and then compares what dovecot finds in the store
+# with what the store holds.  A store that was restored with the wrong owner, or
+# an account whose home is not where the store is, fails here and not at the
+# first login of a user.
+[% FOR name IN names.keys().sort() %]
+{
+    my $user = '[% name %]@[% domain %]';
+    my $auth = `doveadm auth lookup '$user' 2>&1`;
+    is( $?, 0, "dovecot finds the account $user in its passwd-file" ) or diag $auth;
+
+    my $maildir = '/mail/[% domain %]/[% name %]/Maildir';
+    SKIP: {
+        skip "$user has no maildir yet, so there is nothing salvaged to compare", 2 unless -d $maildir;
+
+        my $files = `find '$maildir' -type f \\( -path '*/cur/*' -o -path '*/new/*' \\) | wc -l`;
+        chomp $files;
+        my $found = `doveadm search -u '$user' all 2>&1 | wc -l`;
+        chomp $found;
+        is( $found + 0, $files + 0, "dovecot finds the $files messages that the maildir of $user holds" );
+
+        my $boxes = `doveadm mailbox list -u '$user' 2>&1`;
+        my @missing;
+        foreach my $folder ( grep { m/\A[.][^.]/ && -d "$maildir/$_/cur" } map { s{.*/}{}r } glob "'$maildir'/.*" ) {
+            my $box = $folder =~ s/\A[.]//r;
+            push @missing, $box unless $boxes =~ m/^(?:INBOX[.])?\Q$box\E$/m;
+        }
+        is( scalar @missing, 0, "dovecot lists every mailbox that the maildir of $user holds" ) or diag "missing: @missing\n$boxes";
+    }
+}
+[% END %]
 # virtual_maps delivers unmatched mail for the domain to the catchall, and only
 # an account dovecot knows can own that mailbox.
 {

@@ -415,6 +415,56 @@ sub replace {
     );
 }
 
+=head2 $outcome = put($file, $password, ref => $ref, value => $value, overwrite => $bool)
+
+Puts one secret into the database in C<$file>, and reads it back.  This is what
+C<bin/add_secret> and the mail account tools do, so they cannot disagree about
+when a value may be replaced.  Returns one of these:
+
+=over 4
+
+=item C<added>, when the reference was not there.
+
+=item C<same>, when it already held C<$value>.  Nothing is written.
+
+=item C<replaced>, when it held another value and C<overwrite> is true.
+
+=item C<refused>, when it held another value and C<overwrite> is false.  Nothing
+is written, because whatever authenticated with the old value would stop
+working.
+
+=back
+
+Dies if the database does not hold C<$value> after a write.  The database drops
+a field that it does not keep, and a tool that reported success then would have
+written nothing.
+
+=cut
+
+sub put {
+    my ( $class, $file, $password, %opts ) = @_;
+    my ( $ref, $value ) = @opts{qw{ref value}};
+
+    # Look before writing, because remember() keeps an existing value and does
+    # not say so.
+    my %found = eval { $class->lookup( $file, $password, probe => $ref ) };
+    my $held  = $found{probe};
+
+    if ( defined $held ) {
+        return 'same'    if $held eq $value;
+        return 'refused' if !$opts{overwrite};
+        $class->replace( $file, $password, $ref => $value );
+    }
+    else {
+        $class->remember( $file, $password, $ref => sub { $value } );
+    }
+
+    my %now = $class->lookup( $file, $password, probe => $ref );
+    die "$file did not come back holding the new value of $ref\n" unless defined $now{probe} && $now{probe} eq $value;
+
+    return defined $held ? 'replaced' : 'added';
+}
+
 =head2 forget($file, $password, @refs)
 
 Removes the entry that each reference in C<@refs> names, and returns the

@@ -12,6 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
+use Provisioner::MailAccount();
 use Provisioner::Utils();
 use Trog::Secrets();
 
@@ -171,6 +172,61 @@ On the guest, only C<dovecot>, C<opendkim> and root can read these files.  But
 the fetched copy goes into the data directory of the provisioner and into its
 backups.  That copy holds all the mail of this domain.
 
+=head3 Accounts on a running guest
+
+A rebuild is too much for a new address. Three tools change an account on the
+running guest, and change the configuration with it, so that the next build
+makes the same account:
+
+    bin/add_mail_user DOMAIN NAME [--gecos TEXT] [--mailbox NAME ...]
+    bin/reset_mail_password DOMAIN NAME [--kick]
+    bin/remove_mail_user DOMAIN NAME [--kick]
+
+C<add_mail_user> stores the password as C<secret:mail/DOMAIN-NAME/password>,
+adds the account to C<mail.names> in F<recipes.d/DOMAIN.yaml>, and adds the line
+to F</mail/DOMAIN/passwd> on the guest. The line is the one that the build
+renders. Both call C<passwd_line> in L<Provisioner::MailAccount>. The tools
+change that file through a temporary file and a rename, so dovecot never reads
+half of it, and dovecot needs no restart. C<reset_mail_password> replaces the
+value in the secret store and the hash in the one line. See the POD of each
+tool.
+
+An account that you add by hand on the guest, with none of these tools, is not
+in C<mail.names>. The next build does not make it. See C<unlisted_accounts>.
+
+=head3 An account that only the salvaged store knows
+
+The build makes F</mail/DOMAIN/passwd> from C<mail.names> and moves the
+salvaged file aside as F<passwd.old>. An address in the salvaged file that
+C<mail.names> lacks has its mailbox, but it cannot log in. Before this check, the
+build did not say so.
+
+Now the build compares the two files, and C<unlisted_accounts> decides what it
+does with each address that only the old one holds:
+
+=over 4
+
+=item * C<refuse>, which is the default. The build stops before it moves
+anything, and the setup log names each address. The old file stays where it was.
+Either add the account to C<mail.names> (C<bin/add_mail_user> does it), or
+remove it (C<bin/remove_mail_user> does it), and build again. This is the
+default because a build that restores a login that you removed from the
+configuration is a security fault that nothing reports.
+
+=item * C<keep>, which copies the line of each such address into the new file,
+with its hash, and names the address in the setup log. Use it to move a store
+whose accounts you cannot list yet.
+
+=back
+
+The guest test reads F<passwd.old> too. For each address in it, the test makes
+sure that the address is in C<mail.names>, or in the new file under C<keep>. The
+test also asks dovecot to look up each account in C<mail.names>. It then makes
+sure that the number of messages that dovecot finds for the account is the number
+of message files in its maildir. A store that was restored with the wrong owner
+fails there. The test does not log in with the password, because the guest holds
+only the hash, and the test would need the plain text.
+
 =head3 Sending through a mail relay
 
     somedomain:
@@ -294,13 +350,25 @@ sub args {
                             # bin/preflight says so.
                             description => 'The mailbox password.  Write it as a secret: reference; the value belongs in the store rather than in recipes.d.',
                         },
-                        gecos => { type => 'string' },
+                        gecos => {
+                            type    => 'string',
+                            pattern => '\A[^:\r\n]*\z',
+
+                            # The passwd-file has no way to quote a colon.
+                            description => 'The full name of the account.  It cannot hold a colon or a line break.',
+                        },
 
                         # The mailboxes that doveadm makes for this account,
                         # in addition to INBOX.
                         mailboxes => { type => 'array', items => { type => 'string' }, default => [] },
                     },
                 },
+            },
+            unlisted_accounts => {
+                type        => 'string',
+                enum        => [qw{refuse keep}],
+                default     => 'refuse',
+                description => 'What a build does with an account that the salvaged passwd-file holds and mail.names does not.  refuse stops the build and names the addresses.  keep copies their lines into the new passwd-file and names them in the setup log.',
             },
             mail_aliases => {
                 type    => 'array',
@@ -591,6 +659,10 @@ sub template_files {
 sub enrich {
     my ( $self, %opts ) = @_;
 
+    # The schema cannot say what a key of names may be.  Ask here, because the
+    # template engine only warns when passwd_line dies, and renders no line.
+    Provisioner::MailAccount::check_name($_) for keys %{ $opts{names} // {} };
+
     # Every address that an authenticated user of this domain can put in MAIL
     # FROM, and the login that owns it.  See "Who can send as whom" in the POD.
     #
@@ -633,6 +705,16 @@ sub formatters {
     my ($class) = shift;
     return (
         dovecot_password_hash => Text::Xslate::html_builder( \&Provisioner::Utils::dovecot_password_hash ),
+
+        # The line of the passwd-file, from the one place that knows it, which
+        # bin/add_mail_user also calls.  html_builder, so that the hash and a
+        # gecos with an ampersand are not escaped as HTML.
+        mail_passwd_line => Text::Xslate::html_builder(
+            sub {
+                my ( $domain, $name, $gecos, $password ) = @_;
+                return Provisioner::MailAccount::passwd_line( domain => $domain, name => $name, gecos => $gecos, password => $password );
+            }
+        ),
     );
 }
 

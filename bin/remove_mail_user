@@ -1,0 +1,101 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::remove_mail_user;
+
+#ABSTRACT: Take a mail account away from a running guest and from its configuration.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+use Provisioner::MailAccount();
+use Trog::Config();
+use Trog::Credentials();
+
+=head1 USAGE
+
+    remove_mail_user [--credentials] [--kick] [--secrets FILE] DOMAIN NAME
+
+Takes C<NAME@DOMAIN> out of the configuration, out of F</mail/DOMAIN/passwd> on
+the running guest, and out of the secret store.  It is the opposite of
+C<bin/add_mail_user>.
+
+=head1 DESCRIPTION
+
+It refuses an account that is in neither the configuration nor the passwd-file.
+An account in only one of the two is removed from that one, which is how you
+clean up an account that was added by hand on the guest, or that a failed run
+left behind.
+
+It removes the account from the configuration first.  If F<recipes.yaml> holds
+the account, it stops there with nothing changed, and says to take it out of
+that file.
+
+B<The mailboxes stay.>  The directory F</mail/DOMAIN/NAME> on the guest holds
+mail, and this tool does not delete mail.  Delete it by hand when you are sure.
+The next build salvages it with the rest of the store.
+
+=head2 OPTIONS
+
+=over 4
+
+=item C<--kick>
+
+End the open sessions of the account with C<doveadm kick>.  The sessions that
+are open keep working until they end, even though the line is gone.
+
+=item C<--credentials>, C<--secrets FILE>
+
+As for C<bin/add_mail_user>.
+
+=back
+
+=head1 SUBROUTINES
+
+=head2 $rc = main(@args)
+
+Removes the account.  Returns 0, or 2 for a usage error.  Dies with the reason if
+it refuses.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ( $kick, $store, $credentials, $help );
+    GetOptionsFromArray(
+        \@args,
+        'kick'        => \$kick,
+        'secrets=s'   => \$store,
+        'credentials' => \$credentials,
+        'help'        => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Need a domain and a name' ) unless @args == 2;
+
+    my ( $domain, $name ) = @args;
+
+    Trog::Credentials->load() if $credentials;
+
+    Provisioner::MailAccount::remove(
+        domain  => $domain,
+        name    => $name,
+        kick    => $kick,
+        secrets => $store // Trog::Config->path('secrets.kdbx'),
+    );
+
+    print "Removed $name\@$domain.  Its mailboxes are still on the guest.\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

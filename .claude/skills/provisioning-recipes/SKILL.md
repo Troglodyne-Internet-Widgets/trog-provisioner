@@ -94,6 +94,8 @@ Without the variable, every tool falls back to `/etc/trog-provisioner`, and it
 says nothing.  So run `new_guest`, `new_config`, `provision` and `destroy`
 through the links of the same names in `scripts/`, never from `bin/`.  Each
 link dies unless the variable is set, and then runs the tool in `bin/`.
+The mail tools `add_mail_user`, `reset_mail_password` and
+`remove_mail_user` have links there too, for the same reason.
 `teardown`, `collect_artifacts` and `ask_guest` make the same check.  A run
 against the real configuration sets the variable to that path explicitly.
 

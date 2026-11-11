@@ -1694,6 +1694,29 @@ sub record_global {
     return $class->record_setting( $domain, '_global', $key, $value );
 }
 
+=head2 check_settable($domain, $block, $key)
+
+Dies, naming the file, when F<recipes.yaml> sets C<$block.$key> for the domain,
+because a value there wins over the file of the domain, and what
+C<record_setting> wrote would not take effect.  Returns 1 otherwise.
+
+It is the first step of C<record_setting>.  A caller that does other work
+before it writes asks first, so that it does not do that work for a write that
+will be refused.
+
+=cut
+
+sub check_settable {
+    my ( $class, $domain, $block, $key ) = @_;
+
+    my $main = Trog::Config->path('recipes.yaml');
+    my $held = eval { YAML::XS::Load( File::Slurper::read_binary($main) ) } // {};
+    die "$main already sets $block.$key for $domain, and a domain's own file does not override it.\n" . "Change it there.\n"
+      if defined $held->{$domain}{$block}{$key};
+
+    return 1;
+}
+
 =head2 record_setting($domain, $block, $key, $value)
 
 Writes one setting of the block C<$block> of a domain, such as a recipe or
@@ -1713,10 +1736,7 @@ writing something that would not take effect, and says which file to edit.
 sub record_setting {
     my ( $class, $domain, $block, $key, $value ) = @_;
 
-    my $main = Trog::Config->path('recipes.yaml');
-    my $held = eval { YAML::XS::Load( File::Slurper::read_binary($main) ) } // {};
-    die "$main already sets $block.$key for $domain, and a domain's own file does not override it.\n" . "Change it there.\n"
-      if defined $held->{$domain}{$block}{$key};
+    $class->check_settable( $domain, $block, $key );
 
     my $path = Trog::Config->path("recipes.d/$domain.yaml");
     my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($path) ) } // {};
