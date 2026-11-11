@@ -462,6 +462,11 @@ name C<sudo>.  Without one, it asks at the terminal through
 C<< Trog::Credentials->prompt >>, and dies with what to configure when there is
 no terminal.  Dies if the answer is empty.
 
+=head2 run_sudo_or_die(@argv)
+
+Runs C<@argv> as C<run_sudo> does, and returns 1.  Dies, naming the command
+and the machine, unless it exits 0.
+
 =cut
 
 sub run_sudo {
@@ -533,6 +538,11 @@ sub run_sudo {
     die 'Could not authenticate sudo on ' . $self->describe . "\n";
 }
 
+sub run_sudo_or_die ( $self, @argv ) {
+    $self->run_sudo(@argv) == 0 or die 'Could not run ' . join( ' ', @argv ) . ' on ' . $self->describe . "\n";
+    return 1;
+}
+
 =head1 FILES
 
 Each of these is the plain local filesystem call when the machine is us, and a
@@ -582,6 +592,28 @@ success and 0 on failure.  Locally, without C<sudo>, dies on failure.
 =item C<append_line($path, $line)>
 
 Appends a line, but only if the file does not already contain it.
+
+=item C<root_text($path)>
+
+What root reads in C<$path>, through C<sudo -n cat>, without its last newline.
+An empty string when root reads nothing there, which is also the answer for a
+file that is not there and for a read that failed.  So a caller that writes
+from what it read uses C<rewrite_lines>, below, which tells those apart.
+
+=item C<holds_line($path, $line)>
+
+True when root reads C<$line>, as a whole line, in C<$path>.
+
+=item C<rewrite_lines($path, %opts)>
+
+Writes C<$path> as root, with C<mode>, 0644 by default.  It keeps each line of
+the file for which the code reference C<keep> returns true, in their order,
+and then puts each line of the array reference C<add>.  Without C<keep>, it
+keeps every line.  Returns 1.
+
+Dies, and writes nothing, when the read comes back empty but the file is not
+empty.  A write from that read would drop every line that somebody else put
+there.  Dies when the write fails.
 
 =item C<put_file($local, $remote, %opts)>
 
@@ -939,6 +971,28 @@ sub append_line {
     return 1 if $self->run_cmd( qw{grep -qxF --}, $line, $path ) == 0;
 
     return pour( $self, { stdin_data => "$line\n" }, $path, append => 1 );
+}
+
+sub root_text ( $self, $path ) {
+    my $text = $self->capture_cmd( 'sudo -n cat ' . shq($path) . ' 2>/dev/null' ) // q{};
+    chomp $text;
+    return $text;
+}
+
+sub holds_line ( $self, $path, $line ) {
+    return any { $_ eq $line } split m/\n/, $self->root_text($path);
+}
+
+sub rewrite_lines ( $self, $path, %opts ) {
+    my $keep = $opts{keep} // sub ($line) { 1 };
+    my $text = $self->root_text($path);
+    die "Could not read $path on " . $self->describe . "; refusing to rewrite it blind\n"
+      if $text eq q{} && $self->run_cmd( qw{sudo -n test -s}, $path ) == 0;
+
+    my @lines = ( ( grep { $keep->($_) } split m/\n/, $text ), @{ $opts{add} // [] } );
+    $self->write_text( $path, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => $opts{mode} // '0644' )
+      or die "Could not write $path on " . $self->describe . "\n";
+    return 1;
 }
 
 =head1 SEE ALSO

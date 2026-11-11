@@ -19,6 +19,7 @@ use List::Util();
 
 use Trog::Hypervisors();
 use Trog::HV::Libvirt();
+use Trog::HV::Libvirt::BridgeHelper();
 use Trog::Steps();
 
 =head1 NAME
@@ -54,8 +55,8 @@ inside the network, or it changes nothing and says which.
 It defines the network on the system daemon, persistent, with NAT and no DHCP,
 starts it, and starts it with the host.  For a block on a session URI, it also
 lets the user of the URI join the bridge, in the file of qemu-bridge-helper for
-that user.  C<guest_network_steps> and C<runner_bridge_steps> in
-L<Trog::HV::Libvirt> say what each step does.
+that user.  C<guest_network_steps> in L<Trog::HV::Libvirt> and C<grant_steps> in
+L<Trog::HV::Libvirt::BridgeHelper> say what each step does.
 
 Each step first asks whether it is done, and skips itself if it is.  So a second
 run changes nothing.  It prints the XML of the network first, also with
@@ -146,7 +147,7 @@ sub main {
 
     my @steps = (
         $via->guest_network_steps($plan),
-        $guests->is_session ? $via->runner_bridge_steps( $guests->ssh_user, $plan->{bridge} ) : (),
+        $guests->is_session ? Trog::HV::Libvirt::BridgeHelper::grant_steps( $via, $guests->ssh_user, $plan->{bridge} ) : (),
     );
     my $changed = Trog::Steps::run( \@steps, $opt{dryrun} );
 

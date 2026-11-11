@@ -20,6 +20,7 @@ use Test::More;
 use Capture::Tiny qw{capture_stdout capture_stderr};
 use Test::NoWarnings;
 use Test::MockModule qw{strict};
+use Test::Fatal      qw{exception};
 use File::Temp       qw{tempdir};
 use File::Path();
 use File::Slurper();
@@ -344,6 +345,96 @@ subtest 'a file read off a remote machine comes back whole' => sub {
         return $self->{content};
     }
 }
+
+# Runs $code with a remote machine whose root reads the files of %$files, a
+# file with the content undef being one that root cannot read.  Each write
+# fails with $writes_fail.  $code gets the machine and the list of what was
+# written and run as root.
+sub with_root_files ( $files, $writes_fail, $code ) {
+    my @did;
+    my $mock = Test::MockModule->new('Trog::Machine');
+    $mock->redefine(
+        capture_cmd => sub ( $self, $cmd ) {
+            my ($path) = $cmd =~ m{\Asudo[ ]-n[ ]cat[ ]'([^']+)'[ ]2>/dev/null\z} or die "not expecting: $cmd\n";
+            return $files->{$path};
+        }
+    );
+    $mock->redefine(
+        run_cmd => sub ( $self, @argv ) {
+            "@argv[0..3]" eq 'sudo -n test -s' or die "not expecting: @argv\n";
+            my $path = $argv[-1];
+            return exists $files->{$path} && ( $files->{$path} // 'unreadable' ) ne q{} ? 0 : 1;
+        }
+    );
+    $mock->redefine(
+        write_text => sub ( $self, $path, $text, %opts ) {
+            push @did, [ $path, $text, $opts{mode} ];
+            return $opts{sudo} && !$writes_fail ? 1 : 0;
+        }
+    );
+    $mock->redefine( run_sudo => sub ( $self, @argv ) { push @did, [@argv]; return $argv[0] eq 'false' ? 1 : 0 } );
+    return $code->( remote(), \@did );
+}
+
+subtest 'root_text is what root reads, and holds_line asks it for a whole line' => sub {
+    with_root_files(
+        { '/bogus/conf' => "allow br0\ninclude /bogus/other\n" },
+        0,
+        sub ( $machine, $ ) {
+            is( $machine->root_text('/bogus/conf'),    "allow br0\ninclude /bogus/other", 'the text, without its last newline' );
+            is( $machine->root_text('/bogus/missing'), q{},                               'and an empty string for a file that is not there' );
+            ok( $machine->holds_line( '/bogus/conf',  'allow br0' ), 'a line that is there' );
+            ok( !$machine->holds_line( '/bogus/conf', 'allow br' ),  'and not a line that only starts one' );
+        }
+    );
+};
+
+subtest 'rewrite_lines keeps what keep keeps, and adds after it' => sub {
+    with_root_files(
+        { '/bogus/conf' => "one\ntwo\nthree\n" },
+        0,
+        sub ( $machine, $did ) {
+            ok( $machine->rewrite_lines( '/bogus/conf', keep => sub ($line) { $line ne 'two' }, add => ['four'], mode => '0600' ), 'it returns true' );
+            is_deeply( $did, [ [ '/bogus/conf', "one\nthree\nfour\n", '0600' ] ], 'the kept lines in their order, the new one after them, with the mode' );
+
+            @$did = ();
+            $machine->rewrite_lines( '/bogus/conf', add => ['four'] );
+            is_deeply( $did, [ [ '/bogus/conf', "one\ntwo\nthree\nfour\n", '0644' ] ], 'without keep it keeps every line, and the mode is 0644' );
+
+            @$did = ();
+            $machine->rewrite_lines( '/bogus/new', add => ['first'] );
+            is_deeply( $did, [ [ '/bogus/new', "first\n", '0644' ] ], 'a file that is not there yet gets the new lines' );
+        }
+    );
+};
+
+subtest 'rewrite_lines does not write from a read that failed' => sub {
+    with_root_files(
+        { '/bogus/conf' => undef },
+        0,
+        sub ( $machine, $did ) {
+            like( exception { $machine->rewrite_lines( '/bogus/conf', add => ['mine'] ) }, qr{refusing[ ]to[ ]rewrite[ ]it[ ]blind}, 'it dies' );
+            is_deeply( $did, [], 'and writes nothing' );
+        }
+    );
+    with_root_files(
+        { '/bogus/conf' => "x\n" },
+        1,
+        sub ( $machine, $ ) {
+            like( exception { $machine->rewrite_lines( '/bogus/conf', add => ['y'] ) }, qr{Could[ ]not[ ]write[ ]/bogus/conf}, 'and it dies when the write fails' );
+        }
+    );
+};
+
+subtest 'run_sudo_or_die dies unless the command succeeds' => sub {
+    with_root_files(
+        {}, 0,
+        sub ( $machine, $ ) {
+            is( $machine->run_sudo_or_die(qw{true now}), 1, 'a command that exits 0' );
+            like( exception { $machine->run_sudo_or_die(qw{false now}) }, qr/\ACould[ ]not[ ]run[ ]false[ ]now[ ]on[ ]/, 'one that does not dies, naming it' );
+        }
+    );
+};
 
 subtest 'list_dir takes a path with a space in it' => sub {
     my $dir = tempdir( CLEANUP => 1 );
