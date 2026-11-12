@@ -193,18 +193,20 @@ sub tuned_xml {
     );
 
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv_mock->redefine( has_tpm              => sub { 0 } );
-    $hv_mock->redefine( pool                 => sub { 1 } );
-    $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
-    $hv_mock->redefine( create_disk          => sub { '/pool/vm.example.test-qcow2' } );
-    $hv_mock->redefine( cloudinit_iso        => sub { '/pool/seed.iso' } );
-    $hv_mock->redefine( domain_dir           => sub { $dir } );
-    $hv_mock->redefine( libvirt_version      => sub { $opts{libvirt} } );
-    $hv_mock->redefine( qemu_version         => sub { $opts{qemu} } );
-    $hv_mock->redefine( pool_fstype          => sub { $opts{fstype}    // 'ext2/ext3' } );
-    $hv_mock->redefine( pool_takes_direct_io => sub { $opts{direct_io} // 1 } );
-    $hv_mock->redefine( zfs_version          => sub { $opts{zfs_version} } );
-    $hv_mock->redefine( qemu_img_options     => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
+    $hv_mock->redefine( has_tpm               => sub { 0 } );
+    $hv_mock->redefine( pool                  => sub { 1 } );
+    $hv_mock->redefine( base_image            => sub { '/pool/baseimage-qcow2' } );
+    $hv_mock->redefine( create_disk           => sub { '/pool/vm.example.test-qcow2' } );
+    $hv_mock->redefine( cloudinit_iso         => sub { '/pool/seed.iso' } );
+    $hv_mock->redefine( domain_dir            => sub { $dir } );
+    $hv_mock->redefine( libvirt_version       => sub { $opts{libvirt} } );
+    $hv_mock->redefine( qemu_version          => sub { $opts{qemu} } );
+    $hv_mock->redefine( pool_fstype           => sub { $opts{fstype}    // 'ext2/ext3' } );
+    $hv_mock->redefine( pool_takes_direct_io  => sub { $opts{direct_io} // 1 } );
+    $hv_mock->redefine( zfs_version           => sub { $opts{zfs_version} } );
+    $hv_mock->redefine( qemu_img_options      => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
+    $hv_mock->redefine( virtiofsd_version     => sub { $opts{virtiofsd} } );
+    $hv_mock->redefine( libvirtd_may_run_shim => sub { $opts{shim_allowed} // 1 } );
 
     Trog::HV->forget();
     Trog::HV->new(
@@ -485,6 +487,24 @@ subtest 'a guest of a session joins the NAT bridge, and asks for nothing the ses
     like( exception { tuned_xml( %session, mounts => "raw=/dev/sdb\n" ) },         qr/block[ ]device[ ]of[ ]the[ ]host/,               'a block device of the host' );
     like( exception { tuned_xml( %session, mounts => "otherpool=disk-qcow2\n" ) }, qr/pool[ ]otherpool.*only[ ]the[ ]pool[ ]of[ ]its/, 'and a volume of another pool' );
     like( exception { tuned_xml( %session, mounts => "raw=/dev/sdb\n" ) },         qr{system[ ]URI[ ]of[ ].*/system},                  'each says where the guest can be built instead' );
+};
+
+# A domain whose share has no virtiofsd is defined, and then does not start,
+# with an error from libvirt that does not name the share.
+subtest 'a virtiofs share needs a virtiofsd on the hypervisor' => sub {
+    my %system = ( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), mounts => "dir=/bogus/share\n" );
+
+    my $xml    = tuned_xml( %system, virtiofsd => 'virtiofsd 1.10.0' );
+    my $binary = qr{<binary[ ]path='/usr/libexec/virtiofs-better'/>};
+    my $source = qr{<source[ ]dir='/bogus/share'/>};
+    like( $xml, qr{<filesystem[ ]type='mount'.*$binary\s*$source}, 'a hypervisor that runs one gets the share' );
+    libvirt_takes( $xml, 'and the schema of libvirt takes the domain' );
+
+    my $shares = qr{shares[ ]/bogus/share[ ]over[ ]virtiofs};
+    my $cannot = qr{cannot[ ]start[ ]a[ ]virtiofsd};
+    like( exception { tuned_xml(%system) },                                                                    qr{$shares.*$cannot.*bin/preflight}, 'one that does not refuses the guest, and says where to look' );
+    like( exception { tuned_xml( %system, virtiofsd => 'virtiofsd 1.10.0', shim_allowed => 0 ) },              $cannot,                             'and so does one whose libvirtd may not run the shim' );
+    like( tuned_xml( libvirt => libvirt( 10, 0, 0 ), qemu => libvirt( 9, 0, 0 ), mounts => "raw=/dev/sdb\n" ), qr{<source[ ]dev='/dev/sdb'/>},      'while a guest with no share builds there' );
 };
 
 # --- The machine type, and the topology that follows from it -----------------

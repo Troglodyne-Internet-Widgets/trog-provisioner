@@ -452,6 +452,28 @@ subtest 'list_dir takes a path with a space in it' => sub {
     is_deeply( [ remote()->list_dir("$dir/none; echo leaked") ], [],         'where a semicolon is part of the name, not the end of a command' );
 };
 
+subtest 'is_dir and is_block_device ask the machine that has the path' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    my ( $machine, $mock ) = here();
+    is( $machine->is_dir($dir),              1, 'a directory here is one' );
+    is( $machine->is_dir("$dir/none"),       0, 'and a path that is not there is not' );
+    is( $machine->is_block_device($dir),     0, 'a directory is no block device' );
+    is( $machine->is_block_device('/bogus'), 0, 'and neither is a path that is not there' );
+    undef $mock;    ## no critic (ProhibitUselessVarClearing) -- restores the real is_local, so that remote() below is not taken for this machine
+
+    # The far side runs test(1) with the path as one argument, and its exit
+    # status is the answer.  Here a local shell stands in for it.
+    my @ran;
+    my $remote = Test::MockModule->new('Trog::Machine');
+    $remote->redefine( run_cmd => sub ( $, @argv ) { push @ran, [@argv]; return system(@argv) >> 8 } );
+    is( remote()->is_dir($dir),          1, 'a directory there is one' );
+    is( remote()->is_dir("$dir/none"),   0, 'and a path that is not there is not' );
+    is( remote()->is_block_device($dir), 0, 'a directory there is no block device' );
+    is_deeply( $ran[0], [ 'test', '-d', $dir ], 'each is one test(1) on the far side' );
+    is_deeply( $ran[2], [ 'test', '-b', $dir ], 'with the flag that asks for a block device' );
+};
+
 subtest 'a file copied here with sudo gets the mode it was asked for' => sub {
     my ( $machine, $mock ) = here();
     my @sudo;

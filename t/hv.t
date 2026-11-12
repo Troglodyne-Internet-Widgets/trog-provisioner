@@ -227,6 +227,65 @@ subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
     is( $own->partition, '/machine/runner',      'and the slice its guests are placed in' );
 };
 
+subtest 'prepare_host installs virtiofs-better, and the rule that lets libvirtd run it' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my ( @did, %files, $confinement, $session );
+    $mock->redefine( mkpath          => sub { 1 } );
+    $mock->redefine( is_session      => sub { $session } );
+    $mock->redefine( file_exists     => sub ( $, $path ) { exists $files{$path} ? 1 : 0 } );
+    $mock->redefine( put_file        => sub ( $, $from, $to, % ) { push @did, "put $to"; $files{$to} = q{}; 1 } );
+    $mock->redefine( run_sudo        => sub ( $, @argv ) { push @did, "@argv"; 0 } );
+    $mock->redefine( run_sudo_or_die => sub ( $, @argv ) { push @did, "@argv"; 1 } );
+    $mock->redefine( capture_cmd     => sub ( $, $cmd ) { $cmd =~ m{attr/current} ? $confinement : q{} } );
+
+    # grep -rqsF $path /etc/apparmor.d, against the files above.
+    $mock->redefine(
+        run_cmd => sub ( $, @argv ) {
+            ( any { index( $_, $argv[2] ) >= 0 } values %files ) ? 0 : 1;
+        }
+    );
+    $mock->redefine(
+        rewrite_lines => sub ( $, $path, %how ) {
+            push @did, "rewrite $path";
+            $files{$path} = join q{}, ( $files{$path} // q{} ), map { "$_\n" } @{ $how{add} };
+            1;
+        }
+    );
+    my $local = '/etc/apparmor.d/local/usr.sbin.libvirtd';
+
+    $confinement = "libvirtd (enforce)\n";
+    my $hv = fresh( uri => 'qemu+ssh://root@hv.test/system' );
+    is( $hv->prepare_host('/bogus/virtiofs-better'), 1, 'a confined libvirtd on a new hypervisor is prepared' );
+    is_deeply(
+        \@did,
+        [ 'put /usr/libexec/virtiofs-better', 'chmod 0755 /usr/libexec/virtiofs-better', "rewrite $local", 'apparmor_parser -r /etc/apparmor.d/usr.sbin.libvirtd' ],
+        'with the shim, and then the rule in the file of local rules, and the profile loaded again'
+    );
+    is( $files{$local}, "/usr/libexec/virtiofs-better PUx,\n", 'the rule lets libvirtd run the shim' );
+    ok( $hv->libvirtd_may_run_shim, 'and the next question sees the rule, and not the answer from before' );
+
+    @did = ();
+    is( $hv->prepare_host('/bogus/virtiofs-better'), 1, 'a second run is prepared' );
+    is_deeply( \@did, [], 'and changes nothing' );
+
+    %files = ( '/usr/libexec/virtiofs-better' => q{} );
+    $hv    = fresh( uri => 'qemu+ssh://root@hv.test/system' );
+    $hv->prepare_host('/bogus/virtiofs-better');
+    is_deeply( \@did, [ "rewrite $local", 'apparmor_parser -r /etc/apparmor.d/usr.sbin.libvirtd' ], 'a hypervisor that has the shim and lost its rule gets the rule back' );
+
+    ( @did, %files ) = ();
+    $confinement = "unconfined\n";
+    $hv          = fresh( uri => 'qemu+ssh://root@hv.test/system' );
+    $hv->prepare_host('/bogus/virtiofs-better');
+    is_deeply( \@did, [ 'put /usr/libexec/virtiofs-better', 'chmod 0755 /usr/libexec/virtiofs-better' ], 'a libvirtd that AppArmor does not confine gets no rule' );
+
+    ( @did,         %files )   = ();
+    ( $confinement, $session ) = ( "libvirtd (enforce)\n", 1 );
+    $hv = fresh( uri => 'qemu+ssh://root@hv.test/session' );
+    $hv->prepare_host('/bogus/virtiofs-better');
+    is_deeply( \@did, [], 'and a session, which has no virtiofs share, gets neither' );
+};
+
 subtest 'an existing pool says where it is, and is believed' => sub {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm => sub { FakePoolVMM->new('/var/lib/libvirt/images') } );

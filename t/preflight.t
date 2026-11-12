@@ -352,6 +352,62 @@ subtest 'a storage pool nothing can write to is a hypervisor nothing can be buil
     like( $result->{fix}, qr/pool-list/, 'and says how to find what pools there are' );
 };
 
+# The package of virtiofsd once went missing from a hypervisor while
+# virtiofs-better stayed, and each guest with a share was defined and then did
+# not start.  A test that the shim is there passed all along.
+subtest 'virtiofs-better has to run a virtiofsd' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( describe    => sub { 'someadmin@hv.test' } );
+    $hv->redefine( file_exists => sub { $_[1] eq '/usr/libexec/virtiofs-better' ? 1 : 0 } );
+
+    # The shim answers --version, and libvirtd runs under apparmor or not.  A
+    # grep of /etc/apparmor.d finds the shim named in a profile or not.
+    my ( @asked, $confinement, $named );
+    $hv->redefine(
+        capture_cmd => sub ( $, $cmd ) {
+            push @asked, $cmd;
+            return $cmd =~ m/attr\/current/ ? $confinement : "virtiofsd 1.10.0\n";
+        }
+    );
+    $hv->redefine( run_cmd => sub ( $, @argv ) { return $argv[0] eq 'grep' && $named ? 0 : 1 } );
+
+    ( $confinement, $named ) = ( "libvirtd (enforce)\n", 1 );
+    my ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( $result->{ok}, 'a shim that runs a virtiofsd, and that a profile allows, passes' );
+    like( $result->{what}, qr/virtiofsd[ ]1[.]10[.]0/,                     'and says which one' );
+    like( $asked[0],       qr{\A/usr/libexec/virtiofs-better[ ]--version}, 'which the shim itself was asked, so the virtiofsd it runs answers' );
+
+    ( $confinement, $named ) = ( "libvirtd (enforce)\n", 0 );
+    ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( !$result->{ok}, 'a libvirtd that apparmor confines, with no rule for the shim, fails' );
+    like( $result->{what}, qr/apparmor/,                                          'saying that apparmor is why' );
+    like( $result->{fix},  qr{local/usr[.]sbin[.]libvirtd.*apparmor_parser[ ]-r}, 'and the rule to add, and how to load it' );
+
+    ( $confinement, $named ) = ( "unconfined\n", 0 );
+    ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( $result->{ok}, 'while a libvirtd that apparmor does not confine needs no rule' );
+
+    $hv->redefine( capture_cmd => sub { q{} } );
+    ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( !$result->{ok}, 'a shim whose virtiofsd says nothing fails' );
+    like( $result->{what}, qr/someadmin\@hv[.]test/,      'naming the hypervisor it asked' );
+    like( $result->{fix},  qr/apt[ ]install[ ]virtiofsd/, 'and the package to install' );
+
+    $hv->redefine( capture_cmd => sub { die "Gave up on it\n" } );
+    ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( !$result->{ok}, 'and so does one that hangs' );
+
+    $hv->redefine( file_exists => sub { 0 } );
+    ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( $result->{ok}, 'a hypervisor with no shim yet passes, because it has built no guest to share into' );
+    like( $result->{what}, qr/No[ ]\/usr\/libexec\/virtiofs-better/, 'and says so' );
+
+    $hv->redefine( file_exists => sub { 1 } );
+    $hv->redefine( is_session  => sub { 1 } );
+    ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
+    ok( $result->{ok}, 'and so does a session, which has no virtiofs share' );
+};
+
 subtest 'a guest has to have an address of ours to fetch from' => sub {
     my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $local = Test::MockModule->new('Trog::Local');
@@ -536,6 +592,9 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     $hv->redefine( run_cmd   => sub { 1 } );              # no passwordless sudo
     $hv->redefine( iso_maker => sub { die "none\n" } );
     $hv->redefine( vmm       => sub { die "no\n" } );
+
+    # And whether or not this machine has a virtiofs-better that runs.
+    $hv->redefine( virtiofsd_version => sub { 'virtiofsd 1.10.0' } );
 
     # The count is of the failures above, whether or not this machine has bwrap.
     my $local = Test::MockModule->new('Trog::Local');

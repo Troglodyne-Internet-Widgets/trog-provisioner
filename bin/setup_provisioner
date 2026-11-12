@@ -87,11 +87,9 @@ sub setup_storage_pool {
     return 1;
 }
 
-# TODO: add the two apparmor items that nothing else adds.  One is the
-# libvirt-qemu profile override that lets a guest read what it gets.  The other
-# is a profile for /usr/libexec/virtiofs-better, which has no profile.
-# bin/provision installs that binary on first use, but the operator adds its
-# profile.
+# TODO: add the libvirt-qemu profile override that lets a guest read what it
+# gets, which nothing else adds.  The rule that lets libvirtd run
+# virtiofs-better comes from prepare_host in Trog::HV::Libvirt.
 sub setup_apparmor {
     return 1;
 }

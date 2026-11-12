@@ -43,7 +43,9 @@ The recipe of your application must install the FUSE driver for each mount (s3fs
 for the example above).
 
 If a disk names a pool, give its device as a path relative to that pool.
-Otherwise, give an absolute path to the file or device.
+Otherwise, give an absolute path to the file or device.  The path is on the
+hypervisor, and the hypervisor says whether it is a directory or a block device,
+not the machine that runs F<bin/new_config>.
 
 A disk can name a partition number.  The default is 1.
 
@@ -103,10 +105,15 @@ sub enrich {
         foreach my $disk (@$disks) {
             $disk->{servicename} = $disk->{mountpoint};
             $disk->{servicename} =~ s|/|_|g;
-            $disk->{pool} = 'raw' if -b $disk->{device};
-            $disk->{pool} = 'dir' if -d $disk->{device};
 
-            if ( -d $disk->{device} ) {
+            # The device is on the hypervisor, so the hypervisor answers.  A
+            # relative device is a volume in its pool, and needs no question.
+            next unless ( $disk->{device} // q{} ) =~ m{\A/};
+            my $hv = $self->hv;
+            $disk->{pool} = 'raw' if $hv->is_block_device( $disk->{device} );
+
+            if ( $hv->is_dir( $disk->{device} ) ) {
+                $disk->{pool}      = 'dir';
                 $disk->{type}      = 'virtiofs';
                 $disk->{partition} = 'NONE';
 

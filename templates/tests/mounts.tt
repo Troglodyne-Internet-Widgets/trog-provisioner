@@ -19,9 +19,11 @@ ok(length $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted, '[% moun
 {
     my $unit = `systemd-escape -p --suffix=mount '[% mount.mountpoint %]'`;
     chomp $unit;
+
+    # Quoted for the shell, because systemd-escape writes a dash as \x2d.
     is(`findmnt -no FSTYPE --mountpoint '[% mount.mountpoint %]'`, "virtiofs\n", '[% mount.mountpoint %] is the virtiofs share');
-    is(`systemctl is-enabled $unit 2>&1`, "enabled\n", "$unit is enabled, so the share mounts at boot");
-    like(`systemctl show -P Before $unit`, qr/\blocal-fs[.]target\b/, 'and is ordered before local-fs.target, so before the services');
+    is(`systemctl is-enabled '$unit' 2>&1`, "enabled\n", "$unit is enabled, so the share mounts at boot");
+    like(`systemctl show -P Before '$unit'`, qr/\blocal-fs[.]target\b/, 'and is ordered before local-fs.target, so before the services');
 }
 [% END %]
 [% END %]
