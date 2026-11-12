@@ -61,6 +61,10 @@ before the target of every other recipe, so that each recipe writes to what is
 mounted.  C<targets_in_order> in F<bin/new_config> says why it cannot run
 earlier.
 
+The salvage before a rebuild fetches nothing from under a share or a FUSE
+mount, because the files are not on the guest.  Back them up where they live.
+See L<Provisioner::Recipe/remote_mountpoints>.
+
 =cut
 
 use parent qw{Provisioner::Recipe};
@@ -138,6 +142,13 @@ sub enrich {
     }
 
     return %opts;
+}
+
+# A disk in a pool or a block device is attached to the guest, and is left out.
+sub remote_mountpoints {
+    my ( $self, %opts ) = @_;
+    my %v = $self->validated(%opts);
+    return map { $_->{mountpoint} } ( grep { $_->{pool} eq 'dir' } @{ $v{disks} // [] } ), @{ $v{fuse} // [] };
 }
 
 sub template_files {

@@ -310,6 +310,27 @@ C<install_dir> of C<$global_config> when it named none.
 
 sub salvage_dir ($global_config) { return $salvage_from // $global_config->{install_dir} }
 
+=head2 ($holder, @exclude) = salvage_around_mounts($remote, @mountpoints)
+
+Where the salvage of C<$remote> meets the remote mount points of the guest, see
+L<Provisioner::Recipe/remote_mountpoints>.  C<$holder> is the mount point that
+holds C<$remote>, and then the salvage skips it.  Otherwise C<$holder> is undef,
+and C<@exclude> holds a pattern for rsync for each mount point under
+C<$remote>, anchored where the fetch of C<$remote> starts, so that the fetch
+does not go down into it.
+
+=cut
+
+sub salvage_around_mounts ( $remote, @mountpoints ) {
+    ( my $path = $remote ) =~ s{/+\z}{};
+    my @exclude;
+    foreach my $mount ( map { s{/+\z}{}r } @mountpoints ) {
+        return ($mount) if $path eq $mount || index( $path, "$mount/" ) == 0;
+        push( @exclude, '/' . substr( $mount, length($path) + 1 ) . '/' ) if index( $mount, "$path/" ) == 0;
+    }
+    return ( undef, @exclude );
+}
+
 sub main {
     my @args = @_;
 
@@ -1195,6 +1216,8 @@ sub handle_domain {
     }
     write_guest_secrets( $cfg_dir, $fqdn, \%guest_secrets, $sfile, $keepass );
 
+    my @remote_mounts = map { $builders{$_}->remote_mountpoints( $builders{$_}->takes(%$global_config), %{ $rconf->{$domain}{$_} // {} }, modules => \@modules ) } @modules;
+
     foreach my $module (@modules) {
         my $builder = $builders{$module};
         my $pconf   = $rconf->{$domain}{$module};
@@ -1250,6 +1273,14 @@ sub handle_domain {
             my %tg          = $builder->remote_files( $salvage_dir, $fqdn );
             my @skip        = $builder->remote_skip();
 
+            # What lives on a remote mount is backed up where it lives.
+            foreach my $remote ( sort keys %tg ) {
+                my ($holder) = salvage_around_mounts( $remote, @remote_mounts );
+                next unless $holder;
+                print "Not fetching $remote, which is on the remote mount at $holder.  Back it up where it lives.\n";
+                delete $tg{$remote};
+            }
+
             # Before the fetch, so that it gets the current state.
             refresh_salvage(
                 address    => $guest_ip,
@@ -1260,6 +1291,7 @@ sub handle_domain {
                 watched    => [ sort keys %tg ],
             );
             foreach my $to_fetch ( sort keys(%tg) ) {
+                my ( undef, @inner ) = salvage_around_mounts( $to_fetch, @remote_mounts );
                 print "Fetching $to_fetch into $data_dir/$tg{$to_fetch}\n";
 
                 my $gap = salvage_path(
@@ -1270,7 +1302,7 @@ sub handle_domain {
                     remote      => $to_fetch,
                     destination => "$data_dir/$tg{$to_fetch}",
                     deleted_to  => "$deleted_to/$tg{$to_fetch}",
-                    exclude     => \@skip,
+                    exclude     => [ @skip, @inner ],
                 );
                 next unless $gap;
 

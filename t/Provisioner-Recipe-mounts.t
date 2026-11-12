@@ -89,6 +89,25 @@ subtest 'a block device on the hypervisor' => sub {
     is( $raw->{type},      'ext4', 'with the type given' );
 };
 
+subtest 'remote_mountpoints: a share and a FUSE mount, and not an attached disk' => sub {
+    my %opts = (
+        %BASE,
+        disks => [
+            { device => '/bogus/share',   mountpoint => '/bogus/mnt/share' },
+            { device => '/bogus/dev/sdz', mountpoint => '/bogus/mnt/raw', type => 'ext4' },
+            { device => 'bogus-volume',   mountpoint => '/bogus/mnt/vol', type => 'ext4' },
+        ],
+        fuse => [ { device => 'bogus-bucket', mountpoint => '/bogus/mnt/bucket', type => 'fuse.s3fs' } ],
+    );
+    my $fresh = Provisioner::Cookbook->load( 'mounts', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => '/nonexistent',
+        distro        => 'ubuntu',
+        hv            => Trog::Local->new(),
+    );
+    is_deeply( [ $fresh->remote_mountpoints(%opts) ], [qw{/bogus/mnt/share /bogus/mnt/bucket}], 'the share of the hypervisor and the bucket, whose files the guest does not hold' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();
