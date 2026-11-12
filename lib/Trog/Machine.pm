@@ -310,6 +310,15 @@ This alarm is for a case that the library cannot see: a call that stops making
 progress while the connection seems fine.  sftp does this when the far side
 refuses a write.  In normal use, nothing reaches this alarm.
 
+On a remote machine, both die before they send a command that starts with
+C<sudo> and not with C<sudo -n>, or C<sudo -V>, which asks for nothing and
+refuses C<-n>.  Such a sudo asks for a password when the
+login user has no grant for the command.  Nobody can type one over this
+connection, so the command waits until the alarm, and says nothing about sudo.
+C<sudo -n> fails at once instead, and L</run_sudo(@argv)> can give a password.
+Only the first word is checked.  A sudo later in a pipeline is the business of
+its caller.
+
 =head2 Trog::Machine::hang_limit($command)
 
 Returns how many seconds C<$command> can run on a remote machine before it
@@ -362,6 +371,13 @@ my sub unhang ( $self, $what, $code ) {
     return wantarray ? @result : $result[0];
 }
 
+# Dies if $what, a command for the far side as one string, starts with a sudo
+# that can ask for a password.  See capture_cmd($shell_command).
+my sub refuse_asking_sudo ( $self, $what ) {
+    return if $what !~ m/\A\s*sudo\s/ || $what =~ m/\A\s*sudo\s+-[nV](?:\s|\z)/;
+    die "Refusing to send '$what' to " . $self->describe . ": over ssh, nobody can type the password that sudo would ask for, so it would wait until the alarm.\n" . "Write sudo -n, which fails at once instead, or use run_sudo, which can give a password.\n";
+}
+
 =head2 Trog::Machine::unpaged(@command)
 
 C<@command> as C<capture_cmd> and C<run_cmd> send it to the far side, with no
@@ -389,6 +405,7 @@ sub capture_cmd {
         return $out;
     }
 
+    refuse_asking_sudo( $self, $cmd );
     return unhang( $self, $cmd, sub { ( $self->ssh->cmd( unpaged($cmd) ) )[0] } );
 }
 
@@ -396,7 +413,9 @@ sub run_cmd {
     my ( $self, @argv ) = @_;
     return system(@argv) >> 8 if $self->is_local;
 
-    return unhang( $self, join( ' ', @argv ), sub { $self->ssh->cmd_exit_code( unpaged(@argv) ) } );
+    my $what = join( ' ', @argv );
+    refuse_asking_sudo( $self, $what );
+    return unhang( $self, $what, sub { $self->ssh->cmd_exit_code( unpaged(@argv) ) } );
 }
 
 =head1 SUDO

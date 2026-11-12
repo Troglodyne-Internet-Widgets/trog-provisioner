@@ -388,7 +388,7 @@ sub guest_tool {
     my ( $hv, $tool, @args ) = @_;
 
     # Each word in single quotes, and a single quote inside one as '\''.
-    my $out = $hv->capture_cmd( join ' ', 'sudo', $tool, map { Trog::Utils::shell_quote($_) } @args );
+    my $out = $hv->capture_cmd( join ' ', qw{sudo -n}, $tool, map { Trog::Utils::shell_quote($_) } @args );
     my $rc  = $? >> 8;
 
     die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install libguestfs-tools\n" if $rc == 127;

@@ -274,11 +274,26 @@ in the user slice of the account.
 
 =back
 
+=head2 local_uri
+
+The URI that names the same daemon on the hypervisor itself: the driver and the
+path of L</uri>, with no transport, host, port or query, for example
+C<qemu:///session>.  It is for a command that runs on the hypervisor, such as
+C<virsh -c>.  Without C<-c>, C<virsh> as a user other than root asks the session
+of that user, also when L</uri> names the system daemon.
+
+The command runs as the login user of L</uri>.  So it reaches the daemon with
+the access that L</vmm> has, and needs no sudo.
+
+It is empty when L</uri> is not L</explicit>.  libvirt reads an empty URI as no
+URI, and selects its default, as L</vmm> lets it.
+
 =cut
 
 sub explicit   ($self) { return $self->{explicit} }
 sub uri        ($self) { return $self->setting('uri') }
 sub is_session ($self) { return ( $self->{path} // q{} ) eq '/session' }
+sub local_uri  ($self) { return $self->explicit ? "$self->{driver}://$self->{path}" : q{} }
 
 sub is_local {
     my ($self) = @_;
@@ -679,7 +694,7 @@ sub console_output {
 
     # sudo, because libvirt writes the file as root.
     my $log = $self->console_log_path($name);
-    return $self->capture_cmd("sudo cat '$log'") || undef;
+    return $self->capture_cmd("sudo -n cat '$log'") || undef;
 }
 
 =head2 ($advice, $port) = $hv->vnc_access($name)
@@ -1968,7 +1983,7 @@ sub disk_owner_runs ( $self, @argv ) {
 }
 
 sub disk_owner_says ( $self, $cmd ) {
-    return $self->capture_cmd( $self->is_session ? $cmd : "sudo $cmd" );
+    return $self->capture_cmd( $self->is_session ? $cmd : "sudo -n $cmd" );
 }
 
 =head2 $hv->disk_layout($volume)

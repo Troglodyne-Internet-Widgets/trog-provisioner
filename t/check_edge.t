@@ -58,7 +58,7 @@ subtest 'as_root: the output and the exit status of a command on the far side' =
     is_deeply( [ Provisioner::Bin::check_edge::as_root( $m, 'true' ) ],  [ "said\n", 0 ],     'what it printed, and 0' );
     is_deeply( [ Provisioner::Bin::check_edge::as_root( $m, 'false' ) ], [ q{},      3 ],     'and a status that is not 0' );
     is_deeply( [ Provisioner::Bin::check_edge::as_root( $m, 'lost' ) ],  [ q{},      undef ], 'and no status when the command printed none' );
-    like( $m->{asked}[0], qr/\Asudo[ ]sh[ ]-c[ ]'true;/, 'as root' );
+    like( $m->{asked}[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]'true;/, 'as root' );
 
     my ($quoted) = Provisioner::Bin::check_edge::as_root( machine( [ qr/./ => sub { return ( "$_[0]\n", 0 ) } ] ), q{echo 'x'} );
     like( $quoted, qr/'echo[ ]'\\''x'\\''/, 'with a single quote in the command kept inside the quotes of sh -c' );

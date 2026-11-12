@@ -1848,6 +1848,12 @@ subtest 'a session reads its leases from the system daemon, and runs qemu-img as
     ok( !fresh( uri => 'qemu+ssh://runner@hv/system' )->is_session,  'and the system URI is not' );
     ok( !fresh()->is_session, 'nor is the default' );
 
+    # virsh runs on the hypervisor, where the host and the transport mean nothing.
+    is( fresh( uri => 'qemu+ssh://runner@hv/session' )->local_uri,                       'qemu:///session', 'on the hypervisor, a session is the session of the login user' );
+    is( fresh( uri => 'qemu+ssh://admin@hv:2222/system?keyfile=/bogus/key' )->local_uri, 'qemu:///system',  'and the system URI is the system daemon, with no port and no query' );
+    is( fresh( uri => 'qemu:///session' )->local_uri,                                    'qemu:///session', 'and a local URI is itself' );
+    is( fresh()->local_uri, q{}, 'and with no URI, it is empty, so that libvirt selects its default as vmm lets it' );
+
     my $hv   = fresh( uri => 'qemu+ssh://runner@hv/session' );
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
 
@@ -1877,7 +1883,7 @@ subtest 'a session reads its leases from the system daemon, and runs qemu-img as
     $system->disk_snapshot_names('vm.test.test-qcow2');
     is_deeply(
         \@ran,
-        [ 'root: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: sudo qemu-img snapshot -l -U '/bogus/pool/vm.test.test-qcow2'} ],
+        [ 'root: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: sudo -n qemu-img snapshot -l -U '/bogus/pool/vm.test.test-qcow2'} ],
         'and as root on the system URI, where libvirt gives each disk to libvirt-qemu'
     );
 };
@@ -2099,7 +2105,7 @@ subtest 'the console of a libvirt guest is read off the hypervisor as root' => s
 
     my $hv = bless( {}, 'Trog::HV::Libvirt' );
     is( $hv->console_output('vm.test'), "boot line\n", 'what the capture holds' );
-    like( $asked, qr{\Asudo[ ]cat[ ]'/tmp/vm[.]test-console[.]log'\z}, 'read with sudo, because libvirt writes it as root' );
+    like( $asked, qr{\Asudo[ ]-n[ ]cat[ ]'/tmp/vm[.]test-console[.]log'\z}, 'read with sudo, because libvirt writes it as root' );
 
     $mock->redefine( capture_cmd => sub { q{} } );
     is( $hv->console_output('vm.test'), undef, 'and an empty capture is no console at all' );
