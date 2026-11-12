@@ -39,7 +39,9 @@ target before this one.  The postrun runs after every target.
 The build runs C<go generate>, which runs F<tablegen.py>.  That script reads
 F<languages.yaml> with ruamel.yaml when it can, and with PyYAML when it
 cannot.  PyYAML refuses F<languages.yaml> of 2.28, so ruamel.yaml is a
-dependency of the build.
+dependency of the build.  A C<?> in a flow collection stops PyYAML, which is
+L<https://gitlab.com/esr/loccount/-/work_items/33>.  When a release fixes
+that, the dependency can go.
 
 =head3 deps
 
