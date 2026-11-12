@@ -75,7 +75,7 @@ use Trog::Patterns();
             recipes:
                 _base:
                     _global:
-                        install_dir: /opt/domains
+                        install_dir: /opt/hosts
                 someguest.test.test:
                     nginx:
                         cert_password: "store:someguest/tls/password"
@@ -547,7 +547,7 @@ sub enrich {
 
     # Both go into a path under the domain directory, so an absolute path
     # points somewhere else.  `store: /etc/trog-provisioner/secrets.kdbx`
-    # renders as /opt/domains/<domain>//etc/..., and fails as a missing file.
+    # renders as /opt/hosts/<domain>//etc/..., and fails as a missing file.
     under_the_domain( $opts{checkout_dir}, 'checkout_dir' ) if $opts{checkout};
     under_the_domain( $opts{store},        'store' )        if $opts{store};
 

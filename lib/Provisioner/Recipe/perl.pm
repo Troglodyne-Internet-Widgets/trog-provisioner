@@ -77,8 +77,8 @@ hash that names one of four verbs, which are the verbs of
 F<scripts/cpan_install>:
 
     { install     => [ 'Dist::Zilla', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] }
-    { installdeps => '/opt/domains/example.test/tCMS' }
-    { dzil        => '/opt/domains/example.test/checkout' }
+    { installdeps => '/opt/hosts/example.test/tCMS' }
+    { dzil        => '/opt/hosts/example.test/checkout' }
     { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } }
 
 F<scripts/cpan_install> says what each verb installs.

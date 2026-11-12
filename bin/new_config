@@ -111,7 +111,7 @@ Most of what you put in the main recipes.yaml goes in the _base section:
             libdir:
                 - path/to/my/custom/libdir
             data_source: "/opt/data"
-            install_dir: "/opt/domains"
+            install_dir: "/opt/hosts"
         adminconfig:
             pkgs:
                 - vim

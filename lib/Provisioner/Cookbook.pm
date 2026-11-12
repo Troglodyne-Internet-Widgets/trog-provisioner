@@ -1963,8 +1963,12 @@ sub alias_map {
 
 Returns the directory on the guest where the files of a domain live.  It comes
 from C<_global>, not from the C<data> recipe, so a recipe that uses
-C<install_dir> does not depend on C<data>.  Returns F</opt/domains> if the
+C<install_dir> does not depend on C<data>.  Returns F</opt/hosts> if the
 configuration says nothing.
+
+The default is not F</opt/domains>, the default of C<basedir>.  A guest that
+runs the provisioner keeps a directory for each guest that it builds under its
+C<basedir>, and a domain installed on that guest must not land among them.
 
 =cut
 
@@ -1974,7 +1978,7 @@ sub install_dir {
     my $said = $class->global_config( $domain, $conf )->{install_dir};
     return $said if $said;
 
-    return '/opt/domains';
+    return '/opt/hosts';
 }
 
 =head2 data_source($domain, $conf)

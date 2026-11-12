@@ -739,8 +739,8 @@ subtest 'needs_recipe holds the machine of a domain to what it holds another gue
 subtest 'a required_recipes sub always gets the domain and install_dir' => sub {
 
     dependencies_of( ['t_reader'] );
-    is( $Provisioner::Recipe::t_reader::handed{domain},      'd.test',       'the domain it was called for, which no _global can name' );
-    is( $Provisioner::Recipe::t_reader::handed{install_dir}, '/opt/domains', 'and the default install_dir, when _global names none' );
+    is( $Provisioner::Recipe::t_reader::handed{domain},      'd.test',     'the domain it was called for, which no _global can name' );
+    is( $Provisioner::Recipe::t_reader::handed{install_dir}, '/opt/hosts', 'and the default install_dir, when _global names none' );
 
     dependencies_of( ['t_reader'], global_config => { install_dir => '/srv' } );
     is( $Provisioner::Recipe::t_reader::handed{install_dir}, '/srv', 'but what _global says wins' );
@@ -1087,14 +1087,14 @@ subtest 'where a domain lives is _global to say, not the data recipe' => sub {
     # and nothing respectively.  A path that is not the default, or this would
     # pass whether the fallback were there or not.
     my $legacy = { _base => { data => { from => '/opt/data', to => '/somewhere/else' } }, 'a.test' => {} };
-    is( Provisioner::Cookbook->install_dir( 'a.test', $legacy ), '/opt/domains', 'the default, rather than what data says' );
-    is( Provisioner::Cookbook->data_source( 'a.test', $legacy ), undef,          'and nothing at all for the source' );
+    is( Provisioner::Cookbook->install_dir( 'a.test', $legacy ), '/opt/hosts', 'the default, rather than what data says' );
+    is( Provisioner::Cookbook->data_source( 'a.test', $legacy ), undef,        'and nothing at all for the source' );
 
     # A path to render is harmless to guess at.  Where the teardown sweeps is
     # not, so that one says nothing rather than pointing at a directory nobody
     # named.
-    is( Provisioner::Cookbook->install_dir( 'a.test', {} ), '/opt/domains', 'install_dir has a default' );
-    is( Provisioner::Cookbook->data_source( 'a.test', {} ), undef,          'and data_source deliberately has none' );
+    is( Provisioner::Cookbook->install_dir( 'a.test', {} ), '/opt/hosts', 'install_dir has a default, which is not the /opt/domains of basedir' );
+    is( Provisioner::Cookbook->data_source( 'a.test', {} ), undef,        'and data_source deliberately has none' );
 };
 
 subtest 'the recipes that direct a build are not offered as things to put on one' => sub {
