@@ -201,8 +201,8 @@ session on each of C<@bridges>, in order:
 
 =item 1. An C<allow> line for each bridge in L</acl_file>.  A line that is
 there already stays, also for a bridge that is not in C<@bridges>.  So
-C<runner_account_steps> in L<Trog::HV::Libvirt> and F<bin/guest_network> each
-add their bridges, and neither takes away the bridge of the other.
+F<bin/guest_network> adds its bridge without taking away one that something
+else allowed.
 
 =item 2. An C<include> of that file in C<$CONF>.
 
@@ -210,9 +210,21 @@ add their bridges, and neither takes away the bridge of the other.
 
 =cut
 
-sub grant_steps ( $hv, $user, @bridges ) {
+# The action that includes the file of $user in $CONF.
+my sub include_step ( $hv, $user ) {
     my $acl     = acl_file($user);
     my $include = "include $acl";
+    return {
+        what => "include $acl in $CONF",
+        done => sub { $hv->holds_line( $CONF, $include ) },
+        do   => sub {
+            $hv->rewrite_lines( $CONF, keep => sub ($line) { $line ne $include }, add => [$include] );
+        },
+    };
+}
+
+sub grant_steps ( $hv, $user, @bridges ) {
+    my $acl = acl_file($user);
 
     my $missing = sub {
         my %has = map { $_ => 1 } split m/\n/, $hv->root_text($acl);
@@ -228,19 +240,52 @@ sub grant_steps ( $hv, $user, @bridges ) {
                 $hv->rewrite_lines( $acl, keep => sub ($line) { $line ne q{} }, add => [ $missing->() ] );
             },
         },
+        include_step( $hv, $user ),
+    );
+}
+
+=head2 allow_only_steps
+
+C<($hv, $user, @bridges)>.  The actions that let C<$user> join each of
+C<@bridges> and no other bridge, in order:
+
+=over 4
+
+=item 1. L</acl_file> with an C<allow> line for each bridge, in that order, and
+no other line.  A line for another bridge goes, whoever wrote it.
+
+=item 2. An C<include> of that file in C<$CONF>.
+
+=back
+
+C<runner_account_steps> in L<Trog::HV::Libvirt> uses these, because the file of
+a runner with an account holds the bridges of the block of the runner, and a
+bridge that the block no longer names must not stay allowed.
+
+=cut
+
+sub allow_only_steps ( $hv, $user, @bridges ) {
+    my $acl  = acl_file($user);
+    my $want = join q{}, map { "allow $_\n" } @bridges;
+
+    return (
         {
-            what => "include $acl in $CONF",
-            done => sub { $hv->holds_line( $CONF, $include ) },
-            do   => sub {
-                $hv->rewrite_lines( $CONF, keep => sub ($line) { $line ne $include }, add => [$include] );
+            what => "let $user join " . join( ' and ', @bridges ) . " and no other bridge, in $acl",
+            done => sub {
+                join( q{}, map { "$_\n" } grep { $_ ne q{} } split m/\n/, $hv->root_text($acl) ) eq $want;
+            },
+            do => sub {
+                $hv->run_sudo_or_die( qw{install -d -m 0755}, File::Basename::dirname($acl) );
+                $hv->rewrite_lines( $acl, keep => sub ($line) { 0 }, add => [ map { "allow $_" } @bridges ] );
             },
         },
+        include_step( $hv, $user ),
     );
 }
 
 =head2 revoke_steps
 
-C<($hv, $user)>.  The actions that undo L</grant_steps> for C<$user>: the C<include> line goes
+C<($hv, $user)>.  The actions that undo L</grant_steps> and L</allow_only_steps> for C<$user>: the C<include> line goes
 out of C<$CONF>, and then L</acl_file> goes.  A C<$CONF> that root cannot read
 looks to these like one without the line, so it stays as it was.
 
@@ -325,6 +370,23 @@ sub capability_removal_steps ( $hv, $helper, $user ) {
             : ()
         ),
     );
+}
+
+=head2 allowed_by_others
+
+C<($hv, $bridge, $user)>.  The files of the runner accounts other than C<$user>
+that let their account join C<$bridge>, by name, sorted.  Empty when none does.
+
+=cut
+
+sub allowed_by_others ( $hv, $bridge, $user ) {
+    my $own   = File::Basename::basename( acl_file($user) );
+    my $dir   = File::Basename::dirname( acl_file($user) );
+    my @files = sort grep {
+        my $file = $_;
+        $file =~ m/\Atrog-runner-.+[.]conf\z/ && $file ne $own && List::Util::any { $_ eq "allow $bridge" } split m/\n/, $hv->root_text("$dir/$file");
+    } $hv->list_dir($dir);
+    return @files;
 }
 
 =head2 has_capability

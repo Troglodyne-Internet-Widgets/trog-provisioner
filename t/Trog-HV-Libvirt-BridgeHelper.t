@@ -15,8 +15,11 @@ use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use List::Util();
+use File::Basename();
+use Capture::Tiny();
 
 use FindBin::libs;
+use Trog::Steps();
 
 BEGIN { use_ok('Trog::HV::Libvirt::BridgeHelper') or BAIL_OUT('Trog::HV::Libvirt::BridgeHelper does not load') }
 
@@ -24,13 +27,33 @@ my $CONF = $Trog::HV::Libvirt::BridgeHelper::CONF;
 
 {
 
-    # A hypervisor that has the files of @HAVE.
+    # A hypervisor that has the files of @HAVE, and the text of each file of
+    # %FILES, which root reads and writes.
     package Test::HelperHV;
     our @HAVE;
+    our %FILES;
     sub new ($class) { return bless {}, $class }
 
     sub file_exists ( $, $path ) {
-        return List::Util::any { $_ eq $path } @HAVE;
+        return List::Util::any { $_ eq $path } @HAVE, keys %FILES;
+    }
+
+    sub root_text ( $, $path ) { return $FILES{$path} // q{} }
+
+    sub holds_line ( $self, $path, $line ) {
+        return List::Util::any { $_ eq $line } split m/\n/, $self->root_text($path);
+    }
+
+    sub list_dir ( $, $dir ) {
+        return map { m{\A\Q$dir\E/([^/]+)\z} ? $1 : () } sort keys %FILES;
+    }
+
+    sub run_sudo_or_die { return 1 }
+
+    sub rewrite_lines ( $self, $path, %how ) {
+        my @lines = ( ( grep { $how{keep}->($_) } split m/\n/, $self->root_text($path) ), @{ $how{add} // [] } );
+        $FILES{$path} = join q{}, map { "$_\n" } @lines;
+        return 1;
     }
 }
 
@@ -93,6 +116,42 @@ subtest 'refused is each bridge that no allow names, or that a deny names' => su
     is_deeply( [ Trog::HV::Libvirt::BridgeHelper::refused( [ [ allow => 'all' ], [ deny => 'br0' ] ], qw{br0 virbr1} ) ],        ['br0'],             'except one that a deny names' );
     is_deeply( [ Trog::HV::Libvirt::BridgeHelper::refused( [ [ allow => 'br0' ], [ deny => 'all' ] ], 'br0' ) ],                 ['br0'],             'and deny all refuses each bridge' );
     is_deeply( [ Trog::HV::Libvirt::BridgeHelper::refused( [],                                        'br0' ) ],                 ['br0'],             'with no rules, it refuses everything, as the helper does' );
+};
+
+# Runs the actions of @actions, and returns how many changed something.
+sub run_quietly (@actions) {
+    my $count;
+    Capture::Tiny::capture_stdout( sub { $count = Trog::Steps::run( \@actions, 0 ) } );
+    return $count;
+}
+
+subtest 'allow_only_steps leaves the account its bridges and no other' => sub {
+    my $acl = Trog::HV::Libvirt::BridgeHelper::acl_file('runner');
+    local %Test::HelperHV::FILES = ( $acl => "allow virbr0\nallow br0\n", $CONF => "allow virbr0\n" );
+    my $hv = Test::HelperHV->new;
+
+    ok( run_quietly( Trog::HV::Libvirt::BridgeHelper::allow_only_steps( $hv, 'runner', qw{virbr0 virbr1} ) ), 'a file with another bridge in it is changed' );
+    is( $Test::HelperHV::FILES{$acl},                                                                         "allow virbr0\nallow virbr1\n", 'and holds the bridges given, in their order, and not the one it had' );
+    is( $Test::HelperHV::FILES{$CONF},                                                                        "allow virbr0\ninclude $acl\n", 'and bridge.conf includes it, after the lines that it had' );
+    is( run_quietly( Trog::HV::Libvirt::BridgeHelper::allow_only_steps( $hv, 'runner', qw{virbr0 virbr1} ) ), 0,                              'a second run changes nothing' );
+
+    run_quietly( Trog::HV::Libvirt::BridgeHelper::grant_steps( $hv, 'runner', 'br0' ) );
+    is( $Test::HelperHV::FILES{$acl}, "allow virbr0\nallow virbr1\nallow br0\n", 'while grant_steps adds a bridge, and keeps what is there' );
+};
+
+subtest 'allowed_by_others names the files of the other accounts that allow a bridge' => sub {
+    my $dir = File::Basename::dirname( Trog::HV::Libvirt::BridgeHelper::acl_file('runner') );
+    local %Test::HelperHV::FILES = (
+        "$dir/trog-runner-runner.conf" => "allow virbr1\n",
+        "$dir/trog-runner-b.conf"      => "allow virbr0\nallow virbr1\n",
+        "$dir/trog-runner-a.conf"      => "allow virbr1\n",
+        "$dir/trog-runner-c.conf"      => "allow virbr10\n",
+        "$dir/other.conf"              => "allow virbr1\n",
+    );
+    my $hv = Test::HelperHV->new;
+
+    is_deeply( [ Trog::HV::Libvirt::BridgeHelper::allowed_by_others( $hv, 'virbr1', 'runner' ) ], [qw{trog-runner-a.conf trog-runner-b.conf}], 'each other runner account whose file allows the bridge, sorted, and not the account itself, a longer name, or a file of something else' );
+    is_deeply( [ Trog::HV::Libvirt::BridgeHelper::allowed_by_others( $hv, 'br0',    'runner' ) ], [],                                          'and none for a bridge that no other account may join' );
 };
 
 Test::NoWarnings::had_no_warnings();

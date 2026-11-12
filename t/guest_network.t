@@ -31,10 +31,12 @@ use FindBin::libs;
 ## no critic (CompileTime) -- set before anything reads the configuration directory.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
-# Loaded so Test::MockModule has a package to attach to, and for the constant of
-# the XML of a network that is not running.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
-use Sys::Virt();            ## no critic (ProhibitUnusedImports)
+use Trog::Hypervisors();
+use Trog::Steps();
+use Trog::HV::Libvirt();
+
+# For the constant of the XML of a network that is not running.
+use Sys::Virt();                                                                                     ## no critic (ProhibitUnusedImports)
 
 my $script = "$FindBin::Bin/../bin/guest_network";
 require_ok($script) or BAIL_OUT("$script does not load");
@@ -92,8 +94,10 @@ sub fresh_state {
     sub is_active           ($self)                   { return $self->net->{active} }
     sub get_autostart       ($self)                   { return $self->net->{autostart} }
     sub get_xml_description ( $self, @ )              { return $self->net->{xml} }
-    sub create ($self) { $self->{state}{started}++; return $self->net->{active} = 1 }
-    sub set_autostart ( $self, $on ) { return $self->net->{autostart} = $on }
+    sub create              ($self)                   { $self->{state}{started}++; return $self->net->{active} = 1 }
+    sub set_autostart       ( $self, $on )            { return $self->net->{autostart}                         = $on }
+    sub destroy             ($self)                   { return $self->net->{active}                            = 0 }
+    sub undefine            ($self)                   { return delete $self->{state}{networks}{ $self->{name} } }
 
     package Test::FakeVmm;
     sub new ( $class, $state ) { return bless { state => $state }, $class }
@@ -121,12 +125,17 @@ sub fresh_state {
     }
 }
 
-sub run_tool ( $state, @args ) {
+# Runs $code with Trog::HV::Libvirt answering from $state, and returns what
+# $code returns.
+sub mocked ( $state, $code ) {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm         => sub ($hv) { Test::FakeVmm->new($state) } );
     $mock->redefine( network_vmm => sub ($hv) { Test::FakeVmm->new($state) } );
     $mock->redefine(
         capture_cmd => sub ( $hv, $cmd ) {
+            if ( my ($dir) = $cmd =~ m{\Als[ ]-1[ ]'([^']+)'} ) {
+                return join "\n", map { m{\A\Q$dir\E/([^/]+)\z} ? $1 : () } sort keys %{ $state->{files} };
+            }
             my ($file) = $cmd =~ m{\Asudo[ ]-n[ ]cat[ ]'([^']+)'} or die "the fake hypervisor was not expecting: $cmd\n";
             return $state->{files}{$file} // q{};
         }
@@ -139,6 +148,11 @@ sub run_tool ( $state, @args ) {
     );
     $mock->redefine(
         run_cmd => sub ( $hv, @argv ) {
+            return exists $state->{files}{ $argv[-1] } ? 0 : 1 if "@argv[0..1]" eq 'test -f';
+            if ( "@argv[0..1]" eq 'test -d' ) {
+                my ($bridge) = $argv[-1] =~ m{\A/sys/class/net/([^/]+)/bridge\z} or die "the fake hypervisor was not expecting: @argv\n";
+                return $state->{host_bridges}{$bridge} ? 0 : 1;
+            }
             "@argv[0..3]" eq 'sudo -n test -s' or die "the fake hypervisor was not expecting: @argv\n";
             return ( $state->{files}{ $argv[-1] } // q{} ) ne q{} ? 0 : 1;
         }
@@ -150,10 +164,18 @@ sub run_tool ( $state, @args ) {
             return 1;
         }
     );
+    return $code->();
+}
 
-    my $rc;
-    my $said = capture_stdout { $rc = Trog::Bin::GuestNetwork::main(@args) };
-    return ( $rc, $said );
+sub run_tool ( $state, @args ) {
+    return mocked(
+        $state,
+        sub {
+            my $rc;
+            my $said = capture_stdout { $rc = Trog::Bin::GuestNetwork::main(@args) };
+            return ( $rc, $said );
+        }
+    );
 }
 
 my @run = ( qw{--hypervisor clod --nic virbr1 --via hv1}, '--hvconf', hvconf() );
@@ -245,6 +267,113 @@ subtest 'what it refuses to make' => sub {
     $state->{networks}{other} = { xml => "<network><name>other</name><bridge name='virbr1'/></network>", active => 1, autostart => 1 };
     like( exception { run_tool( $state, @run ) }, qr/virbr1[ ]on[ ].*belongs[ ]to[ ]the[ ]network[ ]other/, 'and a bridge that another network has' );
     is( $state->{defined}, 0, 'none of which defines anything' );
+};
+
+# The block of a runner as Provisioner::Recipe::trogrunner takes it, with lists
+# where hypervisors.conf has text.
+my %RUNNER = (
+    libvirt_uri    => 'qemu+ssh://runner@hv1.test.test/session',
+    resolvers      => ['10.0.0.1'],
+    dhcp_nics      => ['virbr0'],
+    static_nics    => ['virbr1'],
+    gateway_virbr1 => '10.0.0.1',
+    ip_pool_virbr1 => ['10.0.0.64/26'],
+    prefix_virbr1  => 24,
+);
+
+# The block that acts for the runner, on the system URI of the same host.
+sub operator_block () { return Trog::Hypervisors->load( hvconf() )->hypervisor('hv1') }
+
+# Runs the actions that $make returns against $state, and returns how many
+# changed something and what they printed.
+sub run_steps ( $state, $make ) {
+    return mocked(
+        $state,
+        sub {
+            my $count;
+            my $said = capture_stdout { $count = Trog::Steps::run( [ $make->() ], 0 ) };
+            return ( $count, $said );
+        }
+    );
+}
+
+subtest 'runner_adapters: the bridges and the networks of the block of the runner' => sub {
+    my $state   = fresh_state();
+    my $hv      = operator_block();
+    my %no_dhcp = %RUNNER;
+    delete $no_dhcp{dhcp_nics};
+
+    my %got = mocked( $state, sub { $hv->runner_adapters( \%RUNNER, 'runner' ) } );
+    is_deeply( $got{bridges},                                                                  [qw{virbr0 virbr1}],                                    'the bridges of the runner, leases first, and not those of the block that acts for it' );
+    is_deeply( [ map { [ @{$_}{qw{name bridge address prefix cidr}} ] } @{ $got{networks} } ], [ [qw{runner-virbr1 virbr1 10.0.0.1 24 10.0.0.0/24}] ], 'and one network for its static adapter, named after the user and the bridge' );
+
+    my %lease = mocked( $state, sub { $hv->runner_adapters( \%no_dhcp, 'runner' ) } );
+    is_deeply( $lease{bridges}, [qw{virbr0 virbr1}], 'a runner that names no dhcp_nics gets the bridge of the default network of the host' );
+
+    like(
+        exception {
+            mocked( $state, sub { $hv->runner_adapters( { %RUNNER, ip_pool_virbr1 => ['10.0.1.0/26'] }, 'runner' ) } )
+        },
+        qr{outside[ ]10[.]0[.]0[.]0/24},
+        'and a pool outside the network of its gateway is refused'
+    );
+};
+
+subtest 'runner_network_steps: the network of a static adapter, or nothing on a bridge of the host' => sub {
+    my $state  = fresh_state();
+    my $hv     = operator_block();
+    my ($plan) = @{ { mocked( $state, sub { $hv->runner_adapters( \%RUNNER, 'runner' ) } ) }->{networks} };
+
+    my ( $count, $said ) = run_steps( $state, sub { $hv->runner_network_steps($plan) } );
+    is( $count, 3, 'it defines, starts and autostarts the network' ) or diag $said;
+    like( $state->{networks}{'runner-virbr1'}{xml}, qr{<bridge[ ]name='virbr1'},                        'on the bridge of the block' );
+    like( $state->{networks}{'runner-virbr1'}{xml}, qr{<ip[ ]address='10[.]0[.]0[.]1'[ ]prefix='24'/>}, 'at its gateway, with its prefix' );
+    ok( $state->{networks}{'runner-virbr1'}{active} && $state->{networks}{'runner-virbr1'}{autostart}, 'running, and started with the host' );
+    is( ( run_steps( $state, sub { $hv->runner_network_steps($plan) } ) )[0], 0, 'and a second run changes nothing' );
+
+    my $lan = Trog::HV::Libvirt->guest_network_plan( name => 'runner-br0', bridge => 'br0', address => '192.0.2.1', prefix => 24 );
+    $state->{host_bridges}{br0} = 1;
+    my $before = $state->{defined};
+    ( $count, $said ) = run_steps( $state, sub { $hv->runner_network_steps($lan) } );
+    is( $count, 0, 'a bridge of the host that no network owns is left alone' );
+    like( $said, qr/ok[ ]+leave[ ]br0[ ]to[ ].*bridge[ ]of[ ]its[ ]own/, 'and it says so' );
+    is( $state->{defined}, $before, 'with nothing defined' );
+};
+
+subtest 'runner_network_removal_steps: the network goes when nothing else joins its bridge' => sub {
+    my $state  = fresh_state();
+    my $hv     = operator_block();
+    my ($plan) = @{ { mocked( $state, sub { $hv->runner_adapters( \%RUNNER, 'runner' ) } ) }->{networks} };
+    run_steps( $state, sub { $hv->runner_network_steps($plan) } );
+    my $remove = sub {
+        run_steps( $state, sub { $hv->runner_network_removal_steps( $plan, 'runner' ) } );
+    };
+
+    $state->{files}{$ACL} = 'allow virbr1';
+    my ( undef, $said ) = $remove->();
+    ok( $state->{networks}{'runner-virbr1'}, 'it stays while the account of the runner is there' );
+    like( $said, qr/stays.*the[ ]account[ ]runner/, 'and says why' );
+    delete $state->{files}{$ACL};
+
+    $state->{files}{'/etc/qemu/trog-runner-other.conf'} = 'allow virbr1';
+    ( undef, $said ) = $remove->();
+    ok( $state->{networks}{'runner-virbr1'}, 'and while another account may join its bridge' );
+    like( $said, qr/stays.*trog-runner-other[.]conf/, 'naming the file that allows it' );
+    delete $state->{files}{'/etc/qemu/trog-runner-other.conf'};
+
+    $state->{networks}{'runner-virbr1'}{xml} =~ s/<network>/<network connections='2'>/;
+    ( undef, $said ) = $remove->();
+    ok( $state->{networks}{'runner-virbr1'}, 'and while a guest of the system daemon is on it' );
+    like( $said, qr/stays.*2[ ]guest\(s\)/, 'counting them' );
+    $state->{networks}{'runner-virbr1'}{xml} =~ s/[ ]connections='2'//;
+
+    $remove->();
+    ok( !$state->{networks}{'runner-virbr1'}, 'with none of those, it is stopped and undefined' );
+    is( ( $remove->() )[0], 0, 'and a second run changes nothing' );
+
+    $state->{networks}{'runner-virbr1'} = { xml => "<network><name>runner-virbr1</name><bridge name='virbr9'/></network>", active => 1 };
+    is( ( $remove->() )[0], 0, 'a network of that name on another bridge is not one that this made, and stays' );
+    ok( $state->{networks}{'runner-virbr1'}, 'so it is still there' );
 };
 
 done_testing();

@@ -849,9 +849,17 @@ gateway_virbr1 = 10.0.0.1
 prefix_virbr1  = 24
 ```
 
-`bin/guest_network` makes the network of a static adapter from the block.  The
-block of a session cannot define a network of the system daemon, so `--via`
-names the block of an account on the system URI of the same host, with sudo:
+When the block is the block of a runner with an `account`, in the `hypervisors`
+of the `trogrunner` recipe, `bin/provision` makes this network when it builds
+the runner, and `bin/destroy` takes it away again.  It is named `USER-BRIDGE`,
+such as `runner-virbr1`.  The account may join the bridges of the block of the
+runner and no other, not the bridges of the block that makes the account.
+`outside_steps` in `perldoc Provisioner::Recipe::trogrunner` has the rest.
+
+For any other block, `bin/guest_network` makes the network of a static adapter
+from the block.  The block of a session cannot define a network of the system
+daemon, so `--via` names the block of an account on the system URI of the same
+host, with sudo:
 
 ```
 bin/guest_network --hypervisor runner-hv --nic virbr1 --via hv1 --dryrun

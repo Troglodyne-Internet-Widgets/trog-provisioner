@@ -322,7 +322,7 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     like( $dropin, qr/CPUQuota=400%\nIOWeight=50/, 'the user slice has the caps' );
     reads_as_a_slice($dropin);
 
-    is( $state->{files}{$ACL}, "allow virbr0\nallow br0", 'the user may join the NAT bridge and the outbound bridge' );
+    is( $state->{files}{$ACL}, "allow virbr0", 'the user may join the bridge of the leases, and not the static bridge of the block that makes the account' );
     like( $state->{files}{$BRIDGES}, qr{^include[ ]\Q$ACL\E$}m, 'which bridge.conf includes' );
     ok( $state->{caps}{$HELPER}, 'the bridge helper has the capability to add a tap device to a bridge' );
     like( $state->{files}{$APT_HOOK}, qr{setcap[ ]cap_net_admin\+ep[ ]\Q$HELPER\E}, 'and an apt hook gives it back after an upgrade' );
@@ -348,6 +348,17 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     $state->{root} = [];
     run_tool( $state, map { $_ eq '500G' ? '1T' : $_ } @create );
     is_deeply( $state->{root}, ['zfs set quota=1T tank/vm-disks/runner'], 'a new quota sets the quota, and nothing else' );
+};
+
+subtest '--bridge gives the account those bridges, and takes away the others' => sub {
+    my $state = fresh_state();
+    $state->{files}{$ACL} = "allow virbr0\nallow br0";
+
+    my ( $rc, $said ) = run_tool( $state, @create, qw{--bridge virbr0 --bridge virbr1} );
+    is( $rc,                   0,                            'it exits 0' ) or diag $said;
+    is( $state->{files}{$ACL}, "allow virbr0\nallow virbr1", 'the file holds the bridges given, and not the bridge that it allowed before' );
+
+    like( exception { run_tool( $state, @create, qw{--bridge br/0} ) }, qr{bridge[ ]'br/0'[ ]is[ ]not[ ]the[ ]name[ ]of[ ]a[ ]link}, 'and a bridge that is not the name of a link is refused' );
 };
 
 subtest 'it refuses a hypervisor that cannot hold the account' => sub {

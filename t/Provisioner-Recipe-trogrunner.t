@@ -568,6 +568,14 @@ subtest 'a runner with access and no key stops the postrun, which fails the buil
     sub runner_removal_steps     ( $self, $plan )            { push @{ $self->{asked} }, [ remove => $plan ];           return { what => 'unmake it' } }
     sub runner_key_steps         ( $self, $user, $line )     { push @{ $self->{asked} }, [ key => $user, $line ];       return { what => 'let it in' } }
     sub runner_key_removal_steps ( $self, $user, $material ) { push @{ $self->{asked} }, [ unkey => $user, $material ]; return { what => 'shut it out' } }
+
+    # The adapters of a runner with two bridges, one of them static.
+    sub runner_adapters ( $self, $block, $user ) {
+        push @{ $self->{asked} }, [ adapters => $block, $user ];
+        return ( bridges => [qw{virbr0 virbr1}], networks => [ { name => "$user-virbr1", bridge => 'virbr1' } ] );
+    }
+    sub runner_network_steps         ( $self, $plan )        { push @{ $self->{asked} }, [ network => $plan ];        return { what => 'net it' } }
+    sub runner_network_removal_steps ( $self, $plan, $user ) { push @{ $self->{asked} }, [ unnet   => $plan, $user ]; return { what => 'unnet it' } }
 }
 
 # The store as bin/provision hands it to a step: by reference.  The recipe's own
@@ -658,16 +666,21 @@ subtest 'a runner with an account has it made, and its key put in as root' => su
     my @steps   = Provisioner::Cookbook->load('trogrunner')->outside_steps( $DOMAIN, hypervisor_access => 'least', restrict_key_to_ip => 0, hypervisors => \%blocks );
     my %context = ( domain => $DOMAIN, domain_dir => $dir, dryrun => 0, secrets => runner_secrets() );
 
-    is_deeply( [ map { $_->{id} } @steps ],      [qw{trogrunner:account:hv1 trogrunner:key:hv1}],      'the account, and then the key' );
-    is_deeply( [ map { $_->{machine} } @steps ], [ { hypervisor => 'hv1' }, { hypervisor => 'hv1' } ], 'both as the account of the block of that name in hypervisors.conf, and not as the runner' );
+    is_deeply( [ map { $_->{id} } @steps ],      [qw{trogrunner:networks:hv1 trogrunner:account:hv1 trogrunner:key:hv1}], 'the networks, the account, and then the key' );
+    is_deeply( [ map { $_->{machine} } @steps ], [ ( { hypervisor => 'hv1' } ) x 3 ],                                     'each as the account of the block of that name in hypervisors.conf, and not as the runner' );
 
     my $admin = Test::FakeAdmin->new();
     $_->{apply}->( $admin, %context ) for @steps;
-    my ( $plan, $account, $key ) = @{ $admin->{asked} };
+    my %asked;
+    push @{ $asked{ $_->[0] } }, $_ for @{ $admin->{asked} };
+    my ( $adapters, $network, $plan, $account, $key ) = map { $asked{$_}[0] } qw{adapters network plan account key};
+    is( $adapters->[1],      $blocks{hv1},    'the adapters come from the block of the runner' );
+    is( $adapters->[2],      'runner',        'and the user of its URI' );
+    is( $network->[1]{name}, 'runner-virbr1', 'each network of a static adapter is made' );
     is_deeply(
         $plan->[1],
-        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', quota => '500G', cores => 32 },
-        'the plan is the user of the URI, the pool of the entry, and the limits of the account'
+        { user => 'runner', pool_name => 'runner_disks', pool_path => '/srv/vm-disks/runner', quota => '500G', cores => 32, bridges => [qw{virbr0 virbr1}] },
+        'the plan is the user of the URI, the pool of the entry, the limits of the account, and the bridges of the runner'
     );
     is( $account->[0], 'account', 'and the account is made from it' );
     is( $key->[1],     'runner',  'and the key goes to that user' );
@@ -676,7 +689,7 @@ subtest 'a runner with an account has it made, and its key put in as root' => su
 
     $admin = Test::FakeAdmin->new();
     $_->{revert}->( $admin, %context, secrets => {} ) for reverse @steps;
-    is_deeply( [ map { $_->[0] } @{ $admin->{asked} } ], [qw{unkey plan remove}], 'the revert takes the key away, and then the account' );
+    is_deeply( [ map { $_->[0] } @{ $admin->{asked} } ], [qw{unkey plan remove adapters unnet}], 'the revert takes the key away, then the account, and then the networks' );
 };
 
 subtest 'access taken away leaves only what to take back' => sub {

@@ -2323,6 +2323,122 @@ sub guest_network_steps ( $hv, $plan ) {
     );
 }
 
+=head2 %adapters = $hv->runner_adapters(\%block, $user)
+
+The adapters of the guests of the runner C<$user>, from C<\%block>, the block of
+the runner as L<Provisioner::Recipe::trogrunner> takes it, on the same host as
+this hypervisor, which acts for it:
+
+=over 4
+
+=item C<bridges>
+
+A reference to the list of its bridges: its C<dhcp_nics>, or the bridge of the
+C<default> network of this hypervisor when it names none, and then its
+C<static_nics>.  It is what the account of the runner may join.
+
+=item C<networks>
+
+A reference to a list of plans from C<guest_network_plan>, one for each of its
+C<static_nics>, with the gateway, the prefix and the pool of the block.  Each
+network is named C<USER-BRIDGE>.
+
+=back
+
+Dies as the block of the runner would, on an adapter without a pool or a
+gateway, and as C<guest_network_plan> does.
+
+=cut
+
+sub runner_adapters ( $hv, $block, $user ) {
+    my $class  = ref $hv;
+    my $runner = $class->candidate( $class->options_from_block($block) );
+
+    my @dhcp     = $runner->setting_list('dhcp_nics');
+    my @static   = $runner->static_nics;
+    my @networks = map {
+        $class->guest_network_plan(
+            name    => "$user-$_",
+            bridge  => $_,
+            address => $runner->nic_gateway($_),
+            prefix  => $runner->nic_prefix_length($_),
+            pool    => $runner->nic_pool($_),
+        )
+    } @static;
+
+    return ( bridges => [ ( @dhcp ? @dhcp : $hv->lease_nic ), @static ], networks => \@networks );
+}
+
+=head2 @actions = $hv->runner_network_steps(\%plan)
+
+The actions that give a static adapter of the guests of a runner its network,
+on the system daemon of this hypervisor.  C<\%plan> is from
+C<guest_network_plan>, for a bridge of the C<static_nics> of the block of the
+runner.
+
+When the bridge is a bridge of the host that no network of libvirt owns, such
+as one that bridges the LAN, it is not this software's to make.  Then the one
+action says so and changes nothing.  Otherwise the actions are those of
+C<guest_network_steps>.  L<Provisioner::Recipe::trogrunner> runs these when it
+provisions a runner with an account.
+
+=cut
+
+sub runner_network_steps ( $hv, $plan ) {
+    my $bridge = $plan->{bridge};
+    return {
+        what => "leave $bridge to " . $hv->describe . ', which has it as a bridge of its own',
+        done => sub { 1 },
+        do   => sub { },
+      }
+      if !network_on( $hv, $bridge ) && $hv->run_cmd( qw{test -d}, "/sys/class/net/$bridge/bridge" ) == 0;
+    return $hv->guest_network_steps($plan);
+}
+
+=head2 @actions = $hv->runner_network_removal_steps(\%plan, $user)
+
+The action that undoes C<runner_network_steps> when the runner C<$user> goes:
+the network of C<\%plan> is stopped and undefined.  It stays when it has
+another bridge than the plan, because then this software did not make it.  It
+also stays while a guest of the system daemon is on it, while the file of
+another runner account lets that account join its bridge, and while the file of
+C<$user> is there.  That file goes with the account, which does not go while its
+pool holds the disk of a guest, so a network stays under the guests of a runner
+that could not be taken away.  Then the action says
+why and changes nothing.
+
+=cut
+
+sub runner_network_removal_steps ( $hv, $plan, $user ) {
+    my ( $name, $bridge ) = @{$plan}{qw{name bridge}};
+    my $network = sub {
+        my $net = eval { $hv->vmm->get_network_by_name($name) } || return undef;
+        return ( eval { $net->get_bridge_name } // q{} ) eq $bridge ? $net : undef;
+    };
+
+    # The guests of the system daemon on it, which libvirt counts in the XML of a
+    # network that runs, the runner if its account is still there, and the other
+    # accounts that may put theirs on it.
+    my $users = sub ($net) {
+        my ($guests) = $net->is_active ? $net->get_xml_description =~ m/<network\b[^>]*\bconnections=['"](\d+)['"]/ : ();
+        my $own = Trog::HV::Libvirt::BridgeHelper::acl_file($user);
+        return ( $guests ? "$guests guest(s) of the system daemon" : () ), ( $hv->file_exists($own) ? "the account $user, whose $own is still there" : () ),
+          Trog::HV::Libvirt::BridgeHelper::allowed_by_others( $hv, $bridge, $user );
+    };
+
+    return {
+        what => "remove the network $name, unless something else still joins $bridge",
+        done => sub { !$network->() },
+        do   => sub {
+            my $net  = $network->();
+            my @busy = $users->($net);
+            return print "        It stays, because these still join $bridge: " . join( ', ', @busy ) . "\n" if @busy;
+            $net->destroy                                                                                    if $net->is_active;
+            $net->undefine;
+        },
+    };
+}
+
 =head1 CAPACITY
 
 What the hypervisor has and what its guests already have.  L<Trog::HV> uses
@@ -3722,14 +3838,18 @@ SUDOERS
 
 Checks what an account is to be, and returns what the methods below need.
 C<%args> takes C<user>, C<pool_name> and C<pool_path>, which are required, and
-C<quota>, C<cores> and C<io_weight>.  The plan has those.
+C<quota>, C<cores>, C<io_weight> and C<bridges>.  The plan has those.
+
+C<bridges> is a reference to the list of the bridges that the guests of the
+account may join: the C<dhcp_nics> and the C<static_nics> of the block of the
+runner, not of the block that makes the account.
 
 C<cores> is the CPU time that the guests of the account get together, in
 whole cores of the host, such as 16.  The user slice of the account gets it as
 C<CPUQuota>, 100% for each core.
 
-C<quota> is required to make an account, and not to take one away, so this
-does not require it.  Dies on a value that a step would write into a file or a
+C<quota> is required to make an account, and not to take one away, and so are
+C<bridges>, so this does not require them.  Dies on a value that a step would write into a file or a
 command as syntax.
 
 =cut
@@ -3754,7 +3874,13 @@ sub runner_account_plan {
     die "io_weight '$args{io_weight}' has to be from 1 to 10000\n"
       if defined $args{io_weight} && ( $args{io_weight} !~ m/\A\d+\z/ || $args{io_weight} < 1 || $args{io_weight} > 10_000 );
 
-    return { map { $_ => $args{$_} } qw{user pool_name pool_path quota cores io_weight} };
+    if ( defined $args{bridges} ) {
+        die "bridges is a list of the bridges that the guests of the account may join\n" unless ref $args{bridges} eq q{ARRAY} && @{ $args{bridges} };
+        my ($bad) = grep { !m/$Trog::Patterns::LINK_NAME/ } @{ $args{bridges} };
+        die "bridge '$bad' is not the name of a link\n" if defined $bad;
+    }
+
+    return { map { $_ => $args{$_} } qw{user pool_name pool_path quota cores io_weight bridges} };
 }
 
 =head2 @actions = $hv->runner_account_steps(\%plan)
@@ -3786,9 +3912,10 @@ memory, because C<MemoryMax> on a slice kills a guest rather than refusing the
 next one.  C<max_memory> is the budget that refuses it instead.  See QUOTAS in
 L<Provisioner::Recipe::trogrunner>.
 
-=item 6. The bridges that qemu-bridge-helper lets the user join: each of
-L</nic_bridges>, the bridges of the block of this object.  See
-C<grant_steps> in L<Trog::HV::Libvirt::BridgeHelper>.
+=item 6. The bridges that qemu-bridge-helper lets the user join: the
+C<bridges> of the plan, and no other.  A bridge that the file allowed before
+and the plan does not name goes.  See C<allow_only_steps> in
+L<Trog::HV::Libvirt::BridgeHelper>.
 
 =item 7. The C<cap_net_admin> capability on qemu-bridge-helper, and an apt
 hook that sets it again after each package upgrade.  See C<capability_steps> in
@@ -3803,7 +3930,7 @@ is installed.
 Before the first, it makes sure that the hypervisor has what every step needs,
 and dies with the reason if one is missing: a quota in the plan, sudo 1.9.10
 or later for the pattern of the grant, the lease helper, F</dev/kvm>,
-qemu-bridge-helper, apt for the hook, a name for each bridge, and ZFS under the parent
+qemu-bridge-helper, apt for the hook, the bridges of the plan, and ZFS under the parent
 of the pool.  On a filesystem other than ZFS, the message says how to put a
 quota there, which is the advice of C<note_pool_quota>.
 
@@ -3824,7 +3951,8 @@ sub runner_account_steps {
     my $helper = Trog::HV::Libvirt::BridgeHelper::helper($hv) or die 'There is no qemu-bridge-helper on ' . $hv->describe . ", which a session needs to put a guest on a bridge.\n";
     $hv->run_cmd(qw{test -d /etc/apt/apt.conf.d}) == 0
       or die 'There is no apt on ' . $hv->describe . ", so nothing would set the capability of $helper again after a package upgrade.\n";
-    my @bridges = $hv->nic_bridges;
+    die "An account for a runner needs the bridges that its guests may join\n" unless $plan->{bridges};
+    my @bridges = @{ $plan->{bridges} };
 
     my $parent = File::Basename::dirname($path);
     my $fstype = $hv->path_fstype($parent);
@@ -3918,7 +4046,7 @@ sub runner_account_steps {
             },
         },
         @slice,
-        Trog::HV::Libvirt::BridgeHelper::grant_steps( $hv, $user, @bridges ),
+        Trog::HV::Libvirt::BridgeHelper::allow_only_steps( $hv, $user, @bridges ),
         Trog::HV::Libvirt::BridgeHelper::capability_steps( $hv, $helper ),
         {
             what => "grant $user sudo for the lease release, in $sudoers",
