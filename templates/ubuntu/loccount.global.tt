@@ -1,0 +1,3 @@
+[%# loccount, for the whole guest.  DESCRIPTION in Provisioner::Recipe::loccount
+    says why it is built, and why only in the postrun. -%]
+[% script_dir %]/queue_postrun_task [% script_dir %]/build_loccount.sh '[% version %]'

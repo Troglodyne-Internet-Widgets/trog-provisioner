@@ -1,0 +1,26 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+use File::Temp qw{tempdir};
+
+my $version = qx{/usr/local/bin/loccount -V 2>&1};
+is($version, "loccount [% version %]\n", 'loccount runs, and is the version that was asked for') or diag $version;
+
+# What App::Clod asks of it: the lines of a git work tree, as JSON, and the
+# COCOMO estimates.  A file that git does not track is not counted.
+my $dir = tempdir(CLEANUP => 1);
+for my $file (qw{tracked.pl untracked.pl}) {
+    open(my $fh, '>', "$dir/$file") or die "Cannot write $file: $!";
+    print {$fh} "print 1;\nprint 2;\n";
+    close($fh) or die "Cannot close $file: $!";
+}
+my $git = qx{cd '$dir' && git init --quiet && git add tracked.pl 2>&1};
+is($?, 0, 'a work tree to count') or diag $git;
+
+my $out = qx{/usr/local/bin/loccount -j -c '$dir' 2>&1};
+is($?, 0, 'loccount counts it') or diag $out;
+like($out, qr/^\{"language":"Perl", "sloc":2, "lloc":2, "filecount":1\}$/m, 'as a JSON line of each language, of the tracked file alone') or diag $out;
+like($out, qr/^Total Logical Source Lines of Code \(LLOC\)\s+= 2$/m, 'with the COCOMO II estimate of the logical lines') or diag $out;
+
+done_testing();

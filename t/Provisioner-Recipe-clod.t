@@ -60,6 +60,8 @@ subtest 'the perl recipe installs the checkout, and the modules of the spokes af
 
     my %proxy = $required{nginxproxy}->(%GLOBALS);
     is( $proxy{proxy_uri}, 'run/clod.sock', 'nginxproxy serves the socket of the daemon' );
+
+    is_deeply( { $required{loccount}->(%GLOBALS) }, {}, 'and loccount is installed, for the Code tab of the health page, as its defaults have it' );
 };
 
 # App::Clod evaluates the configuration as perl, so this evaluates it too.

@@ -424,7 +424,8 @@ are C<perlcritic>, C<perltidy>, C<nytprofhtml> and C<nytprofmerge>, from
 Perl::Critic, Perl::Tidy and Devel::NYTProf.  Perl::Critic and Perl::Tidy also arrive
 through the author dependencies of the checkout, but only by chance, so the
 recipe names them.
-C<nginxproxy>, which serves the socket.  C<claude>, which installs the program
+C<nginxproxy>, which serves the socket.  C<loccount>, which App::Clod runs on
+each spoke for the Code tab of its health page.  C<claude>, which installs the program
 that does the work, and makes the C<agent_user> as its C<restricted_user>.
 C<servicesudo>, which lets the service user restart both units, and ask for
 their status, with sudo, as
@@ -453,6 +454,7 @@ sub required_recipes {
             );
         },
         nginxproxy  => sub { return ( proxy_uri => 'run/clod.sock' ) },
+        loccount    => sub { return () },
         servicesudo => sub {
             my (%opts) = @_;
             my @units = ( "clod-$opts{domain}.service", "clod-worker-$opts{domain}.service" );

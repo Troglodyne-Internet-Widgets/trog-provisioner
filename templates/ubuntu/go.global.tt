@@ -1,0 +1,16 @@
+[%# The toolchain, for the whole guest.  DESCRIPTION in Provisioner::Recipe::go
+    says why it is not the package of the distribution.
+
+    Re-entrant: it downloads nothing while /usr/local/go holds this release.
+    An archive whose SHA-256 is wrong stops the line before the old toolchain
+    goes away.
+
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
+if ! /usr/local/go/bin/go version 2>/dev/null | grep -qF ' go[% version %] '; then \
+    curl -fsSL --retry 3 --retry-all-errors -o 'go[% version %].linux-amd64.tar.gz' 'https://go.dev/dl/go[% version %].linux-amd64.tar.gz' \
+    && echo '[% sha256 %]  go[% version %].linux-amd64.tar.gz' | sha256sum -c --quiet - \
+    && rm -rf /usr/local/go \
+    && tar -C /usr/local -xzf 'go[% version %].linux-amd64.tar.gz'; \
+fi
+ln -sf /usr/local/go/bin/go /usr/local/go/bin/gofmt /usr/local/bin/
