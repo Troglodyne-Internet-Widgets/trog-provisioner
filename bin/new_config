@@ -628,15 +628,23 @@ out of it.
 Takes C<state_dir>, C<user>, C<admin_user>, C<fetch>, which is true when the
 guest fetches through a cache, C<modules>, the recipe targets in order,
 C<order_only>, what C<order_only> returns for them, C<ufw>, which is true
-when the guest runs ufw, and C<resolver>, which is true when a recipe names a
-drop-in of systemd-resolved.  See L<Provisioner::Recipe/resolver_files>.
+when the guest runs ufw, C<mounts>, which is true when the guest runs the
+mounts recipe, and C<resolver>, which is true when a recipe names a drop-in of
+systemd-resolved.  See L<Provisioner::Recipe/resolver_files>.
 
 The C<resolver> target comes first after C<state>, so that every target after
 it runs with the resolver that the guest keeps.
 
 The global targets wait for one another.  The cache waits for the last of them,
-every recipe target waits for the cache, or for the last global target without
-one, and for what C<order_only> says.  ufw waits for every recipe target.
+and mounts for the cache, or for the last global target without one.  Every
+recipe target waits for mounts, or for the one before it without mounts, and
+for what C<order_only> says.  ufw waits for every recipe target.
+
+mounts comes before every recipe, so that each recipe writes to what is
+mounted, and not to the disk under it.  It cannot come earlier.  It runs
+F<mount_virtiofs> and F<add_to_fstab> from the directory that the C<scripts>
+target installs.  And the C<data> target runs C<chown -R> and C<chmod -R> over
+the directory of the domain, which would go into a share mounted inside it.
 
 =cut
 
@@ -651,7 +659,7 @@ sub targets_in_order {
 
     my @targets;
     my $last;
-    foreach my $target ( map { "$state/$_" } @global, ( $args{fetch} ? 'fetch_via_cache' : () ) ) {
+    foreach my $target ( map { "$state/$_" } @global, ( $args{fetch} ? 'fetch_via_cache' : () ), ( $args{mounts} ? 'mounts' : () ) ) {
         push( @targets, { target => $target, after => [ $last // () ] } );
         $last = $target;
     }
@@ -1318,6 +1326,11 @@ sub handle_domain {
     my $ufw_fragment = delete $fragments{ufw};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/ufw" } @modules_ordered;
 
+    # mounts comes out because it must run before every recipe:
+    # targets_in_order says why.
+    my $mounts_fragment = delete $fragments{mounts};
+    @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/mounts" } @modules_ordered;
+
     my %order_only = order_only( \@modules, \%targets_of, $required_by, \@modules_ordered );
 
     # The hosts that the guest downloads from through the fetch cache, and the
@@ -1344,6 +1357,7 @@ sub handle_domain {
             %$global_config,
             data_fragment    => $data_fragment,
             ufw_fragment     => $ufw_fragment,
+            mounts_fragment  => $mounts_fragment,
             fragments        => \%fragments,
             global_fragments => \%global_fragments,
             targets          => [
@@ -1355,6 +1369,7 @@ sub handle_domain {
                     modules    => \@modules_ordered,
                     order_only => \%order_only,
                     ufw        => defined $ufw_fragment,
+                    mounts     => defined $mounts_fragment,
                     resolver   => scalar %resolver_files,
                 )
             ],
