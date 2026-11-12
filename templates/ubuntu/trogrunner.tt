@@ -24,16 +24,18 @@
 install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/etc/trog-provisioner'
 ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisioner
 
-install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
-install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
-# Always, because every block names the resolvers of its guests, and a runner
-# that is its own hypervisor gets a block for this guest.
-install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.hypervisors.conf '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf'
+# Each of these only when it is missing, because the configuration belongs to
+# the operator once it exists.  A rebuild restores the salvaged copy first, and
+# a configuration directory that is a share of the hypervisor already has one.
+# THE CONFIGURATION in Provisioner::Recipe::trogrunner says more.
+[ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
+[ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
+[ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.hypervisors.conf '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf'
 [% IF store %]
 # The secret store of the runner, from the data directory of this domain.
 # Nothing generates it, because a new keepass database has new passwords.
 # Every guest that the runner built uses the old ones.
-install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/[% store %]' '[% install_dir %]/[% domain %]/etc/trog-provisioner/secrets.kdbx'
+[ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/secrets.kdbx' ] || install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/[% store %]' '[% install_dir %]/[% domain %]/etc/trog-provisioner/secrets.kdbx'
 [% END %]
 # /etc/profile.d, not a dotfile in the domain directory.  That directory is a
 # home only if the domain names a service user, and a runner does not have to.

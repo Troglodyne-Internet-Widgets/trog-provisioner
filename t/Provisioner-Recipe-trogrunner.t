@@ -454,6 +454,48 @@ subtest 'perl is the whole of what it needs from another recipe' => sub {
     ok( !$deps{xorriso},      'but not xorriso, which is the hypervisor job' );
 };
 
+# A runner whose configuration directory is a share of the hypervisor has the
+# configuration of the fleet there before the fragment runs, and so has one
+# that was rebuilt, from the salvage.  The fragment must leave it alone.
+subtest 'the fragment seeds the configuration, and leaves what is there alone' => sub {
+    my $guest = tempdir( CLEANUP => 1 );
+    my $bin   = tempdir( CLEANUP => 1 );
+
+    # install with the owner and the group taken out, which only root can set.
+    File::Slurper::Temp::write_text( "$bin/install", qq{#!/bin/sh\nwhile [ \$# -gt 2 ]; do case "\$1" in -o|-g|-m) shift 2;; *) shift;; esac; done\ncp "\$1" "\$2"\n} );
+    chmod 0755, "$bin/install" or die "chmod: $!";
+
+    my ( $dir, $recipe, $vars ) = built( install_dir => $guest, store => 'secrets.kdbx' );
+    my $conf  = "$guest/$DOMAIN/etc/trog-provisioner";
+    my @seeds = grep { m{\A\[[ ]-e[ ]'[^']*/etc/trog-provisioner/} } split m/\n/, $recipe->render(%$vars);
+    is( scalar @seeds, 4, 'four files are seeded: recipes.yaml, admin_authorized_keys, hypervisors.conf and the store' );
+
+    # From the directory of the payload, where the fragment runs.
+    my $seed = sub {
+        my $said = q{};
+        local $ENV{PATH} = "$bin:$ENV{PATH}";
+        IPC::Run3::run3( [ qw{bash -e -c}, join( "\n", 'cd "$1"', @seeds ), 'bash', $dir ], \undef, \$said, \$said );
+        return ( $? >> 8, $said );
+    };
+
+    File::Path::make_path($conf);
+    File::Slurper::Temp::write_text( "$guest/$DOMAIN/secrets.kdbx", "bogus store\n" );
+    my ( $rc, $said ) = $seed->();
+    is( $rc,                                                0,                                                            'an empty directory is seeded' ) or diag $said;
+    is( File::Slurper::read_text("$conf/recipes.yaml"),     File::Slurper::read_text("$dir/trogrunner.recipes.yaml"),     'with the rendered recipes.yaml' );
+    is( File::Slurper::read_text("$conf/hypervisors.conf"), File::Slurper::read_text("$dir/trogrunner.hypervisors.conf"), 'and hypervisors.conf' );
+    is( File::Slurper::read_text("$conf/secrets.kdbx"),     "bogus store\n",                                              'and the store of the domain' );
+
+    File::Slurper::Temp::write_text( "$conf/$_", "the operator's $_\n" ) for qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx};
+    ( $rc, $said ) = $seed->();
+    is( $rc, 0, 'a directory that has the configuration is seeded too' ) or diag $said;
+    is_deeply(
+        [ map { File::Slurper::read_text("$conf/$_") } qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx} ],
+        [ map { "the operator's $_\n" } qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx} ],
+        'and keeps every file that it had'
+    );
+};
+
 subtest 'the symlink is made with -n, or the second provision fails' => sub {
     my ( undef, $recipe, $vars ) = built();
     my $fragment = $recipe->render(%$vars);

@@ -70,8 +70,9 @@ use Trog::Patterns();
 
             hypervisor_access: least
 
-            # The recipes.yaml of the runner, dumped as written.  Write
-            # secrets as store:, never as secret:.  See SECRETS IN recipes.
+            # The first recipes.yaml of the runner, dumped as written.  Write
+            # secrets as store:, never as secret:.  See THE CONFIGURATION and
+            # SECRETS IN recipes.
             recipes:
                 _base:
                     _global:
@@ -95,6 +96,32 @@ The checkout is optional (C<checkout: 0>).  A runner that manages its own
 repositories, such as a coding agent, already has one.  A second copy under
 C<install_dir> is a second copy to keep in step.  Point C<deps_from> at the
 path where it clones instead, and the dependencies still install.
+
+=head3 THE CONFIGURATION
+
+The recipe seeds F<recipes.yaml>, F<hypervisors.conf>,
+F<admin_authorized_keys> and, with C<store>, F<secrets.kdbx> in the
+configuration directory of the runner.  It writes each one only when the file
+is not there yet, and leaves a file that is there as it is.  After the first
+build, the configuration belongs to the operator, who edits it in place.
+
+So C<recipes> and C<hypervisors> say what the first build writes, and a change
+to them later does not reach a runner that has the files.  Two cases have the
+files before the fragment runs:
+
+=over 4
+
+=item * A rebuild.  The salvage keeps the configuration directory, see
+L</remote_files>, and the C<data> target restores it before this fragment.
+
+=item * A configuration directory that is a share of the hypervisor, see
+L<Provisioner::Recipe::mounts>.  The C<mounts> target runs before this
+fragment, so the share holds the configuration of the fleet already.
+
+=back
+
+That also keeps what the rendered files cannot say, such as a block of
+F<hypervisors.conf> for a cloud, which names a token and no C<libvirt_uri>.
 
 =head3 THE PROVISIONING ACCOUNT
 
@@ -169,8 +196,8 @@ provisioned the guest.
 
 =head3 SECRETS IN recipes
 
-The C<recipes> argument is the whole F<recipes.yaml> of the runner.  Read this
-section before you write one.
+The C<recipes> argument is the first F<recipes.yaml> of the runner, see
+L</THE CONFIGURATION>.  Read this section before you write one.
 
 C<bin/new_config> resolves every C<secret:> reference in the I<whole>
 configuration before it constructs any recipe.  So it resolves a C<secret:>
@@ -995,12 +1022,11 @@ The private key, and the secret store of the runner.  A secret salvaged off a
 guest goes into the domain directory, then into C<data.tar.gz> and every
 backup.  C<remote_skip> exists to prevent that.
 
-B<Not> the rendered configuration files, although each provision renders them
-again.  The C<data> target unpacks the payload before any recipe fragment
-runs, so the rendered copy replaces the salvaged one anyway.  And if every file
-in a directory is skipped, the directory comes off the guest empty.  That looks
-the same as a failed fetch, and the salvage-gap check refuses to rebuild over
-it.
+B<Not> the configuration files.  The salvaged copy is the configuration of
+the runner, which the fragment leaves as it is, see L</THE CONFIGURATION>.
+And if every file in a directory is skipped, the directory comes off the guest
+empty.  That looks the same as a failed fetch, and the salvage-gap check
+refuses to rebuild over it.
 
 =cut
 
