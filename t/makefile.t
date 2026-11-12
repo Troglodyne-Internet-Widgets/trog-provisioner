@@ -67,6 +67,7 @@ sub makefile {
                     modules    => $in{modules_ordered},
                     order_only => $in{order_only} // {},
                     ufw        => defined $in{ufw_fragment},
+                    mounts     => defined $in{mounts_fragment},
                     resolver   => scalar %{ $in{resolver_files} // {} },
                 )
             ],
@@ -110,6 +111,7 @@ subtest 'the order of all is stated as prerequisites, so make -j keeps it' => su
         fragments        => { tcms          => "echo tcms\n", perl => "echo perl\n" },
         global_fragments => { nginx         => "echo nginx\n" },
         ufw_fragment     => "echo ufw\n",
+        mounts_fragment  => "echo mounts\n",
         fetch_hosts      => ['cpan.test.test'],
         cache_ip         => '192.0.2.1',
     );
@@ -122,11 +124,13 @@ subtest 'the order of all is stated as prerequisites, so make -j keeps it' => su
     my @all   = split q{ }, $all;
 
     ok( !exists $before{"$STATE/state"}, 'the first target waits for nothing' );
-    is_deeply( $before{"$STATE/sysctl"},          ["$STATE/service_user"],                                                       'each global target waits for the one before it' );
-    is_deeply( $before{"$STATE/fetch_via_cache"}, ["$STATE/testdeps"],                                                           'the cache after the last of them' );
-    is_deeply( $before{"$STATE/tcms"},            ["$STATE/fetch_via_cache"],                                                    'every recipe after the cache' );
-    is_deeply( $before{"$STATE/perl"},            [ "$STATE/fetch_via_cache", "$STATE/tcms" ],                                   'and after the recipes that required it' );
-    is_deeply( $before{"$STATE/ufw"},             [ "$STATE/fetch_via_cache", "$G/global_nginx", "$STATE/tcms", "$STATE/perl" ], 'and ufw after every recipe' );
+    is_deeply( $before{"$STATE/sysctl"},          ["$STATE/service_user"],                                              'each global target waits for the one before it' );
+    is_deeply( $before{"$STATE/fetch_via_cache"}, ["$STATE/testdeps"],                                                  'the cache after the last of them' );
+    is_deeply( $before{"$STATE/mounts"},          ["$STATE/fetch_via_cache"],                                           'mounts after the cache' );
+    is_deeply( $before{"$STATE/tcms"},            ["$STATE/mounts"],                                                    'every recipe after mounts' );
+    is_deeply( $before{"$STATE/perl"},            [ "$STATE/mounts", "$STATE/tcms" ],                                   'and after the recipes that required it' );
+    is_deeply( $before{"$STATE/ufw"},             [ "$STATE/mounts", "$G/global_nginx", "$STATE/tcms", "$STATE/perl" ], 'and ufw after every recipe' );
+    like( $mf, qr{^\Q$STATE\E/mounts:\n\techo[ ]mounts\n\ttouch[ ]\$\@$}m, 'and the mounts target runs the fragment of the recipe' );
 
     is( scalar( grep { !exists $before{$_} } @all ), 1, 'every target of all but the first has its order stated' );
     foreach my $target ( sort keys %before ) {

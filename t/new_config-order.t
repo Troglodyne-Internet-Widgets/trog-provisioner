@@ -71,6 +71,20 @@ subtest 'targets_in_order' => sub {
     is( $as_admin[1]{target}, "$S/admin_user", 'a domain run as its admin makes the admin account' );
     my @nobody = Trog::Provisioner::Config::Generator::targets_in_order( %args, user => undef );
     is( $nobody[1]{target}, "$S/sysctl", 'and a domain with no user makes neither' );
+
+    # The mounts recipe of a runner shares the configuration of the fleet in,
+    # and the recipe of the runner writes there.
+    my @mounted = Trog::Provisioner::Config::Generator::targets_in_order( %args, fetch => 1, mounts => 1, ufw => 1 );
+    my %m       = map { $_->{target} => $_ } @mounted;
+    is_deeply( [ map { $_->{target} } @mounted ], [ @global, "$S/fetch_via_cache", "$S/mounts", @ordered, "$S/ufw" ], 'mounts comes after the cache, and before every recipe' );
+    is_deeply( $m{"$S/mounts"}{after},            ["$S/fetch_via_cache"],                                             'so it waits for the cache, and after it the data target and the scripts' );
+    is_deeply( $m{"$G/global_cron"}{after},       ["$S/mounts"],                                                      'a recipe that waits for nothing else waits for mounts' );
+    is_deeply( $m{"$S/perl"}{after},              [ "$S/mounts", "$S/tcms" ],                                         'and so does one that waits for another recipe' );
+    is_deeply( $m{"$S/ufw"}{after},               [ "$S/mounts", @ordered ],                                          'and ufw' );
+
+    my @no_cache = Trog::Provisioner::Config::Generator::targets_in_order( %args, fetch => 0, mounts => 1 );
+    is_deeply( +{ map { $_->{target} => $_->{after} } @no_cache }->{"$S/mounts"}, ["$S/testdeps"], 'without a cache, mounts waits for the last global target' );
+    ok( !grep( { $_->{target} =~ m{/mounts\z} } @all ), 'and mounts is not there unless asked for' );
 };
 
 Test::NoWarnings::had_no_warnings();

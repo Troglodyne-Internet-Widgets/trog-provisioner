@@ -56,6 +56,11 @@ directory, so while the share is not mounted, a write to the mount point fails
 and does not go to the root disk.  The share mounts before local-fs.target on
 each boot, so before the services of the guest start.
 
+In the build, the target of this recipe runs after the global targets and
+before the target of every other recipe, so that each recipe writes to what is
+mounted.  C<targets_in_order> in F<bin/new_config> says why it cannot run
+earlier.
+
 =cut
 
 use parent qw{Provisioner::Recipe};

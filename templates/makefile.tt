@@ -182,6 +182,13 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
 	touch $@
 [% END -%]
 
+[%# Before every recipe: targets_in_order in bin/new_config says why. -%]
+[% IF mounts_fragment -%]
+[% state_dir %]/mounts:
+[% mounts_fragment | tabinate -%]
+	touch $@
+[% END -%]
+
 [% FOR module IN global_fragments.keys().sort() %]
 [% global_state_dir %]/global_[% module %]:
 [% global_fragments.$module | tabinate -%]
