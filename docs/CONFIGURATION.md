@@ -56,8 +56,10 @@ The addresses of the guests are not moved. They live in `ips.db`, which
 
 `basedir` is where the generated configuration for each domain lands **on this
 machine**, one directory per fully qualified name. It is easy to confuse with
-the `data` recipe's `to`, which is where things land **on the guest**; they are
-frequently both `/opt/domains`, and they are not the same directory.
+`install_dir`, which is where the files of a domain land **on the guest**. The
+default of `basedir` is `/opt/domains`, and the default of `install_dir` is
+`/opt/hosts`. They differ so that a guest that runs the provisioner does not
+install its own domains among the directories of the guests that it builds.
 
 The resolvers, the gateway and the address pool of a guest are not here.
 They are facts of the network that the guest is on, so the block of its
@@ -149,7 +151,7 @@ tickle.test.test:
         memory: ram_size_in_mb
         cpus:  num_cpus
         data_source: /opt/client-data
-        install_dir: /opt/domains
+        install_dir: /opt/hosts
     adminconfig:
         skel: "/opt/dotfiles/test"
         pkgs: [vim, tig, tmux, plocate]
@@ -545,7 +547,7 @@ runner.example.test:
         recipes:
             _base:
                 _global:
-                    install_dir: /opt/domains
+                    install_dir: /opt/hosts
 ```
 
 Nothing in it is required, and `config` inherits `admin_user`, `admin_email`
@@ -992,7 +994,7 @@ no snapshot to go back to.
 The `data` recipe rsyncs `from/<domain>` on this machine to `to/<domain>` on the
 guest, and that path is what templates see as `data_dir`. With the example
 above, `/opt/client-data/tickle.test.test` here arrives at
-`/opt/domains/tickle.test.test` on the guest.
+`/opt/hosts/tickle.test.test` on the guest.
 
 The guest fetches it from here directly. It used to be shipped to the
 hypervisor first so the guest could pull it from there, which meant a domain's

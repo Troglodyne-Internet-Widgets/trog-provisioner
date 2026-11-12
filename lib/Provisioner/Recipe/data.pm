@@ -19,7 +19,7 @@ files of a domain live on the guest, and where they come from:
 
     _base:
         _global:
-            install_dir: /opt/domains
+            install_dir: /opt/hosts
             data_source: /opt/data
 
     somedomain:

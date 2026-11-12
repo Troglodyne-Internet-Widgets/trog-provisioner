@@ -1266,9 +1266,10 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
 
     quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml" } ) } );
     %given = flags_given(@flags);
-    ok( !exists $given{'--hvconf'},     'and not passed when there is none, so the generator reads the default' );
-    ok( !exists $given{'--hypervisor'}, 'nor --hypervisor' );
-    ok( !exists $given{'--domaindir'},  'nor a domain directory that was only the default' );
+    ok( !exists $given{'--hvconf'},       'and not passed when there is none, so the generator reads the default' );
+    ok( !exists $given{'--hypervisor'},   'nor --hypervisor' );
+    ok( !exists $given{'--domaindir'},    'nor a domain directory that was only the default' );
+    ok( !exists $given{'--salvage-from'}, 'nor --salvage-from, so the salvage reads under install_dir' );
 
     # The generator chooses the hypervisor, so --hypervisor and a --domaindir
     # from the command line go to it, as --hvconf does.
@@ -1289,6 +1290,10 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
     is( $given{'--hypervisor'}, 'hv1', '--hypervisor is passed on' );
     is( $given{'--domaindir'},  $dir,  'and so is a --domaindir from the command line' );
     ok( $given{'--reserve'}, 'a build has the guest reserved, on a hypervisor that gives it its address' );
+
+    quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml", salvage_from => '/bogus/old' } ) } );
+    %given = flags_given(@flags);
+    is( $given{'--salvage-from'}, '/bogus/old', '--salvage-from is passed on, so the salvage reads where the running guest keeps its state' );
 
     quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml", dryrun => 1 } ) } );
     %given = flags_given(@flags);
@@ -1357,12 +1362,12 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
         };
     };
 
-    is( $run->(qw{--hypervisor hv1 --salvage-gaps-ok --existing 192.0.2.5 web.test}), undef, 'it runs to the end' );
+    is( $run->(qw{--hypervisor hv1 --salvage-gaps-ok --salvage-from /bogus/old --existing 192.0.2.5 web.test}), undef, 'it runs to the end' );
     is_deeply( [ map { $_->{domain} } @built ],     [qw{cache.test logs.test web.test}], 'the cache, the collector that needs it, and then the domain' );
     is_deeply( [ map { $_->{hypervisor} } @built ], [qw{hv1 hv1 hv1}],                   'each on the hypervisor this run was told to use' );
     is_deeply( [ map { $_->{recipes} } @built ],    [ ($recipes) x 3 ],                  'from the same configuration' );
-    ok( !$built[0]{salvage_gaps_ok} && !$built[0]{reuse}, '--salvage-gaps-ok and --existing are not for an upstream guest' );
-    is_deeply( [ @{ $built[-1] }{qw{salvage_gaps_ok reuse}} ], [ 1, '192.0.2.5' ], 'but for the domain asked for' );
+    ok( !$built[0]{salvage_gaps_ok} && !$built[0]{reuse} && !$built[0]{salvage_from}, '--salvage-gaps-ok, --salvage-from and --existing are not for an upstream guest' );
+    is_deeply( [ @{ $built[-1] }{qw{salvage_gaps_ok salvage_from reuse}} ], [ 1, '/bogus/old', '192.0.2.5' ], 'but for the domain asked for' );
 
     my $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
     like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'it says which setting makes a guest needed' );
