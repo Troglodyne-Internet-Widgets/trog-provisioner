@@ -579,6 +579,11 @@ write without C<sudo> leaves the mode to the writer.
 
 True if C<$path> is a plain file.
 
+=item C<is_dir($path)>, C<is_block_device($path)>
+
+True if C<$path> is a directory, or a block device.  Each follows a symlink, as
+C<test> does.
+
 =item C<mkpath(@paths)>
 
 Makes each directory and its parents.  On a remote machine, if the login user
@@ -747,6 +752,16 @@ sub file_exists {
     my ( $self, $path ) = @_;
     return -f $path                                  ? 1 : 0 if $self->is_local;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the question test -f asks of a remote machine
     return $self->run_cmd( qw{test -f}, $path ) == 0 ? 1 : 0;
+}
+
+sub is_dir ( $self, $path ) {
+    return -d $path                                  ? 1 : 0 if $self->is_local;
+    return $self->run_cmd( qw{test -d}, $path ) == 0 ? 1 : 0;
+}
+
+sub is_block_device ( $self, $path ) {
+    return -b $path                                  ? 1 : 0 if $self->is_local;
+    return $self->run_cmd( qw{test -b}, $path ) == 0 ? 1 : 0;
 }
 
 sub mkpath {

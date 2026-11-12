@@ -461,6 +461,11 @@ the system daemon, and a session has no virtiofs yet.  So a C<raw> or C<dir>
 line, or a line that names a pool, dies with the reason.  See
 L<Trog::HV::Libvirt/is_session>.
 
+A C<dir> line dies when the hypervisor cannot start a virtiofsd, see
+L<Trog::HV::Libvirt/virtiofsd_version> and
+L<Trog::HV::Libvirt/libvirtd_may_run_shim>.  Without one, libvirt defines the
+domain, and the domain does not start.
+
 =item C<session>
 
 1 on a session URI, and absent otherwise.
@@ -619,6 +624,8 @@ sub enrich {
         $map .= $pool eq 'dir' ? "$disk=$dev\n" : "$disk=/dev/$dev\n";
 
         if ( $pool eq 'dir' ) {
+            die "mounts.txt shares $disk over virtiofs, and " . $hv->describe . " cannot start a virtiofsd, so the guest would not start.\n" . "bin/preflight says why.\n"
+              unless $hv->virtiofsd_version && $hv->libvirtd_may_run_shim;
             push( @filesystems, { source => $disk, target => $dev } );
             next;
         }

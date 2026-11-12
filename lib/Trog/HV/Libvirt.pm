@@ -41,6 +41,15 @@ my $BACKUP_SUFFIX = '.bak-qcow2';
 # runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
 my @LEASE_HELPERS = qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
 
+# Where prepare_host installs virtiofs-better, which the domain XML names as the
+# binary of each virtiofs share.  At the top for the reason $PRISTINE_SNAPSHOT is.
+my $VIRTIOFS_SHIM = '/usr/libexec/virtiofs-better';
+
+# The AppArmor profile of libvirtd that Ubuntu ships, and the file of local
+# rules that it includes, which a package upgrade does not replace.
+my $LIBVIRTD_PROFILE       = '/etc/apparmor.d/usr.sbin.libvirtd';
+my $LIBVIRTD_LOCAL_PROFILE = '/etc/apparmor.d/local/usr.sbin.libvirtd';
+
 =head1 NAME
 
 Trog::HV::Libvirt - the libvirt backend: domains, storage pools and the facts of
@@ -2636,9 +2645,19 @@ sub pool_free {
 =head2 prepare_host($virtiofs)
 
 Makes the directory of the storage pool, and installs C<$virtiofs> as
-F</usr/libexec/virtiofs-better> if it is not there.  That program runs in the
-qemu process, so it must be on the hypervisor.  Returns 1.  Dies if either step
-fails.
+F</usr/libexec/virtiofs-better> if it is not there.  libvirt starts that
+program on the hypervisor for each virtiofs share, so it must be there.
+
+When L</libvirtd_may_run_shim> says that AppArmor stops libvirtd from running
+the program, it adds the rule C<"/usr/libexec/virtiofs-better PUx,"> to
+F</etc/apparmor.d/local/usr.sbin.libvirtd>, and loads the profile again.  That
+file is the one for local rules, so an upgrade of the libvirt package keeps it.
+
+Returns 1.  Dies if a step fails.
+
+It does not ask whether the virtiofsd that the program runs is there, because
+it runs for every guest, and most guests have no share.  The guest that has one
+asks: see L</virtiofsd_version>.
 
 On a session URI it does not install the program, because a guest there has no
 virtiofs share: see L<Provisioner::Recipe::vm/enrich>.
@@ -2651,13 +2670,72 @@ sub prepare_host {
     $self->mkpath( $self->pool_path )
       or die "Could not create storage pool dir " . $self->pool_path . " on the hypervisor";
 
-    return 1 if $self->is_session || $self->file_exists('/usr/libexec/virtiofs-better');
+    return 1 if $self->is_session;
 
-    $self->put_file( $virtiofs, '/usr/libexec/virtiofs-better', sudo => 1 )
-      or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
-    $self->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
+    if ( !$self->file_exists($VIRTIOFS_SHIM) ) {
+        $self->put_file( $virtiofs, $VIRTIOFS_SHIM, sudo => 1 )
+          or die("Could not copy virtiofs-better to $VIRTIOFS_SHIM, you may have to do this manually");
+        $self->run_sudo( qw{chmod 0755}, $VIRTIOFS_SHIM );
+    }
+
+    return 1 if $self->libvirtd_may_run_shim;
+
+    $self->rewrite_lines( $LIBVIRTD_LOCAL_PROFILE, add => ["$VIRTIOFS_SHIM PUx,"] );
+    $self->run_sudo_or_die( qw{apparmor_parser -r}, $LIBVIRTD_PROFILE );
+    delete $self->{libvirtd_may_run_shim};
 
     return 1;
+}
+
+=head2 virtiofsd_version
+
+What F</usr/libexec/virtiofs-better> says when it is run with C<--version>,
+such as C<virtiofsd 1.10.0>, or undef when it says nothing.
+
+That runs the program as libvirt runs it, with the options that it adds, so
+the answer covers the whole chain: the program is there, the virtiofsd that it
+runs is there and starts, and that virtiofsd takes the options.  A test that
+each file is there proves less.
+
+It asks once for each object, and gives the same answer after that.  The
+object lasts for one run, and an install on the hypervisor needs a new run to
+be seen.  The same goes for L</libvirtd_may_run_shim>.
+
+=cut
+
+sub virtiofsd_version ($self) {
+    return $self->{virtiofsd_version} if exists $self->{virtiofsd_version};
+
+    my $said = eval { $self->capture_cmd("$VIRTIOFS_SHIM --version 2>/dev/null") } // q{};
+    my ($version) = $said =~ m/^(virtiofsd [^\n]+)/m;
+    return $self->{virtiofsd_version} = $version;
+}
+
+=head2 libvirtd_may_run_shim
+
+False when AppArmor confines the libvirt daemon and no profile under
+F</etc/apparmor.d> names F</usr/libexec/virtiofs-better>.  True otherwise.
+
+The profile of libvirtd that Ubuntu ships lets it run F</usr/libexec/virtiofsd>
+and nothing else of the kind.  So the daemon cannot run the program, and logs
+C<cannot execute binary /usr/libexec/virtiofs-better: Permission denied> in the
+log of the share under F</var/log/libvirt/qemu>.  What the build sees is
+C<virtiofsd died unexpectedly>.  L</virtiofsd_version> runs the program as the
+login user, who is not confined, so it cannot see this.
+
+L</prepare_host($virtiofs)> adds the rule that allows it.  This looks for the
+path in any file under F</etc/apparmor.d>, and does not parse the profile.
+
+=cut
+
+sub libvirtd_may_run_shim ($self) {
+    return $self->{libvirtd_may_run_shim} if exists $self->{libvirtd_may_run_shim};
+
+    # libvirtd, or virtqemud where the daemons are split.
+    my $confinement = eval { $self->capture_cmd(q{for p in $(pidof libvirtd virtqemud); do cat /proc/$p/attr/current; done 2>/dev/null}) } // q{};
+    my $confined    = $confinement =~ m/[(]enforce[)]/;
+
+    return $self->{libvirtd_may_run_shim} = ( !$confined || $self->run_cmd( qw{grep -rqsF}, $VIRTIOFS_SHIM, '/etc/apparmor.d' ) == 0 ) ? 1 : 0;
 }
 
 =head2 release_seed($domain)
@@ -2774,7 +2852,7 @@ order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
 
 =cut
 
-sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_guest_bridges check_guest_networks check_bridge_acl check_guest_pool check_pool_writable check_config} }
+sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_guest_bridges check_guest_networks check_bridge_acl check_guest_pool check_pool_writable check_virtiofs check_config} }
 sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()
@@ -2957,6 +3035,53 @@ from the filesystem, so set it there too or the next pool-build puts it back:
 
     virsh pool-dumpxml <pool>    # the <permissions> under <target>
 FIX
+}
+
+=head2 $result = $hv->check_virtiofs()
+
+Passes when F</usr/libexec/virtiofs-better> runs a virtiofsd, by
+L</virtiofsd_version>, and libvirtd may run it, by
+L</libvirtd_may_run_shim>.  Also passes when that program is not there yet, or
+on a session URI, which has no virtiofs share.
+
+Preflight checks a hypervisor and no domain.  Placement chooses the hypervisor
+of a domain later, in C<bin/new_config>, so preflight cannot know whether a
+guest with a share will be built here.  The program is the evidence that one
+can be: L</prepare_host($virtiofs)> installs it before the first guest of the
+system daemon.  Without it, this hypervisor has built no guest yet, and the
+build of a guest with a share asks again, in L<Provisioner::Recipe::vm/enrich>.
+
+=cut
+
+sub check_virtiofs ($self) {
+    return $self->verdict( 1, 'A session has no virtiofs share, so it needs no virtiofsd',    q{} ) if $self->is_session;
+    return $self->verdict( 1, "No $VIRTIOFS_SHIM yet, so no guest here has a virtiofs share", q{} ) unless $self->file_exists($VIRTIOFS_SHIM);
+
+    my $version = $self->virtiofsd_version;
+    return $self->verdict( 0, "$VIRTIOFS_SHIM runs no virtiofsd on " . $self->describe, <<"FIX" ) unless $version;
+libvirt starts that program for each directory that the mounts recipe shares
+into a guest.  When it cannot start a virtiofsd, the guest is defined and does
+not start.  See what it says:
+
+    $VIRTIOFS_SHIM --version
+
+It runs /usr/libexec/virtiofsd, which the virtiofsd package installs:
+
+    sudo apt install virtiofsd
+FIX
+
+    return $self->verdict( 0, "apparmor does not let libvirtd run $VIRTIOFS_SHIM on " . $self->describe, <<"FIX" ) unless $self->libvirtd_may_run_shim;
+$VIRTIOFS_SHIM runs $version for you,
+but the profile of libvirtd lets the daemon run only /usr/libexec/virtiofsd.
+So a guest with a virtiofs share is defined and does not start, with
+"virtiofsd died unexpectedly".  bin/provision adds the rule on its next build
+here.  To add it now, allow the program, and load the profile again:
+
+    echo '$VIRTIOFS_SHIM PUx,' | sudo tee -a $LIBVIRTD_LOCAL_PROFILE
+    sudo apparmor_parser -r $LIBVIRTD_PROFILE
+FIX
+
+    return $self->verdict( 1, "$VIRTIOFS_SHIM runs $version, and libvirtd may run it", q{} );
 }
 
 =head2 $result = $hv->check_iso_builder()
