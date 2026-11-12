@@ -8,10 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use Fcntl qw{LOCK_EX LOCK_NB};
 use File::KeePass::KDBX();
 use Scalar::Util qw{looks_like_number};
-use Time::HiRes  qw{time sleep};
+use Mutex::Flock();
 
 # How many seconds a writer waits for another writer to finish with the store.
 our $LOCK_WAIT = 120;
@@ -531,7 +530,7 @@ that load before either saves each save what the other did not see, and the
 second save throws away the change of the first.  Code outside this module that
 loads and saves the store, as C<bin/regroup_secrets> does, must call this too.
 
-The lock is an C<flock> on C<$file.lock>, beside the store, which this sub
+The lock is one of L<Mutex::Flock> on C<$file.lock>, beside the store, which this sub
 makes if it is not there.  It is not on the store itself, because a save
 replaces the store with a new file, and a lock on the old file does not stop a
 writer that opens the new one.  A reader needs no lock, because a save
@@ -542,27 +541,23 @@ the lock file cannot be opened, or if the wait runs out.  The lock is released
 when C<$work> returns or dies.
 
 C<$work> must not call a sub here that saves the store.  That sub opens the
-lock file again, and C<flock> makes it wait for the lock that its own process
-holds, until the wait runs out.
+lock file again through a handle of its own, and the lock makes it wait for
+the one that its own process holds, until the wait runs out.
 
 =cut
 
 sub locked {
     my ( $class, $file, $work ) = @_;
 
-    my $path = "$file.lock";
+    my $path  = "$file.lock";
+    my $mutex = eval { Mutex::Flock->new( path => $path ) } or die "Could not open $path: $@";
 
-    # Open for as long as the lock is held, because closing it releases the lock.
-    open( my $lock, '>>', $path ) or die "Could not open $path: $!\n";    ## no critic (InputOutput::RequireBriefOpen)
+    $mutex->timedwait($LOCK_WAIT)
+      or die "Another process has been writing $file for $LOCK_WAIT seconds, and still holds $path.\n";
 
-    my $until = time() + $LOCK_WAIT;
-    while ( !flock( $lock, LOCK_EX | LOCK_NB ) ) {
-        die "Another process has been writing $file for $LOCK_WAIT seconds, and still holds $path.\n"
-          if time() >= $until;
-        sleep(0.1);
-    }
-
-    return $work->();
+    # The lock is held, so synchronize takes it without a wait, and lets it go
+    # when $work returns or dies.
+    return $mutex->synchronize($work);
 }
 
 =head2 parse($reference)
