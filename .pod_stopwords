@@ -15,6 +15,7 @@ CHECKSUMS
 CIDR
 CIDRs
 CLI
+COCOMO
 CPAN
 CPUs
 CVE
@@ -43,6 +44,7 @@ Filesystem
 GDM
 GECOS
 GiB
+gofmt
 Gogs
 Grafana
 GraphQL
@@ -65,6 +67,7 @@ LDAP
 LDAPS
 LDIF
 LIBVIRT
+loccount
 LSP
 LTS
 MACs
@@ -115,6 +118,7 @@ RSA
 Readahead
 Roundcube
 RTK
+ruamel
 SATA
 SHA
 SIGALRM

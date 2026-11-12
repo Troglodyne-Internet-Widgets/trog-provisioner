@@ -1,0 +1,28 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+use File::Temp qw{tempdir};
+
+my $version = qx{go version 2>&1};
+like($version, qr/\Qgo version go[% version %] linux\/amd64\E/, 'go on the PATH is the release that was asked for') or diag $version;
+
+# A toolchain that reports its version can still fail to build.  So build a
+# program, offline, with the caches in a directory of the test.
+my $dir = tempdir(CLEANUP => 1);
+open(my $fh, '>', "$dir/main.go") or die "Cannot write main.go: $!";
+print {$fh} "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"ok\") }\n";
+close($fh) or die "Cannot close main.go: $!";
+
+local $ENV{GOTOOLCHAIN} = 'local';
+local $ENV{GOCACHE}     = "$dir/cache";
+local $ENV{GOPATH}      = "$dir/gopath";
+my $built = qx{cd '$dir' && go mod init test.test/hello 2>&1 && go build -o hello . 2>&1};
+is($?, 0, 'a program builds') or diag $built;
+is(qx{'$dir/hello' 2>&1}, "ok\n", 'and the binary runs');
+
+my $fmt = qx{gofmt -l '$dir/main.go' 2>&1};
+is($?, 0, 'gofmt runs from the PATH too') or diag $fmt;
+is($fmt, '', 'and finds the program formatted') or diag $fmt;
+
+done_testing();
