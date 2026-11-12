@@ -1102,7 +1102,7 @@ sub reprovision_guest (%args) {
 
     place_guest_secrets( $guest, $domain );
 
-    print "Scheduling job to run setup script\n" . $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh") . "Done.\n";
+    print "Scheduling job to run setup script\n" . $guest->capture_cmd("sudo -n at now -f /root/setup-$domain.sh") . "Done.\n";
 
     return ( $reuser, $reuse );
 }
@@ -1131,7 +1131,7 @@ sub refresh_cloud_init {
     $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
 
     foreach my $module ( Provisioner::Cookbook->load( $distro // 'ubuntu' )->rerun_modules() ) {
-        print $guest->capture_cmd("sudo cloud-init single --name $module -f cloud-config.txt") . "\n";
+        print $guest->capture_cmd("sudo -n cloud-init single --name $module -f cloud-config.txt") . "\n";
     }
 
     return 1;
@@ -1166,7 +1166,7 @@ sub merge_guest_addresses (%args) {
     return 1 unless @$ips;
     my $index = $hv->address_index // die "$domain has the addresses @$ips, and " . ( $hv->name // $hv->describe ) . " names no static_nics, so no adapter of the guest can have them\n";
 
-    my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
+    my $existing_nc = $guest->capture_cmd('sudo -n cat /etc/netplan/50-cloud-init.yaml');
     my $parsed      = YAML::XS::Load($existing_nc);
 
     my $adapter   = primary_adapter( $parsed, $hv->guest_mac( $built_for, $index ) );
@@ -1183,7 +1183,7 @@ sub merge_guest_addresses (%args) {
     $guest->put_file( $new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600' )
       or die "Could not install the netplan config on $domain";
 
-    my $output = $guest->capture_cmd('sudo netplan apply');
+    my $output = $guest->capture_cmd('sudo -n netplan apply');
     chomp $output;
     print "$output\n" if $output;
 

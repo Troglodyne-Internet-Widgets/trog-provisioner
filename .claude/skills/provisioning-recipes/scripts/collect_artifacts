@@ -271,7 +271,7 @@ sub capture_to {
     # quoting early and the guest answered with a syntax error instead.
     ( my $quoted = $command ) =~ s/'/'\\''/g;
 
-    my $content = eval { $guest->capture_cmd("sudo sh -c '$quoted'") } // q{};
+    my $content = eval { $guest->capture_cmd("sudo -n sh -c '$quoted'") } // q{};
     File::Slurper::Temp::write_text( $local, $content );
 
     return { remote => "\$ $command", ok => 1, local => $local, bytes => length $content };
@@ -359,7 +359,7 @@ sub fetch {
     return { remote => $remote, ok => 0, why => 'not there' }
       if $guest->run_sudo( qw{test -f}, $remote );
 
-    my $content = eval { $guest->capture_cmd("sudo cat '$remote'") } // q{};
+    my $content = eval { $guest->capture_cmd("sudo -n cat '$remote'") } // q{};
 
     my $name  = $remote =~ s{\N*/}{}r;
     my $local = "$into/$name";

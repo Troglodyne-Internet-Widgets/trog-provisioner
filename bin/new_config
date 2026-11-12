@@ -1499,7 +1499,7 @@ my sub salvage_mtimes ( $guest, $watched ) {
         "printf '%s\\t%s\\n' $q \"\$(find $q -printf '%T@\\n' 2>/dev/null | sort -rn | head -1)\""
     } @$watched;
 
-    my $said = $guest->capture_cmd( 'sudo sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
+    my $said = $guest->capture_cmd( 'sudo -n sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
 
     my %mtime;
     foreach my $line ( split m/\n/, $said ) {

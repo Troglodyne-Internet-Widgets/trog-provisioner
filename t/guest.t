@@ -283,7 +283,7 @@ subtest 'the wait on the guest gives up only when nothing could start make' => s
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
     my $log = "$dir/setup.log";
     $cmd =~ s{/var/log/vm[.]example[.]test[.]setup[.]log}{$log}g;
-    $cmd =~ s{\Asudo[ ]timeout[ ]\S+[ ]}{timeout 6 };
+    $cmd =~ s{\Asudo[ ]-n[ ]timeout[ ]\S+[ ]}{timeout 6 };
 
     File::Slurper::Temp::write_text( "$dir/atq",   qq{#!/bin/sh\n[ -n "\$NO_AT" ] && { echo "atq: not found" >&2; exit 127; }\nprintf '%s' "\$QUEUED"\n} );
     File::Slurper::Temp::write_text( "$dir/pgrep", qq{#!/bin/sh\nexit \${RUNNING:-1}\n} );
@@ -367,7 +367,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     my $setup = $n * ( $seconds{ $unit || 's' } // 1 );
 
     # Built the way wait_for_makefile builds it.
-    my $atq = qq{sudo timeout $Trog::Guest::SETUP_TIMEOUT bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
+    my $atq = qq{sudo -n timeout $Trog::Guest::SETUP_TIMEOUT bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
 
     cmp_ok(
         Trog::Machine::hang_limit($atq), '>=', $setup,

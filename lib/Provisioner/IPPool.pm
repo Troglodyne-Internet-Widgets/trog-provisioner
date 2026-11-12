@@ -960,10 +960,13 @@ sub seed {
             #
             # Do not quote each address.  They are numbers, and a quote inside
             # the script closes the quoting of the sh -c around it.
+            #
+            # No sudo.  Any user may ping and read the neighbor table, and the
+            # account of a runner has no grant for either.
             my @mine   = grep { $nic_of{$_} eq $nic } sort keys %nic_of;
             my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } @mine;
             $script .= " wait; ip -4 neigh show dev $nic";
-            $swept  .= ( $hv->capture_cmd( 'sudo sh -c ' . Trog::Utils::shell_quote($script) ) // q{} ) . "\n";
+            $swept  .= ( $hv->capture_cmd( 'sh -c ' . Trog::Utils::shell_quote($script) ) // q{} ) . "\n";
         }
 
         # STALE is not a signal.  It outlives the machine, so reserving it
@@ -991,12 +994,20 @@ sub seed {
             # ARP source reads the neighbor table of the client.  This machine
             # is not on the bridge of the guests, so from here it reports only
             # the NAT address.
+            #
+            # virsh asks the daemon that list_all_domains asked, by -c, because
+            # without it the login user asks its own session; see local_uri.
+            my $daemon = Trog::Utils::shell_quote( $hv->local_uri );
             $script .= "\n" . join "\n", map {
                 my $q = Trog::Utils::shell_quote($_);
-                "virsh domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
+                "virsh -c $daemon domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
             } @names;
 
-            my $said = $hv->capture_cmd( 'sudo sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
+            # No sudo.  A provision.conf belongs to the user that ran
+            # new_config, who is usually the login user.  A file that the login
+            # user cannot read is the case above, which virsh covers.  virsh
+            # needs only the access that list_all_domains has.
+            my $said = $hv->capture_cmd( 'sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
 
             # A guest also answers on the NAT bridge, and libvirt gives out
             # those addresses, not this pool.

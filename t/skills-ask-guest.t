@@ -80,8 +80,8 @@ subtest 'the command reaches the guest whole, quotes and all' => sub {
     $guest->redefine( new      => sub { return $sent } );
 
     my $said = capture_stdout { Trog::Skill::AskGuest::main( 'vm.test', q{awk '{print $1}'}, '/etc/hosts' ) };
-    is( $sent->{sent}, q{sudo sh -c 'awk '\''{print $1}'\'' /etc/hosts'}, 'as root, with its own quotes kept inside the quoting' );
-    is( $said,         "said\n",                                          'and what the guest said is printed' );
+    is( $sent->{sent}, q{sudo -n sh -c 'awk '\''{print $1}'\'' /etc/hosts'}, 'as root, with its own quotes kept inside the quoting' );
+    is( $said,         "said\n",                                             'and what the guest said is printed' );
 };
 
 subtest 'a domain that shares the guest of another is asked of that guest' => sub {
@@ -98,7 +98,7 @@ subtest 'a domain that shares the guest of another is asked of that guest' => su
     capture_stdout { Trog::Skill::AskGuest::main( 'tenant.test.test', 'true' ) };
     is_deeply( \@addressed, ['host.test.test'], 'the address is of the host' );
     is_deeply( \@keyed,     ['host.test.test'], 'and so is the key' );
-    is( $sent->{sent}, q{sudo sh -c 'true'}, 'and the command reaches it' );
+    is( $sent->{sent}, q{sudo -n sh -c 'true'}, 'and the command reaches it' );
 };
 
 done_testing();

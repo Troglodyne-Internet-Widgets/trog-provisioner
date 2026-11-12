@@ -18,6 +18,7 @@ use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
+use IPC::Run3();
 use POSIX();
 
 use FindBin::libs;
@@ -562,15 +563,25 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     }
     sub static_nics ($self)         { return $self->{nics} ? @{ $self->{nics} } : sort keys %{ $self->static_pools } }
     sub address_nic ($self)         { return ( $self->static_nics )[0] }
-    sub nic_gateway ( $self, $nic ) { return $self->{gateways}                               ? $self->{gateways}{$nic} : $self->{gateway} }
-    sub capture_cmd ( $self, $cmd ) { push @{ $self->{asked} }, $cmd; return $cmd =~ m/ping/ ? $self->{sweep}          : $self->{guests} }
+    sub nic_gateway ( $self, $nic ) { return $self->{gateways} ? $self->{gateways}{$nic} : $self->{gateway} }
     sub vmm         ($self)         { return $self }
+    sub local_uri   ($self)         { return $self->{local_uri} // 'qemu:///system' }
+
+    # With a far side, the command runs in a shell here, with the programs of
+    # that directory first on the PATH, as a hypervisor would run it.
+    sub capture_cmd ( $self, $cmd ) {
+        push @{ $self->{asked} }, $cmd;
+        return $cmd =~ m/ping/ ? $self->{sweep} : $self->{guests} unless $self->{far_side};
+        local $ENV{PATH} = "$self->{far_side}:/usr/bin:/bin";
+        IPC::Run3::run3( [ 'sh', '-c', $cmd ], \undef, \my $out, \undef );
+        return $out;
+    }
 
     sub list_all_domains ($self) {
         return map { FakeDomain->new($_) } @{ $self->{names} };
     }
-    sub domain_dir       { return '/bogus' }
-    sub ssh_host ($self) { return $self->{host} }
+    sub domain_dir ($self) { return $self->{domain_dir} // '/bogus' }
+    sub ssh_host   ($self) { return $self->{host} }
 
     package FakeDomain;
     sub new      ( $class, $name ) { return bless { name => $name }, $class }
@@ -739,6 +750,57 @@ subtest 'seed: each bridge is swept, and each address recorded on the bridge of 
         'each gateway and each address of the guest on the bridge of its pool, and the one on the first of static_nics is its address'
     ) or diag explain $rows;
     is_deeply( Provisioner::IPPool::assignments(), { 'guest.test' => '10.0.0.5' }, 'which is the one in ipmap' );
+};
+
+# A far side for FakeHV: a directory of programs that stand in for those of
+# the hypervisor.  ping answers for $answers only.  ip lists nothing.  virsh
+# reports $guest_ip for each domain, and only when it is asked for the daemon
+# $daemon.  sudo refuses, as it does for an account that has no grant for the
+# command.
+sub far_side ( $answers, $daemon, $guest_ip ) {
+    my $dir     = File::Temp::tempdir( CLEANUP => 1 );
+    my %program = (
+        ping  => qq{#!/bin/sh\nfor a in "\$@"; do [ "\$a" = "$answers" ] && exit 0; done\nexit 1\n},
+        ip    => qq{#!/bin/sh\nexit 0\n},
+        virsh => qq{#!/bin/sh\n[ "\$1" = -c ] && [ "\$2" = "$daemon" ] && [ "\$3" = domifaddr ] || exit 1\necho " vnet0      52:54:00:00:00:01    ipv4         $guest_ip/24"\n},
+        sudo  => qq{#!/bin/sh\necho 'sudo: a password is required' >&2\nexit 1\n},
+    );
+    foreach my $name ( keys %program ) {
+        File::Slurper::Temp::write_text( "$dir/$name", $program{$name} );
+        chmod 0755, "$dir/$name" or die "chmod $dir/$name: $!";
+    }
+    return $dir;
+}
+
+subtest 'seed: what it asks the hypervisor, it asks as the login user, and virsh asks the daemon of the hypervisor' => sub {
+
+    # The account of a session has no grant for any of this.  Its sudo would
+    # ask for a password, and over ssh nobody can type one, so the seed hung.
+    # And sudo virsh asks the system daemon, which does not know the guests of
+    # a session.
+    foreach my $daemon (qw{qemu:///session qemu:///system}) {
+        fresh_db();
+        my $domains = File::Temp::tempdir( CLEANUP => 1 );
+        mkdir "$domains/conf.test" or die "mkdir: $!";
+        File::Slurper::Temp::write_text( "$domains/conf.test/provision.conf", "ips = 192.0.2.44\n" );
+
+        my $hv = FakeHV->new(
+            pool       => { cidr => '192.0.2.32/27' },
+            gateway    => '192.0.2.62',
+            names      => [qw{arp.test conf.test}],
+            local_uri  => $daemon,
+            domain_dir => $domains,
+            far_side   => far_side( '192.0.2.50', $daemon, '192.0.2.41' ),
+        );
+        my $mock = Test::MockModule->new('Trog::Hypervisors');
+        $mock->redefine( load => sub { return FakeFleet->new( hv1 => $hv ) } );
+        Provisioner::IPPool::seed();
+
+        my $taken = Provisioner::IPPool::taken();
+        is( $taken->{'192.0.2.50'}, 'insitu:unknown', "$daemon: the sweep finds what answers a ping" )                                or diag explain $hv->{asked};
+        is( $taken->{'192.0.2.41'}, 'arp.test',       "$daemon: virsh asks the daemon of the hypervisor for the address of a guest" ) or diag explain $hv->{asked};
+        is( $taken->{'192.0.2.44'}, 'conf.test',      "$daemon: and the provision.conf of a guest is read" )                          or diag explain $hv->{asked};
+    }
 };
 
 subtest 'a seed that could not finish is retried, not remembered' => sub {

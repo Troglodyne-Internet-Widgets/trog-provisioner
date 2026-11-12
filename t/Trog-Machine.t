@@ -529,6 +529,28 @@ subtest 'a remote command runs with no pager' => sub {
     is( remote()->capture_cmd(q{timeout 5 echo ok}),                                  "ok\n",      'and the command still runs as it was written' );
 };
 
+subtest 'a remote sudo that could ask for a password is refused before it is sent' => sub {
+
+    # Over ssh nobody can type a password, so a sudo that asks for one waits
+    # until the alarm, ten minutes later.
+    my @sent;
+    my $far = Test::MockModule->new( 'Trog::Machine::FarSide', no_auto => 1 );
+    $far->define( cmd           => sub ( $,     @command ) { push @sent, "@command"; return ( "ok\n", q{}, 0 ) } );
+    $far->define( cmd_exit_code => sub ( $self, @command ) { return ( $self->cmd(@command) )[2] } );
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( ssh => sub { return bless {}, 'Trog::Machine::FarSide' } );
+
+    like( exception { remote()->capture_cmd(q{sudo cat /bogus/file}) }, qr/sudo[ ]-n .* run_sudo/, 'capture_cmd refuses a sudo with no -n, and says what to use instead' );
+    like( exception { remote()->run_cmd(qw{sudo true}) },               qr/sudo[ ]-n/,             'and so does run_cmd with a list' );
+    like( exception { remote()->run_cmd(q{  sudo true}) },              qr/sudo[ ]-n/,             'and with a string that starts with blanks' );
+    is( scalar @sent, 0, 'and none of them was sent' ) or diag explain \@sent;
+
+    is( remote()->capture_cmd(q{sudo -n cat /bogus/file}), "ok\n", 'a sudo -n is sent, because it fails at once when it would ask' );
+    is( remote()->run_cmd(qw{sudo -n true}),               0,      'by run_cmd too' );
+    is( remote()->capture_cmd(q{sudo -V}),                 "ok\n", 'and so is sudo -V, which asks for nothing, and refuses -n' );
+    is( remote()->capture_cmd(q{sudoedit-ish /bogus}),     "ok\n", 'and a command that only starts with the letters is not sudo' );
+};
+
 subtest 'what sudo says when it wants a password it cannot ask for' => sub {
     is( sudo_reads("sudo: a password is required\n"),                                                'asked', 'sudo -n with no passwordless sudo' );
     is( sudo_reads("sudo: password is required\n"),                                                  'asked', 'and without the article' );
