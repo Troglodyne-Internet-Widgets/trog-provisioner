@@ -8,7 +8,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/new_config-salvage.t - refresh_salvage: a failed refresh that changed nothing, and one that did
+t/new_config-salvage.t - refresh_salvage: a failed refresh that changed nothing, and one that did; and where the salvage reads
 
 =cut
 
@@ -22,6 +22,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Test::More;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
+use IPC::Run3();
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 require Trog::Guest;
@@ -165,6 +166,24 @@ subtest 'a recipe that watches nothing is not probed at all' => sub {
 
     is( refresh( ['dump-it'], [] ), 1, 'it still runs the command' );
     is( $asked,                     0, 'and asks the guest for no mtimes' );
+};
+
+# A guest that moves from one install_dir to another keeps its state under
+# the old one until the rebuild, so the salvage has to read there.
+subtest 'the salvage reads under --salvage-from, and under install_dir without it' => sub {
+    my $generator = Test::MockModule->new( 'Trog::Provisioner::Config::Generator', no_auto => 1 );
+    my @read_from;
+    $generator->redefine( expand_dependent_domains => sub ($domain) { return $domain } );
+    $generator->redefine( handle_domain            => sub ($domain) { push @read_from, Trog::Provisioner::Config::Generator::salvage_dir( { install_dir => '/bogus/new' } ); return 0 } );
+
+    is( Trog::Provisioner::Config::Generator::main(qw{--salvage-from /bogus/old move.test.test}), 0, 'a run with --salvage-from' );
+    is( Trog::Provisioner::Config::Generator::main('stay.test.test'),                             0, 'and the next run, without it' );
+    is_deeply( \@read_from, [qw{/bogus/old /bogus/new}], 'read under the directory that it names, and then under install_dir, because main forgets it' );
+
+    my $said = q{};
+    IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/new_config", qw{--salvage-from bogus/relative move.test.test} ], \undef, \$said, \$said );
+    is( $? >> 8, 2, 'a relative path is refused, before anything runs' );
+    like( $said, qr{absolute[ ]path,[ ]not[ ]bogus/relative}, 'and the refusal says why' );
 };
 
 done_testing();

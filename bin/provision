@@ -83,6 +83,14 @@ about to lose.
 A directory that the guest never wrote does not stop the run.  Neither does a
 domain that has no guest yet.  So a new machine never needs this option.
 
+=item B<--salvage-from> DIR
+
+Salvages the state of the guest from DIR, the C<install_dir> that the running
+guest has, when the configuration now names another one.  Passed to
+F<bin/new_config>, which says more.  Use it once, for the rebuild that moves a
+guest.  Like B<--salvage-gaps-ok>, it applies only to DOMAIN, and not to the
+guests that DOMAIN needs.
+
 =item B<--clone-on-nonreusable>
 
 Copies the disk of the guest to C<DOMAIN.bak-qcow2> before the rebuild destroys
@@ -420,7 +428,7 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse,                $hv_name,                $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse,                $hv_name,                $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $salvage_from, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     my ( $rebuild_upstream,     $on_failure,             $help );
     GetOptionsFromArray(
@@ -433,6 +441,7 @@ sub main {
         'recipes=s'               => \$recipes,
         'credentials'             => \$credentials,
         'salvage-gaps-ok'         => \$salvage_gaps_ok,
+        'salvage-from=s'          => \$salvage_from,
         'clone-on-nonreusable'    => \$clone_on_nonreusable,
         'destroy-on-nonreusable'  => \$destroy_on_nonreusable,
         'die-on-nonreusable'      => \$die_on_nonreusable,
@@ -511,8 +520,9 @@ sub main {
           or die "The build of $upstream, which $domain needs up first, failed, so $domain was not built.\n$@";
     }
 
-    # Only the guest asked for takes --existing and --salvage-gaps-ok.
-    return build_guest( %build, domain => $domain, reuse => $reuse, salvage_gaps_ok => $salvage_gaps_ok );
+    # Only the guest asked for takes --existing, --salvage-gaps-ok and
+    # --salvage-from.
+    return build_guest( %build, domain => $domain, reuse => $reuse, salvage_gaps_ok => $salvage_gaps_ok, salvage_from => $salvage_from );
 }
 
 =head2 %there = cycles_left_up($domain, $conf, %args)
@@ -587,7 +597,7 @@ Builds the guest of C<domain> in C<%args> and waits for its makefile, and
 returns 0.  The other keys are the options of the command line that apply to
 every guest a run builds: C<hypervisor>, C<hvconf>, C<recipes>, C<domain_dir>,
 C<dryrun>, C<nonreusable> and C<on_failure>, and for the guest asked for,
-C<reuse> and C<salvage_gaps_ok>.  Dies when the build fails, after
+C<reuse>, C<salvage_gaps_ok> and C<salvage_from>.  Dies when the build fails, after
 C<with_rollback> has made its offer.
 
 Each call chooses its own hypervisor, because a run builds several guests, and
@@ -597,7 +607,7 @@ they can be on different ones.
 
 sub build_guest {
     my (%args) = @_;
-    my ( $domain, $reuse, $hv_name, $hvconf, $recipes, $dryrun, $nonreusable, $on_failure, $salvage_gaps_ok ) = @args{qw{domain reuse hypervisor hvconf recipes dryrun nonreusable on_failure salvage_gaps_ok}};
+    my ( $domain, $reuse, $hv_name, $hvconf, $recipes, $dryrun, $nonreusable, $on_failure, $salvage_gaps_ok, $salvage_from ) = @args{qw{domain reuse hypervisor hvconf recipes dryrun nonreusable on_failure salvage_gaps_ok salvage_from}};
     $HVCONF = $hvconf;
 
     Trog::HV->forget();
@@ -627,6 +637,7 @@ sub build_guest {
 
             # Only from the command line: see --salvage-gaps-ok in the POD.
             salvage_gaps_ok => $salvage_gaps_ok,
+            salvage_from    => $salvage_from,
         }
     );
 
@@ -848,7 +859,7 @@ sub ask_rollback {
 Runs F<bin/new_config> for $domain, in this process, when there are recipes
 for it to read.  $opts is a hash reference.  This sub reads its keys
 C<domain_dir>, C<domain_dir_given>, C<recipes>, C<hvconf>, C<uri>,
-C<dryrun> and C<salvage_gaps_ok>.  C<recipes> defaults to the file that
+C<dryrun>, C<salvage_gaps_ok> and C<salvage_from>.  C<recipes> defaults to the file that
 L<Trog::Config> names.
 
 It returns 0 and does nothing when there is no F<recipes.yaml> and no
@@ -889,9 +900,10 @@ sub generate_config {
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
     require $generator;
     my @flags = ( '--recipes', $recipes );
-    push( @flags, '--hvconf',     $opts->{hvconf} )           if defined $opts->{hvconf};
-    push( @flags, '--hypervisor', $opts->{hypervisor} )       if defined $opts->{hypervisor};
-    push( @flags, '--domaindir',  $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};
+    push( @flags, '--hvconf',       $opts->{hvconf} )           if defined $opts->{hvconf};
+    push( @flags, '--hypervisor',   $opts->{hypervisor} )       if defined $opts->{hypervisor};
+    push( @flags, '--domaindir',    $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};
+    push( @flags, '--salvage-from', $opts->{salvage_from} )     if defined $opts->{salvage_from};
 
     # For the generator, this only keeps the key of a guest that is up.  See
     # DRY RUNS in bin/new_config.  A build reserves a guest on a hypervisor

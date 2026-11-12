@@ -61,7 +61,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] [--reserve] $domain $domain2 ...
+    new_config [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] [--reserve] [--salvage-from=dir] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -99,6 +99,15 @@ guest that does not exist yet empty, through C<reserve_guest> in L<Trog::HV>.
 Then the guest has its address, and the configuration names it as C<main_ip>.
 So the registrar publishes its A record in the same build.  Without the option,
 this makes no guest, which a billing service charges for.
+
+The --salvage-from option names the C<install_dir> that the running guest
+has, when the configuration now names another one.  The salvage reads the
+state of each recipe under that directory, and the new configuration still
+puts the state under the new C<install_dir>.  Use it once, for the rebuild
+that moves a guest, for example from F</opt/domains> to F</opt/hosts>.
+Without it, the salvage looks under the new directory on the old guest, and
+gets nothing.  It applies to each domain of the run, so name one domain.  It
+must be an absolute path.
 
 Most of what you put in the main recipes.yaml goes in the _base section:
 
@@ -246,7 +255,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun, $reserve );
+our ( $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun, $reserve, $salvage_from );
 
 sub get_recipe_config {
     return Provisioner::Cookbook->configuration($pfile);
@@ -291,31 +300,44 @@ recipe looks like that.
 
 sub salvage_gaps { return %SALVAGE_GAPS }
 
+=head2 $dir = salvage_dir($global_config)
+
+The C<install_dir> on the running guest, under which the salvage reads the
+state of each recipe.  That is the --salvage-from of the last C<main>, or the
+C<install_dir> of C<$global_config> when it named none.
+
+=cut
+
+sub salvage_dir ($global_config) { return $salvage_from // $global_config->{install_dir} }
+
 sub main {
     my @args = @_;
 
     # Clear the gaps and the options of the last run, because a process can call
     # main() more than once: bin/provision does, once for each guest it builds.
     %SALVAGE_GAPS = ();
-    undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh, $reserve;
+    undef $_ for $hvconf, $hv_name, $domaindir, $dryrun, $skip_ssh, $reserve, $salvage_from;
 
     my ( $credentials, $help );
     GetOptionsFromArray(
         \@args,
-        'secrets=s'    => \$sfile,
-        'recipes=s'    => \$pfile,
-        'hvconf=s'     => \$hvconf,
-        'hypervisor=s' => \$hv_name,
-        'domaindir=s'  => \$domaindir,
-        'skip_ssh'     => \$skip_ssh,
-        'credentials'  => \$credentials,
-        'dryrun'       => \$dryrun,
-        'reserve'      => \$reserve,
-        'help'         => \$help,
+        'secrets=s'      => \$sfile,
+        'recipes=s'      => \$pfile,
+        'hvconf=s'       => \$hvconf,
+        'hypervisor=s'   => \$hv_name,
+        'domaindir=s'    => \$domaindir,
+        'skip_ssh'       => \$skip_ssh,
+        'credentials'    => \$credentials,
+        'dryrun'         => \$dryrun,
+        'reserve'        => \$reserve,
+        'salvage-from=s' => \$salvage_from,
+        'help'           => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless @args;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => "--salvage-from takes an absolute path, not $salvage_from" )
+      if defined $salvage_from && index( $salvage_from, '/' ) != 0;
 
     # The password of the secrets database, for a run with no terminal.  See
     # Trog::Credentials.
@@ -1216,8 +1238,9 @@ sub handle_domain {
 
         if ($target_is_up) {
             print "Backing up $module files from $fqdn\n";
-            my %tg   = $builder->remote_files( $global_config->{install_dir}, $fqdn );
-            my @skip = $builder->remote_skip();
+            my $salvage_dir = salvage_dir($global_config);
+            my %tg          = $builder->remote_files( $salvage_dir, $fqdn );
+            my @skip        = $builder->remote_skip();
 
             # Before the fetch, so that it gets the current state.
             refresh_salvage(
@@ -1225,7 +1248,7 @@ sub handle_domain {
                 admin_user => $admin_user,
                 cfg_dir    => $cfg_dir,
                 module     => $module,
-                commands   => [ $builder->remote_prepare( $global_config->{install_dir}, $fqdn ) ],
+                commands   => [ $builder->remote_prepare( $salvage_dir, $fqdn ) ],
                 watched    => [ sort keys %tg ],
             );
             foreach my $to_fetch ( sort keys(%tg) ) {
