@@ -8,7 +8,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/new_config-salvage.t - refresh_salvage: a failed refresh that changed nothing, and one that did; and where the salvage reads
+t/new_config-salvage.t - refresh_salvage: a failed refresh that changed nothing, and one that did; where the salvage reads, and what it leaves on a remote mount
 
 =cut
 
@@ -184,6 +184,22 @@ subtest 'the salvage reads under --salvage-from, and under install_dir without i
     IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/new_config", qw{--salvage-from bogus/relative move.test.test} ], \undef, \$said, \$said );
     is( $? >> 8, 2, 'a relative path is refused, before anything runs' );
     like( $said, qr{absolute[ ]path,[ ]not[ ]bogus/relative}, 'and the refusal says why' );
+};
+
+# A runner keeps the configuration of the fleet in a share of the hypervisor,
+# inside its domain directory, and a backup host keeps that, not the salvage.
+subtest 'the salvage leaves alone what is on a remote mount' => sub {
+    my @mounts = ( '/bogus/d/etc/fleet', '/bogus/data/' );
+    my $around = sub ($remote) { [ Trog::Provisioner::Config::Generator::salvage_around_mounts( $remote, @mounts ) ] };
+
+    is_deeply( $around->('/bogus/d/etc/fleet/'),                                             ['/bogus/d/etc/fleet'],   'a path that is the mount point is skipped' );
+    is_deeply( $around->('/bogus/d/etc/fleet/sub'),                                          ['/bogus/d/etc/fleet'],   'and so is one under it' );
+    is_deeply( $around->('/bogus/data'),                                                     ['/bogus/data'],          'whichever of the two has a trailing slash' );
+    is_deeply( $around->('/bogus/d/'),                                                       [ undef, '/etc/fleet/' ], 'a path above a mount point is fetched, without the mount point, from where its fetch starts' );
+    is_deeply( $around->('/bogus/d/etc'),                                                    [ undef, '/fleet/' ],     'which moves as the path does' );
+    is_deeply( $around->('/bogus/d/etc/fleetwood/'),                                         [undef],                  'a path that only starts with the same letters is fetched whole' );
+    is_deeply( $around->('/bogus/elsewhere'),                                                [undef],                  'as is one nowhere near a mount point' );
+    is_deeply( [ Trog::Provisioner::Config::Generator::salvage_around_mounts('/bogus/d/') ], [undef],                  'and every path, on a guest with no remote mount' );
 };
 
 done_testing();

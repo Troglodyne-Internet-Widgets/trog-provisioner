@@ -1277,6 +1277,23 @@ sub remote_skip {
     return ();
 }
 
+=head3 @mountpoints = $recipe->remote_mountpoints(%opts)
+
+The mount points on the guest whose files live somewhere other than the guest,
+such as a directory of the hypervisor or a bucket.  C<%opts> is as for
+C<render_file>.  Nothing here.
+
+The salvage before a rebuild fetches nothing from these, because a rebuild of
+the guest does not touch them.  Back them up where they live, with a
+C<backup> host.  See C<salvage_around_mounts> in F<bin/new_config>, and
+L<Provisioner::Recipe::mounts>, which names them.
+
+=cut
+
+sub remote_mountpoints {
+    return ();
+}
+
 =head3 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
 Files that the guest must have but that must not travel in the payload.
