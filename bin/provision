@@ -385,8 +385,8 @@ sub issue_secret {
     # The stderr of the command is dropped, because sudo runs it in a pty that
     # carries stderr along with stdout, and anything said there would become
     # part of the secret.
-    ( my $quoted = $issue->{command} ) =~ s/'/'\\''/g;
-    my $secret = $guest->capture_cmd("sudo -n sh -c 'exec 2>/dev/null; $quoted'") // q{};
+    my $quoted = Trog::Utils::shell_quote("exec 2>/dev/null; $issue->{command}");
+    my $secret = $guest->capture_cmd("sudo -n sh -c $quoted") // q{};
     chomp $secret;
     die "$issuer did not issue the secret that $domain needs at $path.  Ask it why: the command is in the guest-secrets.yaml of $domain.\n"
       unless $secret =~ m/\A\S+\z/;

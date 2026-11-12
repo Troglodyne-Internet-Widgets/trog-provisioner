@@ -7,8 +7,9 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use IPC::Open3 ();
-use List::Util qw{any};
+use Data::Validate::Domain ();
+use IPC::Open3             ();
+use List::Util             qw{any};
 
 =head1 pdns_client
 
@@ -91,7 +92,12 @@ our $AUTH       = '127.0.0.1:2500';
 # and into the arguments of pdns-acl.
 sub dns_name {
     my ($name) = @_;
-    return defined $name && $name =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/ ? 1 : 0;
+
+    # is_domain also takes capitals and a final dot, so those are refused
+    # here: the name goes into a file, a path and the arguments of a command,
+    # and must have one spelling.
+    return 0 unless defined $name && $name =~ m/\A[[:lower:][:digit:].-]*[[:lower:][:digit:]-]\z/a;
+    return defined Data::Validate::Domain::is_domain( $name, { domain_disable_tld_validation => 1 } ) ? 1 : 0;
 }
 
 # Every command this runs, as the one thing a test stands in for.  A list, so

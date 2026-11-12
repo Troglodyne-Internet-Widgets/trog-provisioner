@@ -14,7 +14,8 @@ t/Provisioner-Recipe-tpsgi.t - C<tpsgi.ini> takes the directory of the applicati
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use File::Slurper();
 
 use FindBin::libs;
@@ -51,6 +52,15 @@ subtest 'the basedir global stays out of tpsgi.ini' => sub {
 subtest 'app_dir is the basedir of tPSGI' => sub {
     my $ini = tpsgi_ini( app_dir => 'tCMS' );
     like( $ini, qr/^basedir=tCMS$/m, 'tPSGI changes into the directory of the application' ) or diag $ini;
+};
+
+subtest 'loggers are names that a class can have' => sub {
+    foreach my $good (qw{Log::Dispatch::File Foo Foo::Bar_2}) {
+        is( exception { tpsgi_ini( loggers => [$good] ) }, undef, "$good is taken" );
+    }
+    foreach my $bad ( qw{1Foo::Bar Foo:: Foo::1Bar:: Foo;Bar}, 'Foo Bar' ) {
+        ok( exception { tpsgi_ini( loggers => [$bad] ) }, "$bad is refused" );
+    }
 };
 
 Test::NoWarnings::had_no_warnings();

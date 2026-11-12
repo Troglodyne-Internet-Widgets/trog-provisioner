@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use URI();
+
 =head1 NAME
 
 Provisioner::Recipe::aptmirror - a guest that holds a copy of the archive, so
@@ -308,10 +310,17 @@ cannot replace it.  The vhost and the fragment must both use C<mirror_root>.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my ( $host, $path ) = $opts{upstream} =~ m{\A[[:alpha:]][[:alnum:]+.-]*://([^/]+)(/\S*)\z};
-    die "upstream must be a URL with a path on it, like http://archive.ubuntu.com/ubuntu -- got '$opts{upstream}'\n"
-      unless defined $host && defined $path;
+    # apt-mirror leaves the user info of a URL out of its spool path, so the
+    # host is the host and a port that the URL gives, and not what comes
+    # before the first slash.  host_port would add the default port to a URL
+    # that has none, and the spool path of a mirror that exists would move.
+    my $url    = URI->new( $opts{upstream} );
+    my $usable = $url->can('host_port') && ( $url->host // q{} ) ne q{} && $url->path =~ m{\A/} && $opts{upstream} =~ m/\A\S+\z/;
+    die "upstream must be a URL with a path on it, like http://archive.ubuntu.com/ubuntu -- got '$opts{upstream}'\n" if !$usable;
 
+    my ( $host, $path ) = ( $url->host, $url->path );
+    $host = "[$host]" if index( $host, q{:} ) >= 0;
+    $host .= ':' . $url->port if $url->port != $url->default_port;
     $path =~ s{/\z}{};
     $opts{upstream_host} = $host;
     $opts{mirror_root}   = "$opts{spool}/mirror/$host$path";

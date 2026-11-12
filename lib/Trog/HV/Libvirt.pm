@@ -17,6 +17,7 @@ use URI::Split();
 use List::Util();
 use Time::HiRes qw{sleep time};
 use Trog::Local();
+use Trog::Utils();
 use File::Basename();
 use File::Slurper();
 use List::Util();
@@ -1688,9 +1689,9 @@ sub path_fstype {
 
     # capture_cmd takes a shell string, and the path can come from a
     # configuration file.
-    ( my $quoted = $path ) =~ s/'/'\\''/g;
+    my $quoted = Trog::Utils::shell_quote($path);
 
-    my $type = $self->capture_cmd("stat -f -c %T '$quoted' 2>/dev/null") // '';
+    my $type = $self->capture_cmd("stat -f -c %T $quoted 2>/dev/null") // '';
     chomp $type;
 
     return $type;
@@ -3357,10 +3358,10 @@ sub pool_space {
 
     # capture_cmd takes a shell string, and the pool path can come from a
     # configuration file.
-    ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
+    my $quoted = Trog::Utils::shell_quote( $self->pool_path );
 
     my @steps = (
-        "p=\$(realpath -e '$quoted') || exit 0",
+        "p=\$(realpath -e $quoted) || exit 0",
         'echo "$p"',
         'df -B1 --output=avail,source,target "$p" | tail -n1',
         'df -B1 --output=avail "$(df --output=target "$p" | tail -n1)" | tail -n1',
@@ -3757,9 +3758,6 @@ runs as the account, so its domains can open only what the account can open.
 my sub sudoers_of ($user) { return "/etc/sudoers.d/90-trog-runner-$user" }
 my sub linger_of  ($user) { return "/var/lib/systemd/linger/$user" }
 
-# A string for a shell on the hypervisor, quoted.
-my sub q1 ($value) { return q{'} . ( $value =~ s/'/'\\''/gr ) . q{'} }
-
 # What a command printed, without its last newline, or an empty string.
 my sub said ( $hv, $cmd ) {
     my $out = $hv->capture_cmd("$cmd 2>/dev/null") // q{};
@@ -3768,10 +3766,10 @@ my sub said ( $hv, $cmd ) {
 }
 
 # The home directory of $user, or an empty string when there is no such user.
-my sub home_of ( $hv, $user ) { return said( $hv, 'getent passwd ' . q1($user) . ' | cut -d: -f6' ) }
+my sub home_of ( $hv, $user ) { return said( $hv, 'getent passwd ' . Trog::Utils::shell_quote($user) . ' | cut -d: -f6' ) }
 
 # The uid of $user, or an empty string when there is no such user.
-my sub uid_of ( $hv, $user ) { return said( $hv, 'id -u ' . q1($user) ) }
+my sub uid_of ( $hv, $user ) { return said( $hv, 'id -u ' . Trog::Utils::shell_quote($user) ) }
 
 # The drop-in that limits the user slice of the account with $uid.
 my sub slice_dropin ($uid) { return "/etc/systemd/system/user-$uid.slice.d/50-trog-runner.conf" }
@@ -3959,8 +3957,8 @@ sub runner_account_steps {
     die "The parent of $path is on '$fstype', and a pool of a runner can have a quota here only on ZFS.\n" . pool_quota_advice( $fstype, $name, { path => $path, mount => $parent, source => $parent } )
       unless $fstype eq 'zfs';
 
-    my $parent_set = said( $hv, 'zfs list -H -o name ' . q1($parent) );
-    my $mounted_at = said( $hv, 'zfs get -H -o value mountpoint ' . q1($parent_set) );
+    my $parent_set = said( $hv, 'zfs list -H -o name ' . Trog::Utils::shell_quote($parent) );
+    my $mounted_at = said( $hv, 'zfs get -H -o value mountpoint ' . Trog::Utils::shell_quote($parent_set) );
     die "$parent is not where a ZFS dataset is mounted (it is inside $parent_set, mounted at $mounted_at), so a child dataset would not mount at $path\n"
       unless $parent_set && $mounted_at eq $parent;
     my $dataset = "$parent_set/" . File::Basename::basename($path);
@@ -3991,7 +3989,7 @@ sub runner_account_steps {
     # it starts belongs to the account, and stops when the account stops
     # lingering, and not with the login of the operator.
     my @virsh        = ( qw{systemd-run --quiet --wait --pipe}, "--machine=$user\@.host", qw{--user virsh -q -c qemu:///session} );
-    my $session_says = sub ( $verb, $pool ) { said( $hv, join q{ }, 'sudo -n', @virsh, $verb, q1($pool) ) };
+    my $session_says = sub ( $verb, $pool ) { said( $hv, join q{ }, 'sudo -n', @virsh, $verb, Trog::Utils::shell_quote($pool) ) };
 
     my @steps = (
         {
@@ -4002,23 +4000,23 @@ sub runner_account_steps {
         {
             what => "put $user in the kvm group",
             done => sub {
-                List::Util::any { $_ eq 'kvm' } split q{ }, said( $hv, 'id -nG ' . q1($user) );
+                List::Util::any { $_ eq 'kvm' } split q{ }, said( $hv, 'id -nG ' . Trog::Utils::shell_quote($user) );
             },
             do => sub { $hv->run_sudo_or_die( qw{usermod -aG kvm}, $user ) },
         },
         {
             what => "make the ZFS dataset $dataset at $path",
-            done => sub { said( $hv, 'zfs list -H -o name ' . q1($dataset) ) eq $dataset },
+            done => sub { said( $hv, 'zfs list -H -o name ' . Trog::Utils::shell_quote($dataset) ) eq $dataset },
             do   => sub { $hv->run_sudo_or_die( qw{zfs create -o}, "quota=$plan->{quota}", $dataset ) },
         },
         {
             what => "set the quota of $dataset to $plan->{quota}",
-            done => sub { uc said( $hv, 'zfs get -H -o value quota ' . q1($dataset) ) eq uc $plan->{quota} },
+            done => sub { uc said( $hv, 'zfs get -H -o value quota ' . Trog::Utils::shell_quote($dataset) ) eq uc $plan->{quota} },
             do   => sub { $hv->run_sudo_or_die( qw{zfs set}, "quota=$plan->{quota}", $dataset ) },
         },
         {
             what => "give $path to $user, with mode 0700",
-            done => sub { said( $hv, 'stat -c %U:%a ' . q1($path) ) eq "$user:700" },
+            done => sub { said( $hv, 'stat -c %U:%a ' . Trog::Utils::shell_quote($path) ) eq "$user:700" },
             do   => sub { $hv->run_sudo_or_die( 'chown', "$user:", $path ); $hv->run_sudo_or_die( qw{chmod 0700}, $path ) },
         },
         {
@@ -4084,13 +4082,13 @@ sub runner_removal_steps {
     my ( $hv,   $plan ) = @_;
     my ( $user, $path ) = @{$plan}{qw{user pool_path}};
 
-    my $dataset = sub { said( $hv, 'zfs list -H -o name ' . q1($path) ) };
+    my $dataset = sub { said( $hv, 'zfs list -H -o name ' . Trog::Utils::shell_quote($path) ) };
     my $helper  = Trog::HV::Libvirt::BridgeHelper::helper($hv);
 
     # The session keeps no volume that the directory does not have.  A base
     # image is a download that any guest can fetch again, and not a disk.
     my $refuse_if_full = sub {
-        my $first = said( $hv, 'sudo -n find ' . q1($path) . q{ -mindepth 1 ! -name 'baseimage-*' -print -quit} );
+        my $first = said( $hv, 'sudo -n find ' . Trog::Utils::shell_quote($path) . q{ -mindepth 1 ! -name 'baseimage-*' -print -quit} );
         die "$path still holds $first, and maybe more, so the account $user stays.  Destroy the guests of the runner first.\n" if $first ne q{};
     };
     $refuse_if_full->();
@@ -4128,7 +4126,7 @@ sub runner_removal_steps {
         },
         {
             what => "destroy the ZFS dataset at $path",
-            done => sub { my $set = $dataset->(); !$set || said( $hv, 'zfs get -H -o value mountpoint ' . q1($set) ) ne $path },
+            done => sub { my $set = $dataset->(); !$set || said( $hv, 'zfs get -H -o value mountpoint ' . Trog::Utils::shell_quote($set) ) ne $path },
             do   => sub { $refuse_if_full->();    $hv->run_sudo_or_die( qw{zfs destroy}, $dataset->() ) },
         },
         {

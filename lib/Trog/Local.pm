@@ -15,6 +15,7 @@ use IPC::Run3();
 use Fcntl qw{S_ISREG};
 use File::Temp();
 use Trog::Utils();
+use Data::Validate::Domain();
 
 =head1 NAME
 
@@ -319,14 +320,18 @@ takes, or if it cannot write the file.
 =cut
 
 # What scripts/guest_authorized_keys takes, which a key line can hold
-# unquoted.
-our $GUEST_NAME = qr/\A[[:alnum:]][[:alnum:].-]*\z/;
-our $GUEST_DIR  = qr{\A/[[:alnum:]._/+-]+\z};
+# unquoted.  The pattern in guest_name is for the key line: is_domain takes a
+# final dot, and does not promise to stay inside ASCII.
+our $GUEST_DIR = qr{\A/[[:alnum:]._/+-]+\z};
+
+my sub guest_name ($name) {
+    return $name =~ m/\A[[:alnum:].-]+\z/ && $name !~ m/[.]\z/ && defined Data::Validate::Domain::is_domain( $name, { domain_disable_tld_validation => 1 } );
+}
 
 sub authorize_guest_key {
     my ( $self, $name, $dir, $pubkey ) = @_;
 
-    die "'$name' is not a domain name, so it cannot name a guest key\n" unless $name =~ $GUEST_NAME;
+    die "'$name' is not a domain name, so it cannot name a guest key\n" unless guest_name($name);
     die "sshd cannot be given '$dir' in a key line: it must be an absolute path of letters, digits and ._/+-\n"
       unless $dir =~ $GUEST_DIR;
 
@@ -344,7 +349,7 @@ cannot remove the file.
 sub revoke_guest_key {
     my ( $self, $name ) = @_;
 
-    die "'$name' is not a domain name, so it names no guest key\n" unless $name =~ $GUEST_NAME;
+    die "'$name' is not a domain name, so it names no guest key\n" unless guest_name($name);
 
     my $file = "$Trog::Utils::GUEST_KEYS/$name";
     return 0 unless -e $file;

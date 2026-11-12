@@ -19,6 +19,7 @@ use Trog::Config();
 use Trog::Credentials();
 use Trog::Hypervisors();
 use Trog::Secrets();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -76,12 +77,6 @@ our @TABLES = qw{sender_login virtual_aliases virtual_maps};
 # What the template puts in the uid and the gid fields.  The build replaces it
 # with the uid of dovecot on the guest, which only the guest knows.
 our $UID_PLACEHOLDER = '%REPLACEME%';
-
-# Returns $str quoted for a POSIX shell.
-my sub shq ($str) {
-    $str =~ s/'/'\\''/g;
-    return "'$str'";
-}
 
 =head2 $address = address($domain, $name)
 
@@ -406,13 +401,13 @@ my sub root ( $guest, $script ) {
 
 # Runs $script as root on the guest, and returns what it printed.
 my sub root_out ( $guest, $script ) {
-    return $guest->capture_cmd( 'sudo -n sh -c ' . shq($script) ) // q{};
+    return $guest->capture_cmd( 'sudo -n sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
 }
 
 # The text of the file at $path on the guest, or undef where it is not there.
 my sub read_file ( $guest, $path ) {
-    return if root( $guest, 'test -f ' . shq($path) );
-    return root_out( $guest, 'cat ' . shq($path) );
+    return if root( $guest, 'test -f ' . Trog::Utils::shell_quote($path) );
+    return root_out( $guest, 'cat ' . Trog::Utils::shell_quote($path) );
 }
 
 # Replaces $dir/$file on the guest with $text, through a temporary file in $dir
@@ -421,17 +416,17 @@ my sub read_file ( $guest, $path ) {
 my sub replace_file ( $guest, $dir, $file, $text ) {
     my $path = "$dir/$file";
 
-    my $tmp = root_out( $guest, 'mktemp ' . shq("$dir/.$file.XXXXXX") );
+    my $tmp = root_out( $guest, 'mktemp ' . Trog::Utils::shell_quote("$dir/.$file.XXXXXX") );
     chomp $tmp;
     die "Could not make a temporary file in $dir on the guest.\n" unless $tmp =~ m{\A\Q$dir\E/[.]\Q$file\E[.]\w+\z};
 
     my $moved = eval {
         $guest->write_text( $tmp, $text, sudo => 1, mode => '0600' ) or die "Could not write $tmp on the guest.\n";
-        root( $guest, 'chown --reference=' . shq($path) . q{ } . shq($tmp) . ' && chmod --reference=' . shq($path) . q{ } . shq($tmp) . ' && mv -f ' . shq($tmp) . q{ } . shq($path) ) == 0;
+        root( $guest, 'chown --reference=' . Trog::Utils::shell_quote($path) . q{ } . Trog::Utils::shell_quote($tmp) . ' && chmod --reference=' . Trog::Utils::shell_quote($path) . q{ } . Trog::Utils::shell_quote($tmp) . ' && mv -f ' . Trog::Utils::shell_quote($tmp) . q{ } . Trog::Utils::shell_quote($path) ) == 0;
     };
     my $why = $@;
     unless ($moved) {
-        root( $guest, 'rm -f ' . shq($tmp) );
+        root( $guest, 'rm -f ' . Trog::Utils::shell_quote($tmp) );
         die $why || "Could not move $tmp over $path on the guest.\n";
     }
 
@@ -485,7 +480,7 @@ reload postfix.  Dies if C<postmap> fails.  The file is then already replaced.
 sub write_table ( $guest, $domain, $table, $text ) {
     my $dir = "$POSTFIX_ROOT/$domain";
     replace_file( $guest, $dir, $table, $text );
-    root( $guest, 'postmap ' . shq("hash:$dir/$table") ) == 0 or die "postmap failed on $dir/$table on the guest.\n";
+    root( $guest, 'postmap ' . Trog::Utils::shell_quote("hash:$dir/$table") ) == 0 or die "postmap failed on $dir/$table on the guest.\n";
     return 1;
 }
 
@@ -551,7 +546,7 @@ as the template does.
 
 sub make_mailboxes ( $guest, $address, @mailboxes ) {
     foreach my $box (@mailboxes) {
-        my ( $u, $b ) = ( shq($address), shq($box) );
+        my ( $u, $b ) = ( Trog::Utils::shell_quote($address), Trog::Utils::shell_quote($box) );
         root( $guest, "doveadm mailbox status -u $u messages $b >/dev/null 2>&1 || doveadm mailbox create -u $u $b" ) == 0
           or die "doveadm could not make the mailbox $box for $address.\n";
     }
@@ -567,7 +562,7 @@ failure of anything.
 =cut
 
 sub kick ( $guest, $address ) {
-    return root( $guest, 'doveadm kick ' . shq($address) ) == 0;
+    return root( $guest, 'doveadm kick ' . Trog::Utils::shell_quote($address) ) == 0;
 }
 
 =head2 $password = ask_password($address, %opts)

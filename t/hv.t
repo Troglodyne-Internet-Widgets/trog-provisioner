@@ -2177,6 +2177,10 @@ subtest 'a client that will not load says which, and how to install it' => sub {
     like( $err, qr/cpanm[ ]Trog::No::Such::Client\n\z/,                                                                       'and ends with the command that installs it' );
     unlike( $err, qr/[@]INC[ ]entries[ ]checked/, 'without the list of every directory perl looked in' );
 
+    $mock->redefine( client_module => sub { return '../Evil' } );
+    like( exception { $hv->require_client }, qr/will[ ]not[ ]load/, 'a name that is not a module name is refused before it is turned into a path' );
+
+    $mock->redefine( client_module => sub { return 'Trog::No::Such::Client' } );
     my $bad = $hv->check_client;
     is( $bad->{ok}, 0, 'and the check fails' );
     like( $bad->{what}, qr/Trog::No::Such::Client[ ]will[ ]not[ ]load/, 'naming the module' );

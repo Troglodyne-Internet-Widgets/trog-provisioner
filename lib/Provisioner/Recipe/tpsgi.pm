@@ -10,6 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Module::Runtime();
 use Path::Tiny();
 
 use Provisioner::Recipe::servicesudo();
@@ -84,8 +85,21 @@ sub required_recipes {
     );
 }
 
-# The name of a Perl module.
-my $MODULE = qr/\A \w+ (?: :: \w+ )* \z/;
+=head2 %opts = $recipe->enrich(%opts)
+
+Dies when an entry of C<loggers> is not the name of a Perl module, such as
+C<1Foo::Bar>, because tPSGI loads each one by name.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    my @bad = grep { !Module::Runtime::is_module_name($_) } @{ $opts{loggers} // [] };
+    die "loggers must be names of Perl modules, and these are not: @bad\n" if @bad;
+
+    return %opts;
+}
 
 sub args {
     return (
@@ -96,8 +110,8 @@ sub args {
             routers => { type => 'array',  items       => { type => 'string' } },
             loggers => {
                 type        => 'array',
-                items       => { type => 'string', pattern => "$MODULE" },
-                description => 'Log::Dispatch output classes that tPSGI adds to its log, and that it hands to the application.  It loads each by name, so a class can live beside a router.',
+                items       => { type => 'string' },
+                description => 'Log::Dispatch output classes that tPSGI adds to its log, and that it hands to the application.  It loads each by name, so a class can live beside a router.  Each must be the name of a Perl module, which enrich checks.',
             },
         },
     );

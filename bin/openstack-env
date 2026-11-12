@@ -18,6 +18,7 @@ use FindBin::libs;
 use Trog::Credentials();
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -146,7 +147,7 @@ sub exports {
 
     # Single quotes, because a secret can hold anything a shell would read: a
     # quote inside one closes it, escapes it, and opens another.
-    return join( q{}, map { "export $_='" . ( $from{$_} =~ s/'/'\\''/gr ) . "'\n" } grep { defined $from{$_} && length $from{$_} } sort keys %from );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a value of "0" is still a value
+    return join( q{}, map { "export $_=" . Trog::Utils::shell_quote( $from{$_} ) . "\n" } grep { defined $from{$_} && length $from{$_} } sort keys %from );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a value of "0" is still a value
 }
 
 =head1 SEE ALSO

@@ -19,6 +19,7 @@ use File::Slurper::Temp();
 use Net::OpenSSH::More();
 use Time::HiRes qw{alarm};
 use Trog::Credentials();
+use Trog::Utils();
 use Provisioner::Vars();
 
 =head1 NAME
@@ -669,13 +670,6 @@ owner.
 
 =cut
 
-# Returns $string quoted for a POSIX shell, for a command that has to be one
-# string.
-my sub shq ($str) {
-    $str =~ s/'/'\\''/g;
-    return "'$str'";
-}
-
 # Runs @cmd on the far side with the options of Net::OpenSSH's system in
 # \%opts.  Returns 1 on success, and warns and returns 0 on failure.
 my sub remote_system ( $self, $opts, @cmd ) {
@@ -716,7 +710,7 @@ my sub pour ( $self, $stdin, $path, %opts ) {
 
         # A move would replace the file, so sudo sh -c concatenates the staged
         # content onto it.  >> has no argv form, so the command is one string.
-        $ok = !$self->run_sudo( qw{sh -c}, sprintf( 'cat %s >> %s', shq($staged), shq($path) ) );
+        $ok = !$self->run_sudo( qw{sh -c}, sprintf( 'cat %s >> %s', Trog::Utils::shell_quote($staged), Trog::Utils::shell_quote($path) ) );
         $self->remove($staged);
     }
     else {
@@ -783,7 +777,7 @@ sub list_dir {
     }
 
     # ls, not sftp.  See "Why none of this uses sftp".
-    my $listing = $self->capture_cmd( 'ls -1 ' . shq($path) . ' 2>/dev/null' ) // '';
+    my $listing = $self->capture_cmd( 'ls -1 ' . Trog::Utils::shell_quote($path) . ' 2>/dev/null' ) // '';
     return grep { $_ } split( m/\n/, $listing );
 }
 
@@ -974,7 +968,7 @@ sub append_line {
 }
 
 sub root_text ( $self, $path ) {
-    my $text = $self->capture_cmd( 'sudo -n cat ' . shq($path) . ' 2>/dev/null' ) // q{};
+    my $text = $self->capture_cmd( 'sudo -n cat ' . Trog::Utils::shell_quote($path) . ' 2>/dev/null' ) // q{};
     chomp $text;
     return $text;
 }

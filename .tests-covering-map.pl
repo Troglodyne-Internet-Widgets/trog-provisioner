@@ -90,6 +90,7 @@ use File::Basename();
 use File::Spec();
 use File::Temp();
 use List::Util qw{uniq};
+use Module::Runtime();
 use Provisioner::Cookbook();
 
 # Read by the tools that the hook runs, and by dzil, and by no test.
@@ -155,7 +156,7 @@ return sub {
                     my @names_in_dirs = ( @{$recipe}{qw{template global_template}}, map { "files/$_" } keys %files );
 
                     # The recipe and its distribution's subclass, if it has one.
-                    my @modules = grep { -e } map { "lib/$_.pm" =~ s{::}{/}gr } $class, "Provisioner::Recipe::$name";
+                    my @modules = grep { -e } map { 'lib/' . Module::Runtime::module_notional_filename($_) } $class, "Provisioner::Recipe::$name";
 
                     foreach my $dir (@dirs) {
                         push @{ $stands_for{"$dir/$_"} }, @modules for @names_in_dirs;

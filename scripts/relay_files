@@ -7,13 +7,15 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use Cwd            ();
-use Fcntl          qw{:flock};
-use File::Basename ();
-use File::Temp     ();
-use IPC::Open3     ();
-use MIME::Base64   ();
-use Time::HiRes    ();
+use Cwd                    ();
+use Data::Validate::Domain ();
+use Fcntl                  qw{:flock};
+use File::Basename         ();
+use File::Temp             ();
+use IPC::Open3             ();
+use MIME::Base64           ();
+use Socket                 ();
+use Time::HiRes            ();
 
 =head1 relay_files
 
@@ -41,7 +43,12 @@ file that a service reads.
 
 sub dns_name {
     my ($name) = @_;
-    return defined $name && $name =~ m/\A[[:lower:][:digit:]-]+(?:[.][[:lower:][:digit:]-]+)+\z/ ? 1 : 0;
+
+    # is_domain also takes capitals and a final dot, so those are refused
+    # here: the name goes into a file, a path and the arguments of a command,
+    # and must have one spelling.
+    return 0 unless defined $name && $name =~ m/\A[[:lower:][:digit:].-]*[[:lower:][:digit:]-]\z/a;
+    return defined Data::Validate::Domain::is_domain( $name, { domain_disable_tld_validation => 1 } ) ? 1 : 0;
 }
 
 =head2 upstream($upstream)
@@ -53,8 +60,10 @@ C<192.0.2.10:8443>.
 
 sub upstream {
     my ($upstream) = @_;
-    my $octet = qr/[[:digit:]]{1,3}/;
-    return defined $upstream && $upstream =~ m/\A$octet(?:[.]$octet){3}:[[:digit:]]{1,5}\z/ ? 1 : 0;
+
+    return 0 unless defined $upstream && $upstream =~ m/\A([^:]+):([[:digit:]]{1,5})\z/a;
+    my ( $address, $port ) = ( $1, $2 );
+    return defined Socket::inet_pton( Socket::AF_INET(), $address ) && $port >= 1 && $port <= 65535 ? 1 : 0;
 }
 
 =head2 ($output, $ok) = run([\%opts,] @command)

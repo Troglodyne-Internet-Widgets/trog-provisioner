@@ -17,6 +17,7 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
 use Trog::Steps();
+use Trog::Utils();
 use File::Basename();
 use File::Glob();
 use File::Path();
@@ -444,8 +445,7 @@ sub as_root_on {
         return 0;
     }
 
-    ( my $quoted = $command ) =~ s/'/'\\''/g;
-    my $rc = eval { $guest->run_cmd("sudo -n sh -c '$quoted'") } // $@;
+    my $rc = eval { $guest->run_cmd( "sudo -n sh -c " . Trog::Utils::shell_quote($command) ) } // $@;
     if ($rc) {
         warn "Could not $how{doing} on $name: $rc\n";
         return 0;

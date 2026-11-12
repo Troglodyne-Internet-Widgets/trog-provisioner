@@ -138,6 +138,7 @@ subtest 'cache_address: the fetch cache, as the address a guest points names at'
     # would do for a mirror, is no use here.
     like( exception { $distro->cache_address( %fleet, cache => 'nowhere.test.test' ) },       qr/No[ ]address[ ]for[ ]'nowhere\.test\.test'/,          'a name nothing assigns an address to dies' );
     like( exception { $distro->cache_address( %fleet, cache => 'http://cache.test.test/' ) }, qr/No[ ]address[ ]for[ ]'http:\/\/cache\.test\.test\/'/, 'and so does a URL' );
+    like( exception { $distro->cache_address( %fleet, cache => '999.0.2.1' ) },               qr/No[ ]address[ ]for[ ]'999\.0\.2\.1'/,                 'and so does an octet above 255, which is not an address' );
 };
 
 Test::NoWarnings::had_no_warnings();

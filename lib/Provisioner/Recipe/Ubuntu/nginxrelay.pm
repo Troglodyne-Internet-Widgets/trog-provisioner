@@ -17,7 +17,7 @@ Provisioner::Recipe::Ubuntu::nginxrelay - Ubuntu's C<deps> for L<Provisioner::Re
 =cut
 
 sub deps {
-    return qw{libnginx-mod-stream ipset};
+    return qw{libnginx-mod-stream ipset libdata-validate-domain-perl};
 }
 
 1;

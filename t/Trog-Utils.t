@@ -17,6 +17,7 @@ use Test::More;
 use Test::MockModule qw{strict};
 use File::Temp();
 use File::Slurper();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -195,6 +196,28 @@ subtest 'write_binary_mode: the mode asked for, whatever the umask' => sub {
 
     like( ( eval { Trog::Utils::write_binary_mode( "$dir/no/such/dir/file", "text\n", oct('0644') ); 1 } ? q{} : $@ ), qr/\S/, 'a file that it cannot write dies' );
     is( umask, $umask, 'and leaves the umask as it was too' );
+};
+
+subtest 'shell_quote: one word for a POSIX shell, whatever it holds' => sub {
+    is( Trog::Utils::shell_quote('plain'),       q{'plain'},       'a word is in single quotes' );
+    is( Trog::Utils::shell_quote(q{}),           q{''},            'an empty string is one empty word, and not no word' );
+    is( Trog::Utils::shell_quote(q{it's}),       q{'it'\\''s'},    'a single quote is closed, escaped and opened again' );
+    is( Trog::Utils::shell_quote('$(reboot) ;'), q{'$(reboot) ;'}, 'and nothing else is special inside' );
+
+    foreach my $string ( q{}, q{plain}, q{it's}, q{a b}, q{$HOME `x` "y" \\ ; | &}, qq{two\nlines} ) {
+        my ( $said, $err );
+        IPC::Run3::run3( [ 'sh', '-c', 'printf %s ' . Trog::Utils::shell_quote($string) ], \undef, \$said, \$err );
+        is( $said, $string, 'the shell reads back ' . ( $string ne q{} ? 'what went in' : 'nothing' ) );
+    }
+};
+
+subtest 'is_ipv4: four octets of 0 to 255, and nothing else' => sub {
+    foreach my $good (qw{192.0.2.1 0.0.0.0 255.255.255.255}) {
+        is( Trog::Utils::is_ipv4($good), 1, "$good is an address" );
+    }
+    foreach my $bad ( qw{999.0.2.1 1234.0.2.1 192.0.2.256 192.0.2 192.0.2.1.5 192.0.2.1/24 192.0.2.1:80 2001:db8::1 a.test}, "192.0.2.1\n", q{}, undef ) {
+        is( Trog::Utils::is_ipv4($bad), 0, ( $bad // 'undef' ) =~ s/\n/\\n/gr . ' is not' );
+    }
 };
 
 done_testing();
