@@ -87,6 +87,21 @@ about any of it.
 So the guest test opens a TCP connection to C<host:port> and fails if nothing
 answers.  That one assertion is the only one that catches a dead destination.
 
+=head2 Repeated lines are kept
+
+Ubuntu sets C<$RepeatedMsgReduction on> in F</etc/rsyslog.conf>.  Then rsyslog
+merges a line that repeats into one line and a C<message repeated N times>
+summary, before any action sees it.  A collector would get that summary in
+place of the lines.
+
+So the forwarder file turns it off, with C<$RepeatedMsgReduction off>.  rsyslog
+reads F</etc/rsyslog.d> after F</etc/rsyslog.conf>, so the later value wins.
+The setting is global, and the action syntax has no switch for one action.  So
+the local F</var/log/syslog> of the guest also keeps every repeated line.
+
+A guest that is its own destination installs no forwarder.  It keeps the
+setting of Ubuntu.
+
 =head2 Which logs arrive
 
 Everything that reaches rsyslog.  journald forwards the journal to rsyslog, so
