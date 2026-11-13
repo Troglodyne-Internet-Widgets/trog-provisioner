@@ -22,10 +22,13 @@ use Trog::Local();
 # The fetches below run in the sandbox, as a guest's do, and there is no other
 # way to ask rsync what the guest gets.  The skip comes before Test::NoWarnings
 # loads, because its test at END would follow the plan of a skip.
+#
+# Under root, rsync switches to nobody, which the sandbox cannot look up.
 BEGIN {
     if ( my $why = Trog::Local->new()->sandbox_error ) {
         plan skip_all => "No sandbox here, so no fetch either: $why";
     }
+    plan skip_all => 'The daemon of a guest never runs as root, and rsync behaves otherwise under root' if $> == 0;
 }
 
 use Test::NoWarnings;
