@@ -18,6 +18,7 @@ use Text::Xslate();
 
 use Provisioner::Packager();
 use Provisioner::Recipe::claude();
+use Provisioner::Recipe::grafanaotel();
 use Provisioner::Recipe::servicesudo();
 use Provisioner::Utils();
 use Trog::Patterns();
@@ -318,6 +319,10 @@ L<Provisioner::Recipe::grafanaotel/The details expire first>.
 A C<host> that the ip pool knows is resolved to its address, as the C<host> of
 L<Provisioner::Recipe::logshipper> is.
 
+The dashboard of App::Clod then links to the dashboard of the runs that
+L<Provisioner::Recipe::grafanaotel> draws, at C<host> as it is written, over
+HTTPS, because the certificate of grafana names the host and not its address.
+
 =head2 THE LOCAL LIB
 
 The C<perl> recipe installs what the checkout needs into the perl of the host,
@@ -521,8 +526,9 @@ C<package_name>, C<install_command> and C<update_command>, which the installer
 of L</THE SYSTEM PACKAGES> holds.  Adds C<installer>, its path.
 
 Adds C<telemetry_target>, the address or name that the runs send their
-telemetry to, when C<telemetry> names a C<host>.  Dies when the host is a URL,
-or this guest itself.
+telemetry to, when C<telemetry> names a C<host>, and C<grafana_url>, the
+dashboard of the runs on that host.  Dies when the host is a URL, or this
+guest itself.
 
 Replaces C<dashboard_password> with C<dashboard_password_sha256>, the SHA-256 of
 its C<UTF-8> bytes in lowercase hex, which is what F<clod.conf> holds.  So the
@@ -543,6 +549,7 @@ sub enrich {
     $opts{local_lib}        = "$opts{install_dir}/$opts{domain}/perl5";
     $opts{agent_lib}        = "$opts{install_dir}/$opts{domain}/agent-perl5";
     $opts{telemetry_target} = $self->telemetry_target(%opts);
+    $opts{grafana_url}      = 'https://' . $opts{telemetry}{host} . Provisioner::Recipe::grafanaotel::->dashboard_path() if $opts{telemetry_target};
 
     my $packager = Provisioner::Packager->named( $opts{packager} = $self->distro_packager );
     $opts{package_name}    = $packager->package_name;

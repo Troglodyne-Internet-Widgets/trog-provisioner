@@ -8,7 +8,11 @@ install -d -m 0755 /etc/telegraf/telegraf.d
 install -o root -g root -m 0644 grafanaotel_telegraf.conf /etc/telegraf/telegraf.d/60-grafanaotel.conf
 install -o root -g root -m 0644 grafanaotel_details.star /etc/telegraf/grafanaotel_details.star
 install -o root -g root -m 0644 grafanaotel_ufw.conf /etc/ufw/applications.d/grafanaotel
+[%# The provider of the grafana recipe loads each file in this directory, and
+    the grafana target chowns it later. -%]
+install -d -m 0755 /var/lib/grafana/dashboards
+install -o root -g root -m 0644 grafanaotel_dashboard.json /var/lib/grafana/dashboards/claude-runs.json
 [%# Telegraf must restart to open the listener, and it is not installed until
     the grafana target, below this one, runs. -%]
 [% script_dir %]/queue_postrun_task systemctl restart telegraf
-echo 'grafanaotel: OTLP on [% port %]; the details of an event stay [% detail_retention %].'
+echo 'grafanaotel: OTLP on [% port %]; the details of an event stay [% detail_retention %]; drawn on the Claude runs dashboard.'

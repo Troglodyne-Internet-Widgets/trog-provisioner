@@ -42,6 +42,7 @@
         OTEL_LOG_USER_PROMPTS       => '1',
 [% END -%]
     },
+    grafana_url      => [% perl_string(grafana_url) %],
 [% END -%]
     system_packages  => { packager => '[% packager %]', installer => '[% installer %]' },
 [% IF follow_up_max.defined() -%]

@@ -184,6 +184,7 @@ subtest 'telemetry goes where the configuration says, with the details it asks f
 
     my ($quiet) = $conf_of->();
     is_deeply( $quiet->{otel} // {}, {}, 'with no host, the runs send nothing' );
+    ok( !exists $quiet->{grafana_url}, 'and the dashboard links to no grafana' );
 
     my ( $conf, $profile ) = $conf_of->( telemetry => { host => 'logs.test.test' } );
     is_deeply(
@@ -192,6 +193,7 @@ subtest 'telemetry goes where the configuration says, with the details it asks f
         'a host that the pool knows gets the metrics and events at its address, on the OTLP port, without details'
     );
     like( $profile, qr{^ports=4317/tcp$}m, 'and the guest may connect out to that port' );
+    is( $conf->{grafana_url}, 'https://logs.test.test/d/claude-runs', 'and the dashboard links to the dashboard of the runs, at the name of the host, which its certificate holds' );
 
     ($conf) = $conf_of->( telemetry => { host => 'otel.vendor.test', port => 4417, tool_details => 1, user_prompts => 1 } );
     is( $conf->{otel}{OTEL_EXPORTER_OTLP_ENDPOINT}, 'http://otel.vendor.test:4417', 'a host that the pool does not know is used as written, on the port given' );

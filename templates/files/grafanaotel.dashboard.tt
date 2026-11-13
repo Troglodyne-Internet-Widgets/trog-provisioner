@@ -1,0 +1,159 @@
+[%# The runs of Claude Code that send telemetry here, drawn from what the
+    input of grafanaotel writes.  The uid is fixed, because App::Clod links to
+    /d/claude-runs.  See Provisioner::Recipe::grafanaotel.
+
+    The metrics arrive as deltas, one point per export, so a sum over the
+    range is the total.  The repo and task variables read the clod.* tags,
+    and a run that has no such tag matches All. -%]
+{
+  "uid": "claude-runs",
+  "title": "Claude runs",
+  "description": "Cost, tokens and tool calls of the runs of Claude Code that send OTLP to this collector.",
+  "editable": false,
+  "schemaVersion": 39,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "5m",
+  "tags": ["claude", "otel"],
+  "templating": {
+    "list": [
+      {
+        "name": "repo",
+        "label": "Repository",
+        "type": "query",
+        "datasource": "[% datasource %]",
+        "query": "SHOW TAG VALUES FROM \"claude_code.cost.usage\" WITH KEY = \"clod.repo\"",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "task",
+        "label": "Task",
+        "type": "query",
+        "datasource": "[% datasource %]",
+        "query": "SHOW TAG VALUES FROM \"claude_code.cost.usage\" WITH KEY = \"clod.task\"",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Cost",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series",
+          "query": "SELECT sum(\"gauge\") FROM \"claude_code.cost.usage\" WHERE $timeFilter AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Output tokens",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series",
+          "query": "SELECT sum(\"gauge\") FROM \"claude_code.token.usage\" WHERE $timeFilter AND \"type\" = 'output' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Sessions",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series",
+          "query": "SELECT sum(\"gauge\") FROM \"claude_code.session.count\" WHERE $timeFilter AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Refused tool calls",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series",
+          "query": "SELECT count(\"tool_use_id\") FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_decision' AND \"decision\" = 'reject' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Cost by repository",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 9 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_clod.repo]]",
+          "query": "SELECT sum(\"gauge\") FROM \"claude_code.cost.usage\" WHERE $timeFilter AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"clod.repo\" fill(none)" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Tokens by type",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 9 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_type]]",
+          "query": "SELECT sum(\"gauge\") FROM \"claude_code.token.usage\" WHERE $timeFilter AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"type\" fill(none)" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Refused tool calls by tool",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 13, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_tool_name]]",
+          "query": "SELECT count(\"tool_use_id\") FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_decision' AND \"decision\" = 'reject' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"tool_name\" fill(none)" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Failed tool calls by tool",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 12, "y": 13, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_tool_name]]",
+          "query": "SELECT count(\"tool_use_id\") FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_result' AND \"success\" = 'false' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"tool_name\" fill(none)" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Refused tool calls",
+      "description": "The job and attempt name the evidence that App::Clod keeps of the run.",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 21, "w": 24, "h": 9 },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "table",
+          "query": "SELECT \"clod.job_id\" AS \"job\", \"clod.attempt\" AS \"attempt\", \"tool_name\" AS \"tool\", \"clod.repo\" AS \"repository\", \"clod.task\" AS \"task\" FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_decision' AND \"decision\" = 'reject' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ ORDER BY time DESC LIMIT 200" }
+      ]
+    }
+  ]
+}

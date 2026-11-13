@@ -72,6 +72,19 @@ gone.
 To read both in one query, join them on C<copied_fields>.  The C<details>
 policy is not the default, so InfluxQL names it: C<"details"."logs_detail">.
 
+=head2 The dashboard
+
+The recipe installs the dashboard "Claude runs", with the uid
+C<claude-runs>.  It draws the cost, the tokens and the sessions of the runs,
+and the tool calls that were refused or failed, with a table of the refused
+calls by job and attempt.  Its variables filter by the C<clod.repo> and
+C<clod.task> tags.  The uid is fixed, because L<Provisioner::Recipe::clod>
+links the dashboard of App::Clod to it, through C<dashboard_path>.
+
+The dashboard names its datasource, as the one of
+L<Provisioner::Recipe::grafanasyslog> does, so C<datasource> must be the
+C<datasource_name> of C<grafana>.
+
 =head2 It listens on the network, and that is the point
 
 The senders are other guests, so the input binds every address, and the ufw
@@ -87,6 +100,14 @@ L<Provisioner::Recipe::clod> does with C<telemetry>.
 =cut
 
 =head1 METHODS
+
+=head2 $path = Provisioner::Recipe::grafanaotel->dashboard_path()
+
+The path of the dashboard under the address of grafana.
+
+=cut
+
+sub dashboard_path { return '/d/claude-runs' }
 
 =head2 %required = $recipe->required_recipes(%opts)
 
@@ -133,6 +154,9 @@ sub is_multi_tenant { return 0 }
 
 =item * C<port>: the port of the OTLP input, on every address.
 
+=item * C<datasource>: the grafana datasource that the dashboard reads.  See
+L</The dashboard>.
+
 =item * C<detail_retention>: how long the details of an event stay, as an
 InfluxDB duration.  See L</The details expire first>.
 
@@ -166,6 +190,11 @@ sub args {
                 maximum     => 65535,
                 description => 'Port of the OTLP input over gRPC, on every address.',
             },
+            datasource => {
+                type        => 'string',
+                default     => 'InfluxDB',
+                description => 'The grafana datasource the dashboard reads.  Must match the grafana recipe datasource_name, which t/recipes.t checks.',
+            },
             detail_retention => {
                 type        => 'string',
                 pattern     => "$Trog::Patterns::INFLUX_DURATION",
@@ -196,14 +225,16 @@ sub args {
 
 =head2 %files = $recipe->template_files()
 
-The telegraf fragment, the processor that it loads, and the ufw profile.
+The telegraf fragment, the processor that it loads, the ufw profile and the
+dashboard.
 
 =cut
 
 sub template_files {
     return (
-        'grafanaotel.telegraf.tt' => 'grafanaotel_telegraf.conf',
-        'grafanaotel.details.tt'  => 'grafanaotel_details.star',
+        'grafanaotel.telegraf.tt'  => 'grafanaotel_telegraf.conf',
+        'grafanaotel.details.tt'   => 'grafanaotel_details.star',
+        'grafanaotel.dashboard.tt' => 'grafanaotel_dashboard.json',
 
         # Rendered here, not by ufw, because ufw does not know the port.
         'grafanaotel.ufw.conf.tt' => 'grafanaotel_ufw.conf',

@@ -129,6 +129,26 @@ subtest 'a login lands on the home dashboard' => sub {
 };
 [% END -%]
 
+subtest 'grafana loaded each dashboard that a recipe installed' => sub {
+
+    # The provider skips a file that it cannot read, logs it once, and stays
+    # healthy, so ask grafana for each one by its uid.
+    my @files = glob '/var/lib/grafana/dashboards/*.json';
+    foreach my $file (@files) {
+        my $want = eval { JSON::PP->new->decode( do { open( my $fh, '<', $file ) or die $!; local $/; <$fh> } ) };
+        ok( $want && $want->{uid}, "$file is JSON with a uid" ) or do { diag $@; next };
+        my $out = q{};
+        my $got;
+        foreach ( 1 .. 20 ) {
+            $out = grafana_api("http://127.0.0.1:$port/api/dashboards/uid/$want->{uid}");
+            $got = eval { JSON::PP->new->decode($out) };
+            last if $got && $got->{dashboard};
+            sleep 3;
+        }
+        is( $got && $got->{dashboard}{title}, $want->{title}, "and grafana serves it as $want->{title}" ) or diag $out;
+    }
+};
+
 # The salvage as bin/new_config asks for it before a rebuild, and the restore
 # as a rebuilt guest runs it, here on a guest whose database is its own.
 subtest 'the measurements can be salvaged, and a salvage does not replace them' => sub {
