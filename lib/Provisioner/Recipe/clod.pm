@@ -147,12 +147,14 @@ The layout on the guest:
     [install_dir]/[domain]/App-Clod/    the checkout
     [install_dir]/[domain]/clod.conf    the configuration, 0640 root:[user]
     [install_dir]/[domain]/clod.env     GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN, 0640 root:[user]
-    [install_dir]/[domain]/clod-state/  the Minion database
+    [install_dir]/[domain]/clod-state/  the Minion database, and the evidence of failed jobs
     [install_dir]/[domain]/workspace/   the mirrors, the work trees and the hub of the bot
     [install_dir]/[domain]/run/         the socket, 2750 [user]:www-data
 
 The Minion database holds every job, the history on the health page, and the
-claims that stop the bot from taking one notification twice.  So it survives a
+claims that stop the bot from taking one notification twice.  The evidence
+directory holds the transcripts of the claude runs of each job that failed,
+which is how somebody finds out what such a run did.  So both survive a
 rebuild of the guest.  See C<remote_prepare>.  The workspace does not, because
 the bot fetches the mirrors again.
 
@@ -512,7 +514,8 @@ Runs F<clod-salvage.sh>, which copies the Minion database into
 F<.clod-salvage> with the C<.backup> of C<sqlite3>.  The worker writes the
 database all the time, so a plain copy can take half of a transaction.  On a
 guest without the database, the command fails, and the salvage keeps what it
-had.
+had.  Then it copies the evidence directory beside the database, when the
+guest has one.
 
 =cut
 
@@ -534,7 +537,10 @@ sub remote_files {
 
 =head2 %restores = $recipe->restores(%opts)
 
-The salvaged database goes back to F<clod-state>, owned by the service C<user>.
+The salvaged database and evidence go back to F<clod-state>, owned by the
+service C<user>.  The evidence gets no mode, because C<restore_state> would
+apply it to every file in it.  App::Clod makes the directory mode 0700 again
+before a run writes to it.
 
 =cut
 
@@ -542,7 +548,10 @@ sub restores {
     my ( $self, %opts ) = @_;
     my ( $install_dir, $domain, $admin_user ) = @opts{qw{install_dir domain admin_user}};
     my $user = $opts{user} // $admin_user;
-    return ( "$install_dir/$domain/clod-state/minion.db" => { from => "$install_dir/$domain/clod-salvage/minion.db", owner => "$user:$admin_user", mode => '0640' } );
+    return (
+        "$install_dir/$domain/clod-state/minion.db" => { from => "$install_dir/$domain/clod-salvage/minion.db", owner => "$user:$admin_user", mode => '0640' },
+        "$install_dir/$domain/clod-state/evidence"  => { from => "$install_dir/$domain/clod-salvage/evidence",  owner => "$user:$admin_user" },
+    );
 }
 
 =head2 %formatters = $recipe->formatters()

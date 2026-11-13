@@ -5,3 +5,7 @@
 set -e
 install -d -o root -g root -m 0700 '[% install_dir %]/[% domain %]/.clod-salvage'
 sqlite3 '[% install_dir %]/[% domain %]/clod-state/minion.db' ".backup '[% install_dir %]/[% domain %]/.clod-salvage/minion.db'"
+rm -rf '[% install_dir %]/[% domain %]/.clod-salvage/evidence'
+if [ -d '[% install_dir %]/[% domain %]/clod-state/evidence' ]; then
+    cp -a '[% install_dir %]/[% domain %]/clod-state/evidence' '[% install_dir %]/[% domain %]/.clod-salvage/evidence'
+fi
