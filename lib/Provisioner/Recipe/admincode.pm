@@ -76,6 +76,10 @@ F<Build.PL> gets what cpanm reads from it.  A repository with none of these is
 skipped.  So this recipe can smoke your own personal PAN.  If your repositories need system packages, list
 them in C<extra_pkgs>.
 
+The install runs as root, and the tests run as the admin, who owns the clones.
+Every file that the install leaves in a clone goes to the admin afterwards.  See
+F<scripts/smoke_perl_modules.pl>.
+
 =head2 Cloning while the fetch cache is in front of it
 
 F<scripts/repos_for> asks each C<api_url> for the repositories of an entity.

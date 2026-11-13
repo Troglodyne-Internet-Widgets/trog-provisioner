@@ -18,7 +18,7 @@ use Getopt::Long ();
     cpan_install [--notest] installdeps DIR
     cpan_install [--notest] dzil DIR
     cpan_install [--notest] pin PKGCONFIG_PACKAGE MODULE
-    cpan_install test DIR
+    cpan_install [--as USER] test DIR
 
 =head2 DESCRIPTION
 
@@ -51,6 +51,11 @@ Its version must match the C<libvirt> that it builds against.
 C<DIR> and with C<-l>.  It is here, and not in the caller, because only this
 script knows which perl the dependencies went into.  A C<prove> from C<PATH>
 is the system perl's, which has none of them.
+
+With C<--as USER>, the tests run as C<USER>, with the home of C<USER> as
+C<HOME>, so that nothing they write belongs to root.  This script changes the
+account, and not its caller, because this script is in the home of root, where
+C<USER> cannot run it.
 
 =back
 
@@ -125,17 +130,18 @@ our $PERL_ROOT = '/opt/perl5';
 # The mirror whose index says which release to install.
 our $MIRROR = 'https://www.cpan.org';
 
-my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin|test ARGS\n";
+my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin ARGS, or cpan_install [--as USER] test DIR\n";
 
 sub main {
     my @args = @_;
 
     my %opt;
-    Getopt::Long::GetOptionsFromArray( \@args, \%opt, 'notest' )
+    Getopt::Long::GetOptionsFromArray( \@args, \%opt, 'notest', 'as=s' )
       or return usage();
 
     my ( $verb, @rest ) = @args;
     return usage() unless defined $verb;
+    return usage() if defined $opt{as} && $verb ne 'test';
 
     my $bin = perl_bin();
 
@@ -189,7 +195,7 @@ sub main {
         $rc = install_specs( $bin, \%opt, "$module\@$version" );
     }
     elsif ( $verb eq 'test' && @rest == 1 ) {
-        $rc = run_in( $rest[0], "$bin/prove", '-lvm', 't' );
+        $rc = run_in( $rest[0], as_user( $opt{as} ), "$bin/prove", '-lvm', 't' );
     }
     else {
         return usage();
@@ -309,6 +315,22 @@ sub ensure_cpm {
     my ($bin) = @_;
     return 0 if -e "$bin/cpm";
     return run_in( undef, "$bin/cpanm", qw{--notest --mirror-only App::cpm} );
+}
+
+=head2 @prefix = as_user($name)
+
+The words to put before a command so that it runs as the account C<$name>,
+with the home of that account as C<HOME>.  Empty when C<$name> is undef.  Dies
+when no account has that name.
+
+=cut
+
+sub as_user {
+    my ($name) = @_;
+    return unless defined $name;
+    my $home = ( getpwnam $name )[7];
+    die "cpan_install: no account is named $name, so nothing can run as it\n" unless defined $home;
+    return ( 'runuser', '-u', $name, '--', 'env', "HOME=$home" );
 }
 
 sub usage {

@@ -183,6 +183,17 @@ subtest 'test: the prove of that perl, in the checkout' => sub {
 
     $r = install( args => [qw{test /bogus/checkout}], fails => qr{/prove\b} );
     is( $r->{rc}, 1, 'and a suite that fails is the exit code' );
+
+    # root, because it is the one account that every host has.
+    $r = install( args => [qw{--as root test /bogus/checkout}] );
+    is_deeply( $r->{ran}, [ [ '/bogus/checkout', qw{runuser -u root -- env}, 'HOME=' . ( getpwnam 'root' )[7], "$PERL/bin/prove", qw{-lvm t} ] ], 'and as the account that --as names, with its home' );
+
+    $r = install( args => [qw{--as bogus-no-such-account test /bogus/checkout}] );
+    like( $r->{err}, qr/no[ ]account[ ]is[ ]named[ ]bogus-no-such-account/, 'which must exist' );
+    is_deeply( $r->{ran}, [], 'or nothing runs' );
+
+    $r = install( args => [qw{--as root installdeps /bogus/app}] );
+    is( $r->{rc}, 2, 'and --as is for the tests alone, because an install goes into the perl that root owns' );
 };
 
 subtest 'exit_code: what a child exit status says, the way a shell says it' => sub {

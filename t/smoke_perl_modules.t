@@ -21,6 +21,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use List::Util qw{any};
 use IPC::Run3();
+use Test::MockModule();
 
 use FindBin;
 use FindBin::libs;
@@ -104,6 +105,46 @@ subtest 'dependencies fail to install' => sub {
     my ( $rc, @calls ) = smoke( $base, fails => 'dzil' );
     isnt( $rc, 0, 'it exits non-zero' );
     is_deeply( \@calls, [ [qw{dzil a-dzil}] ], 'and does not test what it could not install for' );
+};
+
+require_ok($script);
+
+subtest 'the tests run as the owner of the checkout' => sub {
+    is_deeply( [ Trog::Script::SmokePerlModules::as_owner($<) ], [], 'and as they are when this account owns it' );
+
+    # The test needs an account other than its own, and root is on every host.
+    plan skip_all => 'this runs as root, so root is not another account' unless $<;
+    is_deeply( [ Trog::Script::SmokePerlModules::as_owner(0) ], [qw{--as root}], 'through cpan_install, which can change the account' );
+};
+
+subtest 'what root leaves in a checkout goes back to its owner' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    make_path("$dir/.git");
+    File::Slurper::Temp::write_text( "$dir/$_", "# bogus\n" ) for qw{Makefile .git/index};
+    symlink( "$dir/Makefile", "$dir/link" ) or die "Cannot make the symlink: $!";
+
+    my $mock = Test::MockModule->new( 'Trog::Script::SmokePerlModules', no_auto => 1 );
+    my @given;
+    $mock->redefine( set_owner => sub { push @given, [ $_[0] =~ s{\A\Q$dir\E}{}r, @_[ 1, 2 ] ] } );
+
+    # $< stands for root, because every file here belongs to the account that
+    # runs the test.
+    Trog::Script::SmokePerlModules::give_back( $dir, $<, 4242, 4343 );
+    is_deeply( [ sort { $a->[0] cmp $b->[0] } @given ], [ map { [ $_, 4242, 4343 ] } q{}, qw{/.git /.git/index /Makefile} ], 'every file and directory, and not the symlink' );
+
+    # The basedir can hold a checkout through a symlink, which glob and -d take.
+    @given = ();
+    my $links = tempdir( CLEANUP => 1 );
+    symlink( $dir, "$links/checkout" ) or die "Cannot make the symlink: $!";
+    Trog::Script::SmokePerlModules::give_back( "$links/checkout", $<, 4242, 4343 );
+    is( scalar @given, 4, 'and through a checkout that is a symlink' );
+
+    @given = ();
+    Trog::Script::SmokePerlModules::give_back( $dir, $< + 1, 4242, 4343 );
+    is_deeply( \@given, [], 'and nothing that another account owns' );
+
+    Trog::Script::SmokePerlModules::give_back( $dir, $<, $<, 4343 );
+    is_deeply( \@given, [], 'and nothing when the owner ran the install' );
 };
 
 Test::NoWarnings::had_no_warnings();
