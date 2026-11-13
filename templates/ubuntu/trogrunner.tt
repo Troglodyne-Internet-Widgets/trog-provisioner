@@ -31,6 +31,9 @@ ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisio
 [ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
 [ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
 [ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.hypervisors.conf '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf'
+[% IF cache_authority %]
+[ -e '[% install_dir %]/[% domain %]/etc/trog-provisioner/fetchcache-ca.crt' ] || install -o '[% user %]' -g '[% admin_user %]' -m 0644 trogrunner.fetchcache-ca.crt '[% install_dir %]/[% domain %]/etc/trog-provisioner/fetchcache-ca.crt'
+[% END %]
 [% IF store %]
 # The secret store of the runner, from the data directory of this domain.
 # Nothing generates it, because a new keepass database has new passwords.

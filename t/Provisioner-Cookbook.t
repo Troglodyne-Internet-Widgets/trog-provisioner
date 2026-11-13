@@ -1271,6 +1271,7 @@ subtest 'the settings of an installation are validated in one place' => sub {
     like( $own_global->( ip_pool   => { bins => { guests => { cidr => '192.0.2.0/24' } } } ), qr{/ip_pool/bins:[ ]/propertyName/guests},          'nor as a bin named guests' );
     is( $own_global->( ip_pool => { bins => { vpnclients => { cidr => '10.8.0.128/25', via => 'vpn.test.test' } } } ), undef, 'while the other bins are' );
     like( $own_global->( nameservers => { ns2 => 'ns2.test.test' } ), qr{/nameservers:[ ]Nothing[ ]declares[ ]this[ ]setting}, 'and a zone names only the ns1 of the guest that holds it, so there are no nameservers to set' );
+    like( $own_global->( cache => 'cache.test.test' ), qr{It[ ]is[ ]now[ ]the[ ]cache[ ]in[ ]the[ ]block}, 'and a setting that moved says where it went' );
 
     # Six hand-written refusals, each naming one setting, in the order the
     # script happened to read them: an operator fixed one and ran it again.
@@ -1354,58 +1355,57 @@ subtest 'one alias is a list, as two already were' => sub {
 
 subtest 'upstream_domains: the guests a domain needs up first, in the order to build them' => sub {
     my %conf = (
-        _base         => { _global      => { cache => 'cache.test', mirror => 'http://archive.test/ubuntu' } },
-        'cache.test'  => { fetchcache   => {} },
+        _base         => { _global      => { mirror => 'mirror.test' } },
+        'mirror.test' => { aptmirror    => {} },
         'logs.test'   => { logcollector => {} },
         'web.test'    => { logshipper   => { host => 'logs.test' } },
         'tenant.test' => { cron         => {} },
-        'plain.test'  => { _global      => { cache => q{} }, logshipper => { host => 'syslog.vendor.test' } },
-        'byip.test'   => { _global      => { cache => '192.0.2.9' } },
+        'plain.test'  => { _global      => { mirror => q{} }, logshipper => { host => 'syslog.vendor.test' } },
+        'byip.test'   => { _global      => { mirror => '192.0.2.9' } },
         _shared       => { 'web.test'   => ['tenant.test'] },
     );
     my $up = sub { [ Provisioner::Cookbook->upstream_domains( $_[0], \%conf ) ] };
 
-    is_deeply( $up->('web.test'),    [qw{cache.test logs.test}], 'the cache first, which the collector needs too, then the collector' );
-    is_deeply( $up->('logs.test'),   ['cache.test'],             'the collector needs the cache' );
-    is_deeply( $up->('cache.test'),  [],                         'and the cache, which names itself, needs nothing' );
-    is_deeply( $up->('tenant.test'), [qw{cache.test logs.test}], 'a domain on the guest of another needs what that guest needs, and not the guest' );
-    is_deeply( $up->('plain.test'),  [],                         'an empty cache and a host outside the installation are nothing to build' );
-    is_deeply( $up->('byip.test'),   [],                         'and neither is a cache named by its address' );
+    is_deeply( $up->('web.test'),    [qw{mirror.test logs.test}], 'the mirror first, which the collector needs too, then the collector' );
+    is_deeply( $up->('logs.test'),   ['mirror.test'],             'the collector needs the mirror' );
+    is_deeply( $up->('mirror.test'), [],                          'and the mirror, which names itself, needs nothing' );
+    is_deeply( $up->('tenant.test'), [qw{mirror.test logs.test}], 'a domain on the guest of another needs what that guest needs, and not the guest' );
+    is_deeply( $up->('plain.test'),  [],                          'an empty mirror and a host outside the installation are nothing to build' );
+    is_deeply( $up->('byip.test'),   [],                          'and neither is a mirror named by its address' );
 
-    $conf{'mirror.test'} = { aptmirror => {} };
-    $conf{'apt.test'}    = { _global   => { cache => q{}, mirror => 'http://mirror.test/ubuntu' } };
-    is_deeply( $up->('apt.test'), [qw{cache.test mirror.test}], 'a URL whose host is a guest here names that guest, after the cache that it needs' );
+    $conf{'apt.test'} = { _global => { mirror => 'http://mirror.test/ubuntu' } };
+    is_deeply( $up->('apt.test'), ['mirror.test'], 'a URL whose host is a guest here names that guest' );
     $conf{'apt.test'}{_global}{mirror} = 'http://archive.elsewhere.test/ubuntu';
     is_deeply( $up->('apt.test'), [], 'and one whose host is not, nothing' );
 
-    # The cache and the collector each use the other when it is up, and each
+    # The mirror and the collector each use the other when it is up, and each
     # builds without the other.
-    $conf{'cache.test'}{logshipper} = { host => 'logs.test' };
-    is_deeply( $up->('web.test'),                                               [qw{cache.test logs.test}], 'a cycle of weak settings is ignored, and the order still holds where it can' );
-    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf ) ], [],                         'and upstream_cycle finds none' );
+    $conf{'mirror.test'}{logshipper} = { host => 'logs.test' };
+    is_deeply( $up->('web.test'),                                               [qw{mirror.test logs.test}], 'a cycle of weak settings is ignored, and the order still holds where it can' );
+    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf ) ], [],                          'and upstream_cycle finds none' );
 
     # A setting that no schema marks may be one that a build needs.  With one
     # step strong, the guest at the weak step builds first, without the other.
-    $conf{'logs.test'}{_global} = { api => 'https://cache.test/v1' };
-    is_deeply( $up->('web.test'), [qw{cache.test logs.test}], 'a cycle with one weak step is ignored too, and the guest that needs the other strongly waits for it' );
+    $conf{'logs.test'}{_global} = { api => 'https://mirror.test/v1' };
+    is_deeply( $up->('web.test'), [qw{mirror.test logs.test}], 'a cycle with one weak step is ignored too, and the guest that needs the other strongly waits for it' );
 
-    $conf{'cache.test'}{_global} = { api => 'https://logs.test/v1' };
+    $conf{'mirror.test'}{_global} = { api => 'https://logs.test/v1' };
     my $cycle = exception { $up->('web.test') };
     $cycle //= q{};
-    like( $cycle, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]api/, 'a cycle in which every step is strong is refused, naming each setting' );
-    like( $cycle, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'both of them' );
+    like( $cycle, qr/logs[.]test[ ]names[ ]mirror[.]test[ ]in[ ]_global[.]api/, 'a cycle in which every step is strong is refused, naming each setting' );
+    like( $cycle, qr/mirror[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'both of them' );
     unlike( $cycle, qr/logshipper[.]host/,  'and not a weak setting beside them' );
     unlike( $cycle, qr/web[.]test[ ]names/, 'nor the guest that only leads into it' );
 
     is_deeply(
         [ map { "$_->{by} $_->{setting}" } Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf ) ],
-        [ 'cache.test _global.api', 'logs.test _global.api' ],
+        [ 'mirror.test _global.api', 'logs.test _global.api' ],
         'upstream_cycle returns the same cycle, and does not die'
     );
-    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf, 'cache.test' ) ], [], 'with one of its guests up, there is none' );
+    is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'web.test', \%conf, 'mirror.test' ) ], [], 'with one of its guests up, there is none' );
     is_deeply(
-        [ Provisioner::Cookbook->upstream_domains( 'web.test', \%conf, 'cache.test' ) ],
-        [qw{cache.test logs.test}],
+        [ Provisioner::Cookbook->upstream_domains( 'web.test', \%conf, 'mirror.test' ) ],
+        [qw{mirror.test logs.test}],
         'and upstream_domains returns both, the one that is up first'
     );
     is_deeply( [ Provisioner::Cookbook->upstream_cycle( 'plain.test', \%conf ) ], [], 'a domain that needs no guest of the cycle has none' );
@@ -1416,21 +1416,21 @@ subtest 'upstream_domains: the guests a domain needs up first, in the order to b
 subtest 'upstream_domains: the guests that serve the fleet, each configured to use the others' => sub {
     my %conf = (
         _base => {
-            _global    => { cache    => 'cache.test' },
+            _global    => { mirror   => 'mirror.test' },
             logshipper => { host     => 'logs.test' },
             sssd       => { ldap_uri => 'ldaps://ldap.test', base_dn => 'dc=ldap,dc=test' },
         },
-        'cache.test' => { fetchcache   => {} },
-        'logs.test'  => { logcollector => {} },
-        'ldap.test'  => { ldap         => { admin_password => 'throwaway' } },
-        'web.test'   => { nginx        => {} },
+        'mirror.test' => { aptmirror    => {} },
+        'logs.test'   => { logcollector => {} },
+        'ldap.test'   => { ldap         => { admin_password => 'throwaway' } },
+        'web.test'    => { nginx        => {} },
     );
     my $up = sub { [ Provisioner::Cookbook->upstream_domains( $_[0], \%conf ) ] };
 
-    is( $up->('web.test')->[0], 'cache.test', 'the cache comes first, because every other guest names it' );
-    is_deeply( [ sort @{ $up->('web.test') } ], [qw{cache.test ldap.test logs.test}], 'and a guest that uses all three gets all three' );
-    is( $up->('ldap.test')->[0], 'cache.test', 'which holds for the directory too' );
-    is_deeply( [ sort @{ $up->('ldap.test') } ], [qw{cache.test logs.test}], 'which uses the others, and not itself' );
+    is( $up->('web.test')->[0], 'mirror.test', 'the mirror comes first, because every other guest names it' );
+    is_deeply( [ sort @{ $up->('web.test') } ], [qw{ldap.test logs.test mirror.test}], 'and a guest that uses all three gets all three' );
+    is( $up->('ldap.test')->[0], 'mirror.test', 'which holds for the directory too' );
+    is_deeply( [ sort @{ $up->('ldap.test') } ], [qw{logs.test mirror.test}], 'which uses the others, and not itself' );
 
     # Found in the order a, c, b, and b is the one that the most guests name.
     my %named = (
@@ -1444,11 +1444,11 @@ subtest 'upstream_domains: the guests that serve the fleet, each configured to u
 
 subtest 'named_guests: each setting that names a guest here, and which' => sub {
     my %conf = (
-        _base        => { _global      => { cache => 'cache.test' } },
-        'cache.test' => { fetchcache   => {} },
-        'logs.test'  => { logcollector => {} },
-        'web.test'   => {
-            _global           => { admin_email => 'root@logs.test', contact => 'mailto:root@logs.test', note => 'secret:logs.test/x/y', path => 'logs.test/var', api => 'https://cache.test/v1' },
+        _base         => { _global      => { mirror => 'mirror.test' } },
+        'mirror.test' => { aptmirror    => {} },
+        'logs.test'   => { logcollector => {} },
+        'web.test'    => {
+            _global           => { admin_email => 'root@logs.test', contact => 'mailto:root@logs.test', note => 'secret:logs.test/x/y', path => 'logs.test/var', api => 'https://mirror.test/v1' },
             backupdestination => { hosts       => [ 'elsewhere.test', 'logs.test:2222' ] },
             logshipper        => { host        => 'https://logs.test/in' },
         },
@@ -1459,10 +1459,10 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
     is_deeply(
         [ Provisioner::Cookbook->named_guests( 'web.test', \%conf ) ],
         [
-            { domain => 'cache.test', setting => '_global.api',                by => 'web.test', weak => 0 },
-            { domain => 'cache.test', setting => '_global.cache',              by => 'web.test', weak => 1 },
-            { domain => 'logs.test',  setting => 'backupdestination.hosts[1]', by => 'web.test', weak => 1 },
-            { domain => 'logs.test',  setting => 'logshipper.host',            by => 'web.test', weak => 1 },
+            { domain => 'mirror.test', setting => '_global.api',                by => 'web.test', weak => 0 },
+            { domain => 'mirror.test', setting => '_global.mirror',             by => 'web.test', weak => 1 },
+            { domain => 'logs.test',   setting => 'backupdestination.hosts[1]', by => 'web.test', weak => 1 },
+            { domain => 'logs.test',   setting => 'logshipper.host',            by => 'web.test', weak => 1 },
         ],
         'a domain, a domain with a port and a URL name a guest, and an address, a reference, a path and a host elsewhere do not'
     );
@@ -1486,13 +1486,13 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
         'a field that is marked below a key of _global is weak, and one beside it that nothing declares is strong'
     );
     delete $conf{'web.test'}{_global}{ip_pool};
-    is_deeply( [ Provisioner::Cookbook->direct_upstream_domains( 'web.test', \%conf ) ], [qw{cache.test logs.test}], 'each guest once' );
+    is_deeply( [ Provisioner::Cookbook->direct_upstream_domains( 'web.test', \%conf ) ], [qw{mirror.test logs.test}], 'each guest once' );
     is_deeply(
         [ map { $_->{by} } Provisioner::Cookbook->named_guests( 'tenant.test', \%conf ) ],
         [qw{tenant.test web.test web.test web.test web.test}],
         'a domain on the guest of another names what that guest names, and says whose setting it is'
     );
-    is_deeply( [ Provisioner::Cookbook->named_guests( 'cache.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
+    is_deeply( [ Provisioner::Cookbook->named_guests( 'mirror.test', \%conf ) ], [], 'and a guest that names itself names nothing' );
 };
 
 subtest 'distros_in_use: each distribution with each release a domain builds on' => sub {

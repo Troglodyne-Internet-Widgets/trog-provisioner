@@ -929,6 +929,25 @@ CONF
     like exception { $fleet->hypervisor('typo')->configured_transfer_port }, qr/transfer_port[ ]for[ ]typo[ ]is[ ]'ssh'/, 'and a port that is not one is said, naming the block';
 };
 
+subtest 'each block names the fetch cache of its guests, or none' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[home]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+cache=fetchcache.example.net
+
+[runner]
+libvirt_uri=qemu+ssh://runner@hv1.example.net/session
+cache=192.0.2.30
+
+[cloud]
+libvirt_uri=qemu+ssh://root@far.example.net/system
+CONF
+
+    is $fleet->hypervisor('home')->configured_cache,   'fetchcache.example.net', 'a block names its cache by domain';
+    is $fleet->hypervisor('runner')->configured_cache, '192.0.2.30',             'or by the address that its guests reach it at';
+    is $fleet->hypervisor('cloud')->configured_cache,  undef,                    'and a block that names none gives its guests none';
+};
+
 subtest 'the documented example is a file that loads' => sub {
 
     # The shipped example, not a copy of it.  A configuration file people are

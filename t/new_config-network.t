@@ -45,11 +45,11 @@ my $ippool = Test::MockModule->new('Provisioner::IPPool');
 $ippool->redefine( reached_through => sub { my ($domain) = @_; return $through{$domain} } );
 
 my %conf = (
-    _base        => { _global      => { cache => 'cache.test' }, logshipper => { host => 'logs.test' } },
-    'cache.test' => { fetchcache   => {} },
-    'logs.test'  => { logcollector => {} },
-    'web.test'   => { cron         => {} },
-    'plain.test' => { _global      => { cache => q{} }, logshipper => { host => 'syslog.vendor.test' } },
+    _base         => { _global      => { mirror => 'mirror.test' }, logshipper => { host => 'logs.test' } },
+    'mirror.test' => { aptmirror    => {} },
+    'logs.test'   => { logcollector => {} },
+    'web.test'    => { cron         => {} },
+    'plain.test'  => { _global      => { mirror => q{} }, logshipper => { host => 'syslog.vendor.test' } },
 );
 my $home  = NetworkProbe::HV->new( name => 'hv1',    network => 'home' );
 my $home2 = NetworkProbe::HV->new( name => 'hv2',    network => 'home' );
@@ -62,20 +62,20 @@ sub required {
     return ( {@got}, $said );
 }
 
-%where = ( 'cache.test' => $home, 'logs.test' => $home2 );
+%where = ( 'mirror.test' => $home, 'logs.test' => $home2 );
 my ($need) = required('web.test');
 is( $need->{network}, 'home', 'the network of the guests it needs, on two hypervisors of one network' );
-like( $need->{network_why}, qr/it[ ]needs[ ]cache[.]test,[ ]which[ ]is[ ]on[ ]hv1/, 'saying which guests, on which hypervisors' );
-like( $need->{network_why}, qr/logs[.]test,[ ]which[ ]is[ ]on[ ]hv2/,               'each of them' );
+like( $need->{network_why}, qr/it[ ]needs[ ]mirror[.]test,[ ]which[ ]is[ ]on[ ]hv1/, 'saying which guests, on which hypervisors' );
+like( $need->{network_why}, qr/logs[.]test,[ ]which[ ]is[ ]on[ ]hv2/,                'each of them' );
 
 is_deeply( ( required('plain.test') )[0], {}, 'a guest that needs nothing may go anywhere' );
 
-%where = ( 'cache.test' => $home );
+%where = ( 'mirror.test' => $home );
 my ( $partial, $said ) = required('web.test');
 is( $partial->{network}, 'home', 'a guest that is not up yet does not limit it' );
 like( $said, qr/logs[.]test[ ]is[ ]not[ ]up/, 'and says so' );
 
-%where = ( 'cache.test' => $home, 'logs.test' => $cloud );
+%where = ( 'mirror.test' => $home, 'logs.test' => $cloud );
 my $err = exception { required('web.test') };
 $err //= q{};
 like( $err, qr/needs[ ]guests[ ]that[ ]are[ ]on[ ]different[ ]networks/,      'guests on two networks are refused' );
@@ -84,31 +84,31 @@ like( $err, qr/network[ ]'cloud':[ ]logs[.]test,[ ]which[ ]is[ ]on[ ]linode/, 'n
 # A VPN client reaches the network of its server from anywhere.
 $conf{'vpn.test'}  = { openvpn       => {} };
 $conf{'edge.test'} = { openvpnclient => { server => 'vpn.test', issue_from => 'vpn.test' } };
-%where             = ( 'cache.test' => $home, 'logs.test' => $home2, 'vpn.test' => $home );
+%where             = ( 'mirror.test' => $home, 'logs.test' => $home2, 'vpn.test' => $home );
 my ( $edge, $edge_said ) = required('edge.test');
 is_deeply( $edge, {}, 'a VPN client may go anywhere, when what it needs is on the network of its server' );
-like( $edge_said, qr/cache[.]test[ ]does[ ]not[ ]limit/,               'and says which guest no longer limits it' );
+like( $edge_said, qr/mirror[.]test[ ]does[ ]not[ ]limit/,              'and says which guest no longer limits it' );
 like( $edge_said, qr/openvpnclient[ ]connects[ ]it[ ]to[ ]vpn[.]test/, 'and why' );
 
-%where = ( 'cache.test' => $home, 'logs.test' => $cloud, 'vpn.test' => $home );
+%where = ( 'mirror.test' => $home, 'logs.test' => $cloud, 'vpn.test' => $home );
 is( ( required('edge.test') )[0]{network}, 'cloud', 'but a guest that it needs on another network still limits it' );
 
-%where = ( 'cache.test' => $home, 'logs.test' => $home2 );
+%where = ( 'mirror.test' => $home, 'logs.test' => $home2 );
 is( ( required('edge.test') )[0]{network}, 'home', 'and a server that is not up brings it onto no network' );
 
 # The guests reach a VPN client at its address in the tunnel, so only on the
 # network of its server.
 $through{'edge.test'} = 'vpn.test';
-$conf{'relayed.test'} = { logshipper => { host  => 'edge.test' } };
-$conf{'alone.test'}   = { _global    => { cache => q{} }, logshipper => { host => 'edge.test' } };
-%where                = ( 'cache.test' => $home, 'edge.test' => $cloud, 'vpn.test' => $home2 );
+$conf{'relayed.test'} = { logshipper => { host   => 'edge.test' } };
+$conf{'alone.test'}   = { _global    => { mirror => q{} }, logshipper => { host => 'edge.test' } };
+%where                = ( 'mirror.test' => $home, 'edge.test' => $cloud, 'vpn.test' => $home2 );
 my ($relayed) = required('relayed.test');
 is( $relayed->{network}, 'home', 'a VPN client on another network is reached on the network of its server' );
 my $reached = qr/which[ ]is[ ]reached[ ]through[ ]vpn[.]test/;
 like( $relayed->{network_why}, qr/edge[.]test,[ ]${reached}[ ]on[ ]hv2/, 'which it says' );
 is( ( required('alone.test') )[0]{network}, 'home', 'also with nothing else to reach, and not the network of the hypervisor of the client' );
 
-%where = ( 'cache.test' => NetworkProbe::HV->new( name => 'hv3', network => 'office' ), 'edge.test' => $cloud, 'vpn.test' => $home );
+%where = ( 'mirror.test' => NetworkProbe::HV->new( name => 'hv3', network => 'office' ), 'edge.test' => $cloud, 'vpn.test' => $home );
 like( ( exception { required('relayed.test') } ) // q{}, qr/network[ ]'home':[ ]edge[.]test/, 'a network that the client is not reached on is refused' );
 
 %where = ( 'edge.test' => $cloud );

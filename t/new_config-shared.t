@@ -99,6 +99,7 @@ sub generate {
         admin_user    => 'someadmin',
         admin_email   => 'bogus@test.test',
         admin_gecos   => 'Test Test',
+        %{ $on{global} // {} },
     );
 
     my %recipes = (
@@ -142,6 +143,32 @@ subtest 'a generation replaces the guest tests of the last one' => sub {
     ok( !-e $stale,                     'the test of a recipe no longer on the domain is gone' );
     ok( -f "$domains/$HOST/t/nosnap.t", 'and the test of one still on it is there' );
     ok( -f "$domains/$HOST/t/ubuntu.t", 'and so is the test of the distro recipe, which is not one of its modules' );
+};
+
+# An installation whose guests provision through the cache of another, as a
+# runner does, holds the certificate of the authority of the cache and not the
+# key.  The block of its hypervisor names the cache by address, which its own
+# pool does not hold.
+subtest 'a guest uses the cache of its hypervisor, and trusts it with no key here' => sub {
+    my $cert = "$ENV{TROG_PROVISIONER_CONFIG}/fetchcache-ca.crt";
+    File::Slurper::Temp::write_text( $cert, "the certificate of the authority of the fleet\n" );
+    my $fetches = Test::MockModule->new('Provisioner::Recipe::nosnap');
+    $fetches->redefine( fetch_hosts => sub { return ('www.cpan.org') } );
+
+    $hv_network->redefine( configured_cache => sub { return '192.0.2.30' } );
+
+    my ( $err, $domains ) = generate();
+    $hv_network->unmock('configured_cache');
+    is( $err, undef, 'the generation runs' ) or diag $err;
+    like( File::Slurper::read_text("$domains/$HOST/Makefile"), qr{fetch_via_cache[ ]on[ ]192\.0\.2\.30[ ]}, 'and points the guest at the cache of its hypervisor' );
+
+    ( $err, undef ) = generate( global => { cache => '192.0.2.30' } );
+    like( $err // q{}, qr{/cache:[ ]_global[ ]no[ ]longer}, 'a cache in _global is refused' );
+    like( $err // q{}, qr{hypervisors[.]conf},              'and the message says where it went' );
+    is( eval { File::Slurper::read_text("$domains/$HOST/fetchcache-ca.crt") } // q{}, "the certificate of the authority of the fleet\n", 'and the guest trusts the authority of the fleet, not a new one' );
+    is( File::Slurper::read_text($cert), "the certificate of the authority of the fleet\n", 'which is still the one the installation holds' );
+
+    unlink $cert or die "unlink: $!";
 };
 
 subtest 'two domains on one guest generate when the recipe can be shared' => sub {

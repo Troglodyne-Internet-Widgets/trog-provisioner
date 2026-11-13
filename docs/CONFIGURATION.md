@@ -426,19 +426,27 @@ failing. When `mirror` names a domain of this installation, `bin/provision`
 builds that guest first if it is not up. See [Upstream guests](#upstream-guests). `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
-`cache` names a fetch cache for guests to provision through: a domain here,
-resolved to its address, or an IPv4 address. While a guest provisions, each host
-its recipes download from -- what they name in `fetch_hosts`, which
-`perldoc Provisioner::Recipe` describes -- is pointed at the cache in the
-guest's `/etc/hosts`. So a template's `https://github.com/...`, cpanm and git
-are answered by the cache without knowing it is there, and every host goes back
-to upstream once the guest's deferred work is done.
+The fetch cache of a guest is not a setting of `_global`. It is the `cache` in
+the block of its hypervisor in `hypervisors.conf`: a domain here, resolved to its
+address, or an IPv4 address. While a guest provisions, each host its recipes
+download from -- what they name in `fetch_hosts`, which `perldoc
+Provisioner::Recipe` describes -- is pointed at the cache in the guest's
+`/etc/hosts`. So a template's `https://github.com/...`, cpanm and git are
+answered by the cache without knowing it is there, and every host goes back to
+upstream once the guest's deferred work is done.
 
-```yaml
-_base:
-    _global:
-        cache: fetchcache.test
+```ini
+[hv1]
+libvirt_uri = qemu+ssh://root@hv1.example.test/system
+cache       = fetchcache.test
 ```
+
+The cache belongs to the hypervisor because a guest reaches only a cache on its
+own network, or through its NAT. A block that names no cache, such as one for a
+cloud, gives its guests none, with nothing to turn off domain by domain. A
+runner, whose ip pool does not hold the cache of the fleet, names it by the
+address that its guests reach it at. `bin/new_config` refuses a `cache` in
+`_global`, and says where it went.
 
 To have one to name, give a domain the `fetchcache` recipe. It fetches from those
 hosts on a guest's behalf, keeps what it fetched, and hands out what it already
@@ -446,12 +454,14 @@ has when upstream is failing, which is the point of it: GitHub answering 503 for
 an hour stops being an hour of failed builds. It answers under the hosts' own
 names, with a certificate signed by an authority `bin/new_config` makes in the
 configuration directory the first time one is needed, and a guest trusts that
-authority only while it provisions. `perldoc Provisioner::Recipe::fetchcache`
-has how long it keeps what, and how to add a host.
+authority only while it provisions. Another installation whose guests use the
+same cache, such as a runner, holds the certificate of that authority and never
+its key. `perldoc Provisioner::Recipe::fetchcache` has how long it keeps what,
+and how to add a host.
 
 A guest points a host at the cache only if the cache answers for it when the
-guest starts, so a cache that is down costs a build nothing. **Empty by
-default**, which is every download going straight upstream, as it always has.
+guest starts, so a cache that is down costs a build nothing. A guest built
+before its cache is up downloads from upstream, so build the cache first.
 Nothing requires the recipe, and the cache itself fetches from upstream rather
 than from itself.
 
@@ -898,13 +908,13 @@ its `_global`, with what it takes from `_base`, and each of its recipes. You do
 not list what a guest needs anywhere else. A setting names a guest when its value
 is one of these:
 
-- A domain of this installation, such as `cache: fetchcache.example.test`.
+- A domain of this installation, such as `mirror: mirror.example.test`.
 - That domain with a port, such as `logs.example.test:514`.
 - A URL whose host is that domain, such as `http://mirror.example.test/ubuntu`.
 
 An address, an email address, a `secret:` reference, a path and a host outside
 this installation name nothing. So does a setting that names the domain itself.
-In practice the settings that name guests are `cache` and `mirror` in `_global`,
+In practice the settings that name guests are `mirror` in `_global`,
 the `host` of `logshipper`, the `ldap_uri` of `sssd`, the `hosts` of
 `backupdestination`, and the `via` of a bin in `ip_pool`. A new recipe whose
 setting names a guest takes part with no extra code.
@@ -922,20 +932,19 @@ their settings.
 `bin/provision` builds each of those guests first when no hypervisor has it,
 and each guest that they name in turn, in order, and then the domain you asked
 for. It leaves a guest that is up alone, unless you pass
-`--rebuild-upstream-guests`. So one line puts the whole fleet behind a cache,
-and the cache guest is built on the way to the first guest that needs it:
+`--rebuild-upstream-guests`. So one line puts the whole fleet behind a mirror,
+and the mirror guest is built on the way to the first guest that needs it:
 
 ```yaml
 _base:
     _global:
-        cache: fetchcache.example.test
+        mirror: mirror.example.test
 ```
 
-The cache guest names itself there too, and does not wait for itself.
+The mirror guest names itself there too, and does not wait for itself.
 
 Each of those settings is weak. A weak setting names a guest that a build can go
-on without. A guest downloads from upstream while the cache is down, installs
-from the archive while the mirror is down, and queues its logs while the
+on without. A guest installs from the archive while the mirror is down, and queues its logs while the
 collector is down. SSSD starts offline while the directory is down. A guest
 writes the route to a bin through the address of its `via`, which the pool
 gives, and the route works once that guest is up. A backup destination pulls
@@ -947,7 +956,7 @@ the guest that it names.
 
 A weak setting must also take effect on its own once the named guest comes up,
 with no rebuild. rsyslog retries the collector, and SSSD goes online when the
-directory answers. The cache is the other kind: a guest uses it only while it
+directory answers. The mirror is the other kind: a guest uses it only while it
 builds, so a guest built without it lost time and nothing else. That is what
 makes a loop of weak settings safe to ignore: when every guest in it is up, the
 loop has resolved itself, or cost a build some time. A setting that a guest
@@ -955,10 +964,10 @@ needs, and reads only when it is built, does not resolve, so leave it strong.
 
 So a loop of guests that name each other is ignored when one of its settings is
 weak. The one line above and a `logshipper` in `_base` make such a loop: the
-cache ships its logs to the collector, and the collector downloads through the
-cache. Both settings are weak, so `bin/provision` builds the cache first and then
-the collector. Of the guests in a loop, it builds first the one that the others
-name most. That is usually the cache, so that the others build through it.
+mirror ships its logs to the collector, and the collector installs from the
+mirror. Both settings are weak, so `bin/provision` builds the mirror first and
+then the collector. Of the guests in a loop, it builds first the one that the
+others name most. That is usually the mirror, so that the others build from it.
 
 A loop in which every setting is strong is refused, because no order builds
 those guests. The message names each setting in the loop. Change one of them so
@@ -973,13 +982,12 @@ does for any loop.
 
 A guest is placed only on the network of the guests it needs; see
 [Networks](#networks). A guest that should run somewhere else, such as a cloud
-with caches of its own, needs a configuration of its own without those
-settings:
+with a collector of its own, needs a configuration of its own without those
+settings. Its cache is the one that the block of its hypervisor names, so it
+needs nothing for that:
 
 ```yaml
 prod.example.test:
-    _global:
-        cache: ''
     logshipper:
         host: logs.provider.example
 ```

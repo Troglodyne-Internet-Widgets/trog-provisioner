@@ -370,8 +370,8 @@ which backend it describes.  So all keys must be read before that decision.
 Each backend names its own keys in C<config_keys>.  This class reads the
 placement limits, because placement belongs to this class, and C<transfer_ip>
 and C<transfer_port>, because every kind of hypervisor has guests that fetch
-from us.  It reads C<network> and C<resolvers>, because what a guest can reach
-depends on where it is, and each key of L</NIC_KEY>, because the pool and the
+from us.  It reads C<network>, C<resolvers> and C<cache>, because what a guest
+can reach depends on where it is, and each key of L</NIC_KEY>, because the pool and the
 gateway of each static adapter of a guest are on the network of its bridge.
 
 =head2 NIC_KEY
@@ -397,8 +397,8 @@ my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_over
 my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
 # The network of the guests of this hypervisor, and what they reach.  See
-# network and configured_resolvers.
-my @NETWORK_KEYS = qw{network resolvers};
+# network, configured_resolvers and configured_cache.
+my @NETWORK_KEYS = qw{network resolvers cache};
 
 # What took the place of each key of the two adapters that a guest used to
 # have.  See replaced_keys.
@@ -606,6 +606,22 @@ sub configured_resolvers ($self) {
     }
     return @resolvers;
 }
+
+=head2 configured_cache
+
+The fetch cache that the guests of this hypervisor provision through, from
+C<cache> in its block of F<hypervisors.conf>, as a domain or an IPv4 address, or
+undef when the block names none.  Then its guests download from upstream.
+
+Each block names its own, because a guest reaches only a cache on its own
+network, or through its NAT.  A runner keeps an ip pool of its own, which does
+not hold the cache of the fleet, so its block names the cache by address.
+L<Provisioner::DistroRecipe/cache_address> turns the value into the address
+that a guest points the hosts it downloads from at.
+
+=cut
+
+sub configured_cache ($self) { return $self->setting('cache') }
 
 =head2 static_nics
 

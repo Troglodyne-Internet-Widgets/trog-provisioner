@@ -21,6 +21,7 @@ use File::Slurper::Temp();
 use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
 use HTTP::Tiny();
+use List::Util qw{uniq};
 use Pod::Usage   qw{pod2usage};
 use YAML::XS();
 
@@ -170,22 +171,28 @@ is on a real guest; the skill says when a build wants it.
 
 =item B<--cache> NAME
 
-Provision through the fetch cache NAME, by writing C<cache: NAME> into the
-scratch C<_base>'s C<_global>.  NAME is a cache built from this same scratch
-configuration, which has an authority of its own; the skill says how.
+Provision through the fetch cache NAME, by writing C<cache = NAME> into every
+block of the scratch F<hypervisors.conf>.  NAME is a cache built from this same
+scratch configuration, which has an authority of its own; the skill says how.
+
+Without B<--cache> or B<--fleet-cache>, the blocks of the scratch
+F<hypervisors.conf> name no cache, whatever the blocks of the installation
+name, so a scratch guest provisions through a cache only when asked to.
 
 =item B<--fleet-cache>
 
 Provision through the fetch cache that the installation's guests use: the
-C<cache> in the C<_global> of its C<_base>.  The address of the cache, out of
-the installation's ip pool, goes into the scratch C<_base>'s C<_global>.  The
-authority of the cache, F<fetchcache-ca.crt> and F<fetchcache-ca.key>, is copied
-in, so that a scratch guest trusts the certificate of the cache.  The teardown
+C<cache> in the blocks of its F<hypervisors.conf>.  The address of the cache,
+out of the installation's ip pool, goes into every block of the scratch
+F<hypervisors.conf>.  The
+certificate of the authority of the cache, F<fetchcache-ca.crt>, is copied in,
+so that a scratch guest trusts the certificate of the cache.  Its key stays in
+the installation, see C<trusted_authority> in L<Provisioner::Recipe::fetchcache>.  The teardown
 of the last scratch domain removes the copy with the directory.
 
 It asks the cache first, as a guest does, for C<fetchcache-status> under the
 name of a host that it caches.  If the installation names no cache, or the cache
-has no address or authority, or it does not answer, this dies with the reason
+has no address or certificate, or it does not answer, this dies with the reason
 and builds nothing.  Run it again without this option to build without a cache.
 
 Not with B<--cache>, which names a cache of this scratch configuration.
@@ -263,7 +270,7 @@ sub main {
       unless $has_fleet;
     $report .= "  recipes.d/ left empty, so a guest gets what new_guest names and nothing else\n";
     $report .= "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n"       if $cpan_tests;
-    $report .= "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
+    $report .= "  cache: $cache in each block of hypervisors.conf, so guests provision through it\n" if $cache;
     $report .= "  cache: the fleet's, $fleet->{name} at $fleet->{address}, which answered for $fleet->{answered}; its authority copied, so guests trust it\n" if $fleet;
     $report .= "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     $report .= join( q{}, map { "    $_\n" } @refs );
@@ -288,23 +295,26 @@ sub main {
 sub fleet_cache {
     my ($source) = @_;
 
-    my $conf = YAML::XS::Load( File::Slurper::read_binary("$source/recipes.yaml") );
-    my $name = $conf->{_base}{_global}{cache}
-      or die "The installation names no cache in the _global of _base, so there is no fleet cache to use.\n";
+    my %caches = Trog::Hypervisors::Config->load("$source/hypervisors.conf")->caches;
+    my @names  = uniq( sort values %caches );
+    die "No block of the hypervisors.conf of the installation names a cache, so there is no fleet cache to use.\n" unless @names;
+    die "The blocks of the hypervisors.conf of the installation name more than one cache, " . join( ' and ', @names ) . ", so there is no one fleet cache to use.\n"
+      if @names > 1;
+    my ($name) = @names;
 
     my $address = $name =~ m/\A(?:\d{1,3}\.){3}\d{1,3}\z/ ? $name : do {
         local $ENV{TROG_PROVISIONER_CONFIG} = $source;
         Provisioner::IPPool::held_by($name);
     } or die "The fleet cache $name has no address in the ip pool of the installation.\n";
 
-    my %authority = map { $_ => "$source/fetchcache-ca.$_" } qw{crt key};
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether the authority exists is the question
-    -f $authority{$_} or die "The fleet cache has no $authority{$_}, so a guest could not trust it.\n" for sort keys %authority;
+    my $authority = "$source/fetchcache-ca.crt";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether the certificate exists is the question
+    -f $authority or die "The fleet cache has no $authority, so a guest could not trust it.\n";
 
-    my $answered = cache_answers( $address, $authority{crt}, Provisioner::Cookbook->fetch_hosts )
+    my $answered = cache_answers( $address, $authority, Provisioner::Cookbook->fetch_hosts )
       or die "The fleet cache $name at $address did not answer, so build without it.\n";
 
-    return { name => $name, address => $address, authority => \%authority, answered => $answered };
+    return { name => $name, address => $address, authority => $authority, answered => $answered };
 }
 
 # The first of @hosts that the cache at $address answers for, as
@@ -374,17 +384,15 @@ sub build {
     #
     # And a fetch cache, when the build is to go through one: see
     # Provisioner::Recipe::fetchcache.
-    $global{cpan_notest} = 0            if $opts{cpan_tests};
-    $global{cache}       = $opts{cache} if $opts{cache};
+    $global{cpan_notest} = 0 if $opts{cpan_tests};
 
-    # The fleet's cache, by the address that fleet_cache found.  Its authority
-    # comes too, or
-    # Provisioner::Recipe::fetchcache->authority makes a new one here, and a
-    # guest then refuses the certificate of the cache.
+    # The fleet's cache, by the address that fleet_cache found, and the
+    # certificate that its guests trust.  Not the key, which can sign for any
+    # host: see trusted_authority in Provisioner::Recipe::fetchcache.
+    my $cache = $opts{cache};
     if ( my $fleet = $opts{fleet} ) {
-        my %mode = ( crt => oct('0644'), key => oct('0600') );
-        Trog::Utils::write_binary_mode( "$dir/fetchcache-ca.$_", File::Slurper::read_binary( $fleet->{authority}{$_} ), $mode{$_} ) for sort keys %mode;
-        $global{cache} = $fleet->{address};
+        Trog::Utils::write_binary_mode( "$dir/fetchcache-ca.crt", File::Slurper::read_binary( $fleet->{authority} ), oct('0644') );
+        $cache = $fleet->{address};
     }
 
     File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump( { _base => { _global => \%global } } ) );
@@ -394,6 +402,12 @@ sub build {
     # it wrong silently sends the guest to the wrong libvirt.
     my $fleet     = 'hypervisors.conf';
     my $has_fleet = copy( "$source/$fleet", "$dir/$fleet" ) ? 1 : 0;
+    die "A fetch cache is named in the blocks of hypervisors.conf, and $source has none to copy, so a scratch guest cannot have one.\n"
+      if $cache && !$has_fleet;
+
+    # The cache of a guest is the cache of its hypervisor, so each block names
+    # the one this run asked for, or none.
+    File::Slurper::Temp::write_text( "$dir/$fleet", with_cache( File::Slurper::read_text("$dir/$fleet"), $cache ) ) if $has_fleet;
 
     my %needed = Trog::Secrets->needed( YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") ) );
     my %unique = map { $_ => 1 } values %needed;
@@ -449,6 +463,20 @@ sub read_token {
 
 # The text of a fleet without the blocks in %drop.  A block runs from its
 # header to the next header.
+# $text, a hypervisors.conf, with each block naming $cache as its fetch cache,
+# or with no cache in any block when $cache is undef.
+sub with_cache {
+    my ( $text, $cache ) = @_;
+
+    my @lines;
+    foreach my $line ( split m/^/m, $text ) {
+        next if $line =~ m/\A\s*cache\s*=/;
+        push @lines, $line;
+        push @lines, "cache = $cache\n" if defined $cache && $line =~ m/\A\s*\[[^\]]+\]/;
+    }
+    return join q{}, @lines;
+}
+
 sub without_blocks {
     my ( $text, %drop ) = @_;
 

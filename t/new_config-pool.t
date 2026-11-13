@@ -49,6 +49,7 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 
     package PoolProbe::HV;
     sub configured_resolvers { return ('192.0.2.254') }
+    sub configured_cache     { return }
     sub static_nics          { my ($self) = @_; return @{ $self->{nics} // [] } }
     sub address_nic          { my ($self) = @_; return ( $self->static_nics )[0] }
 
@@ -156,10 +157,10 @@ subtest 'a domain whose recipes write its address is refused where it would have
             my $run = $dryrun ? 'with --dryrun' : 'without --dryrun';
             my ( $said, $died ) = generate( nics => [], on_nat_network => 1, recipes => { $recipe => undef }, dryrun => $dryrun );
             my @lines = split( m/\n/, $died );
-            is( $lines[0], "vm.test.test runs recipes that write the address of the guest into a record: $recipe.",                                                                   "$recipe is refused $run, naming the domain and the recipe" );
+            is( $lines[0], "vm.test.test runs recipes that write the address of the guest into a record: $recipe.",                                                                                          "$recipe is refused $run, naming the domain and the recipe" );
             is( $lines[1], 'The block of hv1 in hypervisors.conf names no static adapter with an address pool, so vm.test.test would have only a lease on the NAT network of hv1, and no address to write.', 'and the block of the hypervisor' );
-            is( $lines[2], 'Give the block of hv1 a static adapter: static_nics, with ip_pool_NIC and gateway_NIC.',                    'and what to give it' );
-            is( $lines[3], 'See Networks in docs/CONFIGURATION.md.  Or take those recipes off vm.test.test.',                                                                         'and where that is written down' );
+            is( $lines[2], 'Give the block of hv1 a static adapter: static_nics, with ip_pool_NIC and gateway_NIC.',                                                                                         'and what to give it' );
+            is( $lines[3], 'See Networks in docs/CONFIGURATION.md.  Or take those recipes off vm.test.test.',                                                                                                'and where that is written down' );
             unlike( $said, qr/takes[ ]a[ ]lease/, 'before it goes on to take the lease' );
         }
     }

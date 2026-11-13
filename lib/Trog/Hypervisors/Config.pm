@@ -145,6 +145,19 @@ sub secret_blocks ($self) {
     return grep { $named{$_} } $self->names;
 }
 
+=head2 caches(@names)
+
+Returns the C<cache> that each block names, as a hash of the name of the block
+to its value, without the blocks that name none.  With C<@names>, only those
+blocks.  Empty when there is no fleet.  See L<Trog::HV/configured_cache>.
+
+=cut
+
+sub caches ( $self, @names ) {    ## no critic (ProhibitUnusedDefinitions) -- the scratch_config of the provisioning-recipes skill calls it, outside bin/ and lib/
+    @names = $self->names unless @names;
+    return map { $_ => $self->{blocks}{$_}{cache} } grep { defined $self->{blocks}{$_} && ( $self->{blocks}{$_}{cache} // q{} ) ne q{} } @names;
+}
+
 =head1 SEE ALSO
 
 L<Trog::Hypervisors>
