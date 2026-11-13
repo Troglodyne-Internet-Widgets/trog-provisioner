@@ -1840,8 +1840,8 @@ Returns nothing if C<destination> holds a file after the fetch.  Otherwise
 returns a hash reference with C<recipe>, C<remote>, C<message>, and
 C<alarming>, which is true when the salvage lost state.
 
-When nothing came down, it removes the directories that the fetch made for
-C<destination>, so that the next guest does not get an empty path that the
+It makes C<destination> and its parents before the fetch.  When nothing came
+down, it removes the directories that it made, so that the next guest does not get an empty path that the
 old one did not have.  A destination that was there before stays.
 
 It examines the destination, not the transfer, because a second run moves
@@ -1859,14 +1859,9 @@ path.
 sub salvage_path (%args) {
     die "salvage_path needs deleted_to, the directory for what the guest no longer has\n" unless $args{deleted_to};
 
-    # The highest directory that the fetch makes, because get_dir makes the
-    # destination and its parents before it asks the guest for anything.
-    my $made;
-    my $at = $args{destination};
-    while ( !-e $at ) {
-        $made = $at;
-        $at   = File::Basename::dirname($at);
-    }
+    # Made here and not left to get_dir, so that the highest directory that it
+    # creates is known, first in what make_path returns.
+    my ($made) = make_path( $args{destination} );
 
     # The result is ignored, because the destination tells more, and part of
     # the state is better than none.
