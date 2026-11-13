@@ -146,19 +146,17 @@ subtest 'a generation replaces the guest tests of the last one' => sub {
 };
 
 # An installation whose guests provision through the cache of another, as a
-# runner does, has no address for the cache in its pool, and holds the
-# certificate of the authority of the cache and not the key.
-subtest 'a guest reaches the cache where its hypervisor says, and trusts it with no key here' => sub {
+# runner does, holds the certificate of the authority of the cache and not the
+# key, and names the cache by address, which its own pool does not hold.
+subtest 'a guest trusts the certificate that the installation holds, which needs no key' => sub {
     my $cert = "$ENV{TROG_PROVISIONER_CONFIG}/fetchcache-ca.crt";
     File::Slurper::Temp::write_text( $cert, "the certificate of the authority of the fleet\n" );
     my $fetches = Test::MockModule->new('Provisioner::Recipe::nosnap');
     $fetches->redefine( fetch_hosts => sub { return ('www.cpan.org') } );
-    $hv_network->redefine( configured_cache_ip => sub { return '192.0.2.30' } );
 
-    my ( $err, $domains ) = generate( global => { cache => 'cache.test.test' } );
-    $hv_network->unmock('configured_cache_ip');
-    is( $err, undef, 'the generation runs, with a cache that the pool does not hold' ) or diag $err;
-    like( File::Slurper::read_text("$domains/$HOST/Makefile"), qr{fetch_via_cache[ ]on[ ]192\.0\.2\.30[ ]}, 'and points the guest at the address that its hypervisor gives' );
+    my ( $err, $domains ) = generate( global => { cache => '192.0.2.30' } );
+    is( $err, undef, 'the generation runs' ) or diag $err;
+    like( File::Slurper::read_text("$domains/$HOST/Makefile"), qr{fetch_via_cache[ ]on[ ]192\.0\.2\.30[ ]}, 'and points the guest at the cache' );
     is( eval { File::Slurper::read_text("$domains/$HOST/fetchcache-ca.crt") } // q{}, "the certificate of the authority of the fleet\n", 'and the guest trusts the authority of the fleet, not a new one' );
     is( File::Slurper::read_text($cert),                                              "the certificate of the authority of the fleet\n", 'which is still the one the installation holds' );
 

@@ -1,5 +1,5 @@
 [%# The certificate of the authority of the fetch cache, which the guests of the
-    runner trust while they provision through the cache.  Empty unless a block
-    of hypervisors names a cache_ip.  Never the key: see trusted_authority in
-    Provisioner::Recipe::fetchcache. -%]
+    runner trust while they provision through the cache.  Empty unless the
+    recipes of the runner give it a cache.  Never the key: see
+    trusted_authority in Provisioner::Recipe::fetchcache. -%]
 [% cache_authority %]

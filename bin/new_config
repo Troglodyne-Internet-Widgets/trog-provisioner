@@ -1073,7 +1073,7 @@ sub handle_domain {
 
     # Once, here, not by each recipe: see Provisioner::DistroRecipe/cache_address.
     # The resolvers go to every recipe, because the fetch cache runs one.
-    $global_config->{cache_ip}  = $distro->cache_address( %$global_config, reached_at => scalar $hv->configured_cache_ip );
+    $global_config->{cache_ip}  = $distro->cache_address(%$global_config);
     $global_config->{resolvers} = $resolvers;
 
     # Emptied, not only made, because every file in it goes to the guest and

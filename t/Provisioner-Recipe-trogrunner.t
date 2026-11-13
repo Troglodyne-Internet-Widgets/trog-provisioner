@@ -225,18 +225,15 @@ subtest 'the adapters of the guests of the runner reach its hypervisors.conf' =>
     like( exception { built( hypervisors => { hv1 => { %guests, gateway_virbr1 => 'gw.test.test' } } ) },      qr/gateway_virbr1/, 'and so is a gateway that is not an address' );
 };
 
-# The ip pool of the runner does not hold the cache of the fleet, so the block
-# says where its guests reach the cache, and the runner gets the certificate of
-# the authority of the cache, which its guests trust.
-subtest 'a block with a cache_ip gives the runner the address and the certificate of the cache' => sub {
+# The ip pool of the runner does not hold the cache of the fleet, so its recipes
+# name the cache by the address that its guests reach, and the runner gets the
+# certificate of the authority of the cache, which its guests trust.
+subtest 'a runner with a cache gets the certificate of its authority' => sub {
     my $authority = Provisioner::Cookbook->load('fetchcache')->authority();
-    my ($dir) = built( hypervisors => { hv1 => { %SESSION, cache_ip => '192.0.2.30' } } );
+    my ($dir) = built( recipes => { _base => { _global => { cache => '192.0.2.30' } } } );
 
-    my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
-    is( $hv1->configured_cache_ip,                                     '192.0.2.30',                                   'read back as the runner reads it' );
-    is( slurp( $dir, 'trogrunner.fetchcache-ca.crt' ) =~ s/\n+\z/\n/r, File::Slurper::read_text( $authority->{cert} ), 'and the certificate of the authority of this installation' );
-
-    like( exception { built( hypervisors => { hv1 => { %SESSION, cache_ip => 'cache.test.test' } } ) }, qr/cache_ip/, 'a name, which a guest cannot write into /etc/hosts, is refused here, not on the runner' );
+    is( slurp( $dir, 'trogrunner.fetchcache-ca.crt' ) =~ s/\n+\z/\n/r,                       File::Slurper::read_text( $authority->{cert} ), 'the certificate of the authority of this installation' );
+    is( YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) )->{_base}{_global}{cache}, '192.0.2.30',                                   'beside the cache, as the runner reads it' );
 };
 
 subtest 'a hypervisor we could not get a shell on is refused here, not on the guest' => sub {
@@ -480,7 +477,7 @@ subtest 'the fragment seeds the configuration, and leaves what is there alone' =
     chmod 0755, "$bin/install" or die "chmod: $!";
 
     Provisioner::Cookbook->load('fetchcache')->authority();
-    my ( $dir, $recipe, $vars ) = built( install_dir => $guest, store => 'secrets.kdbx', hypervisors => { hv1 => { %SESSION, cache_ip => '192.0.2.30' } } );
+    my ( $dir, $recipe, $vars ) = built( install_dir => $guest, store => 'secrets.kdbx', recipes => { _base => { _global => { cache => '192.0.2.30' } } } );
     my $conf  = "$guest/$DOMAIN/etc/trog-provisioner";
     my @seeds = grep { m{\A\[[ ]-e[ ]'[^']*/etc/trog-provisioner/} } split m/\n/, $recipe->render(%$vars);
     is( scalar @seeds, 5, 'five files are seeded: recipes.yaml, admin_authorized_keys, hypervisors.conf, the certificate of the cache and the store' );

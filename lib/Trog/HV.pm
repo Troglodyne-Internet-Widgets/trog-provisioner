@@ -370,8 +370,8 @@ which backend it describes.  So all keys must be read before that decision.
 Each backend names its own keys in C<config_keys>.  This class reads the
 placement limits, because placement belongs to this class, and C<transfer_ip>
 and C<transfer_port>, because every kind of hypervisor has guests that fetch
-from us.  It reads C<network>, C<resolvers> and C<cache_ip>, because what a guest
-can reach depends on where it is, and each key of L</NIC_KEY>, because the pool and the
+from us.  It reads C<network> and C<resolvers>, because what a guest can reach
+depends on where it is, and each key of L</NIC_KEY>, because the pool and the
 gateway of each static adapter of a guest are on the network of its bridge.
 
 =head2 NIC_KEY
@@ -397,8 +397,8 @@ my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_over
 my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
 # The network of the guests of this hypervisor, and what they reach.  See
-# network, configured_resolvers and configured_cache_ip.
-my @NETWORK_KEYS = qw{network resolvers cache_ip};
+# network and configured_resolvers.
+my @NETWORK_KEYS = qw{network resolvers};
 
 # What took the place of each key of the two adapters that a guest used to
 # have.  See replaced_keys.
@@ -605,28 +605,6 @@ sub configured_resolvers ($self) {
         Net::IP->new($resolver) or die "resolvers for " . ( $self->name // $self->describe ) . " names '$resolver', which is not an address\n";
     }
     return @resolvers;
-}
-
-=head2 configured_cache_ip
-
-The address at which a guest of this hypervisor reaches the fetch cache, from
-C<cache_ip> in its block of F<hypervisors.conf>, or undef when the block names
-none.  It wins over the address of the cache in the ip pool, see
-L<Provisioner::DistroRecipe/cache_address>, because the address that reaches
-the cache depends on where the guest is.  A runner keeps an ip pool of its own,
-which does not hold the cache, so its block names the address that its guests
-reach the cache at.  The C<cache> of F<recipes.yaml> still decides whether a
-guest has a cache at all.
-
-Dies on a value that is not an IPv4 address, because a guest writes it into
-F</etc/hosts>.
-
-=cut
-
-sub configured_cache_ip ($self) {
-    my $address = $self->setting('cache_ip');
-    return $address if !defined $address || Trog::Utils::is_ipv4($address);
-    die "cache_ip for " . ( $self->name // $self->describe ) . " is '$address', which is not an IPv4 address\n";
 }
 
 =head2 static_nics

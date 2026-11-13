@@ -49,7 +49,6 @@ my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 
     package PoolProbe::HV;
     sub configured_resolvers { return ('192.0.2.254') }
-    sub configured_cache_ip  { return }
     sub static_nics          { my ($self) = @_; return @{ $self->{nics} // [] } }
     sub address_nic          { my ($self) = @_; return ( $self->static_nics )[0] }
 

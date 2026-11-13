@@ -141,19 +141,6 @@ subtest 'cache_address: the fetch cache, as the address a guest points names at'
     like( exception { $distro->cache_address( %fleet, cache => '999.0.2.1' ) },               qr/No[ ]address[ ]for[ ]'999\.0\.2\.1'/,                 'and so does an octet above 255, which is not an address' );
 };
 
-# A runner keeps an ip pool of its own, which does not hold the cache of the
-# fleet, so the block of its hypervisor says where its guests reach the cache.
-subtest 'cache_address: the block of the hypervisor says where its guests reach the cache' => sub {
-    my $distro = Provisioner::Cookbook->load('ubuntu');
-    my %runner = ( domain => 'guest.test.test', ipmap => {}, reached_at => '192.0.2.30' );
-
-    is( $distro->cache_address( %runner, cache => 'cache.test.test' ),                                                '192.0.2.30', 'a cache the pool does not hold is reached where the block says' );
-    is( $distro->cache_address( %runner, cache => 'cache.test.test', ipmap => { 'cache.test.test' => '192.0.2.9' } ), '192.0.2.30', 'and the block wins over the pool, because the guest is where the block is' );
-    is( $distro->cache_address( %runner, cache => '192.0.2.77' ),                                                     '192.0.2.30', 'and over an address in the _global' );
-    is( $distro->cache_address(%runner),                                                                              q{},          'but a guest whose configuration names no cache has none' );
-    capture_stdout { is( $distro->cache_address( %runner, cache => 'guest.test.test' ), q{}, 'and the cache itself still fetches from upstream' ) };
-};
-
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
