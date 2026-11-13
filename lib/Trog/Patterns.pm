@@ -100,4 +100,13 @@ A version of three numbers, such as C<5.40.1>.
 
 our $DOTTED_VERSION = qr/\A [[:digit:]]+ [.] [[:digit:]]+ [.] [[:digit:]]+ \z/;
 
+=head2 $INFLUX_DURATION
+
+A duration as a retention policy of InfluxDB takes it: a whole number and one
+unit of C<s>, C<m>, C<h>, C<d> or C<w>, such as C<48h> or C<90d>.
+
+=cut
+
+our $INFLUX_DURATION = qr/\A [[:digit:]]+ [smhdw] \z/;
+
 1;

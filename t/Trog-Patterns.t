@@ -100,6 +100,18 @@ my %CASES = (
         [ 'v5.40.1',  0, 'a v first' ],
         [ "5.40.1\n", 0, 'a newline at the end' ],
     ],
+    INFLUX_DURATION => [
+        $Trog::Patterns::INFLUX_DURATION,
+        [ '48h',                          1, 'hours' ],
+        [ '1w',                           1, 'a week, the largest unit' ],
+        [ '30s',                          1, 'seconds, the smallest' ],
+        [ '48',                           0, 'no unit' ],
+        [ 'h',                            0, 'no number' ],
+        [ '1h30m',                        0, 'two units' ],
+        [ '1y',                           0, 'a unit that InfluxDB does not take' ],
+        [ "48h\n",                        0, 'a newline at the end' ],
+        [ "4\N{ARABIC-INDIC DIGIT ONE}h", 0, 'a digit that is not ASCII' ],
+    ],
 );
 
 foreach my $name ( sort keys %CASES ) {

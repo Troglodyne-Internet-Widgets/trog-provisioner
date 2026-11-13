@@ -10,6 +10,12 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Trog::Patterns();
+
+# The name of an attribute of OpenTelemetry, which the processor writes into
+# its starlark between double quotes.
+my $ATTRIBUTE = qr/\A [[:alpha:]] [[:alnum:]_.]* \z/;
+
 =head1 NAME
 
 Provisioner::Recipe::grafanaotel - the telemetry of the fleet, drawn.
@@ -149,7 +155,7 @@ values.
 =cut
 
 sub args {
-    my $field = { type => 'string', pattern => '\A[A-Za-z][A-Za-z0-9_.]*\z' };
+    my $field = { type => 'string', pattern => "$ATTRIBUTE" };
     return (
         type       => 'object',
         properties => {
@@ -162,7 +168,7 @@ sub args {
             },
             detail_retention => {
                 type        => 'string',
-                pattern     => '\A[0-9]+[smhdw]\z',
+                pattern     => "$Trog::Patterns::INFLUX_DURATION",
                 default     => '48h',
                 description => 'How long the details of an event stay, as an InfluxDB duration.',
             },

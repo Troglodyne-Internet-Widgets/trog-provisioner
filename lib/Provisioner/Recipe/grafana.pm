@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Trog::Patterns();
+
 =head1 NAME
 
 Provisioner::Recipe::grafana - dashboards, and the metrics store behind them.
@@ -178,8 +180,8 @@ one dashboard can be the home page.
 
 =cut
 
-# An interval as Grafana takes it, such as 30s or 7d.
-my $INTERVAL = qr/\A [[:digit:]]+ [smhdw] \z/;
+# The name of a retention policy, which the setup script writes unquoted.
+my $POLICY_NAME = qr/\A [[:lower:]] [[:lower:][:digit:]_]* \z/;
 
 # The name of a JSON file, with no directory.
 my $JSON_FILE = qr/\A [^\/]+ [.] json \z/;
@@ -218,15 +220,15 @@ sub args {
             },
             retention => {
                 type        => 'string',
-                pattern     => "$INTERVAL",
+                pattern     => "$Trog::Patterns::INFLUX_DURATION",
                 default     => '90d',
                 description => 'How long measurements are kept, as an InfluxDB duration such as 90d.',
             },
             retention_policies => {
                 type                 => 'object',
                 default              => {},
-                propertyNames        => { pattern => '\A[a-z][a-z0-9_]*\z' },
-                additionalProperties => { type    => 'string', pattern => "$INTERVAL" },
+                propertyNames        => { pattern => "$POLICY_NAME" },
+                additionalProperties => { type    => 'string', pattern => "$Trog::Patterns::INFLUX_DURATION" },
                 description          => 'More retention policies, name to InfluxDB duration, that a telegraf fragment sends a point to with the tag influxdb_retention_policy.',
             },
             home_dashboard => {
