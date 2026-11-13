@@ -71,9 +71,10 @@ F<git-hooks/pre-commit> is in the same position.  It is shell, nothing loads
 it, and a change to it cannot break a test -- so running every test to find out
 says nothing that reading the hook does not.
 
-=item F<git-hooks/post-commit>
+=item F<git-hooks/post-commit>, F<post-merge>, F<post-rewrite> and F<refresh-coverage>
 
-It stands for each test that names it.  F<t/post-commit.t> runs it as git does.
+Each stands for each test that names it.  F<t/post-commit.t> runs them as git
+does.
 
 =item A file under F<completions/>
 
@@ -92,6 +93,9 @@ use File::Temp();
 use List::Util qw{uniq};
 use Module::Runtime();
 use Provisioner::Cookbook();
+
+# The hooks that refresh the records, which t/post-commit.t runs as git does.
+my %REFRESH_HOOKS = map { ( "git-hooks/$_" => 1 ) } qw{post-commit post-merge post-rewrite refresh-coverage};
 
 # Read by the tools that the hook runs, and by dzil, and by no test.
 my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
@@ -201,7 +205,7 @@ return sub {
         return @tests;
     }
 
-    return tests_naming($path)                               if $path eq 'git-hooks/post-commit' || $path eq 'hypervisors.conf.example' || $path eq 'clod.json' || $path =~ m{\Acompletions/[^/]+\z};
+    return tests_naming($path)                               if $REFRESH_HOOKS{$path} || $path eq 'hypervisors.conf.example' || $path eq 'clod.json' || $path =~ m{\Acompletions/[^/]+\z};
     return ( 'lib/Trog/HV/Libvirt.pm', tests_naming($path) ) if $path eq 'virtiofs-better';
     return 'lib/Provisioner/IPPool.pm'                       if $path =~ m{\Aschema/ips(?:[.]v\d+[.]update)?[.]sql\z};
 

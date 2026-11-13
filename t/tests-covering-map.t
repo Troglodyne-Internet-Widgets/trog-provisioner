@@ -100,9 +100,11 @@ subtest 'the configuration of the tools reaches no test' => sub {
     is_deeply( [ $map->('git-hooks/pre-commit') ], [q{}], 'and so does the pre-commit hook' );
 };
 
-subtest 'the post-commit hook stands for the test that runs it' => sub {
-    my @tests = $map->('git-hooks/post-commit');
-    ok( ( grep { $_ eq 't/post-commit.t' } @tests ), 't/post-commit.t' ) or diag "got: @tests";
+subtest 'each hook that refreshes the records stands for the test that runs it' => sub {
+    foreach my $hook (qw{post-commit post-merge post-rewrite refresh-coverage}) {
+        my @tests = $map->("git-hooks/$hook");
+        ok( ( grep { $_ eq 't/post-commit.t' } @tests ), "git-hooks/$hook: t/post-commit.t" ) or diag "got: @tests";
+    }
 };
 
 subtest 'documentation reaches no test, and anything else is left to the caller' => sub {
