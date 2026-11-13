@@ -1,0 +1,12 @@
+[%# The OTLP input, on every address, because the senders are other guests.
+    Provisioner::Recipe::grafanaotel says why the firewall is what keeps
+    strangers out. -%]
+[[inputs.opentelemetry]]
+  service_address = "0.0.0.0:[% port %]"
+
+[%# Each event is a logs point.  This moves its details into a logs_detail
+    point that the output sends to the details retention policy.
+    Provisioner::Recipe::grafanaotel has the account. -%]
+[[processors.starlark]]
+  namepass = ["logs"]
+  script = "/etc/telegraf/grafanaotel_details.star"

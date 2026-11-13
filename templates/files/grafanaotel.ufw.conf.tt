@@ -1,0 +1,6 @@
+[%# The port of the OTLP input.  setup-ufw-rules allows every profile in
+    /etc/ufw/applications.d, inbound and outbound. -%]
+[grafanaotel]
+title=OpenTelemetry
+description=OTLP over gRPC from the fleet, into telegraf
+ports=[% port %]/tcp

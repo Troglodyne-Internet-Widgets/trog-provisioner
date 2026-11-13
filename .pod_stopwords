@@ -48,6 +48,7 @@ gofmt
 Gogs
 Grafana
 GraphQL
+gRPC
 HTTPS
 HV
 IMAP
@@ -89,11 +90,13 @@ NoCloud
 OAuth
 OOM
 OPENSSH
+OTLP
 OpenAPIv
 OpenLDAP
 OpenPGP
 OpenSSH
 OpenStack
+OpenTelemetry
 OpenVPN
 OpenZFS
 Overcommit

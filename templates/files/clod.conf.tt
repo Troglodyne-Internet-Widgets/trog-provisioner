@@ -29,6 +29,20 @@
     local_lib        => '[% local_lib %]',
     agent_lib        => '[% agent_lib %]',
     restart_units    => [ 'clod-[% domain %].service', 'clod-worker-[% domain %].service' ],
+[% IF telemetry_target -%]
+    otel             => {
+        OTEL_METRICS_EXPORTER       => 'otlp',
+        OTEL_LOGS_EXPORTER          => 'otlp',
+        OTEL_EXPORTER_OTLP_PROTOCOL => 'grpc',
+        OTEL_EXPORTER_OTLP_ENDPOINT => 'http://[% telemetry_target %]:[% telemetry.port %]',
+[% IF telemetry.tool_details -%]
+        OTEL_LOG_TOOL_DETAILS       => '1',
+[% END -%]
+[% IF telemetry.user_prompts -%]
+        OTEL_LOG_USER_PROMPTS       => '1',
+[% END -%]
+    },
+[% END -%]
     system_packages  => { packager => '[% packager %]', installer => '[% installer %]' },
 [% IF follow_up_max.defined() -%]
     follow_up_max    => [% follow_up_max %],

@@ -1,0 +1,140 @@
+use strict;
+use warnings;
+
+use Test::More;
+use File::Temp ();
+use JSON::PP   ();
+
+my $port   = '[% port %]';
+my $keep   = '[% detail_retention %]';
+my $influx = 'http://127.0.0.1:8086';
+my $script = '/etc/telegraf/grafanaotel_details.star';
+
+# The grafana recipe names the database, so find it here, as the test of
+# grafanasyslog does.
+sub databases {
+    my $out = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
+    return grep { $_ ne '_internal' } $out =~ m/\["([^"]+)"\]/g;
+}
+
+# Runs telegraf once on a configuration of its own, and returns what it printed.
+sub telegraf_once {
+    my ( $flag, $config ) = @_;
+    my $file = File::Temp->new( SUFFIX => '.conf' );
+    print {$file} $config;
+    close $file;
+    return `telegraf $flag --config $file 2>&1`;
+}
+
+subtest 'telegraf takes OTLP on every address' => sub {
+
+    # The loop polls because a postrun task restarts telegraf.
+    my $listening = q{};
+    foreach ( 1 .. 30 ) {
+        $listening = `ss -lntu 2>/dev/null`;
+        last if $listening =~ m/^tcp\s+LISTEN\s+\S+\s+\S+\s+(?:0\.0\.0\.0|\*|\[::\]):$port\b/m;
+        sleep 2;
+    }
+    like( $listening, qr/^tcp\s+LISTEN\s+\S+\s+\S+\s+(?:0\.0\.0\.0|\*|\[::\]):$port\b/m, "something is bound to every address on $port" )
+      or diag $listening;
+    like( `ufw status 2>&1`,                 qr/^grafanaotel\s+ALLOW\s/m, 'the firewall allows the profile of this recipe' );
+    like( `ufw app info grafanaotel 2>&1`, qr/^\s*$port\/tcp$/m,    "which is $port" );
+};
+
+subtest 'the details of an event expire after their own time' => sub {
+
+    # InfluxDB prints a duration as Go does: 48h0m0s, 30m0s, 45s.
+    my %unit = ( s => 1, m => 60, h => 3600, d => 86400, w => 604800 );
+    my ( $n, $u ) = $keep =~ m/\A(\d+)([smhdw])\z/;
+    my $secs = $n * $unit{$u};
+    my ( $h, $m, $s ) = ( int( $secs / 3600 ), int( $secs % 3600 / 60 ), $secs % 60 );
+    my $want = $h ? "${h}h${m}m${s}s" : $m ? "${m}m${s}s" : "${s}s";
+
+    my %found;
+    foreach my $db ( databases() ) {
+        my $out = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW RETENTION POLICIES ON "$db"' 2>&1`;
+        $found{$db} = $1 if $out =~ m/\["details","([^"]+)"/;
+    }
+    ok( scalar keys %found, 'a database has the details retention policy' ) or return;
+    is( ( values %found )[0], $want, "which keeps a point for $keep" );
+};
+
+# The processor, as telegraf runs it, on events shaped as the OTLP input
+# stores them: every attribute, resource attributes too, in one JSON string.
+subtest 'an event is opened up, and loses its details to a point of their own' => sub {
+    my $json = JSON::PP->new->canonical;
+    my $line = sub {
+        my ( $ns, %attrs ) = @_;
+        ( my $text = $json->encode( \%attrs ) ) =~ s/(["\\])/\\$1/g;
+        return qq{logs,service.name=claude-code body="$attrs{'event.name'}",attributes="$text" $ns\n};
+    };
+    my $events = File::Temp->new( SUFFIX => '.lp' );
+    print {$events} $line->(
+        1700000000000000000,
+        'event.name' => 'tool_result', 'tool_name' => 'Bash', 'session.id' => 's1', 'tool_use_id' => 't1', 'clod.job_id' => '7', 'clod.task' => 'spoke_fix',
+        'duration_ms' => 12, 'tool_input' => '{"command":"bin/preflight"}', 'tool_parameters' => { full_command => 'bin/preflight' },
+    );
+    print {$events} $line->( 1700000000000000001, 'event.name' => 'api_request', 'session.id' => 's1', 'cost_usd' => 0.5 );
+    close $events;
+
+    my $out = telegraf_once( '--test', <<"CONF" );
+[[inputs.file]]
+  files = ["$events"]
+  data_format = "influx"
+[[processors.starlark]]
+  namepass = ["logs"]
+  script = "$script"
+CONF
+    my @lines = grep { m/^>\s/ } split m/\n/, $out;
+    my ($detail) = grep { m/^>\s+logs_detail,/ } @lines;
+    my ($call)   = grep { m/^>\s+logs,/ && m/tool_name=Bash/ } @lines;
+    my ($cost)   = grep { m/^>\s+logs,/ && m/cost_usd=0\.5/ } @lines;
+
+    ok( $call, 'the call is in logs, with its tool as a tag' ) or do { diag $out; return };
+    like( $call, qr/clod\.task=spoke_fix[, ]/, 'and the task of its job as a tag' );
+    like( $call, qr/clod\.job_id="7"/,          'with each other attribute a field of its own' );
+    like( $call, qr/duration_ms=12i?\b/,        'numbers as numbers' );
+    unlike( $call, qr/attributes=|tool_input=|tool_parameters=/, 'and no JSON left, and none of its details' );
+    ok( $cost, 'an event with no details is opened up too' ) or diag $out;
+
+    ok( $detail, 'the details went to logs_detail' ) or do { diag $out; return };
+    like( $detail, qr/influxdb_retention_policy=details/,  'which the output sends to the details policy' );
+    like( $detail, qr/tool_input="\{\\"command\\":\\"bin\/preflight\\"\}"/, 'with the input of the call as it came' );
+    like( $detail, qr/tool_parameters="\{\\"full_command\\":\\"bin\/preflight\\"\}"/, 'and a detail that came as an object, as JSON' );
+    like( $detail, qr/session\.id="s1"/,  'and what joins it to its event' );
+    like( $detail, qr/tool_use_id="t1"/,  'down to the call' );
+};
+
+# The whole path: a metric sent over OTLP to the port, through the input, into
+# influxdb.  telegraf itself is the sender, because it has an OTLP output.
+subtest 'a metric sent over OTLP arrives in influxdb' => sub {
+    my $marker = "grafanaotel-selftest-$$-" . time;
+    my $probe  = File::Temp->new( SUFFIX => '.lp' );
+    print {$probe} "grafanaotel_probe,probe=$marker value=1\n";
+    close $probe;
+
+    my $sent = telegraf_once( '--once', <<"CONF" );
+[[inputs.file]]
+  files = ["$probe"]
+  data_format = "influx"
+[[outputs.opentelemetry]]
+  service_address = "127.0.0.1:$port"
+CONF
+
+    # The input writes on the flush interval of telegraf.
+    my $found = q{};
+    foreach ( 1 .. 24 ) {
+        foreach my $db ( databases() ) {
+            my $out = `curl -fsS -G $influx/query --data-urlencode 'db=$db' --data-urlencode 'q=SELECT * FROM /grafanaotel_probe/ WHERE time > now() - 10m' 2>&1`;
+            next unless index( $out, $marker ) >= 0;
+            $found = $db;
+            last;
+        }
+        last if $found;
+        sleep 5;
+    }
+    ok( $found, 'the probe is in influxdb' )
+      or diag "telegraf --once said:\n$sent\n" . `journalctl -u telegraf --no-pager -n 20 2>&1`;
+};
+
+done_testing();

@@ -171,6 +171,36 @@ subtest 'the daemon listens on the socket that nginx proxies to' => sub {
     like( $unit, qr{$listen$path$}m, 'the path is URL-encoded, with each % doubled for systemd' );
 };
 
+subtest 'telemetry goes where the configuration says, with the details it asks for' => sub {
+    my $conf_of = sub (%telemetry) {
+        my $dir = tempdir( CLEANUP => 1 );
+        my $r   = recipe($dir);
+        $r->generate_files( $dir, $r->validated( $r->takes(%GLOBALS), %BASE, ipmap => { 'logs.test.test' => '192.0.2.9' }, %telemetry ) );
+        my $conf = do "$dir/clod.conf";
+        my $why  = $@ || File::Slurper::read_text("$dir/clod.conf");
+        ok( ref $conf eq 'HASH', 'the configuration evaluates to a hash' ) or diag $why;
+        return ( $conf, -s "$dir/clod_telemetry_ufw.conf" ? File::Slurper::read_text("$dir/clod_telemetry_ufw.conf") : q{} );
+    };
+
+    my ($quiet) = $conf_of->();
+    is_deeply( $quiet->{otel} // {}, {}, 'with no host, the runs send nothing' );
+
+    my ( $conf, $profile ) = $conf_of->( telemetry => { host => 'logs.test.test' } );
+    is_deeply(
+        $conf->{otel},
+        { OTEL_METRICS_EXPORTER => 'otlp', OTEL_LOGS_EXPORTER => 'otlp', OTEL_EXPORTER_OTLP_PROTOCOL => 'grpc', OTEL_EXPORTER_OTLP_ENDPOINT => 'http://192.0.2.9:4317' },
+        'a host that the pool knows gets the metrics and events at its address, on the OTLP port, without details'
+    );
+    like( $profile, qr{^ports=4317/tcp$}m, 'and the guest may connect out to that port' );
+
+    ($conf) = $conf_of->( telemetry => { host => 'otel.vendor.test', port => 4417, tool_details => 1, user_prompts => 1 } );
+    is( $conf->{otel}{OTEL_EXPORTER_OTLP_ENDPOINT}, 'http://otel.vendor.test:4417', 'a host that the pool does not know is used as written, on the port given' );
+    is_deeply( [ @{ $conf->{otel} }{qw{OTEL_LOG_TOOL_DETAILS OTEL_LOG_USER_PROMPTS}} ], [ 1, 1 ], 'and each detail that the configuration turns on is turned on' );
+
+    like( exception { recipe()->telemetry_target( %GLOBALS, telemetry => { host => 'http://logs.test.test' } ) }, qr/is\ a\ URL/,    'a URL is refused, because the port has its own setting' );
+    like( exception { recipe()->telemetry_target( %GLOBALS, telemetry => { host => 'bot.test.test' } ) },         qr/names\ itself/, 'and so is the bot itself' );
+};
+
 subtest 'the database and the evidence come back where clod.conf says they are' => sub {
     my %restores = recipe()->restores(%GLOBALS);
     is_deeply( [ sort keys %restores ], [ '/bogus/bot.test.test/clod-state/evidence', '/bogus/bot.test.test/clod-state/minion.db' ], 'one restore to the database, and one to the evidence' );

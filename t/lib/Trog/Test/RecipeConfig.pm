@@ -79,6 +79,7 @@ sub required_config {
         # A password is not a thing a schema can default, and grubconf refuses
         # to render nothing.
         grafana       => { admin_password => 's3cr3t' },
+        grafanaotel   => { modules        => ['grafana'] },
         grafanasyslog => { modules        => ['grafana'] },
         grubconf      => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
         ldap          => { admin_password => 's3cr3t' },

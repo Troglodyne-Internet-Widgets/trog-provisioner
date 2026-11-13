@@ -1,0 +1,14 @@
+[%# One telegraf, one input, one processor: the global half, once for the
+    machine.
+
+    This target runs before the grafana target, as the one of grafanasyslog
+    does, so the telegraf account does not exist yet.  Root owns each file,
+    and telegraf only reads them. -%]
+install -d -m 0755 /etc/telegraf/telegraf.d
+install -o root -g root -m 0644 grafanaotel_telegraf.conf /etc/telegraf/telegraf.d/60-grafanaotel.conf
+install -o root -g root -m 0644 grafanaotel_details.star /etc/telegraf/grafanaotel_details.star
+install -o root -g root -m 0644 grafanaotel_ufw.conf /etc/ufw/applications.d/grafanaotel
+[%# Telegraf must restart to open the listener, and it is not installed until
+    the grafana target, below this one, runs. -%]
+[% script_dir %]/queue_postrun_task systemctl restart telegraf
+echo 'grafanaotel: OTLP on [% port %]; the details of an event stay [% detail_retention %].'

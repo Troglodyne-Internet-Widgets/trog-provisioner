@@ -1,0 +1,7 @@
+[%# Outbound, to the OTLP port of the telemetry host.  The guests deny outgoing
+    traffic by default, and setup-ufw-rules allows every profile.
+    Provisioner::Recipe::clod has the account, under TELEMETRY. -%]
+[clodtelemetry]
+title=Clod telemetry
+description=OTLP over gRPC to the telemetry host of the bot
+ports=[% telemetry.port %]/tcp

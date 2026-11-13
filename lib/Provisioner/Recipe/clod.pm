@@ -281,9 +281,42 @@ sub args {
             },
             spoke_prompt => { type => 'string', minLength => 1,                               description => 'Text that App::Clod appends to the system prompt of every spoke run, and shows to triage, so that it knows how each spoke tests.' },
             agent_user   => { type => 'string', pattern   => "$Trog::Patterns::ACCOUNT_NAME", description => 'The account that every claude run of the bot runs as, through sudo, so that the agent cannot read the token of the bot.  See THE AGENT ACCOUNT.' },
+
+            telemetry => {
+                type        => 'object',
+                default     => {},
+                description => 'Where every claude run sends its OpenTelemetry.  See TELEMETRY.',
+                properties  => {
+                    host         => { type => 'string',  'x-weak' => 1,    minLength   => 1, description => 'The guest that runs grafanaotel.  Unset sends nothing.  A name the ip pool knows is resolved to its address.  A host, not a URL.' },
+                    port         => { type => 'integer', default  => 4317, minimum     => 1, maximum     => 65535, description => 'The OTLP port over gRPC on host.' },
+                    tool_details => { type => 'boolean', default  => 0,    description => 'Sets OTEL_LOG_TOOL_DETAILS: the input and the full error of each tool call.' },
+                    user_prompts => { type => 'boolean', default  => 0,    description => 'Sets OTEL_LOG_USER_PROMPTS: the text of each prompt and response.' },
+                },
+            },
         },
     );
 }
+
+=head2 TELEMETRY
+
+With C<telemetry> naming a C<host>, every claude run of the bot sends its
+OpenTelemetry there, over gRPC, on C<port>: the metrics, and an event for each
+prompt, request and call of a tool.  App::Clod tags each run with its job.
+L<Provisioner::Recipe::grafanaotel> is the other end.  The recipe writes the
+variables into C<otel> of F<clod.conf>, and installs a ufw profile for the
+port, because the guest denies outgoing traffic by default.  The profile opens
+the port inbound too, where nothing listens.
+
+C<tool_details> and C<user_prompts> turn on C<OTEL_LOG_TOOL_DETAILS> and
+C<OTEL_LOG_USER_PROMPTS>.  Then the events carry the input of each tool call,
+its full error, and the text of each prompt and response.  That is what a
+person needs to find out why a run of the bot failed, and it can hold a
+password that a command line carried.  So they are off by default, and the
+other end keeps them for less time than the rest.  See
+L<Provisioner::Recipe::grafanaotel/The details expire first>.
+
+A C<host> that the ip pool knows is resolved to its address, as the C<host> of
+L<Provisioner::Recipe::logshipper> is.
 
 =head2 THE LOCAL LIB
 
@@ -478,6 +511,10 @@ Adds C<packager>, from C<distro_packager>, and from its L<Provisioner::Packager>
 C<package_name>, C<install_command> and C<update_command>, which the installer
 of L</THE SYSTEM PACKAGES> holds.  Adds C<installer>, its path.
 
+Adds C<telemetry_target>, the address or name that the runs send their
+telemetry to, when C<telemetry> names a C<host>.  Dies when the host is a URL,
+or this guest itself.
+
 Replaces C<dashboard_password> with C<dashboard_password_sha256>, the SHA-256 of
 its C<UTF-8> bytes in lowercase hex, which is what F<clod.conf> holds.  So the
 password is a secret of the store like every other, and it reaches no template.
@@ -493,9 +530,10 @@ sub enrich {
     my ( $self, %opts ) = @_;
     die "clod: the user of $opts{domain}, $opts{user}, is not a name that a sudoers line and the name of a file in sudoers.d can both hold.\n"
       unless $opts{user} =~ $Trog::Patterns::ACCOUNT_NAME;
-    $opts{agent_home} = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
-    $opts{local_lib}  = "$opts{install_dir}/$opts{domain}/perl5";
-    $opts{agent_lib}  = "$opts{install_dir}/$opts{domain}/agent-perl5";
+    $opts{agent_home}       = Provisioner::Recipe::claude::->restricted_home( %opts, restricted_user => $opts{agent_user} ) if defined $opts{agent_user};
+    $opts{local_lib}        = "$opts{install_dir}/$opts{domain}/perl5";
+    $opts{agent_lib}        = "$opts{install_dir}/$opts{domain}/agent-perl5";
+    $opts{telemetry_target} = $self->telemetry_target(%opts);
 
     my $packager = Provisioner::Packager->named( $opts{packager} = $self->distro_packager );
     $opts{package_name}    = $packager->package_name;
@@ -506,6 +544,24 @@ sub enrich {
     # App::Clod hashes the bytes of the password that basic authentication sends.
     $opts{dashboard_password_sha256} = Digest::SHA::sha256_hex( Encode::encode( 'UTF-8', delete $opts{dashboard_password} ) );
     return %opts;
+}
+
+=head2 $target = $recipe->telemetry_target(%opts)
+
+The address or name for the C<host> of C<telemetry>, as
+L<Provisioner::Utils/fleet_address> resolves it, or empty with no host.  Dies
+on a URL, because the endpoint takes the port from C<port>, and on this guest,
+which does not take telemetry.
+
+=cut
+
+sub telemetry_target {
+    my ( $self, %opts ) = @_;
+    my $host = ( $opts{telemetry} // {} )->{host};
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $host, domain => $opts{domain}, ipmap => $opts{ipmap} );
+    die "clod: the telemetry host of $opts{domain}, $host, is a URL.  Name the host, and the port in port.\n" if $kind eq 'url';
+    die "clod: $opts{domain} names itself as its telemetry host, and it does not take telemetry.\n"           if $kind eq 'self';
+    return $value;
 }
 
 =head2 @commands = $recipe->remote_prepare($install_dir, $domain)
@@ -580,6 +636,9 @@ sub template_files {
         'clod.deps.sh.tt'          => 'clod-deps.sh',
         'clod.agent-token.tt'      => 'clod-agent.token',
         'clod.install-packages.tt' => 'clod-install-packages',
+
+        # The outbound port of the telemetry.  See TELEMETRY.
+        'clod.telemetry-ufw.conf.tt' => 'clod_telemetry_ufw.conf',
     );
 }
 
