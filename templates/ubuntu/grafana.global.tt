@@ -16,6 +16,10 @@ install -d -o grafana -g grafana -m 0755 /var/lib/grafana/dashboards
 install -o root -g root -m 0644 grafana_influxdb.env /etc/default/influxdb
 install -o root -g telegraf -m 0640 grafana_telegraf.conf /etc/telegraf/telegraf.d/50-provisioner.conf
 install -m 0755 grafana_influx_setup.sh [% script_dir %]/grafana_influx_setup.sh
+[%# remote_prepare of Provisioner::Recipe::grafana runs this one before a
+    salvage, by this path. -%]
+install -o root -g root -m 0700 grafana-salvage.sh '[% install_dir %]/[% domain %]/grafana-salvage.sh'
+install -o root -g root -m 0700 grafana_influx_restore.sh [% script_dir %]/grafana_influx_restore.sh
 [%# Restart influxd here as well as in postrun.  Cloud-init started it with the
     package, so it listens on every interface until it reads
     /etc/default/influxdb again. -%]
@@ -26,6 +30,7 @@ systemctl restart influxdb
 [%# Before the telegraf restart, so the database exists with a retention when
     telegraf writes to it.  The telegraf install started telegraf, which can
     make the database first.  So the script alters as well as creates. -%]
+[% script_dir %]/queue_postrun_task [% script_dir %]/grafana_influx_restore.sh
 [% script_dir %]/queue_postrun_task [% script_dir %]/grafana_influx_setup.sh
 [% script_dir %]/queue_postrun_task systemctl enable telegraf
 [% script_dir %]/queue_postrun_task systemctl restart telegraf

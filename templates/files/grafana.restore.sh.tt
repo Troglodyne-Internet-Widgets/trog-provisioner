@@ -1,0 +1,50 @@
+#!/bin/bash
+# Puts the measurements that the last salvage took back into influxd.
+#
+# A postrun task, before grafana_influx_setup.sh and before any restart of
+# telegraf, because influxd must answer and the setup script then holds the
+# restored database to the retention of this build.
+# Provisioner::Recipe::grafana has the account.
+
+set -euo pipefail
+
+db='[% influx_database %]'
+backup='[% install_dir %]/[% domain %]/grafana-salvage/influxdb'
+influx='http://127.0.0.1:8086'
+
+if [ ! -d "$backup" ] || [ -z "$(ls -A "$backup")" ]; then
+    echo "grafana: nothing was salvaged, so $db starts empty."
+    exit 0
+fi
+
+ready=''
+for _attempt in $(seq 1 120); do
+    if curl -fsS "$influx/ping" >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ -z "$ready" ]; then
+    echo "grafana: influxd never answered on $influx, so $db was not restored" >&2
+    exit 1
+fi
+
+# grafana_influx_setup.sh gives autogen a duration on every build.  A database
+# that has none, or no database, is one that only the telegraf of this build
+# wrote to, since its first boot.  Anything else holds the state of the guest,
+# and a salvage must not replace it.
+policies=$(curl -fsS -G "$influx/query" --data-urlencode "q=SHOW RETENTION POLICIES ON \"$db\"")
+if grep -q '"autogen","[1-9]' <<<"$policies"; then
+    echo "grafana: $db already holds the measurements of this guest, so the salvage stays unused."
+    exit 0
+fi
+
+# Stopped so that nothing writes to the database between the drop and the
+# restore.  The postrun tasks after this one start it again.
+systemctl stop telegraf
+if grep -q '"autogen"' <<<"$policies"; then
+    curl -fsS -XPOST "$influx/query" --data-urlencode "q=DROP DATABASE \"$db\"" >/dev/null
+fi
+influxd restore -portable -host 127.0.0.1:8088 -db "$db" "$backup"
+echo "grafana: $db holds the measurements of the salvage again."

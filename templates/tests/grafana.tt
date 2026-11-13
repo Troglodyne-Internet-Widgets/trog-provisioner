@@ -129,4 +129,23 @@ subtest 'a login lands on the home dashboard' => sub {
 };
 [% END -%]
 
+# The salvage as bin/new_config asks for it before a rebuild, and the restore
+# as a rebuilt guest runs it, here on a guest whose database is its own.
+subtest 'the measurements can be salvaged, and a salvage does not replace them' => sub {
+    my $dir     = '[% install_dir %]/[% domain %]';
+    my $salvage = `'$dir/grafana-salvage.sh' 2>&1`;
+    is( $?, 0, 'the salvage script succeeds' ) or diag $salvage;
+    my @manifest = glob "$dir/.grafana-salvage/influxdb/*.manifest";
+    ok( scalar @manifest, 'and leaves a portable backup of influxd' ) or diag `ls -la '$dir/.grafana-salvage/influxdb' 2>&1`;
+    like( `cat @manifest 2>&1`, qr/"database":\s*"\Q$database\E"/i, "of $database" ) if @manifest;
+
+    # The restore reads the salvage from where the data target puts it.
+    system( 'rm', '-rf', "$dir/grafana-salvage" );
+    system( 'cp', '-a', "$dir/.grafana-salvage", "$dir/grafana-salvage" );
+    my $restore = `[% script_dir %]/grafana_influx_restore.sh 2>&1`;
+    is( $?, 0, 'the restore script succeeds' ) or diag $restore;
+    like( $restore, qr/already holds the measurements of this guest/, 'and keeps the measurements that the guest has' );
+    system( 'rm', '-rf', "$dir/grafana-salvage" );
+};
+
 done_testing();
