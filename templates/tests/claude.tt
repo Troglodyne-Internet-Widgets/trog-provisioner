@@ -31,6 +31,12 @@ SKIP: {
         or diag 'declared: ' . join(', ', sort keys %declared);
 }
 
+# Over ssh, a mouse that Claude Code captures is a terminal that cannot copy.
+SKIP: {
+    skip 'settings did not parse', 1 unless $conf;
+    is($conf->{env}{CLAUDE_CODE_DISABLE_MOUSE}, '1', 'Claude Code leaves the mouse to the terminal');
+}
+
 # The agent runs as the service user, so it must own what the recipe leaves in
 # its home, and the admin only where the domain names no service user.  A file
 # that the admin or root owns is one the agent cannot write.  .claude is always
@@ -138,7 +144,7 @@ SKIP: {
     SKIP: {
         skip 'its settings did not parse', 4 unless $rconf;
         ok($rconf->{enabledPlugins}{'perl-slop@troglodyne-marketplace'}, 'with the plugins');
-        ok(!exists $rconf->{env}, 'and none of the environment that makes the agent of the domain the bot');
+        is_deeply($rconf->{env}, { CLAUDE_CODE_DISABLE_MOUSE => '1' }, 'and none of the environment that makes the agent of the domain the bot');
         my @commands = map { map { $_->{command} // '' } @{ $_->{hooks} // [] } }
                        grep { ($_->{matcher} // '') eq 'Bash' } @{ $rconf->{hooks}{PreToolUse} // [] };
         ok((grep { m/\brtk\b/ } @commands), 'and its Bash tool goes through rtk');
