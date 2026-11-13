@@ -57,17 +57,29 @@ membership across three accounts and a recursive chmod.  A loopback port needs
 neither.  Nothing outside the guest can reach the port, so this recipe has no
 firewall profile and opens nothing.
 
-=head2 The dashboards survive a rebuild because they are not kept
+=head2 What a rebuild keeps
 
-Nothing here is in C<remote_files>, and that is deliberate for the dashboards.
-Grafana provisions them from files in F</etc/grafana/provisioning>, so a rebuilt
-guest draws the same ones and nothing is carried over.  A rebuild loses the
-measurements and anything that an operator made by hand in the UI.
+Grafana provisions the dashboards from files in F</etc/grafana/provisioning>,
+so a rebuilt guest draws the same ones, and nothing of them is carried over.
+Anything that an operator made by hand in the UI is lost.
 
-The recipe that depends on this one keeps those if it wants them.  That recipe
-knows what it put in the database and whether a loss matters.  So it names what
-to carry over in its own C<remote_files>, and this recipe does not salvage a
-database for every recipe that uses it.
+The measurements are carried over.  The database is one for every recipe
+that writes to it, so this recipe salvages it whole, and a recipe that adds a
+telegraf fragment needs nothing more.  C<remote_prepare> runs
+F<grafana-salvage.sh>, which asks influxd for a portable backup of
+C<influx_database>.  A copy of the files of a running influxd is not one,
+because it can take a shard halfway through a compaction.  The backup comes
+down with the other state of the domain.
+
+A postrun task of the rebuilt guest, F<grafana_influx_restore.sh>, gives it to
+influxd again, before the setup script holds the database to C<retention>.  It
+restores only into a database that this build made, which it knows by the
+duration of C<autogen>: telegraf makes a database with none, and the setup
+script gives every database one.  So a provision of a guest that already
+holds measurements leaves them as they are.  The restore drops the database
+of the new guest first.  That loses what telegraf collected on it since its
+first boot, and nothing that any other guest sent, because the inputs for the
+fleet start after the restore.
 
 =cut
 
@@ -262,7 +274,37 @@ sub template_files {
         # A script, not fragment lines, because it polls influxd and a makefile
         # fragment runs each line in its own shell.
         'grafana.influx-setup.sh.tt' => 'grafana_influx_setup.sh',
+
+        # The two halves of the salvage of the measurements.
+        'grafana.salvage.sh.tt' => 'grafana-salvage.sh',
+        'grafana.restore.sh.tt' => 'grafana_influx_restore.sh',
     );
+}
+
+=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Runs F<grafana-salvage.sh>, which writes a portable backup of
+C<influx_database> to F<.grafana-salvage/influxdb>.  See L</What a rebuild
+keeps>.  On a guest built before this recipe had the script, the command
+fails, and the salvage keeps what it had.
+
+=cut
+
+sub remote_prepare {
+    my ( $self, $install_dir, $domain ) = @_;
+    return ("$install_dir/$domain/grafana-salvage.sh");
+}
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+The backup that C<remote_prepare> made.  It lands in F<grafana-salvage> of the
+domain directory, where the restore reads it.
+
+=cut
+
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return ( "$install_dir/$domain/.grafana-salvage/" => 'grafana-salvage/' );
 }
 
 =head2 %jails = $recipe->jails()
