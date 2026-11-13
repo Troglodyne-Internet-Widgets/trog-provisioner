@@ -5,6 +5,13 @@
     target is empty for a guest that is its own destination.  Then this file
     renders empty, and the guest does not forward to its own listener. -%]
 [% IF target -%]
+[%# Ubuntu sets RepeatedMsgReduction on in /etc/rsyslog.conf.  rsyslog merges
+    repeated lines before any action sees them, so a collector gets one line
+    and a "message repeated" summary in place of every line.  The setting is
+    global and the action() syntax has no per-action switch, so this is the
+    legacy directive.  rsyslog reads this file after /etc/rsyslog.conf, so the
+    later value wins. -%]
+$RepeatedMsgReduction off
 [%# The collector files messages under the name that the sender puts in them.
     rsyslog sends its short hostname unless told otherwise.  Without this line,
     staging.example.test and staging.example.org both go into staging.log, and
