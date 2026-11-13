@@ -80,10 +80,26 @@ account of the operator, with sudo for everything, as for F<bin/runner_account>.
 =head2 Reaching a guest on the network
 
 With C<forward mode='nat'>, libvirt lets a guest start a connection out and
-refuses a new connection in from outside the host.  So this machine reaches each
-guest by the lease of its NAT adapter, as before.  For a network that other
-machines route to, define it with C<< <forward mode='route'/> >> by hand, and
-give the router of the LAN a route to it through the hypervisor.
+refuses a new connection in from outside the host.  But F<bin/provision>
+connects to the static address of a guest that has one, as
+C<guest_ssh_ip> in L<Trog::HV::Libvirt> says, and not to its lease.  So the
+machine that provisions the guests needs an adapter on the network too.  When
+that machine is itself a guest of the same hypervisor, as a runner is, add the
+bridge to the C<static_nics> of the block that builds it, after its first
+static adapter, with a pool that does not overlap the pool of the block of
+C<--hypervisor>:
+
+    [hv1]
+    static_nics    = br0, virbr1
+    ip_pool_virbr1 = 10.0.0.64/26
+    prefix_virbr1  = 24
+
+Each guest of that block gets an adapter on the network when it is built.  A
+guest built before the change gets one when it is built again.
+
+For a network that other machines route to, define it with
+C<< <forward mode='route'/> >> by hand, and give the router of the LAN a route
+to it through the hypervisor.
 
 =head1 OPTIONS
 
