@@ -19,8 +19,8 @@ packages:
 [% packages | yaml %]
 [% IF bootcmd.size() %]
 
-[%# Only with a fetch cache.  See the bootcmd of enrich in
-    Provisioner::Recipe::ubuntu. -%]
+[%# The override of var.conf, and with a fetch cache the hosts of the cache.
+    See the bootcmd of enrich in Provisioner::Recipe::ubuntu. -%]
 bootcmd:
 [% bootcmd | yaml %]
 [% END -%]

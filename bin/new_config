@@ -1317,14 +1317,7 @@ sub handle_domain {
         push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, modules => \@modules ) );
         %resolver_files = ( %resolver_files, $builder->resolver_files( $builder->takes(%$global_config), %$pconf, modules => \@modules ) );
 
-        my @tests = $builder->tests();
-        foreach my $test (@tests) {
-            my $tname = $test;
-            $tname =~ s/tt$/t/;
-            my $rendered = $builder->render_file( "tests/$test", $builder->takes(%$global_config), %$pconf, modules => \@modules );
-            print "Writing $test as $tname\n";
-            File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $rendered );
-        }
+        write_guest_tests( $builder, $cfg_dir, $builder->takes(%$global_config), %$pconf, modules => \@modules );
 
         push( @testdeps, ( $builder->testdeps(@modules) ) );
     }
@@ -1465,6 +1458,11 @@ sub handle_domain {
         ( %guest_secrets  ? ( secrets_marker => Trog::Guest->secrets_marker($fqdn) ) : () ),
         modules => \@modules,
     );
+
+    # The distro recipe left @modules, but every guest runs what it set up.
+    # After generate_files, whose settings the recipe keeps: see validated in
+    # Provisioner::Recipe.
+    write_guest_tests( $builders{$distro_name}, $cfg_dir );
 
     # After generate_files, which makes a key for a domain that had none.  Not
     # on a dry run: see DRY RUNS.
@@ -1630,6 +1628,23 @@ sub refresh_salvage (%args) {
     }
 
     return 1;
+}
+
+=head2 write_guest_tests($builder, $cfg_dir, %vars)
+
+Renders each test of C<< $builder->tests >> with C<%vars> into F<t/> of
+C<$cfg_dir>, as F<NAME.t> for F<tests/NAME.tt>.  The guest runs every file
+there after its build.
+
+=cut
+
+sub write_guest_tests ( $builder, $cfg_dir, %vars ) {
+    foreach my $test ( $builder->tests() ) {
+        my $tname = $test =~ s/tt$/t/r;
+        print "Writing $test as $tname\n";
+        File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $builder->render_file( "tests/$test", %vars ) );
+    }
+    return;
 }
 
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)

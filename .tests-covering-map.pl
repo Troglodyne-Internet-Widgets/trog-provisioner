@@ -163,6 +163,14 @@ return sub {
                     }
                     push @{ $stands_for{"templates/tests/$_"} }, @modules for $recipe->tests;
                 }
+
+                # The distro recipe also renders files of its own name in its
+                # enrich, such as the script of bootcmd, which are not among
+                # its template_files.
+                my $own = 'lib/' . Module::Runtime::module_notional_filename( Provisioner::Cookbook->load($distro) );
+                foreach my $dir (@dirs) {
+                    push @{ $stands_for{$_} }, $own for glob "$dir/files/$distro.*.tt";
+                }
             }
             $stands_for{'templates/makefile.tt'} = ['bin/new_config'];
 
