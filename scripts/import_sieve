@@ -1,0 +1,39 @@
+#!/bin/bash
+# Move the sieve script that a mail store brings for an account into the
+# storage of ManageSieve, and make it the active script:
+#
+#     import_sieve HOME NAME
+#
+# HOME is the home of the account, /mail/<domain>/<name>.  The script it takes
+# is HOME/NAME.sieve.  It goes to HOME/sieve/NAME.sieve, and HOME/.dovecot.sieve
+# becomes a link to it, which is the layout that ManageSieve itself writes.
+# dovecot reads the script from there, and the user sees it in Roundcube.
+#
+# It does nothing when HOME/sieve is already there, because then the store
+# came from a server that ran ManageSieve, and the user chose its active script
+# there.  It does nothing when there is no HOME/NAME.sieve.
+#
+# The new directory and link get the owner of HOME, so this runs as root and
+# leaves nothing that dovecot cannot write.
+set -eu
+
+home=$1
+name=$2
+storage="$home/sieve"
+
+if [ -e "$storage" ] || [ -L "$storage" ]; then
+    exit 0
+fi
+if [ ! -f "$home/$name.sieve" ]; then
+    exit 0
+fi
+
+mkdir -m 2750 "$storage"
+chown --reference="$home" "$storage"
+mv "$home/$name.sieve" "$storage/$name.sieve"
+ln -sfn "sieve/$name.sieve" "$home/.dovecot.sieve"
+chown -h --reference="$home" "$home/.dovecot.sieve"
+# The binary that sievec made beside the old link.  dovecot keeps the binary of
+# a script in the storage beside the script.
+rm -f "$home/.dovecot.svbin"
+echo "import_sieve: $home/$name.sieve is now the active sieve script $storage/$name.sieve"

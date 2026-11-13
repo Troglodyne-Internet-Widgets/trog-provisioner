@@ -164,8 +164,11 @@ mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf
     runs after this loop, so restart dovecot here too. -%]
 systemctl restart dovecot
 [% FOR name IN names.keys() %]
-test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && ln -s "/mail/[% domain %]/[% name %]/[% name %].sieve" "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
-test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && sudo -u dovecot sievec "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
+[%# A script that the store brings goes where ManageSieve keeps the scripts,
+    and becomes the active one.  A store that ManageSieve already keeps stays
+    as it is.  See scripts/import_sieve. -%]
+[% script_dir %]/import_sieve "/mail/[% domain %]/[% name %]" "[% name %]"
+test -f "/mail/[% domain %]/[% name %]/sieve/[% name %].sieve" && sudo -u dovecot sievec "/mail/[% domain %]/[% name %]/sieve/[% name %].sieve"; /bin/true
 [% FOR box IN names.$name.mailboxes %]
 [%# Make the mailbox only if it is not there.  A rebuild restores the maildirs
     of this account first, and a second create fails with exit 65. -%]

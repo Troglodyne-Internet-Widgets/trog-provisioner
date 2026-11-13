@@ -46,13 +46,18 @@ target does this before the fragment runs, and the fragment loads the schema
 only when no database is there.  Nobody can type a contact list back in, so the
 only other choice is to lose it.
 
-Expects IMAP on port 143 and submission on port 587 of its own guest, so it
-requires L<Provisioner::Recipe::mail> and is served from the same guest.  That
-is the only arrangement this configures: config.inc.php names localhost, with
-the peer name mail.[domain] for the certificate check, and has no way to be told
-to name anything else.  Pointing a webmail install at a
+Expects IMAP on port 143, submission on port 587 and ManageSieve on port 4190
+of its own guest, so it requires L<Provisioner::Recipe::mail> and is served from
+the same guest.  That is the only arrangement this configures: config.inc.php
+names localhost, with the peer name mail.[domain] for the certificate check, and
+has no way to be told to name anything else.  Pointing a webmail install at a
 mailserver somewhere else wants an IMAP provider a domain can choose, the way it
 chooses the server of its zone -- see L<Provisioner::Recipe::registrar>.
+
+The C<managesieve> plugin is on, so each user edits the sieve filters of the
+account under Settings, Filters.  It reaches ManageSieve with STARTTLS.  This
+recipe requires mail, so the plugin always has a server.  See
+L<Provisioner::Recipe::mail/Sieve scripts, and ManageSieve>.
 
 TLS uses the certificate provided by the 'letsencrypt' recipe.  The C<webmail>
 name is declared in L<Provisioner::Recipe/subdomains>, not written into the
@@ -73,9 +78,9 @@ writes nothing for it.
         roundcube:
             version: "1.6.9"
 
-nginx then gives the vhost the listeners for the relay.  Roundcube reaches IMAP
-and submission on its own guest, so webmail works through the relay although
-the relay does not pass those ports.
+nginx then gives the vhost the listeners for the relay.  Roundcube reaches IMAP,
+submission and ManageSieve on its own guest, so webmail works through the relay
+although the relay does not pass those ports.
 
 A failed login comes through the relay, so a ban by ufw on this guest blocks
 nothing.  So the C<roundcube-auth> jail goes to C<nginx.proxied_jails>, and it

@@ -258,6 +258,13 @@ subtest 'behind a relay of nginx, the settings of mail clients are public names'
     is_deeply( [ sort keys %{ $asked->( nginx => {} ) } ], ['sites'],                   'without a relay, mail asks nginx for the vhost alone' );
 };
 
+subtest 'ManageSieve claims 4190 on loopback, and on no other address' => sub {
+    my %claims = $recipe->claims(%BASE);
+    is_deeply( [ sort keys %{ $claims{4190} // {} } ], [qw{127.0.0.1 ::1}], 'on both loopback addresses' );
+    %claims = $recipe->claims( %BASE, ipv6 => 0 );
+    is_deeply( [ sort keys %{ $claims{4190} // {} } ], ['127.0.0.1'], 'and on 127.0.0.1 alone when ipv6 is off, as dovecot binds it' );
+};
+
 subtest 'the DKIM key comes from the store, and its public half is a record' => sub {
     my $mail = Provisioner::Cookbook->load('mail');
     my ($file) = values %{ { $mail->guest_secrets( '/nonexistent', 'mail.test.test' ) } };

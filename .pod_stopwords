@@ -79,6 +79,7 @@ MUA
 MX
 MachineIdentifier
 Makefile
+ManageSieve
 Memoised
 Memoized
 MetaCPAN
@@ -133,6 +134,7 @@ SRV
 SSDP
 SSL
 SSSD
+STARTTLS
 statfs
 statvfs
 SolusVM
@@ -333,6 +335,7 @@ libguestfs
 libvirt
 libyaml
 lifecycle
+localhost
 logcollector
 logrotate
 logshipper

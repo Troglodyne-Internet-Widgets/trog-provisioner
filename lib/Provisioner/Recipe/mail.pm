@@ -72,12 +72,42 @@ to mail for the destinations it names.  The other defaults are sane.
 The recipe makes the virtual users you specify, with their passwords and
 mailboxes.
 
-Put existing mailboxes in C<$install_dir/$domain/mailnames/>.  If
-C<mailnames/$USER/$USER.sieve> exists, the recipe links it as
-C<.dovecot.sieve> and compiles it with sievec.
+Put existing mailboxes in C<$install_dir/$domain/mailnames/>, one directory
+for each account, which becomes its home, C</mail/$domain/$USER>.  See
+L</Sieve scripts, and ManageSieve> for the filters of each account.
 
 Give each password as a C<secret:> reference, not in the clear.  See
 L<Trog::Secrets>.
+
+=head3 Sieve scripts, and ManageSieve
+
+Each user edits the sieve scripts of the account in Roundcube, which talks to
+the ManageSieve service of dovecot.  ManageSieve keeps the scripts of an
+account in C<sieve/> in its home, and C<.dovecot.sieve> is a link to the
+active one.  dovecot runs that script when it delivers, after the global sieve
+of L</Spam>.
+
+Bring the scripts of a mail store in one of two ways:
+
+=over 4
+
+=item * From a server that ran ManageSieve, copy the home as it is, with
+C<sieve/> and the C<.dovecot.sieve> link.  The build leaves them alone.
+
+=item * From a server that did not, put the one script of the account at
+C<mailnames/$USER/$USER.sieve>.  When the home has no C<sieve/>, the build
+moves the script to C<sieve/$USER.sieve>, makes it the active script, and
+compiles it with sievec.  It then shows in Roundcube as C<$USER>.
+F<scripts/import_sieve> does the move.
+
+=back
+
+A C<.dovecot.sieve> that is a plain file and not a link is left for dovecot.
+The first time that the user activates a script, dovecot moves the file into
+C<sieve/> as C<dovecot.orig>.
+
+ManageSieve listens on 4190 on loopback only, because Roundcube is on this
+guest.  See C<listens>.
 
 =head3 Who may say that a message passed
 
@@ -424,12 +454,17 @@ C<postgrey> on 10023, on 127.0.0.1.  amavis on 10024 and C<spamd> on 783, both
 on 127.0.0.1 and on ::1.  The C<proxied_ports>, on every address, which the
 firewall closes to all but the mail relays.
 
+ManageSieve on 4190, on 127.0.0.1, and on ::1 unless C<ipv6> is off.  A claim
+on loopback opens nothing in the firewall, and dovecot binds the port on no
+other address, so no client outside the guest reaches it.
+
 =cut
 
 sub listens {
-    my ($self) = @_;
+    my ( $self, %opts ) = @_;
     return (
-        qw{25 465 587 110 995 143 993 127.0.0.1:10025 127.0.0.1:10023},
+        qw{25 465 587 110 995 143 993 127.0.0.1:10025 127.0.0.1:10023 127.0.0.1:4190},
+        ( ( $opts{ipv6} // 1 ) ? '[::1]:4190' : () ),
         ( sort { $a <=> $b } values %{ { $self->proxied_ports } } ),
         map { ( "127.0.0.1:$_", "[::1]:$_" ) } 10024, 783
     );
