@@ -183,7 +183,7 @@ trog-provisioner/
 
 1. **Data Persistence**: Use `remote_files()` for backup/restore functionality
 2. **File Paths**: Use absolute paths in templates where possible. The `[% install_dir %]/[% domain %]` should be where the primary software to deploy on the guest lives, with supporting (public) services in subdomain folders under [% install_dir %].
-3. **Permissions**: Set files/dirs to 0750 with `user:admin_user` ownership, substituting `user` with the relevant service user (e.g. www-data for nginx) where applicable.
+3. **Permissions**: Set dirs and executables to 0750 and other files to 0640 (`chmod u=rwX,g=rX,o=`) with `user:admin_user` ownership, substituting `user` with the relevant service user (e.g. www-data for nginx) where applicable.
 4. **Symlinks**: Link configs from install_dir to system locations when feasible, this simplifies backup/restore operations.
 5. **Dependencies**: List all package dependencies explicitly in `deps()`
 6. **Validation**: Declare what the recipe takes in `args()` -- required fields, types, defaults and descriptions -- rather than checking them in perl. Override `enrich()`, never `validate()`, for what a schema cannot express.

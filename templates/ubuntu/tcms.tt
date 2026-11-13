@@ -2,6 +2,11 @@
     A checkout that came down from the last guest is the live site, and this
     recipe leaves it alone.  See Provisioner::Recipe::tcms. -%]
 [ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/tCMS'
+[%# A salvage from a guest that was built with the old blanket 0750 has the
+    execute bit on every file.  Put back the modes that git tracks in each file
+    whose content did not change, and leave every change of content.  This
+    does nothing to a clean checkout.  See Provisioner::Recipe::tcms. -%]
+[% script_dir %]/reset_git_modes '[% install_dir %]/[% domain %]/tCMS'
 [%# www/ has the group of nginx, which serves the files that tPSGI links out of
     it, and others get nothing.  See Provisioner::Recipe::tcms. -%]
 chown -R [% user %]: '[% install_dir %]/[% domain %]/tCMS'

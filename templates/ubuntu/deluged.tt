@@ -16,10 +16,10 @@ fi
 mkdir -p /var/lib/deluged/config/state
 chown -R debian-deluged:debian-deluged /var/lib/deluged/config
 [%# One mode per type, not u=rwX,g=rX.  A capital X keeps an execute bit that
-    a file already has.  The data target lands the whole domain directory 0750,
-    so every restored file arrives executable, and X keeps that bit.  A first
-    build does not show this, because the files that deluged writes have no
-    execute bit. -%]
+    a file already has.  The data target gives a file 0640 now, but a
+    salvage from a guest that was built before that has every file 0750, and X
+    keeps that bit.  A first build does not show this, because the files that
+    deluged writes have no execute bit. -%]
 find /var/lib/deluged/config/state -type d -exec chmod 0750 {} +
 find /var/lib/deluged/config/state -type f -exec chmod 0640 {} +
 systemctl enable deluged
