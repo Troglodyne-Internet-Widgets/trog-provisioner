@@ -329,7 +329,7 @@ So the recipe makes a local lib, F<perl5> in the directory of the domain, that
 C<user> owns, and names it as C<local_lib> in F<clod.conf>.  Both units put it
 first on C<PERL5LIB>, and its F<bin> first on C<PATH>, so a module there wins
 over the one of the host.  In the postrun, before the units start,
-F<clod-deps.sh> runs C<clod deps install> as C<user>, which installs every
+F<clod-run.sh> runs C<clod deps install> as C<user>, which installs every
 module that the checkout needs into it.  cpm installs a module into a local
 lib even when the perl has it, so the local lib holds a copy of each.  From
 then on the dashboard of the bot installs and upgrades them there, with no
@@ -438,6 +438,15 @@ L<Provisioner::Packager::Deb> writes.
 
 F<clod.conf> gets C<system_packages>, with the packager of the guest, from the
 subclass of the recipe for its distribution, and the path of the installer.
+
+A provision builds the guest again, and the packages that the button
+installed on the guest before it are gone.  So the last task of the postrun,
+after the units start, runs C<clod minion job -e packages_restore> through
+F<clod-run.sh>.  That task of App::Clod queues the install that the button
+queues, for each spoke whose packages the guest lacks, from the harness scan
+in the salvaged Minion database.  See
+L<App::Clod::Tasks/packages_restore>.  On a guest with no salvage, the bot
+has no scan yet, so the task installs nothing, and the buttons stay.
 
 =head2 $packager = $recipe->distro_packager()
 
@@ -633,7 +642,7 @@ sub template_files {
         'clod.sudoers.tt'          => 'clod.sudoers',
         'clod.share.sh.tt'         => 'clod-share.sh',
         'clod.claude.sh.tt'        => 'clod-claude.sh',
-        'clod.deps.sh.tt'          => 'clod-deps.sh',
+        'clod.run.sh.tt'           => 'clod-run.sh',
         'clod.agent-token.tt'      => 'clod-agent.token',
         'clod.install-packages.tt' => 'clod-install-packages',
 

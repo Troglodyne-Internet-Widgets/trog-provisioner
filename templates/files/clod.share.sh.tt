@@ -12,8 +12,8 @@ chgrp -R '[% agent_user %]' "$workspace"
 chmod -R g+rwX "$workspace"
 find "$workspace" -type d -exec chmod g+s {} +
 
-# The agent lib, before clod-deps.sh fills it, so what it installs takes the
-# group of the agent.  See THE AGENT LIB in Provisioner::Recipe::clod.
+# The agent lib, before clod deps install fills it, so what it installs takes
+# the group of the agent.  See THE AGENT LIB in Provisioner::Recipe::clod.
 install -d -o '[% user %]' -g '[% agent_user %]' -m 2750 '[% agent_lib %]'
 
 # The Claude token of the agent, which only the agent reads.  See THE AGENT
