@@ -26,9 +26,10 @@ use parent qw{Provisioner::Recipe};
 =head2 DESCRIPTION
 
 Installs L<nvm|https://nvm.sh> (Node Version Manager) for the configured user.
-Then it installs the latest Node.js with C<nvm install node> and makes it the
-default alias.  It gives the user F<~/.bashrc.d/20-nvm> through
-F<scripts/bashrc_d>, which loads nvm and runs C<nvm use node>, so node is
+Then it installs the newest LTS release of Node.js with C<nvm install --lts>,
+and makes C<lts/*> the default alias.  Not C<nvm install node>, because nodejs.org
+lists alpha releases, and C<node> is the newest release of any kind.  It gives the user F<~/.bashrc.d/20-nvm> through
+F<scripts/bashrc_d>, which loads nvm and runs C<nvm use default>, so the LTS node is
 active in every interactive shell.  The installer runs with
 C<PROFILE=/dev/null>, so it writes no loader of its own.
 
@@ -38,8 +39,8 @@ C<NVM_BIN>, so it follows a version switch.  Without it, C<require()> cannot
 find a module installed with C<npm -g>.
 
 You can run the recipe again on a host that has nvm.  The install script then
-updates nvm in place.  C<nvm install node> installs a newer node only if one
-was released.
+updates nvm in place.  C<nvm install --lts> installs a newer node only if a
+newer LTS release is out.
 
 =head3 deps
 
@@ -93,7 +94,7 @@ sub tests {
 
 The host of the nvm installer, and the host that nvm gets node from.
 
-Only this list names nodejs.org.  C<nvm install node> fetches from it, so no
+Only this list names nodejs.org.  C<nvm install --lts> fetches from it, so no
 template in this recipe contains that URL.
 
 =cut

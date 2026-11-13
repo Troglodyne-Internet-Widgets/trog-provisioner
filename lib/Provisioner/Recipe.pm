@@ -723,7 +723,7 @@ the cache.  It is slower than its neighbors, and it fails when the upstream
 fails.  C<t/recipes.t> checks the hosts that it can see.
 
 The test cannot see a host that a program reaches on its own.
-C<nvm install node> downloads from C<nodejs.org>, and no template names it.  So
+C<nvm install --lts> downloads from C<nodejs.org>, and no template names it.  So
 the test catches an omission that is written down, and the recipe must still
 account for the others.
 
