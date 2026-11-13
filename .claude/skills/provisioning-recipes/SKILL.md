@@ -205,10 +205,13 @@ output — you need it for everything after.
 **Give it a service user: `--user`.** Most recipes are written to run as one,
 and every real domain names one in its `_global`. The `service_user` target
 makes that account with the domain directory as its home -- which is where a
-checkout lands, and the `bin` tpsgi puts on its service's `PATH`. Leave it out
-and `user` falls back to the admin. The admin then runs the domain, and the
-domain directory is its home, with its dotfiles and its sudo. A recipe can then
-fail for reasons that have nothing to do with it. Any name will do; the account is `nologin` and goes with the guest.
+checkout lands, and the `bin` tpsgi puts on its service's `PATH`. Any name will
+do. The service account is `nologin`, and it goes with the guest.
+
+If you leave `--user` out, `user` falls back to the admin. The admin then runs
+the domain, and the domain directory is its home, with its dotfiles and its
+sudo. The admin account is not `nologin`. A recipe can then fail for reasons
+that have nothing to do with it.
 
 If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
