@@ -95,6 +95,13 @@ max_guests     = 20
 ; Without a partition it is refused, since reserve_memory already caps the host.
 ;max_memory     = 65536
 
+; The address at which a guest here reaches the fetch cache, when the ip pool
+; of this installation does not hold the cache.  A runner keeps a pool of its
+; own, so its block names the address of the cache that its guests can reach,
+; for example through the NAT of this hypervisor.  The cache of the _global of
+; recipes.yaml still decides whether a guest has a cache at all.
+;cache_ip       = 192.0.2.30
+
 [hv2]
 libvirt_uri    = qemu+ssh://root@hv2.example.net/system
 reserve_memory = 8192

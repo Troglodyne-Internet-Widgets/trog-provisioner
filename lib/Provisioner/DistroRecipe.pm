@@ -375,8 +375,14 @@ sub global_defaults {
 
 =head2 $address = $distro->cache_address(%opts)
 
-Takes C<cache>, C<domain> and C<ipmap>.  Returns the address of the fetch cache
-that this guest provisions through, or empty for none.
+Takes C<cache>, C<domain>, C<ipmap> and C<reached_at>.  Returns the address of
+the fetch cache that this guest provisions through, or empty for none.
+
+C<reached_at> is the address at which a guest of the hypervisor reaches the
+cache, from C<cache_ip> in its block of F<hypervisors.conf>, see
+L<Trog::HV/configured_cache_ip>.  When the guest has a cache, it wins, because
+the address that reaches the cache depends on where the guest is.  It names no
+cache by itself.
 
 An IPv4 address in C<cache> is returned as it is.  A domain name is resolved to
 its address from the ip pool.  Any other value dies, a URL too.  The guest writes
@@ -396,21 +402,24 @@ sub cache_address {
 
     my $domain = $opts{domain} // q{};
     my $cache  = $opts{cache}  // q{};
-    return $cache if Trog::Utils::is_ipv4($cache);
 
     my ( $kind, $value ) = Provisioner::Utils::fleet_address( $cache, domain => $domain, ipmap => $opts{ipmap} );
-    return q{}    if $kind eq 'none';
-    return $value if $kind eq 'address';
+    return q{} if $kind eq 'none';
 
     if ( $kind eq 'self' ) {
         print "$domain is the fetch cache, so it fetches from upstream rather than from itself.\n";
         return q{};
     }
 
+    return $opts{reached_at} if $opts{reached_at};
+    return $cache            if Trog::Utils::is_ipv4($cache);
+    return $value            if $kind eq 'address';
+
     die <<"NOPE";
 No address for '$cache', which $domain is configured to use as its fetch cache.
 A guest points the hosts it downloads from at the cache by address, so name it
-by a domain this installation assigns an address to, or by its IPv4 address.
+by a domain this installation assigns an address to, or by its IPv4 address, or
+give the block of its hypervisor in hypervisors.conf the cache_ip that reaches it.
 NOPE
 }
 

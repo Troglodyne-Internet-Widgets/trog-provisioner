@@ -177,6 +177,13 @@ provisioner.  To replace the authority, delete both files.  The next
 configuration makes a new one.  The cache and each guest use the new authority
 when they are next built.  A scratch configuration has its own authority.
 
+Only the installation that configures the cache needs the key.  Another
+installation whose guests provision through the same cache, such as a runner,
+needs only F<fetchcache-ca.crt>, copied from the first.  Its configuration
+reads the certificate with C<trusted_authority>, which never makes one.  A new
+authority there would not be the one that signed the certificate of the cache,
+and its guests would refuse the cache.
+
 =head2 What a guest has to trust
 
 A guest that provisions through the cache uses what the cache serves in place
@@ -549,6 +556,24 @@ sub authority {
     IO::Socket::SSL::Utils::KEY_free($key);
 
     return \%paths;
+}
+
+=head2 $path = Provisioner::Recipe::fetchcache->trusted_authority()
+
+Returns the path of F<fetchcache-ca.crt>, the certificate of the authority, which
+a guest that provisions through the cache trusts.  Unlike C<authority>, it
+never makes one, and it does not need the key.  Dies if the certificate is not
+there.
+
+=cut
+
+sub trusted_authority {
+    my ($class) = @_;
+    my $cert = Trog::Config->path('fetchcache-ca.crt');
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    return $cert if -f $cert;
+    die "There is no $cert, so a guest could not trust the fetch cache.\n" . "Configure the cache from this installation first, or copy fetchcache-ca.crt from\n" . "the installation that configures it.  Only the certificate: the key stays there.\n";
 }
 
 =head2 @written = $recipe->certify($output_dir, @hosts)

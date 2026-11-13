@@ -337,6 +337,26 @@ subtest 'the authority is made once, kept in the configuration directory, and it
     ## use critic
 };
 
+# Another installation whose guests use the cache, such as a runner, holds the
+# certificate and not the key.  authority() there makes a new pair over the
+# certificate, which did not sign the certificate of the cache.
+subtest 'trusted_authority reads the certificate alone, and makes nothing' => sub {
+    my $paths = $FETCHCACHE->authority();
+    my %held  = map { $_ => File::Slurper::read_text( $paths->{$_} ) } qw{cert key};
+
+    unlink $paths->{key} or die "unlink: $!";
+    is( $FETCHCACHE->trusted_authority(),           $paths->{cert}, 'with only the certificate there, it is the certificate' );
+    is( File::Slurper::read_text( $paths->{cert} ), $held{cert},    'the one that signed the cache, not a new one' );
+
+    unlink $paths->{cert} or die "unlink: $!";
+    my $error = exception { $FETCHCACHE->trusted_authority() };
+    like( $error, qr/There[ ]is[ ]no[ ]\S+fetchcache-ca\.crt/, 'with none, it dies' );
+    like( $error, qr/Only[ ]the[ ]certificate/,                'and says to copy the certificate only' );
+
+    File::Slurper::Temp::write_text( $paths->{$_}, $held{$_} ) for qw{cert key};
+    chmod oct('0600'), $paths->{key} or die "chmod: $!";
+};
+
 # The patterns are PCRE nginx evaluates; these ones read the same in perl, so what
 # each URL is taken for can be asked here rather than on a guest.
 subtest 'which kind each URL recipes fetch is taken for' => sub {

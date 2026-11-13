@@ -225,6 +225,20 @@ subtest 'the adapters of the guests of the runner reach its hypervisors.conf' =>
     like( exception { built( hypervisors => { hv1 => { %guests, gateway_virbr1 => 'gw.test.test' } } ) },      qr/gateway_virbr1/, 'and so is a gateway that is not an address' );
 };
 
+# The ip pool of the runner does not hold the cache of the fleet, so the block
+# says where its guests reach the cache, and the runner gets the certificate of
+# the authority of the cache, which its guests trust.
+subtest 'a block with a cache_ip gives the runner the address and the certificate of the cache' => sub {
+    my $authority = Provisioner::Cookbook->load('fetchcache')->authority();
+    my ($dir) = built( hypervisors => { hv1 => { %SESSION, cache_ip => '192.0.2.30' } } );
+
+    my $hv1 = Trog::Hypervisors->load("$dir/trogrunner.hypervisors.conf")->hypervisor('hv1');
+    is( $hv1->configured_cache_ip,                                     '192.0.2.30',                                   'read back as the runner reads it' );
+    is( slurp( $dir, 'trogrunner.fetchcache-ca.crt' ) =~ s/\n+\z/\n/r, File::Slurper::read_text( $authority->{cert} ), 'and the certificate of the authority of this installation' );
+
+    like( exception { built( hypervisors => { hv1 => { %SESSION, cache_ip => 'cache.test.test' } } ) }, qr/cache_ip/, 'a name, which a guest cannot write into /etc/hosts, is refused here, not on the runner' );
+};
+
 subtest 'a hypervisor we could not get a shell on is refused here, not on the guest' => sub {
 
     # Trog::HV's rule: a remote hypervisor whose transport gives no shell is
@@ -465,10 +479,11 @@ subtest 'the fragment seeds the configuration, and leaves what is there alone' =
     File::Slurper::Temp::write_text( "$bin/install", qq{#!/bin/sh\nwhile [ \$# -gt 2 ]; do case "\$1" in -o|-g|-m) shift 2;; *) shift;; esac; done\ncp "\$1" "\$2"\n} );
     chmod 0755, "$bin/install" or die "chmod: $!";
 
-    my ( $dir, $recipe, $vars ) = built( install_dir => $guest, store => 'secrets.kdbx' );
+    Provisioner::Cookbook->load('fetchcache')->authority();
+    my ( $dir, $recipe, $vars ) = built( install_dir => $guest, store => 'secrets.kdbx', hypervisors => { hv1 => { %SESSION, cache_ip => '192.0.2.30' } } );
     my $conf  = "$guest/$DOMAIN/etc/trog-provisioner";
     my @seeds = grep { m{\A\[[ ]-e[ ]'[^']*/etc/trog-provisioner/} } split m/\n/, $recipe->render(%$vars);
-    is( scalar @seeds, 4, 'four files are seeded: recipes.yaml, admin_authorized_keys, hypervisors.conf and the store' );
+    is( scalar @seeds, 5, 'five files are seeded: recipes.yaml, admin_authorized_keys, hypervisors.conf, the certificate of the cache and the store' );
 
     # From the directory of the payload, where the fragment runs.
     my $seed = sub {
@@ -481,17 +496,18 @@ subtest 'the fragment seeds the configuration, and leaves what is there alone' =
     File::Path::make_path($conf);
     File::Slurper::Temp::write_text( "$guest/$DOMAIN/secrets.kdbx", "bogus store\n" );
     my ( $rc, $said ) = $seed->();
-    is( $rc,                                                0,                                                            'an empty directory is seeded' ) or diag $said;
-    is( File::Slurper::read_text("$conf/recipes.yaml"),     File::Slurper::read_text("$dir/trogrunner.recipes.yaml"),     'with the rendered recipes.yaml' );
-    is( File::Slurper::read_text("$conf/hypervisors.conf"), File::Slurper::read_text("$dir/trogrunner.hypervisors.conf"), 'and hypervisors.conf' );
-    is( File::Slurper::read_text("$conf/secrets.kdbx"),     "bogus store\n",                                              'and the store of the domain' );
+    is( $rc,                                                 0,                                                             'an empty directory is seeded' ) or diag $said;
+    is( File::Slurper::read_text("$conf/recipes.yaml"),      File::Slurper::read_text("$dir/trogrunner.recipes.yaml"),      'with the rendered recipes.yaml' );
+    is( File::Slurper::read_text("$conf/hypervisors.conf"),  File::Slurper::read_text("$dir/trogrunner.hypervisors.conf"),  'and hypervisors.conf' );
+    is( File::Slurper::read_text("$conf/secrets.kdbx"),      "bogus store\n",                                               'and the store of the domain' );
+    is( File::Slurper::read_text("$conf/fetchcache-ca.crt"), File::Slurper::read_text("$dir/trogrunner.fetchcache-ca.crt"), 'and the certificate of the cache' );
 
-    File::Slurper::Temp::write_text( "$conf/$_", "the operator's $_\n" ) for qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx};
+    File::Slurper::Temp::write_text( "$conf/$_", "the operator's $_\n" ) for qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx fetchcache-ca.crt};
     ( $rc, $said ) = $seed->();
     is( $rc, 0, 'a directory that has the configuration is seeded too' ) or diag $said;
     is_deeply(
-        [ map { File::Slurper::read_text("$conf/$_") } qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx} ],
-        [ map { "the operator's $_\n" } qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx} ],
+        [ map { File::Slurper::read_text("$conf/$_") } qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx fetchcache-ca.crt} ],
+        [ map { "the operator's $_\n" } qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx fetchcache-ca.crt} ],
         'and keeps every file that it had'
     );
 };

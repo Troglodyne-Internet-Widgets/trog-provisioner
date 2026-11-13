@@ -179,13 +179,14 @@ configuration, which has an authority of its own; the skill says how.
 Provision through the fetch cache that the installation's guests use: the
 C<cache> in the C<_global> of its C<_base>.  The address of the cache, out of
 the installation's ip pool, goes into the scratch C<_base>'s C<_global>.  The
-authority of the cache, F<fetchcache-ca.crt> and F<fetchcache-ca.key>, is copied
-in, so that a scratch guest trusts the certificate of the cache.  The teardown
+certificate of the authority of the cache, F<fetchcache-ca.crt>, is copied in,
+so that a scratch guest trusts the certificate of the cache.  Its key stays in
+the installation, see C<trusted_authority> in L<Provisioner::Recipe::fetchcache>.  The teardown
 of the last scratch domain removes the copy with the directory.
 
 It asks the cache first, as a guest does, for C<fetchcache-status> under the
 name of a host that it caches.  If the installation names no cache, or the cache
-has no address or authority, or it does not answer, this dies with the reason
+has no address or certificate, or it does not answer, this dies with the reason
 and builds nothing.  Run it again without this option to build without a cache.
 
 Not with B<--cache>, which names a cache of this scratch configuration.
@@ -297,14 +298,14 @@ sub fleet_cache {
         Provisioner::IPPool::held_by($name);
     } or die "The fleet cache $name has no address in the ip pool of the installation.\n";
 
-    my %authority = map { $_ => "$source/fetchcache-ca.$_" } qw{crt key};
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether the authority exists is the question
-    -f $authority{$_} or die "The fleet cache has no $authority{$_}, so a guest could not trust it.\n" for sort keys %authority;
+    my $authority = "$source/fetchcache-ca.crt";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether the certificate exists is the question
+    -f $authority or die "The fleet cache has no $authority, so a guest could not trust it.\n";
 
-    my $answered = cache_answers( $address, $authority{crt}, Provisioner::Cookbook->fetch_hosts )
+    my $answered = cache_answers( $address, $authority, Provisioner::Cookbook->fetch_hosts )
       or die "The fleet cache $name at $address did not answer, so build without it.\n";
 
-    return { name => $name, address => $address, authority => \%authority, answered => $answered };
+    return { name => $name, address => $address, authority => $authority, answered => $answered };
 }
 
 # The first of @hosts that the cache at $address answers for, as
@@ -377,13 +378,11 @@ sub build {
     $global{cpan_notest} = 0            if $opts{cpan_tests};
     $global{cache}       = $opts{cache} if $opts{cache};
 
-    # The fleet's cache, by the address that fleet_cache found.  Its authority
-    # comes too, or
-    # Provisioner::Recipe::fetchcache->authority makes a new one here, and a
-    # guest then refuses the certificate of the cache.
+    # The fleet's cache, by the address that fleet_cache found, and the
+    # certificate that its guests trust.  Not the key, which can sign for any
+    # host: see trusted_authority in Provisioner::Recipe::fetchcache.
     if ( my $fleet = $opts{fleet} ) {
-        my %mode = ( crt => oct('0644'), key => oct('0600') );
-        Trog::Utils::write_binary_mode( "$dir/fetchcache-ca.$_", File::Slurper::read_binary( $fleet->{authority}{$_} ), $mode{$_} ) for sort keys %mode;
+        Trog::Utils::write_binary_mode( "$dir/fetchcache-ca.crt", File::Slurper::read_binary( $fleet->{authority} ), oct('0644') );
         $global{cache} = $fleet->{address};
     }
 

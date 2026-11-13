@@ -201,7 +201,6 @@ subtest 'CPAN suites and a fetch cache, when they are asked for' => sub {
 subtest 'the fleet cache, its address and its authority, only when it answers' => sub {
     my $source = installation( cache => '192.0.2.9' );
     File::Slurper::Temp::write_text( "$source/fetchcache-ca.crt", "the authority of the fleet\n" );
-    File::Slurper::Temp::write_text( "$source/fetchcache-ca.key", "the key of the fleet\n" );
 
     my @asked;
     my $answer = { success => 1, status => 200, content => "ok\n" };
@@ -214,9 +213,7 @@ subtest 'the fleet cache, its address and its authority, only when it answers' =
 
     my ( $recipes, $dir ) = scratch( source => $source, fleet => $fleet );
     is( $recipes->{_base}{_global}{cache},                  '192.0.2.9',                    'the guests provision through it, named by address' );
-    is( File::Slurper::read_text("$dir/fetchcache-ca.crt"), "the authority of the fleet\n", 'and trust its authority' );
-    is( File::Slurper::read_text("$dir/fetchcache-ca.key"), "the key of the fleet\n",       'whose key comes too' );
-    is( ( stat "$dir/fetchcache-ca.key" )[2] & oct 777,     oct 600,                        'readable by its owner alone' );
+    is( File::Slurper::read_text("$dir/fetchcache-ca.crt"), "the authority of the fleet\n", 'and trust its authority, from the certificate alone' );
 
     $answer = { success => 0, status => 599, content => "Could not connect to '192.0.2.9:443': Connection refused" };
     @asked  = ();
@@ -232,8 +229,8 @@ subtest 'the fleet cache, its address and its authority, only when it answers' =
         exception { Trog::Skill::ScratchConfig::fleet_cache( installation() ) },
         qr/names[ ]no[ ]cache/, 'an installation without a cache has none to give'
     );
-    unlink "$source/fetchcache-ca.key";
-    like( exception { Trog::Skill::ScratchConfig::fleet_cache($source) }, qr/fetchcache-ca\.key/, 'nor does one without the key of its authority' );
+    unlink "$source/fetchcache-ca.crt";
+    like( exception { Trog::Skill::ScratchConfig::fleet_cache($source) }, qr/fetchcache-ca\.crt/, 'nor does one without the certificate of its authority' );
 };
 
 # A kept hypervisor gets the temporary token that the operator gave, and the

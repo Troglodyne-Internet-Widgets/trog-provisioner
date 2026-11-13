@@ -101,7 +101,11 @@ path where it clones instead, and the dependencies still install.
 
 The recipe seeds F<recipes.yaml>, F<hypervisors.conf>,
 F<admin_authorized_keys> and, with C<store>, F<secrets.kdbx> in the
-configuration directory of the runner.  It writes each one only when the file
+configuration directory of the runner.  When a block of C<hypervisors> names a
+C<cache_ip>, it also seeds F<fetchcache-ca.crt>, the certificate of the
+authority of the fetch cache of this installation, and never its key.  So a
+runner whose configuration has the certificate keeps it when the authority is
+replaced, and its operator copies the new one in.  It writes each one only when the file
 is not there yet, and leaves a file that is there as it is.  After the first
 build, the configuration belongs to the operator, who edits it in place.
 
@@ -415,6 +419,11 @@ sub args {
                         partition  => { type => 'string' },
                         domain_dir => { type => 'string' },
 
+                        # Where a guest of this hypervisor reaches the fetch
+                        # cache, which the ip pool of the runner does not hold.
+                        # See configured_cache_ip in Trog::HV.
+                        cache_ip => { type => 'string', format => 'ipv4' },
+
                         # The adapters of a guest, and the pool and the
                         # gateway of each static one.  See ADAPTERS in
                         # Trog::HV::Libvirt.
@@ -622,6 +631,13 @@ sub enrich {
 
     warn "trogrunner: hypervisor_access is $opts{hypervisor_access}, and no hypervisor is named, so no hypervisor lets the runner in\n"
       if $opts{hypervisor_access} ne 'none' && !%{ $opts{hypervisors} };
+
+    # The guests of a block with a cache_ip trust the authority of the cache,
+    # so the runner gets its certificate, and only that.
+    $opts{cache_authority} =
+      ( any { $_->{cache_ip} } values %{ $opts{hypervisors} } )
+      ? File::Slurper::read_text( Provisioner::Cookbook->load('fetchcache')->trusted_authority() )
+      : q{};
 
     return %opts;
 }
@@ -930,6 +946,7 @@ sub template_files {
         'trogrunner.admin_authorized_keys.tt' => 'trogrunner.admin_authorized_keys',
         'trogrunner.recipes.yaml.tt'          => 'trogrunner.recipes.yaml',
         'trogrunner.hypervisors.conf.tt'      => 'trogrunner.hypervisors.conf',
+        'trogrunner.fetchcache-ca.crt.tt'     => 'trogrunner.fetchcache-ca.crt',
         'trogrunner.profile.tt'               => 'trogrunner.profile',
         'trogrunner.owner.sh.tt'              => 'trogrunner-owner.sh',
         'trogrunner.bwrap.apparmor.tt'        => 'trogrunner.bwrap.apparmor',

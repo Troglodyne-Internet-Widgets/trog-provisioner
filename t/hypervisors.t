@@ -929,6 +929,25 @@ CONF
     like exception { $fleet->hypervisor('typo')->configured_transfer_port }, qr/transfer_port[ ]for[ ]typo[ ]is[ ]'ssh'/, 'and a port that is not one is said, naming the block';
 };
 
+subtest 'any block can say where its guests reach the fetch cache' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[runner]
+libvirt_uri=qemu+ssh://runner@hv1.example.net/session
+cache_ip=192.0.2.30
+
+[typo]
+libvirt_uri=qemu+ssh://root@typo.example.net/system
+cache_ip=cache.test.test
+CONF
+
+    is $fleet->hypervisor('hv1')->configured_cache_ip,    undef,        'a block that does not say leaves it to the ip pool';
+    is $fleet->hypervisor('runner')->configured_cache_ip, '192.0.2.30', 'one that does, says the address';
+    like exception { $fleet->hypervisor('typo')->configured_cache_ip }, qr/cache_ip[ ]for[ ]typo[ ]is[ ]'cache\.test\.test'/, 'and a name, which a guest cannot write into /etc/hosts, is refused, naming the block';
+};
+
 subtest 'the documented example is a file that loads' => sub {
 
     # The shipped example, not a copy of it.  A configuration file people are

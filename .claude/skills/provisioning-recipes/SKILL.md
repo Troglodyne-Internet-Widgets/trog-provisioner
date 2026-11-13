@@ -80,9 +80,9 @@ prints why and builds nothing, and the second command builds without a cache.
 Capture the output before the `eval`, as above: `eval "$(command)"` returns 0
 when the command fails, so it cannot choose between the two.
 
-The option copies the authority of the cache, key included, into the scratch
-directory, because `fetchcache` makes a new authority wherever the key is
-missing.  The teardown of the last scratch domain removes the directory.  Do not
+The option copies the certificate of the authority of the cache into the
+scratch directory, and never its key, which can sign for any host.  The
+teardown of the last scratch domain removes the directory.  Do not
 use it when you test the `fetchcache` recipe itself: see *Through a fetch
 cache*.
 
