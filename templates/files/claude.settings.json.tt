@@ -14,9 +14,10 @@
     }[% UNLESS loop.last %],[% END %]
 [% END %]
   },
-[% IF ( github_user || pr_assignee ) && !restricted %]
   "env": {
-[% IF github_user %]
+[%# A guest is used over ssh, and has no clipboard for the copy of the
+    fullscreen interface, so the terminal keeps the mouse to select text. -%]
+    "CLAUDE_CODE_DISABLE_MOUSE": "1"[% IF github_user && !restricted %],
     "GH_CONFIG_DIR": "[% gh_config_dir %]",
     "GIT_AUTHOR_NAME": "[% github_user %]",
     "GIT_AUTHOR_EMAIL": "[% git_email %]",
@@ -24,13 +25,9 @@
     "GIT_COMMITTER_EMAIL": "[% git_email %]",
     "GIT_CONFIG_COUNT": "1",
     "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
-    "GIT_CONFIG_VALUE_0": "git@github.com:"[% IF pr_assignee %],[% END %]
-[% END %]
-[% IF pr_assignee %]
-    "PERL_SLOP_ASSIGNEE": "[% pr_assignee %]"
-[% END %]
+    "GIT_CONFIG_VALUE_0": "git@github.com:"[% END %][% IF pr_assignee && !restricted %],
+    "PERL_SLOP_ASSIGNEE": "[% pr_assignee %]"[% END %]
   },
-[% END %]
   "tui": "fullscreen",
   "theme": "dark"
 }

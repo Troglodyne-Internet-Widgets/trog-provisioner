@@ -433,10 +433,32 @@ subtest 'the settings make each command of the agent the bot' => sub {
 
     my ( $only, $reviewer ) = settings_with( pr_assignee => 'reviewer' );
     ok( $reviewer, 'a reviewer with no bot renders as valid JSON' ) or diag $only;
-    is_deeply( [ keys %{ $reviewer->{env} // {} } ], ['PERL_SLOP_ASSIGNEE'], 'and names only the reviewer' );
+    is_deeply( [ sort keys %{ $reviewer->{env} // {} } ], [qw{CLAUDE_CODE_DISABLE_MOUSE PERL_SLOP_ASSIGNEE}], 'and names only the reviewer' );
 
     my ( undef, $plain ) = settings_with();
-    ok( !exists $plain->{env}, 'a domain with neither gets no environment' );
+    is_deeply( $plain->{env}, { CLAUDE_CODE_DISABLE_MOUSE => '1' }, 'a domain with neither gets no environment of a bot' );
+};
+
+# The env block always renders, and each entry after the first brings its own
+# comma, so each combination of what goes in it is a JSON of its own.
+subtest 'every guest leaves the mouse to the terminal' => sub {
+    my %with = (
+        'neither a bot nor a reviewer' => {},
+        'a bot'                        => {%BOT},
+        'a reviewer'                   => { pr_assignee       => 'reviewer' },
+        'a bot and a reviewer'         => { %BOT, pr_assignee => 'reviewer' },
+    );
+    foreach my $what ( sort keys %with ) {
+        foreach my $file (qw{claude.settings.json claude.restricted.settings.json}) {
+            my $dir = tempdir( CLEANUP => 1 );
+            recipe()->generate_files( $dir, %G, modules => ['claude'], %{ $with{$what} }, restricted_user => 'test-agent' );
+            my $text = do { local ( @ARGV, $/ ) = "$dir/$file"; <> }
+              // q{};
+            my $conf = eval { Cpanel::JSON::XS::decode_json($text) };
+            ok( $conf, "$file with $what renders as valid JSON" ) or diag $text;
+            is( $conf->{env}{CLAUDE_CODE_DISABLE_MOUSE}, '1', 'and disables the mouse' );
+        }
+    }
 };
 
 subtest 'a restricted agent' => sub {
@@ -458,7 +480,7 @@ subtest 'a restricted agent' => sub {
     my $restricted = $conf{'claude.restricted.settings.json'};
     ok( $restricted, 'its settings render as valid JSON' ) or return;
     is_deeply( $restricted->{enabledPlugins}, $conf{'claude.settings.json'}{enabledPlugins}, 'with the plugins of the agent of the domain' );
-    ok( !exists $restricted->{env}, 'but none of the environment that makes that agent the bot' );
+    is_deeply( $restricted->{env},            { CLAUDE_CODE_DISABLE_MOUSE => '1' },          'but none of the environment that makes that agent the bot' );
 
     my $said    = recipe()->render( %G, restricted_user => 'test-agent' );
     my $home    = '/opt/domains/agent.test.test/agents/test-agent';
