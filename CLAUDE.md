@@ -110,29 +110,23 @@ fails, run that file yourself with `-v`, and read the output:
 
 Do the same to see a new test fail before you fix what it tests.
 
-In each working tree that you commit from, install both hooks once:
+Install the hooks once in each clone that you commit from.  A git worktree uses
+the hooks of its main checkout.
 
-    cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
+    cp git-hooks/pre-commit git-hooks/post-commit git-hooks/post-merge \
+       git-hooks/post-rewrite git-hooks/refresh-coverage .git/hooks/
 
-The post-commit hook updates the records of `tests-covering` in the
-background.
+The post-commit, post-merge and post-rewrite hooks run `refresh-coverage`.  It
+updates the records of `tests-covering` in the background after a commit, a
+pull, a merge or a rebase.
 
-A git worktree uses the hooks of the main checkout, but not its records.
-`tests-covering` keeps one file of records for each root, named by the SHA-1 of
-the root path, in `~/.cache/perl-tests-covering`.  A new worktree has no file,
-so its first commit runs every test under coverage before the hook can choose.
-Before the first commit in a new worktree, copy the records of the main
-checkout.  Run this from the worktree:
-
-    main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-    cache=~/.cache/perl-tests-covering
-    cp -p "$cache/$(printf %s "$main" | sha1sum | cut -c1-40).json.gz" \
-          "$cache/$(git rev-parse --show-toplevel | tr -d '\n' | sha1sum | cut -c1-40).json.gz"
-
-A record names files by their path in the root and their content, so the copy
-is correct in the worktree.  Only the tests that ran a file that differs
-between the two checkouts run again.  When the worktree is removed,
-`tests-covering` deletes its file.
+`tests-covering` keeps one file of records for each root, in
+`~/.cache/perl-tests-covering`.  A new worktree has no file.
+`tests-covering` 0.003 and later then reads the records of the main checkout,
+or of another worktree.  It does that until the first refresh writes a file for
+the new worktree.
+Only the tests that ran a file that differs between the two checkouts run
+again.  When the worktree is removed, `tests-covering` deletes its file.
 
 A file that no test loads, such as a template, gets its tests from
 `.tests-covering-map.pl`.  A path that the map cannot place runs every test.
