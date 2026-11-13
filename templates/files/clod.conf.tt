@@ -11,6 +11,7 @@
 [% END -%]
     workspace        => '[% home %]/workspace',
     minion           => 'sqlite:[% home %]/clod-state/minion.db',
+    evidence         => '[% home %]/clod-state/evidence',
     spokes           => [ [% FOR s IN spokes %]'[% s %]', [% END %]],
     spoke_orgs       => [ [% FOR o IN spoke_orgs %]'[% o %]', [% END %]],
     tool_spokes      => [ [% FOR s IN tool_spokes %]'[% s %]', [% END %]],

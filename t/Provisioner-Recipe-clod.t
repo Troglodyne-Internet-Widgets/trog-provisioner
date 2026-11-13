@@ -77,7 +77,8 @@ subtest 'clod.conf is perl that App::Clod reads' => sub {
 
     # The hash is what printf %s not-the-password | sha256sum prints.
     is_deeply( $conf->{auth}, { user => 'admin', password_sha256 => '77210af2f1758a49f5d167d60dd8404361f27d652d269625cc88309f2f0080b1' }, 'and basic authentication for the page, with the SHA-256 of the password' );
-    is( $conf->{minion}, 'sqlite:/bogus/bot.test.test/clod-state/minion.db', 'and the database where the salvage puts it back' );
+    is( $conf->{minion},   'sqlite:/bogus/bot.test.test/clod-state/minion.db', 'and the database where the salvage puts it back' );
+    is( $conf->{evidence}, '/bogus/bot.test.test/clod-state/evidence',         'and the evidence of failed jobs beside it' );
     unlike( File::Slurper::read_text("$dir/clod.conf"), qr/ghp_x|sk-x|not-the-password/, 'and no token, which goes in clod.env, and not the password itself' );
 };
 
@@ -170,11 +171,12 @@ subtest 'the daemon listens on the socket that nginx proxies to' => sub {
     like( $unit, qr{$listen$path$}m, 'the path is URL-encoded, with each % doubled for systemd' );
 };
 
-subtest 'the database comes back where clod.conf says it is' => sub {
+subtest 'the database and the evidence come back where clod.conf says they are' => sub {
     my %restores = recipe()->restores(%GLOBALS);
-    is_deeply( [ keys %restores ], ['/bogus/bot.test.test/clod-state/minion.db'], 'one restore, to the database' );
+    is_deeply( [ sort keys %restores ], [ '/bogus/bot.test.test/clod-state/evidence', '/bogus/bot.test.test/clod-state/minion.db' ], 'one restore to the database, and one to the evidence' );
     my ($salvaged) = values %{ { recipe()->remote_files( '/bogus', 'bot.test.test' ) } };
     is( $restores{'/bogus/bot.test.test/clod-state/minion.db'}{from}, "/bogus/bot.test.test/${salvaged}minion.db", 'from the salvage' );
+    is( $restores{'/bogus/bot.test.test/clod-state/evidence'}{from},  "/bogus/bot.test.test/${salvaged}evidence",  'both of them' );
 };
 
 # What cvtsudoers makes of a rendered sudoers file, rather than what the file
