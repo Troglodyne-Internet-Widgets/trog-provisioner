@@ -4,8 +4,7 @@ use warnings;
 use Test::More;
 use File::Temp();
 
-my $admin_user = '[% admin_user %]';
-my $home       = "/home/$admin_user";
+my $home = '[% admin_home %]';
 
 my $nav = `npm list -g perlnavigator-server 2>/dev/null`;
 like($nav, qr/perlnavigator-server/, 'perlnavigator-server installed globally via npm');
