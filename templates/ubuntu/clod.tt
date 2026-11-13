@@ -59,7 +59,10 @@ systemctl enable 'clod-[% domain %].service' 'clod-worker-[% domain %].service'
 
 # Fill the local lib, and then start the units, after the perl target has
 # installed what the checkout needs, so that clod deps can run.  restart, so
-# that a provision of a running guest loads the new checkout.
-install -o root -g root -m 0755 clod-deps.sh '[% install_dir %]/[% domain %]/clod-deps.sh'
-[% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/clod-deps.sh'
+# that a provision of a running guest loads the new checkout.  Then queue the
+# install of the system packages that the spokes need.  THE SYSTEM PACKAGES in
+# Provisioner::Recipe::clod says why.
+install -o root -g root -m 0755 clod-run.sh '[% install_dir %]/[% domain %]/clod-run.sh'
+[% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/clod-run.sh' deps install
 [% script_dir %]/queue_postrun_task systemctl restart 'clod-[% domain %].service' 'clod-worker-[% domain %].service'
+[% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/clod-run.sh' minion job -e packages_restore

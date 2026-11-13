@@ -243,12 +243,12 @@ subtest 'the local lib that the bot upgrades its modules in' => sub {
     File::Slurper::Temp::write_text( "$bin/runuser", qq{#!/bin/sh\nprintf '%s\\n' "\$@"\n} );
     chmod 0755, "$bin/runuser" or die "chmod: $!";
     local $ENV{PATH} = "$bin:$ENV{PATH}";
-    IPC::Run3::run3( [ '/bin/sh', "$dir/clod-deps.sh" ], \undef, \my $said, \my $err );
+    IPC::Run3::run3( [ '/bin/sh', "$dir/clod-run.sh", qw{deps install} ], \undef, \my $said, \my $err );
     is( $? >> 8, 0, 'the script runs' ) or diag $err;
     my @argv = split m/\n/, $said;
     is_deeply( [ @argv[ 0 .. 2 ] ], [qw{-u svc --}], 'as the service user, who owns the local lib' );
     ok( ( grep { $_ eq "PERL5LIB=$lib/lib/perl5" } @argv ), 'with the local lib first' );
-    is_deeply( [ @argv[ -3 .. -1 ] ], [ '/bogus/bot.test.test/App-Clod/script/clod', qw{deps install} ], 'and runs clod deps install' );
+    is_deeply( [ @argv[ -3 .. -1 ] ], [ '/bogus/bot.test.test/App-Clod/script/clod', qw{deps install} ], 'and runs the clod command of its arguments' );
 
     my $fragment = $r->render(%got);
     my $owner    = qr{-o[ ]'svc'[ ]-g[ ]'bogus'};
@@ -268,10 +268,13 @@ subtest 'the local lib that the bot upgrades its modules in' => sub {
         qr{^install[ ]-d[ ]-o[ ]'svc'[ ]-g[ ]'test-agent'$agent_lib}m,
         'and the postrun gives it to the group of the agent, which may then read it'
     );
-    my $share = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-share.sh'" );
-    my $deps  = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-deps.sh'" );
-    ok( $share >= 0 && $share < $deps,                                        'before it fills the agent lib' );
-    ok( $deps < index( $with_agent, 'queue_postrun_task systemctl restart' ), 'which it does before the units start' );
+    my $share   = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-share.sh'" );
+    my $deps    = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-run.sh' deps install" );
+    my $restart = index( $with_agent, 'queue_postrun_task systemctl restart' );
+    my $restore = index( $with_agent, "queue_postrun_task '/bogus/bot.test.test/clod-run.sh' minion job -e packages_restore" );
+    ok( $share >= 0 && $share < $deps, 'before it fills the agent lib' );
+    ok( $deps < $restart,              'which it does before the units start' );
+    ok( $restart < $restore,           'and once they run, it queues the install of the system packages that the guest lacks' );
 };
 
 subtest 'claude runs as the agent account' => sub {
