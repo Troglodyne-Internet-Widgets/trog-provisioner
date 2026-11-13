@@ -137,6 +137,45 @@ subtest 'the extra packages install at first boot, with the rest' => sub {
     ok( ( grep { $_ eq 'git' } fresh()->deps() ),                          'and with none, what the clone needs still is' );
 };
 
+# make runs the lines of the token, with a sudo that keeps what repos_for would
+# have got and exits as told.
+subtest 'the token reaches repos_for on stdin, and is gone afterwards whether repos_for succeeds or fails' => sub {
+    my $root = tempdir( CLEANUP => 1 );
+    File::Path::make_path("$root/code.test.test/src");
+
+    my $bin = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$bin/sudo", qq{#!/bin/sh\nprintf '%s\\n' "\$@" > '$root/argv'\ncat > '$root/stdin'\nexit "\$FAKE_STATUS"\n} );
+    chmod 0755, "$bin/sudo";
+
+    my %repo     = ( api_url => 'https://bogus.test.test/api', token => 'tok-bogus', repos_for => [qw{alice some-org}] );
+    my $fragment = fresh()->render( %COMMON, install_dir => $root, repos_from => [ \%repo ], modules => [qw{admincode}] );
+    my @lines    = grep { index( $_, '.repos_for.token' ) >= 0 } split /\n/, $fragment;
+    File::Slurper::Temp::write_text( "$root/Makefile", "all:\n" . join( q{}, map { "\t$_\n" } @lines ) );
+
+    my $token = "$root/code.test.test/.repos_for.token";
+    foreach my $status ( 0, 3 ) {
+        unlink "$root/argv", "$root/stdin";
+        local $ENV{PATH}        = "$bin:$ENV{PATH}";
+        local $ENV{FAKE_STATUS} = $status;
+        my $said;
+        IPC::Run3::run3( [ qw{make -s -C}, $root ], \undef, \$said, \$said );
+        my $made = $?;
+
+        is( !!$made, !!$status, "repos_for exiting $status: make " . ( $status ? 'fails' : 'succeeds' ) ) or diag $said;
+        ok( !-e $token, "repos_for exiting $status: the token file is gone" )                             or diag $fragment;
+
+        open( my $fh, '<', "$root/stdin" ) or BAIL_OUT("sudo was never run: $!");
+        my $got = do { local $/; <$fh> };
+        close($fh) or die "Cannot close what sudo read: $!";
+        is( $got, 'tok-bogus', "repos_for exiting $status: repos_for got the token on stdin" );
+    }
+
+    open( my $fh, '<', "$root/argv" ) or BAIL_OUT("sudo kept no arguments: $!");
+    chomp( my @argv = <$fh> );
+    close($fh)                                                                                                                           or die "Cannot close the arguments of sudo: $!";
+    is_deeply( [ @argv[ -3 .. -1 ] ], [qw{https://bogus.test.test/api alice some-org}], 'one run of repos_for asks about every entity' ) or diag explain \@argv;
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

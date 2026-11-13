@@ -237,28 +237,68 @@ subtest 'an entity the api has nothing for is still recorded as asked' => sub {
     is( scalar @{ $again->{asked} }, 0, 'and is not asked for a second time' );
 };
 
+# Each request Pithub would send, answered from a table keyed by its path, so
+# that what is asserted is the path Pithub builds and not the arguments it got.
+sub asking {
+    my (%answers) = @_;
+
+    my @paths;
+    my $mock = Test::MockModule->new('Pithub::Base');
+    $mock->redefine(
+        request => sub {
+            my ( $self, %args ) = @_;
+            push @paths, $args{path};
+            return bless { code => 404 }, 'FakeResult' unless $answers{ $args{path} };
+            return bless { %{ $answers{ $args{path} } } }, 'FakeResult';
+        }
+    );
+
+    return { mock => $mock, paths => \@paths };
+}
+
+subtest 'an organization is listed under /orgs, and a user under /users' => sub {
+    my $asked = asking(
+        '/users/some-org'      => { code => 200, content => { type => 'Organization' } },
+        '/orgs/some-org/repos' => { code => 200 },
+        '/users/alice'         => { code => 200, content => { type => 'User' } },
+        '/users/alice/repos'   => { code => 200 },
+    );
+    my $paths = $asked->{paths};
+
+    my @rows = eval { Trog::repogetter::repos_of(qw{https://api.test/ some-org sekrit}) };
+    is( scalar @rows, 1, 'the organization has its repositories' )                                     or diag $@;
+    is_deeply( $paths, [qw{/users/some-org /orgs/some-org/repos}], 'which are asked for under /orgs' ) or diag explain $paths;
+
+    @$paths = ();
+    @rows   = eval { Trog::repogetter::repos_of(qw{https://api.test/ alice sekrit}) };
+    is( scalar @rows, 1, 'the user has theirs' )                                                                                                                   or diag $@;
+    is_deeply( $paths, [qw{/users/alice /users/alice/repos}], 'which are asked for under /users, and never under /user, which belongs to whoever owns the token' ) or diag explain $paths;
+};
+
 subtest 'an api that refuses the token stops the run and names the status' => sub {
-    my $refusal = bless { code => 401 }, 'FakeResult';
-    my $mock    = Test::MockModule->new('Pithub::Repos');
-    $mock->redefine( list => sub { return $refusal } );
-
-    my $died = do {
-        local $@;
-        eval { Trog::repogetter::repos_of(qw{https://api.test/ gina sekrit}); 1 } ? q{} : $@;
+    my $refused = sub {
+        my (%answers) = @_;
+        my $asked     = asking(%answers);
+        my $died      = do {
+            local $@;
+            eval { Trog::repogetter::repos_of(qw{https://api.test/ gina sekrit}); 1 } ? q{} : $@;
+        };
+        return ( $died, $asked->{paths} );
     };
-    like( $died, qr{https://api\.test/ .* gina .* 401 [ ] Unauthorized}x, 'repos_of dies, naming the api, the entity and the status' );
 
-    $refusal->{code} = 200;
-    my @rows = Trog::repogetter::repos_of(qw{https://api.test/ gina sekrit});
-    is( scalar @rows, 1, 'and an answer that succeeds gives its rows' );
+    my ( $died, $paths ) = $refused->( '/users/gina' => { code => 401 } );
+    like( $died, qr{https://api\.test/ .* gina .* 401 [ ] Unauthorized}x, 'repos_of dies when asked who the entity is, naming the api, the entity and the status' ) or diag explain $paths;
+
+    ( $died, $paths ) = $refused->( '/users/gina' => { code => 200, content => { type => 'User' } }, '/users/gina/repos' => { code => 401 } );
+    like( $died, qr{would [ ] not [ ] list .* gina .* 401 [ ] Unauthorized}x, 'and when asked for the repositories' ) or diag explain $paths;
 };
 
 chdir $was or diag "Could not return to $was: $!";
 
 done_testing();
 
-# What Pithub::Repos::list gives back, as far as repos_of reads it: a status,
-# and one row when that status is a success.
+# What a Pithub request gives back, as far as repos_of reads it: a status, the
+# decoded body, and one row when that status is a success.
 package FakeResult;
 
 use HTTP::Response ();
@@ -271,6 +311,11 @@ sub success {
 sub response {
     my ($self) = @_;
     return HTTP::Response->new( $self->{code} );
+}
+
+sub content {
+    my ($self) = @_;
+    return $self->{content} // {};
 }
 
 sub auto_pagination { return 1 }

@@ -36,8 +36,11 @@ In recipes.yaml:
 
 Sets up the admin account of a domain for work at a shell.  It installs
 C<git> and the C<extra_pkgs>, and requires L<Provisioner::Recipe::github> for
-the GitHub CLI.  It clones every repository that each entity in C<repos_for>
-owns on the git server at C<api_url>.
+the GitHub CLI.  It clones the repositories of each entity in C<repos_for> on
+the git server at C<api_url>.  Of an organization, it clones every repository
+that the owner of C<token> can see.  Of a user, it clones the public
+repositories, whoever owns C<token>.  An entity that the server does not call
+an organization counts as a user.
 
 The clones go into C<basedir> under the directory of the domain.  If the admin
 user is not the service user, a link named C<basedir> in the home of the admin
