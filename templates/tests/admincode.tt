@@ -86,6 +86,15 @@ if (-f $repos_cache) {
 }
 [% END -%]
 
+# A file that root owns in a checkout is one the admin cannot write, and a
+# root-owned .git/index stops every commit.  The smoke of the perl recipe runs
+# after this target, in the postrun, and this test after that.
+{
+    my @strays = grep { length } split m/\n/, qx{find '$code' -user root -printf '%p\\n' 2>&1};
+    is(scalar @strays, 0, 'nothing in the checkouts belongs to root')
+        or diag join "\n", @strays[0 .. ($#strays < 19 ? $#strays : 19)];
+}
+
 [% FOR pkg IN extra_pkgs %]
 {
     my $installed = `dpkg -s [% pkg %] 2>/dev/null`;
