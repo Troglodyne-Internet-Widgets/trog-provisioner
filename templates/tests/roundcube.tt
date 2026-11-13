@@ -66,19 +66,19 @@ chomp $code;
 like($code, qr/^(?:200|30[0-9])$/, 'roundcube answers a request through nginx')
     or diag "HTTP $code from the webmail vhost";
 
-# What roundcube does at login: connect to the IMAP and SMTP host that
-# config.inc.php names, and wait for the greeting.  Behind a relay the public
-# name leads to the relay, which does not pass 143 or 587, so the connection
-# hangs until the relay gives up on the request.  The timeout makes that a
-# failure here rather than a hang.
+# What roundcube does at login, and when a user opens the filters: connect to
+# the IMAP, SMTP and ManageSieve host that config.inc.php names, and wait for
+# the greeting.  Behind a relay the public name leads to the relay, which does
+# not pass 143, 587 or 4190, so the connection hangs until the relay gives up on
+# the request.  The timeout makes that a failure here rather than a hang.
 use IO::Socket::INET;
-foreach my $svc ( [ imap => qr/^\* OK/ ], [ smtp => qr/^220[ -]/ ] ) {
+foreach my $svc ( [ imap => qr/^\* OK/ ], [ smtp => qr/^220[ -]/ ], [ managesieve => qr/^"IMPLEMENTATION"/ ] ) {
     my ( $name, $greeting ) = @$svc;
     my ($target) = $inc =~ m/\$config\['${name}_host'\]\s*=\s*'([^']+)'/;
     $target //= '';
     $target =~ s{^tls://}{};
     my ( $host, $port ) = split /:/, $target, 2;
-    ok( $host && $port, "config.inc.php names an $name host and port ($target)" ) or next;
+    ok( $host && $port, "config.inc.php names a host and port for $name ($target)" ) or next;
     like( $inc, qr/\Q${name}_conn_options\E/, "and the peer name for its certificate" );
     my $sock = IO::Socket::INET->new( PeerAddr => $host, PeerPort => $port, Timeout => 5 );
     ok( $sock, "$name host $host:$port accepts a connection within 5 seconds" ) or diag $@ || $!;
@@ -87,6 +87,15 @@ foreach my $svc ( [ imap => qr/^\* OK/ ], [ smtp => qr/^220[ -]/ ] ) {
     my $line = <$sock> // '';
     like( $line, $greeting, "and sends its $name greeting" ) or diag $line;
     close $sock;
+}
+
+# The filters of a user are the managesieve plugin, which the complete tarball
+# ships.  Roundcube loads a plugin that the configuration names, from a
+# directory of that name.
+{
+    my $plugins = `php -r 'include "[% install_dir %]/webmail.[% domain %]/config/config.inc.php"; print join("\\n", \$config["plugins"]);' 2>&1`;
+    like( $plugins, qr/^managesieve$/m, 'roundcube loads the managesieve plugin' ) or diag $plugins;
+    ok( -f '[% install_dir %]/webmail.[% domain %]/plugins/managesieve/managesieve.php', 'which is there to load' );
 }
 
 # restore_state removes the salvage after it puts it back.  So a salvage still in

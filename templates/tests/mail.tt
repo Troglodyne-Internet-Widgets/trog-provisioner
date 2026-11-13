@@ -483,6 +483,53 @@ subtest '465 is submission over TLS, which takes mail only after a login' => sub
     like( $replies[3], qr/^5\d\d /m,      'and refuses a message for this domain from a client with no login, which only 25 takes' ) or diag $replies[3];
 };
 
+subtest 'ManageSieve answers on loopback with STARTTLS, and on no other address' => sub {
+    require IO::Socket::IP;
+
+    my $sock = IO::Socket::IP->new( PeerHost => '127.0.0.1', PeerPort => 4190, Timeout => 5 );
+    ok( $sock, 'something answers on 127.0.0.1:4190' ) or return diag $@;
+    $sock->timeout(5);
+    my $greeting = q{};
+    while ( my $line = <$sock> ) {
+        $greeting .= $line;
+        last if $line =~ m/^(?:OK|NO|BYE)\b/;
+    }
+    close $sock;
+    like( $greeting, qr/^"IMPLEMENTATION" "Dovecot\b[^"]*\bPigeonhole"/m, 'and it is the ManageSieve of dovecot' ) or diag $greeting;
+    like( $greeting, qr/^"STARTTLS"/m,                              'which offers STARTTLS' ) or diag $greeting;
+
+    # Roundcube checks the certificate against mail.DOMAIN.
+    my $names = `openssl s_client -starttls sieve -connect 127.0.0.1:4190 -servername mail.[% domain %] </dev/null 2>/dev/null | openssl x509 -noout -ext subjectAltName 2>&1`;
+    like( $names, qr/DNS:mail[.]\Q[% domain %]\E\b/, 'and after STARTTLS shows a certificate that names mail.[% domain %]' ) or diag $names;
+
+    # Roundcube is the only client, and it is on this guest.
+    my @outside = `ip -o addr show scope global 2>/dev/null` =~ m{\binet6?\s+([0-9a-f.:]+)/}g;
+    ok( scalar @outside, 'the guest has addresses that are not loopback' );
+    foreach my $address (@outside) {
+        my $from_outside = IO::Socket::IP->new( PeerHost => $address, PeerPort => 4190, Timeout => 5 );
+        ok( !$from_outside, "and nothing answers on $address:4190" );
+    }
+};
+
+subtest 'the active sieve script of each account is in the storage of ManageSieve' => sub {
+    my $any;
+[% FOR name IN names.keys().sort() %]
+    {
+        my $home = '/mail/[% domain %]/[% name %]';
+        if ( -l "$home/.dovecot.sieve" ) {
+            $any = 1;
+
+            # A link to a script outside ~/sieve is a script that ManageSieve
+            # does not list, so the user could not see or change it.
+            like( readlink("$home/.dovecot.sieve"), qr{\A(?:\Q$home\E/)?sieve/[^/]+[.]sieve\z}, '[% name %]: ~/.dovecot.sieve links into ~/sieve' );
+            my $listed = `doveadm sieve list -u '[% name %]\@[% domain %]' 2>&1`;
+            like( $listed, qr/\bACTIVE\b/, 'and dovecot lists the script it names as the active one' ) or diag $listed;
+        }
+    }
+[% END %]
+    plan skip_all => 'no account has a sieve script' unless $any;
+};
+
 subtest 'a mail client finds its settings, as Outlook and Thunderbird ask for them' => sub {
     # The body and then the status, of one request to this guest by name.
     my $fetch = sub {

@@ -41,8 +41,11 @@ namespace inbox {
   }
 }
 
-# Sieve.  The spam filter runs before the sieve of each user.
+# Sieve.  The spam filter runs before the sieve of each user.  The scripts of a
+# user are in ~/sieve, where ManageSieve keeps them, and ~/.dovecot.sieve is a
+# link to the active one.
 plugin {
+  sieve = file:~/sieve;active=~/.dovecot.sieve
   sieve_before = /etc/dovecot/sieve/junk.sieve
 }
 protocol lda {
@@ -50,6 +53,15 @@ protocol lda {
 }
 protocol lmtp {
   mail_plugins = $mail_plugins sieve
+}
+
+# ManageSieve, with which Roundcube edits the scripts of a user.  On loopback
+# only, because Roundcube is on this guest and nothing outside needs it.
+service managesieve-login {
+  inet_listener sieve {
+    address = 127.0.0.1[% IF ipv6 %], ::1[% END %]
+    port = 4190
+  }
 }
 
 # SSL for the whole server
