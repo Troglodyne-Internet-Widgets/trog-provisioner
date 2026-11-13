@@ -98,6 +98,11 @@ Returns the repositories that C<$api_url> lists for C<$entity>, as the rows
 that Pithub gives back, from every page.  It is a named sub for the same reason
 as C<run>: a test replaces it and does not have to mock Pithub.
 
+It asks the API whether C<$entity> is an organization or a user.  Of an
+organization, it lists every repository that the owner of the token can see,
+private ones too if the owner is a member.  Of a user, it lists the public
+repositories, whoever owns the token.
+
 Dies, naming the status, if the API does not answer with success.  A refused
 token is the usual cause.
 
@@ -107,12 +112,18 @@ sub repos_of {
     my ( $api_url, $entity, $token ) = @_;
 
     my $ph = Pithub->new(
-        user    => $entity,
         api_uri => $api_url,
         token   => $token,
     );
 
-    my $result = $ph->repos->list();
+    my $who = $ph->users->get( user => $entity );
+    die "repos_for: $api_url would not say who $entity is: " . $who->response->status_line . "\n"
+      unless $who->success;
+
+    # Named in the call, because list() reads no user given to Pithub->new, and
+    # with no name it lists the repositories of the owner of the token.
+    my $owner  = ( $who->content->{type} // q{} ) eq 'Organization' ? 'org' : 'user';
+    my $result = $ph->repos->list( $owner => $entity );
 
     # Pithub hands back the error body of a refusal as a row, with no name.
     die "repos_for: $api_url would not list the repositories of $entity: " . $result->response->status_line . "\n"
