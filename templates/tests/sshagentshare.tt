@@ -30,11 +30,16 @@ foreach my $name (qw{a b}) {
 
 # A real interactive login bash, so the test goes through /etc/profile.  Only
 # the home and the agent come from the test.
-sub shell {
+sub login {
     my ( $sock, $command ) = @_;
     my $env = "HOME='$home' PATH=/usr/bin:/bin TERM=dumb";
     $env .= " SSH_AUTH_SOCK='$sock'" if defined $sock;
-    my $out = `env -i $env bash -lic '$command' </dev/null 2>/dev/null`;
+    return "env -i $env bash -lic '$command' </dev/null 2>/dev/null";
+}
+
+sub shell {
+    my $command = login(@_);
+    my $out     = `$command`;
     chomp $out;
     return $out;
 }
@@ -65,6 +70,86 @@ is( shell( $link, "kill $pid{c}; sleep 1; _sshagentshare_prompt; readlink ~/.ssh
 # The shells above were login shells, and each ran bash.bash_logout as it
 # exited.  None was a child of sshd, so none owned its agent, and each left it.
 ok( -l "$home/.ssh/agents/" . ( "$dir/a.sock" =~ tr{/}{%}r ), 'a login shell that sshd did not start keeps the agent at exit' );
+
+# A login through sshd that forwards an agent, and ends uncleanly.  The
+# incident: such a login took the link, then ended without its logout hook.
+# sshd removed the forwarded socket, and the entry stayed.  The only
+# interactive shell was busy in the foreground, so no prompt ran either, and a
+# bash -c under it found the link dead.
+#
+# A private sshd on the pipe of the client, so nothing listens, and nothing in
+# the real configuration of sshd or in any authorized_keys changes.
+my $me = getpwuid $<;
+foreach my $file (qw{key hostkey}) {
+    system( 'ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', "$dir/$file" ) == 0
+        or die "ssh-keygen $file: $?";
+}
+system( 'cp', "$dir/key.pub", "$dir/authorized_keys" ) == 0 or die "cp: $?";
+my $sshd = join ' ', '/usr/sbin/sshd -i -f /dev/null', "-h $dir/hostkey",
+    "-o AuthorizedKeysFile=$dir/authorized_keys",
+    map { "-o $_" } qw{StrictModes=no UsePAM=yes PermitRootLogin=prohibit-password AllowAgentForwarding=yes};
+
+my $fourth = `ssh-agent -a '$dir/d.sock'`;
+($pid{d}) = $fourth =~ m/SSH_AGENT_PID=(\d+)/;
+
+# The login bash writes its pid, and exec keeps it, so that the test kills the
+# login and nothing else.  exec also leaves sshd as the parent of the login
+# bash, which is how it knows the forwarded socket as its own.
+my $client = "exec env SSH_AUTH_SOCK='$dir/d.sock' ssh -F /dev/null -tt -A -i $dir/key"
+    . " -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no"
+    . " -o UserKnownHostsFile=/dev/null -o 'ProxyCommand=$sshd' $me\@test.test"
+    . " \"echo \\\$\\\$ >$dir/login.pid; exec env HOME=$home TERM=dumb bash -li\" >/dev/null 2>&1";
+my $ssh = open( my $stdin, '|-', $client ) or die "ssh: $!";
+
+my $forwarded = '';
+foreach ( 1 .. 20 ) {
+    $forwarded = readlink($link) // '';
+    last if $forwarded =~ m{^/tmp/ssh-};
+    select undef, undef, undef, 0.5;
+}
+like( $forwarded, qr{^/tmp/ssh-}, 'a login through sshd takes the link with its forwarded agent' );
+
+# Like claude in the foreground of the only interactive shell: it started while
+# the link was live, and it shows no prompt.
+system( 'mkfifo', "$dir/go" ) == 0 or die "mkfifo: $?";
+open( my $busy, '-|', login( $link, qq{read -r _ <$dir/go; bash -c "ssh-add -l 2>&1; echo exit=\\\$?"} ) )
+    or die "busy shell: $!";
+
+# A kill ends bash before it can read bash.bash_logout, as a hangup does.  A
+# kill of the client is not the same: on a scratch guest the logout hook ran.
+my $login = do { local ( @ARGV, $/ ) = "$dir/login.pid"; <> } // '';
+chomp $login;
+like( $login, qr/^\d+$/, 'the login bash said who it is' );
+kill 'KILL', $login if $login;
+
+# ssh-add -l exits 2 when it reaches no agent.  sshd can remove the forwarded
+# socket, as in the incident, or leave the file with nothing listening on it,
+# as it does here.  Either way nothing answers.
+my $answer;
+foreach ( 1 .. 20 ) {
+    system("SSH_AUTH_SOCK='$link' ssh-add -l >/dev/null 2>&1");
+    $answer = $? >> 8;
+    last if $answer == 2;
+    select undef, undef, undef, 0.5;
+}
+is( $answer, 2, 'when the login is killed, no agent answers on the link' );
+ok( -l "$home/.ssh/agents/" . ( $forwarded =~ tr{/}{%}r ), 'and the logout hook did not run' );
+
+# A fifo blocks until the other end opens, so a busy shell that never got as
+# far as its read would hang the build without the alarm.
+my $out = eval {
+    local $SIG{ALRM} = sub { die "the busy shell did not answer\n" };
+    alarm 60;
+    open( my $go, '>', "$dir/go" ) or die "$dir/go: $!";
+    print {$go} "\n";
+    close $go;
+    my $said = do { local $/; <$busy> };
+    alarm 0;
+    $said;
+} // $@;
+like( $out, qr/^exit=[01]$/m, 'a bash -c under a busy shell still reaches a live agent' ) or diag $out;
+kill 'TERM', $ssh;
+close $stdin;
 
 kill 'TERM', grep { defined } values %pid;
 

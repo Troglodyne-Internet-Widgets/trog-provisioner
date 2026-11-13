@@ -2,4 +2,7 @@
     this part stays POSIX, and loads the bash part only in interactive bash. -%]
 if [ -n "$BASH_VERSION" ] && [ -n "$PS1" ] && [ -r /etc/sshagentshare.bash ]; then
     . /etc/sshagentshare.bash
+    # A bash that shows no prompt reads BASH_ENV, and repairs the link there.
+    # A BASH_ENV that the user set already wins.
+    [ -n "$BASH_ENV" ] || export BASH_ENV=/etc/sshagentshare.bash
 fi

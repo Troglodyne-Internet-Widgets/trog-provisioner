@@ -1,5 +1,7 @@
 [%# /etc/profile.d/sshagentshare.sh sources this in every interactive login
-    bash.  tmux starts each pane as a login shell, so a pane gets it too.
+    bash.  tmux starts each pane as a login shell, so a pane gets it too.  That
+    file also names this one in BASH_ENV, so every non-interactive bash under
+    such a login reads it as well.
     perldoc Provisioner::Recipe::sshagentshare says what it does and why.
 
     Nothing here is interpolated.  No apostrophes in an Xslate comment. -%]
@@ -32,11 +34,13 @@ _sshagentshare_add() {
 }
 
 # Point the link at the newest live agent that is not $1, and forget the dead.
+# BASH_ENV runs this before a script, under any set -u that the script asks
+# for on its first line, so every variable here has a value.
 _sshagentshare_pick() {
-    local entry best
+    local entry best=
     for entry in "$_sshagentshare_dir"/*; do
         [[ -L $entry ]] || continue
-        [[ $(readlink "$entry") == "$1" ]] && continue
+        [[ $(readlink "$entry") == "${1-}" ]] && continue
         if ! _sshagentshare_live "$entry"; then
             rm -f "$entry"
             continue
@@ -44,14 +48,34 @@ _sshagentshare_pick() {
         [[ -z $best || $entry -nt $best ]] && best=$entry
     done
     [[ -n $best ]] && _sshagentshare_point "$(readlink "$best")"
+    return 0
 }
 
-# At each prompt.  Only a test and a comparison when nothing changed.
+# Whether something still listens where the link leads.  -S alone is true of a
+# socket file that sshd left behind after the login went away.  The kernel
+# lists each bound unix socket by its path in /proc/net/unix.  read is a
+# builtin, so this costs one readlink, and no round trip to an agent that may
+# be forwarded from across the network, as ssh-add -l would.  When the list
+# cannot be read, the -S has to do.
+_sshagentshare_listening() {
+    [[ -S $_sshagentshare_link ]] || return 1
+    local target sockets=
+    target=$(readlink "$_sshagentshare_link")
+    read -r -d '' sockets </proc/net/unix 2>/dev/null
+    [[ -z $sockets || $sockets == *" $target"$'\n'* ]]
+}
+
+# Move the link when its agent has gone.
+_sshagentshare_repair() {
+    _sshagentshare_listening || _sshagentshare_pick
+}
+
+# At each prompt.
 _sshagentshare_prompt() {
     if [[ -n $SSH_AUTH_SOCK && $SSH_AUTH_SOCK != "$_sshagentshare_link" ]]; then
         _sshagentshare_live "$SSH_AUTH_SOCK" && _sshagentshare_add "$SSH_AUTH_SOCK"
     fi
-    [[ -S $_sshagentshare_link ]] || _sshagentshare_pick
+    _sshagentshare_repair
     [[ -S $_sshagentshare_link ]] && export SSH_AUTH_SOCK="$_sshagentshare_link"
     return 0
 }
@@ -66,6 +90,18 @@ _sshagentshare_logout() {
         _sshagentshare_pick "$_sshagentshare_own"
     return 0
 }
+
+# A non-interactive bash, through BASH_ENV: a bash -c or a script under an
+# interactive login, such as a tool of a program in its foreground.  No prompt
+# runs there, and the login that the link leads to can end with a hangup that
+# skips the logout hook, so nothing else would move a dead link.  This shell
+# only repairs the link.  It does not add its own agent, because a bash -c of
+# ssh host cmd has an agent that goes away with the command.  The || : keeps a
+# set -e of the script from ending it when the repair fails.
+if [[ $- != *i* ]]; then
+    [[ ${SSH_AUTH_SOCK-} == "$_sshagentshare_link" ]] && { _sshagentshare_repair || :; }
+    return 0
+fi
 
 # The socket that sshd made for this login, which goes away with it.  A tmux
 # pane has the same SSH_AUTH_SOCK, but its parent is tmux, and its exit must not
