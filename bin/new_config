@@ -1862,8 +1862,10 @@ sub salvage_path (%args) {
     # The highest directory that the fetch makes, because get_dir makes the
     # destination and its parents before it asks the guest for anything.
     my $made;
-    for ( my $at = $args{destination}; !-e $at; $at = File::Basename::dirname($at) ) {
+    my $at = $args{destination};
+    while ( !-e $at ) {
         $made = $at;
+        $at   = File::Basename::dirname($at);
     }
 
     # The result is ignored, because the destination tells more, and part of
