@@ -133,7 +133,9 @@ InfluxDB duration.  See L</The details expire first>.
 =item * C<detail_fields>: the fields that the processor moves to
 C<logs_detail>.  The default is every attribute that C<OTEL_LOG_USER_PROMPTS>
 and C<OTEL_LOG_TOOL_DETAILS> add to an event of Claude Code that can carry
-free text.
+free text, and the attributes that name the account of Claude Code, which
+every event carries.  So after C<detail_retention>, an event no longer says
+whose run it was.
 
 =item * C<copied_fields>: the fields that the processor copies to
 C<logs_detail> as well, so that a detail can be joined to its event.
@@ -167,7 +169,7 @@ sub args {
             detail_fields => {
                 type        => 'array',
                 items       => $field,
-                default     => [qw{prompt prompt_text response tool_parameters tool_input error}],
+                default     => [qw{prompt prompt_text response tool_parameters tool_input error user.email user.id user.account_uuid user.account_id organization.id}],
                 description => 'Fields moved out of each logs point into a logs_detail point that expires after detail_retention.',
             },
             copied_fields => {

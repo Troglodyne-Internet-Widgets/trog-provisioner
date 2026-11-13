@@ -72,7 +72,7 @@ subtest 'an event is opened up, and loses its details to a point of their own' =
     print {$events} $line->(
         1700000000000000000,
         'event.name' => 'tool_result', 'tool_name' => 'Bash', 'session.id' => 's1', 'tool_use_id' => 't1', 'clod.job_id' => '7', 'clod.task' => 'spoke_fix',
-        'duration_ms' => 12, 'tool_input' => '{"command":"bin/preflight"}', 'tool_parameters' => { full_command => 'bin/preflight' },
+        'duration_ms' => 12, 'tool_input' => '{"command":"bin/preflight"}', 'tool_parameters' => { full_command => 'bin/preflight' }, 'user.email' => 'someone@test.test',
     );
     print {$events} $line->( 1700000000000000001, 'event.name' => 'api_request', 'session.id' => 's1', 'cost_usd' => 0.5 );
     close $events;
@@ -94,13 +94,14 @@ CONF
     like( $call, qr/clod\.task=spoke_fix[, ]/, 'and the task of its job as a tag' );
     like( $call, qr/clod\.job_id="7"/,          'with each other attribute a field of its own' );
     like( $call, qr/duration_ms=12i?\b/,        'numbers as numbers' );
-    unlike( $call, qr/attributes=|tool_input=|tool_parameters=/, 'and no JSON left, and none of its details' );
+    unlike( $call, qr/attributes=|tool_input=|tool_parameters=|user\.email=/, 'and no JSON left, none of its details, and not whose run it was' );
     ok( $cost, 'an event with no details is opened up too' ) or diag $out;
 
     ok( $detail, 'the details went to logs_detail' ) or do { diag $out; return };
     like( $detail, qr/influxdb_retention_policy=details/,  'which the output sends to the details policy' );
     like( $detail, qr/tool_input="\{\\"command\\":\\"bin\/preflight\\"\}"/, 'with the input of the call as it came' );
     like( $detail, qr/tool_parameters="\{\\"full_command\\":\\"bin\/preflight\\"\}"/, 'and a detail that came as an object, as JSON' );
+    like( $detail, qr/user\.email="someone\@test\.test"/, 'and the account, which expires with them' );
     like( $detail, qr/session\.id="s1"/,  'and what joins it to its event' );
     like( $detail, qr/tool_use_id="t1"/,  'down to the call' );
 };
