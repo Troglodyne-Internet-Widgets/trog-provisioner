@@ -44,6 +44,8 @@ sub installation {
     my (%extra) = @_;
 
     my $source = tempdir( CLEANUP => 1 );
+    my $fleet  = delete $extra{fleet};
+    File::Slurper::Temp::write_text( "$source/hypervisors.conf", $fleet ) if defined $fleet;
     File::Slurper::Temp::write_binary(
         "$source/recipes.yaml",
         YAML::XS::Dump(
@@ -179,27 +181,32 @@ subtest 'the mirror is carried over, being the one thing that is not a credentia
     ok( !exists $bare->{_base}{_global}{mirror}, 'and none conjured when there is none to take' );
 };
 
+# The cache of a guest is the cache of the block of its hypervisor, so a
+# scratch configuration sets the blocks that it copies.
 subtest 'CPAN suites and a fetch cache, when they are asked for' => sub {
-    my ($recipes) = scratch();
-    ok( !exists $recipes->{_base}{_global}{cpan_notest}, 'suites skipped by default, as on a real guest' );
-    ok( !exists $recipes->{_base}{_global}{cache},       'and nothing provisions through a cache unasked' );
+    my $source = installation( fleet => "[hv1]\nlibvirt_uri = qemu:///system\ncache = fleet-cache.test\n\n[hv2]\nlibvirt_uri = qemu+ssh://root\@hv2.test.test/system\n" );
+    my $caches = sub { return { Trog::Hypervisors::Config->load("$_[0]/hypervisors.conf")->caches } };
 
-    ($recipes) = scratch( cpan_tests => 1 );
+    my ( $recipes, $dir ) = scratch( source => $source );
+    ok( !exists $recipes->{_base}{_global}{cpan_notest}, 'suites skipped by default, as on a real guest' );
+    is_deeply( $caches->($dir), {}, 'and nothing provisions through a cache unasked, whatever the installation names' );
+
+    ($recipes) = scratch( source => $source, cpan_tests => 1 );
     is( $recipes->{_base}{_global}{cpan_notest}, 0, '--cpan-tests turns the suites on' );
 
-    ($recipes) = scratch( cache => 'fetchcache.test' );
-    is( $recipes->{_base}{_global}{cache}, 'fetchcache.test', 'and --cache names it in _base, for every guest' );
+    ( $recipes, $dir ) = scratch( source => $source, cache => 'fetchcache.test', cpan_tests => 1 );
+    is_deeply( $caches->($dir), { hv1 => 'fetchcache.test', hv2 => 'fetchcache.test' }, '--cache names it in every block, for every guest' );
+    is( $recipes->{_base}{_global}{cpan_notest}, 0, 'and the suites come too' );
 
-    ($recipes) = scratch( cache => 'fetchcache.test', cpan_tests => 1 );
-    is( $recipes->{_base}{_global}{cache},       'fetchcache.test', 'both together: the cache' );
-    is( $recipes->{_base}{_global}{cpan_notest}, 0,                 'and the suites' );
+    like( exception { scratch( cache => 'fetchcache.test' ) }, qr/has[ ]none[ ]to[ ]copy/, 'with no hypervisors.conf to copy, a cache cannot be named' );
 };
 
 # The fleet's cache, as a guest of the installation would use it.  The cache is
 # answered by a mock: what is under test is what the configuration does with
 # the answer, not the network.
 subtest 'the fleet cache, its address and its authority, only when it answers' => sub {
-    my $source = installation( cache => '192.0.2.9' );
+    my $hv     = "libvirt_uri = qemu:///system\n";
+    my $source = installation( fleet => "[hv1]\n${hv}cache = 192.0.2.9\n\n[hv2]\n$hv" );
     File::Slurper::Temp::write_text( "$source/fetchcache-ca.crt", "the authority of the fleet\n" );
 
     my @asked;
@@ -211,8 +218,8 @@ subtest 'the fleet cache, its address and its authority, only when it answers' =
     is( $fleet->{address}, '192.0.2.9', 'the address of the cache is the one the installation gives it' );
     like( $asked[0], qr{\Ahttps://[^/]+/fetchcache-status[ ]via[ ]192\.0\.2\.9\z}, 'and it was asked as a guest asks it, at that address' );
 
-    my ( $recipes, $dir ) = scratch( source => $source, fleet => $fleet );
-    is( $recipes->{_base}{_global}{cache},                  '192.0.2.9',                    'the guests provision through it, named by address' );
+    my ( undef, $dir ) = scratch( source => $source, fleet => $fleet );
+    is_deeply( { Trog::Hypervisors::Config->load("$dir/hypervisors.conf")->caches }, { hv1 => '192.0.2.9', hv2 => '192.0.2.9' }, 'the guests of every block provision through it, named by address' );
     is( File::Slurper::read_text("$dir/fetchcache-ca.crt"), "the authority of the fleet\n", 'and trust its authority, from the certificate alone' );
 
     $answer = { success => 0, status => 599, content => "Could not connect to '192.0.2.9:443': Connection refused" };
@@ -226,8 +233,12 @@ subtest 'the fleet cache, its address and its authority, only when it answers' =
     ok( @asked > 1, 'a host that the cache does not hold a certificate for is passed over for the next' );
 
     like(
-        exception { Trog::Skill::ScratchConfig::fleet_cache( installation() ) },
-        qr/names[ ]no[ ]cache/, 'an installation without a cache has none to give'
+        exception { Trog::Skill::ScratchConfig::fleet_cache( installation( fleet => "[hv1]\n$hv" ) ) },
+        qr/names[ ]a[ ]cache/, 'an installation without a cache has none to give'
+    );
+    like(
+        exception { Trog::Skill::ScratchConfig::fleet_cache( installation( fleet => "[hv1]\n${hv}cache = 192.0.2.9\n\n[hv2]\n${hv}cache = 192.0.2.10\n" ) ) },
+        qr/more[ ]than[ ]one[ ]cache/, 'and one whose blocks name two caches has no one to give'
     );
     unlink "$source/fetchcache-ca.crt";
     like( exception { Trog::Skill::ScratchConfig::fleet_cache($source) }, qr/fetchcache-ca\.crt/, 'nor does one without the certificate of its authority' );

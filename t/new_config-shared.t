@@ -147,18 +147,26 @@ subtest 'a generation replaces the guest tests of the last one' => sub {
 
 # An installation whose guests provision through the cache of another, as a
 # runner does, holds the certificate of the authority of the cache and not the
-# key, and names the cache by address, which its own pool does not hold.
-subtest 'a guest trusts the certificate that the installation holds, which needs no key' => sub {
+# key.  The block of its hypervisor names the cache by address, which its own
+# pool does not hold.
+subtest 'a guest uses the cache of its hypervisor, and trusts it with no key here' => sub {
     my $cert = "$ENV{TROG_PROVISIONER_CONFIG}/fetchcache-ca.crt";
     File::Slurper::Temp::write_text( $cert, "the certificate of the authority of the fleet\n" );
     my $fetches = Test::MockModule->new('Provisioner::Recipe::nosnap');
     $fetches->redefine( fetch_hosts => sub { return ('www.cpan.org') } );
 
-    my ( $err, $domains ) = generate( global => { cache => '192.0.2.30' } );
+    $hv_network->redefine( configured_cache => sub { return '192.0.2.30' } );
+
+    my ( $err, $domains ) = generate();
+    $hv_network->unmock('configured_cache');
     is( $err, undef, 'the generation runs' ) or diag $err;
-    like( File::Slurper::read_text("$domains/$HOST/Makefile"), qr{fetch_via_cache[ ]on[ ]192\.0\.2\.30[ ]}, 'and points the guest at the cache' );
+    like( File::Slurper::read_text("$domains/$HOST/Makefile"), qr{fetch_via_cache[ ]on[ ]192\.0\.2\.30[ ]}, 'and points the guest at the cache of its hypervisor' );
+
+    ( $err, undef ) = generate( global => { cache => '192.0.2.30' } );
+    like( $err // q{}, qr{/cache:[ ]_global[ ]no[ ]longer}, 'a cache in _global is refused' );
+    like( $err // q{}, qr{hypervisors[.]conf},              'and the message says where it went' );
     is( eval { File::Slurper::read_text("$domains/$HOST/fetchcache-ca.crt") } // q{}, "the certificate of the authority of the fleet\n", 'and the guest trusts the authority of the fleet, not a new one' );
-    is( File::Slurper::read_text($cert),                                              "the certificate of the authority of the fleet\n", 'which is still the one the installation holds' );
+    is( File::Slurper::read_text($cert), "the certificate of the authority of the fleet\n", 'which is still the one the installation holds' );
 
     unlink $cert or die "unlink: $!";
 };

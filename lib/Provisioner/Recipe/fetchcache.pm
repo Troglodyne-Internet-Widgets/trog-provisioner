@@ -33,11 +33,14 @@ while they provision, so an upstream outage does not fail a build.
     fetchcache.test:
         fetchcache: {}
 
-Then point the fleet at it:
+Then point the guests of each hypervisor that reaches it at it, in its block of
+F<hypervisors.conf>:
 
-    _base:
-        _global:
-            cache: fetchcache.test
+    [hv1]
+    libvirt_uri = qemu+ssh://root@hv1.test/system
+    cache       = fetchcache.test
+
+See L<Trog::HV/configured_cache>.
 
 =head1 DESCRIPTION
 
@@ -232,7 +235,8 @@ over ssh to C<github.com>.
     _base:
         _global:
             mirror: mirrors.test
-            cache:  mirrors.test
+
+and C<cache = mirrors.test> in the blocks of F<hypervisors.conf>.
 
 =head2 Seeing what it did
 

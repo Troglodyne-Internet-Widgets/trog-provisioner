@@ -262,10 +262,6 @@ are these:
 distribution.  The default is empty, which means no mirror.  See C<mirror_uri>
 in L<Provisioner::Recipe::ubuntu>.
 
-=item * C<cache>: a fetch cache that guests provision through.  The default is
-empty, which means that every download goes to the upstream host.  See
-C<cache_address> and L<Provisioner::Recipe::fetchcache>.
-
 =item * C<mirror_insecure>: whether apt can install from a repository that it
 cannot verify.  This field has no default, because the answer depends on
 C<mirror>.  C<enrich> in the distribution subclass sets it on when a mirror is
@@ -296,13 +292,6 @@ sub args {
                 'x-weak'    => 1,
                 description =>
                   'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
-            },
-            cache => {
-                type        => 'string',
-                default     => q{},
-                'x-weak'    => 1,
-                description =>
-                  'A fetch cache for guests to provision through: a guest built by the fetchcache recipe, named by its domain -- resolved out of the ip pool -- or by its IPv4 address.  Empty, the default, means none, and every download goes straight upstream.  For the length of a build, each host its recipes name in fetch_hosts is pointed at the cache, and only if the cache answers for that host when the build starts, so a cache that is down costs a build nothing.',
             },
             mirror_insecure => {
                 type        => 'boolean',
@@ -378,6 +367,12 @@ sub global_defaults {
 Takes C<cache>, C<domain> and C<ipmap>.  Returns the address of the fetch cache
 that this guest provisions through, or empty for none.
 
+C<cache> is the cache of the hypervisor of the guest, see
+L<Trog::HV/configured_cache>.  For the length of a build, the guest points each
+host that its recipes name in C<fetch_hosts> at the cache, and only if the
+cache answers for that host when the build starts.  So a cache that is down
+costs a build nothing.
+
 An IPv4 address in C<cache> is returned as it is.  A domain name is resolved to
 its address from the ip pool.  Any other value dies, a URL too.  The guest writes
 this value into F</etc/hosts> for the hosts that it downloads from, so it must be
@@ -408,9 +403,10 @@ sub cache_address {
     }
 
     die <<"NOPE";
-No address for '$cache', which $domain is configured to use as its fetch cache.
+No address for '$cache', which the hypervisor of $domain names as its fetch cache.
 A guest points the hosts it downloads from at the cache by address, so name it
-by a domain this installation assigns an address to, or by its IPv4 address.
+in the block of the hypervisor in hypervisors.conf by a domain this
+installation assigns an address to, or by its IPv4 address.
 NOPE
 }
 

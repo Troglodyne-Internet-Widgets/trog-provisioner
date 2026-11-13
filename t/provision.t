@@ -1336,10 +1336,10 @@ sub upstream_fixture {
         $file,
         YAML::XS::Dump(
             {
-                _base        => { _global      => { cache => 'cache.test' } },
-                'cache.test' => { fetchcache   => {} },
-                'logs.test'  => { logcollector => {} },
-                'web.test'   => { logshipper   => { host => 'logs.test' } },
+                _base         => { _global      => { mirror => 'mirror.test' } },
+                'mirror.test' => { aptmirror    => {} },
+                'logs.test'   => { logcollector => {} },
+                'web.test'    => { logshipper   => { host => 'logs.test' } },
                 %extra,
             }
         )
@@ -1363,60 +1363,60 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     };
 
     is( $run->(qw{--hypervisor hv1 --salvage-gaps-ok --salvage-from /bogus/old --existing 192.0.2.5 web.test}), undef, 'it runs to the end' );
-    is_deeply( [ map { $_->{domain} } @built ],     [qw{cache.test logs.test web.test}], 'the cache, the collector that needs it, and then the domain' );
-    is_deeply( [ map { $_->{hypervisor} } @built ], [qw{hv1 hv1 hv1}],                   'each on the hypervisor this run was told to use' );
-    is_deeply( [ map { $_->{recipes} } @built ],    [ ($recipes) x 3 ],                  'from the same configuration' );
+    is_deeply( [ map { $_->{domain} } @built ],     [qw{mirror.test logs.test web.test}], 'the mirror, the collector that needs it, and then the domain' );
+    is_deeply( [ map { $_->{hypervisor} } @built ], [qw{hv1 hv1 hv1}],                    'each on the hypervisor this run was told to use' );
+    is_deeply( [ map { $_->{recipes} } @built ],    [ ($recipes) x 3 ],                   'from the same configuration' );
     ok( !$built[0]{salvage_gaps_ok} && !$built[0]{reuse} && !$built[0]{salvage_from}, '--salvage-gaps-ok, --salvage-from and --existing are not for an upstream guest' );
     is_deeply( [ @{ $built[-1] }{qw{salvage_gaps_ok salvage_from reuse}} ], [ 1, '/bogus/old', '192.0.2.5' ], 'but for the domain asked for' );
 
     my $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
-    like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/, 'it says which setting makes a guest needed' );
-    like( $said, qr/logs[.]test[ ]names[ ]cache[.]test[ ]in[ ]_global[.]cache/, 'for the guests needed in turn too' );
-    my $weak = 'in _global.cache, so it is built after that guest when it can be';
+    like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/,   'it says which setting makes a guest needed' );
+    like( $said, qr/logs[.]test[ ]names[ ]mirror[.]test[ ]in[ ]_global[.]mirror/, 'for the guests needed in turn too' );
+    my $weak = 'in _global.mirror, so it is built after that guest when it can be';
     like( $said, qr/\Q$weak\E/, 'and that it can build without a guest that a weak setting names' );
 
-    %up = ( 'cache.test' => 'hv9' );
+    %up = ( 'mirror.test' => 'hv9' );
     $run->('web.test');
     is_deeply( [ map { $_->{domain} } @built ], [qw{logs.test web.test}], 'a guest that is up is left alone, wherever it is' );
 
-    %up   = ( 'cache.test' => 'hv9', 'logs.test' => 'hv8' );
+    %up   = ( 'mirror.test' => 'hv9', 'logs.test' => 'hv8' );
     $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
-    my @lines = grep { m/cache[.]test|logs[.]test/ } split( m/\n/, $said );
+    my @lines = grep { m/mirror[.]test|logs[.]test/ } split( m/\n/, $said );
     is( scalar @lines, 1, 'the guests that are left up are said in one line, without the settings that name them' ) or diag $said;
-    like( $lines[0] // q{}, qr/cache[.]test[ ]on[ ]hv9,[ ]logs[.]test[ ]on[ ]hv8/, 'with the hypervisor of each' );
-    %up = ( 'cache.test' => 'hv9' );
+    like( $lines[0] // q{}, qr/mirror[.]test[ ]on[ ]hv9,[ ]logs[.]test[ ]on[ ]hv8/, 'with the hypervisor of each' );
+    %up = ( 'mirror.test' => 'hv9' );
 
     $run->(qw{--rebuild-upstream-guests web.test});
-    is_deeply( [ map { $_->{domain} } @built ], [qw{cache.test logs.test web.test}], 'and --rebuild-upstream-guests rebuilds it' );
+    is_deeply( [ map { $_->{domain} } @built ], [qw{mirror.test logs.test web.test}], 'and --rebuild-upstream-guests rebuilds it' );
     %up = ();
 
-    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); die "makefile failed\n" if $args{domain} eq 'cache.test'; return 0 } );
+    $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); die "makefile failed\n" if $args{domain} eq 'mirror.test'; return 0 } );
     my $failed = $run->('web.test') // q{};
-    like( $failed, qr/The[ ]build[ ]of[ ]cache[.]test,/,        'a failed upstream stops the run' );
+    like( $failed, qr/The[ ]build[ ]of[ ]mirror[.]test,/,       'a failed upstream stops the run' );
     like( $failed, qr/which[ ]web[.]test[ ]needs[ ]up[ ]first/, 'saying which domain needed it' );
     like( $failed, qr/makefile[ ]failed/,                       'and why it failed' );
     is( scalar @built, 1, 'before the next one' );
 
-    # The cache ships its logs to the collector, which downloads through the
-    # cache.  Both settings are weak, so neither guest waits for the other.
+    # The mirror ships its logs to the collector, which downloads through the
+    # mirror.  Both settings are weak, so neither guest waits for the other.
     $bin->redefine( build_guest => sub { my %args = @_; push( @built, \%args ); return 0 } );
-    $recipes = upstream_fixture( 'cache.test' => { fetchcache => {}, logshipper => { host => 'logs.test' } } );
+    $recipes = upstream_fixture( 'mirror.test' => { aptmirror => {}, logshipper => { host => 'logs.test' } } );
     is( $run->('web.test'), undef, 'two guests that need each other only through weak settings are built' );
-    is_deeply( [ map { $_->{domain} } @built ], [qw{cache.test logs.test web.test}], 'the cache first, then the collector, then the domain' );
+    is_deeply( [ map { $_->{domain} } @built ], [qw{mirror.test logs.test web.test}], 'the mirror first, then the collector, then the domain' );
 
     # A setting that no schema marks is strong.
     $recipes = upstream_fixture(
-        'cache.test' => { fetchcache   => {}, _global => { api => 'https://logs.test/v1' } },
-        'logs.test'  => { logcollector => {}, _global => { api => 'https://cache.test/v1' } },
+        'mirror.test' => { aptmirror    => {}, _global => { api => 'https://logs.test/v1' } },
+        'logs.test'   => { logcollector => {}, _global => { api => 'https://mirror.test/v1' } },
     );
-    like( $run->('web.test'), qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'two guests that need each other through strong settings are refused, naming the setting' );
+    like( $run->('web.test'), qr/mirror[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'two guests that need each other through strong settings are refused, naming the setting' );
     is_deeply( \@built, [], 'before anything is built' );
 
-    %up = ( 'cache.test' => 'hv9' );
+    %up = ( 'mirror.test' => 'hv9' );
     like( $run->('web.test'), qr/cannot[ ]be[ ]built/, 'and so is a cycle with a guest that is not up' );
     is_deeply( \@built, [], 'still before anything is built' );
 
-    %up = ( 'cache.test' => 'hv9', 'logs.test' => 'hv9' );
+    %up = ( 'mirror.test' => 'hv9', 'logs.test' => 'hv9' );
     like( $run->('web.test'), qr/no[ ]terminal/, 'a cycle of guests that are up stops the run with nobody to ask' );
     is_deeply( \@built, [], 'before anything is built' );
 
@@ -1437,8 +1437,8 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
         undef,
         'and yes goes on'
     );
-    like( $said, qr/cache[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'after it names the cycle' );
-    like( $said, qr/none[ ]of[ ]them[ ]can[ ]be[ ]rebuilt/,                   'and what it stops' );
+    like( $said, qr/mirror[.]test[ ]names[ ]logs[.]test[ ]in[ ]_global[.]api/, 'after it names the cycle' );
+    like( $said, qr/none[ ]of[ ]them[ ]can[ ]be[ ]rebuilt/,                    'and what it stops' );
     is_deeply( [ map { $_->{domain} } @built ], ['web.test'], 'building only the domain, and leaving both guests of the cycle alone' );
 
     like( $run->(qw{--rebuild-upstream-guests web.test}), qr/cannot[ ]be[ ]built/, 'but --rebuild-upstream-guests, which would rebuild them, is refused' );
@@ -1455,12 +1455,12 @@ subtest 'guest_is_up asks the whole fleet, whatever --hypervisor names' => sub {
     use warnings;
 
     $exists = 1;
-    is( Trog::Bin::Provisioner::guest_is_up( 'cache.test', hypervisor => 'hv1', hvconf => '/bogus/hypervisors.conf' ), 'hv2', 'the hypervisor that has it' );
+    is( Trog::Bin::Provisioner::guest_is_up( 'mirror.test', hypervisor => 'hv1', hvconf => '/bogus/hypervisors.conf' ), 'hv2', 'the hypervisor that has it' );
     ok( !exists $asked{hypervisor}, 'asking the fleet, and not only the hypervisor a missing guest goes to' );
     is( $asked{hvconf}, '/bogus/hypervisors.conf', 'the fleet of this run' );
 
     $exists = 0;
-    is( Trog::Bin::Provisioner::guest_is_up('cache.test'), undef, 'and nothing when none has it' );
+    is( Trog::Bin::Provisioner::guest_is_up('mirror.test'), undef, 'and nothing when none has it' );
 };
 
 subtest 'a failed build offers to go back to its snapshot' => sub {

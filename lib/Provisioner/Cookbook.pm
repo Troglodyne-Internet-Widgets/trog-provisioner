@@ -1611,7 +1611,7 @@ sub direct_upstream_domains {
 
 Each place in the configuration of C<$domain> that names the guest of another
 domain of C<$conf>, as a hash reference: C<domain> is the guest that is named,
-C<setting> is the path of the setting, such as C<_global.cache> or
+C<setting> is the path of the setting, such as C<_global.mirror> or
 C<logshipper.host>, and C<by> is the domain whose configuration holds it.
 C<$conf> is as in C<domain_config>.
 
@@ -1836,6 +1836,9 @@ sub global_schema {
     );
 }
 
+# Keys of _global that a release took away, each with where the setting is now.
+my %RETIRED = ( cache => 'the cache in the block of the hypervisor in hypervisors.conf, see configured_cache in Trog::HV' );
+
 # The keys a _global may set, and the readOnly keys that nothing lets it set,
 # each as a set.
 my sub global_keys ($class) {
@@ -1860,8 +1863,9 @@ in one place: before this, F<bin/new_config> hand-wrote six of them and nothing
 else checked at all.
 
 A key that C<declared_globals> does not list is wrong too.  Either nothing
-reads it, or the build works it out and would disagree with it.  The refusal
-says which.
+reads it, or the build works it out and would disagree with it, or a release
+moved the setting somewhere else, as it moved C<cache> to the block of the
+hypervisor.  The refusal says which, and where a moved setting went.
 
 =cut
 
@@ -1902,7 +1906,12 @@ sub validated_globals {
 
     my ( $settable, $computed ) = global_keys($class);
     foreach my $key ( grep { !$settable->{$_} } sort keys %$said ) {
-        push( @errors, $computed->{$key} ? "/$key: The build works this out, so _global cannot set it." : "/$key: Nothing declares this setting, so nothing reads it." );
+        push(
+            @errors,
+            $RETIRED{$key}      ? "/$key: _global no longer takes this.  It is now $RETIRED{$key}."
+            : $computed->{$key} ? "/$key: The build works this out, so _global cannot set it."
+            :                     "/$key: Nothing declares this setting, so nothing reads it."
+        );
     }
 
     die "The settings of this installation are not valid" . $where . ":\n" . join( "\n", map { "  $_" } @errors ) . "\nThey are the _global of _base in recipes.yaml, and a domain overrides one in its own _global.\n"
