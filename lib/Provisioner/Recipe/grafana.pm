@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Trog::Patterns();
+
 =head1 NAME
 
 Provisioner::Recipe::grafana - dashboards, and the metrics store behind them.
@@ -153,6 +155,16 @@ duration.  The setup script creates the database with this retention.  Telegraf
 creates a missing database with no expiry, and a syslog firehose with no expiry
 fills the disk.
 
+=item * C<retention_policies> -- more retention policies in the database, as a
+map from the name of each to an InfluxDB duration.  The setup script creates
+each one, and sets its duration on a database that has it already.  A telegraf
+fragment sends a point to one of them with the tag
+C<influxdb_retention_policy>, which the output of this recipe reads and does
+not store.  A point without the tag goes to the default policy, which keeps it
+for C<retention>.  L<Provisioner::Recipe::grafanaotel> asks for one, to keep
+the details of the events of claude for less time than the events.  Empty by
+default.
+
 =item * C<home_dashboard> -- the file in F</var/lib/grafana/dashboards> that
 grafana shows after a login.  No default.  Without it, the home page lists only
 starred and recently viewed dashboards.  A provisioned dashboard is neither on a
@@ -168,8 +180,8 @@ one dashboard can be the home page.
 
 =cut
 
-# An interval as Grafana takes it, such as 30s or 7d.
-my $INTERVAL = qr/\A [[:digit:]]+ [smhdw] \z/;
+# The name of a retention policy, which the setup script writes unquoted.
+my $POLICY_NAME = qr/\A [[:lower:]] [[:lower:][:digit:]_]* \z/;
 
 # The name of a JSON file, with no directory.
 my $JSON_FILE = qr/\A [^\/]+ [.] json \z/;
@@ -208,9 +220,16 @@ sub args {
             },
             retention => {
                 type        => 'string',
-                pattern     => "$INTERVAL",
+                pattern     => "$Trog::Patterns::INFLUX_DURATION",
                 default     => '90d',
                 description => 'How long measurements are kept, as an InfluxDB duration such as 90d.',
+            },
+            retention_policies => {
+                type                 => 'object',
+                default              => {},
+                propertyNames        => { pattern => "$POLICY_NAME" },
+                additionalProperties => { type    => 'string', pattern => "$Trog::Patterns::INFLUX_DURATION" },
+                description          => 'More retention policies, name to InfluxDB duration, that a telegraf fragment sends a point to with the tag influxdb_retention_policy.',
             },
             home_dashboard => {
                 type        => 'string',

@@ -37,6 +37,9 @@ install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% d
 visudo -cf clod.sudoers
 install -m 0440 -o root -g root clod.sudoers '/etc/sudoers.d/clod-[% user %]'
 install -d -o '[% user %]' -g www-data -m 2750 '[% install_dir %]/[% domain %]/run'
+[% IF telemetry_target -%]
+install -o root -g root -m 0644 clod_telemetry_ufw.conf /etc/ufw/applications.d/clodtelemetry
+[% END -%]
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/App-Clod'
 chown '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/.gitconfig'
 

@@ -41,3 +41,14 @@ curl -fsS -XPOST "$influx/query" \
     --data-urlencode "q=ALTER RETENTION POLICY autogen ON \"$db\" DURATION $retention" >/dev/null
 
 echo "grafana: $db keeps measurements for $retention."
+
+# InfluxDB answers 200 with the error in its body, so curl -f does not catch a
+# CREATE of a policy that exists.  The ALTER after it sets the duration either
+# way, on a fresh guest and on a rebuilt one.
+[% FOR name IN retention_policies.keys().sort() -%]
+curl -fsS -XPOST "$influx/query" \
+    --data-urlencode "q=CREATE RETENTION POLICY \"[% name %]\" ON \"$db\" DURATION [% retention_policies[name] %] REPLICATION 1" >/dev/null
+curl -fsS -XPOST "$influx/query" \
+    --data-urlencode "q=ALTER RETENTION POLICY \"[% name %]\" ON \"$db\" DURATION [% retention_policies[name] %]" >/dev/null
+echo "grafana: the policy [% name %] of $db keeps measurements for [% retention_policies[name] %]."
+[% END -%]

@@ -11,3 +11,8 @@
 [%# grafana_influx_setup.sh creates the database with a retention.  A database
     that telegraf creates never expires anything. -%]
   skip_database_creation = true
+[%# A fragment sends a point to another retention policy of the database by
+    tagging it.  The tag says where the point goes, so it is not stored.
+    Provisioner::Recipe::grafana has the account, under retention_policies. -%]
+  retention_policy_tag = "influxdb_retention_policy"
+  exclude_retention_policy_tag = true
