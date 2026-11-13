@@ -1,0 +1,20 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+plan skip_all => 'rsyslog is not installed' unless -e '/usr/lib/tmpfiles.d/00rsyslog.conf';
+
+# What the postinst of systemd runs on each upgrade of systemd: var.conf by
+# name, without 00rsyslog.conf.  Provisioner::Recipe::ubuntu has the account.
+system( 'systemd-tmpfiles', '--create', 'var.conf' );
+is( $?, 0, 'systemd-tmpfiles applies var.conf by name, as an upgrade of systemd does' );
+
+my $file = '/var/log/.provisioner-syslog-test';
+unlink $file;
+system( 'runuser', '-u', 'syslog', '--', 'touch', $file );
+ok( -e $file, 'and then syslog, the user that rsyslog runs as, can still make a log in /var/log' )
+    or diag `stat -c '%U:%G %a' /var/log`;
+unlink $file;
+
+done_testing();

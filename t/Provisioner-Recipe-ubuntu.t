@@ -374,6 +374,9 @@ CONF
                 # before it installs anything: it was the only defer: false entry.
             ],
 
+            # The override of var.conf.  The subtest of /var/log below runs it.
+            bootcmd => [ ignore() ],
+
             # The newline in the middle of the first of these is as it has always
             # been, and is why runcmd is built as a list rather than written out
             # in the template: a YAML sequence item cannot carry one inline.
@@ -802,7 +805,7 @@ subtest 'the vendor archives and their answers are there before the packages' =>
     ok( !exists $written{'/etc/apt/keyrings/vendor.asc'}{encoding}, 'and a text one says nothing' );
 
     is( $user_data->{apt}{debconf_selections}{provisioner}, join( q{}, map { "$_\n" } @answers ), 'the answers go to apt once each, one per line, colon and all' );
-    ok( !exists $user_data->{bootcmd}, 'and with no cache, nothing runs at boot' );
+    is( scalar @{ $user_data->{bootcmd} // [] },            1,                                    'and with no cache, only the override of var.conf runs at boot' );
 };
 
 subtest 'first boot installs through the fetch cache' => sub {
@@ -811,14 +814,49 @@ subtest 'first boot installs through the fetch cache' => sub {
     my ( $dir, undef ) = generated( fetch_cache => { address => '192.0.2.50', authority => $cert, hosts => [qw{apt.one.test apt.two.test}], script => $script } );
     my $user_data = loaded( $dir, 'user-data' );
 
-    is( scalar @{ $user_data->{bootcmd} // [] }, 1, 'one command at boot, which runs before the packages install' );
-    my $cmd = $user_data->{bootcmd}[0] // q{};
+    is( scalar @{ $user_data->{bootcmd} // [] }, 2, 'one command at boot after the override of var.conf, which runs before the packages install' );
+    my $cmd = $user_data->{bootcmd}[1] // q{};
 
     my @lines = split m/\n/, $cmd;
     is( $lines[0], "if [ ! -e /etc/provisioner/state/$DOMAIN/state ]; then", 'only until the makefile of the domain has begun, so a reboot leaves the hosts alone' );
     like( $cmd, qr{<<'TROG_FETCH_VIA_CACHE'\n\Q$script\ETROG_FETCH_VIA_CACHE\n}, 'the script, whole, in a heredoc that the shell does not expand' );
     like( $cmd, qr{<<'TROG_FETCHCACHE_CA'\n\Q$cert\E\nTROG_FETCHCACHE_CA\n},     'the authority, with the newline that a heredoc needs' );
     is( $lines[-2], 'bash /run/trog-fetch_via_cache on 192.0.2.50 /run/trog-fetchcache-ca.crt apt.one.test apt.two.test', 'and it runs, for every host' );
+};
+
+# The first command at boot runs here in sh, as cloud-init runs it, with two
+# directories of the test in place of /usr/lib/tmpfiles.d and /etc/tmpfiles.d.
+subtest 'first boot gives /var/log the mode of rsyslog in an override of var.conf' => sub {
+    my ( $dir, undef ) = generated();
+    my $cmd  = loaded( $dir, 'user-data' )->{bootcmd}[0] // q{};
+    my $root = tempdir( CLEANUP => 1 );
+    mkdir "$root/$_" for qw{lib etc};
+
+    my $run = sub {
+        my $script = $cmd =~ s{/usr/lib/tmpfiles[.]d}{$root/lib}gr =~ s{/etc/tmpfiles[.]d}{$root/etc}gr;
+        IPC::Run3::run3( [ 'sh', '-c', $script ], \undef, \my $out, \my $err );
+        return ( $? >> 8, $err );
+    };
+
+    my $var = "Q /var 0755 - - -\nd /var/log 0755 - - -\nf /var/log/wtmp 0664 root utmp -\n";
+    File::Slurper::Temp::write_text( "$root/lib/var.conf", $var );
+
+    my ( $status, $err ) = $run->();
+    is( $status, 0, 'without rsyslog, it succeeds' ) or diag $err;
+    ok( !-e "$root/etc/var.conf", 'and writes no override, so var.conf of systemd stands' );
+
+    File::Slurper::Temp::write_text( "$root/lib/00rsyslog.conf", "z /var/log 0775 root syslog -\nz /var/log/syslog 0640 syslog adm -\n" );
+    ( $status, $err ) = $run->();
+    is( $status, 0, 'with rsyslog, it succeeds' ) or diag $err;
+    is(
+        eval { File::Slurper::read_text("$root/etc/var.conf") } // q{},
+        "Q /var 0755 - - -\nd /var/log 0775 root syslog -\nf /var/log/wtmp 0664 root utmp -\n",
+        'and the override is var.conf with the line of /var/log from rsyslog, and every other line as it was'
+    );
+
+    File::Slurper::Temp::write_text( "$root/lib/var.conf", $var =~ s{^Q[ ]/var[ ]0755}{Q /var 0750}mr );
+    $run->();
+    like( eval { File::Slurper::read_text("$root/etc/var.conf") } // q{}, qr{^Q[ ]/var[ ]0750[ ]}m, 'a boot after systemd changes var.conf makes the override again from the new one' );
 };
 
 Test::NoWarnings::had_no_warnings();

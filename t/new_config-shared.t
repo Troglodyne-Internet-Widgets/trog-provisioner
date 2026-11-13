@@ -141,6 +141,7 @@ subtest 'a generation replaces the guest tests of the last one' => sub {
 
     ok( !-e $stale,                     'the test of a recipe no longer on the domain is gone' );
     ok( -f "$domains/$HOST/t/nosnap.t", 'and the test of one still on it is there' );
+    ok( -f "$domains/$HOST/t/ubuntu.t", 'and so is the test of the distro recipe, which is not one of its modules' );
 };
 
 subtest 'two domains on one guest generate when the recipe can be shared' => sub {

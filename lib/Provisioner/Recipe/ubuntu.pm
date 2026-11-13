@@ -276,6 +276,10 @@ in SQLite, through the C<DBI> of the system perl, and C<sqlite3> reads it.
 
 sub deps { return qw{openssl openssh-server openssh-client rsync retry sendmail sqlite3 libdbd-sqlite3-perl} }
 
+sub tests {
+    return qw{ubuntu.tt};
+}
+
 =head1 METHODS
 
 =head2 BLOCK_SCALAR_INDENT
@@ -379,7 +383,17 @@ plus what the makefile needs.  atd starts the makefile, make runs it, and bash
 is the shell for recipe lines.  Something must also accept mail, so it adds
 sendmail, unless the packages have postfix, which conflicts with it.
 
-C<bootcmd>, with a C<fetch_cache>, points the hosts of the cache at it before
+C<bootcmd> first runs F<files/ubuntu.var-log.sh.tt>.  It writes
+F</etc/tmpfiles.d/var.conf>, which systemd-tmpfiles reads in place of the
+F<var.conf> of systemd, with the line of F</var/log> from the F<00rsyslog.conf>
+of rsyslog.  The postinst of systemd applies F<var.conf> by name and without
+F<00rsyslog.conf>.  Without the copy, each upgrade of systemd makes F</var/log>
+0755 until the next boot, and rsyslog, which runs as the user syslog, cannot
+make its logs there.  This is Ubuntu bug 1748147.  The copy is made again at
+every boot from the F<var.conf> that is installed, so it follows that file.  A
+guest without rsyslog gets no copy.
+
+C<bootcmd>, with a C<fetch_cache>, also points the hosts of the cache at it before
 cloud-init installs the packages.  It writes F<scripts/fetch_via_cache> and the
 certificate of the authority under F</run>, and runs the script, so first boot
 and the makefile decide in one way which hosts go to the cache.  The
@@ -492,24 +506,23 @@ sub enrich {
     ];
     $opts{answers} = [ $packager->answers( @{ Provisioner::Utils::coerce_arrayref( $opts{package_answers} ) } ) ];
 
-    $opts{bootcmd} = [];
+    $opts{bootcmd} = [ $self->render_raw( "files/$sub.var-log.sh.tt", %opts ) ];
     if ( my $cache = $opts{fetch_cache} ) {
         my $script = $cache->{script}    =~ s/\n?\z/\n/r;
         my $cert   = $cache->{authority} =~ s/\n?\z/\n/r;
-        $opts{bootcmd} = [
-            join(
-                q{},
-                "if [ ! -e /etc/provisioner/state/$opts{domain}/state ]; then\n",
-                "cat > /run/trog-fetch_via_cache <<'TROG_FETCH_VIA_CACHE'\n",
-                $script,
-                "TROG_FETCH_VIA_CACHE\n",
-                "cat > /run/trog-fetchcache-ca.crt <<'TROG_FETCHCACHE_CA'\n",
-                $cert,
-                "TROG_FETCHCACHE_CA\n",
-                "bash /run/trog-fetch_via_cache on $cache->{address} /run/trog-fetchcache-ca.crt @{ $cache->{hosts} }\n",
-                "fi\n",
-            )
-        ];
+        push @{ $opts{bootcmd} },
+          join(
+            q{},
+            "if [ ! -e /etc/provisioner/state/$opts{domain}/state ]; then\n",
+            "cat > /run/trog-fetch_via_cache <<'TROG_FETCH_VIA_CACHE'\n",
+            $script,
+            "TROG_FETCH_VIA_CACHE\n",
+            "cat > /run/trog-fetchcache-ca.crt <<'TROG_FETCHCACHE_CA'\n",
+            $cert,
+            "TROG_FETCHCACHE_CA\n",
+            "bash /run/trog-fetch_via_cache on $cache->{address} /run/trog-fetchcache-ca.crt @{ $cache->{hosts} }\n",
+            "fi\n",
+          );
     }
 
     # A list, not two lines of the template, because the first item has a

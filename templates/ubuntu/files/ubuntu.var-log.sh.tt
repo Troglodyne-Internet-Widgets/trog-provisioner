@@ -1,0 +1,12 @@
+[%# Run by cloud-init in bootcmd, at every boot and before the packages install.
+    Writes /etc/tmpfiles.d/var.conf, the copy of var.conf of systemd that
+    systemd-tmpfiles reads in its place, with /var/log as rsyslog has it.  The
+    enrich of Provisioner::Recipe::ubuntu has the whole account. -%]
+lib=/usr/lib/tmpfiles.d
+etc=/etc/tmpfiles.d
+if [ -e "$lib/00rsyslog.conf" ] && [ -e "$lib/var.conf" ]; then
+    set -- $(awk '$1 == "z" && $2 == "/var/log" { print $3, $4, $5 }' "$lib/00rsyslog.conf")
+    if [ $# -eq 3 ]; then
+        awk -v mode="$1" -v user="$2" -v group="$3" '$1 == "d" && $2 == "/var/log" { $3 = mode; $4 = user; $5 = group } { print }' "$lib/var.conf" > "$etc/var.conf.new" && mv "$etc/var.conf.new" "$etc/var.conf"
+    fi
+fi

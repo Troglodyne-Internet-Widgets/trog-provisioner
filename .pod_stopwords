@@ -549,3 +549,5 @@ RDATA
 transcodes
 virtiofsd
 libvirtd
+postinst
+tmpfiles
