@@ -57,9 +57,10 @@ ok(!has_content('[% install_dir %]/[% domain %]/deluged/state')
     || has_content('/var/lib/deluged/config/state'),
     'nothing was salvaged and left unrestored beside an empty state directory');
 
-# One mode per type, not u=rwX.  The data target lands a salvage 0750, and X
-# keeps that execute bit.  So a rebuild brings the state back executable, and a
-# first build does not show it.
+# One mode per type, not u=rwX.  The data target gives a file 0640 now, but a
+# salvage from a guest that was built before that is 0750 on every file, and X
+# keeps that execute bit.  So such a rebuild brings the state back executable,
+# and a first build does not show it.
 #
 # Ask the files for the bits that they must not have, not for one exact mode.
 # deluged writes torrents.state itself after the fragment runs chmod, under its

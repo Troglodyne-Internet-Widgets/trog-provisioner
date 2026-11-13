@@ -549,6 +549,37 @@ subtest 'only data sets the owner of the domain directory' => sub {
       or diag explain \%chowners;
 };
 
+# A blanket 0750 made every file executable, and git tracks that bit, so each
+# file of a checkout under the domain directory that git tracks as 644 showed
+# as modified.  A capital X sets the bit only where one is already.
+subtest 'the data target does not make every file executable' => sub {
+    my $data = Provisioner::Cookbook->load( 'data', distro => $DISTRO )->new(%PROV)->render(%G);
+    my $dir  = "$G{install_dir}/$G{domain}";
+
+    like( $data, qr{^chmod[ ]-R[ ]u=rwX,g=rX,o=[ ]\Q$dir\E$}m, 'the domain directory is opened by the X form' );
+    unlike( $data, qr{^chmod[ ]-R[ ]0750}m, 'and no recursive chmod gives every file 0750' );
+};
+
+subtest 'a recipe that owns a checkout puts back its tracked modes and nothing else' => sub {
+    foreach my $case ( [ tcms => 'tCMS' ], [ trogrunner => 'trog-provisioner' ] ) {
+        my ( $name, $subdir ) = @$case;
+        my $out = Provisioner::Cookbook->load( $name, distro => $DISTRO )->new(%PROV)->render( %G, %{ $required_config{$name} // {} } );
+        my $dir = "$G{install_dir}/$G{domain}/$subdir";
+
+        like( $out, qr{^\S*/reset_git_modes[ ]'\Q$dir\E'$}m, "$name: the modes of the checkout are reset" );
+        my $discards   = qr{git[ ] (?: checkout | reset | stash | clean ) \b}x;
+        my $everything = qr{(?: --[ ]\. | --hard )}x;
+        unlike( $out, qr{$discards [^\n]* $everything}x, "$name: and no git command throws away content" )
+          if $name eq 'tcms';
+
+        # After the clone and before the chown, so that the clone is in place and
+        # the owner of the checkout is not what the script reads.
+        my ( $reset, $chown ) = ( index( $out, 'reset_git_modes' ), index( $out, "chown -R" ) );
+        cmp_ok( $reset, '>', index( $out, 'git clone' ), "$name: and it comes after the clone" );
+        cmp_ok( $reset, '<', $chown, "$name: and before the chown of the checkout" );
+    }
+};
+
 # ----------------------------------------------------------------
 # Validate: required fields cause die
 # ----------------------------------------------------------------

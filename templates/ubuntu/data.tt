@@ -3,7 +3,13 @@ mkdir -p [% install_dir %]/[% domain %]
 # wrote for it.  See Provisioner::Recipe::data.
 rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]::data.[% domain %]/ [% install_dir %]/[% domain %]/
 chown -R [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
-chmod -R 0750 [% install_dir %]/[% domain %]
+[%# u=rwX,g=rX,o= and not 0750.  A capital X sets the execute bit only on a
+    directory and on a file that already has one.  So a file that git tracks
+    as 644 stays 640, and a checkout under the domain directory is not dirty.
+    A salvage from a guest that was built with 0750 has the bit on every file,
+    and X keeps it, so a recipe that owns a checkout puts back the tracked
+    modes with reset_git_modes. -%]
+chmod -R u=rwX,g=rX,o= [% install_dir %]/[% domain %]
 [%# Put back the state that the recipes salvaged.  This is one loop, not a call
     in the fragment of each recipe.  The restores() of each recipe fills in the
     map.  See Provisioner::Recipe::restores.

@@ -54,10 +54,20 @@ clones C<repo_branch> of C<repo_url>.  That happens for a domain that never exis
 data directory somebody emptied.
 
 This recipe leaves a checkout that is already there exactly as it is, in any
-state, except for the two hosts in L</THE HOSTS OF TCMS>.  It is the site that
-somebody runs, so this recipe does not reset, update or reconcile it.
+state, except for the two hosts in L</THE HOSTS OF TCMS> and one more case,
+which is the execute bit.  It is the site that somebody runs, so this recipe
+does not reset, update or reconcile it.
 C<config/> is partly tracked, so a write into the working tree replaces a live
 configuration with what master says today.
+
+The one case is a salvage from a guest that the C<data> target made every file
+executable.  git tracks the execute bit, so each file that it records as 644
+shows as modified, though no content changed.  The fragment runs
+F<reset_git_modes> on the checkout.  For each file whose content is still the
+blob in the index, it sets the mode that the index records.  A file with a
+change of content keeps its change and its mode, and a clean or absent checkout
+is not touched.  It does not run C<git checkout -- .>, because that would also
+throw away the changes of content.
 
 The fragment does set the owner of the checkout, which the service user and
 its own group own.  C<www/> is the exception, and has the group C<www-data>.

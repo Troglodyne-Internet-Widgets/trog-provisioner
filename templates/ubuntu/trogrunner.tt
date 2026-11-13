@@ -79,6 +79,10 @@ install -o root -g root -m 0700 trogrunner-owner.sh '[% install_dir %]/[% domain
 # HOME= on every git, because atd gives no environment, and git as root with
 # no HOME does more than warn.
 [ -e '[% install_dir %]/[% domain %]/[% checkout_dir %]/.git' ] || HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+# A salvage from a guest that was built with the old blanket 0750 has the
+# execute bit on every file.  Put back the tracked modes, and leave every
+# change of content.
+[% script_dir %]/reset_git_modes '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 [% END %]
