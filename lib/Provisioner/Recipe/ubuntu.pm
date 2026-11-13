@@ -13,6 +13,7 @@ use parent qw{Provisioner::DistroRecipe};
 # What ssh-keygen defaults to for RSA.
 my $RSA_BITS = 3072;
 
+use File::Basename();
 use File::Slurper();
 use HTTP::Tiny();
 use List::Util qw{any uniq};
@@ -393,6 +394,10 @@ make its logs there.  This is Ubuntu bug 1748147.  The copy is made again at
 every boot from the F<var.conf> that is installed, so it follows that file.  A
 guest without rsyslog gets no copy.
 
+C<bootcmd> last makes the directory above C<admin_home>.  cloud-init makes the
+account of the admin after C<bootcmd>, and C<useradd> makes the home but not the
+directory above it, which is C<install_dir> when the admin runs the domain.
+
 C<bootcmd>, with a C<fetch_cache>, also points the hosts of the cache at it before
 cloud-init installs the packages.  It writes F<scripts/fetch_via_cache> and the
 certificate of the authority under F</run>, and runs the script, so first boot
@@ -524,6 +529,7 @@ sub enrich {
             "fi\n",
           );
     }
+    push @{ $opts{bootcmd} }, 'mkdir -p ' . File::Basename::dirname( $opts{admin_home} ) if $opts{admin_home};
 
     # A list, not two lines of the template, because the first item has a
     # newline in it.  A YAML sequence item written by hand cannot carry one.

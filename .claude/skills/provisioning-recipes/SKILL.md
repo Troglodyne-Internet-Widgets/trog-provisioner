@@ -206,9 +206,9 @@ output — you need it for everything after.
 and every real domain names one in its `_global`. The `service_user` target
 makes that account with the domain directory as its home -- which is where a
 checkout lands, and the `bin` tpsgi puts on its service's `PATH`. Leave it out
-and `user` falls back to the admin: the domain directory becomes a symlink to a
-home under `/home`, and a recipe can fail for reasons that have nothing to do
-with it. Any name will do; the account is `nologin` and goes with the guest.
+and `user` falls back to the admin. The admin then runs the domain, and the
+domain directory is its home, with its dotfiles and its sudo. A recipe can then
+fail for reasons that have nothing to do with it. Any name will do; the account is `nologin` and goes with the guest.
 
 If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`

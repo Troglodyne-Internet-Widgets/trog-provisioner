@@ -5,8 +5,8 @@ use Test::More;
 
 my $user = '[% user %]';
 
-# Ask passwd.  The home is the domain directory only when the domain names a
-# service user, and otherwise it is the home of the admin under /home.
+# Ask passwd.  The home is the domain directory when this account runs the
+# domain, and otherwise it is the home of the admin under /home.
 chomp( my $home = `getent passwd $user | cut -d: -f6` );
 ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 

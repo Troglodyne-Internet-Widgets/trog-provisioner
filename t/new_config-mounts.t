@@ -106,6 +106,47 @@ subtest 'mounts runs after the global targets, and before every recipe' => sub {
     }
     is_deeply( $before{"$S/mounts"}, ["$S/testdeps"], 'mounts waits for the last global target' );
     ok( ( grep { $_ eq "$S/mounts" } @{ $before{"$S/configd"} // [] } ), 'and the recipe waits for mounts' ) or diag explain $before{"$S/configd"};
+
+    # No user, so the admin runs the domain, and cloud-init makes its account
+    # with the directory of the domain as its home.
+    my $users = YAML::XS::Load( File::Slurper::read_binary("$tmpdir/domains/$DOMAIN/users.yaml") );
+    is( $users->{users}[0]{homedir}, "/opt/hosts/$DOMAIN", 'the admin runs the domain, so its home is the directory of the domain' );
+};
+
+subtest 'a domain whose admin home is under a share is refused' => sub {
+    my $tmpdir = tempdir( CLEANUP => 1 );
+    mkdir "$tmpdir/domains";
+    mkdir "$tmpdir/data";
+    mkdir "$tmpdir/data/$DOMAIN";
+
+    my %global = (
+        data_source   => "$tmpdir/data",
+        basedir       => "$tmpdir/domains",
+        transfer_user => 'someadmin',
+        admin_user    => 'someadmin',
+        admin_email   => 'bogus@test.test',
+        admin_gecos   => 'Test Test',
+    );
+    my $disk        = { device => 'bogus-volume', mountpoint => '/opt/hosts/', type => 'ext4' };
+    my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
+    File::Slurper::Temp::write_text( $recipe_file, YAML::XS::Dump( { _base => { _global => \%global }, $DOMAIN => { configd => undef, mounts => { disks => [$disk] } } } ) );
+    Provisioner::Cookbook->forget();
+
+    my $err = exception {
+        Trog::Provisioner::Config::Generator::main( '--recipes', $recipe_file, '--skip_ssh', $DOMAIN );
+    };
+    like( $err, qr{/opt/hosts/\Q$DOMAIN\E,[ ]is[ ]under},             'the generation names the home' );
+    like( $err, qr{the[ ]share[ ]that[ ]mounts[ ]at[ ]/opt/hosts[.]}, 'and the share that would hide it' );
+    ok( !-e "$tmpdir/domains/$DOMAIN/Makefile", 'and writes no makefile' );
+};
+
+subtest 'share_over' => sub {
+    my $mounts = { disks => [ { mountpoint => '/srv/share/' }, { device => 'no-mountpoint' } ], fuse => [ { mountpoint => '/opt/hosts' } ] };
+    is( Trog::Provisioner::Config::Generator::share_over( '/srv/share',          $mounts ), '/srv/share', 'the path is the mount point, whatever slash ends it' );
+    is( Trog::Provisioner::Config::Generator::share_over( '/srv/share/one.test', $mounts ), '/srv/share', 'and a directory under it' );
+    is_deeply( [ Trog::Provisioner::Config::Generator::share_over( '/srv/shared/one.test', $mounts ) ], [], 'but not a directory whose name only begins with the same letters' );
+    is_deeply( [ Trog::Provisioner::Config::Generator::share_over( '/opt/hosts/one.test',  $mounts ) ], [], 'and a FUSE mount does not count' );
+    is_deeply( [ Trog::Provisioner::Config::Generator::share_over( '/srv/share',           undef ) ],   [], 'and no mounts at all is no share' );
 };
 
 done_testing;

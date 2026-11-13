@@ -336,6 +336,18 @@ subtest 'the data source, and a domain inside it' => sub {
     is( Provisioner::Cookbook->data_dir( 'one.test', {} ),    undef, 'and none when nothing says where the data source is' );
 };
 
+subtest 'admin_home: the directory of the domain when the admin runs it' => sub {
+    my %g = ( admin_user => 'boss', install_dir => '/bogus/hosts', domain => 'one.test' );
+
+    is( Provisioner::Cookbook->admin_home( %g, user => 'boss' ), '/bogus/hosts/one.test', 'the admin is the user' );
+    is( Provisioner::Cookbook->admin_home(%g),                   '/bogus/hosts/one.test', 'and no user means the admin, as validate says' );
+    is( Provisioner::Cookbook->admin_home( %g, user => 'svc' ),  '/home/boss',            'a service user runs the domain, so the admin lives under /home' );
+
+    is( Provisioner::Cookbook->admin_home( %g, install_dir => undef ), '/home/boss', 'no install_dir, no directory of the domain to be the home' );
+    is( Provisioner::Cookbook->admin_home( %g, domain      => undef ), '/home/boss', 'and the same without a domain' );
+    is_deeply( [ Provisioner::Cookbook->admin_home( %g, admin_user => undef ) ], [], 'and nothing at all without an admin' );
+};
+
 subtest 'the shelf has the recipes on it' => sub {
     my @names = Provisioner::Cookbook->names();
 

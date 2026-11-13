@@ -180,6 +180,7 @@ my %G = (
     script_dir                 => '/root/bin',
     user                       => 'www-data',
     admin_user                 => 'admin',
+    admin_home                 => '/home/admin',
     admin_email                => 'admin@test.test',
     main_ip                    => '192.0.2.100',
     tld_ip                     => '192.0.2.1',
@@ -2375,8 +2376,8 @@ subtest 'the admin checkout symlink survives a second domain on the machine' => 
     # with it, the way useradd did in the service_user target.
     my $fragment = File::Slurper::read_text( fragment_file("admincode.tt") );
 
-    like( $fragment, qr{^test[ ]-e[ ]/home/\Q[% admin_user %]/[% basedir %]\E[ ]\|\|[ ]}m, 'the link is only made when the name is free' );
-    like( $fragment, qr{ln[ ]-s[ ]\Q[% install_dir %]/[% domain %]/[% basedir %]\E}m,      'and still points at this domain own checkout' );
+    like( $fragment, qr{^test[ ]-e[ ]\Q[% admin_home %]/[% basedir %]\E[ ]\|\|[ ]}m,  'the link is only made when the name is free' );
+    like( $fragment, qr{ln[ ]-s[ ]\Q[% install_dir %]/[% domain %]/[% basedir %]\E}m, 'and still points at this domain own checkout' );
 };
 
 subtest 'the ufw target runs after every recipe that installs a profile' => sub {

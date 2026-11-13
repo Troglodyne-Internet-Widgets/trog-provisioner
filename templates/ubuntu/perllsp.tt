@@ -8,26 +8,26 @@ install -m 0755 perllsp.perlnavigator /usr/local/sbin/perlnavigator
 
 # Install the vim-lsp plugins into the vim pack directory of the admin user.
 # Vim 8 and later loads packages from ~/.vim/pack/*/start/ without a plugin manager.
-mkdir -p /home/[% admin_user %]/.vim/pack/lsp/start
+mkdir -p [% admin_home %]/.vim/pack/lsp/start
 
 [%# Each plugin is the tarball of its pinned commit.  The directory is emptied
     first, because a tarball unpacked over an older one keeps the files that
     the newer commit deleted.  The ref goes beside it for the guest test. -%]
 [% FOR plugin IN plugins -%]
 curl -fsSL --retry 3 --retry-all-errors -o 'perllsp.[% plugin.dir %].tar.gz' 'https://codeload.github.com/[% plugin.repo %]/tar.gz/[% plugin.ref %]'
-rm -rf '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]'
-mkdir -p '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]'
-tar -xzf 'perllsp.[% plugin.dir %].tar.gz' --strip-components=1 -C '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]'
-echo '[% plugin.ref %]' > '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]/.trog-ref'
+rm -rf '[% admin_home %]/.vim/pack/lsp/start/[% plugin.dir %]'
+mkdir -p '[% admin_home %]/.vim/pack/lsp/start/[% plugin.dir %]'
+tar -xzf 'perllsp.[% plugin.dir %].tar.gz' --strip-components=1 -C '[% admin_home %]/.vim/pack/lsp/start/[% plugin.dir %]'
+echo '[% plugin.ref %]' > '[% admin_home %]/.vim/pack/lsp/start/[% plugin.dir %]/.trog-ref'
 [% END -%]
 
-chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vim
+chown -R [% admin_user %]:[% admin_user %] [% admin_home %]/.vim
 
 # Put the perllsp vimrc snippet in ~/.vim/ and source it from ~/.vimrc
-install -m 0644 -o [% admin_user %] -g [% admin_user %] perllsp.vim /home/[% admin_user %]/.vim/perllsp.vim
+install -m 0644 -o [% admin_user %] -g [% admin_user %] perllsp.vim [% admin_home %]/.vim/perllsp.vim
 
 [%# Only if it is not already sourced, so a new provision does not add the line
     again. -%]
-grep -qF 'source ~/.vim/perllsp.vim' /home/[% admin_user %]/.vimrc 2>/dev/null \
-    || echo "source ~/.vim/perllsp.vim" >> /home/[% admin_user %]/.vimrc
-chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vimrc
+grep -qF 'source ~/.vim/perllsp.vim' [% admin_home %]/.vimrc 2>/dev/null \
+    || echo "source ~/.vim/perllsp.vim" >> [% admin_home %]/.vimrc
+chown [% admin_user %]:[% admin_user %] [% admin_home %]/.vimrc

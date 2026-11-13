@@ -1,14 +1,14 @@
 mkdir -p [% install_dir %]/[% domain %]/[% basedir %]
-mkdir -p /home/[% admin_user %]/bin
-chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/bin
+mkdir -p [% admin_home %]/bin
+chown [% admin_user %]:[% admin_user %] [% admin_home %]/bin
 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/[% basedir %]
 [% IF admin_user != user %]
 [%# The admin has one home.  If several domains on one machine use the same
     basedir, the first domain built keeps the link.  ln fails on a name that
     exists, and that stops this target and every target after it. -%]
-test -e /home/[% admin_user %]/[% basedir %] || sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] /home/[% admin_user %]/[% basedir %]
+test -e [% admin_home %]/[% basedir %] || sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] [% admin_home %]/[% basedir %]
 [% END %]
-cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
+cp [% script_dir %]/repos_for [% admin_home %]/bin/repos_for
 [% FOR repo in repos_from %]
 [%# The token goes on stdin, because ps shows argv to every user on the guest.
     install -m 0600 makes the file before the token goes in, so the token is
@@ -17,7 +17,7 @@ cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
     of repos_for, so that the token goes when repos_for fails too. -%]
 install -m 0600 /dev/null [% install_dir %]/[% domain %]/.repos_for.token
 printf '%s' '[% repo.token %]' > [% install_dir %]/[% domain %]/.repos_for.token
-cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /home/[% admin_user %]/bin/repos_for [% repo.api_url %] [% repo.repos_for.join(' ') %] < [% install_dir %]/[% domain %]/.repos_for.token; status=$$?; rm -f [% install_dir %]/[% domain %]/.repos_for.token; exit $$status
+cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] [% admin_home %]/bin/repos_for [% repo.api_url %] [% repo.repos_for.join(' ') %] < [% install_dir %]/[% domain %]/.repos_for.token; status=$$?; rm -f [% install_dir %]/[% domain %]/.repos_for.token; exit $$status
 [% END -%]
 [% IF modules.grep('^claude$').size() %]
 [%# Deferred, because the claude recipe installs the settings file, and its

@@ -374,8 +374,9 @@ CONF
                 # before it installs anything: it was the only defer: false entry.
             ],
 
-            # The override of var.conf.  The subtest of /var/log below runs it.
-            bootcmd => [ ignore() ],
+            # The override of var.conf, which the subtest of /var/log below
+            # runs, and the directory above the home of the admin.
+            bootcmd => [ ignore(), 'mkdir -p /home' ],
 
             # The newline in the middle of the first of these is as it has always
             # been, and is why runcmd is built as a list rather than written out
@@ -805,7 +806,7 @@ subtest 'the vendor archives and their answers are there before the packages' =>
     ok( !exists $written{'/etc/apt/keyrings/vendor.asc'}{encoding}, 'and a text one says nothing' );
 
     is( $user_data->{apt}{debconf_selections}{provisioner}, join( q{}, map { "$_\n" } @answers ), 'the answers go to apt once each, one per line, colon and all' );
-    is( scalar @{ $user_data->{bootcmd} // [] },            1,                                    'and with no cache, only the override of var.conf runs at boot' );
+    is( scalar @{ $user_data->{bootcmd} // [] },            2,                                    'and with no cache, only the override of var.conf and the home of the admin run at boot' );
 };
 
 subtest 'first boot installs through the fetch cache' => sub {
@@ -814,7 +815,7 @@ subtest 'first boot installs through the fetch cache' => sub {
     my ( $dir, undef ) = generated( fetch_cache => { address => '192.0.2.50', authority => $cert, hosts => [qw{apt.one.test apt.two.test}], script => $script } );
     my $user_data = loaded( $dir, 'user-data' );
 
-    is( scalar @{ $user_data->{bootcmd} // [] }, 2, 'one command at boot after the override of var.conf, which runs before the packages install' );
+    is( scalar @{ $user_data->{bootcmd} // [] }, 3, 'one command at boot after the override of var.conf, which runs before the packages install' );
     my $cmd = $user_data->{bootcmd}[1] // q{};
 
     my @lines = split m/\n/, $cmd;
@@ -826,6 +827,14 @@ subtest 'first boot installs through the fetch cache' => sub {
 
 # The first command at boot runs here in sh, as cloud-init runs it, with two
 # directories of the test in place of /usr/lib/tmpfiles.d and /etc/tmpfiles.d.
+subtest 'first boot makes the directory above the home of the admin, before cloud-init makes the account' => sub {
+    my ($runs) = generated( install_dir => '/bogus/hosts', user => 'admin' );
+    is( loaded( $runs, 'user-data' )->{bootcmd}[-1], 'mkdir -p /bogus/hosts', 'install_dir, when the admin runs the domain and its home is the directory of the domain' );
+
+    my ($other) = generated( install_dir => '/bogus/hosts', user => 'svc' );
+    is( loaded( $other, 'user-data' )->{bootcmd}[-1], 'mkdir -p /home', 'and /home, when a service user runs it' );
+};
+
 subtest 'first boot gives /var/log the mode of rsyslog in an override of var.conf' => sub {
     my ( $dir, undef ) = generated();
     my $cmd  = loaded( $dir, 'user-data' )->{bootcmd}[0] // q{};

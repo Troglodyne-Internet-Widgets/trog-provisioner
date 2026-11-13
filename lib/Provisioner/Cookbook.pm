@@ -1990,6 +1990,32 @@ sub install_dir {
     return '/opt/hosts';
 }
 
+=head2 $home = Provisioner::Cookbook->admin_home(%globals)
+
+Returns the home directory of C<admin_user> on the guest.  C<%globals> are the
+settings of C<_global>, with C<domain>.
+
+When C<user> is C<admin_user>, or is not set, the admin runs the domain.  Then
+the home is the directory of the domain, C<install_dir>/C<domain>, so the
+settings that a recipe writes there are the settings of the account that runs
+the domain.  Otherwise it is F</home/>C<admin_user>.
+
+cloud-init makes the account with this home, before anything else writes to
+the directory.  Returns nothing when C<admin_user> is not set, and
+F</home/>C<admin_user> when C<install_dir> or C<domain> is not.
+
+=cut
+
+sub admin_home {
+    my ( $class, %globals ) = @_;
+
+    my $admin = $globals{admin_user} or return;
+    my $runs  = ( $globals{user} // $admin ) eq $admin;
+    return "$globals{install_dir}/$globals{domain}" if $runs && $globals{install_dir} && $globals{domain};
+
+    return "/home/$admin";
+}
+
 =head2 data_source($domain, $conf)
 
 Returns the directory on the hypervisor that holds what gets shipped to the
