@@ -1840,6 +1840,10 @@ Returns nothing if C<destination> holds a file after the fetch.  Otherwise
 returns a hash reference with C<recipe>, C<remote>, C<message>, and
 C<alarming>, which is true when the salvage lost state.
 
+When nothing came down, it removes the directories that the fetch made for
+C<destination>, so that the next guest does not get an empty path that the
+old one did not have.  A destination that was there before stays.
+
 It examines the destination, not the transfer, because a second run moves
 nothing from a guest that did not change.  It counts files, not directories,
 because a fetch that cannot read makes the directories anyway.  A symlink
@@ -1854,6 +1858,13 @@ path.
 
 sub salvage_path (%args) {
     die "salvage_path needs deleted_to, the directory for what the guest no longer has\n" unless $args{deleted_to};
+
+    # The highest directory that the fetch makes, because get_dir makes the
+    # destination and its parents before it asks the guest for anything.
+    my $made;
+    for ( my $at = $args{destination}; !-e $at; $at = File::Basename::dirname($at) ) {
+        $made = $at;
+    }
 
     # The result is ignored, because the destination tells more, and part of
     # the state is better than none.
@@ -1898,6 +1909,10 @@ sub salvage_path (%args) {
             die $err;
         }
     }
+
+    # Nothing came down, so what the fetch made holds only directories, and the
+    # data target would give the new guest a path that the old one did not have.
+    remove_tree($made) if defined $made;
 
     # The path as an argument, because run_sudo escapes each one.  find prints
     # nothing for an absent path, so one question covers both quiet causes.

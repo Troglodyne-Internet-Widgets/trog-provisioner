@@ -30,6 +30,10 @@ isnt( $user_node, $system_node, 'and it is nvm\'s rather than the system one' );
 my $node_version = `sudo -u $user /bin/bash -ic 'node --version' 2>&1`;
 like( $node_version, qr/^v\d+\.\d+\.\d+$/m, 'and it runs' ) or diag $node_version;
 
+# node names its LTS line in process.release.lts, and leaves it out of any other.
+my $lts = `sudo -u $user /bin/bash -ic 'node -p "process.release.lts || \\"\\""' 2>/dev/null`;
+like( $lts, qr/^[A-Z][a-z]+$/m, 'and it is an LTS release, not the newest of any kind' ) or diag $lts;
+
 chomp( my $node_path = `sudo -u $user /bin/bash -ic 'echo \$NODE_PATH' 2>/dev/null` );
 
 # Read both streams and pick the path out of them.  An interactive shell writes

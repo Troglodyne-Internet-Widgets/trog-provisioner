@@ -79,10 +79,10 @@ what the lookup answers today.
 
 ## Deliberately not pinned
 
-matrix/synapse and plex install from their own apt repositories; ketesa and
-`nvm install node` take whatever is newest; the claude plugin marketplaces are
-three GitHub repositories named by path.  Each of these is a build that can
-change without this repository changing.
+matrix/synapse and plex install from their own apt repositories.  ketesa takes
+the newest release.  `nvm install --lts` takes the newest LTS release.  The
+claude plugin marketplaces are three GitHub repositories named by path.  Each of
+these builds can change when this repository does not.
 
 ## The base image
 

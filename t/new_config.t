@@ -459,4 +459,46 @@ subtest 'an empty tree of directories is not a salvage' => sub {
     ok( !gap_at($links), 'a symlink is something, and looking at it does not walk into itself' );
 };
 
+# A guest whose fetch makes the destination and its parents, as get_dir in
+# Trog::Machine does before rsync runs, and lands one file if told to.
+{
+
+    package MakingGuest;
+    use parent -norequire, 'MockGuest';
+
+    sub get_dir {
+        my ( $self, $remote, $local ) = @_;
+        File::Path::make_path($local);
+        if ( $self->{lands} ) {
+            open( my $fh, '>', "$local/$self->{lands}" ) or die "Could not write into $local: $!";
+            close($fh)                                   or die "Could not close $local/$self->{lands}: $!";
+        }
+        return 1;
+    }
+}
+
+subtest 'a fetch that brings nothing takes away the directories that it made' => sub {
+    my %args = (
+        recipe     => 'trogrunner',
+        host       => 'd.test.local',
+        user       => 'tester',
+        remote     => '/bogus/d.test.local/trog-provisioner/',
+        deleted_to => "$salvage_root/aside",
+    );
+    my $data = "$salvage_root/data";
+    mkdir $data or die "Could not create $data: $!";
+
+    my $gap = Trog::Provisioner::Config::Generator::salvage_path( %args, guest => MakingGuest->new( rc => 1 ), destination => "$data/nested/trog-provisioner/" );
+    ok( $gap && !$gap->{alarming}, 'a path that is not on the guest is reported, quietly' );
+    ok( !-e "$data/nested",        'and every directory that the fetch made is gone, the highest one too' );
+    ok( -d $data,                  'but not the directory that was there before it' );
+
+    mkdir "$data/kept" or die "Could not create $data/kept: $!";
+    Trog::Provisioner::Config::Generator::salvage_path( %args, guest => MakingGuest->new( rc => 1 ), destination => "$data/kept" );
+    ok( -d "$data/kept", 'a destination that was there before the fetch stays, empty or not' );
+
+    ok( !Trog::Provisioner::Config::Generator::salvage_path( %args, guest => MakingGuest->new( rc => 0, lands => 'ips.db' ), destination => "$data/fresh/trog-provisioner/" ), 'a fetch that lands a file is a salvage' );
+    ok( -e "$data/fresh/trog-provisioner/ips.db",                                                                                                                              'and what it made stays, with the file in it' );
+};
+
 done_testing();

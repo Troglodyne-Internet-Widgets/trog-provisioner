@@ -3,9 +3,9 @@
 su - [% user %] -s /bin/bash -c \
     "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/[% nvm_version %]/install.sh | PROFILE=/dev/null bash"
 
-# Install the latest Node.js and make it the default alias
+# The newest LTS release, because "node" is the newest of any kind, alphas too.
 su - [% user %] -s /bin/bash -c \
-    ". ~/.nvm/nvm.sh && nvm install node && nvm alias default node"
+    ". ~/.nvm/nvm.sh && nvm install --lts && nvm alias default 'lts/*'"
 
-# The loader, nvm use node and NODE_PATH, in ~/.bashrc.d of the user.
+# The loader, nvm use default and NODE_PATH, in ~/.bashrc.d of the user.
 [% script_dir %]/bashrc_d [% user %] 20-nvm nvm.bashrc

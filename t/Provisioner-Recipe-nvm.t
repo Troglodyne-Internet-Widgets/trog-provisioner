@@ -29,14 +29,14 @@ use Provisioner::Cookbook();
 
 # The nvm.sh here stands in for the real one: it defines nvm, and nvm use sets
 # NVM_BIN, as the real one does.
-subtest 'the shell of the user loads nvm, uses node, and finds the global modules' => sub {
+subtest 'the shell of the user loads nvm, uses the default node, and finds the global modules' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     my $r   = Provisioner::Cookbook->load( 'nvm', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
     is_deeply( [ $r->generate_files( $dir, domain => 'node.test.test' ) ], ['nvm.bashrc'], 'the recipe writes the file that bashrc_d installs' );
 
     my $home = tempdir( CLEANUP => 1 );
     File::Path::make_path("$home/.nvm");
-    File::Slurper::Temp::write_text( "$home/.nvm/nvm.sh", qq{nvm() { [ "\$1 \$2" = 'use node' ] && NVM_BIN="\$NVM_DIR/versions/node/v1/bin"; }\n} );
+    File::Slurper::Temp::write_text( "$home/.nvm/nvm.sh", qq{nvm() { [ "\$1 \$2" = 'use default' ] && NVM_BIN="\$NVM_DIR/versions/node/v1/bin"; }\n} );
 
     local $ENV{HOME} = $home;
     delete local @ENV{qw{NVM_BIN NVM_DIR NODE_PATH}};
