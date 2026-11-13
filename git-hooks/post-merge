@@ -4,4 +4,4 @@
 # through refresh-coverage beside this hook, which says why.  git runs this
 # after a merge or a fast-forward, a pull --rebase that only fast-forwards
 # included, and not after a pull that changes nothing.
-exec "$(dirname "$0")/refresh-coverage"
+exec "${0%/*}/refresh-coverage"

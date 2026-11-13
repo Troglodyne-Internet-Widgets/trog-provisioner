@@ -9,4 +9,4 @@
 # Not after commit --amend, which runs post-commit as well.
 [ "$1" = rebase ] || exit 0
 
-exec "$(dirname "$0")/refresh-coverage"
+exec "${0%/*}/refresh-coverage"

@@ -13,4 +13,4 @@ for state in rebase-merge rebase-apply sequencer; do
     [ -d "$(git rev-parse --git-path "$state")" ] && exit 0
 done
 
-exec "$(dirname "$0")/refresh-coverage"
+exec "${0%/*}/refresh-coverage"
