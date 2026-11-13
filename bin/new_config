@@ -1841,8 +1841,9 @@ returns a hash reference with C<recipe>, C<remote>, C<message>, and
 C<alarming>, which is true when the salvage lost state.
 
 It makes C<destination> and its parents before the fetch.  When nothing came
-down, it removes the directories that it made, so that the next guest does not get an empty path that the
-old one did not have.  A destination that was there before stays.
+down, it removes the directories that it made, so that the next guest does not
+get an empty path that the old one did not have.  A destination that was there
+before stays.
 
 It examines the destination, not the transfer, because a second run moves
 nothing from a guest that did not change.  It counts files, not directories,
