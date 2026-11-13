@@ -49,7 +49,7 @@ subtest 'order_only' => sub {
 
 subtest 'targets_in_order' => sub {
     my %before = Trog::Provisioner::Config::Generator::order_only( [qw{cron tcms nginxproxy nginx perl ufw}], \%targets_of, \%required_by, \@ordered );
-    my %args   = ( state_dir => $S, user => 'svc', admin_user => 'admin', modules => \@ordered, order_only => \%before );
+    my %args   = ( state_dir => $S, user => 'svc', modules => \@ordered, order_only => \%before );
 
     my @all    = Trog::Provisioner::Config::Generator::targets_in_order( %args, fetch => 1, ufw => 1 );
     my %at     = map { $_->{target} => $_ } @all;
@@ -68,7 +68,7 @@ subtest 'targets_in_order' => sub {
     ok( !grep( { $_->{target} =~ m{/(?:ufw|fetch_via_cache)\z} } @plain ), 'and neither ufw nor the cache is there unless asked for' );
 
     my @as_admin = Trog::Provisioner::Config::Generator::targets_in_order( %args, user => 'admin' );
-    is( $as_admin[1]{target}, "$S/admin_user", 'a domain run as its admin makes the admin account' );
+    is( $as_admin[1]{target}, "$S/service_user", 'a domain run as its admin gets the same target, because cloud-init made the account with the directory of the domain as its home' );
     my @nobody = Trog::Provisioner::Config::Generator::targets_in_order( %args, user => undef );
     is( $nobody[1]{target}, "$S/sysctl", 'and a domain with no user makes neither' );
 

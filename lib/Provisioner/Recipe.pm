@@ -489,6 +489,7 @@ sub global_args {
 
             user        => { type => 'string', description => 'The service account the application runs as and recipes set ownership to.  Falls back to admin_user, which is a fallback rather than the intended configuration.' },
             admin_user  => { type => 'string', description => 'The account that administers the guest.' },
+            admin_home  => { type => 'string', readOnly    => 1, description => 'The home of admin_user on the guest: the directory of the domain when user is admin_user, and /home/admin_user otherwise.  See Provisioner::Cookbook->admin_home.' },
             admin_email => { type => 'string', description => 'Where mail for the administrator goes.' },
             admin_keys  => { type => 'array',  items       => { type => 'string' }, description => "The administrator's ssh keys, read from admin_authorized_keys beside the rest of the configuration and written straight into the guest." },
 
@@ -2145,6 +2146,10 @@ user owns the files of the domain and runs the application.  Most recipes
 expect a user that is not the admin.  So set it, on a test guest as on a
 production host.
 
+C<admin_home> defaults here too, to what L<Provisioner::Cookbook/admin_home>
+returns.  So a template that writes into the home of the admin names
+C<admin_home>, and never F</home/>C<admin_user>.
+
 =cut
 
 sub validate {
@@ -2181,6 +2186,9 @@ sub validate {
     }
 
     $opts{user} //= $opts{admin_user};
+    if ( my $home = Provisioner::Cookbook->admin_home(%opts) ) {
+        $opts{admin_home} //= $home;
+    }
 
     return $self->enrich(%opts);
 }

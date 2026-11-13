@@ -8,17 +8,17 @@ use File::Temp ();
 
 my $code = '[% install_dir %]/[% domain %]/[% basedir %]';
 ok(-d $code, 'code directory exists');
-ok(-d '/home/[% admin_user %]/bin', 'admin bin directory exists');
+ok(-d '[% admin_home %]/bin', 'admin bin directory exists');
 
 # The admin must own both, or nothing that runs as the admin can write to them.
-foreach my $dir ($code, '/home/[% admin_user %]/bin') {
+foreach my $dir ($code, '[% admin_home %]/bin') {
     my @st = stat $dir;
     is(scalar getpwuid($st[4] // -1), '[% admin_user %]', "$dir is owned by the admin");
 }
 
 # The recipe copies this helper in without setting a mode, then runs it by its
 # absolute path.
-ok(-x '/home/[% admin_user %]/bin/repos_for', 'repos_for is installed and executable');
+ok(-x '[% admin_home %]/bin/repos_for', 'repos_for is installed and executable');
 
 # Test each entity, not the directory.  Every entity clones into the one
 # basedir, so a count of the directory passes when any single entity worked.
@@ -26,7 +26,7 @@ ok(-x '/home/[% admin_user %]/bin/repos_for', 'repos_for is installed and execut
 # repos_for records the repositories of each entity in .repos_for.json in the
 # admin home, by api_url and then by entity.  That file tells whether an entity
 # was fetched, and which directories it must leave.
-my $repos_cache = '/home/[% admin_user %]/.repos_for.json';
+my $repos_cache = '[% admin_home %]/.repos_for.json';
 ok(-f $repos_cache, 'repos_for recorded what it fetched');
 
 my $fetched = {};

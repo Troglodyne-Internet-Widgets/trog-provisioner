@@ -135,6 +135,13 @@ subtest 'the settings every recipe is handed are declared once' => sub {
     # user is not declared with a default anywhere, so this fallback -- which
     # runs after validation -- is still what fills it in.
     is( $got{user}, 'someadmin', 'user still falls back to admin_user' );
+
+    # After the fallback, because the home of the admin depends on who runs the
+    # domain.
+    my %runs = $ntp->validate( domain => 'x.test.test', admin_user => 'someadmin', install_dir => '/bogus/hosts' );
+    is( $runs{admin_home}, '/bogus/hosts/x.test.test', 'admin_home is the directory of the domain when the admin runs it' );
+    my %svc = $ntp->validate( domain => 'x.test.test', admin_user => 'someadmin', install_dir => '/bogus/hosts', user => 'svc' );
+    is( $svc{admin_home}, '/home/someadmin', 'and under /home when a service user does' );
 };
 
 # A recipe that declares a colliding key is describing a different thing spelled

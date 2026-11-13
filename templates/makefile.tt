@@ -133,18 +133,14 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
 
 [%# One machine can hold several domains.  The account is per machine and this
     target is per domain, so a second domain must not stop on the account that
-    the first one made. %]
+    the first one made.  When the admin runs the domain, cloud-init already made
+    the account, with the directory of the domain as its home.  See
+    Provisioner::Cookbook->admin_home. %]
 [% state_dir %]/service_user:
 	getent passwd [% user %] > /dev/null || useradd -s /usr/sbin/nologin -d [% install_dir %]/[% domain %] [% user %]
 	mkdir -p [% install_dir %]/[% domain %]; /bin/true
 	chown [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
 	touch $@
-
-[% state_dir %]/admin_user:
-	 mkdir -p [% install_dir %]; /bin/true
-	 ln -s /home/[% admin_user %] [% install_dir %]/[% domain %]
-	 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]
-	 touch $@
 
 [% state_dir %]/scripts:
 	mkdir -p [% script_dir %]

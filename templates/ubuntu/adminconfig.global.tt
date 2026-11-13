@@ -1,2 +1,5 @@
-rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]::skel.[% domain %]/ /home/[% admin_user %]/
-chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]
+[%# The owner and the modes of what came from skel, and of nothing else in the
+    home, which can be the directory of the domain.  rsync gives the home the
+    modes of the top of skel, and the StrictModes of sshd refuses a key in a
+    home that other accounts can write. -%]
+rsync -av --chown=[% admin_user %]:[% admin_user %] --chmod=go-w,o-rwx -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]::skel.[% domain %]/ [% admin_home %]/

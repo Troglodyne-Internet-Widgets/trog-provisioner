@@ -11,6 +11,10 @@ my $home = ( split m/:/, $user_entry )[5] // '';
 ok($home && -d $home, "admin user home directory exists ($home)")
     or BAIL_OUT('no home directory to check');
 
+# The directory of the domain when the admin runs it.  Recipes write the
+# settings of that account there, so another home would not see them.
+is($home, '[% admin_home %]', 'and it is the home that the recipes write to');
+
 # The recipe rsyncs the skel into the home and chowns it.  ssh does not read a
 # key from a home that the admin does not own.
 my @st = stat $home;
@@ -24,10 +28,9 @@ ok(-s $keys, 'the admin has authorized_keys');
 my @kst = stat $keys;
 is($kst[2] & 022, 0, 'and it is not group or world writable');
 
-# Only world write, not group write, for the home.  The home is 775 with a group
-# of the same name as the admin, so group write gives nothing more.  Key
-# authentication works on these guests with StrictModes on.
-is($st[2] & 002, 0, 'and the home directory is not world writable');
+# The recipe takes group and world write off what comes from skel, the home
+# included, because the home can be the directory of the domain.
+is($st[2] & 022, 0, 'and the home directory is not group or world writable');
 
 # bin/provision runs the whole build over ssh as this user, and every command
 # uses sudo.  So sudo without a password is required.
