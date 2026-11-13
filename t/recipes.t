@@ -44,6 +44,7 @@ use File::Path();
 use File::Rsync();
 use File::Basename();
 use File::Slurper();
+use Cpanel::JSON::XS();
 use File::Slurper::Temp();
 use Text::Xslate();
 
@@ -2680,8 +2681,23 @@ subtest 'the two halves of the dashboard agree about the datasource' => sub {
     # still starts, and every panel on it draws "Datasource not found".
     my %stack  = Provisioner::Cookbook->defaults('grafana');
     my %syslog = Provisioner::Cookbook->defaults('grafanasyslog');
+    my %otel   = Provisioner::Cookbook->defaults('grafanaotel');
 
     is( $syslog{datasource}, $stack{datasource_name}, 'grafanasyslog reads the datasource grafana provisions' );
+    is( $otel{datasource},   $stack{datasource_name}, 'and so does grafanaotel' );
+};
+
+subtest 'the dashboard grafanaotel installs has the uid that clod links to' => sub {
+
+    # The uid is written in the dashboard, and the path in the recipe.  Where
+    # they disagree, the Grafana button of App::Clod opens "Dashboard not found".
+    my $dir     = tempdir( CLEANUP => 1 );
+    my $r       = Provisioner::Cookbook->load( 'grafanaotel', distro => $DISTRO )->new( %PROV, output_dir => $dir );
+    my %written = map { $_ => 1 } $r->generate_files( $dir, %G, Provisioner::Cookbook->defaults('grafanaotel') );
+    ok( $written{'grafanaotel_dashboard.json'}, 'grafanaotel renders a dashboard' ) or return;
+    my $dashboard = eval { Cpanel::JSON::XS->new->decode( File::Slurper::read_binary("$dir/grafanaotel_dashboard.json") ) };
+    ok( $dashboard, 'which is JSON' ) or return diag $@;
+    is( "/d/$dashboard->{uid}", $r->dashboard_path, 'and its uid is the one that dashboard_path names' );
 };
 
 subtest 'the home dashboard grafanasyslog names is the one it installs' => sub {

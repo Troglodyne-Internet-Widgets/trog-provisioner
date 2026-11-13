@@ -13,8 +13,10 @@ my $script = '/etc/telegraf/grafanaotel_details.star';
 # The grafana recipe names the database, so find it here, as the test of
 # grafanasyslog does.
 sub databases {
-    my $out = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
-    return grep { $_ ne '_internal' } $out =~ m/\["([^"]+)"\]/g;
+    my $out    = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
+    my $answer = eval { JSON::PP->new->decode($out) } // {};
+    my @names  = map { $_->[0] } map { @{ $_->{values} // [] } } map { @{ $_->{series} // [] } } @{ $answer->{results} // [] };
+    return grep { $_ ne '_internal' } @names;
 }
 
 # Runs telegraf once on a configuration of its own, and returns what it printed.
@@ -108,6 +110,28 @@ CONF
 
 # The whole path: a metric sent over OTLP to the port, through the input, into
 # influxdb.  telegraf itself is the sender, because it has an OTLP output.
+subtest 'each query of the dashboard runs' => sub {
+
+    # InfluxDB answers a query that it cannot parse with an error and HTTP
+    # 200, and grafana shows that as an empty panel.  The variables are set
+    # as grafana sets them for All, and over the last day.
+    my $file      = '/var/lib/grafana/dashboards/claude-runs.json';
+    my $dashboard = eval { JSON::PP->new->decode( do { open( my $fh, '<', $file ) or die $!; local $/; <$fh> } ) };
+    ok( $dashboard, "$file is JSON" ) or return diag $@;
+    my ($db) = databases();
+    foreach my $panel ( @{ $dashboard->{panels} } ) {
+        foreach my $target ( @{ $panel->{targets} } ) {
+            my $q = $target->{query} =~ s/\$timeFilter/time > now() - 1d/gr =~ s/\$__interval/1h/gr =~ s/\$(?:repo|task)\b/.*/gr;
+            my $config = File::Temp->new;
+            print {$config} "data-urlencode = \"db=$db\"\n", 'data-urlencode = "q=' . ( $q =~ s/(["\\])/\\$1/gr ) . "\"\n";
+            close $config;
+            my $out = `curl -fsS -G -K '$config' $influx/query 2>&1`;
+            like( $out, qr/"results"/, "the query of $panel->{title} runs" ) or diag "$q\n$out";
+            unlike( $out, qr/"error"/, 'and InfluxDB finds nothing wrong with it' ) or diag "$q\n$out";
+        }
+    }
+};
+
 subtest 'a metric sent over OTLP arrives in influxdb' => sub {
     my $marker = "grafanaotel-selftest-$$-" . time;
     my $probe  = File::Temp->new( SUFFIX => '.lp' );
