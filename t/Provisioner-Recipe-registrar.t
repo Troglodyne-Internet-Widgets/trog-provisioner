@@ -231,6 +231,22 @@ subtest 'the authority is built first, as any guest that a setting names is' => 
     is_deeply( [ Provisioner::Cookbook->upstream_domains( 'web.lab.test.test', \%conf ) ], ['ns.test.test'], 'so bin/provision builds the authority first' );
 };
 
+subtest 'a zone that has the name of a domain does not name its guest' => sub {
+
+    # The guest of the apex names the edge, the edge names the vpn, and the vpn
+    # lists the zone of the apex for its account.  Read as a reference, the
+    # zone closed a loop of strong settings that no order could build.
+    my %account = ( registrar => { accounts => { ours => { type => 'easydns', zones => ['apex.test'] } } } );
+    my %conf    = (
+        'apex.test'      => { mail          => { relay  => { host => 'edge.apex.test' } } },
+        'edge.apex.test' => { openvpnclient => { server => 'vpn.apex.test' } },
+        'vpn.apex.test'  => {%account},
+    );
+
+    is_deeply( [ Provisioner::Cookbook->named_guests( 'vpn.apex.test', \%conf ) ], [],                                    'the zone of an account is not a guest that the vpn needs' );
+    is_deeply( [ Provisioner::Cookbook->upstream_domains( 'apex.test', \%conf ) ], [ 'vpn.apex.test', 'edge.apex.test' ], 'so the apex builds after the guests that it needs, and no loop stops it' );
+};
+
 subtest 'a domain whose authority is under a reserved TLD trusts the authority of its API' => sub {
     my $name = 'web.lab.zone.test';
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
