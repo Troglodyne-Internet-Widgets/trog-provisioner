@@ -1393,6 +1393,39 @@ my sub global_properties ($class) {
     return \%declared;
 }
 
+# Whether a field on @path below $node, or one above it, such as a list of
+# hosts, carries $mark, such as x-weak.  A step that the schema does not
+# declare ends the walk.
+my sub marked ( $mark, $node, @path ) {
+    my $marked = $node->{$mark};
+    foreach my $step (@path) {
+        my $props = ref $node->{properties} eq 'HASH' ? $node->{properties} : {};
+        my $next =
+            $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH' ? $node->{items}
+          : ref $props->{$step} eq 'HASH'                       ? $props->{$step}
+          : ref $node->{additionalProperties} eq 'HASH'         ? $node->{additionalProperties}
+          :                                                       last;
+        $node = $next;
+        $marked ||= $node->{$mark};
+    }
+    return $marked ? 1 : 0;
+}
+
+# Whether the field that holds $setting carries $mark.  A recipe block asks the
+# schema of that recipe alone.  A key of _global asks every schema that can
+# declare it, from $$declared, which is filled the first time it is needed,
+# and is marked only when each of them marks it.
+my sub setting_marked ( $class, $mark, $setting, $declared ) {
+    my ( $block, $key, @path ) = Trog::Utils::slot_steps($setting);
+    if ( $block eq '_global' ) {
+        $$declared //= global_properties($class);
+        my @fields = @{ $$declared->{$key} // [] };
+        return ( @fields && List::Util::all { marked( $mark, $_, @path ) } @fields ) ? 1 : 0;
+    }
+    my %schema = $class->load($block)->schema;
+    return marked( $mark, \%schema, $key, @path );
+}
+
 # Each place in the configuration of $domain that names another guest, as
 # named_guests returns it, without whether the reference is weak.  The weight
 # is a walk over schemas, and upstream_order needs it only for a cycle.
@@ -1401,7 +1434,7 @@ my sub references ( $class, $domain, $conf ) {
     my %configured = map { $_ => 1 } $class->domains($conf);
     my $host       = $class->host_of( $domain, $conf ) // q{};
 
-    my @named;
+    my ( @named, $declared );
     foreach my $guest ( $domain, $host || () ) {
         my $config = $class->domain_config( $guest, $conf );
         my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
@@ -1421,29 +1454,12 @@ my sub references ( $class, $domain, $conf ) {
                 }
 
                 next if !defined $name || !$configured{$name} || $name eq $domain || $name eq $host;
+                next if setting_marked( $class, 'x-not-guest', $slot->[0], \$declared );
                 push( @named, { domain => $name, setting => $slot->[0], by => $guest } );
             }
         }
     }
     return @named;
-}
-
-# Whether a field on @path below $node, or one above it, such as a list of
-# hosts, is marked weak.  A step that the schema does not declare ends the
-# walk.
-my sub marked_weak ( $node, @path ) {
-    my $weak = $node->{'x-weak'};
-    foreach my $step (@path) {
-        my $props = ref $node->{properties} eq 'HASH' ? $node->{properties} : {};
-        my $next =
-            $step =~ m/\A\d+\z/ && ref $node->{items} eq 'HASH' ? $node->{items}
-          : ref $props->{$step} eq 'HASH'                       ? $props->{$step}
-          : ref $node->{additionalProperties} eq 'HASH'         ? $node->{additionalProperties}
-          :                                                       last;
-        $node = $next;
-        $weak ||= $node->{'x-weak'};
-    }
-    return $weak ? 1 : 0;
 }
 
 # Sets weak on each reference that has none yet, from the field that holds the
@@ -1452,19 +1468,7 @@ my sub marked_weak ( $node, @path ) {
 # only when a reference is in _global.
 my sub weigh ( $class, @named ) {
     my $declared;
-    foreach my $ref ( grep { !defined $_->{weak} } @named ) {
-        my ( $block, $key, @path ) = Trog::Utils::slot_steps( $ref->{setting} );
-
-        if ( $block eq '_global' ) {
-            $declared //= global_properties($class);
-            my @fields = @{ $declared->{$key} // [] };
-            $ref->{weak} = ( @fields && List::Util::all { marked_weak( $_, @path ) } @fields ) ? 1 : 0;
-            next;
-        }
-
-        my %schema = $class->load($block)->schema;
-        $ref->{weak} = marked_weak( \%schema, $key, @path );
-    }
+    $_->{weak} = setting_marked( $class, 'x-weak', $_->{setting}, \$declared ) foreach grep { !defined $_->{weak} } @named;
     return;
 }
 
@@ -1627,7 +1631,9 @@ It reads every setting of the C<_global> of the domain and of each of its
 recipes.  A value names a guest when it is that domain, the domain with a port,
 such as C<logs.example.test:514>, or a URL whose host is that domain.  An
 address, an email address, a C<secret:> reference and a host outside the
-configuration name nothing.  Neither does the domain itself.
+configuration name nothing.  Neither does the domain itself, nor a setting
+whose field the schema marks C<'x-not-guest' =E<gt> 1>, such as a DNS zone
+that has the name of a domain.
 
 A domain built onto the guest of another, see C<host_of>, also names what the
 settings of that guest name, with C<by> set to that guest.  The guest itself

@@ -395,8 +395,12 @@ sub exclusive_on_machine_with { return () }
 Declares the arguments of the recipe as a hash for the schema() method of
 L<JSON::Validator>.  The schema must be openapiv3.
 
-Two keys of a field are ours, and the validator ignores them.
+Three keys of a field are ours, and the validator ignores them.
 C<'x-secret' =E<gt> 1> marks a password, a token or a key; see C<secrets_in>.
+C<'x-not-guest' =E<gt> 1> marks a field whose value is a host name that is not
+a guest, such as a DNS zone, which can have the name of a domain of the
+installation.  L<Provisioner::Cookbook/named_guests> then does not take it for
+a reference to that guest.
 C<'x-weak' =E<gt> 1> marks a field that can name another guest of the
 installation, when the guest builds and runs without that guest, as through a
 fetch cache that is down, and starts to use it on its own once it is up, or

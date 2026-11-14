@@ -281,7 +281,7 @@ sub args {
                         key   => { type => 'string', default     => q{}, 'x-secret'  => 1, description => 'The token of this account, as a secret: reference.' },
                         zones => {
                             type        => 'array',
-                            items       => { type => 'string', format => 'hostname' },
+                            items       => { type => 'string', format => 'hostname', 'x-not-guest' => 1 },
                             default     => [],
                             description => 'The zones that this account holds, other than the zone of the domain.  A served name in one of them is published there and certified.',
                         },
