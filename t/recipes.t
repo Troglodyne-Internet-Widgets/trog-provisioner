@@ -560,24 +560,23 @@ subtest 'the data target does not make every file executable' => sub {
     unlike( $data, qr{^chmod[ ]-R[ ]0750}m, 'and no recursive chmod gives every file 0750' );
 };
 
-subtest 'a recipe that owns a checkout puts back its tracked modes and nothing else' => sub {
-    foreach my $case ( [ tcms => 'tCMS' ], [ trogrunner => 'trog-provisioner' ] ) {
-        my ( $name, $subdir ) = @$case;
-        my $out = Provisioner::Cookbook->load( $name, distro => $DISTRO )->new(%PROV)->render( %G, %{ $required_config{$name} // {} } );
-        my $dir = "$G{install_dir}/$G{domain}/$subdir";
+# The data target repairs every checkout under the domain directory, so a
+# recipe that keeps one needs no call of its own.  t/reset-git-modes.t runs the
+# script itself.
+subtest 'the data target puts back the tracked modes of every checkout' => sub {
+    my $data = Provisioner::Cookbook->load( 'data', distro => $DISTRO )->new(%PROV)->render(%G);
+    my $dir  = "$G{install_dir}/$G{domain}";
 
-        like( $out, qr{^\S*/reset_git_modes[ ]'\Q$dir\E'$}m, "$name: the modes of the checkout are reset" );
-        my $discards   = qr{git[ ] (?: checkout | reset | stash | clean ) \b}x;
-        my $everything = qr{(?: --[ ]\. | --hard )}x;
-        unlike( $out, qr{$discards [^\n]* $everything}x, "$name: and no git command throws away content" )
-          if $name eq 'tcms';
+    like( $data, qr{^\S*/reset_git_modes[ ]'\Q$dir\E'$}m, 'reset_git_modes runs over the domain directory' );
+    cmp_ok( index( $data, 'reset_git_modes' ), '>', index( $data, 'chmod -R' ), 'and after the chmod, which keeps an execute bit that a salvage brought' );
+};
 
-        # After the clone and before the chown, so that the clone is in place and
-        # the owner of the checkout is not what the script reads.
-        my ( $reset, $chown ) = ( index( $out, 'reset_git_modes' ), index( $out, "chown -R" ) );
-        cmp_ok( $reset, '>', index( $out, 'git clone' ), "$name: and it comes after the clone" );
-        cmp_ok( $reset, '<', $chown, "$name: and before the chown of the checkout" );
-    }
+subtest 'tcms throws away no content of the checkout that it finds' => sub {
+    my $out = Provisioner::Cookbook->load( 'tcms', distro => $DISTRO )->new(%PROV)->render( %G, %{ $required_config{tcms} // {} } );
+
+    my $discards   = qr{git[ ] (?: checkout | reset | stash | clean ) \b}x;
+    my $everything = qr{(?: --[ ]\. | --hard )}x;
+    unlike( $out, qr{$discards [^\n]* $everything}x, 'no git command in the fragment discards the working tree' );
 };
 
 # ----------------------------------------------------------------

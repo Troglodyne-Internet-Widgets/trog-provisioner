@@ -62,11 +62,12 @@ configuration with what master says today.
 
 The one case is a salvage from a guest that the C<data> target made every file
 executable.  git tracks the execute bit, so each file that it records as 644
-shows as modified, though no content changed.  The fragment runs
-F<reset_git_modes> on the checkout.  For each file whose content is still the
-blob in the index, it sets the mode that the index records.  A file with a
-change of content keeps its change and its mode, and a clean or absent checkout
-is not touched.  It does not run C<git checkout -- .>, because that would also
+shows as modified, though no content changed.  Before the target of this
+recipe, the C<data> target runs F<reset_git_modes> over the domain directory,
+and so over this checkout.  For each file whose content is still the blob in
+the index, it sets the mode that the index records.  A file with a change of
+content keeps its change and its mode, and a clean or absent checkout is not
+touched.  It does not run C<git checkout -- .>, because that would also
 throw away the changes of content.
 
 The fragment does set the owner of the checkout, which the service user and

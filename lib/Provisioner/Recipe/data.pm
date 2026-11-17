@@ -49,6 +49,13 @@ of its own.  A configuration that gives C<data> a C<to> or a C<from> is refused.
 The recipes say what it puts back, and where.  See C<restores> in
 L<Provisioner::Recipe>.
 
+It gives a directory and an executable C<0750> and any other file C<0640>.
+Then it runs F<reset_git_modes> over the domain directory.  In every git
+checkout there, a file whose content is still the blob in the index gets the
+mode that the index records.  A file whose content changed keeps its content and
+its mode.  This repairs a checkout salvaged from a guest that made every file
+executable, so that git does not show each file as modified.
+
 =head2 What the key of the guest reaches
 
 The guest fetches from this machine with its own key, as C<transfer_user>.

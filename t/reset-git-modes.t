@@ -82,6 +82,33 @@ subtest 'a change of content stays, with its mode as it was found' => sub {
     like( run_in( 'git', '-C', $dir, 'status', '--porcelain' )->{said}, qr/\A [ ]M[ ]edited\n \z/, 'and only that file is dirty' );
 };
 
+subtest 'every checkout under a domain directory, and nothing outside them' => sub {
+    my $domain = tempdir( CLEANUP => 1 );
+    my $top    = checkout();
+    my $deep   = checkout();
+    run_in( 'mv',    $top,  "$domain/site" );
+    run_in( 'mkdir', '-p',  "$domain/a/b" );
+    run_in( 'mv',    $deep, "$domain/a/b/tool" );
+
+    # A worktree has a .git that is a file, not a directory.
+    run_in( 'git', '-C', "$domain/site", qw{worktree add -q}, "$domain/wt" );
+
+    File::Slurper::Temp::write_text( "$domain/loose", "loose\n" );
+    my @salvaged = map {
+        my $c = $_;
+        map { "$domain/$c/$_" } qw{tool plain edited}
+    } qw{site a/b/tool wt};
+    chmod 0750, @salvaged, "$domain/loose";
+
+    symlink $domain, "$home/domain-link" or die "symlink: $!";
+    is( run_in( $script, "$home/domain-link" )->{rc}, 0, 'not an error, through a symlink to the domain directory' );
+
+    foreach my $c (qw{site a/b/tool wt}) {
+        is( run_in( 'git', '-C', "$domain/$c", 'status', '--porcelain' )->{said}, '', "the checkout at $c is clean" );
+    }
+    is( mode_of("$domain/loose"), '0750', 'and a file in no checkout keeps the mode that it had' );
+};
+
 subtest 'a clean checkout, a directory that is not one, and a path that is not there' => sub {
     my $dir = checkout();
     is( run_in( $script, $dir )->{rc}, 0,      'a clean checkout is not an error' );
