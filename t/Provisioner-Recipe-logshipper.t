@@ -83,6 +83,17 @@ subtest 'a destination the pool knows is pinned to its address' => sub {
     like( conf($dir), qr/\Qglobal(preserveFQDN="on")\E/, 'and sending its full name, so two guests with one short name do not collide' );
 };
 
+subtest 'repeated lines are forwarded one by one' => sub {
+
+    # Ubuntu merges repeats in /etc/rsyslog.conf, before any action sees them,
+    # so the collector would get one line and a summary.
+    my ($dir) = generated();
+    like( conf($dir), qr/^\$RepeatedMsgReduction[ ]off$/m, 'the merging is turned off when there is a target' );
+
+    my ($self) = generated( host => $DOMAIN );
+    unlike( conf($self), qr/RepeatedMsgReduction/i, 'and left to Ubuntu for a guest that is its own destination' );
+};
+
 subtest 'a destination the pool does not know is used as written' => sub {
     my ($dir) = generated( host => 'syslog.vendor.example' );
 

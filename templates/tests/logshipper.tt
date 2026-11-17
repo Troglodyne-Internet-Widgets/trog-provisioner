@@ -26,6 +26,7 @@ subtest 'the forwarder is installed and says where it is sending' => sub {
     like( $body, qr/\Qtarget="$target"\E/,     'naming the destination it was configured with' );
     like( $body, qr/\Qport="$port"\E/,         'on the configured port' );
     like( $body, qr/\Qprotocol="$protocol"\E/, 'over the configured protocol' );
+    like( $body, qr/^\$RepeatedMsgReduction[ ]off$/m, 'and not merging repeated lines' );
 };
 
 subtest 'rsyslog accepts the configuration' => sub {
@@ -36,6 +37,25 @@ subtest 'rsyslog accepts the configuration' => sub {
     my $out = `rsyslogd -N1 2>&1`;
     unlike( $out, qr/error|could not|unknown|invalid/i, 'rsyslogd -N1 finds nothing to complain about' )
       or diag $out;
+};
+
+subtest 'a repeated line is kept every time' => sub {
+
+    # Ubuntu merges repeats into "message repeated N times" in /var/log/syslog.
+    # The merging happens before the forwarder too, so this file shows it.
+    my $tag = 'logshipper' . $$ . time;
+    system( 'logger', '-t', $tag, 'same line' ) for 1 .. 3;
+
+    my $log = '/var/log/syslog';
+    my $body;
+    for ( 1 .. 20 ) {
+        $body = do { open( my $fh, '<', $log ) or die "$log: $!"; local $/; <$fh> };
+        last if ( () = $body =~ /\Q$tag\E[^\n]*same line/g ) >= 3;
+        sleep 1;
+    }
+    my @copies = $body =~ /^[^\n]*\Q$tag\E[^\n]*same line$/mg;
+    is( scalar @copies, 3, 'three copies of the line' );
+    unlike( $body, qr/message repeated[^\n]*\Q$tag\E|\Q$tag\E[^\n]*message repeated/, 'and no summary for it' );
 };
 
 subtest 'and something is actually listening at the other end' => sub {
