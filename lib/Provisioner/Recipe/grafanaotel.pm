@@ -72,12 +72,39 @@ gone.
 To read both in one query, join them on C<copied_fields>.  The C<details>
 policy is not the default, so InfluxQL names it: C<"details"."logs_detail">.
 
+=head2 A metric does not say whose run it was
+
+Claude Code puts the account and the session on each metric, and the input
+makes each attribute of a metric a tag.  A metric is not an event, so it has no
+C<logs_detail> to move them to, and it stays for the C<retention> of
+C<grafana>.  So the input drops the tags that C<dropped_tags> names.  The cost
+and the tokens still group by repository and task, through the C<clod.*> tags.
+
+=head2 Numbers arrive as strings
+
+Claude Code sends most attributes of an event as strings, also a number, and
+C<true> or C<false>.  InfluxQL cannot take the mean of a string, or compare it with C<false>.
+So the processor stores each attribute that C<number_fields> names as a float,
+and each that C<boolean_fields> names as a boolean.  A float and not an
+integer, because InfluxDB refuses a point whose field has another type than in
+the points before it, and one value with a decimal point would make that
+happen.  A value that is not a number, or not C<true> or C<false>, is left out
+of the point for the same reason.
+
+That rule of InfluxDB holds for each shard, which is one shard group duration
+of the retention policy, a week by default.  When a field changes type, as
+C<duration_ms> and C<success> do on an installation that stored them as
+strings, InfluxDB refuses each new point with that field until the next shard
+group starts.  So deploy such a change when a shard group starts, or accept
+that the events with that field are lost until then.  A query over both kinds
+of shard sees only the values of the type that it asks for.
+
 =head2 The dashboard
 
 The recipe installs the dashboard "Claude runs", with the uid
 C<claude-runs>.  It draws the cost, the tokens and the sessions of the runs,
 and the tool calls that were refused or failed, with a table of the refused
-calls by job and attempt.  Its variables filter by the C<clod.repo> and
+calls by job and attempt, and how long the calls of each tool took.  Its variables filter by the C<clod.repo> and
 C<clod.task> tags.  The uid is fixed, because L<Provisioner::Recipe::clod>
 links the dashboard of App::Clod to it, through C<dashboard_path>.
 
@@ -174,6 +201,15 @@ C<logs_detail> as well, so that a detail can be joined to its event.
 Each value of a tag is a series in InfluxDB, so name only attributes with few
 values.
 
+=item * C<number_fields>, C<boolean_fields>: the attributes of an event that
+the processor stores as a float or as a boolean.  See L</Numbers arrive as
+strings>.
+
+=item * C<dropped_tags>: the tags that the input drops from every metric.  The
+default is the attributes that name the account and the session of Claude
+Code, which it puts on each metric.  See L</A metric does not say whose run it
+was>.
+
 =back
 
 =cut
@@ -218,6 +254,24 @@ sub args {
                 items       => $field,
                 default     => [qw{event.name tool_name decision clod.task clod.repo}],
                 description => 'Attributes that become tags, which a dashboard groups by.  Only attributes with few values.',
+            },
+            number_fields => {
+                type        => 'array',
+                items       => $field,
+                default     => [qw{duration_ms}],
+                description => 'Attributes of an event that are stored as a float, although the sender sends them as strings.',
+            },
+            boolean_fields => {
+                type        => 'array',
+                items       => $field,
+                default     => [qw{success}],
+                description => 'Attributes of an event that are stored as a boolean, although the sender sends them as strings.',
+            },
+            dropped_tags => {
+                type        => 'array',
+                items       => $field,
+                default     => [qw{user.id session.id user.email user.account_uuid user.account_id organization.id}],
+                description => 'Tags that the input drops from every metric.',
             },
         },
     );

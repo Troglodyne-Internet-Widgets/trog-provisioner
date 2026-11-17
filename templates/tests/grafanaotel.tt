@@ -74,7 +74,7 @@ subtest 'an event is opened up, and loses its details to a point of their own' =
     print {$events} $line->(
         1700000000000000000,
         'event.name' => 'tool_result', 'tool_name' => 'Bash', 'session.id' => 's1', 'tool_use_id' => 't1', 'clod.job_id' => '7', 'clod.task' => 'spoke_fix',
-        'duration_ms' => 12, 'tool_input' => '{"command":"bin/preflight"}', 'tool_parameters' => { full_command => 'bin/preflight' }, 'user.email' => 'someone@test.test',
+        'duration_ms' => '12', 'success' => 'false', 'tool_input' => '{"command":"bin/preflight"}', 'tool_parameters' => { full_command => 'bin/preflight' }, 'user.email' => 'someone@test.test',
     );
     print {$events} $line->( 1700000000000000001, 'event.name' => 'api_request', 'session.id' => 's1', 'cost_usd' => 0.5 );
     close $events;
@@ -95,7 +95,8 @@ CONF
     ok( $call, 'the call is in logs, with its tool as a tag' ) or do { diag $out; return };
     like( $call, qr/clod\.task=spoke_fix[, ]/, 'and the task of its job as a tag' );
     like( $call, qr/clod\.job_id="7"/,          'with each other attribute a field of its own' );
-    like( $call, qr/duration_ms=12i?\b/,        'numbers as numbers' );
+    like( $call, qr/duration_ms=12[, ]/,        'a number that came as a string as a float' );
+    like( $call, qr/success=false[, ]/,         'and a boolean that came as a string as a boolean' );
     unlike( $call, qr/attributes=|tool_input=|tool_parameters=|user\.email=/, 'and no JSON left, none of its details, and not whose run it was' );
     ok( $cost, 'an event with no details is opened up too' ) or diag $out;
 
@@ -135,7 +136,7 @@ subtest 'each query of the dashboard runs' => sub {
 subtest 'a metric sent over OTLP arrives in influxdb' => sub {
     my $marker = "grafanaotel-selftest-$$-" . time;
     my $probe  = File::Temp->new( SUFFIX => '.lp' );
-    print {$probe} "grafanaotel_probe,probe=$marker value=1\n";
+    print {$probe} "grafanaotel_probe,probe=$marker,user.id=u1,session.id=s1 value=1\n";
     close $probe;
 
     my $sent = telegraf_once( '--once', <<"CONF" );
@@ -159,7 +160,14 @@ CONF
         sleep 5;
     }
     ok( $found, 'the probe is in influxdb' )
-      or diag "telegraf --once said:\n$sent\n" . `journalctl -u telegraf --no-pager -n 20 2>&1`;
+      or return diag "telegraf --once said:\n$sent\n" . `journalctl -u telegraf --no-pager -n 20 2>&1`;
+
+    # The account and the session came as attributes of the metric, which
+    # the input makes tags.
+    my $out  = `curl -fsS -G $influx/query --data-urlencode 'db=$found' --data-urlencode 'q=SHOW TAG KEYS FROM /grafanaotel_probe/' 2>&1`;
+    my @keys = map { $_->[0] } map { @{ $_->{values} // [] } } map { @{ $_->{series} // [] } } @{ ( eval { JSON::PP->new->decode($out) } // {} )->{results} // [] };
+    ok( ( grep { $_ eq 'probe' } @keys ), 'the probe keeps its own tag' ) or diag $out;
+    is_deeply( [ grep { m/\A(?:user|session)\./ } @keys ], [], 'and not the account or the session that it was sent with' ) or diag $out;
 };
 
 done_testing();

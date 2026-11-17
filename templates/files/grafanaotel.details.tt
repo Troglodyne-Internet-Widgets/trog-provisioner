@@ -9,12 +9,40 @@ load("json.star", "json")
 DETAIL = [[% FOR f IN detail_fields %]"[% f %]", [% END %]]
 TAGS = [[% FOR f IN tag_fields %]"[% f %]", [% END %]]
 COPIED = [[% FOR f IN copied_fields %]"[% f %]", [% END %]]
+NUMBERS = [[% FOR f IN number_fields %]"[% f %]", [% END %]]
+BOOLEANS = [[% FOR f IN boolean_fields %]"[% f %]", [% END %]]
 SCALAR = ["string", "int", "float", "bool"]
 
 def value(v):
     if type(v) in SCALAR:
         return v
     return json.encode(v)
+
+# Always a float, and None for anything else, because InfluxDB refuses a
+# point whose field changes type.  Starlark has no try, so the text is
+# checked before float() can fail.
+def number(v):
+    if type(v) in ["int", "float"]:
+        return float(v)
+    if type(v) != "string":
+        return None
+    digits = v[1:] if v.startswith("-") else v
+    parts = digits.split(".")
+    if len(parts) > 2:
+        return None
+    for p in parts:
+        if not p.isdigit():
+            return None
+    return float(v)
+
+def boolean(v):
+    if type(v) == "bool":
+        return v
+    if v == "true":
+        return True
+    if v == "false":
+        return False
+    return None
 
 def apply(metric):
     raw = metric.fields.get("attributes")
@@ -33,6 +61,14 @@ def apply(metric):
             details[k] = value(v)
         elif k in TAGS:
             metric.tags[k] = str(v)
+        elif k in NUMBERS:
+            n = number(v)
+            if n != None:
+                metric.fields[k] = n
+        elif k in BOOLEANS:
+            b = boolean(v)
+            if b != None:
+                metric.fields[k] = b
         else:
             metric.fields[k] = value(v)
     if not details:

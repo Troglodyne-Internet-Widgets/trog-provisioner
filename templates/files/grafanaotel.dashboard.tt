@@ -140,7 +140,7 @@
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
       "targets": [
         { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_tool_name]]",
-          "query": "SELECT count(\"tool_use_id\") FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_result' AND \"success\" = 'false' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"tool_name\" fill(none)" }
+          "query": "SELECT count(\"tool_use_id\") FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_result' AND \"success\" = false AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"tool_name\" fill(none)" }
       ]
     },
     {
@@ -153,6 +153,19 @@
       "targets": [
         { "refId": "A", "rawQuery": true, "resultFormat": "table",
           "query": "SELECT \"clod.job_id\" AS \"job\", \"clod.attempt\" AS \"attempt\", \"tool_name\" AS \"tool\", \"clod.repo\" AS \"repository\", \"clod.task\" AS \"task\" FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_decision' AND \"decision\" = 'reject' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ ORDER BY time DESC LIMIT 200" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Tool call duration",
+      "description": "The mean time that a call of each tool took, from the duration_ms of its tool_result event.",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 30, "w": 24, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_tool_name]]",
+          "query": "SELECT mean(\"duration_ms\") FROM \"logs\" WHERE $timeFilter AND \"event.name\" = 'tool_result' AND \"clod.repo\" =~ /^$repo$/ AND \"clod.task\" =~ /^$task$/ GROUP BY time($__interval), \"tool_name\" fill(none)" }
       ]
     }
   ]
