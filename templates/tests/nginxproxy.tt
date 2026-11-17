@@ -39,7 +39,7 @@ foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
 # Traverse is not read.  A file that the application writes into the root later
 # gets the www-data group only from the setgid bit on the directory.  Without
 # that bit, the file keeps the default group of the process that wrote it.
-# The probe gets mode 0750, as data leaves every file, so only the group lets
+# The probe gets mode 0640, as data leaves a file, so only the group lets
 # www-data read it.
 foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
     next unless -d $root;
@@ -47,7 +47,7 @@ foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
     open(my $fh, '>', $probe) or die "could not write $probe: $!";
     print {$fh} "probe\n";
     close $fh;
-    chmod 0750, $probe;
+    chmod 0640, $probe;
     my $readable = system('runuser', '-u', 'www-data', '--', 'cat', $probe) == 0;
     ok($readable, "and www-data can actually read a file under $root, not merely traverse to it");
     unlink $probe;
@@ -65,7 +65,7 @@ foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
     if (open(my $fh, '>', $file)) {
         print {$fh} $probe;
         close $fh;
-        chmod 0750, $file;
+        chmod 0640, $file;
         my $url = '[% IF v.ssl %]https[% ELSE %]http[% END %]://[% domain %]:[% port %]/.nginxproxy_query_probe';
         my $get = sub {
             my ($query) = @_;

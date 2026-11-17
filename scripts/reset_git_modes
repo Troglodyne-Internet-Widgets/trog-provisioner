@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Put back the file modes that git tracks, in each checkout at or under a
+# directory, and touch nothing else.
+#
+#     reset_git_modes <directory>
+#
+# The data target of a guest that was built before it used u=rwX,g=rX,o= made
+# every file executable.  The salvage keeps that, and the rsync brings it back
+# onto the next guest.  git tracks the execute bit, so each file that git
+# records as 100644 then shows as modified, though no content changed.  The
+# data target runs this over the whole domain directory, so that every checkout
+# that a recipe keeps there is repaired, whichever recipe owns it.
+#
+# `git checkout -- .` would fix the modes, and would also throw away every
+# change of content.  A checkout of a recipe is the live site, and somebody
+# edits it.  So this script resets only a file whose mode is the whole
+# difference: it hashes the file, and when that is the blob that the index
+# holds, it sets the mode that the index records.  A file with a change of
+# content stays as it is, whatever its mode.
+#
+# It declines (does nothing and exits 0) when the directory is absent or holds
+# no checkout, and for a checkout that is clean.  A first build has no checkout
+# until a fragment clones one, and a clone has the right modes.
+
+set -uo pipefail
+
+ROOT="${1:?usage: reset_git_modes <directory>}"
+
+[ -d "$ROOT" ] || exit 0
+
+reset_checkout() {
+    local checkout="$1"
+
+    # root runs this over files that another account owns, so git needs the
+    # directory marked safe, and a HOME to read.  Neither is written to the
+    # configuration of an account.
+    local git=(git -c "safe.directory=$checkout" -C "$checkout")
+
+    # --raw -z gives  :<old mode> <new mode> <old blob> <new blob> <status> NUL <path> NUL
+    # The old side is the index, so the old mode is the one to put back.
+    "${git[@]}" diff --raw --no-abbrev -z --diff-filter=M 2>/dev/null | while IFS=' ' read -r -d '' meta; do
+        IFS= read -r -d '' path || break
+        read -r old_mode new_mode old_blob _ <<<"$meta"
+        old_mode="${old_mode:1}"
+        case "$old_mode/$new_mode" in
+            100644/100755 | 100755/100644) ;;
+            *) continue ;;
+        esac
+        [ "$("${git[@]}" hash-object -- "$path" 2>/dev/null)" = "$old_blob" ] || continue
+        if [ "$old_mode" = 100755 ]; then
+            chmod u+x,g+x -- "$checkout/$path"
+        else
+            chmod a-x -- "$checkout/$path"
+        fi
+    done
+}
+
+export HOME="${HOME:-$ROOT}"
+
+# -H follows the directory given, which can be a symlink, and no link below it.
+# A .git is a directory, or a file in a worktree or a submodule, so the test is
+# on the name, and -prune keeps find out of the repository itself.
+find -H "$ROOT" -name .git -prune -printf '%h\0' | while IFS= read -r -d '' checkout; do
+    reset_checkout "$checkout"
+done
+
+exit 0

@@ -175,7 +175,8 @@ milters declared per domain make postfix run each of them twice.
 one directory.  Prepend C<install_dir> to every path a fragment names.  If
 software insists on a path of its own, symlink that path into C<install_dir>.
 
-=item * Files and directories are C<0750 user:admin_user>.  C<user> is the
+=item * Directories and executables are C<0750 user:admin_user>, and any other
+file is C<0640>, which C<chmod u=rwX,g=rX,o=> gives.  C<user> is the
 service account that the application runs as.  It defaults to the admin user,
 see C<validate>.
 

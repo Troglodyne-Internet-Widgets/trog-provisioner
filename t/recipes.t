@@ -550,6 +550,36 @@ subtest 'only data sets the owner of the domain directory' => sub {
       or diag explain \%chowners;
 };
 
+# A blanket 0750 made every file executable, and git tracks that bit, so each
+# file of a checkout under the domain directory that git tracks as 644 showed
+# as modified.  A capital X sets the bit only where one is already.
+subtest 'the data target does not make every file executable' => sub {
+    my $data = Provisioner::Cookbook->load( 'data', distro => $DISTRO )->new(%PROV)->render(%G);
+    my $dir  = "$G{install_dir}/$G{domain}";
+
+    like( $data, qr{^chmod[ ]-R[ ]u=rwX,g=rX,o=[ ]\Q$dir\E$}m, 'the domain directory is opened by the X form' );
+    unlike( $data, qr{^chmod[ ]-R[ ]0750}m, 'and no recursive chmod gives every file 0750' );
+};
+
+# The data target repairs every checkout under the domain directory, so a
+# recipe that keeps one needs no call of its own.  t/reset-git-modes.t runs the
+# script itself.
+subtest 'the data target puts back the tracked modes of every checkout' => sub {
+    my $data = Provisioner::Cookbook->load( 'data', distro => $DISTRO )->new(%PROV)->render(%G);
+    my $dir  = "$G{install_dir}/$G{domain}";
+
+    like( $data, qr{^\S*/reset_git_modes[ ]'\Q$dir\E'$}m, 'reset_git_modes runs over the domain directory' );
+    cmp_ok( index( $data, 'reset_git_modes' ), '>', index( $data, 'chmod -R' ), 'and after the chmod, which keeps an execute bit that a salvage brought' );
+};
+
+subtest 'tcms throws away no content of the checkout that it finds' => sub {
+    my $out = Provisioner::Cookbook->load( 'tcms', distro => $DISTRO )->new(%PROV)->render( %G, %{ $required_config{tcms} // {} } );
+
+    my $discards   = qr{git[ ] (?: checkout | reset | stash | clean ) \b}x;
+    my $everything = qr{(?: --[ ]\. | --hard )}x;
+    unlike( $out, qr{$discards [^\n]* $everything}x, 'no git command in the fragment discards the working tree' );
+};
+
 # ----------------------------------------------------------------
 # Validate: required fields cause die
 # ----------------------------------------------------------------

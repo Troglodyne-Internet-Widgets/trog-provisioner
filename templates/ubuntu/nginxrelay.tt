@@ -1,7 +1,7 @@
 [%# The data target puts back the registrations of the guests behind this
     one.  Provisioner::Recipe::nginxrelay says why. -%]
 install -d -o root -g root -m 0755 /etc/nginx/nginxrelay.d
-[%# The data target leaves what it restores 0750 root:root, and nginx opens each
+[%# The data target leaves what it restores root:root with no access for others, and nginx opens each
     certificate as www-data at the handshake.  These are the modes that
     nginxrelay_client cert gives them. -%]
 install -d -o root -g root -m 0755 /etc/nginx/nginxrelay.d/media
