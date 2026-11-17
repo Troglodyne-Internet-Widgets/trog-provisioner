@@ -4,5 +4,8 @@
         "bin/provision",
         "bin/destroy",
         ".claude/skills/provisioning-recipes/scripts/*"
+    ],
+    "cleanup": [
+        ".claude/skills/provisioning-recipes/scripts/clean_scratch"
     ]
 }

@@ -128,6 +128,13 @@ first, because a link passes every argument after it to its tool unread.  A
 `TROG_SETUP_TIMEOUT=3h` in front of `provision` is refused in the same way, so
 such a session builds with the default timeout.
 
+Tear down each guest yourself, as for any other run.  The bot also cleans up
+after you.  The `TMPDIR` of a bot run is its scratch directory, so
+`scratch_config` makes its directory there.  After the run, also a run that
+died, App-Clod runs `scripts/clean_scratch` with that directory, as the
+`cleanup` of `clod.json`.  It tears down every guest that a scratch
+configuration there still names.
+
 It takes the settings of the installation out of the `_global` of `_base` in
 its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
 `recipes.d/` empty, and builds a KeePass DB holding a made-up value for every

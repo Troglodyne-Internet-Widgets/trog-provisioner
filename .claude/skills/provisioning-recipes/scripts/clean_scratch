@@ -1,0 +1,126 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::CleanScratch;
+
+#ABSTRACT: Tear down every scratch configuration under a directory, and each guest that it configures.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use File::Basename();
+use File::Find();
+use IPC::Run3();
+use Pod::Usage qw{pod2usage};
+
+=head1 NAME
+
+clean_scratch - tear down every scratch configuration under a directory, and each guest that it configures
+
+=head1 SYNOPSIS
+
+    clean_scratch DIR
+
+=head1 DESCRIPTION
+
+Finds each configuration that C<scratch_config> made under C<DIR>, by its
+marker, and runs C<teardown> for each domain in its F<recipes.d>.  The teardown
+of the last domain removes the configuration.  A configuration with no domain
+left is removed with C<scratch_config --remove>.
+
+It is for a run that cannot be trusted to tear down its own guests, because it
+can die first.  App::Clod runs it after each run of the bot, as the C<cleanup>
+of F<clod.json>, with the scratch directory of the run, which is also the
+C<TMPDIR> where C<scratch_config> made its configuration.
+
+It does not look inside a configuration that it found, because the data source
+of a scratch configuration is in it.  It passes no password to C<teardown>, so
+a hypervisor that C<scratch_config --keep> kept, with a credential in the
+scratch store, cannot be asked, and its teardown fails.
+
+Exits 0 when nothing failed, also when it found nothing.  Exits 1 when a
+teardown or a removal failed, after it tried each of the others.
+
+=cut
+
+# scratch_config's marker.  See scripts/teardown.
+our $MARKER = '.trog-scratch-config';
+
+sub main {
+    my @args = @_;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ ) if @args != 1;
+    my ($under) = @args;
+    die "$under is not a directory.\n" if !-d $under;
+
+    my $failed = 0;
+    for my $dir ( scratch_configs($under) ) {
+        $failed += tear_down($dir);
+    }
+    return $failed ? 1 : 0;
+}
+
+=head1 SUBROUTINES
+
+=head2 @dirs = scratch_configs($under)
+
+The directories under C<$under>, C<$under> itself among them, that hold the
+marker of C<scratch_config>, sorted.  It does not descend into one that it
+found, nor follow a symbolic link.
+
+=cut
+
+sub scratch_configs {
+    my ($under) = @_;
+    my @found;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                return if !-d $File::Find::name || !-f "$File::Find::name/$MARKER";    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the marker is a plain file
+                push @found, $File::Find::name;
+                $File::Find::prune = 1;
+            },
+        },
+        $under,
+    );
+    return sort @found;
+}
+
+=head2 $failures = tear_down($dir)
+
+Runs C<teardown --config $dir> for each domain in F<$dir/recipes.d>, or
+C<scratch_config --remove $dir> when there is none.  Returns how many of them
+failed.
+
+=cut
+
+sub tear_down {
+    my ($dir) = @_;
+    my @domains = sort map { File::Basename::basename( $_, q{.yaml} ) } glob "$dir/recipes.d/*.yaml";
+    return run_script( 'scratch_config', '--remove', $dir ) ? 1 : 0 if !@domains;
+    my $failed = 0;
+    for my $domain (@domains) {
+        $failed++ if run_script( 'teardown', '--config', $dir, $domain );
+    }
+    return $failed;
+}
+
+=head2 $status = run_script($name, @args)
+
+Runs the script C<$name> beside this one, with C<@args> and no input, and
+returns its exit status.  Its output goes where this script's goes.
+
+=cut
+
+sub run_script {
+    my ( $name, @args ) = @_;
+    my $script = File::Basename::dirname(__FILE__) . "/$name";
+    IPC::Run3::run3( [ $^X, $script, @args ], \undef, undef, undef );
+    return $? >> 8;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
