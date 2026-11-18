@@ -20,6 +20,7 @@ use Dist::Conformance::Check::SystemPackages();
 use Dist::Conformance::Snapshot();
 use Dist::Conformance::Snapshot::Tree();
 
+use Provisioner::Cookbook();
 use Provisioner::Recipe::servicesudo();
 use Provisioner::Utils();
 
@@ -129,18 +130,27 @@ needs a login.  A site without a relay, such as an internal one, leaves
 C<secure_host> out.  Then C<general.secure_host> is empty, and tCMS serves
 every page on every name.
 
-So the fragment queues F<bin/tcms-hostname> of the checkout to write both into
-F<config/main.cfg>, as the service user, on every build.  Without
-C<secure_host>, it writes an empty secure host, which clears one that came down
-with the checkout.  It is the one change that this recipe makes to a checkout
-that is already there, and only these two settings.  It runs after the C<perl>
-recipe has built the modules that tCMS loads, and before the service of tPSGI
-starts.  The F<bin/tcms-hostname> of the checkout must take C<--secure>, which
-a checkout older than that does not, and then the task fails.
+tCMS links the public assets of a post to C<general.media_base>.  A site
+behind a relay serves them on a media name, which the relay caches.  See
+L<Provisioner::Recipe::nginx/Media names>.  The media base is
+C<https://NAME>, where NAME is the name in C<nginx.media_names> whose vhost is
+the domain.  A domain with no such name gets an empty media base,
+and tCMS serves the assets on its own names.  The build stops when more than
+one media name maps to the domain, because tCMS links to one.
+
+So the fragment queues F<bin/tcms-hostname> of the checkout to write all three
+into F<config/main.cfg>, as the service user, on every build.  An empty secure
+host or media base clears one that came down with the checkout.  It is the one
+change that this recipe makes to a checkout that is already there, and only
+these three settings.  It runs after the C<perl> recipe has built the modules
+that tCMS loads, and before the service of tPSGI starts.  The
+F<bin/tcms-hostname> of the checkout must take C<--secure> and C<--media>.  A
+checkout older than that does not, and then the task fails.
 
 The guest test asks F<bin/tcms-hostname> for the hostname, and expects the
 domain.  With C<secure_host>, it also asks tCMS for F</login> on the domain,
-and expects a redirect to C<secure_host>.
+and expects a redirect to C<secure_host>.  It asks tCMS for its media base,
+and expects the one above.
 
 =head2 THE JOB WORKER
 
@@ -387,6 +397,23 @@ sub template_files {
 
 sub tests {
     return qw{tcms.tt};
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<media_base>, from C<nginx.media_names> of the domain.  See
+L</THE HOSTS OF TCMS>.
+
+=cut
+
+sub enrich ( $, %opts ) {
+    my $nginx = Provisioner::Cookbook->domain_config( $opts{domain} )->{nginx} // {};
+    my $media = $nginx->{media_names}                                          // {};
+    my @names = sort grep { ( $media->{$_} // q{} ) eq $opts{domain} } keys %$media;
+    die "tcms: more than one media name maps to $opts{domain} (@names), and tCMS links its assets to one.  Map one of them to $opts{domain} in nginx.media_names.\n" if @names > 1;
+
+    $opts{media_base} = @names ? "https://$names[0]" : q{};
+    return %opts;
 }
 
 =head2 @hosts = $recipe->fetch_hosts(%opts)

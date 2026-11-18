@@ -14,10 +14,10 @@ sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir
     they are missing.  See Provisioner::Recipe::tcms. -%]
 sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '[% install_dir %]/[% domain %]/tCMS' -f Installer.mk prereq-frontend
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'
-[%# The hostname and the secure host, which tCMS writes itself, once the perl
-    target has built what it loads.  An empty secure host clears it.  See THE
-    HOSTS OF TCMS in Provisioner::Recipe::tcms. -%]
-[% script_dir %]/queue_postrun_task "cd '[% install_dir %]/[% domain %]/tCMS' && sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' /opt/perl5/current/bin/perl bin/tcms-hostname --secure '[% secure_host %]' '[% domain %]'"
+[%# The hostname, the secure host and the media base, which tCMS writes
+    itself, once the perl target has built what it loads.  An empty value
+    clears one.  See THE HOSTS OF TCMS in Provisioner::Recipe::tcms. -%]
+[% script_dir %]/queue_postrun_task "cd '[% install_dir %]/[% domain %]/tCMS' && sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' /opt/perl5/current/bin/perl bin/tcms-hostname --secure '[% secure_host %]' --media '[% media_base %]' '[% domain %]'"
 [%# The worker of the job queue.  reenable, so that a guest built before the
     service of tPSGI wanted the worker loses its old link.  restart, so that a
     provision of a running guest loads the new checkout, after the perl target
