@@ -159,5 +159,27 @@ subtest 'a symlink is given, not what it points at' => sub {
     is_deeply( \@warned, [], 'the owner of the link changes, and its target is never touched' );
 };
 
+subtest 'the PATH of an interactive bash of the owner' => sub {
+    my $home = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$home/.bashrc", <<'RC' );
+[ -z "$PS1" ] && return
+echo 'PATH=/bogus/printed/by/a/startup/file'
+printf 'a line with no newline'
+export PATH="/bogus/owner/node/bin:$PATH"
+RC
+
+    my $path = Trog::Script::SmokePerlModules::interactive_path( 'env', "HOME=$home" );
+    like( $path, qr{\A/bogus/owner/node/bin:}, 'is what its startup files leave, and not what they print' );
+
+    is( Trog::Script::SmokePerlModules::interactive_path('true'), undef, 'and nothing when it prints none' );
+    is_deeply( [ Trog::Script::SmokePerlModules::owner_path($<) ], [], 'and nothing asked of the account that runs the script' );
+};
+
+subtest 'the PATH of the owner goes first' => sub {
+    local $ENV{PATH} = '/bogus/root/bin:/usr/bin';
+    is( Trog::Script::SmokePerlModules::path_with('/bogus/owner/bin::/usr/bin'), '/bogus/owner/bin:/usr/bin:/bogus/root/bin', 'with each directory once, and no empty one' );
+    is( Trog::Script::SmokePerlModules::path_with(),                             '/bogus/root/bin:/usr/bin',                  'and the PATH as it is without one' );
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();
