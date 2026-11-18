@@ -69,16 +69,23 @@ install -o root -g root -m 0700 trogrunner-owner.sh '[% install_dir %]/[% domain
 # Provisioner::Recipe::trogrunner.
 [% script_dir %]/queue_postrun_task [% script_dir %]/setup_transfer_user [% IF transfer_account == user %]--give-shell [% END %]'[% transfer_account %]' '[% provision_user %]'
 [% IF checkout %]
-# The checkout, only if nothing is there.  A checkout salvaged from the
-# replaced guest holds work, and a clone over it loses that work.  koan.tt has
-# the same guard.
+# The checkout.  A checkout salvaged from the replaced guest can hold work, so
+# it only fast-forwards, and a pull that cannot fast-forward stops the build.
+# Without the pull, the guest runs the code of the guest that it replaced.
+#
+# safe.directory on the command line, because root runs the pull in a checkout
+# that the service user owns, and the global entry comes after.
 #
 # A subdirectory, not the domain directory, because service_user made that
 # first, and git clone refuses a target that is not empty.
 #
 # HOME= on every git, because atd gives no environment, and git as root with
 # no HOME does more than warn.
-[ -e '[% install_dir %]/[% domain %]/[% checkout_dir %]/.git' ] || HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+if [ -e '[% install_dir %]/[% domain %]/[% checkout_dir %]/.git' ]; then \
+    HOME='[% install_dir %]/[% domain %]' git -c safe.directory='[% install_dir %]/[% domain %]/[% checkout_dir %]' -C '[% install_dir %]/[% domain %]/[% checkout_dir %]' pull --ff-only; \
+else \
+    HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'; \
+fi
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 
 # Tab completion of a domain, for bin/new_config, bin/provision and bin/destroy.

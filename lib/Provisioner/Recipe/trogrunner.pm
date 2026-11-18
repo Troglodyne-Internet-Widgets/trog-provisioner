@@ -97,6 +97,11 @@ repositories, such as a coding agent, already has one.  A second copy under
 C<install_dir> is a second copy to keep in step.  Point C<deps_from> at the
 path where it clones instead, and the dependencies still install.
 
+A rebuild salvages the checkout, see L</remote_files>.  The recipe then runs
+C<git pull --ff-only> in it as root.  A fast-forward loses no work.  If
+the branch diverged, has no upstream, or a local change is in the way, the pull
+fails, and so does the build.  Fix the checkout on the guest, and build again.
+
 =head3 THE CONFIGURATION
 
 The recipe seeds F<recipes.yaml>, F<hypervisors.conf>,
