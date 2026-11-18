@@ -32,7 +32,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 # Test::MockModule in strict mode has methods to find.  The backend rather than
 # Trog::HV, because that is where the libvirt methods these mocks replace live,
 # and Trog::HV requires it lazily.
-use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports) -- the backend whose refusal is under test
 
 my $script = "$FindBin::Bin/../bin/debug_boot";
@@ -267,6 +267,39 @@ subtest '--vnc prints what the backend says to act on, and its advice' => sub {
     $hv->redefine( vnc_access => sub { ( "open this\n", 'https://cloud.test/vnc?token=x' ) } );
     ($out) = capture { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
     is( $out, "https://cloud.test/vnc?token=x\n", 'whatever shape it is' );
+};
+
+subtest '--keys asks the daemon that holds the guest' => sub {
+    my @ran;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( run_cmd => sub { shift; push @ran, [@_]; return 0 } );
+
+    my %daemon = (
+        'qemu+ssh://someadmin@hv.test/session' => [qw{-c qemu:///session}],
+        'qemu+ssh://someadmin@hv.test/system'  => [qw{-c qemu:///system}],
+    );
+    foreach my $uri ( sort keys %daemon ) {
+        @ran = ();
+        my $hv = Trog::HV::Libvirt->build( uri => $uri );
+        capture { Trog::Bin::DebugBoot::keys_to( $hv, 'vm.test', 'KEY_DOWN' ) };
+        is_deeply( \@ran, [ [ 'virsh', @{ $daemon{$uri} }, qw{send-key vm.test --holdtime 100 KEY_DOWN} ] ], "$uri sends to the daemon it names" )
+          or diag explain \@ran;
+    }
+
+    # No -c at all, so that virsh selects its default as Sys::Virt does.
+    @ran = ();
+    capture { Trog::Bin::DebugBoot::keys_to( Trog::HV::Libvirt->build(), 'vm.test' ) };
+    is_deeply( \@ran, [ [qw{virsh send-key vm.test --holdtime 100 KEY_ESC}] ], 'no uri gives virsh no -c, and ESC when no key is named' )
+      or diag explain \@ran;
+
+    $mock->redefine( run_cmd => sub { return 1 } );
+    like(
+        exception {
+            capture { Trog::Bin::DebugBoot::keys_to( Trog::HV::Libvirt->build(), 'vm.test' ) }
+        },
+        qr/\ACould[ ]not[ ]send[ ]KEY_ESC[ ]to[ ]vm[.]test[.]/,
+        'a virsh that fails stops the script'
+    );
 };
 
 subtest 'a screenshot is streamed straight here, and named for what it is' => sub {
