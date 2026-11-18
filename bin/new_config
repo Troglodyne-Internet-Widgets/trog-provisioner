@@ -1491,6 +1491,7 @@ sub handle_domain {
     # After generate_files, whose settings the recipe keeps: see validated in
     # Provisioner::Recipe.
     write_guest_tests( $builders{$distro_name}, $cfg_dir );
+    write_secrets_test( $builders{$distro_name}, $cfg_dir, \%guest_secrets );
 
     # After generate_files, which makes a key for a domain that had none.  Not
     # on a dry run: see DRY RUNS.
@@ -1673,6 +1674,32 @@ sub write_guest_tests ( $builder, $cfg_dir, %vars ) {
         File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $builder->render_file( "tests/$test", %vars ) );
     }
     return;
+}
+
+=head2 write_secrets_test($builder, $cfg_dir, $wanted)
+
+Renders F<tests/guest_secrets.tt> into F<t/guest_secrets.t> of C<$cfg_dir>.  The
+test makes sure that each file in C<$wanted>, which is what C<guest_secrets>
+collected from every recipe of the guest, exists with its C<owner> and C<mode>.
+A file that names no owner is C<root:root>, and one that names no mode is
+C<0600>, as in the manifest.  When C<$wanted> is empty, it writes nothing and
+removes the test of an earlier run.  Returns the path that it wrote, or nothing.
+
+It uses C<render_raw>, not C<render_file>.  C<render_file> gives back the
+variables of the first render of the recipe, so a list that comes later would
+not reach the template.
+
+=cut
+
+sub write_secrets_test ( $builder, $cfg_dir, $wanted ) {
+    my $test = "$cfg_dir/t/guest_secrets.t";
+    unlink $test;
+    return unless %$wanted;
+
+    my @secrets = map { { path => $_, owner => $wanted->{$_}{owner} // 'root:root', mode => $wanted->{$_}{mode} // '0600' } } sort keys %$wanted;
+    print "Writing guest_secrets.tt as guest_secrets.t: " . scalar(@secrets) . " file(s)\n";
+    File::Slurper::Temp::write_binary( $test, $builder->render_raw( 'tests/guest_secrets.tt', secrets => \@secrets ) );
+    return $test;
 }
 
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)

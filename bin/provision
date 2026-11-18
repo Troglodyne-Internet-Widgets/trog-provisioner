@@ -351,10 +351,20 @@ sub place_guest_secrets {
         # Try the owner, but do not require it.  The account is usually from a
         # package that the makefile has not installed yet.  Until the recipe
         # changes the owner, the mode above keeps the secret private.  That is
-        # why guest_secrets gives the final owner, not the first one.
+        # why guest_secrets gives the final owner, not the first one.  A
+        # missing account is the normal case, so it gets a note.  Whether the
+        # recipe gave the file away is for t/guest_secrets.t to say after the
+        # build.  Any other failure gets a warning.
         my $owner = $wanted->{$path}{owner} // 'root:root';
-        warn "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n"
-          if $guest->run_sudo( 'chown', $owner, $path );
+        if ( $guest->run_sudo( 'chown', $owner, $path ) ) {
+            my $said = chown_error( $guest, $owner, $path );
+            if ( $said =~ m/invalid[ ](?:user|group)/ ) {
+                print "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n";
+            }
+            else {
+                warn "Could not give $path to $owner on $domain: " . ( $said ne q{} ? $said : "chown failed, and said nothing\n" );
+            }
+        }
 
         print "Placed $path on $domain from " . ( $wanted->{$path}{ref} // "$wanted->{$path}{issue}{guest}" ) . "\n";
     }
@@ -368,6 +378,20 @@ sub place_guest_secrets {
     $guest->write_text( $marker, "placed\n", sudo => 1, mode => '0600' )
       or die "Could not write $marker on $domain, which its build waits for\n";
     return 1;
+}
+
+=head2 $said = chown_error($guest, $owner, $path)
+
+Runs the C<chown> that failed again on C<$guest>, in the C locale, and returns
+what it said.  C<run_sudo> returns only the exit code, and that does not tell a
+missing account from a file that is not there.  Only the text does.  It returns
+the text of sudo when sudo needs a password, which is not an account error.
+
+=cut
+
+sub chown_error {
+    my ( $guest, $owner, $path ) = @_;
+    return $guest->capture_cmd( join( q{ }, 'sudo -n env LC_ALL=C chown', Trog::Utils::shell_quote($owner), Trog::Utils::shell_quote($path), '2>&1' ) ) // q{};
 }
 
 =head2 $secret = issue_secret($domain, $path, $issue)

@@ -1340,7 +1340,12 @@ C<%opts>.
 C<owner> is the final owner of the file, not the owner it lands with.
 Placement happens before the makefile runs, so the account usually belongs to
 a package that is not installed yet.  C<mode> keeps the secret private until
-the recipe changes the owner, which the recipe must do.
+the recipe changes the owner, which the recipe must do.  C<bin/provision> prints
+a note, not a warning, when the account does not exist yet.  A recipe that never
+gives the file away is found after the build, by the guest test
+F<t/guest_secrets.t>.  C<bin/new_config> writes it from the entries of every
+recipe of the guest, so a recipe adds no test of its own.  It expects C<owner>
+and C<mode> as declared, C<root:root> and C<0600> when the entry has none.
 
 =cut
 

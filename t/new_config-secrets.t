@@ -26,6 +26,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
+use IPC::Run3();
 use Test::Fatal qw{exception};
 use File::Temp();
 use File::Slurper();
@@ -147,6 +148,41 @@ subtest 'the manifest is not something the guest is handed' => sub {
 
     ok( defined $members, 'found what goes into data.tar.gz' );
     unlike( $members // '', qr/guest-secrets/, 'and the manifest is not among it' );
+};
+
+subtest 'the guest test lists each file that guest_secrets names, and only those' => sub {
+    my $builder = Provisioner::Cookbook->load( 'mail', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/t";
+
+    my %wanted = (
+        signing_key_wanted(),
+        '/etc/plain.key' => { ref => 'secret:plain/password' },
+    );
+    my $written = Trog::Provisioner::Config::Generator::write_secrets_test( $builder, $dir, \%wanted );
+    is( $written, "$dir/t/guest_secrets.t", 'a test is written into t/' );
+
+    my $text  = File::Slurper::read_binary($written);
+    my $key   = q{/opt/domains/matrix.vm.test/homeserver.signing.key};
+    my $entry = qr{q\{\Q$key\E\},\s+q\{matrix-synapse:matrix-synapse\},};
+    like( $text, qr{$entry\s+q\{0600\}},                                   "it lists a path with its declared owner and mode" );
+    like( $text, qr{q\{/etc/plain[.]key\},\s+q\{root:root\},\s+q\{0600\}}, 'and the defaults for an entry that declares none' );
+    is( scalar( () = $text =~ m/^\s+\[\s+q\{/gm ), 2, 'and nothing else' );
+    is( system( $^X, '-c', $written ) >> 8,        0, 'and what it wrote compiles' ) or diag $text;
+
+    IPC::Run3::run3( [ $^X, $written ], \undef, \my $stdout, \my $stderr );
+    my $found = $stdout . $stderr;
+    like( $found, qr{not[ ]ok[ ]1[ ]-[ ]/etc/plain[.]key[ ]is[ ]root:root[ ]0600}, 'a file that is not there fails, and the name says which' );
+    like( $found, qr{it[ ]is:[ ]no[ ]such[ ]file},                                 'and says what was found' );
+    like( $found, qr{should[ ]be[ ]owned[ ]by[ ]matrix-synapse:matrix-synapse},    "with the declared owner" );
+    like( $found, qr{with[ ]mode[ ]0600},                                          "and mode" );
+
+    Trog::Provisioner::Config::Generator::write_secrets_test( $builder, $dir, {} );
+    ok( !-e "$dir/t/guest_secrets.t", 'and a guest with no secrets has no such test, not even an old one' );
 };
 
 # bin/new_config loads Carp::Always, so a die anywhere under it carries a trace.
