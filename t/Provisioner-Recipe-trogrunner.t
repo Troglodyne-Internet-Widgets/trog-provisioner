@@ -517,6 +517,55 @@ subtest 'the fragment seeds the configuration, and leaves what is there alone' =
     );
 };
 
+subtest 'a salvaged checkout is fast-forwarded, and keeps its work' => sub {
+    my $guest    = tempdir( CLEANUP => 1 );
+    my $upstream = tempdir( CLEANUP => 1 );
+    my $checkout = "$guest/$DOMAIN/trog-provisioner";
+    File::Path::make_path("$guest/$DOMAIN");
+
+    local $ENV{GIT_AUTHOR_NAME}     = 'test';
+    local $ENV{GIT_AUTHOR_EMAIL}    = 'test@test.test';
+    local $ENV{GIT_COMMITTER_NAME}  = 'test';
+    local $ENV{GIT_COMMITTER_EMAIL} = 'test@test.test';
+    my $git = sub {
+        my ( $dir, @args ) = @_;
+        my $said = q{};
+        IPC::Run3::run3( [ 'git', '-C', $dir, @args ], \undef, \$said, \$said );
+        die "git @args: $said" if $?;
+        chomp $said;
+        return $said;
+    };
+    $git->( $upstream, qw{init -q -b master} );
+    $git->( $upstream, qw{commit -q --allow-empty -m one} );
+
+    my ( undef, $recipe, $vars ) = built( install_dir => $guest, repo_url => $upstream );
+    ( my $fragment = $recipe->render(%$vars) ) =~ s/\\\n//g;
+    my @lines = grep { m{\Aif[ ]\[[ ]-e[ ]'\Q$checkout\E/\.git'} } split m/\n/, $fragment;
+    is( scalar @lines, 1, 'one line makes the checkout' );
+
+    my $run = sub {
+        my $said = q{};
+        IPC::Run3::run3( [ qw{bash -e -c}, $lines[0] ], \undef, \$said, \$said );
+        return ( $? >> 8, $said );
+    };
+
+    my ( $rc, $said ) = $run->();
+    is( $rc,                                     0,                                       'a guest with no checkout clones one' ) or diag $said;
+    is( $git->( $checkout, qw{rev-parse HEAD} ), $git->( $upstream, qw{rev-parse HEAD} ), 'at the tip of the branch' );
+
+    $git->( $upstream, qw{commit -q --allow-empty -m two} );
+    ( $rc, $said ) = $run->();
+    is( $rc,                                     0,                                       'a salvaged checkout that is behind is pulled' ) or diag $said;
+    is( $git->( $checkout, qw{rev-parse HEAD} ), $git->( $upstream, qw{rev-parse HEAD} ), 'up to the tip of the branch' );
+
+    $git->( $checkout, qw{commit -q --allow-empty -m work} );
+    my $work = $git->( $checkout, qw{rev-parse HEAD} );
+    $git->( $upstream, qw{commit -q --allow-empty -m three} );
+    ( $rc, $said ) = $run->();
+    isnt( $rc, 0, 'a salvaged checkout that diverged stops the build' );
+    is( $git->( $checkout, qw{rev-parse HEAD} ), $work, 'and keeps the commit that was made on the guest' );
+};
+
 subtest 'the symlink is made with -n, or the second provision fails' => sub {
     my ( undef, $recipe, $vars ) = built();
     my $fragment = $recipe->render(%$vars);
