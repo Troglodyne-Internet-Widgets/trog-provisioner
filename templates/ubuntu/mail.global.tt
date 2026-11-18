@@ -23,9 +23,9 @@ sievec /etc/dovecot/sieve/junk.sieve
 install -d -m 0755 -o root -g root /etc/postfix/main.cf.d
 install -d -m 0755 -o root -g root /etc/postfix/master.cf.d
 install -d -m 0755 -o root -g root /etc/opendkim.conf.d
-# The dovecot account exists only on the guest, so its uid goes in here and
-# not in the rendered template.
-sed -i "s/%DOVECOT_UID%/$$(id -u dovecot)/g" main.cf.global
+# The dovecot account and group exist only on the guest, so their ids go in
+# here and not in the rendered template.
+sed -i -e "s/%DOVECOT_UID%/$$(id -u dovecot)/g" -e "s/%DOVECOT_GID%/$$(getent group dovecot | cut -d: -f3)/g" main.cf.global
 install -m 0644 -o root -g root main.cf.global /etc/postfix/main.cf.d/40-mail
 install -m 0600 -o root -g root master.cf /etc/postfix/master.cf.d/40-mail
 [%# The firewall of the ports where a mail relay passes the mail clients.

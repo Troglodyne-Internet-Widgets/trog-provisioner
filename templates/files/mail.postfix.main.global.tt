@@ -34,15 +34,14 @@ mydestination = $myhostname, localhost
 # The command postfix runs for a daemon started with -D: strace it to the log.
 debugger_command = PATH=/bin:/usr/bin:/usr/local/bin; (strace -f -p $process_id 2>&1 | logger -p mail.info) & sleep 5
 
-# Virtual mailboxes.  The makefile fragment fills in %DOVECOT_UID%, because
-# the account exists only on the guest.  The group gets the same value, as in
-# the mail passwd file.
+# Virtual mailboxes.  The makefile fragment fills in %DOVECOT_UID% and
+# %DOVECOT_GID%, because the account and the group exist only on the guest.
 #
 # The fragment of each domain names its own lookup tables, under
 # /etc/postfix/domains/<domain>/.
 virtual_mailbox_base = /mail
 virtual_uid_maps = static:%DOVECOT_UID%
-virtual_gid_maps = static:%DOVECOT_UID%
+virtual_gid_maps = static:%DOVECOT_GID%
 
 # This guest is not a relay.  Reset first, because the package names the same
 # three networks, and configd adds these to them.
