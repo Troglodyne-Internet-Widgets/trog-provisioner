@@ -321,11 +321,17 @@ subtest 'Dist::Zilla is not asked for: the perl comes with it' => sub {
 subtest 'the checkout is optional, which is the case koan needs' => sub {
     my ( undef, $with, $wvars ) = built();
     like( $with->render(%$wvars), qr{git[ ]clone[ ]--branch[ ]'master'}, 'cloned by default' );
+    like(
+        $with->render(%$wvars),
+        qr{^ln[ ]-sfn[ ]'\Q$INSTALL/$DOMAIN/trog-provisioner/completions/trog-provisioner.bash\E'[ ]/etc/bash_completion\.d/trog-provisioner$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        'and the completion is linked from it, with -n like the other link'
+    );
 
     my ( undef, $without, $ovars ) = built( checkout => 0, deps_from => ['/srv/code/trog-provisioner'] );
     my $fragment = $without->render(%$ovars);
 
-    unlike( $fragment, qr/git[ ]clone/, 'and not at all when the runner manages its own' );
+    unlike( $fragment, qr/git[ ]clone/,     'and not at all when the runner manages its own' );
+    unlike( $fragment, qr{bash_completion}, 'and the completion is not linked, because the code is not where this recipe knows' );
     ok( ( grep { $_->[-2] eq 'dzil'                  && $_->[-1] eq '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'deps come from where it says instead' );
     ok( !( grep { $_->[-1] =~ m{/trog-provisioner\z} && $_->[-1] ne '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'and not from a checkout that was never made' );
 };
@@ -461,9 +467,10 @@ subtest 'perl is the whole of what it needs from another recipe' => sub {
     # deps() and installs nothing at all, which is a failed cpanm forty minutes
     # into a build rather than an apt that said something.
     my %deps = map { $_ => 1 } $recipe->deps();
-    ok( $deps{'libvirt-dev'}, 'libvirt-dev, without which Sys::Virt does not build' );
-    ok( $deps{'pkg-config'},  'and the thing that finds it' );
-    ok( !$deps{xorriso},      'but not xorriso, which is the hypervisor job' );
+    ok( $deps{'libvirt-dev'},     'libvirt-dev, without which Sys::Virt does not build' );
+    ok( $deps{'pkg-config'},      'and the thing that finds it' );
+    ok( !$deps{xorriso},          'but not xorriso, which is the hypervisor job' );
+    ok( $deps{'bash-completion'}, 'and bash-completion, which reads the link that the fragment makes' );
 };
 
 # A runner whose configuration directory is a share of the hypervisor has the
@@ -571,7 +578,7 @@ subtest 'the account that provisions gets the configuration and the key, and pas
     ok( $did{"ln -sfn $key /bogus/home/agent/.ssh/id_ed25519"},                                                          'the key is linked where ssh looks for it' )                                or diag $asked;
     ok( $did{"chown -h agent:agent /bogus/home/agent/.ssh/id_ed25519"},                                                  'and the link is the account own, not root' )                               or diag $asked;
     ok( $did{"runuser -u agent -- sh -c ssh-keyscan -p '2222' 'hv1.test.test' >> '/bogus/home/agent/.ssh/known_hosts'"}, 'the host key of the hypervisor goes into the known_hosts of the account' ) or diag $asked;
-    is( ( scalar grep { m{svc} } @lines ), 0, 'and nothing is given to the service user' ) or diag $asked;
+    is( ( scalar grep { index( $_, 'svc' ) >= 0 } @lines ), 0, 'and nothing is given to the service user' ) or diag $asked;
 };
 
 subtest 'without a provision_user, the service user provisions, and needs no ACL' => sub {

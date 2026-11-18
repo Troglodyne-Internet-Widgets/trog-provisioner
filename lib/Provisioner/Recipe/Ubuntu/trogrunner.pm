@@ -53,6 +53,10 @@ installs F</etc/apparmor.d/bwrap>, which leaves C<bwrap> unconfined and allows
 C<userns>, in the form of the profiles that Ubuntu ships for other programs
 that need one.
 
+=item * C<bash-completion> for the tab completion of a domain.  The recipe
+links F<completions/trog-provisioner.bash> into F</etc/bash_completion.d>, and
+this package is what reads that directory.  See L<Provisioner::Recipe::trogrunner/TAB COMPLETION>.
+
 =back
 
 C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
@@ -75,6 +79,7 @@ sub deps {
       acl
       gpg
       bubblewrap
+      bash-completion
     };
 }
 
