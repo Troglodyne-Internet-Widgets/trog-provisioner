@@ -128,6 +128,15 @@ first, because a link passes every argument after it to its tool unread.  A
 `TROG_SETUP_TIMEOUT=3h` in front of `provision` is refused in the same way, so
 such a session builds with the default timeout.
 
+Tear down each guest yourself, as for any other run.  If the session is a run
+of App::Clod, App::Clod also cleans up after you.  It sets `TMPDIR` to the
+scratch directory of the run, so `scratch_config` makes its directory there.
+After the run, also a run that died, it runs `scripts/clean_scratch` with that
+directory, because `clod.json` names that script as a `cleanup`.  Any other
+harness that runs sessions without a person can do the same: give each session
+its own `TMPDIR`, and run `clean_scratch` on that directory after the session.
+It tears down every guest that a scratch configuration there still names.
+
 It takes the settings of the installation out of the `_global` of `_base` in
 its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
 `recipes.d/` empty, and builds a KeePass DB holding a made-up value for every
