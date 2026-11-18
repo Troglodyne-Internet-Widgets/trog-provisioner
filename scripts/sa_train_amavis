@@ -6,8 +6,10 @@
 #
 # Spam is every message in the folder that dovecot gives the \Junk special use,
 # and in each folder that --spam-folder names.  A NAME is as a mail client shows
-# it, for example INBOX.suspicious.  Ham is every message in every other folder
-# of the account, except the folders with the \Trash, \Drafts and \Sent special
+# it, for example INBOX.suspicious.  The recipe gives Junk Email that use.  A
+# folder that is only a link, as the mailbox_alias plugin makes for an alias, is
+# skipped, because its target is learned by its own name.  Ham is every message
+# in every other folder of the account, except the folders with the \Trash, \Drafts and \Sent special
 # uses.  These are the folders that the sieve of the account files into.
 #
 # INBOX is never learned, read or not.  What lands there has not been sorted
@@ -93,6 +95,10 @@ for maildir in "$@"; do
     # it.  INBOX is the maildir itself, so it is not among them.
     for dir in "$maildir"/.[!.]*; do
         [ -d "$dir/cur" ] || [ -d "$dir/new" ] || continue
+        # The mailbox_alias plugin makes an alias name, such as Junk, a link to
+        # its target.  Learning the link would learn the target again, and an
+        # alias of the spam folder is not in the list of spam folders.
+        [ -L "$dir" ] && continue
         folder=${dir##*/.}
         [ "$folder" = INBOX ] && continue
         if listed "$folder" "${junk[@]}" "${spam_folders[@]}"; then

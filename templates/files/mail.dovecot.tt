@@ -9,8 +9,8 @@ first_valid_gid=1
 mail_uid=dovecot
 mail_gid=dovecot
 
-# Enable Maildir++ quota support.
-mail_plugins = $mail_plugins quota
+# Enable Maildir++ quota support, and the aliases of folders (see below).
+mail_plugins = $mail_plugins quota mailbox_alias
 
 # Take the quota limits from the maildirsize file.  If the file does not
 # exist, do not enforce a quota.
@@ -31,28 +31,49 @@ service quota-warning {
     }
 }
 
-# Junk, for every account, with the special use that mail clients look for
-# (RFC 6154).  The sieve below files spam there.
+# The folders for sent mail, deleted mail, spam and drafts, named as classic
+# Outlook names them, each with the special use that other clients look for
+# (RFC 6154).  Most clients use the folder that has the special use, whatever
+# its name.  Outlook ignores the use and uses its own names.  So with these
+# names, every client uses the same four folders.  Every account has them,
+# subscribed.  The sieve below files spam into Junk Email.
 #
-# Trash, Drafts and Sent get their special uses here too, and are not made: a
-# client or the sieve of an account makes them.  scripts/sa_train_amavis reads
-# these uses from dovecot, and learns neither of the three folders as ham.
-# So a folder that is renamed changes its name here and nowhere else.
+# scripts/sa_train_amavis reads these uses from dovecot, and learns neither
+# Sent Items, Deleted Items nor Drafts as ham.  So a folder that is renamed
+# changes its name here and nowhere else.
 namespace inbox {
   inbox = yes
-  mailbox Junk {
+  mailbox "Sent Items" {
+    special_use = \Sent
+    auto = subscribe
+  }
+  mailbox "Deleted Items" {
+    special_use = \Trash
+    auto = subscribe
+  }
+  mailbox "Junk Email" {
     special_use = \Junk
     auto = subscribe
   }
-  mailbox Trash {
-    special_use = \Trash
-  }
   mailbox Drafts {
     special_use = \Drafts
+    auto = subscribe
   }
-  mailbox Sent {
-    special_use = \Sent
-  }
+}
+
+# The names that other clients make are aliases of the folders above, so that a
+# client with its own name reaches the same messages.  The plugin makes its
+# "new" name a link to its "old" name, which is the real folder, and keeps one
+# index for the two.  So the real folder is the "old" name here, and the alias
+# is the "new" one.  A link that is made by hand shows the messages under two
+# sets of UIDs.  The plugin can alias only a name that is not a real folder, so
+# the build first moves the messages of a real folder under an alias name into
+# its target.
+plugin {
+[% FOR alias IN mailbox_aliases.keys().sort() -%]
+  mailbox_alias_old[% loop.count == 1 ? '' : loop.count %] = [% mailbox_aliases.$alias %]
+  mailbox_alias_new[% loop.count == 1 ? '' : loop.count %] = [% alias %]
+[% END -%]
 }
 
 # Sieve.  The spam filter runs before the sieve of each user.  The scripts of a

@@ -58,8 +58,50 @@ mailboxes.  amavis, opendmarc and opendkim filter and sign the mail.
 amavis scores each message with SpamAssassin, and marks spam with
 C<X-Spam-Flag: YES>.  The package turns that check off, and the recipe turns it
 back on.  A global sieve, which runs before the sieve of each user, files marked
-mail into C<Junk>.  Every account has that folder, with the C<\Junk> special
-use that mail clients look for.
+mail into C<Junk Email>.  Every account has that folder, with the C<\Junk>
+special use that mail clients look for.
+
+=head3 The special-use folders, and their aliases
+
+dovecot declares four folders in the inbox namespace of every account, each
+subscribed and each with its special use (RFC 6154): C<Sent Items> (C<\Sent>),
+C<Deleted Items> (C<\Trash>), C<Junk Email> (C<\Junk>) and C<Drafts>
+(C<\Drafts>).  Most clients use the folder that has the special use, whatever
+its name.  Classic Outlook ignores the use and uses these names, which is why
+they are the names.  Roundcube gets the same four names in C<sent_mbox>,
+C<trash_mbox>, C<junk_mbox> and C<drafts_mbox>.  A client in a language other
+than English makes folders with translated names.  The recipe does not cover
+them, but C<mailbox_aliases> can.
+
+C<mailbox_aliases> maps the name of a folder that another client makes to the
+folder that it must reach.  The default is C<Junk> to C<Junk Email>, C<Sent> and
+C<Sent Messages> to C<Sent Items>, and C<Trash> and C<Deleted Messages> to
+C<Deleted Items>.  Thunderbird and Roundcube make C<Junk>, C<Sent> and
+C<Trash>.  Apple Mail makes C<Sent Messages> and C<Deleted Messages>.  An entry that you write adds to the
+default, and an entry with a default name changes its target:
+
+    somedomain:
+        mail:
+            mailbox_aliases:
+                Gesendet: Sent Items
+
+The C<mailbox_alias> plugin of dovecot makes an alias a link to its target, and
+creates, renames and deletes the alias without touching the target.  A link made
+by hand is not safe, because dovecot keeps one index for each name, so the same
+messages show under two sets of UIDs.  An alias that has no link is not safe
+either: a client that deletes it deletes the messages of the target.  So the
+build makes the link of each alias for each account in C<names>.  The plugin
+makes one for any other account when a client first creates the alias.  The
+plugin takes the target as its C<mailbox_alias_old> and the alias as its
+C<mailbox_alias_new>.
+
+The plugin can alias only a name that is not a real folder, and a restored store
+can have a real folder under an alias name.  So for each account and each
+alias, after the store is restored and before the training, the build does this
+when the alias is a real folder.  It moves the messages into the target with
+C<doveadm move>, then deletes the empty folder, and writes a line about it in
+the setup log.  The move does not depend on whether the target exists, so
+C<.Junk> of an old store merges into C<Junk Email>.
 
 =head3 The Validity lists
 
@@ -89,10 +131,11 @@ the mirrors of the rules are many, and the list changes.
 
 Each night, C<sa_train_amavis> trains the Bayes database of amavis from the
 folders of every account in C<names>.  Spam is the folder that dovecot gives the
-C<\Junk> special use, and each folder in C<names.$USER.spam_folders>, for
+C<\Junk> special use, which is C<Junk Email>, and each folder in C<names.$USER.spam_folders>, for
 example C<INBOX.$spam>.  Ham is every other folder of the account, except the
-folders with the C<\Trash>, C<\Drafts> and C<\Sent> special uses.  These are the
-folders that the sieve of the account files into.  INBOX is never learned, read
+folders with the C<\Trash>, C<\Drafts> and C<\Sent> special uses, which are
+C<Deleted Items>, C<Drafts> and C<Sent Items>.  An alias, which is a link, is not
+learned a second time.  INBOX is never learned, read
 or not, because it holds mail that nobody has sorted.  The script reads the
 special uses from the configuration of dovecot, which declares all four in
 F<mail.dovecot.tt>.  A folder that is renamed there is found by its use.
@@ -460,6 +503,9 @@ sub required_recipes {
 # A value with no colon and no line break in it.
 my $NO_COLON = qr/\A [^:\r\n]* \z/;
 
+# A folder name that is safe in all of those places.
+my $FOLDER_NAME = q{\A[^'"%$\\\\/.\r\n]+\z};
+
 sub args {
     return (
         type       => 'object',
@@ -493,14 +539,14 @@ sub args {
                         mailboxes => { type => 'array', items => { type => 'string' }, default => [] },
 
                         # The folders that sa_train_amavis learns as spam, in
-                        # addition to the one with the Junk special use.  No
+                        # addition to the one with the \Junk special use.  No
                         # quote and no percent sign, because the name goes
                         # into a cron line and a shell word.
                         spam_folders => {
                             type        => 'array',
                             default     => [],
                             items       => { type => 'string', pattern => q{\A[^'%\r\n]+\z} },
-                            description => 'Folders of this account, besides the one with the Junk special use, that hold spam, for example INBOX.$spam.  The nightly training learns each as spam.  Every other folder of the account is learned as ham, but INBOX, Trash, Drafts and Sent.',
+                            description => 'Folders of this account, besides Junk Email, the one with the \Junk special use, that hold spam, for example INBOX.$spam.  The nightly training learns each as spam.  Every other folder of the account is learned as ham, but INBOX, Deleted Items, Drafts and Sent Items, which have the \Trash, \Drafts and \Sent special uses.',
                         },
                     },
                 },
@@ -510,6 +556,26 @@ sub args {
                 enum        => [qw{refuse keep}],
                 default     => 'refuse',
                 description => 'What a build does with an account that the salvaged passwd-file holds and mail.names does not.  refuse stops the build and names the addresses.  keep copies their lines into the new passwd-file and names them in the setup log.',
+            },
+
+            # The default of each of the five is on the member, not on the map,
+            # so that an operator who adds a translated name keeps the five.
+            # No quote, percent sign, dollar sign, backslash, slash or dot:
+            # the name goes into a shell word, a make recipe, the dovecot
+            # configuration and a Maildir++ directory name.
+            mailbox_aliases => {
+                type                 => 'object',
+                default              => {},
+                description          => 'Map from the name of a folder that a mail client makes to the folder that it reaches.  The mailbox_alias plugin of dovecot links the name to the folder, and the build moves the messages of a real folder under that name into the folder first.  A name that you add keeps the five that are there.',
+                additionalProperties => { type    => 'string', pattern => $FOLDER_NAME },
+                propertyNames        => { pattern => $FOLDER_NAME },
+                properties           => {
+                    'Junk'             => { type => 'string', default => 'Junk Email',    pattern => $FOLDER_NAME },
+                    'Sent'             => { type => 'string', default => 'Sent Items',    pattern => $FOLDER_NAME },
+                    'Trash'            => { type => 'string', default => 'Deleted Items', pattern => $FOLDER_NAME },
+                    'Sent Messages'    => { type => 'string', default => 'Sent Items',    pattern => $FOLDER_NAME },
+                    'Deleted Messages' => { type => 'string', default => 'Deleted Items', pattern => $FOLDER_NAME },
+                },
             },
             mail_aliases => {
                 type    => 'array',
