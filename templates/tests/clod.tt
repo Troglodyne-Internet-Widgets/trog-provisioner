@@ -69,6 +69,12 @@ ok(-d "$home/clod-state" && (stat _)[4] == (getpwnam('[% user %]'))[2], 'the dat
     my $gid = (getgrnam $agent)[2] // -1;
     ok((grep { $_ == $gid } split ' ', $groups // ''), "the worker is in the group of $agent") or diag "groups: ", $groups // 'none';
 
+    # App::Clod gives the workspace the sticky bit, and refuses to run git
+    # below a directory that the group can write without it.
+    my @ws = stat "$home/workspace";
+    is(sprintf('%s %s %04o', scalar getpwuid($ws[4] // -1) // '', scalar getgrgid($ws[5] // -1) // '', ($ws[2] // 0) & 07777), "[% user %] $agent 3770",
+        "the workspace is the worker's, shared with the group of $agent, setgid and sticky");
+
     foreach my $secret ("$home/clod.env", "$home/clod.conf", "$home/clod-state/minion.db", "/proc/$pid/environ") {
         system('runuser', '-u', $agent, '--', 'cat', $secret);
         isnt($? >> 8, 0, "$agent cannot read $secret");

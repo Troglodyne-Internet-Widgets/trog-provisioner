@@ -19,6 +19,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use File::Which();
 use File::Find();
+use File::Path();
 use Test::MockModule qw{strict};
 use IPC::Run3();
 use Cpanel::JSON::XS();
@@ -297,8 +298,6 @@ subtest 'claude runs as the agent account' => sub {
     like( $unit, qr/^UMask=0007$/m, 'with a umask that leaves the files of a worktree to the group' );
     my $share = File::Slurper::read_text("$dir/clod-share.sh");
     like( $share, qr/^usermod[ ]-a[ ]-G[ ]'test-agent'[ ]'svc'$/m, 'and the worker in the group of the agent' );
-    my $owners = qr{-o[ ]'svc'[ ]-g[ ]'test-agent'};
-    like( $share, qr{^install[ ]-d[ ]$owners[ ]-m[ ]2770[ ]"\$workspace"$}m, 'which owns the workspace' );
     my $said   = $r->render(%got);
     my $queued = index( $said, "/bogus/bin/queue_postrun_task '/bogus/bot.test.test/clod-share.sh'" );
     ok( $queued >= 0 && $queued < index( $said, 'queue_postrun_task systemctl restart' ), 'in the postrun, after the claude recipe has made the account, and before the restart' );
@@ -361,6 +360,63 @@ subtest 'claude runs as the agent account' => sub {
 
     my $dotted = recipe();
     like( exception { $dotted->validated( $dotted->takes( %GLOBALS, user => 'svc.dotted' ), %BASE ) }, qr/sudoers\.d/, 'a service user that would name a sudoers file that sudo skips is refused' );
+};
+
+# clod-share.sh runs on a workspace that the bot has used, as the account that
+# runs the test and its primary group, which install and chgrp take without
+# root.  App::Clod takes the group write from the configuration of each bare
+# clone and the control files of the reference, because the worker runs git
+# there.  THE AGENT ACCOUNT in Provisioner::Recipe::clod.
+subtest 'the share leaves what App::Clod sealed sealed' => sub {
+    my $user  = getpwuid $<;
+    my $group = getgrgid( ( split m/\s/, $( )[0] );
+    my $guest = tempdir( CLEANUP => 1 );
+    my $dir   = tempdir( CLEANUP => 1 );
+    my $r     = recipe($dir);
+    my %got   = $r->validated( $r->takes( %GLOBALS, install_dir => $guest, user => $user ), %BASE, agent_user => $group );
+    $r->generate_files( $dir, %got );
+
+    my $home = "$guest/bot.test.test";
+    my $ws   = "$home/workspace";
+    my %mode = (
+        "$ws"                          => '2770',
+        "$ws/mirrors/test-org/one.git" => '2750',
+        "$ws/ref/test-org/one"         => '2750',
+        "$ws/work/1/test-org/one"      => '0750',
+    );
+    File::Path::make_path( keys %mode, $got{agent_home} );
+    my %file = (
+        "$ws/mirrors/test-org/one.git/config" => '0640',
+        "$ws/ref/test-org/one/.git"           => '0640',
+        "$ws/work/1/test-org/one/file"        => '0640',
+        "$guest/outside"                      => '0600',
+    );
+    File::Slurper::Temp::write_text( $_, "bogus\n" ) for keys %file, "$home/clod-agent.token";
+    chmod oct( $mode{$_} ), $_ or die "chmod $_: $!" for keys %mode;
+    chmod oct( $file{$_} ), $_ or die "chmod $_: $!" for keys %file;
+    symlink "$guest/outside", "$ws/outside" or die "symlink: $!";
+
+    # usermod with no effect, because the account that runs the test is no
+    # account of a guest.
+    my $bin = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$bin/usermod", "#!/bin/sh\n" );
+    chmod oct('0755'), "$bin/usermod" or die "chmod: $!";
+    local $ENV{PATH} = "$bin:$ENV{PATH}";
+    my $said = q{};
+    IPC::Run3::run3( [ 'sh', "$dir/clod-share.sh" ], \undef, \$said, \$said );
+    is( $? >> 8, 0, 'the share script runs' ) or diag $said;
+
+    my $mode_of = sub ($path) { return sprintf '%04o', ( ( lstat $path )[2] // 0 ) & oct('7777') };
+    is( $mode_of->($ws),                            '3770', 'the workspace is the group\'s, setgid, and sticky, as App::Clod seals it, so that the agent renames nothing of the worker in it' );
+    is( $mode_of->("$ws/work/1/test-org/one/file"), '0660', 'a file of a work tree is the group\'s to write, so that the agent commits there' );
+    is( $mode_of->("$ws/work/1/test-org/one"),      '2770', 'and so is its directory, setgid' );
+    foreach my $sealed ( 'mirrors/test-org/one.git/config', 'ref/test-org/one/.git' ) {
+        is( $mode_of->("$ws/$sealed"), $file{"$ws/$sealed"}, "the share leaves $sealed as App::Clod sealed it, so that the agent cannot change what git runs as the worker" );
+    }
+    foreach my $sealed ( 'mirrors/test-org/one.git', 'ref/test-org/one' ) {
+        is( $mode_of->("$ws/$sealed"), $mode{"$ws/$sealed"}, "and $sealed, where the agent could make a configuration of its own" );
+    }
+    is( $mode_of->("$guest/outside"), '0600', 'and a file outside the workspace that a link in it names' );
 };
 
 # THE SYSTEM PACKAGES in Provisioner::Recipe::clod.  The installer runs here,

@@ -189,12 +189,20 @@ umask with that of the worker.  Without C<agent_user>, the file holds no
 grant, so a provision takes back the grant of an earlier one.
 
 =item * Gives the workspace to the group of C<agent_user>, setgid, with mode
-C<2770>, and puts C<user> in that group.  The worker gets C<UMask=0007>.  So
+C<3770>, and puts C<user> in that group.  The worker gets C<UMask=0007>.  So
 claude can commit in a work tree that the worker made, and the worker can push
 the commit and remove the work tree.  The group of C<user> stays the group of
 F<clod.env> and F<clod.conf>, and the agent is not in it.  F<clod-share.sh>
 does this in the postrun, before the services restart, because the target of
 the claude recipe runs after this one, and makes the account.
+
+F<clod-share.sh> leaves the bare clones in F<mirrors/> and the reference work
+trees in F<ref/> as App::Clod left them.  The worker runs git there, so the
+agent must not be able to write their configuration.  App::Clod takes the group
+write from it on each fetch, but not back out what was written while the group
+had it.  The workspace gets the sticky bit, as App::Clod gives it, so that the
+agent cannot rename what the worker made at the top of it.  So the script shares
+what the worker owns there, and never what a symbolic link names.
 
 =item * Gives the Claude token to C<agent_user> alone, in
 F<E<lt>agent_homeE<gt>/.claude-token>, mode 0400.  F<clod-claude.sh> in the
