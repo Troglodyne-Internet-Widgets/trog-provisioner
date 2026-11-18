@@ -176,6 +176,20 @@ C<agent_user> of L<Provisioner::Recipe::clod> must not:
         config:
             transfer_user: clod-transfer
 
+=head3 TAB COMPLETION
+
+With a checkout, the recipe links F<completions/trog-provisioner.bash> into
+F</etc/bash_completion.d>.  Then C<bin/new_config>, C<bin/provision> and
+C<bin/destroy> complete the domain.  One link serves the checkout, because the
+script finds F<bin/domains> beside the command that it completes.  Without a
+checkout, the recipe does not know where the code is, and makes no link.
+
+On Ubuntu, bash-completion loads from F</etc/profile.d/bash_completion.sh>.
+Only a login shell reads that file.  The block for it in F</etc/bash.bashrc> is
+commented out, and the recipe leaves that file alone.  So the completion works
+in a tmux pane and in an ssh session, which start login shells by default.  A
+plain C<bash> that is not a login shell has no completion.  Run C<bash -l> there.
+
 =head3 What it needs from the guest, and how long it takes
 
 The build was measured on four vCPUs and 8GB.  Nobody tuned these numbers.

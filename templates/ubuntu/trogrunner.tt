@@ -80,6 +80,20 @@ install -o root -g root -m 0700 trogrunner-owner.sh '[% install_dir %]/[% domain
 # no HOME does more than warn.
 [ -e '[% install_dir %]/[% domain %]/[% checkout_dir %]/.git' ] || HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+
+# Tab completion of a domain, for bin/new_config, bin/provision and bin/destroy.
+#
+# Only with a checkout.  Without one (checkout: 0 with deps_from) this recipe
+# does not know where the code is, so it has nothing to link.
+#
+# One link serves the checkout.  The script finds bin/domains beside the
+# command that is completed, which type -P finds through the PATH that
+# /etc/profile.d/trogrunner.sh sets.  See TAB COMPLETION in
+# Provisioner::Recipe::trogrunner.
+#
+# -n on ln, as for the other link.
+install -d -o root -g root -m 0755 /etc/bash_completion.d
+ln -sfn '[% install_dir %]/[% domain %]/[% checkout_dir %]/completions/trog-provisioner.bash' /etc/bash_completion.d/trog-provisioner
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 [% END %]
 [%# This recipe hands its CPAN modules to the perl recipe.  Its target installs

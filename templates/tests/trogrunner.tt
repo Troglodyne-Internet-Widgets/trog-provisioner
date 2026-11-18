@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use File::Temp;
 
 [%# A runner needs a perl that can load this distribution, cpanm, Sys::Virt,
     and a configuration.  These assertions make sure that it has them.
@@ -86,10 +87,49 @@ is( system("cd '$checkout' && $bin/perl -Ilib -c lib/Provisioner/Recipe.pm >/dev
 
 is( system("cd '$checkout' && $bin/prove -l t/Provisioner-Recipe.t >/dev/null 2>&1"), 0,
     'and its own tests run' );
+
+# Tab completion, as a login shell of the admin user.  Ubuntu loads
+# bash-completion from /etc/profile.d, which only a login shell reads, so the
+# test names that kind of shell.  The shell code is in a file, so that no
+# quoting layer between this test and bash can expand it.
+is( system('dpkg -s bash-completion >/dev/null 2>&1'), 0, 'bash-completion is installed' );
+is( readlink('/etc/bash_completion.d/trog-provisioner') // q{}, "$checkout/completions/trog-provisioner.bash", 'the completion is linked from the checkout' );
+
+sub login_shell {
+    my ($code) = @_;
+    my $script = File::Temp->new( SUFFIX => '.bash' );
+    print {$script} "$code\n";
+    close $script;
+    chmod 0644, $script->filename;
+    my $said = `runuser -l [% admin_user %] -c "bash -lic 'source $script'" 2>&1`;
+    return ( $?, $said );
+}
+
+my ( $rc, $spec ) = login_shell(q{complete -p provision});
+is( $rc, 0, 'a login shell of [% admin_user %] has a completion for provision' ) or diag "bash said: $spec";
+like( $spec, qr/_trog_provisioner_domains/, 'and it is the one that completes a domain' );
+
+# A domain of the configuration, from the account that provisions.  Nothing
+# here names one, so the test asks bin/domains, which is what the completion
+# asks.
+SKIP: {
+    skip "$user cannot read the checkout", 2 unless system("runuser -u $user -- test -r '$checkout/bin/domains'") == 0;
+    my ($domain) = split( "\n", `runuser -u $user -- sh -c "cd '$checkout' && $bin/perl -Ilib bin/domains" 2>/dev/null` );
+    skip 'bin/domains names no domain on this runner', 2 unless $domain;
+    my $prefix = substr( $domain, 0, 3 );
+    my ( $crc, $reply ) = login_shell(q{COMP_WORDS=(provision "} . $prefix . q{"); COMP_CWORD=1; _trog_provisioner_domains; printf '%s\n' "${COMPREPLY[@]}"});
+    is( $crc, 0, 'the completion function runs in a login shell' ) or diag "bash said: $reply";
+    ok( scalar( grep { $_ eq $domain } split( "\n", $reply ) ), "it completes the prefix '$prefix' of a domain to the whole domain" )
+        or diag "it said: $reply";
+}
 [% ELSE %]
 # A runner that manages its own repositories must not get a second copy of
 # this one.
 ok( !-e "$dir/trog-provisioner", 'no checkout was made, which is what was asked for' );
+
+# And has nothing to link the completion to.
+ok( !-e '/etc/bash_completion.d/trog-provisioner' && !-l '/etc/bash_completion.d/trog-provisioner', 'no completion was linked, because the code is not where this recipe knows' );
+is( system('dpkg -s bash-completion >/dev/null 2>&1'), 0, 'bash-completion is installed' );
 [% END %]
 [% IF hypervisor_access != 'none' %]
 my $key = "$dir/.ssh/id_ed25519";
