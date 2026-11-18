@@ -183,11 +183,15 @@ C<agent_user> of L<Provisioner::Recipe::clod> must not:
 
 =head3 TAB COMPLETION
 
-With a checkout, the recipe links F<completions/trog-provisioner.bash> into
+The recipe puts F<completions/trog-provisioner.bash> into
 F</etc/bash_completion.d>.  Then C<bin/new_config>, C<bin/provision> and
-C<bin/destroy> complete the domain.  One link serves the checkout, because the
-script finds F<bin/domains> beside the command that it completes.  Without a
-checkout, the recipe does not know where the code is, and makes no link.
+C<bin/destroy> complete the domain.  The script finds F<bin/domains> beside the
+command that it completes, so one file serves every checkout on the guest.
+
+With a checkout, the file is a link into it, so a pull updates it.  Without
+one, the recipe does not know which path of C<deps_from> holds the code, and
+that checkout can arrive after the fragment runs.  So the file is a copy from
+the checkout that built the guest, and it changes only at the next provision.
 
 On Ubuntu, bash-completion loads from F</etc/profile.d/bash_completion.sh>.
 Only a login shell reads that file.  The block for it in F</etc/bash.bashrc> is
@@ -970,6 +974,7 @@ sub template_files {
         'trogrunner.profile.tt'               => 'trogrunner.profile',
         'trogrunner.owner.sh.tt'              => 'trogrunner-owner.sh',
         'trogrunner.bwrap.apparmor.tt'        => 'trogrunner.bwrap.apparmor',
+        'trogrunner.completion.bash'          => 'trogrunner.completion.bash',
     );
 }
 

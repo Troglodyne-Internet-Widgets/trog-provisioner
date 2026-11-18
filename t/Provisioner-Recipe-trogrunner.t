@@ -23,6 +23,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
 use IPC::Run3();
+use FindBin();
 use FindBin::libs;
 use Provisioner::Utils();
 use YAML::XS();
@@ -327,11 +328,13 @@ subtest 'the checkout is optional, which is the case koan needs' => sub {
         'and the completion is linked from it, with -n like the other link'
     );
 
-    my ( undef, $without, $ovars ) = built( checkout => 0, deps_from => ['/srv/code/trog-provisioner'] );
+    my ( $odir, $without, $ovars ) = built( checkout => 0, deps_from => ['/srv/code/trog-provisioner'] );
     my $fragment = $without->render(%$ovars);
 
-    unlike( $fragment, qr/git[ ]clone/,     'and not at all when the runner manages its own' );
-    unlike( $fragment, qr{bash_completion}, 'and the completion is not linked, because the code is not where this recipe knows' );
+    unlike( $fragment, qr/git[ ]clone/, 'and not at all when the runner manages its own' );
+    my $copy = 'install -o root -g root -m 0644 trogrunner.completion.bash /etc/bash_completion.d/trog-provisioner';
+    ok( ( grep { $_ eq $copy } split m/\n/, $fragment ), 'the completion is installed as a copy instead, because the code is not where this recipe knows' );
+    is( slurp( $odir, 'trogrunner.completion.bash' ), File::Slurper::read_text("$FindBin::Bin/../completions/trog-provisioner.bash"), 'the copy is completions/trog-provisioner.bash' );
     ok( ( grep { $_->[-2] eq 'dzil'                  && $_->[-1] eq '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'deps come from where it says instead' );
     ok( !( grep { $_->[-1] =~ m{/trog-provisioner\z} && $_->[-1] ne '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'and not from a checkout that was never made' );
 };

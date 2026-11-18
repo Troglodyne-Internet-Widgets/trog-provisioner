@@ -90,8 +90,8 @@ chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checko
 
 # Tab completion of a domain, for bin/new_config, bin/provision and bin/destroy.
 #
-# Only with a checkout.  Without one (checkout: 0 with deps_from) this recipe
-# does not know where the code is, so it has nothing to link.
+# A link, so that a pull in the checkout updates it.  Without a checkout, the
+# copy that the ELSE branch installs.
 #
 # One link serves the checkout.  The script finds bin/domains beside the
 # command that is completed, which type -P finds through the PATH that
@@ -102,6 +102,15 @@ chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checko
 install -d -o root -g root -m 0755 /etc/bash_completion.d
 ln -sfn '[% install_dir %]/[% domain %]/[% checkout_dir %]/completions/trog-provisioner.bash' /etc/bash_completion.d/trog-provisioner
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+[% ELSE %]
+# Tab completion of a domain, as a copy, because this recipe does not know
+# which checkout holds the code.  See TAB COMPLETION in
+# Provisioner::Recipe::trogrunner.
+#
+# install replaces a link that a run with a checkout left there.  It does not
+# write through the link into that checkout.
+install -d -o root -g root -m 0755 /etc/bash_completion.d
+install -o root -g root -m 0644 trogrunner.completion.bash /etc/bash_completion.d/trog-provisioner
 [% END %]
 [%# This recipe hands its CPAN modules to the perl recipe.  Its target installs
     them after this fragment makes the checkout: Sys::Virt pinned, and what the

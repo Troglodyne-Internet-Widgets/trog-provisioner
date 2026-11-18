@@ -54,7 +54,7 @@ C<userns>, in the form of the profiles that Ubuntu ships for other programs
 that need one.
 
 =item * C<bash-completion> for the tab completion of a domain.  The recipe
-links F<completions/trog-provisioner.bash> into F</etc/bash_completion.d>, and
+puts F<completions/trog-provisioner.bash> into F</etc/bash_completion.d>, and
 this package is what reads that directory.  See L<Provisioner::Recipe::trogrunner/TAB COMPLETION>.
 
 =back

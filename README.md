@@ -196,7 +196,7 @@ They describe an *installation*, not this software.  They used to sit in the che
 
 ### Tab completion of a domain
 
-`bin/domains` prints each domain that the configuration names.  The bash completion in `completions/trog-provisioner.bash` uses it to complete the domain of `bin/new_config`, `bin/provision` and `bin/destroy`.  The `trogrunner` recipe links it for all users when it clones the checkout, so a runner needs nothing more.  Only a login shell loads it on Ubuntu, which includes ssh and tmux panes.  On any other machine, install it in one of three ways.
+`bin/domains` prints each domain that the configuration names.  The bash completion in `completions/trog-provisioner.bash` uses it to complete the domain of `bin/new_config`, `bin/provision` and `bin/destroy`.  The `trogrunner` recipe installs it for all users, so a runner needs nothing more.  It links the file from the checkout that it clones, or copies it when the runner has no such checkout.  Only a login shell loads it on Ubuntu, which includes ssh and tmux panes.  On any other machine, install it in one of three ways.
 
 For all users, link it into the directory that the bash-completion package reads at the start of every shell:
 

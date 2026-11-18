@@ -1,0 +1,1 @@
+../../completions/trog-provisioner.bash
