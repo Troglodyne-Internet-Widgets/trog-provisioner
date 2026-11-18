@@ -63,10 +63,12 @@ F<.claude/skills> of the clone.  Claude Code loads those only for a directory
 that the session starts with C<--add-dir>, or that C</add-dir> adds during it.
 
 So the recipe also gives the admin F<~/.bashrc.d/50-admincode-E<lt>domainE<gt>>,
-through F<scripts/bashrc_d>.  It defines a
-C<claude> function that passes C<--add-dir> for each clone in C<basedir>, which
-it lists each time it runs, so a later clone needs no provision.  If several
-domains on one machine run this recipe, the function adds the clones of each.
+through F<scripts/bashrc_d>.  It defines a C<claude> function that passes
+C<--add-dir> for each clone in C<basedir> that has a F<.claude/skills>, and for
+no other.  Claude Code asks the admin to trust each directory that C<--add-dir>
+names, and only the skills need the flag.  The function lists the clones each
+time it runs, so a later clone needs no provision.  If several domains on one
+machine run this recipe, the function adds the clones of each.
 
 If the C<perl> recipe is enabled, the CPAN dependencies of each repository are
 installed into the perl that it built, and then the tests of the repository run

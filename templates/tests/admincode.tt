@@ -80,9 +80,13 @@ if (-f $repos_cache) {
     chomp @got;
     my %added = map { $got[$_] eq '--add-dir' ? ( $got[ $_ + 1 ] => 1 ) : () } 0 .. $#got;
     my @clones  = grep { basename($_) ne '.' && basename($_) ne '..' } map { dirname($_) } glob "$code/*/.git $code/.*/.git";
-    my @missing = grep { !$added{$_} } @clones;
-    is(scalar @missing, 0, 'claude in a shell of the admin adds every clone, which loads its skills')
+    my @skilled = grep { -d "$_/.claude/skills" } @clones;
+    my @missing = grep { !$added{$_} } @skilled;
+    is(scalar @missing, 0, 'claude in a shell of the admin adds every clone that has skills, which loads them')
         or diag "not added: @missing; claude got: @got";
+    my @extra = grep { !-d "$_/.claude/skills" } keys %added;
+    is(scalar @extra, 0, 'and no clone without skills, because each one it adds asks the admin for trust')
+        or diag "added without skills: @extra";
 }
 [% END -%]
 
