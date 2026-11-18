@@ -29,6 +29,8 @@ global fragment, the keys of C<template_files>, and C<tests> under
 F<templates/tests/>.  Each name is looked for in every directory of
 C<template_dirs>.  F<templates/makefile.tt> stands for F<bin/new_config>, which
 renders it.
+F<templates/tests/guest_secrets.tt> stands for it too, because it renders the test of
+the secrets of the guest from what every recipe declares.
 
 =item F<openssl.conf>
 
@@ -177,6 +179,10 @@ return sub {
                 }
             }
             $stands_for{'templates/makefile.tt'} = ['bin/new_config'];
+
+            # Rendered by bin/new_config from the guest_secrets of every recipe, so
+            # no recipe names it in tests.
+            $stands_for{'templates/tests/guest_secrets.tt'} = ['bin/new_config'];
 
             # A template that another includes stands for what that one stands
             # for, such as the publishing that the registrar includes in its

@@ -48,7 +48,8 @@ subtest 'a template stands for the recipe that renders it' => sub {
         [qw{lib/Provisioner/Recipe/registrar.pm}],
         'a template that another includes, for the recipe whose templates include it'
     );
-    is_deeply( [ $map->('openssl.conf') ], ['bin/new_config'], 'and the openssl.conf of its ssl target, for what copies it' );
+    is_deeply( [ $map->('templates/tests/guest_secrets.tt') ], ['bin/new_config'], 'the guest test of secrets, for what renders it from every recipe' );
+    is_deeply( [ $map->('openssl.conf') ],                     ['bin/new_config'], 'and the openssl.conf of its ssl target, for what copies it' );
 
 };
 

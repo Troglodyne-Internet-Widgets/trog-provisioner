@@ -715,7 +715,7 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 
     package Test::NetplanGuest;
     sub new         ( $class, $netplan )   { return bless { netplan => $netplan, put => [] }, $class }
-    sub capture_cmd ( $self, $cmd )        { push @{ $self->{asked} }, $cmd;                                                return $cmd =~ m/cat/ ? YAML::XS::Dump( $self->{netplan} ) : q{} }
+    sub capture_cmd ( $self, $cmd )        { push @{ $self->{asked} }, $cmd;                                                return index( $cmd, q{cat} ) >= 0 ? YAML::XS::Dump( $self->{netplan} ) : q{} }
     sub put_file    ( $self, $from, $, % ) { push @{ $self->{put} },   YAML::XS::Load( File::Slurper::read_binary($from) ); return 1 }
 }
 
@@ -1188,6 +1188,61 @@ subtest 'the marker that setup.sh waits for is written after every secret' => su
         qr/which[ ]its[ ]build[ ]waits[ ]for/,
         'and a marker that cannot be written stops the run, rather than a build that waits half an hour'
     );
+};
+
+subtest 'an owner that does not exist yet is a note, and any other failure to give the file away is a warning' => sub {
+    my $dir      = tempdir( CLEANUP => 1 );
+    my $manifest = YAML::XS::Dump( { '/bogus/signing.key' => { ref => 'secret:g/signing/key', mode => '0600', owner => 'svc:svc' } } );
+    my $count    = 0;
+
+    # One domain for each run, because place_guest_secrets places a domain once.
+    my $fresh = sub {
+        my $domain = "owned" . $count++ . ".test.test";
+        mkdir "$dir/$domain";
+        File::Slurper::Temp::write_text( "$dir/$domain/guest-secrets.yaml", $manifest );
+        return $domain;
+    };
+
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $secrets->redefine( lookup => sub { return ( '/bogus/signing.key' => 'the key' ) } );
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { 'throwaway' } );
+    my $steps = Test::MockModule->new('Trog::Steps');
+    $steps->redefine( apply => sub { return 0 } );
+
+    my $said = q{};
+    my @asked;
+    no warnings 'once';
+    local *OwnerProbe::run_sudo    = sub { my ( undef, @argv ) = @_; return $argv[0] eq 'chown' ? 1 : 0 };
+    local *OwnerProbe::capture_cmd = sub { my ( undef, $cmd ) = @_; push( @asked, $cmd ); return $said };
+    local *OwnerProbe::write_text  = sub { return 1 };
+    use warnings;
+    my $guest = bless {}, 'OwnerProbe';
+
+    foreach my $case ( [ q{chown: invalid user: 'svc:svc'}, 'user' ], [ q{chown: invalid group: 'svc:svc'}, 'group' ] ) {
+        my ( $text, $what ) = @{$case};
+        $said = "$text\n";
+        Trog::HV->forget();
+        Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+
+        my @warned;
+        local $SIG{__WARN__} = sub { push( @warned, @_ ) };
+        my ($out) = capture_stdout { Trog::Bin::Provisioner::place_guest_secrets( $guest, $fresh->() ) };
+        is_deeply( \@warned, [], "no warning when the $what is not on the guest yet" ) or diag @warned;
+        like( $out, qr{/bogus/signing[.]key[ ]is[ ]root's[ ]for[ ]now}, 'there is a plain note instead' );
+    }
+    like( $asked[0], qr{LC_ALL=C[ ]chown[ ]'svc:svc'[ ]'[^']+'[ ]2>&1\z}, 'and the text came from the chown itself, in a locale that does not translate it' );
+
+    $said = "chown: changing ownership of '/bogus/signing.key': Operation not permitted\n";
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+    my @warned;
+    {
+        local $SIG{__WARN__} = sub { push( @warned, @_ ) };
+        quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( $guest, $fresh->() ) } );
+    }
+    is( scalar @warned, 1, 'any other reason that chown fails is still a warning' );
+    like( $warned[0], qr{Could[ ]not[ ]give.*svc:svc.*not[ ]permitted}, 'which names the file, the owner and what chown said' );
 };
 
 subtest 'a secret that another guest issues is asked of that guest, and not of the store' => sub {
