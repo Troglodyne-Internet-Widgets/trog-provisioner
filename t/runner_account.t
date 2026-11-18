@@ -58,6 +58,7 @@ my $ACL      = '/etc/qemu/trog-runner-runner.conf';
 my $BRIDGES  = '/etc/qemu/bridge.conf';
 my $APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
 my $LINGER   = '/var/lib/systemd/linger/runner';
+my $FIXED    = '/var/lib/trog-provisioner/guestfs-appliance/README.fixed';
 
 # What the fake hypervisor has.  Each test starts from a fresh one.
 sub fresh_state {
@@ -74,6 +75,7 @@ sub fresh_state {
         session_pools => {},
         kvm           => 1,
         apt           => 1,
+        guestfs       => 1,
         root          => [],
     };
 }
@@ -88,18 +90,19 @@ sub dataset_holding ( $state, $path ) {
 # What the fake answers to each command it is asked, by the first words of the
 # command.  Each answer gets the state and the first quoted argument.
 my @ANSWERS = (
-    [ 'sudo -V'                        => sub ( $s, $arg, @ ) { $s->{sudo} } ],
-    [ 'command -v qemu-img'            => sub ( $s, $arg, @ ) { '/usr/bin/qemu-img' } ],
-    [ 'mktemp'                         => sub ( $s, $arg, @ ) { '/tmp/staged' } ],
-    [ 'stat -f'                        => sub ( $s, $arg, @ ) { $s->{fstype}{$arg} } ],
-    [ 'zfs list -H -o name'            => sub ( $s, $arg, @ ) { index( $arg, q{/} ) == 0 ? dataset_holding( $s, $arg ) : exists $s->{datasets}{$arg} ? $arg : undef } ],
-    [ 'zfs get -H -o value mountpoint' => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{mountpoint} } ],
-    [ 'zfs get -H -o value quota'      => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{quota} } ],
-    [ 'getent passwd'                  => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? "/home/$arg"                                       : undef } ],
-    [ 'id -nG'                         => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
-    [ 'id -u'                          => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
-    [ 'id -g'                          => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
-    [ 'sudo -n cat'                    => sub ( $s, $arg, @ ) { $s->{unreadable}{$arg} ? undef                                              : $s->{files}{$arg} } ],
+    [ 'sudo -V'                                    => sub ( $s, $arg, @ ) { $s->{sudo} } ],
+    [ 'command -v qemu-img'                        => sub ( $s, $arg, @ ) { '/usr/bin/qemu-img' } ],
+    [ 'command -v libguestfs-make-fixed-appliance' => sub ( $s, $arg, @ ) { $s->{guestfs} ? '/usr/sbin/libguestfs-make-fixed-appliance' : undef } ],
+    [ 'mktemp'                                     => sub ( $s, $arg, @ ) { '/tmp/staged' } ],
+    [ 'stat -f'                                    => sub ( $s, $arg, @ ) { $s->{fstype}{$arg} } ],
+    [ 'zfs list -H -o name'                        => sub ( $s, $arg, @ ) { index( $arg, q{/} ) == 0 ? dataset_holding( $s, $arg ) : exists $s->{datasets}{$arg} ? $arg : undef } ],
+    [ 'zfs get -H -o value mountpoint'             => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{mountpoint} } ],
+    [ 'zfs get -H -o value quota'                  => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{quota} } ],
+    [ 'getent passwd'                              => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? "/home/$arg"                                       : undef } ],
+    [ 'id -nG'                                     => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
+    [ 'id -u'                                      => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
+    [ 'id -g'                                      => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
+    [ 'sudo -n cat'                                => sub ( $s, $arg, @ ) { $s->{unreadable}{$arg} ? undef                                              : $s->{files}{$arg} } ],
     [
         'sudo -n find' => sub ( $s, $arg, $cmd ) {
             my $images = index( $cmd, q{! -name 'baseimage-*'} ) < 0;
@@ -129,8 +132,9 @@ my @ROOT = (
     [ 'useradd'                 => sub ( $s, @a ) { $s->{users}{ $a[-1] } = { groups => [] };        0 } ],
     [ 'usermod'                 => sub ( $s, @a ) { push @{ $s->{users}{ $a[-1] }{groups} }, $a[-2]; 0 } ],
     [ 'chown'                   => sub ( $s, @a ) { $s->{owners}{ $a[-1] }{user} = $a[-2] =~ s/:\z//r; 0 } ],
+    [ 'chmod -R'                => sub ( $s, @a ) { $s->{readable}{ $a[-1] }     = $a[-2];             0 } ],
     [ 'chmod'                   => sub ( $s, @a ) { $s->{owners}{ $a[-1] }{mode} = $a[-2] =~ s/\A0//r; 0 } ],
-    [ 'loginctl enable-linger'  => sub ( $s, @a ) { $s->{files}{$LINGER}         = q{}; 0 } ],
+    [ 'loginctl enable-linger'  => sub ( $s, @a ) { $s->{files}{$LINGER}         = q{};                0 } ],
     [ 'loginctl disable-linger' => sub ( $s, @a ) { delete $s->{files}{$LINGER}; 0 } ],
     [ 'systemctl stop'          => sub ( $s, @a ) { $s->{stopped}{ $a[-1] } = 1; 0 } ],
     [
@@ -153,9 +157,16 @@ my @ROOT = (
     [ 'rmdir'       => sub ( $s, @a ) { $s->{rmdir}{ $a[-1] } = 1; 0 } ],
     [ 'install -d'  => sub ( $s, @a ) { 0 } ],
     [ 'install'     => sub ( $s, @a ) { $s->{files}{ $a[-1] } = $s->{files}{ $a[-2] }; 0 } ],
-    [ 'rm -f'       => sub ( $s, @a ) { delete $s->{files}{ $a[-1] };                  0 } ],
-    [ 'userdel'     => sub ( $s, @a ) { delete $s->{users}{ $a[-1] };                  0 } ],
-    [ 'systemctl daemon-reload' => sub ( $s, @a ) { 0 } ],
+    [
+        'rm -rf' => sub ( $s, @a ) {
+            delete @{ $s->{files} }{ grep { index( $_, "$a[-1]/" ) == 0 } keys %{ $s->{files} } };
+            0;
+        }
+    ],
+    [ 'libguestfs-make-fixed-appliance' => sub ( $s, @a ) { $s->{files}{"$a[-1]/README.fixed"} = 'fixed'; 0 } ],
+    [ 'rm -f'                           => sub ( $s, @a ) { delete $s->{files}{ $a[-1] };                 0 } ],
+    [ 'userdel'                         => sub ( $s, @a ) { delete $s->{users}{ $a[-1] };                 0 } ],
+    [ 'systemctl daemon-reload'         => sub ( $s, @a ) { 0 } ],
 );
 
 # The first entry of @$table whose words begin $command, or a death that names
@@ -291,6 +302,16 @@ subtest 'cores is what the user slice gets' => sub {
     ok( !exists $state->{files}{$DROPIN}, 'and no drop-in without a limit to put in it' );
 };
 
+subtest 'without libguestfs there is no appliance to build' => sub {
+    my $state = fresh_state();
+    $state->{guestfs} = 0;
+
+    my ($rc) = run_tool( $state, @create );
+    is( $rc, 0, 'the account is still made' );
+    ok( !exists $state->{files}{$FIXED}, 'with no appliance' );
+    is( ( grep { m/guestfs/ } @{ $state->{root} } ), 0, 'and nothing of libguestfs ran as root' );
+};
+
 subtest 'a dry run asks, says, and changes nothing' => sub {
     my $state = fresh_state();
 
@@ -299,7 +320,7 @@ subtest 'a dry run asks, says, and changes nothing' => sub {
     is_deeply( $state->{root}, [], 'and runs nothing as root' );
     like( $said, qr/would[ ]make[ ]the[ ]user[ ]runner/,                        'it says it would make the user' );
     like( $said, qr{would[ ]make[ ]the[ ]ZFS[ ]dataset[ ]tank/vm-disks/runner}, 'and the dataset, a child of the one on the parent directory' );
-    like( $said, qr/Nothing[ ]changed:[ ]14[ ]step/,                            'and counts every step' );
+    like( $said, qr/Nothing[ ]changed:[ ]15[ ]step/,                            'and counts every step' );
 };
 
 subtest 'a run makes the account, and a second run finds nothing to do' => sub {
@@ -326,6 +347,8 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     like( $state->{files}{$BRIDGES}, qr{^include[ ]\Q$ACL\E$}m, 'which bridge.conf includes' );
     ok( $state->{caps}{$HELPER}, 'the bridge helper has the capability to add a tap device to a bridge' );
     like( $state->{files}{$APT_HOOK}, qr{setcap[ ]cap_net_admin\+ep[ ]\Q$HELPER\E}, 'and an apt hook gives it back after an upgrade' );
+    ok( exists $state->{files}{$FIXED}, 'the fixed appliance of libguestfs is built, which the user reads the disks of its guests with' );
+    is( $state->{readable}{ File::Basename::dirname($FIXED) }, 'a+rX', 'and every user may read it, its kernel too' );
 
     my $grant = $state->{files}{'/etc/sudoers.d/90-trog-runner-runner'};
     like( $grant, qr/^runner[ ]ALL=\(root\)[ ]NOPASSWD:/m, 'the grant for the user is installed' );
@@ -436,6 +459,7 @@ subtest 'remove takes it all away, and not the disks of guests' => sub {
     unlike( $state->{files}{$BRIDGES}, qr/trog-runner-runner/, 'and their line in bridge.conf' );
     ok( !$state->{caps}{$HELPER},                           'the capability of the bridge helper, which no other account needs' );
     ok( !exists $state->{files}{$APT_HOOK},                 'and its hook' );
+    ok( !exists $state->{files}{$FIXED},                    'the fixed appliance of libguestfs, which no other account needs' );
     ok( !exists $state->{files}{$LINGER},                   'the lingering' );
     ok( $state->{stopped}{'user-1001.slice'},               'every process of the account, by its slice, before userdel, which refuses a user with a process' );
     ok( !exists $state->{datasets}{'tank/vm-disks/runner'}, 'the dataset' );
@@ -455,6 +479,7 @@ subtest 'the bridge helper keeps its capability while another account needs it' 
     ok( !exists $state->{files}{$ACL},     'the bridges of this account go' );
     ok( $state->{caps}{$HELPER},           'and the capability stays for the other one' );
     ok( exists $state->{files}{$APT_HOOK}, 'with its hook' );
+    ok( exists $state->{files}{$FIXED},    'and so does the fixed appliance of libguestfs' );
 };
 
 subtest 'bridge.conf keeps the lines of others, and is not rewritten from a failed read' => sub {

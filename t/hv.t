@@ -1902,6 +1902,24 @@ subtest 'leases are looked up by MAC, not by name' => sub {
     }
 }
 
+subtest 'a session reads disks only through the fixed appliance of libguestfs' => sub {
+    my $fixed = 0;
+    my $mock  = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( run_cmd     => sub ( $hv, @argv ) { return "@argv" =~ m/command[ ]-v[ ]virt-cat/ ? 0 : 1 } );
+    $mock->redefine( file_exists => sub ( $hv, $path ) { $fixed && $path eq "$Trog::HV::Libvirt::GUESTFS_APPLIANCE/README.fixed" } );
+
+    my $note = fresh( uri => 'qemu+ssh://runner@hv/session' )->note_libguestfs;
+    ok( !$note->{ok}, 'libguestfs without the appliance is not enough for a session' );
+    like( $note->{what}, qr/No[ ]fixed[ ]appliance/, 'saying what is missing' );
+    like( $note->{fix},  qr/bin\/runner_account/,    'and what builds it' );
+    ok( fresh( uri => 'qemu+ssh://admin@hv/system' )->note_libguestfs->{ok}, 'root on the system URI reads the kernel itself, and needs none' );
+    is_deeply( [ fresh( uri => 'qemu+ssh://admin@hv/system' )->guestfs_env ], [], 'so a tool there gets no LIBGUESTFS_PATH' );
+
+    $fixed = 1;
+    ok( fresh( uri => 'qemu+ssh://runner@hv/session' )->note_libguestfs->{ok}, 'with the appliance, the session passes' );
+    is_deeply( [ fresh( uri => 'qemu+ssh://runner@hv/session' )->guestfs_env ], ["LIBGUESTFS_PATH='$Trog::HV::Libvirt::GUESTFS_APPLIANCE'"], 'and a tool there boots that appliance' );
+};
+
 subtest 'a session reads its leases from the system daemon, and runs qemu-img as itself' => sub {
     ok( fresh( uri  => 'qemu+ssh://runner@hv/session' )->is_session, 'a session URI is a session' );
     ok( !fresh( uri => 'qemu+ssh://runner@hv/system' )->is_session,  'and the system URI is not' );
