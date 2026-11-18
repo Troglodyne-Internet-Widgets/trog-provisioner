@@ -91,6 +91,11 @@ my $RESTART_SETTLE = 2;
 our $POOL_BUSY_WAIT     = 600;
 our $POOL_BUSY_INTERVAL = 2;
 
+# The fixed appliance of libguestfs on the hypervisor, which
+# runner_account_steps builds for the accounts other than root: see guestfs_env.
+our $GUESTFS_APPLIANCE = '/var/lib/trog-provisioner/guestfs-appliance';
+my sub has_appliance ($hv) { return $hv->file_exists("$GUESTFS_APPLIANCE/README.fixed") }
+
 # The transports that also give us a shell on the hypervisor.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
@@ -2006,6 +2011,31 @@ sub disk_owner_says ( $self, $cmd ) {
     return $self->capture_cmd( $self->is_session ? $cmd : "sudo -n $cmd" );
 }
 
+=head2 @words = $hv->guestfs_env()
+
+The environment that a tool of libguestfs needs on the hypervisor, as words for
+a shell command that C<disk_owner_says> runs.  On a session URI it is
+C<LIBGUESTFS_PATH>, set to C<$GUESTFS_APPLIANCE>.  On the system URI it is
+empty.
+
+libguestfs boots a small VM of its own.  Without a fixed appliance, C<supermin>
+builds that VM from the kernel of the host, and Ubuntu lets only root read the
+kernel.  The tool runs as root on the system URI, but as the user of the URI on
+a session, and that user can have no sudo for it, as with a runner account.
+So a session uses the fixed appliance that C<runner_account_steps> builds.
+
+Dies on a session URI when the appliance is not there, and says how to build
+it.
+
+=cut
+
+sub guestfs_env ($self) {
+    return () unless $self->is_session;
+    die "There is no fixed appliance of libguestfs in $GUESTFS_APPLIANCE on " . $self->describe . ", so the user of a session cannot read a disk.  bin/runner_account builds it, through the block of an account with sudo on the same host.\n"
+      unless has_appliance($self);
+    return 'LIBGUESTFS_PATH=' . Trog::Utils::shell_quote($GUESTFS_APPLIANCE);
+}
+
 =head2 $hv->disk_layout($volume)
 
 The layout of an existing qcow2 volume, as a hashref with C<cluster_size> in
@@ -3414,7 +3444,8 @@ FIX
 =head2 $result = $hv->note_libguestfs()
 
 Passes when the hypervisor has C<virt-cat>, C<virt-ls> or C<virt-edit>, which
-can read the disk of a guest that does not boot.
+can read the disk of a guest that does not boot.  On a session URI, the fixed
+appliance of C<guestfs_env> must be there too.
 
 =cut
 
@@ -3423,7 +3454,15 @@ sub note_libguestfs {
 
     my ($found) = grep { $self->run_cmd( 'sh', '-c', "command -v $_ >/dev/null 2>&1" ) == 0 } qw{virt-cat virt-ls virt-edit};
 
-    return { ok => 1 } if $found;
+    return { ok => 1 } if $found && ( !$self->is_session || has_appliance($self) );
+
+    return { ok => 0, what => "No fixed appliance of libguestfs in $GUESTFS_APPLIANCE", fix => <<'FIX' } if $found;
+The user of a session cannot read the kernel of the host, so libguestfs cannot
+build the small VM that it reads a disk with.  Without the appliance, this
+account cannot read the disk of a guest.  Run bin/runner_account for this
+account again, through the block of an account with sudo on the same host, and
+it builds one.
+FIX
 
     return { ok => 0, what => 'No libguestfs on the hypervisor', fix => <<'FIX' };
 Without it, a guest that will not boot can only be looked at through its
@@ -4075,7 +4114,11 @@ L<Trog::HV::Libvirt::BridgeHelper>.
 hook that sets it again after each package upgrade.  See C<capability_steps> in
 L<Trog::HV::Libvirt::BridgeHelper>, which says why the helper needs it.
 
-=item 8. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
+=item 8. Where the hypervisor has libguestfs, its fixed appliance in
+C<$GUESTFS_APPLIANCE>, which every user may read.  The user reads the disks of
+its guests with it: see C<guestfs_env>.  One appliance serves every account.
+
+=item 9. The sudoers file F</etc/sudoers.d/90-trog-runner-USER>, which
 C<runner_sudoers> writes.  C<visudo -c> makes sure that it is valid before it
 is installed.
 
@@ -4141,10 +4184,24 @@ sub runner_account_steps {
     my $sudoers = sudoers_of($user);
     my $grant   = Trog::HV::Libvirt->runner_sudoers( user => $user, lease_helper => $lease );
 
+    # Only where libguestfs is, because it is optional: see note_libguestfs.
+    my @appliance = said( $hv, 'command -v libguestfs-make-fixed-appliance' ) eq q{} ? () : {
+        what => "build the fixed appliance of libguestfs in $GUESTFS_APPLIANCE, which every user may read",
+        done => sub { has_appliance($hv) },
+        do   => sub {
+            $hv->run_sudo_or_die( qw{install -d -m 0755},            File::Basename::dirname($GUESTFS_APPLIANCE) );
+            $hv->run_sudo_or_die( 'libguestfs-make-fixed-appliance', $GUESTFS_APPLIANCE );
+
+            # supermin copies the kernel with its mode, which lets only root read it.
+            $hv->run_sudo_or_die( qw{chmod -R a+rX}, $GUESTFS_APPLIANCE );
+        },
+    };
+
     # virsh as $user, in its own systemd manager.  So the session daemon that
     # it starts belongs to the account, and stops when the account stops
     # lingering, and not with the login of the operator.
-    my @virsh        = ( qw{systemd-run --quiet --wait --pipe}, "--machine=$user\@.host", qw{--user virsh -q -c qemu:///session} );
+    my @virsh = ( qw{systemd-run --quiet --wait --pipe}, "--machine=$user\@.host", qw{--user virsh -q -c qemu:///session} );
+
     my $session_says = sub ( $verb, $pool ) { said( $hv, join q{ }, 'sudo -n', @virsh, $verb, Trog::Utils::shell_quote($pool) ) };
 
     my @steps = (
@@ -4202,6 +4259,7 @@ sub runner_account_steps {
         @slice,
         Trog::HV::Libvirt::BridgeHelper::allow_only_steps( $hv, $user, @bridges ),
         Trog::HV::Libvirt::BridgeHelper::capability_steps( $hv, $helper ),
+        @appliance,
         {
             what => "grant $user sudo for the lease release, in $sudoers",
             done => sub { chomp( my $wanted = $grant ); $hv->root_text($sudoers) eq $wanted },
@@ -4224,8 +4282,8 @@ The actions that take the account of C<\%plan> away, in the other order from
 C<runner_account_steps>.  The user goes with its home, and the keys and the
 session configuration of libvirt in it.  The dataset goes with C<zfs destroy>,
 without C<-r>, so a snapshot or a child dataset stops it.  The capability of
-qemu-bridge-helper and its apt hook go only with the last account that
-needs them.
+qemu-bridge-helper, its apt hook and the fixed appliance of libguestfs go
+only with the last account that needs them.
 
 It refuses to start, and dies, while the directory of the pool holds a file
 other than a base image of C<base_image>, because that is a disk of a guest.
@@ -4257,6 +4315,11 @@ sub runner_removal_steps {
         },
         Trog::HV::Libvirt::BridgeHelper::revoke_steps( $hv, $user ),
         Trog::HV::Libvirt::BridgeHelper::capability_removal_steps( $hv, $helper, $user ),
+        {
+            what => "remove the fixed appliance of libguestfs in $GUESTFS_APPLIANCE, unless another runner account needs it",
+            done => sub { !Trog::HV::Libvirt::BridgeHelper::is_last_account( $hv, $user ) || !has_appliance($hv) },
+            do   => sub { $hv->run_sudo_or_die( qw{rm -rf}, $GUESTFS_APPLIANCE ) },
+        },
         {
             what => "remove the limits of the user slice of $user",
             done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || absent( $hv, slice_dropin($uid) ) },

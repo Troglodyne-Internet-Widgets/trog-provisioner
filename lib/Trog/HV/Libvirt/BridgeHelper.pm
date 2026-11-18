@@ -338,6 +338,20 @@ sub capability_steps ( $hv, $helper ) {
     );
 }
 
+=head2 is_last_account
+
+C<($hv, $user)>.  True when no runner account other than C<$user> has an
+L</acl_file> on the hypervisor.  Something that every runner account shares
+goes only with the last one.
+
+=cut
+
+sub is_last_account ( $hv, $user ) {
+    my $own = File::Basename::basename( acl_file($user) );
+    my $dir = File::Basename::dirname( acl_file($user) );
+    return !List::Util::any { m/\Atrog-runner-.+[.]conf\z/ && $_ ne $own } $hv->list_dir($dir);
+}
+
 =head2 capability_removal_steps
 
 C<($hv, $helper, $user)>.  The actions that undo L</capability_steps> when C<$user> is the last runner
@@ -348,11 +362,7 @@ is no capability to take away, and only the hook goes.
 =cut
 
 sub capability_removal_steps ( $hv, $helper, $user ) {
-    my $own  = File::Basename::basename( acl_file($user) );
-    my $dir  = File::Basename::dirname( acl_file($user) );
-    my $last = sub {
-        !List::Util::any { m/\Atrog-runner-.+[.]conf\z/ && $_ ne $own } $hv->list_dir($dir);
-    };
+    my $last = sub { is_last_account( $hv, $user ) };
 
     return (
         {

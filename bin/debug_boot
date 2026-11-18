@@ -389,7 +389,7 @@ sub guest_tool {
 
     # As the owner of the disks, and through the daemon that holds the guest,
     # because -d asks libvirt for them.
-    my $out = $hv->disk_owner_says( join ' ', $tool, map { Trog::Utils::shell_quote($_) } $hv->local_connect, @args );
+    my $out = $hv->disk_owner_says( join ' ', $hv->guestfs_env, $tool, map { Trog::Utils::shell_quote($_) } $hv->local_connect, @args );
     my $rc  = $? >> 8;
 
     die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install libguestfs-tools\n" if $rc == 127;
