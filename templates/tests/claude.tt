@@ -106,6 +106,21 @@ SKIP: {
     my $fragment = eval { decode_json(do { local (@ARGV, $/) = $fragment_path; <> }) };
     is_deeply($conf->{autoMode}, $fragment, 'the settings carry the auto mode configuration of the domain');
 }
+
+# The instructions of the operator, where the domain has them.  CLAUDE.md must
+# import them and still import RTK.md, which rtk init wrote before them.
+my $instructions_path = '[% install_dir %]/[% domain %]/claude.CLAUDE.md';
+SKIP: {
+    skip 'this domain has no instructions of the operator', 3 unless -e $instructions_path;
+
+    my $want      = do { local (@ARGV, $/) = $instructions_path; <> };
+    my $installed = do { local (@ARGV, $/) = "$home/.claude/OPERATOR.md"; <> } // '';
+    is($installed, $want, 'OPERATOR.md holds the instructions of the domain');
+
+    my @imports = grep { m/^@/ } split m/\n/, do { local (@ARGV, $/) = "$home/.claude/CLAUDE.md"; <> } // '';
+    is(scalar(grep { $_ eq '@OPERATOR.md' } @imports), 1, 'CLAUDE.md imports them once') or diag "imports: @imports";
+    ok((grep { $_ eq '@RTK.md' } @imports), 'and still imports RTK.md') or diag "imports: @imports";
+}
 [% IF github_user %]
 
 # The bot that each command of the agent acts as.  Asked of gh and git with the
@@ -152,6 +167,12 @@ SKIP: {
         my @got = installed_plugins('[% restricted_user %]', $restricted);
         is_deeply(\@got, [sort keys %{ $rconf->{enabledPlugins} // {} }], 'and claude says that each of its plugins is installed')
             or diag 'installed: ' . join(', ', @got);
+    }
+
+    SKIP: {
+        skip 'this domain has no instructions of the operator', 1 unless -e $instructions_path;
+        my $rclaude = do { local (@ARGV, $/) = "$restricted/.claude/CLAUDE.md"; <> } // '';
+        ok((grep { $_ eq '@OPERATOR.md' } split m/\n/, $rclaude), 'its CLAUDE.md imports the instructions of the operator too') or diag $rclaude;
     }
 
     system('runuser', '-u', '[% restricted_user %]', '--', 'test', '-r', "$restricted/.claude/settings.json");
