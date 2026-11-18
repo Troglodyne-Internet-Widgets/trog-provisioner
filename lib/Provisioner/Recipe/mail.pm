@@ -60,11 +60,85 @@ back on.  A global sieve, which runs before the sieve of each user, files marked
 mail into C<Junk>.  Every account has that folder, with the C<\Junk> special
 use that mail clients look for.
 
+=head3 The Validity lists
+
+F</etc/spamassassin/60-trog-mail.cf> belongs to this recipe.  It sets
+C<RCVD_IN_VALIDITY_CERTIFIED>, C<RCVD_IN_VALIDITY_SAFE> and
+C<RCVD_IN_VALIDITY_RPBL> to 0.  Validity answers "listed" to a resolver that
+asks it too many questions, and the text of that answer says "Excessive Number
+of Queries".  SpamAssassin counts any answer as a hit.  The first two rules
+score -3.0 and -2.0, so a resolver over its quota gave nearly all mail from the
+large senders a bonus, spam included.
+
+=head3 The rules, every day
+
+The package leaves C<spamassassin-maintenance.timer> off, so C<sa-update> never
+ran and the guest scored with the rules of the package.  The build enables the
+timer and runs C<sa-update> one time, so that a new guest does not wait a day.
+amavis loads the rules when it starts.  So a drop-in of
+C<spamassassin-maintenance.service> restarts amavis after a run that changed a
+file of the rules.
+
+C<sa-update> needs port 80 and 443 for the update hosts, and 53 for their
+names.  The C<APT> profile of L<Provisioner::Recipe::ufw> opens all three for
+every guest, so the recipe adds no hole.  It names no C<fetch_hosts>, because
+the mirrors of the rules are many, and the list changes.
+
+=head3 Bayes
+
 Each night, C<sa_train_amavis> trains the Bayes database of amavis from the
-mailboxes of C<names>.  Spam is what is in C<Junk>.  Ham is mail in the INBOX
-that is more than a week old and read.  So a user who moves a message into or
-out of C<Junk> teaches the filter.  SpamAssassin uses Bayes only after it has
-learned 200 messages of each kind.
+folders of every account in C<names>.  Spam is the folder that dovecot gives the
+C<\Junk> special use, and each folder in C<names.$USER.spam_folders>, for
+example C<INBOX.$spam>.  Ham is every other folder of the account, except the
+folders with the C<\Trash>, C<\Drafts> and C<\Sent> special uses.  These are the
+folders that the sieve of the account files into.  INBOX is never learned, read
+or not, because it holds mail that nobody has sorted.  The script reads the
+special uses from the configuration of dovecot, which declares all four in
+F<mail.dovecot.tt>.  A folder that is renamed there is found by its use.
+
+A user who moves a message into a folder teaches the filter.  SpamAssassin uses
+Bayes only after it has learned 200 messages of each kind.
+
+The build does not salvage the Bayes database, so each build starts with an
+empty one.  At the end of the target of each domain, after the mail store is
+restored, the build runs the training one time.  An account that moved here
+scores with Bayes from its first message.
+
+=head3 Asking blocklists from this guest
+
+SpamAssassin asks DNS blocklists about the address of the sender.  A large
+shared resolver sends every question from an address that thousands of others
+share, and a list answers such an address with "blocked".  URIBL answers
+C<127.0.0.1> to C<2.0.0.127.multi.uribl.com> then, and SpamAssassin reports
+C<URIBL_BLOCKED> and checks no URI.  A resolver of this guest sends the
+questions from the address of this guest.
+
+The recipe installs C<unbound>, which recurses from the root, and tells
+SpamAssassin to ask it, with C<dns_server 127.0.0.2> in the file above.  It is
+on by default where C<main_ip> is a public address: not in a private, loopback,
+link-local or shared range.  A guest behind NAT keeps the resolvers of the
+installation, because its questions leave from the address of the hypervisor
+anyway.
+
+To turn it on for a guest that is not public, or off for one that is, set it in
+the configuration of the domain:
+
+    somedomain:
+        mail:
+            local_resolver: false
+
+Off, C<unbound> is stopped and SpamAssassin asks the first nameserver of
+F</etc/resolv.conf>.
+
+The recipe does not use L<Provisioner::Recipe::nostubresolver>, and does not
+change the C<resolvers> of the installation.  Those name the servers that the
+whole guest asks, and a guest with such a recipe still asks them for everything
+else.  Port 53 does not clash, because the stub of systemd-resolved listens on
+127.0.0.53 and 127.0.0.54, and C<unbound> listens on 127.0.0.2 alone.  A
+C<pdns> on the same guest keeps 127.0.0.1.  C<unbound> recurses over port 53 to
+the authoritative servers, which the C<APT> profile of the firewall opens.
+
+=head3 Relay and accounts
 
 The recipe can relay SMTP through another host.  C<relay.to> limits the relay
 to mail for the destinations it names.  The other defaults are sane.
@@ -409,6 +483,17 @@ sub args {
                         # The mailboxes that doveadm makes for this account,
                         # in addition to INBOX.
                         mailboxes => { type => 'array', items => { type => 'string' }, default => [] },
+
+                        # The folders that sa_train_amavis learns as spam, in
+                        # addition to the one with the Junk special use.  No
+                        # quote and no percent sign, because the name goes
+                        # into a cron line and a shell word.
+                        spam_folders => {
+                            type        => 'array',
+                            default     => [],
+                            items       => { type => 'string', pattern => q{\A[^'%\r\n]+\z} },
+                            description => 'Folders of this account, besides the one with the Junk special use, that hold spam, for example INBOX.$spam.  The nightly training learns each as spam.  Every other folder of the account is learned as ham, but INBOX, Trash, Drafts and Sent.',
+                        },
                     },
                 },
             },
@@ -441,6 +526,14 @@ sub args {
             },
 
             ipv6 => { type => 'boolean', default => 1 },
+
+            # No default, because it depends on the guest: enrich turns it on
+            # where main_ip is a public address.  A default here would say one
+            # thing for every guest.
+            local_resolver => {
+                type        => 'boolean',
+                description => 'Whether SpamAssassin asks a recursive resolver on this guest (unbound) instead of the resolvers of the installation.  Unset, it is on where main_ip is a public address.  Set it to false to turn it off.',
+            },
         },
     );
 }
@@ -700,6 +793,9 @@ sub template_files {
         'mail.autoconfig.tt'             => 'config-v1.1.xml',
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',
+        'mail.spamassassin.tt'           => 'mail_spamassassin.cf',
+        'mail.unbound.tt'                => 'mail_unbound.conf',
+        'mail.spamassassin-update.tt'    => 'mail_spamassassin_update.conf',
         'mail.junk.sieve'                => 'junk.sieve',
         'mail.mailrelay_tls_policy.tt'   => 'mailrelay_tls_policy',
         'mail.mailrelay_ufw.tt'          => 'mail_mailrelay_ufw.conf',
@@ -707,6 +803,25 @@ sub template_files {
         'relay.action.tt'                => 'mail_relay.action',
         'mail.proxy_from.tt'             => 'mail_proxy_from',
     );
+}
+
+=head2 $bool = is_public_ipv4($address)
+
+True when C<$address> is an IPv4 address that the internet routes to: not a
+private, loopback, link-local or shared address, and not multicast.  False for
+anything else, including nothing.  C<enrich> uses it to decide C<local_resolver>.
+
+=cut
+
+sub is_public_ipv4 ($address) {
+    return 0 unless defined $address && $address =~ m/\A (\d+) [.] (\d+) [.] \d+ [.] \d+ \z/;
+    my ( $first, $second ) = ( $1, $2 );
+    return 0 if $first == 0 || $first == 10 || $first == 127 || $first >= 224;
+    return 0 if $first == 169 && $second == 254;
+    return 0 if $first == 172 && $second >= 16 && $second <= 31;
+    return 0 if $first == 192 && $second == 168;
+    return 0 if $first == 100 && $second >= 64 && $second <= 127;
+    return 1;
 }
 
 sub enrich {
@@ -737,6 +852,9 @@ sub enrich {
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
     $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
     $opts{proxied_ports}  = { $self->proxied_ports };
+
+    # See "Asking blocklists from this guest" in the POD.
+    $opts{local_resolver} //= is_public_ipv4( $opts{main_ip} ) ? 1 : 0;
 
     # The templates treat relay.host as a host outside unless mailrelay is set.
     $opts{mailrelay} = mailrelay_of( $opts{domain}, %opts );

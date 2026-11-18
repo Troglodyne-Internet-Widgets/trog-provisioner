@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Test::More;
 use File::Find ();
+use File::Temp ();
 use JSON::PP ();
 
 # What the next fetch finds.  The fragment gives the whole mail store to
@@ -560,5 +561,82 @@ subtest 'a mail client finds its settings, as Outlook and Thunderbird ask for th
         my $names = `openssl s_client -connect 127.0.0.1:443 -servername $name </dev/null 2>/dev/null | openssl x509 -noout -ext subjectAltName 2>&1`;
         like( $names, qr/DNS:\Q$name\E\b/, "the certificate on 443 names $name" ) or diag $names;
     }
+};
+
+# The Validity lists answer "listed" to a resolver that is over its quota, and
+# the rules for them score below zero.  The file of the recipe sets them to 0.
+subtest 'the Validity rules weigh nothing' => sub {
+    my $conf = '/etc/spamassassin/60-trog-mail.cf';
+    my $text = -r $conf ? do { local ( @ARGV, $/ ) = $conf; <> } : q{};
+    foreach my $rule (qw{RCVD_IN_VALIDITY_CERTIFIED RCVD_IN_VALIDITY_SAFE RCVD_IN_VALIDITY_RPBL}) {
+        like( $text, qr/^score\s+\Q$rule\E\s+0\s*$/m, "$conf gives $rule the score 0" );
+    }
+
+    # SpamAssassin reads the file, as amavis does.
+    my $debug = `spamassassin -D config -L < /dev/null 2>&1`;
+    like( $debug, qr{config: read file \Q$conf\E}, 'and SpamAssassin reads that file' ) or diag $debug;
+
+    # A message from a host that the lists know.  If a list answers, the rule
+    # shows in the report with its score, and that score must be 0.  If none
+    # answers, there is nothing to see here, and the lines above hold.
+    my $probe = "From: someone\@example.test\nTo: catchall\@[% domain %]\nSubject: validity probe\n"
+      . "Received: from mail-yb1-f176.google.com (mail-yb1-f176.google.com [209.85.219.176])\n"
+      . "\tby mail.[% domain %] with ESMTPS; Mon, 1 Jan 2024 00:00:00 +0000\n"
+      . "Message-ID: <validity-probe\@example.test>\nDate: Mon, 1 Jan 2024 00:00:00 +0000\n\nprobe\n";
+    my $report_file = File::Temp::tmpnam();
+    open( my $in, '|-', "spamassassin -t > '$report_file' 2>&1" ) or die "spamassassin: $!";
+    print {$in} $probe;
+    close($in);
+    my $report = do { local ( @ARGV, $/ ) = $report_file; <> } // q{};
+    unlink $report_file;
+    my @weighed = grep { m/RCVD_IN_VALIDITY_/ && !m/^\s*0\.0\s/ && m/^\s*-?\d/ } split /\n/, $report;
+    is( scalar @weighed, 0, 'a message that the Validity lists answer for scores 0 from each of them' ) or diag join( "\n", @weighed );
+};
+
+# The timer that the package ships is off, so the rules stayed those of the
+# package for ever.  The build enables it and runs the update once.
+subtest 'the rules are updated every day, and were updated by the build' => sub {
+    my $enabled = `systemctl is-enabled spamassassin-maintenance.timer 2>&1`;
+    chomp $enabled;
+    is( $enabled, 'enabled', 'spamassassin-maintenance.timer is enabled' );
+    my $active = `systemctl is-active spamassassin-maintenance.timer 2>&1`;
+    chomp $active;
+    is( $active, 'active', 'and running' );
+
+    my $unit = `systemctl cat spamassassin-maintenance.service 2>&1`;
+    like( $unit, qr{systemctl try-restart amavis}, 'the service restarts amavis after an update that changed the rules' ) or diag $unit;
+
+    my @rules = glob '/var/lib/spamassassin/*/updates_spamassassin_org/*.cf';
+    ok( scalar @rules, 'sa-update ran during the build, and left its rules in /var/lib/spamassassin' ) or diag `ls -R /var/lib/spamassassin 2>&1`;
+};
+
+# SpamAssassin asks one resolver.  URIBL answers 127.0.0.14 for its test point
+# from a resolver that it serves, and 127.0.0.1 for one that is over its quota,
+# which SpamAssassin reports as URIBL_BLOCKED and then checks no URI.
+subtest 'the resolver that SpamAssassin uses is one that URIBL answers' => sub {
+    my $conf   = '/etc/spamassassin/60-trog-mail.cf';
+    my $text   = -r $conf ? do { local ( @ARGV, $/ ) = $conf; <> } : q{};
+    my ($server) = $text =~ m/^dns_server\s+(\S+)/m;
+[% IF local_resolver -%]
+    is( $server, '127.0.0.2', 'SpamAssassin is told to ask the resolver of this guest' );
+    my $unbound = `systemctl is-active unbound 2>&1`;
+    chomp $unbound;
+    is( $unbound, 'active', 'which runs' );
+    my $listening = `ss -lnu 2>&1`;
+    like( $listening, qr/127[.]0[.]0[.]2:53\b/, 'on 127.0.0.2, port 53' ) or diag $listening;
+[% ELSE -%]
+    is( $server, undef, 'SpamAssassin is not told a resolver, because local_resolver is off for this guest' );
+[% END -%]
+
+    # With no dns_server, SpamAssassin asks the first nameserver of resolv.conf.
+    unless ( defined $server ) {
+        my $resolv = do { local ( @ARGV, $/ ) = '/etc/resolv.conf'; <> } // q{};
+        ($server) = $resolv =~ m/^nameserver\s+(\S+)/m;
+    }
+    ok( defined $server, 'there is a resolver to ask' ) or return;
+
+    my $answer = `/usr/bin/perl -MNet::DNS -e 'my \$r = Net::DNS::Resolver->new( nameservers => [\$ARGV[0]] ); my \$q = \$r->query( "2.0.0.127.multi.uribl.com", "A" ); print join( " ", map { \$_->address } grep { \$_->type eq "A" } \$q->answer ) if \$q' '$server' 2>&1`;
+    like( $answer, qr/\b127[.]0[.]0[.]14\b/, "$server answers the test point of URIBL with 127.0.0.14" ) or diag $answer;
+    unlike( $answer, qr/\b127[.]0[.]0[.]1\b(?![.]?\d)/, 'and not with 127.0.0.1, which says that the resolver is blocked' ) or diag $answer;
 };
 done_testing();

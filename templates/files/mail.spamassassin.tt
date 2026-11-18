@@ -1,0 +1,16 @@
+[%# The SpamAssassin configuration that Provisioner::Recipe::mail owns, which
+    amavis reads with the rest of /etc/spamassassin.  See Spam in the POD. -%]
+# Validity answers "listed" to a resolver that asks it too many questions, and
+# the text of the answer says "Excessive Number of Queries".  SpamAssassin counts
+# any answer as a hit, and these rules score well below zero.  So they give
+# spam a bonus.  Their weight is zero.
+score RCVD_IN_VALIDITY_CERTIFIED 0
+score RCVD_IN_VALIDITY_SAFE 0
+score RCVD_IN_VALIDITY_RPBL 0
+[% IF local_resolver -%]
+
+# The resolver of this guest, so that a blocklist sees the address of this guest
+# and not that of a large shared resolver.  See Asking blocklists from this
+# guest in the POD.
+dns_server 127.0.0.2
+[% END -%]

@@ -287,6 +287,53 @@ subtest 'the DKIM key comes from the store, and its public half is a record' => 
     ok( ( grep { $_->{name} eq 'default._domainkey.mail.test.test' } $mail->dns_records( domain => 'mail.test.test' ) ), 'and among the records of mail' );
 };
 
+subtest 'spam_folders is a list that defaults to none, and takes no quote or percent sign' => sub {
+    my %account = ( password => 'x', gecos => 'Me' );
+    my %none    = $recipe->validate( %BASE, names => { me => {%account} } );
+    is_deeply( $none{names}{me}{spam_folders}, [], 'no folders by default' );
+
+    my %some = $recipe->validate( %BASE, names => { me => { %account, spam_folders => [ 'INBOX.$spam', 'INBOX.$suspicious' ] } } );
+    is_deeply( $some{names}{me}{spam_folders}, [ 'INBOX.$spam', 'INBOX.$suspicious' ], 'the folders given are kept' );
+
+    foreach my $bad ( q{it's}, '100%', "two\nlines" ) {
+        like( exception { $recipe->validate( %BASE, names => { me => { %account, spam_folders => [$bad] } } ) }, qr{spam_folders}, 'a name that breaks a cron line or a shell word is refused' );
+    }
+};
+
+subtest 'local_resolver is on where the guest has a public address, unless the operator says otherwise' => sub {
+    my %names = ( names => { me => { password => 'x', gecos => 'Me' } } );
+    my $on    = sub { return { $recipe->enrich( $recipe->validate( %BASE, %names, @_ ) ) }->{local_resolver} };
+
+    ok( $on->( main_ip => '203.0.113.7' ), 'a public address turns it on' );
+    foreach my $private (qw{10.1.2.3 172.16.0.9 192.168.1.5 100.64.0.1 127.0.0.1 169.254.1.1}) {
+        ok( !$on->( main_ip => $private ), "$private does not" );
+    }
+    ok( !$on->(), 'a guest with no address does not' );
+    ok( !$on->( main_ip => '203.0.113.7', local_resolver => 0 ), 'false turns it off on a public guest' );
+    ok( $on->( main_ip  => '10.1.2.3',    local_resolver => 1 ), 'and true turns it on for a private one' );
+};
+
+subtest 'the cron job trains each account with its own spam folders' => sub {
+    my %opts = $recipe->validate(
+        %BASE,
+        script_dir => '/scripts',
+        names      => {
+            me  => { password => 'x', gecos => 'Me', spam_folders => ['INBOX.$spam'] },
+            you => { password => 'x', gecos => 'You' },
+        },
+    );
+    my $cron   = $recipe->render_raw( 'files/mail.cron.tt', $recipe->enrich(%opts) );
+    my $line   = qr{^21[ ]2[ ]\*[ ]\*[ ]\*[ ]root[ ]/scripts/sa_train_amavis[ ]}m;
+    my $folder = qr{--spam-folder[ ]'INBOX[.][\$]spam'[ ]};
+    my $home   = qr{/mail/\Q$BASE{domain}\E};
+    like( $cron, qr{$line$folder$home/me/Maildir\n}m, 'one line has the folder of the account, with its dollar sign as it is' ) or diag $cron;
+    like( $cron, qr{$line$home/you/Maildir\n}m,       'and an account with none passes none' )                                  or diag $cron;
+
+    my $target  = $recipe->render_raw( 'mail.tt', $recipe->enrich(%opts) );
+    my $doubled = qr{--spam-folder[ ]'INBOX[.][\$][\$]spam'[ ]};
+    like( $target, qr{^/scripts/sa_train_amavis[ ]$doubled}m, 'the build seeds the database, with the dollar sign doubled for make' ) or diag $target;
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

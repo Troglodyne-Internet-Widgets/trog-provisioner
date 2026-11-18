@@ -9,6 +9,36 @@ install -m 0775 -o dovecot -g dovecot [% script_dir %]/dovecot_overquota /mail/s
     domains, after this file empties it, so it must not stay. -%]
 install -m 0644 -o root -g root amavis.global /etc/amavis/conf.d/40-trog-mail
 rm -f /etc/amavis/conf.d/50-user
+[%# SpamAssassin.  The scores of the Validity lists and, where this guest has
+    a resolver of its own, the address that SpamAssassin asks.  The file is in
+    /etc/spamassassin, which amavis reads when it starts, and the restart of
+    amavis is queued by the target of each domain.  Provisioner::Recipe::mail
+    has the whole account, under Spam. -%]
+install -m 0644 -o root -g root mail_spamassassin.cf /etc/spamassassin/60-trog-mail.cf
+[%# The recursive resolver, first, so that it answers before anything asks it.
+    The file always goes in, because it names the one interface that unbound
+    listens on.  Off, unbound stops, so that it holds no port. -%]
+install -d -m 0755 -o root -g root /etc/unbound/unbound.conf.d
+install -m 0644 -o root -g root mail_unbound.conf /etc/unbound/unbound.conf.d/trog-mail.conf
+[% IF local_resolver -%]
+unbound-checkconf
+systemctl enable unbound
+systemctl restart unbound
+[% ELSE -%]
+systemctl disable --now unbound; /bin/true
+[% END -%]
+[%# The rules, every day.  The timer is the one that the package ships and
+    leaves off.  amavis loads the rules only when it starts, so the drop-in
+    restarts it after an update that changed one.  The update runs once here as
+    well, so that a new guest does not score with the rules of the package for
+    a day.  sa-update exits 0 when it updated and 1 when there was nothing to
+    update; any other status is a failure.  Egress is port 80, 443 and 53, which
+    the APT profile of ufw opens for every guest. -%]
+install -d -m 0755 -o root -g root /etc/systemd/system/spamassassin-maintenance.service.d
+install -m 0644 -o root -g root mail_spamassassin_update.conf /etc/systemd/system/spamassassin-maintenance.service.d/trog-mail.conf
+systemctl daemon-reload
+systemctl enable --now spamassassin-maintenance.timer
+sa-update || test $$? -eq 1
 install -d -m 0755 -o root -g root /etc/dovecot/sieve
 install -m 0644 -o root -g root junk.sieve /etc/dovecot/sieve/junk.sieve
 sievec /etc/dovecot/sieve/junk.sieve

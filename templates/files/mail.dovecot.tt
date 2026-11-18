@@ -33,11 +33,25 @@ service quota-warning {
 
 # Junk, for every account, with the special use that mail clients look for
 # (RFC 6154).  The sieve below files spam there.
+#
+# Trash, Drafts and Sent get their special uses here too, and are not made: a
+# client or the sieve of an account makes them.  scripts/sa_train_amavis reads
+# these uses from dovecot, and learns neither of the three folders as ham.
+# So a folder that is renamed changes its name here and nowhere else.
 namespace inbox {
   inbox = yes
   mailbox Junk {
     special_use = \Junk
     auto = subscribe
+  }
+  mailbox Trash {
+    special_use = \Trash
+  }
+  mailbox Drafts {
+    special_use = \Drafts
+  }
+  mailbox Sent {
+    special_use = \Sent
   }
 }
 

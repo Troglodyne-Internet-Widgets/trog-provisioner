@@ -180,3 +180,11 @@ doveadm mailbox status -u [% name %]@[% domain %] messages [% box %] > /dev/null
 chown -R dovecot:dovecot /mail/[% domain %]
 find /mail/[% domain %] -type d -exec chmod 2750 {} +
 find /mail/[% domain %] -type f -exec chmod 0640 {} +
+[%# Seed the Bayes database, now that the mail store is restored and the modes
+    are set.  The build does not salvage the database, so each build starts with
+    an empty one, and an account that was moved here would score without Bayes
+    until the first night.  The training reads dovecot to find the special use
+    folders, so it must run after dovecot has its configuration. -%]
+[% FOR account IN names.keys().sort() -%]
+[% INCLUDE "files/mail.train.tt" WITH make = 1, account = account -%]
+[% END -%]

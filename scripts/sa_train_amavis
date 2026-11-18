@@ -1,13 +1,22 @@
 #!/bin/bash
-# Train the Bayes database that amavis scores mail with, from the mailboxes it
-# is given:
+# Train the Bayes database that amavis scores mail with, from the folders of the
+# mailboxes that it is given:
 #
-#     sa_train_amavis MAILDIR...
+#     sa_train_amavis [--spam-folder NAME]... MAILDIR...
 #
-# Spam is every message in the Junk folder of each MAILDIR.  Ham is mail in its
-# INBOX that is more than a week old and read.  Unread mail is left out, because
-# its owner may not have looked at it yet, and it can still be spam.  dovecot
-# keeps the date that a message arrived as the mtime of its file.
+# Spam is every message in the folder that dovecot gives the \Junk special use,
+# and in each folder that --spam-folder names.  A NAME is as a mail client shows
+# it, for example INBOX.suspicious.  Ham is every message in every other folder
+# of the account, except the folders with the \Trash, \Drafts and \Sent special
+# uses.  These are the folders that the sieve of the account files into.
+#
+# INBOX is never learned, read or not.  What lands there has not been sorted
+# yet, and read mail in it can still be spam.  Mail that a person moved to a
+# folder has been judged.
+#
+# The special uses come from the configuration of dovecot, so a folder that
+# dovecot renames is still found.  --spam-folder applies to every MAILDIR of the
+# call, so call this once for each account that has its own list.
 #
 # As root, because the mail is dovecot's and amavis cannot read it.  amavis gets
 # its database back when this exits, however it exits.
@@ -16,18 +25,84 @@ set -u
 DB=/var/lib/amavis/.spamassassin
 trap 'chown -R amavis:amavis "$DB"' EXIT
 
+spam_folders=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --spam-folder)
+            [ $# -ge 2 ] || { echo "sa_train_amavis: --spam-folder needs a folder name" >&2; exit 2; }
+            spam_folders+=("$2")
+            shift 2
+            ;;
+        --) shift; break ;;
+        -*) echo "sa_train_amavis: unknown option $1" >&2; exit 2 ;;
+        *) break ;;
+    esac
+done
+
+# One line for each folder and special use, as "use<TAB>folder".  doveconf
+# prints a folder as "mailbox NAME {", with quotes around a name that has a
+# space.  If dovecot cannot say, stop: with no special uses, Trash would be ham.
+uses=$(doveconf -n) || { echo "sa_train_amavis: doveconf failed, so the special use folders are unknown" >&2; exit 1; }
+uses=$(awk '
+    /^[ \t]*mailbox[ \t]+.*\{[ \t]*$/ {
+        name = $0
+        sub(/^[ \t]*mailbox[ \t]+/, "", name)
+        sub(/[ \t]*\{[ \t]*$/, "", name)
+        gsub(/"/, "", name)
+        next
+    }
+    /^[ \t]*special_use[ \t]*=/ && name != "" {
+        use = $0
+        sub(/^[^=]*=[ \t]*/, "", use)
+        n = split(use, parts, /[ \t]+/)
+        for (i = 1; i <= n; i++) if (parts[i] != "") print parts[i] "\t" name
+    }
+    /^[ \t]*\}/ { name = "" }
+' <<< "$uses")
+
+junk=()
+skip=()
+while IFS=$'\t' read -r use folder; do
+    case "$use" in
+        '\Junk') junk+=("$folder") ;;
+        '\Trash' | '\Drafts' | '\Sent') skip+=("$folder") ;;
+    esac
+done <<< "$uses"
+
+# Whether $1 is one of the remaining arguments.
+listed() {
+    local want=$1 item
+    shift
+    for item in "$@"; do
+        [ "$item" = "$want" ] && return 0
+    done
+    return 1
+}
+
+learn() {
+    local kind=$1 dir=$2
+    # new as well as cur, because mail that nobody opens stays in new.
+    for sub in new cur; do
+        [ -d "$dir/$sub" ] && sa-learn --dbpath "$DB" --no-sync "--$kind" "$dir/$sub" > /dev/null
+    done
+    return 0
+}
+
 for maildir in "$@"; do
-    # new as well as cur, because spam that nobody opens stays in new.
-    for junk in "$maildir/.Junk/new" "$maildir/.Junk/cur"; do
-        if [ -d "$junk" ]; then
-            sa-learn --dbpath "$DB" --no-sync --spam "$junk" > /dev/null
+    # Maildir++ keeps a folder in a directory of its own, named with a dot before
+    # it.  INBOX is the maildir itself, so it is not among them.
+    for dir in "$maildir"/.[!.]*; do
+        [ -d "$dir/cur" ] || [ -d "$dir/new" ] || continue
+        folder=${dir##*/.}
+        [ "$folder" = INBOX ] && continue
+        if listed "$folder" "${junk[@]}" "${spam_folders[@]}"; then
+            learn spam "$dir"
+        elif listed "$folder" "${skip[@]}"; then
+            continue
+        else
+            learn ham "$dir"
         fi
     done
-    if [ -d "$maildir/cur" ]; then
-        # S is the flag that dovecot writes for a message that was read.
-        find "$maildir/cur" -type f -name '*:2,*S*' -mtime +7 -print0 \
-            | xargs -0 -r sa-learn --dbpath "$DB" --no-sync --ham > /dev/null
-    fi
 done
 
 sa-learn --dbpath "$DB" --sync > /dev/null
