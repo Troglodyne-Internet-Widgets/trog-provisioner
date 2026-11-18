@@ -3,6 +3,9 @@
     strangers out. -%]
 [[inputs.opentelemetry]]
   service_address = "0.0.0.0:[% port %]"
+[%# The account and the session, which Claude Code puts on each metric.
+    Provisioner::Recipe::grafanaotel says why. -%]
+  tagexclude = [[% FOR t IN dropped_tags %]"[% t %]", [% END %]]
 
 [%# Each event is a logs point.  This moves its details into a logs_detail
     point that the output sends to the details retention policy.
