@@ -22,6 +22,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use Cpanel::JSON::XS();
 use Capture::Tiny qw{capture_stdout};
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -553,6 +554,56 @@ subtest 'the records of mail go to the publisher in a file of their own' => sub 
     my ( $plain, $without ) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, modules => ['registrar'] );
     is_deeply( $plain->{zone_records}, [], 'a guest that runs no mail has no such records' );
     unlike( $without, qr/--records/, 'and its publisher is handed no file' );
+};
+
+# The guest test of the records, run against a fake shortcut that lists what
+# the provider holds.  lexicon lists a record of easyDNS as its host, a dot and
+# the zone, and easyDNS keeps the apex as an empty host or as "@".
+sub guest_test_against {
+    my ( $opts, @rows ) = @_;
+
+    my $dir = tempdir( CLEANUP => 1 );
+    foreach my $type (qw{A CNAME MX SRV TXT}) {
+        File::Slurper::Temp::write_binary( "$dir/rows-$type.json", Cpanel::JSON::XS::encode_json( [ grep { $_->{type} eq $type } @rows ] ) );
+    }
+    File::Slurper::Temp::write_text( "$dir/$PUBLIC", qq{#!/bin/sh\nexec cat "$dir/rows-\$2.json"\n} );
+    chmod 0700, "$dir/$PUBLIC" or die "chmod: $!";
+
+    my $test = fresh('registrar')->render_raw( 'tests/registrar.tt', %$opts );
+    $test =~ s{/opt/lexicon/}{$dir/}g;
+    File::Slurper::Temp::write_text( "$dir/registrar.t", $test );
+    my $tap;
+    IPC::Run3::run3( [ $^X, "$dir/registrar.t" ], \undef, \$tap, \undef );
+    return $tap;
+}
+
+subtest 'the guest test finds a record at the apex, however the provider spells the apex' => sub {
+    my %mail = ( %ON_PUBLIC, hostnames => [ "www.$PUBLIC", "mail.$PUBLIC", "autodiscover.$PUBLIC" ], modules => [qw{registrar mail}] );
+    my ($opts) = publishing( 'registrar', $REGISTRAR, %mail );
+
+    my $row = sub {
+        my ( $apex, $type, $name, $content ) = @_;
+        return { type => $type, name => ( $name eq $PUBLIC ? "$apex$PUBLIC" : $name ), content => $content, id => "$type $name $content" };
+    };
+    my @names = (
+        ( map { [ 'A',        $_,         $opts->{address} ] } $PUBLIC, @{ $opts->{address_names} } ),
+        ( map { [ 'CNAME',    $_,         $PUBLIC ] } @{ $opts->{domain_aliases} } ),
+        ( map { [ $_->{type}, $_->{name}, $_->{content} ] } @{ $opts->{zone_records} } ),
+    );
+
+    foreach my $apex ( q{.}, '@.' ) {
+        my $tap = guest_test_against( $opts, map { $row->( $apex, @$_ ) } @names );
+        unlike( $tap, qr/^\s*not[ ]ok/m, "every check passes, with the apex listed as ${apex}DOMAIN" ) or diag $tap;
+        like( $tap, qr/^\s*ok[ ]\d+[ ]-[ ]MX[ ]\Q$PUBLIC\E[ ]holds[ ]10[ ]mail/m, 'the MX of the apex among them' );
+    }
+
+    # As the zone was after a build that could not find the apex in the list:
+    # its own records beside those of an older server.
+    my @older  = ( $row->( '@.', 'A', $PUBLIC, '198.51.100.9' ), $row->( '@.', 'TXT', $PUBLIC, 'v=spf1 +mx ~all' ) );
+    my $tap    = guest_test_against( $opts, @older, map { $row->( q{.}, @$_ ) } @names );
+    my $failed = qr/^\s*not[ ]ok[ ]\d+[ ]-[ ]and[ ]no[ ]other[ ]/m;
+    like( $tap, qr/${failed}address/,                           'a second address of the domain fails' );
+    like( $tap, qr/${failed}TXT[ ]at[ ]\Q$PUBLIC\E[ ].*v=spf1/, 'and so does a second SPF' );
 };
 
 subtest 'each zone that an account lists gets the credentials of that account' => sub {

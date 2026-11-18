@@ -860,7 +860,11 @@ C<CNAME> either.  F<scripts/publish_dns_records> writes them through the lexicon
 shortcut of the domain, in the postrun.  It changes only a record of ours that
 has the wrong content, so a rebuild from the same configuration sends nothing.
 It deletes one kind of record only: a C<CNAME> of the domain at a name that
-now holds an C<A> record.
+now holds an C<A> record.  A second address at a name that it publishes, or a
+second record that the C<match> of a record claims, such as a second SPF, it
+reports as a failure of the postrun, with the command that deletes it.  Both
+answer, so the zone is wrong while they are there, but a hand or an older
+server wrote them, and which one is wrong is for the operator to decide.
 
 The address goes up as it is, an RFC 1918 address of a fleet behind NAT
 included: a zone that holds internal addresses for internal names is ordinary,

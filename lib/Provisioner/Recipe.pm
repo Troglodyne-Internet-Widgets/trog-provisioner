@@ -175,7 +175,7 @@ milters declared per domain make postfix run each of them twice.
 one directory.  Prepend C<install_dir> to every path a fragment names.  If
 software insists on a path of its own, symlink that path into C<install_dir>.
 
-=item * Directories and executables are C<0750 user:admin_user>, and any other
+=item * Directories and executable files are C<0750 user:admin_user>, and any other
 file is C<0640>, which C<chmod u=rwX,g=rX,o=> gives.  C<user> is the
 service account that the application runs as.  It defaults to the admin user,
 see C<validate>.
@@ -1668,7 +1668,9 @@ with records of other owners, such as the C<TXT> of SPF at the apex, also has
 C<match>, the start of the content that marks it as the record of this recipe.
 An empty C<match> marks every record of that type at that name as the record
 of this recipe.  Without C<match>, a record is the record of this recipe only
-where its content is the same.  See C<zone_records> in
+where its content is the same.  The publisher updates one record that the
+match marks, and reports each other one as a failure of the postrun, with the
+command that deletes it.  It deletes none of them.  See C<zone_records> in
 L<Provisioner::Recipe::registrar>.  None here.  It reads
 only C<$opts{domain}>.
 
