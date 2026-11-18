@@ -198,6 +198,13 @@ of the nearest parent onto every maildir and message file that it makes.  So
 the group and the setgid bit on C</mail/E<lt>domainE<gt>> decide the group and
 the mode of the whole store.
 
+The store comes with the index files of the server that it was salvaged from,
+such as F<dovecot-uidlist>.  dovecot trusts an index while the mtime of its
+maildir is unchanged, and a copy keeps the mtime.  So a message that arrived
+after the old server last indexed the maildir would stay out of every search
+and every client.  The build runs C<doveadm force-resync> on every mailbox of
+each account, which reads each maildir again, and changes no message.
+
 On the guest, only C<dovecot>, C<opendkim> and root can read these files.  But
 the fetched copy goes into the data directory of the provisioner and into its
 backups.  That copy holds all the mail of this domain.

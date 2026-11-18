@@ -180,6 +180,37 @@ subtest 'an account that only the salvaged passwd-file holds is refused, or kept
     is( $still_there, 0, 'and the salvaged file moved aside' );
 };
 
+subtest 'the build makes dovecot read each restored maildir again' => sub {
+    my %names    = ( names => { someuser => { password => 'x', gecos => 'Some User' }, other => { password => 'y', gecos => 'Other' } }, script_dir => '/nonexistent' );
+    my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, %names ) ) );
+    my @lines    = grep { !m/\A\#/ } split m/\n/, $fragment;
+
+    my @resync = grep { m/doveadm[ ]force-resync/ } @lines;
+    is( scalar @resync, 2, 'once for each account' ) or diag $fragment;
+
+    # Run as make would hand them to the shell, with a doveadm that writes down
+    # what it was asked, and a store where only someuser has a maildir.
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/$_" or die "mkdir: $!" for qw{bin store store/someuser store/someuser/Maildir};
+    File::Slurper::Temp::write_text( "$dir/bin/doveadm", qq{#!/bin/sh\necho "\$*" >> "$dir/asked"\n} );
+    chmod 0755, "$dir/bin/doveadm" or die "chmod: $!";
+    foreach my $line (@resync) {
+        my $command = $line =~ s/\$\$/\$/gr =~ s{/mail/mail[.]test[.]test}{$dir/store}gr;
+        my $out;
+        IPC::Run3::run3( [ 'bash', '-c', "PATH='$dir/bin':\$PATH; $command" ], \undef, \$out, \$out );
+        is( $? >> 8, 0, 'the line succeeds' ) or diag $out;
+    }
+    my $asked = -e "$dir/asked" ? File::Slurper::read_text("$dir/asked") : q{};
+    is( $asked, "force-resync -u someuser\@mail.test.test *\n", 'dovecot reads every mailbox of the account that has a maildir, and an account without one is left to the first delivery' );
+
+    # dovecot answers doveadm only once the restart above has run, and the
+    # sweep of the modes after it gives the files that doveadm writes to dovecot.
+    my ($restart) = grep { $lines[$_] eq 'systemctl restart dovecot' } 0 .. $#lines;
+    my ($resync)  = grep { $lines[$_] =~ m/force-resync/ } 0 .. $#lines;
+    my ($sweep)   = grep { $lines[$_] =~ m{\Achown[ ]-R[ ]dovecot:dovecot[ ]/mail/} } 0 .. $#lines;
+    ok( defined $restart && defined $sweep && $restart < $resync && $resync < $sweep, 'after dovecot restarts, and before the store is given to dovecot' ) or diag $fragment;
+};
+
 subtest 'a relay that is a mail relay of this installation takes every sender, with a login' => sub {
     my %config   = ( 'relay.test.test' => { mailrelay => {} }, 'web.test.test' => { nginx => {} } );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
