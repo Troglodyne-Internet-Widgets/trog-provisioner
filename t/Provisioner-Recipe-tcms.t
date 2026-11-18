@@ -93,16 +93,29 @@ subtest 'the hosts of tCMS are written by tCMS, after the perl target' => sub {
 
     my @one = $hostname->();
     is( scalar @one, 1, 'without a secure host, the recipe still sets the hosts once' );
-    like( $one[0], qr{bin/tcms-hostname[ ]--secure[ ]''[ ]'web[.]test[.]test'}, 'clearing the secure host, with the domain as the hostname' );
+    my $domain = qr{[ ]--media[ ]\S+[ ]'web[.]test[.]test'};
+    like( $one[0], qr{bin/tcms-hostname[ ]--secure[ ]''$domain}, 'clearing the secure host, with the domain as the hostname' );
 
     my @set = $hostname->( secure_host => 'secure.web.test.test' );
     is( scalar @set, 1, 'with one, it sets them once' );
     like( $set[0], qr{^\S*/queue_postrun_task[ ]}, 'in a task that runs after every target, the perl target among them' );
     like( $set[0], qr{sudo[ ]-u[ ]bogus[ ]},       'as the service user' );
-    my $hosts = qr{[ ]'secure[.]web[.]test[.]test'[ ]'web[.]test[.]test'}x;
+    my $hosts = qr{[ ]'secure[.]web[.]test[.]test'$domain};
     like( $set[0], qr{bin/tcms-hostname[ ]--secure$hosts}, 'with the secure host, and the domain as the hostname' );
 
     isnt( exception { $recipe->()->validate( %base, secure_host => 'not a host' ) }, undef, 'and a secure host that is not a host name is refused' );
+
+    like( $one[0], qr{[ ]--media[ ]''[ ]}, 'a domain with no media name clears the media base' );
+
+    my %config   = ( 'web.test.test' => { nginx => { media_names => { 'media.web.test.test' => 'web.test.test', 'media.other.test.test' => 'other.test.test' } } } );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub ( $, $domain ) { return $config{$domain} // {} } );
+
+    my @media = $hostname->();
+    like( $media[0], qr{[ ]--media[ ]'https://media[.]web[.]test[.]test'[ ]}, 'and one with a media name for the domain sets it, and not the name of another vhost' );
+
+    $config{'web.test.test'}{nginx}{media_names}{'cdn.web.test.test'} = 'web.test.test';
+    like( exception { $hostname->() }, qr/more[ ]than[ ]one[ ]media[ ]name/, 'and two media names for the domain stop the build' );
 };
 
 # THE SYSTEM PACKAGES in Provisioner::Recipe::tcms.  git is faked: each answer
