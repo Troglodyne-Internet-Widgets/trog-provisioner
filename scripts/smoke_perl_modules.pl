@@ -40,6 +40,18 @@ The tests then run as the owner of the checkout, through C<cpan_install --as>,
 so that nothing they write belongs to root.  A file that root owns in a checkout is one
 that the admin cannot write, and a root-owned F<.git/index> stops every commit.
 
+=head3 Whose tools
+
+A build can run more than perl.  A dist.ini can run npm in a BeforeBuild, for
+example, and C<dzil listdeps> runs it.  The toolchains that the owner works
+with are the ones that the build expects: the node of nvm, the tools of
+C<go install>, and whatever else a file in F<~/.bashrc.d> puts on C<PATH>.
+
+So the install and the tests of each checkout run with the C<PATH> of an
+interactive bash of its owner first, and the C<PATH> of the script after it.
+The script does not ask when it runs as the owner itself, and an owner whose
+bash says nothing changes nothing.
+
 =cut
 
 sub main {
@@ -62,6 +74,9 @@ sub main {
             $had_failures++;
             next;
         }
+
+        # See "Whose tools".
+        local $ENV{PATH} = path_with( owner_path($uid) );
 
         # All of $?, so that a child killed by a signal counts as a failure.
         system( $cpan_install, @flags, $verb, $repo_dir );
@@ -117,6 +132,59 @@ sub as_owner {
     my $name = getpwuid $uid;
     die "smoke_perl_modules: no account has uid $uid\n" unless defined $name;
     return ( '--as', $name );
+}
+
+=head2 $path = owner_path($uid)
+
+The C<PATH> of an interactive bash of the account C<$uid>, with the home of
+that account as C<HOME>.  Nothing for the account that runs this script, and
+nothing when that bash prints no C<PATH>.  See L</Whose tools>.
+
+=cut
+
+sub owner_path {
+    my ($uid) = @_;
+
+    return if $uid == $<;
+    my ( $name, $home ) = ( getpwuid $uid )[ 0, 7 ];
+    die "smoke_perl_modules: no account has uid $uid\n" unless defined $name;
+    return interactive_path( 'runuser', '-u', $name, '--', 'env', "HOME=$home" );
+}
+
+=head2 $path = interactive_path(@prefix)
+
+Runs C<bash -ic> after the words in C<@prefix>, and returns the C<PATH> that
+it prints.  The C<PATH> is on a line of its own, after whatever the startup
+files of bash print, and the last such line counts.  Nothing when bash prints
+none.
+
+=cut
+
+sub interactive_path {
+    my @prefix = @_;
+
+    open( my $fh, '-|', @prefix, 'bash', '-ic', q{printf '\nPATH=%s\n' "$PATH"} ) or return;    ## no critic (ProhibitPipeOpen) -- what bash prints is the answer
+    my @said = <$fh>;
+
+    # Unchecked, because a startup file can make bash exit nonzero after it
+    # printed the PATH.
+    close $fh;    ## no critic (InputOutput::RequireCheckedSyscalls)
+    my ($path) = reverse map { m/\APATH=(.+)\n?\z/ ? $1 : () } @said;
+    return $path;
+}
+
+=head2 $path = path_with(@paths)
+
+Joins each C<PATH> in C<@paths>, then the C<PATH> of this script, into one,
+in that order.  A directory that is already there, and an empty one, is left
+out.
+
+=cut
+
+sub path_with {
+    my @paths = @_;
+    my %seen;
+    return join ':', grep { $_ ne q{} && !$seen{$_}++ } map { split /:/ } grep { defined } @paths, $ENV{PATH};
 }
 
 =head2 give_back($dir, $from, $uid, $gid)
