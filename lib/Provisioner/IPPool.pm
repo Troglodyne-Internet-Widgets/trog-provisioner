@@ -997,10 +997,10 @@ sub seed {
             #
             # virsh asks the daemon that list_all_domains asked, by -c, because
             # without it the login user asks its own session; see local_uri.
-            my $daemon = Trog::Utils::shell_quote( $hv->local_uri );
+            my $virsh = join q{ }, 'virsh', map { Trog::Utils::shell_quote($_) } $hv->local_connect;
             $script .= "\n" . join "\n", map {
                 my $q = Trog::Utils::shell_quote($_);
-                "virsh -c $daemon domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
+                "$virsh domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
             } @names;
 
             # No sudo.  A provision.conf belongs to the user that ran

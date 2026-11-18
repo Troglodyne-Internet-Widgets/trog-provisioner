@@ -334,6 +334,29 @@ subtest 'a missing disk tool names the package preflight names' => sub {
     like( $err, qr/apt[ ]install[ ]\Q$package\E\n/, 'and the same one is named here' );
 };
 
+# -d asks libvirt for the disks, so it has to ask the daemon that holds the
+# guest.  A session owns its disks, and the system daemon gives them to root.
+subtest 'a disk tool runs as the owner of the disks, through the daemon of the guest' => sub {
+    my @said;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( capture_cmd => sub ( $hv, $cmd ) { push @said, $cmd; $? = 0; return "hv.test\n" } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
+
+    my %want = (
+        'qemu+ssh://someadmin@hv.test/session' => q{virt-cat '-c' 'qemu:///session' '-d' 'vm.test' '/etc/hostname'},
+        'qemu+ssh://someadmin@hv.test/system'  => q{sudo -n virt-cat '-c' 'qemu:///system' '-d' 'vm.test' '/etc/hostname'},
+    );
+    foreach my $uri ( sort keys %want ) {
+        @said = ();
+        my ($out) = Trog::Bin::DebugBoot::guest_tool( Trog::HV::Libvirt->build( uri => $uri ), qw{virt-cat -d vm.test /etc/hostname} );
+        is_deeply( \@said, [ $want{$uri} ], "$uri runs it as the owner of the disks, through its own daemon" ) or diag explain \@said;
+        is( $out, "hv.test\n", 'and gives back what it printed' );
+    }
+
+    @said = ();
+    Trog::Bin::DebugBoot::guest_tool( Trog::HV::Libvirt->build(), qw{virt-cat -d vm.test /etc/hostname} );
+    is_deeply( \@said, [q{sudo -n virt-cat '-d' 'vm.test' '/etc/hostname'}], 'no uri runs it as root, with no -c' ) or diag explain \@said;
+};
+
 # The fleet decides which hypervisor has the guest, as it does for destroy,
 # snapshot and restore.  What it finds has to be the current hypervisor too,
 # because code under Trog::HV asks Trog::HV->new() for it.

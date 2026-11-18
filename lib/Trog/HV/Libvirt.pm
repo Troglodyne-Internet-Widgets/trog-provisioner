@@ -297,12 +297,23 @@ the access that L</vmm> has, and needs no sudo.
 It is empty when L</uri> is not L</explicit>.  libvirt reads an empty URI as no
 URI, and selects its default, as L</vmm> lets it.
 
+=head2 local_connect($uri)
+
+The arguments that give C<virsh> or a tool of libguestfs the daemon C<$uri>, on
+the hypervisor: C<-c> and C<$uri>.  C<$uri> defaults to L</local_uri>.  When
+C<$uri> is empty, it returns no arguments, so that the tool selects its default.
+
 =cut
 
 sub explicit   ($self) { return $self->{explicit} }
 sub uri        ($self) { return $self->setting('uri') }
 sub is_session ($self) { return ( $self->{path} // q{} ) eq '/session' }
 sub local_uri  ($self) { return $self->explicit ? "$self->{driver}://$self->{path}" : q{} }
+
+sub local_connect ( $self, $uri = undef ) {
+    $uri //= $self->local_uri;
+    return $uri ne q{} ? ( q{-c}, $uri ) : ();
+}
 
 sub is_local {
     my ($self) = @_;
@@ -2318,7 +2329,8 @@ sub guest_network_steps ( $hv, $plan ) {
     my $network = sub {
         return eval { $vmm->get_network_by_name($name) } || undef;
     };
-    my $restart = join q{ }, 'virsh -c', $hv->uri, "net-destroy $name &&", 'virsh -c', $hv->uri, "net-start $name";
+    my $uri     = Trog::Utils::shell_quote( $hv->uri );
+    my $restart = "virsh -c $uri net-destroy $name && virsh -c $uri net-start $name";
 
     return (
         {
@@ -3252,13 +3264,17 @@ sub check_guest_networks ($self) {
     };
     return $self->verdict( 0, 'Could not ask libvirt for its networks', $@ ) if $@;
 
+    # The networks belong to the system daemon, also on a session, as in
+    # network_vmm.
+    my $virsh = join q{ }, 'virsh', map { Trog::Utils::shell_quote($_) } $self->local_connect( $self->local_uri =~ s{/session\z}{/system}r );
+
     my ($lease) = grep { $_->get_name eq 'default' } @networks;
     return $self->verdict( 0, "$bridges[0], the first of dhcp_nics, is not the bridge of the default network", <<"FIX" ) unless $lease && $lease->get_bridge_name eq $bridges[0];
 This machine finds a guest by its lease on the default network of libvirt, and
 the first adapter of dhcp_nics is the one that takes that lease.  Name the
 bridge of the default network first in dhcp_nics:
 
-    virsh net-info default
+    $virsh net-info default
 FIX
 
     my @down = grep { !( $_->is_active && $_->get_autostart ) } @networks;
@@ -3269,7 +3285,7 @@ FIX
 
 For the default network, or any other one, on the hypervisor:
 
-@{[ join "\n", map { "    virsh net-start $_; virsh net-autostart $_" } @names ]}
+@{[ join "\n", map { "    $virsh net-start $_; $virsh net-autostart $_" } @names ]}
 FIX
 }
 

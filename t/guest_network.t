@@ -246,8 +246,9 @@ subtest 'the bridge of a runner account stays allowed, and the network is define
 
     my ( undef, $said ) = run_tool( $state, @run );
     is( $state->{files}{$ACL}, "allow virbr0\nallow br0\nallow virbr1", 'the bridges of bin/runner_account are still there, and the new one after them' );
-    like( $state->{networks}{clod}{xml}, qr{<uuid>u-old</uuid>.*prefix='24'},           'a network with another prefix is defined with the one of the plan, under the uuid it had' );
-    like( $said,                         qr/net-destroy[ ]clod[ ]&&.*net-start[ ]clod/, 'and since it runs, it says how to restart it, which it does not do itself' );
+    like( $state->{networks}{clod}{xml}, qr{<uuid>u-old</uuid>.*prefix='24'},                   'a network with another prefix is defined with the one of the plan, under the uuid it had' );
+    like( $said,                         qr/net-destroy[ ]clod[ ]&&.*net-start[ ]clod/,         'and since it runs, it says how to restart it, which it does not do itself' );
+    like( $said,                         qr/virsh[ ]-c[ ]'qemu[+]ssh:\/\/[^']+'[ ]net-destroy/, 'with the URI quoted for the shell, because a query in it can have an &' );
     is( $state->{started}, 0, 'so it is not restarted' );
 };
 

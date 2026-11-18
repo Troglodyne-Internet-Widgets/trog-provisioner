@@ -374,11 +374,8 @@ sub keys_to {
 
     # virsh, because Sys::Virt::Domain::send_key takes only numeric keycodes.
     # The table that maps a name like KEY_ESC to a keycode is inside virsh, and
-    # Sys::Virt cannot reach it.  It must ask the daemon that holds the guest,
-    # which Trog::HV::Libvirt::local_uri names.
-    my $daemon  = $hv->local_uri;
-    my @connect = $daemon ne q{} ? ( q{-c}, $daemon ) : ();
-    $hv->run_cmd( qw{virsh}, @connect, qw{send-key}, $domain, qw{--holdtime 100}, @keys ) == 0
+    # Sys::Virt cannot reach it.
+    $hv->run_cmd( qw{virsh}, $hv->local_connect, qw{send-key}, $domain, qw{--holdtime 100}, @keys ) == 0
       or die "Could not send @keys to $domain.\n";
 
     return 0;
@@ -390,8 +387,9 @@ sub keys_to {
 sub guest_tool {
     my ( $hv, $tool, @args ) = @_;
 
-    # Each word in single quotes, and a single quote inside one as '\''.
-    my $out = $hv->capture_cmd( join ' ', qw{sudo -n}, $tool, map { Trog::Utils::shell_quote($_) } @args );
+    # As the owner of the disks, and through the daemon that holds the guest,
+    # because -d asks libvirt for them.
+    my $out = $hv->disk_owner_says( join ' ', $tool, map { Trog::Utils::shell_quote($_) } $hv->local_connect, @args );
     my $rc  = $? >> 8;
 
     die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install libguestfs-tools\n" if $rc == 127;
@@ -450,7 +448,7 @@ sub single {
 
     # A write to the disk of a running guest corrupts it.  libguestfs also
     # refuses, but this message is clearer than its error.
-    die "$domain is running.  Stop it before writing to its disk:\n" . "  virsh -c " . $hv->uri . " destroy $domain\n" if $dom->is_active();
+    die "$domain is running.  Stop it before writing to its disk:\n" . '  virsh -c ' . Trog::Utils::shell_quote( $hv->uri ) . " destroy $domain\n" if $dom->is_active();
 
     # [ \t] and [^\n], never \s or ., because virt-edit gives the expression a
     # line with its newline.  A trailing \s* eats the newline and joins the
