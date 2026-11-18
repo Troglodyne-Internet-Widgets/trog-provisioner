@@ -907,6 +907,13 @@ then, the guest can still be reading its seed.
 Returns the volumes that belong to this guest alone, which we delete after the
 guest is gone.  Never the base image, because every other guest is built on it.
 
+=head2 @removed = $hv->prune_base_images()
+
+Removes the base images that nothing is built on any more, and returns their
+names.  Call it after a disk has gone.  A base image that is not the newest of
+its kind stays while any disk is backed by it.  A backend with no base image
+returns an empty list.
+
 =cut
 
 =head2 @globs = $hv->guest_disks()
@@ -969,6 +976,7 @@ sub prepare_host          ( $self, @ ) { return abstract( $self, 'prepare_host' 
 sub release_seed          ( $self, @ ) { return abstract( $self, 'release_seed' ) }
 sub guest_volumes         ( $self, @ ) { return abstract( $self, 'guest_volumes' ) }
 sub clear_guest           ( $self, @ ) { return abstract( $self, 'clear_guest' ) }
+sub prune_base_images     ( $self, @ ) { return abstract( $self, 'prune_base_images' ) }
 sub rollback_possible     ( $self, @ ) { return abstract( $self, 'rollback_possible' ) }
 sub provision_guest       ( $self, @ ) { return abstract( $self, 'provision_guest' ) }
 sub would_provision       ( $self, @ ) { return abstract( $self, 'would_provision' ) }

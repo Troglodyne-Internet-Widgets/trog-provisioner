@@ -150,7 +150,7 @@ subtest 'a backend that leaves something out is told what' => sub {
       build config_keys capacity client_module
       domain_exists annihilate_domain guest_names guest_ssh_ip nat_address on_nat_network
       snapshot_names snapshot_current_name create_snapshot revert_snapshot
-      prepare_host release_seed guest_volumes uri guest_disks
+      prepare_host release_seed guest_volumes prune_base_images uri guest_disks
       define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image
       create_disk lease_ip release_dhcp_lease guest_mac nic_slots nic_names has_tpm
     };
@@ -236,7 +236,7 @@ subtest 'prepare_host installs virtiofs-better, and the rule that lets libvirtd 
     $mock->redefine( put_file        => sub ( $, $from, $to, % ) { push @did, "put $to"; $files{$to} = q{}; 1 } );
     $mock->redefine( run_sudo        => sub ( $, @argv ) { push @did, "@argv"; 0 } );
     $mock->redefine( run_sudo_or_die => sub ( $, @argv ) { push @did, "@argv"; 1 } );
-    $mock->redefine( capture_cmd     => sub ( $, $cmd ) { $cmd =~ m{attr/current} ? $confinement : q{} } );
+    $mock->redefine( capture_cmd     => sub ( $, $cmd ) { index( $cmd, q{attr/current} ) >= 0 ? $confinement : q{} } );
 
     # grep -rqsF $path /etc/apparmor.d, against the files above.
     $mock->redefine(
@@ -1444,8 +1444,11 @@ subtest 'a rebuild that keeps the disk stops the guest rather than undefining it
     $mock->redefine( domain_exists      => sub { 1 } );
     $mock->redefine( guest_mac          => sub { '52:54:00:aa:bb:cc' } );
     $mock->redefine( lease_ips          => sub { return ('192.168.122.9') } );
+    $mock->redefine( prune_base_images  => sub { push @did, 'prune'; return () } );
 
     quietly( sub { $hv->clear_guest( 'vm.test', keep_disk => 1 ) } );
+
+    ok( !( grep { $_ eq 'prune' } @did ), 'no disk went, so no base image is looked at' );
 
     ok( ( grep { $_ eq 'stop_domain' } @did ),          'the guest is stopped' );
     ok( !( grep { $_ eq 'annihilate_domain' } @did ),   'and not undefined, which would take the record libvirt keeps of its snapshots' );
@@ -1467,12 +1470,23 @@ subtest 'a rebuild that cannot keep the disk clears all of it, the way it always
     $mock->redefine( domain_exists      => sub { 1 } );
     $mock->redefine( guest_mac          => sub { '52:54:00:aa:bb:cc' } );
     $mock->redefine( lease_ips          => sub { return ('192.168.122.9') } );
+    $mock->redefine( prune_base_images  => sub { push @did, 'prune'; return () } );
 
     quietly( sub { $hv->clear_guest('vm.test') } );
 
     is_deeply( \@deleted, [ 'vm.test-qcow2', 'vm.test-cloudinit.iso' ], 'both volumes go' );
-    ok( ( grep { $_ eq 'annihilate_domain' } @did ), 'the domain is undefined' );
-    ok( !( grep { $_ eq 'revert' } @did ),           'and nothing is reverted, there being nothing kept to revert' );
+    ok( ( grep { $_ eq 'prune' } @did ), 'and an old base image that the disk was the last one on goes too' );
+
+    # A pool that cannot be read is no reason to stop a rebuild.
+    $mock->redefine( prune_base_images => sub { die "pool is gone\n" } );
+    my $warned = '';
+    {
+        local $SIG{__WARN__} = sub { $warned .= $_[0] };
+        is( quietly( sub { $hv->clear_guest('vm.test') } ), 1, 'a rebuild goes on when the old base images cannot be removed' );
+    }
+    ok( index( $warned, 'Could not remove the old base images: pool is gone' ) >= 0, 'with a warning that says why' ) or diag $warned;
+    ok( ( grep { $_ eq 'annihilate_domain' } @did ),                                 'the domain is undefined' );
+    ok( !( grep { $_ eq 'revert' } @did ),                                           'and nothing is reverted, there being nothing kept to revert' );
 };
 
 subtest 'a disk is snapshotted the moment it is made, while it is still empty' => sub {
@@ -1556,11 +1570,14 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
 subtest 'the base image is fetched once' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
-    my @ran;
+    my ( @ran, @volumes );
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( volume_path  => sub { undef } );
-    $mock->redefine( refresh_pool => sub { 1 } );
-    $mock->redefine( run_cmd      => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
+    $mock->redefine( volume_path        => sub { undef } );
+    $mock->redefine( refresh_pool       => sub { 1 } );
+    $mock->redefine( pool_path          => sub { '/pool' } );
+    $mock->redefine( run_cmd            => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
+    $mock->redefine( image_volumes      => sub { @volumes } );
+    $mock->redefine( published_checksum => sub { undef } );
 
     quietly( sub { $hv->base_image('https://example.test/noble.img') } );
 
@@ -1571,18 +1588,291 @@ subtest 'the base image is fetched once' => sub {
     ok( ( grep { m/\Amv[ ]\N*\.partial[ ]/ } @ran ), 'and moved into place after' );
 
     # Already there: no fetch at all.
-    @ran = ();
-    $mock->redefine( volume_path => sub { '/opt/terraform/disks/baseimage-qcow2' } );
+    @ran     = ();
+    @volumes = ( { name => 'baseimage-a', path => '/opt/terraform/disks/baseimage-qcow2', tag => undef } );
     is(
         $hv->base_image('https://example.test/noble.img'), '/opt/terraform/disks/baseimage-qcow2',
         'an image already in the pool is used as it is'
     );
     is_deeply( \@ran, [], 'nothing was fetched' );
 
+    # An explicit name is the volume of that name, current or not.
+    $mock->redefine( volume_path => sub { "/pool/$_[1]" } );
+    is( $hv->base_image( 'https://example.test/noble.img', 'chosen' ), '/pool/chosen', 'a name that the caller gives is the volume of that name' );
+    is_deeply( \@ran, [], 'and nothing asks whether it is current' );
+
     # No image and no URL is an error, not an empty download.
     $mock->redefine( volume_path => sub { undef } );
     like( exception { $hv->base_image(undef) }, qr/No[ ]image[ ]URL[ ]configured/, 'and nothing to fetch is an error' );
 };
+
+# The URL of a distribution moves, so a volume named after the URL held the
+# image of the day that the pool first fetched it, for as long as the pool lived.
+subtest 'base_image: a build that has moved on is fetched to a volume of its own' => sub {
+    my $hv     = fresh();
+    my $url    = 'https://example.test/noble/current/noble.img';
+    my $family = Trog::HV::Libvirt::image_volume_name($url);
+
+    my $old_sum = 'a' x 64;
+    my $new_sum = 'b' x 64;
+
+    my ( @ran, @read, %path, @volumes, $published, %sum );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( pool_path          => sub { '/pool' } );
+    $mock->redefine( refresh_pool       => sub { 1 } );
+    $mock->redefine( run_cmd            => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
+    $mock->redefine( volume_path        => sub { $path{ $_[1] } } );
+    $mock->redefine( image_volumes      => sub { @volumes } );
+    $mock->redefine( published_checksum => sub { $published } );
+    $mock->redefine( file_checksum      => sub { push @read, $_[1]; return $sum{ $_[1] } } );
+
+    my $old = { name => $family, path => "/pool/$family", tag => undef, mtime => 100 };
+    %sum = ( $old->{path} => $old_sum, "/pool/$family.partial" => $new_sum );
+
+    # The pool has the build that is published.
+    @volumes   = ($old);
+    $published = $old_sum;
+    is( quietly( sub { $hv->base_image($url) } ), $old->{path}, 'a copy with the published checksum is the one that is used' );
+    is_deeply( \@ran, [], 'and nothing is downloaded' );
+
+    # A build is named after its checksum, so no file is read to tell.
+    my $tagged = { name => "$family-" . substr( $old_sum, 0, 12 ), path => '/pool/tagged', tag => substr( $old_sum, 0, 12 ), mtime => 200 };
+    @volumes = ( $tagged, $old );
+    @read    = ();
+    is( quietly( sub { $hv->base_image($url) } ), '/pool/tagged', 'the newest build is the one that is used' );
+    is_deeply( [ \@ran, \@read ], [ [], [] ], 'with no download and no checksum of a file' );
+
+    # The distribution published a new build.
+    @volumes   = ( $tagged, $old );
+    $published = $new_sum;
+    my $built = "$family-" . substr( $new_sum, 0, 12 );
+    $path{$built} = undef;
+    @ran = ();
+    my $said = quietly( sub { $hv->base_image($url) } );
+    like( $said, qr{\A/pool/\Q$built\E\z}, 'a new checksum is a volume with a new name' ) or diag explain [ $said, \@ran ];
+    ok( ( grep { m{\Acurl\b\N*[ ]-o[ ]/pool/\Q$family\E[.]partial[ ]\Q$url\E\z} } @ran ), 'downloaded to a partial name' );
+    ok( ( grep { $_ eq "mv /pool/$family.partial /pool/$built" } @ran ),                  'and moved to a name of its own' );
+    my %touched = map { $_ => 1 } split q{ }, join q{ }, @ran;
+    ok( !( grep { $touched{$_} } $old->{path}, $tagged->{path} ),         'and the volumes that guests are built on are not touched' );
+    ok( !( grep { m/\A(?:rm|curl)\b\N*[ ]\/pool\/\Q$family\E\z/ } @ran ), 'least of all written over' );
+
+    # The file is named after what it is.  A build can land between the sums and the download.
+    $sum{"/pool/$family.partial"} = 'c' x 64;
+    $built                        = "$family-" . ( 'c' x 12 );
+    @ran                          = ();
+    like( quietly( sub { $hv->base_image($url) } ), qr{\A/pool/\Q$built\E\z}, 'a build that moved again is named by its own checksum' );
+
+    # That build is in the pool already: nothing is put over it.
+    $path{$built} = "/pool/$built";
+    @ran = ();
+    is( quietly( sub { $hv->base_image($url) } ), "/pool/$built", 'a build that is there already is used' );
+    ok( ( grep { m{\Arm[ ]-f[ ]/pool/\Q$family\E[.]partial\z} } @ran ), 'and the copy that was fetched again goes' );
+    ok( !( grep { m/\Amv\b/ } @ran ),                                   'rather than replace it' );
+
+    # No checksum for the download is a failure, because it has no name.
+    $sum{"/pool/$family.partial"} = undef;
+    $path{$built} = undef;
+    like(
+        exception {
+            quietly( sub { $hv->base_image($url) } )
+        },
+        qr/Could[ ]not[ ]checksum/,
+        'a file that cannot be read has no name'
+    );
+};
+
+subtest 'base_image: a build that cannot be compared is not a reason to fail' => sub {
+    my $hv     = fresh();
+    my $url    = 'https://example.test/noble/current/noble.img';
+    my $family = Trog::HV::Libvirt::image_volume_name($url);
+
+    my ( @ran, @volumes );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( pool_path          => sub { '/pool' } );
+    $mock->redefine( refresh_pool       => sub { 1 } );
+    $mock->redefine( run_cmd            => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
+    $mock->redefine( volume_path        => sub { undef } );
+    $mock->redefine( image_volumes      => sub { @volumes } );
+    $mock->redefine( published_checksum => sub { undef } );
+
+    @volumes = ( { name => 'newer', path => '/pool/newer', tag => 'abc', mtime => 2 }, { name => 'older', path => '/pool/older', tag => 'def', mtime => 1 } );
+    is( quietly( sub { $hv->base_image($url) } ), '/pool/newer', 'with no sums, the newest volume is used' );
+    is_deeply( \@ran, [], 'and nothing is fetched' );
+
+    @volumes = ();
+    quietly( sub { $hv->base_image($url) } );
+    ok( ( grep { $_ eq "mv /pool/$family.partial /pool/$family" } @ran ), 'with no sums and no volume, the image is downloaded under the name that it had before builds' );
+};
+
+subtest 'published_checksum reads the sums that sit beside the image' => sub {
+    my $hv = fresh();
+
+    my ( $asked, $res );
+    my $http = Test::MockModule->new('HTTP::Tiny');
+    $http->redefine( get => sub { $asked = $_[1]; return $res } );
+
+    my $sum = 'ab' x 32;
+    $res = { success => 1, content => ( 'cd' x 32 ) . " *other.img\n" . uc($sum) . " *noble.img\n" };
+    is( $hv->published_checksum('https://example.test/noble/current/noble.img'), $sum,                                            'the sum of the line for the file, in lower case' );
+    is( $asked,                                                                  'https://example.test/noble/current/SHA256SUMS', 'from the directory of the image' );
+
+    $res = { success => 1, content => "$sum  noble.img\n" };
+    is( $hv->published_checksum('https://example.test/noble/current/noble.img'), $sum, 'a text mode line says the same' );
+
+    $res = { success => 1, content => "$sum *noble.img.sha\n" };
+    is( $hv->published_checksum('https://example.test/noble/current/noble.img'), undef, 'a file that merely starts the same is not the file' );
+
+    $res = { success => 0, status => 404 };
+    is( $hv->published_checksum('https://example.test/noble/current/noble.img'), undef, 'no sums, no answer' );
+    is( $hv->published_checksum(undef),                                          undef, 'and no URL, none either' );
+};
+
+subtest 'file_checksum asks the hypervisor, and base_volumes lists the builds newest first' => sub {
+    my $hv = fresh();
+
+    my ( $said, @cmds );
+    my $sum  = '0f' x 32;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( capture_cmd => sub { push @cmds, $_[1]; return $said } );
+
+    $said = "$sum  /pool/it's here\n";
+    is( $hv->file_checksum(q{/pool/it's here}), $sum, 'the sum that sha256sum prints' );
+    like( $cmds[0], qr/\Asha256sum[ ]'\/pool\/it'\\''s[ ]here'\z/, 'with the path quoted for the shell' );
+    $said = "sha256sum: nothing\n";
+    is( $hv->file_checksum('/pool/x'), undef, 'and nothing when it does not answer' );
+
+    my $family = 'baseimage-noble.img-0123456789ab';
+    my @names  = ( 'baseimage-qcow2', 'vm.test-qcow2', $family, "$family-aaaaaaaaaaaa", "$family-bbbbbbbbbbbb", 'baseimage-other.img-ba9876543210' );
+    my $pool   = bless { volumes => [ map { FakeBaseVolume->new( name => $_, path => "/pool/$_" ) } @names ] }, 'FakeBaseVolumes';
+    $mock->redefine( pool => sub { $pool } );
+
+    @cmds = ();
+    $said = join q{}, map { "$_->[0] /pool/$_->[1]\n" } [ 100, $family ], [ 300, "$family-aaaaaaaaaaaa" ], [ 200, "$family-bbbbbbbbbbbb" ], [ 50, 'baseimage-other.img-ba9876543210' ];
+    my @volumes = $hv->base_volumes();
+    is_deeply( [ map { $_->{name} } @volumes ], [ "$family-aaaaaaaaaaaa", "$family-bbbbbbbbbbbb", $family, 'baseimage-other.img-ba9876543210' ], 'the builds of base_image, newest first, and no volume that has a name of its own' );
+    is_deeply( [ map { $_->{tag} } @volumes[ 0, 1, 2 ] ], [ 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', undef ], 'with the tag of each, and none for a volume from before builds' );
+    is( scalar @cmds, 1, 'from one command' );
+    is_deeply( [ map { $_->{name} } $hv->image_volumes($family) ], [ "$family-aaaaaaaaaaaa", "$family-bbbbbbbbbbbb", $family ], 'and the family is the builds of one image' );
+
+    $said = q{};
+    is( ( $hv->base_volumes )[0]{mtime}, 0, 'a volume with no date has none' );
+};
+
+subtest 'a build is known by its tag, and a volume from before builds by its file' => sub {
+    my $hv  = fresh();
+    my $sum = 'ab' x 32;
+
+    my @read;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( file_checksum => sub { push @read, $_[1]; return $sum } );
+
+    ok( $hv->is_build( { tag => substr( $sum, 0, 12 ), path => '/p' }, $sum ), 'a tag that starts the sum is the build' );
+    ok( !$hv->is_build( { tag => 'f' x 12, path => '/p' }, $sum ), 'another tag is not' );
+    is_deeply( \@read, [], 'and neither reads the file' );
+
+    ok( $hv->is_build( { tag  => undef, path => '/p' }, $sum ),     'a volume from before builds is read, and is the build when the sums agree' );
+    ok( !$hv->is_build( { tag => undef, path => '/p' }, 'c' x 64 ), 'and is not when they differ' );
+};
+
+# A disk is an overlay on its base volume, so a volume that one still names
+# cannot go.
+subtest 'prune_base_images removes what no disk is backed by, and never the newest' => sub {
+    my $hv = fresh();
+
+    my $family = 'baseimage-noble.img-0123456789ab';
+    my ( $newest, $middle, $oldest ) = map { "$family-$_" } qw{cccccccccccc bbbbbbbbbbbb aaaaaaaaaaaa};
+    my @bases = (
+        { name => $newest, path => "/pool/$newest", family => $family, tag => 'cccccccccccc', mtime => 300 },
+        { name => $middle, path => "/pool/$middle", family => $family, tag => 'bbbbbbbbbbbb', mtime => 200 },
+        { name => $oldest, path => "/pool/$oldest", family => $family, tag => 'aaaaaaaaaaaa', mtime => 100 },
+    );
+
+    my ( %backing, @deleted, @asked );
+    my $pool = bless { volumes => [ ( map { FakeBaseVolume->new( name => $_->{name}, path => $_->{path} ) } @bases ), map { FakeBaseVolume->new( name => $_, path => "/pool/$_" ) } qw{one-qcow2 two-qcow2 one-cloudinit.iso} ] }, 'FakeBaseVolumes';
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( base_volumes    => sub { @bases } );
+    $mock->redefine( pool            => sub { $pool } );
+    $mock->redefine( delete_volume   => sub { push @deleted, $_[1]; return 1 } );
+    $mock->redefine( disk_owner_says => sub { my ( undef, $cmd ) = @_; push @asked, $cmd; my ($path) = $cmd =~ m{'(/pool/[^']+)'}; return $backing{$path} } );
+
+    my $json = sub { my ($file) = @_; return defined $file ? qq({"format":"qcow2","full-backing-filename":"/other/dir/$file"}) : '{"format":"qcow2"}' };
+    %backing = (
+        '/pool/one-qcow2'         => $json->($middle),
+        '/pool/two-qcow2'         => $json->($newest),
+        '/pool/one-cloudinit.iso' => '{"format":"raw"}',
+    );
+
+    quietly( sub { $hv->prune_base_images } );
+    is_deeply( \@deleted, [$oldest], 'an old volume that no disk is backed by goes' ) or diag explain \@deleted;
+    ok( ( grep { m/qemu-img[ ]info[ ]-U[ ]--output=json[ ]'\/pool\/one-qcow2'/ } @asked ), 'found by asking qemu-img for the backing file of each disk' );
+    ok( !( grep { index( $_, 'baseimage' ) >= 0 } @asked ),                                'and not of the base volumes' );
+
+    # The last disk on the middle volume goes.
+    @deleted = ();
+    $backing{'/pool/one-qcow2'} = $json->(undef);
+    quietly( sub { $hv->prune_base_images } );
+    is_deeply( [ sort @deleted ], [ sort $middle, $oldest ], 'with nothing on it, the next one goes' );
+
+    # Nothing is on any of them: the newest still stays.
+    @deleted = ();
+    %backing = map { $_ => $json->(undef) } keys %backing;
+    quietly( sub { $hv->prune_base_images } );
+    ok( !( grep { $_ eq $newest } @deleted ), 'the newest volume of the image stays, though no disk is backed by it' );
+
+    # A volume that cannot be read could be backed by anything.
+    @deleted = ();
+    $backing{'/pool/two-qcow2'} = undef;
+    my $warned = '';
+    {
+        local $SIG{__WARN__} = sub { $warned .= $_[0] };
+        quietly( sub { $hv->prune_base_images } );
+    }
+    is_deeply( \@deleted, [], 'a disk that qemu-img does not answer for keeps every volume' );
+    like( $warned, qr/Could[ ]not[ ]read[ ]the[ ]backing[ ]file[ ]of[ ]two-qcow2/, 'and says so' );
+
+    # The newest is not known without dates.
+    @deleted         = ();
+    %backing         = map { $_ => $json->(undef) } keys %backing;
+    $bases[1]{mtime} = 0;
+    $warned          = '';
+    {
+        local $SIG{__WARN__} = sub { $warned .= $_[0] };
+        quietly( sub { $hv->prune_base_images } );
+    }
+    is_deeply( \@deleted, [], 'volumes with no date are all kept' );
+    like( $warned, qr/Could[ ]not[ ]date/, 'with a word about why' );
+
+    # Two images each keep their newest.
+    $bases[1]{mtime} = 200;
+    my $other = 'baseimage-other.img-ba9876543210';
+    push @bases, { name => $other, path => "/pool/$other", family => $other, tag => undef, mtime => 10 };
+    @deleted = ();
+    quietly( sub { $hv->prune_base_images } );
+    ok( !( grep { $_ eq $other } @deleted ), 'an image with one volume keeps it' );
+
+    # Nothing to do.
+    @bases   = ( $bases[0] );
+    @deleted = @asked = ();
+    is_deeply( [ quietly( sub { $hv->prune_base_images } ) ], [], 'a pool with one volume of an image removes nothing' );
+    is_deeply( \@asked,                                       [], 'and does not read the disks to find out' );
+};
+
+{
+
+    package FakeBaseVolume;
+
+    sub new      ( $class, %info ) { return bless {%info}, $class }
+    sub get_name ($self)           { return $self->{name} }
+    sub get_path ($self)           { return $self->{path} }
+}
+
+{
+
+    package FakeBaseVolumes;
+
+    sub list_all_volumes ($self) { return @{ $self->{volumes} } }
+}
 
 # One volume for every URL meant that the first image a hypervisor fetched was
 # the image of every guest after it, whichever release the guest named.
@@ -1590,7 +1880,9 @@ subtest 'base_image: each image has a volume of its own' => sub {
     my $hv = fresh();
     my @asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( volume_path => sub { my ( $s, $name ) = @_; push @asked, $name; return "/pool/$name" } );
+    $mock->redefine( volume_path        => sub { my ( $s, $name )   = @_; push @asked, $name;   return "/pool/$name" } );
+    $mock->redefine( image_volumes      => sub { my ( $s, $family ) = @_; push @asked, $family; return { name => $family, path => "/pool/$family", tag => undef } } );
+    $mock->redefine( published_checksum => sub { undef } );
 
     my $noble    = 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img';
     my $resolute = 'https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img';

@@ -17,6 +17,7 @@ use Test::MockModule qw{strict};
 use Test::Fatal      qw{exception};
 use File::Temp       qw{tempdir};
 use List::Util();
+use Time::HiRes();
 use File::Slurper();
 use File::Slurper::Temp();
 use FindBin;
@@ -33,7 +34,7 @@ use Trog::HV();
 # backend lazily, and it is named only as a string below.
 use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();
-use Trog::HV::Linode();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Linode();
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
 # wrote itself, full of dots and slashes that would otherwise need escaping one
@@ -366,7 +367,7 @@ subtest 'virtiofs-better has to run a virtiofsd' => sub {
     $hv->redefine(
         capture_cmd => sub ( $, $cmd ) {
             push @asked, $cmd;
-            return $cmd =~ m/attr\/current/ ? $confinement : "virtiofsd 1.10.0\n";
+            return index( $cmd, q{attr/current} ) >= 0 ? $confinement : "virtiofsd 1.10.0\n";
         }
     );
     $hv->redefine( run_cmd => sub ( $, @argv ) { return $argv[0] eq 'grep' && $named ? 0 : 1 } );
@@ -1062,6 +1063,65 @@ subtest 'the pool quota note asks the hypervisor, and advises for its filesystem
     local *Trog::Test::Pools::get_storage_pool_by_name = sub { die "no pool\n" };
     ok( $note->( 'xfs', "/srv/pool\n 1 /dev/sda2 /srv\n1\n" )->{ok}, 'and neither does a pool that libvirt does not have yet' );
     is( scalar @asked, 0, 'without asking the hypervisor anything' );
+};
+
+subtest 'a copy of the image in the pool that is not the published one is worth saying so about' => sub {
+    my $pools = bless {}, 'Trog::Test::Pools';
+    no warnings 'once';
+    local *Trog::Test::Pools::get_storage_pool_by_name = sub { return 1 };
+
+    my $url       = 'https://images.example.test/noble/current/noble.img';
+    my $published = 'ab' x 32;
+    my ( @volumes, $sums );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( distros_in_use => sub { return ( [ 'ubuntu', 'noble' ], [ 'ubuntu', 'noble' ] ) } );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( vmm                => sub { return $pools } );
+    $mock->redefine( pool_name          => sub { return 'bogus' } );
+    $mock->redefine( image_for_distro   => sub { return $url } );
+    $mock->redefine( image_volumes      => sub { return @volumes } );
+    $mock->redefine( published_checksum => sub { return $sums } );
+    $mock->redefine( file_checksum      => sub { return 'cd' x 32 } );
+
+    my $hv  = Trog::HV->candidate( uri => 'qemu:///system' );
+    my $now = Time::HiRes::time();
+    my $day = 86400;
+
+    ok( ( grep { $_ eq 'note_stale_base_image' } $hv->preflight_notes ),               'a libvirt hypervisor runs it' );
+    ok( !( grep { $_ eq 'note_stale_base_image' } Trog::HV::Linode->preflight_notes ), 'and a cloud, which has no base volume, does not' );
+
+    # A copy from before builds that differs, 12 days old.
+    @volumes = ( { name => 'baseimage-noble.img-0123456789ab', path => '/pool/a', tag => undef, mtime => $now - 12 * $day - 60 } );
+    $sums    = $published;
+    my $result = $hv->note_stale_base_image;
+    ok( !$result->{ok}, 'a copy that differs from the published sums is reported' ) or diag explain $result;
+    like( $result->{what}, qr/bogus[ ]pool/,                                              'naming the pool' );
+    like( $result->{what}, qr/up[ ]to[ ]12[ ]days[ ]old/,                                 'and the age of the copy' );
+    like( $result->{fix},  qr/baseimage-noble[.]img-0123456789ab[ ]is[ ]12[ ]days[ ]old/, 'and the volume that it is' );
+    is( scalar( () = $result->{fix} =~ m/days[ ]old/g ), 1, 'once, for an image that two domains build on' );
+
+    # A copy that is the published build.
+    @volumes = ( { name => 'baseimage-noble.img-0123456789ab-' . substr( $published, 0, 12 ), path => '/pool/b', tag => substr( $published, 0, 12 ), mtime => $now - 90 * $day } );
+    is_deeply( $hv->note_stale_base_image, { ok => 1 }, 'a copy with the published checksum says nothing, however old' );
+
+    # A newest copy that matches, over an older one that does not.
+    @volumes = ( $volumes[0], { name => 'older', path => '/pool/c', tag => 'f' x 12, mtime => $now - 400 * $day } );
+    is_deeply( $hv->note_stale_base_image, { ok => 1 }, 'and only the newest copy of an image is compared' );
+
+    # Nothing to compare.
+    $sums    = undef;
+    @volumes = ( { name => 'a', path => '/pool/a', tag => undef, mtime => $now - 12 * $day } );
+    is_deeply( $hv->note_stale_base_image, { ok => 1 }, 'sums that cannot be fetched say nothing' );
+
+    $sums    = $published;
+    @volumes = ();
+    is_deeply( $hv->note_stale_base_image, { ok => 1 }, 'a pool with no copy says nothing' );
+
+    local *Trog::Test::Pools::get_storage_pool_by_name = sub { die "no pool\n" };
+    @volumes = ( { name => 'a', path => '/pool/a', tag => undef, mtime => $now - 12 * $day } );
+    is_deeply( $hv->note_stale_base_image, { ok => 1 }, 'and neither does a pool that libvirt does not have yet' );
 };
 
 subtest 'the client of the hypervisor being checked is the first thing checked' => sub {

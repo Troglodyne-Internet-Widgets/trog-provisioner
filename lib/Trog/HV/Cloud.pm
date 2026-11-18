@@ -120,17 +120,21 @@ sub inspection_address ( $self, $domain ) { return $self->guest_ssh_ip($domain) 
 
 =head2 guest_volumes($domain)
 
+=head2 prune_base_images
+
 Each does nothing, for its own reason.  There is no machine to prepare, because
 the service builds the guest and its disk comes from an image.  There is no seed
 to release, because the payload is a field on the guest, not a drive.  There are
 no volumes left after a guest is gone, because the backend's
-C<annihilate_domain> deletes what this tool made.
+C<annihilate_domain> deletes what this tool made.  There is no base image in a
+pool to remove, because the service keeps its images.
 
 =cut
 
-sub prepare_host  { return 1 }
-sub release_seed  { return 1 }
-sub guest_volumes { return () }
+sub prepare_host      { return 1 }
+sub release_seed      { return 1 }
+sub guest_volumes     { return () }
+sub prune_base_images { return () }
 
 =head2 clear_guest($domain)
 
