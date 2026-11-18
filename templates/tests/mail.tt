@@ -21,6 +21,24 @@ SKIP: {
     is($st[2] & 0007, 0, 'and is closed to everybody else on the guest');
 }
 
+# The group that dovecot and postfix use for a mailbox is the dovecot group, not
+# a gid equal to the uid of the dovecot account.  doveadm cannot create a folder
+# in a store whose group the mail user is not in.
+SKIP: {
+    skip 'no dovecot group to check the mail users against', 2 unless defined $dovecot_gid;
+
+    my ($account) = map { m/\A([^:#\s][^:]*):[^:]*:\d+:/ ? $1 : () } split /\n/, `cat '$store/passwd' 2>/dev/null`;
+    skip 'no mail account to ask dovecot about', 2 unless defined $account;
+
+    my $gid = `doveadm user -f gid '$account' 2>&1`;
+    chomp $gid;
+    is($gid, $dovecot_gid, "dovecot gives $account the gid of the dovecot group");
+
+    my $maps = `postconf -h virtual_gid_maps 2>&1`;
+    chomp $maps;
+    is($maps, "static:$dovecot_gid", 'and so does postfix, for its virtual mailboxes');
+}
+
 # Every maildir and message under the store, because a fetch walks the whole
 # tree.  Nothing in the tree is open wider than the top of it.
 my @exposed;

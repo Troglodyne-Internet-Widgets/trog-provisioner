@@ -68,7 +68,7 @@ test ! -s unlisted_accounts || { echo "mail: [% domain %]: keeping the accounts 
 test ! -s unlisted_accounts || { echo "mail: [% domain %]: the salvaged passwd holds accounts that mail.names does not list, and unlisted_accounts is refuse.  Add each to mail.names (bin/add_mail_user) or remove it (bin/remove_mail_user), then build again:"; cut -d: -f1 unlisted_accounts | sed 's/^/mail:   /'; exit 1; }
 [% END -%]
 test -f /mail/[% domain %]/passwd && mv /mail/[% domain %]/passwd /mail/[% domain %]/passwd.old; /bin/true
-sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
+sed -i -e "s/%DOVECOT_UID%/$$(id -u dovecot)/g" -e "s/%DOVECOT_GID%/$$(getent group dovecot | cut -d: -f3)/g" mailpasswd
 mv mailpasswd /mail/[% domain %]/passwd
 [%# Give the file to dovecot here, not only in the sweep at the end of this
     target.  It arrives as 0600, owned by the account that shipped it.

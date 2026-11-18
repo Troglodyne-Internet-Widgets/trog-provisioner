@@ -74,9 +74,11 @@ our $POSTFIX_ROOT = '/etc/postfix/domains';
 # tools write them.
 our @TABLES = qw{sender_login virtual_aliases virtual_maps};
 
-# What the template puts in the uid and the gid fields.  The build replaces it
-# with the uid of dovecot on the guest, which only the guest knows.
-our $UID_PLACEHOLDER = '%REPLACEME%';
+# What the template puts in the uid and the gid fields.  The build replaces them
+# with the uid of the dovecot account and the gid of the dovecot group, which
+# only the guest knows, and which differ when another package took the gid.
+our $UID_PLACEHOLDER = '%DOVECOT_UID%';
+our $GID_PLACEHOLDER = '%DOVECOT_GID%';
 
 =head2 $address = address($domain, $name)
 
@@ -136,10 +138,12 @@ sub check_domain ($domain) {
 
 The line of the passwd-file for one account.  Takes C<domain>, C<name>,
 C<gecos>, and either C<password>, which it hashes with
-L<Provisioner::Utils/dovecot_password_hash>, or C<hash>.  C<uid> defaults to the
-placeholder that the build replaces with the uid of dovecot.  Dies on a name, a
-domain or a gecos that would put a colon or a line break into the file, because
-the passwd-file has no way to quote one.
+L<Provisioner::Utils/dovecot_password_hash>, or C<hash>.  Takes C<uid> and
+C<gid> together, or neither.  Without them, the line holds the placeholders
+that the build replaces with the uid of dovecot and the gid of its group.  Dies
+when only one of the two is given.  Dies on a name, a domain or a gecos that
+would put a colon or a line break into the file, because the passwd-file has no
+way to quote one.
 
 =cut
 
@@ -156,8 +160,10 @@ sub passwd_line (%args) {
     my $hash = $args{hash} // Provisioner::Utils::dovecot_password_hash( $args{password} );
     die "The hash of $name\@$domain holds a colon or a line break.\n" if $hash =~ m/[:\n\r]/;
 
+    die "A mail account takes a uid and a gid together, or neither.\n" if defined $args{uid} != defined $args{gid};
     my $uid = $args{uid} // $UID_PLACEHOLDER;
-    return join( q{:}, address( $domain, $name ), $hash, $uid, $uid, $gecos, "/mail/$domain/$name", '/usr/sbin/noshell' );
+    my $gid = $args{gid} // $GID_PLACEHOLDER;
+    return join( q{:}, address( $domain, $name ), $hash, $uid, $gid, $gecos, "/mail/$domain/$name", '/usr/sbin/noshell' );
 }
 
 # The lines of a passwd-file that are accounts, as [ address, line ].
@@ -523,18 +529,23 @@ my sub with_tables ( $guest, $domain, $old, $new, $code ) {
     die $why;
 }
 
-=head2 $uid = dovecot_uid($guest)
+=head2 ($uid, $gid) = dovecot_ids($guest)
 
-The uid of the C<dovecot> account on the guest.  The template gives the same
-number as the uid and as the gid.
+The uid of the C<dovecot> account and the gid of the C<dovecot> group on the
+guest, which C<mail_uid> and C<mail_gid> name in the configuration of dovecot.
+Dies when the guest does not answer with a number for each.
 
 =cut
 
-sub dovecot_uid ($guest) {
+sub dovecot_ids ($guest) {
     my $uid = $guest->capture_cmd('id -u dovecot') // q{};
     chomp $uid;
     die "Could not read the uid of dovecot on the guest.\n" unless $uid =~ m/\A\d+\z/;
-    return $uid;
+
+    my ($gid) = ( $guest->capture_cmd('getent group dovecot') // q{} ) =~ m/\A[^:\n]*:[^:\n]*:(\d+):/;
+    die "Could not read the gid of the dovecot group on the guest.\n" unless defined $gid;
+
+    return ( $uid, $gid );
 }
 
 =head2 make_mailboxes($guest, $address, @mailboxes)
@@ -629,11 +640,13 @@ sub add (%args) {
 
     # Built before anything is written, so that a name that the passwd-file
     # cannot hold stops the run with the guest and the store as they were.
+    my ( $uid, $gid ) = dovecot_ids($guest);
     my $line = passwd_line(
         domain => $domain,
         name   => $name,
         gecos  => $gecos,
-        uid    => dovecot_uid($guest),
+        uid    => $uid,
+        gid    => $gid,
         hash   => Provisioner::Utils::dovecot_password_hash( $args{password} ),
     );
 

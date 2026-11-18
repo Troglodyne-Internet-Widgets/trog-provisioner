@@ -63,6 +63,10 @@ require_ok("$FindBin::Bin/../bin/remove_mail_user")    or die "could not require
     sub capture_cmd {
         my ( $self, $cmd ) = @_;
         return "5000\n" if $cmd =~ m/\Aid[ ]-u[ ]dovecot/;
+
+        # Another gid than the uid, as on a guest where another package took
+        # the gid first.
+        return $self->{dovecot_group} // "dovecot:x:5001:\n" if $cmd =~ m/\Agetent[ ]group[ ]dovecot/;
         $cmd =~ s/\Asudo[ ]-n[ ]//;
         push @{ $self->{log} }, $cmd;
         IPC::Run3::run3( $cmd, \undef, \my $out, undef );
@@ -216,11 +220,13 @@ sub verifies {
 
 subtest 'the line is exactly what the template renders' => sub {
     is(
-        Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone', gecos => 'Some One', hash => '{ARGON2ID}H', uid => 5000 ),
-        "someone\@$DOMAIN:{ARGON2ID}H:5000:5000:Some One:/mail/$DOMAIN/someone:/usr/sbin/noshell",
+        Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone', gecos => 'Some One', hash => '{ARGON2ID}H', uid => 5000, gid => 5001 ),
+        "someone\@$DOMAIN:{ARGON2ID}H:5000:5001:Some One:/mail/$DOMAIN/someone:/usr/sbin/noshell",
         'the fields in the order of the passwd-file'
     );
-    like( Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone', gecos => 'x', hash => 'H' ), qr/:%REPLACEME%:%REPLACEME%:/, 'with the placeholder that the build replaces, where there is no uid' );
+    like( Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone', gecos => 'x', hash => 'H' ), qr/:%DOVECOT_UID%:%DOVECOT_GID%:/, 'with the placeholders that the build replaces, where there are no ids' );
+    like( exception { Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone', gecos => 'x', hash => 'H', uid => 5000 ) }, qr/together/, 'a uid without a gid is refused' );
+    like( exception { Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone', gecos => 'x', hash => 'H', gid => 5001 ) }, qr/together/, 'and a gid without a uid' );
 
     like( exception { Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'some:one', gecos => 'x',    hash => 'H' ) }, qr/not[ ]'some:one'/, 'a colon in the name is refused' );
     like( exception { Provisioner::MailAccount::passwd_line( domain => $DOMAIN, name => 'someone',  gecos => "x:y",  hash => 'H' ) }, qr/colon/,            'and one in the gecos' );
@@ -255,7 +261,7 @@ subtest 'an account is added to the store, the guest and the configuration' => s
     my @lines = grep { m/\Anewbie\@/ } split( m/\n/, $text );
     is( scalar @lines, 1, 'the guest has one line for it' );
     my @field = split( m/:/, $lines[0], -1 );
-    is_deeply( [ @field[ 0, 2 .. 6 ] ], [ "newbie\@$DOMAIN", 5000, 5000, 'New One', "/mail/$DOMAIN/newbie", '/usr/sbin/noshell' ], 'with the uid of dovecot, and its home' );
+    is_deeply( [ @field[ 0, 2 .. 6 ] ], [ "newbie\@$DOMAIN", 5000, 5001, 'New One', "/mail/$DOMAIN/newbie", '/usr/sbin/noshell' ], 'with the uid of dovecot, the gid of its group, and its home' );
     ok( verifies( $field[1], 'new-secret' ), 'and the Argon2id hash of the password' );
     is( $text =~ s/^newbie\N*\n//mr, $PASSWD, 'every other line is as it was' );
 
@@ -295,6 +301,16 @@ subtest 'an account that is already there is refused, and nothing changes' => su
     is( passwd_of($root),                                         $PASSWD, 'the guest is as it was' );
     is( own_file(),                                               $before, 'and the configuration' );
     is( secret_of( $kdbx, "secret:mail/$DOMAIN-ghost/password" ), undef,   'and nothing was stored' );
+};
+
+subtest 'a guest with no dovecot group is refused, and nothing changes' => sub {
+    my ( $guest, $root, $kdbx ) = world( dovecot_group => q{} );
+    my $before = own_file();
+
+    like( exception { run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ) }, qr/gid[ ]of[ ]the[ ]dovecot[ ]group/, 'it stops, and says why' );
+    is( passwd_of($root),                                          $PASSWD, 'the guest is as it was' );
+    is( own_file(),                                                $before, 'and the configuration' );
+    is( secret_of( $kdbx, "secret:mail/$DOMAIN-newbie/password" ), undef,   'and nothing was stored' );
 };
 
 subtest 'a write that fails leaves the guest, the store and the configuration as they were' => sub {
