@@ -23,6 +23,7 @@ use POSIX();
 
 use FindBin::libs;
 use Trog::SQLite();
+use Trog::HV::Libvirt();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -561,11 +562,12 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
         return $self->{pools} if $self->{pools};
         return $self->{pool} && %{ $self->{pool} } ? { br0 => $self->{pool} } : {};
     }
-    sub static_nics ($self)         { return $self->{nics} ? @{ $self->{nics} } : sort keys %{ $self->static_pools } }
-    sub address_nic ($self)         { return ( $self->static_nics )[0] }
-    sub nic_gateway ( $self, $nic ) { return $self->{gateways} ? $self->{gateways}{$nic} : $self->{gateway} }
-    sub vmm         ($self)         { return $self }
-    sub local_uri   ($self)         { return $self->{local_uri} // 'qemu:///system' }
+    sub static_nics   ($self)         { return $self->{nics} ? @{ $self->{nics} } : sort keys %{ $self->static_pools } }
+    sub address_nic   ($self)         { return ( $self->static_nics )[0] }
+    sub nic_gateway   ( $self, $nic ) { return $self->{gateways} ? $self->{gateways}{$nic} : $self->{gateway} }
+    sub vmm           ($self)         { return $self }
+    sub local_uri     ($self)         { return $self->{local_uri} // 'qemu:///system' }
+    sub local_connect (@args)         { return Trog::HV::Libvirt::local_connect(@args) }
 
     # With a far side, the command runs in a shell here, with the programs of
     # that directory first on the PATH, as a hypervisor would run it.

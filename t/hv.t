@@ -1913,6 +1913,10 @@ subtest 'a session reads its leases from the system daemon, and runs qemu-img as
     is( fresh( uri => 'qemu:///session' )->local_uri,                                    'qemu:///session', 'and a local URI is itself' );
     is( fresh()->local_uri, q{}, 'and with no URI, it is empty, so that libvirt selects its default as vmm lets it' );
 
+    is_deeply( [ fresh( uri => 'qemu+ssh://runner@hv/session' )->local_connect ],                   [qw{-c qemu:///session}], 'a tool on the hypervisor gets -c and the daemon of the URI' );
+    is_deeply( [ fresh( uri => 'qemu+ssh://runner@hv/session' )->local_connect('qemu:///system') ], [qw{-c qemu:///system}],  'or the daemon that it is given' );
+    is_deeply( [ fresh()->local_connect ], [], 'and with no URI, no -c at all' );
+
     my $hv   = fresh( uri => 'qemu+ssh://runner@hv/session' );
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
 

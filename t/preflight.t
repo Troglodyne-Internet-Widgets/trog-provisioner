@@ -1158,9 +1158,14 @@ subtest 'a network that owns a bridge of a guest runs, and starts with the host'
     @networks = ( default_network(), guest_network( autostart => 0 ) );
     ($result) = quietly( sub { $hv->check_guest_networks } );
     ok( !$result->{ok}, 'a network that would not come back after a reboot fails' );
-    like( $result->{what}, qr/network[ ]clod[ ]does[ ]not[ ]run/,                        'naming it' );
-    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod/,                 'with the helper' );
-    like( $result->{fix},  qr/virsh[ ]net-start[ ]clod;[ ]virsh[ ]net-autostart[ ]clod/, 'and what virsh would do' );
+    like( $result->{what}, qr/network[ ]clod[ ]does[ ]not[ ]run/,        'naming it' );
+    like( $result->{fix},  qr/bin\/guest_network[ ]--hypervisor[ ]clod/, 'with the helper' );
+    my $system = qr{virsh[ ]'-c'[ ]'qemu:///system'};
+    like(
+        $result->{fix},
+        qr/$system[ ]net-start[ ]clod;[ ]$system[ ]net-autostart[ ]clod/,
+        'and what virsh would do, on the system daemon that has the network, also from a session'
+    );
 
     @networks = ( default_network( active => 0 ), guest_network() );
     ($result) = quietly( sub { $hv->check_guest_networks } );
@@ -1172,6 +1177,7 @@ subtest 'a network that owns a bridge of a guest runs, and starts with the host'
     ($result) = quietly( sub { guest_network_hv( dhcp_nics => 'virbr1', static_nics => undef, gateway_virbr1 => undef, ip_pool_virbr1 => undef, ip_addresses_virbr1 => undef, prefix_virbr1 => undef )->check_guest_networks } );
     ok( !$result->{ok}, 'a first DHCP adapter that is not on the default network fails' );
     like( $result->{what}, qr/dhcp_nics,[ ]is[ ]not[ ]the[ ]bridge[ ]of[ ]the[ ]default/, 'saying so' );
+    like( $result->{fix},  qr/$system[ ]net-info[ ]default/,                              'and how to ask the system daemon for its bridge' );
 };
 
 subtest 'qemu-bridge-helper has to let the account of a session join each bridge' => sub {
