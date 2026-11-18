@@ -304,13 +304,16 @@ subtest 'local_resolver is on where the guest has a public address, unless the o
     my %names = ( names => { me => { password => 'x', gecos => 'Me' } } );
     my $on    = sub { return { $recipe->enrich( $recipe->validate( %BASE, %names, @_ ) ) }->{local_resolver} };
 
-    ok( $on->( main_ip => '203.0.113.7' ), 'a public address turns it on' );
-    foreach my $private (qw{10.1.2.3 172.16.0.9 192.168.1.5 100.64.0.1 127.0.0.1 169.254.1.1}) {
+    # Data::Validate::IP::is_public_ipv4 judges the address.  It counts the
+    # documentation ranges (203.0.113.0/24 and the like) as not public, so the
+    # public cases use an address that the internet really routes.
+    ok( $on->( main_ip => '8.8.8.8' ), 'a public address turns it on' );
+    foreach my $private (qw{10.1.2.3 172.16.0.9 192.168.1.5 100.64.0.1 100.127.255.254 127.0.0.1 169.254.1.1 224.0.0.1 ::1 not-an-address}) {
         ok( !$on->( main_ip => $private ), "$private does not" );
     }
     ok( !$on->(), 'a guest with no address does not' );
-    ok( !$on->( main_ip => '203.0.113.7', local_resolver => 0 ), 'false turns it off on a public guest' );
-    ok( $on->( main_ip  => '10.1.2.3',    local_resolver => 1 ), 'and true turns it on for a private one' );
+    ok( !$on->( main_ip => '8.8.8.8',  local_resolver => 0 ), 'false turns it off on a public guest' );
+    ok( $on->( main_ip  => '10.1.2.3', local_resolver => 1 ), 'and true turns it on for a private one' );
 };
 
 subtest 'the cron job trains each account with its own spam folders' => sub {

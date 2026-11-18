@@ -17,6 +17,7 @@ use Provisioner::Utils();
 use Trog::Secrets();
 
 use Crypt::PK::RSA();
+use Data::Validate::IP();
 use MIME::Base64();
 
 =head1 Provisioner::Recipe::mail
@@ -805,25 +806,6 @@ sub template_files {
     );
 }
 
-=head2 $bool = is_public_ipv4($address)
-
-True when C<$address> is an IPv4 address that the internet routes to: not a
-private, loopback, link-local or shared address, and not multicast.  False for
-anything else, including nothing.  C<enrich> uses it to decide C<local_resolver>.
-
-=cut
-
-sub is_public_ipv4 ($address) {
-    return 0 unless defined $address && $address =~ m/\A (\d+) [.] (\d+) [.] \d+ [.] \d+ \z/;
-    my ( $first, $second ) = ( $1, $2 );
-    return 0 if $first == 0 || $first == 10 || $first == 127 || $first >= 224;
-    return 0 if $first == 169 && $second == 254;
-    return 0 if $first == 172 && $second >= 16 && $second <= 31;
-    return 0 if $first == 192 && $second == 168;
-    return 0 if $first == 100 && $second >= 64 && $second <= 127;
-    return 1;
-}
-
 sub enrich {
     my ( $self, %opts ) = @_;
 
@@ -854,7 +836,7 @@ sub enrich {
     $opts{proxied_ports}  = { $self->proxied_ports };
 
     # See "Asking blocklists from this guest" in the POD.
-    $opts{local_resolver} //= is_public_ipv4( $opts{main_ip} ) ? 1 : 0;
+    $opts{local_resolver} //= Data::Validate::IP::is_public_ipv4( $opts{main_ip} ) ? 1 : 0;
 
     # The templates treat relay.host as a host outside unless mailrelay is set.
     $opts{mailrelay} = mailrelay_of( $opts{domain}, %opts );
