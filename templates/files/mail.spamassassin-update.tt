@@ -1,0 +1,7 @@
+[%# Restart amavis after an update of the rules that changed one, because amavis
+    reads the rules when it starts.  The stamp is the time that the run began,
+    and a file of the rules that is newer than it is a change.  sa-update also
+    rewrites compiled/ on a run that changed nothing, so only the rules count. -%]
+[Service]
+ExecStartPre=/usr/bin/touch /run/spamassassin-maintenance.stamp
+ExecStartPost=/bin/sh -c 'if find /var/lib/spamassassin -type f -path "*/updates_spamassassin_org/*" -newer /run/spamassassin-maintenance.stamp | grep -q . ; then systemctl try-restart amavis ; fi'

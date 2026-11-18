@@ -9,7 +9,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/sa-train-amavis.t - scripts/sa_train_amavis: which mail trains amavis as spam, which as ham, and who owns the database afterwards
+t/sa-train-amavis.t - scripts/sa_train_amavis: which folders train amavis as spam, which as ham, and who owns the database afterwards
 
 =cut
 
@@ -19,7 +19,6 @@ use File::Temp    qw{tempdir};
 use File::Slurper qw{read_lines};
 use File::Slurper::Temp();
 use IPC::Run3();
-use Time::HiRes();
 
 use FindBin;
 use FindBin::libs;
@@ -35,53 +34,132 @@ foreach my $fake (qw{sa-learn chown}) {
     chmod 0755, "$bin/$fake" or die "chmod $bin/$fake: $!";
 }
 
+# doveconf as it prints a configuration that gives special uses.  The folders
+# are not the names that the recipe declares, so a script that knows those names
+# by heart fails here.
+my $doveconf = <<'CONF';
+namespace inbox {
+  inbox = yes
+  mailbox Bin {
+    special_use = \Trash
+  }
+  mailbox Entwuerfe {
+    special_use = \Drafts
+  }
+  mailbox "Sent Items" {
+    special_use = \Sent
+  }
+  mailbox Spamverdacht {
+    auto = subscribe
+    special_use = \Junk
+  }
+  prefix =
+}
+CONF
+
+sub fake_doveconf {
+    my ( $text, $rc ) = @_;
+    File::Slurper::Temp::write_text( "$bin/doveconf", "#!/bin/sh\ncat <<'END'\n${text}END\nexit " . ( $rc // 0 ) . "\n" );
+    chmod 0755, "$bin/doveconf" or die "chmod $bin/doveconf: $!";
+    return;
+}
+fake_doveconf($doveconf);
+
 sub train {
-    my (@maildirs) = @_;
+    my (@args) = @_;
     unlink $log;
     local $ENV{PATH} = "$bin:$ENV{PATH}";
-    IPC::Run3::run3( [ $script, @maildirs ], \undef, \my $out, \my $err );
+    IPC::Run3::run3( [ $script, @args ], \undef, \my $out, \my $err );
     my @calls = -e $log ? read_lines($log) : ();
     return { rc => $? >> 8, err => $err // q{}, calls => \@calls };
 }
 
-# A message as dovecot stores it: the flags after :2, in the name, and the
-# date that it arrived as the mtime.
-sub message {
-    my ( $dir, $name, $days_old ) = @_;
-    make_path($dir);
-    File::Slurper::Temp::write_text( "$dir/$name", "Subject: x\n\nbody\n" );
-    my $when = Time::HiRes::time() - $days_old * 86_400;
-    utime $when, $when, "$dir/$name" or die "utime $dir/$name: $!";
-    return "$dir/$name";
+# A folder of a maildir, with one message in each of cur and new, as dovecot
+# stores it.  INBOX is the maildir itself.
+sub folder {
+    my ( $maildir, $name ) = @_;
+    my $dir = $name eq 'INBOX' ? $maildir : "$maildir/.$name";
+    foreach my $sub (qw{cur new tmp}) {
+        make_path("$dir/$sub");
+    }
+    File::Slurper::Temp::write_text( "$dir/cur/1.msg:2,S", "Subject: x\n\nbody\n" );
+    File::Slurper::Temp::write_text( "$dir/new/2.msg",     "Subject: x\n\nbody\n" );
+    return $dir;
 }
 
-subtest 'spam is the Junk folder, ham is old read mail in the INBOX' => sub {
-    my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
-    message( "$maildir/.Junk/cur", '1.junk:2,S',      1 );
-    message( "$maildir/.Junk/new", '1.unopened-junk', 1 );
-    my $old_read   = message( "$maildir/cur", '2.old-read:2,S',     30 );
-    my $old_flags  = message( "$maildir/cur", '3.old-replied:2,RS', 30 );
-    my $old_unread = message( "$maildir/cur", '4.old-unread:2,',    30 );
-    my $new_read   = message( "$maildir/cur", '5.new-read:2,S',     1 );
+# What the calls learned from, as a list of folders with the kind.
+sub learned {
+    my ( $calls, $kind ) = @_;
+    my %seen;
+    foreach my $call ( grep { m/--\Q$kind\E[ ]/ } @$calls ) {
+        my ($dir) = $call =~ m{--\Q$kind\E[ ](.*)\z} or next;
+        $dir =~ s{/(?:cur|new)\z}{};
+        $seen{$dir} = 1;
+    }
+    return [ sort keys %seen ];
+}
 
-    my $r = train($maildir);
+subtest 'spam is Junk and the folders named, ham is every other folder, and four kinds go to neither' => sub {
+    my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
+    my %dir     = map { $_ => folder( $maildir, $_ ) } (
+        qw{INBOX Spamverdacht INBOX.$suspicious INBOX.$spam Bin Entwuerfe Receipts INBOX.Family},
+        'Sent Items',
+    );
+    folder( $maildir, 'Junk' );    # By name only: this dovecot does not give it the special use.
+
+    my $r = train( qw{--spam-folder INBOX.$suspicious --spam-folder INBOX.$spam}, $maildir );
     is( $r->{rc}, 0, 'it succeeds' ) or diag $r->{err};
 
-    my $spam = join "\n", grep { m/--spam/ } @{ $r->{calls} };
-    like( $spam, qr{\Q$maildir\E/[.]Junk/cur$}m, 'the Junk folder is learned as spam' )                            or diag explain $r->{calls};
-    like( $spam, qr{\Q$maildir\E/[.]Junk/new$}m, 'including spam that nobody opened, which dovecot keeps in new' ) or diag explain $r->{calls};
+    is_deeply(
+        learned( $r->{calls}, 'spam' ),
+        [ sort @dir{qw{Spamverdacht INBOX.$suspicious INBOX.$spam}} ],
+        'the folder with the Junk special use and each folder that is named are spam'
+    ) or diag explain $r->{calls};
+    is_deeply(
+        learned( $r->{calls}, 'ham' ),
+        [ sort( @dir{qw{Receipts INBOX.Family}}, "$maildir/.Junk" ) ],
+        'every other folder is ham, including a folder called Junk that has no special use'
+    ) or diag explain $r->{calls};
 
-    my $ham = join "\n", grep { m/--ham/ } @{ $r->{calls} };
-    like( $ham, qr{\Q$old_read\E},  'mail that was read a month ago is ham' );
-    like( $ham, qr{\Q$old_flags\E}, 'and so is mail with other flags beside the read one' );
-    unlike( $ham, qr{\Q$old_unread\E}, 'mail that nobody has read is not, however old it is' );
-    unlike( $ham, qr{\Q$new_read\E},   'nor is read mail from this week, which can still go to Junk' );
+    my @all = ( @{ learned( $r->{calls}, 'spam' ) }, @{ learned( $r->{calls}, 'ham' ) } );
+    foreach my $never ( qw{INBOX Bin Entwuerfe}, 'Sent Items' ) {
+        is( scalar( grep { $_ eq $dir{$never} } @all ), 0, "$never goes to neither" );
+    }
+    is( scalar( grep { m{--(?:spam|ham)[ ]\Q$maildir\E/(?:cur|new)\z} } @{ $r->{calls} } ), 0, 'and no call names the INBOX, read or not' ) or diag explain $r->{calls};
+
+    my @spam_calls = grep { index( $_, '--spam' ) >= 0 } @{ $r->{calls} };
+    ok( scalar( grep { m{/[.]Spamverdacht/new\z} } @spam_calls ),        'spam that nobody opened, which dovecot keeps in new, is learned' ) or diag explain \@spam_calls;
+    ok( scalar( grep { m{/[.]Spamverdacht/cur\z} } @spam_calls ),        'and so is the spam in cur' );
+    ok( !scalar( grep { substr( $_, -4 ) eq '/tmp' } @{ $r->{calls} } ), 'tmp is not learned' );
+};
+
+subtest 'a folder that dovecot gives a special use is found by the use, not the name' => sub {
+    my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
+    my $junk    = folder( $maildir, 'Junk' );
+    my $bin_dir = folder( $maildir, 'Bin' );
+
+    my $r = train($maildir);
+    is_deeply( learned( $r->{calls}, 'spam' ), [],      'Junk is not spam by its name' )                     or diag explain $r->{calls};
+    is_deeply( learned( $r->{calls}, 'ham' ),  [$junk], 'it is ham with the others, and Bin is left alone' ) or diag explain $r->{calls};
+    unlike( join( "\n", @{ $r->{calls} } ), qr{\Q$bin_dir\E}, 'the folder with the Trash special use is not learned' );
+};
+
+subtest 'dovecot that cannot say its special uses stops the training' => sub {
+    my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
+    folder( $maildir, 'Bin' );
+    fake_doveconf( q{}, 1 );
+    my $r = train($maildir);
+    fake_doveconf($doveconf);
+
+    isnt( $r->{rc}, 0, 'it fails, because Trash would be learned as ham' );
+    is( scalar( grep { m/--spam|--ham/ } @{ $r->{calls} } ), 0,                                                      'and learns nothing' ) or diag explain $r->{calls};
+    is( $r->{calls}[-1],                                     'chown -R amavis:amavis /var/lib/amavis/.spamassassin', 'but gives the database back' );
 };
 
 subtest 'every learn writes to the database of amavis, which gets it back' => sub {
     my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
-    message( "$maildir/.Junk/cur", '1.junk:2,S',     1 );
-    message( "$maildir/cur",       '2.old-read:2,S', 30 );
+    folder( $maildir, 'Spamverdacht' );
+    folder( $maildir, 'Receipts' );
 
     my @calls  = @{ train($maildir)->{calls} };
     my @learns = grep { m/^sa-learn/ } @calls;

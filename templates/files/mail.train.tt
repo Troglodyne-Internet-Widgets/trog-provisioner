@@ -1,0 +1,7 @@
+[%# The call that trains amavis from the account named in account.  The cron job
+    and the end of the build both run it, so that this line is said once.  A
+    folder name has no quote and no percent sign, which the schema of
+    mail.names.$USER.spam_folders sees to.  In the makefile, a dollar sign must
+    be doubled, because make takes the first one, and a folder is called
+    INBOX.$spam.  The cron file is no makefile, so it keeps one. -%]
+[% script_dir %]/sa_train_amavis[% FOR folder IN names.$account.spam_folders %] --spam-folder '[% IF make %][% folder.replace('[$]', '$$') %][% ELSE %][% folder %][% END %]'[% END %] /mail/[% domain %]/[% account %]/Maildir

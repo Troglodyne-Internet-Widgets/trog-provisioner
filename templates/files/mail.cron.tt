@@ -1,7 +1,9 @@
 # Mail cron jobs for [% domain %]
-[%# Trains the Bayes database of amavis, which scores the mail, from the Junk
-    and the INBOX of every account.  scripts/sa_train_amavis says which mail
-    counts as spam and which as ham. -%]
-[% IF names.keys().size() %]
-21 2 * * * root [% script_dir %]/sa_train_amavis[% FOR user IN names.keys().sort() %] /mail/[% domain %]/[% user %]/Maildir[% END %]
-[% END %]
+[%# Trains the Bayes database of amavis, which scores the mail, from the folders
+    of every account.  Spam is the Junk folder and the spam_folders of the
+    account.  Ham is every other folder, but not INBOX, Trash, Drafts or Sent.
+    scripts/sa_train_amavis has the whole rule.  One call for each account,
+    because each account has its own spam_folders. -%]
+[% FOR account IN names.keys().sort() -%]
+21 2 * * * root [% INCLUDE "files/mail.train.tt" WITH make = 0, account = account -%]
+[% END -%]
