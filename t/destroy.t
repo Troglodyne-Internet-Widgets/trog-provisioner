@@ -77,10 +77,15 @@ subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     $hv_mock->redefine( volume        => sub { $exists{ $_[1] } } );
     $hv_mock->redefine( delete_volume => sub { push @deleted, $_[1]; return 1 } );
 
+    my $pruned = 0;
+    $hv_mock->redefine( prune_base_images => sub { $pruned++; return () } );
+
     Trog::Bin::Destroy::destroy_disks( $domain, 1 );
     is_deeply( \@deleted, [], 'dryrun removes nothing' );
+    is( $pruned, 0, 'and not an old base image either' );
 
     Trog::Bin::Destroy::destroy_disks( $domain, 0 );
+    is( $pruned, 1, 'once the disk is gone, an old base image that nothing uses goes' );
     is_deeply(
         [ sort @deleted ], [ "$domain-cloudinit.iso", "$domain-qcow2" ],
         'the guest disk and its seed go'

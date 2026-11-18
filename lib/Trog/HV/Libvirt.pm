@@ -12,6 +12,7 @@ use parent 'Trog::HV';
 
 use Digest::SHA();
 use URI();
+use HTTP::Tiny();
 use URI::Split();
 
 use List::Util();
@@ -1013,9 +1014,14 @@ sub volume_path {
 
 =head2 $name = image_volume_name($url)
 
-The name of the volume that C<base_image> keeps the image at C<$url> in.  The
-file name keeps it readable in C<virsh vol-list>.  The hash keeps two images with
-one file name apart, such as the image of a mirror and the image of the archive.
+The name that the volumes of the image at C<$url> start with.  The file name
+keeps it readable in C<virsh vol-list>.  The hash keeps two images with one file
+name apart, such as the image of a mirror and the image of the archive.
+
+A pool can hold several builds of one image, because a URL such as the C<current/>
+directory of a distribution moves.  C<base_image> names each build after what it
+is: this name, a dash, and the start of the SHA256 checksum of the file.  A volume
+with this name alone is a build from before that, and counts as one too.
 
 =cut
 
@@ -1026,14 +1032,32 @@ sub image_volume_name ($url) {
 
 =head2 base_image($url, $name)
 
-Returns the path of the base image under the disk of a guest.  If the pool has
-no volume C<$name>, this downloads C<$url> to the hypervisor first.  Dies if
-there is no image and no URL, or if the download fails.
+Returns the path of the base image under the disk of a guest.  Dies if there is
+no image and no URL, or if the download fails.
 
-C<$name> defaults to a name of C<$url>: C<baseimage->, the file name in the URL,
-and the start of a hash of the whole URL.  So each image has a volume of its own,
-and a guest of one release is never built over the image of another.  Without a
-URL, it defaults to C<baseimage-qcow2>, the one volume that a pool held before.
+With a C<$name>, or without a URL, this is the volume of that name, and nothing
+asks whether it is current.  If the pool has no such volume, this downloads
+C<$url> to it.  Without a URL, C<$name> is C<baseimage-qcow2>, the one volume
+that a pool held before.  It has no operating system or distribution in its
+name, because a call with no URL has nothing that says which it is for.  Every
+caller that knows the distribution passes the URL of its image, and that URL
+has a family of its own (see C<image_volume_name>).  A caller that wants a name
+of its own passes C<$name>.  Pools that hold C<baseimage-qcow2> keep using it.
+
+Otherwise the image has a family of volumes, which C<image_volume_name> names.
+This asks for the checksum that the distribution publishes, as
+C<published_checksum> says.  If the newest volume of the family has that
+checksum, this returns it.  If not, the image has moved on, so this downloads
+the new build to a volume of its own and returns that.  The old volume stays,
+because the disk of every guest built on it is an overlay on it, and a write to
+it would corrupt each of them.  C<prune_base_images> removes it once nothing is
+backed by it.  So a guest that is built now always gets the current image.
+
+If the checksum cannot be had, for example because the distribution does not
+publish it in one of the layouts that C<published_checksum> reads, that is no
+reason to fail a build.  The newest
+volume of the family is used, and a pool with none downloads the image under the
+bare C<image_volume_name>, as it did before there were builds.
 
 libvirt cannot fetch a URL.  So this runs curl on the hypervisor, into the pool
 directory, and then refreshes the pool.  curl runs without sudo on purpose.  If
@@ -1044,27 +1068,306 @@ sudo hides that.
 
 sub base_image {
     my ( $self, $url, $name ) = @_;
-    $name //= defined $url ? image_volume_name($url) : 'baseimage-qcow2';
 
-    my $path = $self->volume_path($name);
-    return $path if $path;
+    if ( defined $name || !defined $url ) {
+        $name //= 'baseimage-qcow2';
 
-    die "No image URL configured, and no $name in the pool to fall back on\n"
-      unless $url;
+        my $path = $self->volume_path($name);
+        return $path if $path;
 
-    $path = $self->pool_path . "/$name";
+        die "No image URL configured, and no $name in the pool to fall back on\n"
+          unless $url;
+
+        return $self->install_download( $self->download_image( $url, $name ), $name );
+    }
+
+    my $family   = image_volume_name($url);
+    my ($newest) = $self->image_volumes($family);
+    my $sum      = $self->published_checksum($url);
+
+    if ( !defined $sum ) {
+        return $newest->{path} if $newest;
+        return $self->install_download( $self->download_image( $url, $family ), $family );
+    }
+
+    return $newest->{path} if $newest && $self->is_build( $newest, $sum );
+
+    print "The base image in the pool is not the one that is published\n" if $newest;
+    my $partial = $self->download_image( $url, $family );
+
+    # Named by what the file is.  The published sum is what the file was a
+    # moment ago, and a build can land between that fetch and this one.
+    my $actual = $self->file_checksum($partial);
+    die "Could not checksum $partial on " . $self->describe . "\n" unless $actual;
+
+    my $built = "$family-" . substr( $actual, 0, 12 );
+    if ( my $there = $self->volume_path($built) ) {
+        $self->run_cmd( 'rm', '-f', $partial );
+        return $there;
+    }
+    return $self->install_download( $partial, $built );
+}
+
+=head2 download_image($url, $family)
+
+Downloads C<$url> into the pool directory under the name C<$family.partial>,
+and returns that path.  Dies if curl fails.  libvirt must not see half a file,
+so the download has a name that is not a volume until C<install_download> moves
+it.
+
+=head2 install_download($partial, $name)
+
+Moves the download at C<$partial> to the volume C<$name>, refreshes the pool and
+returns the path of the volume.  Dies if the move fails.
+
+=cut
+
+sub download_image {
+    my ( $self, $url, $family ) = @_;
+    my $partial = $self->pool_path . "/$family.partial";
+
     print "Fetching the base image from $url\n";
 
     # Download to a partial name first, because a half-downloaded file that
     # libvirt already sees is worse than no file.
-    my $partial = "$path.partial";
     $self->run_cmd( qw{curl -fL --retry 3 -o}, $partial, $url ) == 0
       or die "Could not fetch $url onto " . $self->describe . "\n";
+    return $partial;
+}
+
+sub install_download {
+    my ( $self, $partial, $name ) = @_;
+    my $path = $self->pool_path . "/$name";
 
     $self->run_cmd( 'mv', $partial, $path ) == 0 or die "Could not put the base image in place\n";
     $self->refresh_pool();
 
     return $self->volume_path($name) // $path;
+}
+
+=head2 $sum = $hv->published_checksum($url)
+
+The SHA256 checksum, in lower case hex, that the distribution publishes for the
+image at C<$url>.  This runs on this machine, and not on the hypervisor.
+
+Distributions do not agree on where the sums are or how they look, so this
+tries each of these files in the directory of the image, in this order, and
+returns the first line for the image that it finds:
+
+=over 4
+
+=item * C<SHA256SUMS>, in the layout of C<sha256sum>: Ubuntu and Debian.
+
+=item * C<CHECKSUM>, and C<$file.CHECKSUM>, with lines such as
+C<SHA256 (file) = hex>: Fedora, Rocky and Alma.  A line of another hash, a
+comment, or a line of a PGP signature is skipped.
+
+=item * C<$file.sha256>, and C<$file.sha256sum>, which hold the sum of the one
+file, with or without its name.
+
+=back
+
+Undef when none of them can be fetched, or none has a line for the image.  That
+is not an error.  C<base_image> then uses the newest volume that it has, and
+C<note_stale_base_image> says nothing.  A distribution that publishes its sums
+somewhere else gets the same treatment, so its image is fetched once and then
+kept.
+
+=head2 $sum = parse_checksums($text, $file, $only)
+
+The SHA256 checksum of C<$file> from the text of a sums file, in lower case hex,
+or undef.  It reads the layout of C<sha256sum> (C<hex  file> or C<hex *file>)
+and the BSD layout (C<SHA256 (file) = hex>).  A line of only the hex is taken
+when C<$only> is true, which says that the text is the sums of this image alone,
+as C<$file.sha256> is.
+
+=cut
+
+sub parse_checksums ( $text, $file, $only = 0 ) {
+    foreach my $line ( split m/\r?\n/, $text // q{} ) {
+        if ( my ( $sum, $name ) = $line =~ m/\A ([[:xdigit:]]{64}) [ ][ *]? (\S.*?) \s* \z/x ) {
+            return lc $sum if $name eq $file;
+        }
+        if ( my ( $name, $sum ) = $line =~ m/\A SHA256 [ ] \( (.+) \) [ ] = [ ] ([[:xdigit:]]{64}) \s* \z/x ) {
+            return lc $sum if $name eq $file;
+        }
+        if ( $only && $line =~ m/\A ([[:xdigit:]]{64}) \s* \z/x ) {
+            return lc $1;
+        }
+    }
+    return undef;
+}
+
+sub published_checksum {
+    my ( $self, $url ) = @_;
+    return undef unless $url;
+
+    my $uri  = URI->new($url);
+    my $file = File::Basename::basename( $uri->path // q{} );
+    my $dir  = File::Basename::dirname( $uri->path  // q{} );
+    my $http = HTTP::Tiny->new( timeout => 10 );
+
+    # The flag says that the file is the sums of this image alone.
+    my @candidates = ( [ 'SHA256SUMS', 0 ], [ 'CHECKSUM', 0 ], [ "$file.CHECKSUM", 1 ], [ "$file.sha256", 1 ], [ "$file.sha256sum", 1 ] );
+    foreach my $candidate (@candidates) {
+        my ( $sums_file, $only ) = @$candidate;
+        my $sums = $uri->clone;
+        $sums->path("$dir/$sums_file");
+
+        my $res = $http->get( $sums->as_string );
+        next unless $res->{success};
+
+        my $sum = parse_checksums( $res->{content}, $file, $only );
+        return $sum if defined $sum;
+    }
+    return undef;
+}
+
+=head2 $sum = $hv->file_checksum($path)
+
+The SHA256 checksum, in lower case hex, of the file at C<$path> on the
+hypervisor, which C<sha256sum> there computes.  Undef when it does not answer.
+The file is 600 MB or so, and this takes a few seconds.
+
+=cut
+
+sub file_checksum {
+    my ( $self, $path ) = @_;
+    my $said = eval { $self->capture_cmd( 'sha256sum ' . Trog::Utils::shell_quote($path) ) } // q{};
+    my ($sum) = $said =~ m/\A ([[:xdigit:]]{64}) \s/;
+    return defined $sum ? lc $sum : undef;
+}
+
+# The family of a volume name, and its build tag, for a base volume of
+# base_image.  The name of a family ends in the 12 digits of the hash of a URL,
+# and a build adds 12 digits of its checksum.  The file name is matched lazily,
+# so that the first 12 digits are the hash of the URL.
+my $TWELVE_DIGITS = qr/[[:xdigit:]]{12}/;
+my $BASE_VOLUME   = qr/\A (?<family> baseimage-\N+?-$TWELVE_DIGITS) (?: - (?<tag> $TWELVE_DIGITS) )? \z/;
+
+=head2 @volumes = $hv->base_volumes()
+
+Every base volume that C<base_image> made in the pool, newest first, as hashrefs
+with C<name>, C<path>, C<family>, C<tag> (the start of the checksum, or undef for
+a volume from before builds) and C<mtime>.  The mtime is from C<stat> on the
+hypervisor, and is when the volume was put in the pool.  A volume that has a
+name of its own, such as C<baseimage-qcow2>, is not here.  Dies if libvirt cannot
+list the pool.
+
+=head2 @volumes = $hv->image_volumes($family)
+
+The same, for one family.  C<$family> is an C<image_volume_name>.
+
+=cut
+
+sub base_volumes {
+    my ($self) = @_;
+
+    my @found;
+    foreach my $volume ( $self->pool->list_all_volumes() ) {
+        my $name = $volume->get_name();
+        next unless $name =~ $BASE_VOLUME;
+        push @found, { name => $name, path => $volume->get_path(), family => $+{family}, tag => $+{tag}, mtime => 0 };
+    }
+    return () unless @found;
+
+    # libvirt knows no date for a volume.  Without one, the order is by name,
+    # which is stable but means nothing.
+    my $said = eval {
+        $self->capture_cmd( q{stat -c '%Y %n' } . join( q{ }, map { Trog::Utils::shell_quote( $_->{path} ) } @found ) );
+    } // q{};
+    my %mtime;
+    foreach my $line ( split m/\n/, $said ) {
+        my ( $mtime, $path ) = split q{ }, $line, 2;
+        $mtime{$path} = $mtime if defined $path && $mtime =~ m/\A\d+\z/;
+    }
+    $_->{mtime} = $mtime{ $_->{path} } // 0 for @found;
+
+    my @newest_first = reverse sort { $a->{mtime} <=> $b->{mtime} || $a->{name} cmp $b->{name} } @found;
+    return @newest_first;
+}
+
+sub image_volumes {
+    my ( $self, $family ) = @_;
+    return grep { $_->{family} eq $family } $self->base_volumes();
+}
+
+=head2 $bool = $hv->is_build($volume, $sum)
+
+Whether the base volume C<$volume>, from C<base_volumes>, holds the file with the
+checksum C<$sum>.  A build is named after its checksum, so that answers without
+reading the file.  A volume from before builds has to be read.
+
+=cut
+
+sub is_build {
+    my ( $self, $volume, $sum ) = @_;
+    return $volume->{tag} eq substr( $sum, 0, 12 ) ? 1 : 0 if defined $volume->{tag};
+
+    my $have = $self->file_checksum( $volume->{path} );
+    return defined $have && $have eq $sum ? 1 : 0;
+}
+
+=head2 @removed = $hv->prune_base_images()
+
+Removes each base volume that nothing is backed by, except the newest of its
+image, and returns the names that it removed.  Call it when a disk goes away.
+
+Every guest disk is an overlay on a base volume, and a base volume that an
+overlay has as its backing file cannot go.  So this asks C<qemu-img info> for the
+backing file of every other volume in the pool, and keeps each base volume that
+one names.  It compares file names, so a pool that is reached by two paths still
+counts.  It also never removes the newest volume of an image, which the next
+guest is built on.  There is no number of spare volumes.
+
+If the backing file of any volume cannot be read, or a base volume has no date,
+this removes nothing, because that disk may be backed by any base volume, and
+the newest is not known.  A volume that will not go is a warning.
+
+=cut
+
+sub prune_base_images {
+    my ($self) = @_;
+
+    my @bases = eval { $self->base_volumes() };
+    return () unless @bases;
+
+    if ( List::Util::any { !$_->{mtime} } @bases ) {
+        warn "Could not date the base images in the pool, so none is removed\n";
+        return ();
+    }
+
+    my %newest;
+    $newest{ $_->{family} } //= $_->{name} for @bases;
+    my @old = grep { $newest{ $_->{family} } ne $_->{name} } @bases;
+    return () unless @old;
+
+    my %base = map { $_->{name} => 1 } @bases;
+    my %used;
+    foreach my $volume ( $self->pool->list_all_volumes() ) {
+        my $name = $volume->get_name();
+
+        # A base volume has no disk on it, and a download that is not finished
+        # has no backing file to read yet.
+        next if $base{$name} || $name =~ m/[.]partial \z/;
+
+        my $json = $self->disk_owner_says( 'qemu-img info -U --output=json ' . Trog::Utils::shell_quote( $volume->get_path() ) );
+        my $info = eval { Cpanel::JSON::XS::decode_json( $json // q{} ) };
+        if ( ref $info ne 'HASH' ) {
+            warn "Could not read the backing file of $name, so no base image in the pool is removed\n";
+            return ();
+        }
+
+        my $backing = $info->{'full-backing-filename'} // $info->{'backing-filename'};
+        $used{ File::Basename::basename($backing) } = 1 if defined $backing;
+    }
+
+    my @removed;
+    foreach my $volume ( grep { !$used{ $_->{name} } } @old ) {
+        print "Removing the base image $volume->{name}, which no disk is backed by\n";
+        push @removed, $volume->{name} if $self->delete_volume( $volume->{name} );
+    }
+    return @removed;
 }
 
 # The three characters that XML reads as markup, escaped, for a name that goes
@@ -2895,7 +3198,7 @@ order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
 =cut
 
 sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_guest_bridges check_guest_networks check_bridge_acl check_guest_pool check_pool_writable check_virtiofs check_config} }
-sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
+sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_stale_base_image note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()
 
@@ -3537,6 +3840,57 @@ sub note_pool_quota {
     };
 }
 
+=head2 $result = $hv->note_stale_base_image()
+
+Whether the copy of an image in the pool is the one that the distribution
+publishes now.  For each image that the configuration builds guests of, it
+compares the checksum of the newest base volume with the one that
+C<published_checksum> reads, and reports the age of each copy that differs.  It
+passes when the pool has no copy of an image, and when the sums cannot be
+fetched or are in no layout that C<published_checksum> reads.  So it says
+nothing about a distribution that publishes its sums somewhere else.
+
+It is a note and not a check.  A copy that is old still builds a guest.  Its cost
+is that the guest upgrades every package published since, on its first boot.
+C<base_image> downloads the new build before the next guest, so this says what
+that build will cost, and how long the pool went without one.  It does not
+build anything, and does not define a pool that libvirt lacks.
+
+=cut
+
+sub note_stale_base_image {
+    my ($self) = @_;
+
+    # Not through pool(), which defines and starts a pool it cannot find.  A
+    # note must not build anything.
+    my $name = $self->pool_name;
+    eval { $self->vmm->get_storage_pool_by_name($name) } or return { ok => 1 };
+
+    my ( %seen, @stale );
+    foreach my $pair ( Provisioner::Cookbook->distros_in_use() ) {
+        my $url = eval { $self->image_for_distro(@$pair) } or next;
+        next if $seen{$url}++;
+
+        my ($newest) = $self->image_volumes( image_volume_name($url) ) or next;
+        my $sum      = $self->published_checksum($url)                 or next;
+        next if $self->is_build( $newest, $sum );
+
+        push @stale, { url => $url, name => $newest->{name}, days => int( ( time - $newest->{mtime} ) / 86400 ) };
+    }
+
+    return { ok => 1 } unless @stale;
+
+    my $oldest = List::Util::max( map { $_->{days} } @stale );
+    return {
+        ok   => 0,
+        what => sprintf( 'The base image in the %s pool is not the one that is published, and the copy is up to %d days old', $name, $oldest ),
+        fix  => join( q{}, map { "$_->{name} is $_->{days} days old, and the checksum of $_->{url} has changed since.\n" } @stale ) . <<'FIX' };
+The next guest that is built downloads the new build to a volume of its own
+and is built on that.  Guests that exist are not touched.  Each old volume stays
+until no disk is backed by it, and then the next destroy or rebuild removes it.
+FIX
+}
+
 =head2 \%space = $hv->pool_space($fstype)
 
 The space at the storage pool's directory, from one command on the hypervisor.
@@ -3779,6 +4133,8 @@ C<trog-pristine>.  It dies if the revert fails.
 
 =item * Without C<keep_disk>, it undefines the domain and deletes its disk.
 The new disk is a new overlay, so the new guest does not get the old filesystem.
+Then it removes the old base images that no disk is backed by, as
+C<prune_base_images> says.
 
 =back
 
@@ -3817,6 +4173,10 @@ sub clear_guest {
         }
 
         $self->delete_volume("$domain-qcow2");
+
+        # The disk was the last one on an old base image, perhaps.  A pool that
+        # cannot be read is no reason to stop a rebuild.
+        eval { $self->prune_base_images(); 1 } or warn "Could not remove the old base images: $@";
     }
 
     # The seed goes in both cases, because each provision writes a new one.

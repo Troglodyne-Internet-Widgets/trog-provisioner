@@ -123,6 +123,7 @@ subtest 'nothing to do' => sub {
     is( $cloud->release_seed('there.test.test'),        1, 'no drive to eject the seed from' );
     is( $cloud->clear_guest('there.test.test'),         1, 'nothing to clear before a rebuild' );
     is_deeply( [ $cloud->guest_volumes('there.test.test') ], [], 'and no volumes left after' );
+    is_deeply( [ $cloud->prune_base_images ],                [], 'and no base image to remove' );
     is_deeply( $cloud->{calls},                              [], 'none of which asked the service anything' );
 
     ok( $cloud->is_local && $cloud->builds_by_api && $cloud->manages_addresses, 'local files, guests by API, addresses by the service' );

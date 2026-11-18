@@ -331,9 +331,10 @@ sub destroy_vm {
 
 =head2 destroy_disks($domain, $dryrun)
 
-Delete the volumes of the domain on the current hypervisor.  The base image and
-the storage pool are shared, so they stay.  A volume that will not go gives a
-warning, and the others still go.
+Delete the volumes of the domain on the current hypervisor.  The storage pool is
+shared, so it stays.  So does the newest base image, and each older one that a
+disk is still backed by.  The others go, as C<prune_base_images> says.  A volume
+that will not go gives a warning, and the others still go.
 
 =cut
 
@@ -345,6 +346,9 @@ sub destroy_disks {
         print "Removing volume $volume\n";
         $hv->delete_volume($volume) unless $dryrun;
     }
+
+    # The disk may have been the last one on an old base image.
+    $hv->prune_base_images() unless $dryrun;
     return;
 }
 
