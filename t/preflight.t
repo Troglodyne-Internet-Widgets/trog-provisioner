@@ -50,6 +50,14 @@ require_ok($script) or BAIL_OUT("$script does not load; the install is incomplet
 # restores the real STDOUT around one -- an in-memory handle in its place is not
 # something it can hand back, and everything printed after the first such check
 # goes missing rather than failing.
+# Answers capture_quiet of the hypervisor.  The library has no sub of its own by
+# that name, it takes Trog::Machine's, so a strict mock can define it, and
+# after that it can only redefine it.
+sub mock_quiet ( $mock, $code ) {
+    my $how = defined &Trog::HV::Libvirt::capture_quiet ? 'redefine' : 'define';
+    return $mock->$how( capture_quiet => $code );
+}
+
 sub quietly {
     my ($code) = @_;
 
@@ -364,12 +372,13 @@ subtest 'virtiofs-better has to run a virtiofsd' => sub {
     # The shim answers --version, and libvirtd runs under apparmor or not.  A
     # grep of /etc/apparmor.d finds the shim named in a profile or not.
     my ( @asked, $confinement, $named );
-    $hv->redefine(
-        capture_cmd => sub ( $, $cmd ) {
-            push @asked, $cmd;
-            return index( $cmd, q{attr/current} ) >= 0 ? $confinement : "virtiofsd 1.10.0\n";
-        }
-    );
+    my $ask = sub ( $, @argv ) {
+        my $cmd = join q{ }, @argv;
+        push @asked, $cmd;
+        return index( $cmd, q{attr/current} ) >= 0 ? $confinement : "virtiofsd 1.10.0\n";
+    };
+    $hv->redefine( capture_cmd => $ask );
+    mock_quiet( $hv, $ask );
     $hv->redefine( run_cmd => sub ( $, @argv ) { return $argv[0] eq 'grep' && $named ? 0 : 1 } );
 
     ( $confinement, $named ) = ( "libvirtd (enforce)\n", 1 );
@@ -388,13 +397,13 @@ subtest 'virtiofs-better has to run a virtiofsd' => sub {
     ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
     ok( $result->{ok}, 'while a libvirtd that apparmor does not confine needs no rule' );
 
-    $hv->redefine( capture_cmd => sub { q{} } );
+    $hv->redefine( capture_cmd => sub { q{} }, capture_quiet => sub { q{} } );
     ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
     ok( !$result->{ok}, 'a shim whose virtiofsd says nothing fails' );
     like( $result->{what}, qr/someadmin\@hv[.]test/,      'naming the hypervisor it asked' );
     like( $result->{fix},  qr/apt[ ]install[ ]virtiofsd/, 'and the package to install' );
 
-    $hv->redefine( capture_cmd => sub { die "Gave up on it\n" } );
+    $hv->redefine( capture_cmd => sub { die "Gave up on it\n" }, capture_quiet => sub { die "Gave up on it\n" } );
     ($result) = quietly( sub { Trog::HV->candidate()->check_virtiofs } );
     ok( !$result->{ok}, 'and so does one that hangs' );
 
@@ -1034,7 +1043,7 @@ subtest 'the pool quota note asks the hypervisor, and advises for its filesystem
     $mock->redefine( pool_name   => sub { return 'bogus' } );
     $mock->redefine( pool_path   => sub { return q{/bogus/it's here} } );
     $mock->redefine( pool_fstype => sub { return $fstype } );
-    $mock->redefine( capture_cmd => sub { push( @asked, $_[1] ); return $said } );
+    mock_quiet( $mock, sub { my ( undef, @argv ) = @_; push( @asked, join( q{ }, @argv ) ); return $said } );
     my $note = sub { ( $fstype, $said ) = @_; @asked = (); return Trog::HV->candidate( uri => 'qemu:///system' )->note_pool_quota };
 
     my $result = $note->( 'zfs', "/bogus/pool\n 1878786048 tp/open /bogus/pool\n1878786048\n1878851584\n" );
@@ -1042,7 +1051,7 @@ subtest 'the pool quota note asks the hypervisor, and advises for its filesystem
     like( $result->{what}, qr/the[ ]zpool[ ]tp[ ]has[ ]free/,                        'naming the zpool' );
     like( $result->{fix},  qr/zfs[ ]create[ ]-o[ ]quota=500G[ ]tp\/vm-disks\/bogus/, 'and a dataset in it' );
     is( scalar @asked, 1, 'from one command' );
-    like( $asked[0], qr/'\/bogus\/it'\\''s[ ]here'/, 'with the path quoted for the shell' );
+    like( $asked[0], qr{[ ]sh[ ]/bogus/it's[ ]here\z}, 'with the path as an argument of the script, and not in it' );
 
     ok( $note->( 'zfs', "/bogus/pool\n 209584128 tp/limited /bogus/pool\n209584128\n1878851584\n" )->{ok}, 'a dataset with a quota is not' );
 
@@ -1279,7 +1288,7 @@ subtest 'the pool of the guests is inside the network of its bridge, behind its 
 
     # The address of the host on a bridge that no libvirt network owns.
     my %on_host = ( br0 => '192.0.2.5/24' );
-    $mock->redefine( capture_cmd => sub ( $hv, $cmd ) { my ($dev) = $cmd =~ m/dev[ ](\S+)/; return defined $on_host{$dev} ? "2: $dev    inet $on_host{$dev} brd 192.0.2.255 scope global $dev\n" : q{} } );
+    mock_quiet( $mock, sub ( $hv, @argv ) { my $dev = $argv[-1]; return defined $on_host{$dev} ? "2: $dev    inet $on_host{$dev} brd 192.0.2.255 scope global $dev\n" : q{} } );
 
     my ($result) = quietly( sub { guest_network_hv()->check_guest_pool } );
     ok( $result->{ok}, 'a pool inside 10.0.0.0/24, behind 10.0.0.1' ) or diag explain $result;

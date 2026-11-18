@@ -714,9 +714,9 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 {
 
     package Test::NetplanGuest;
-    sub new         ( $class, $netplan )   { return bless { netplan => $netplan, put => [] }, $class }
-    sub capture_cmd ( $self, $cmd )        { push @{ $self->{asked} }, $cmd;                                                return index( $cmd, q{cat} ) >= 0 ? YAML::XS::Dump( $self->{netplan} ) : q{} }
-    sub put_file    ( $self, $from, $, % ) { push @{ $self->{put} },   YAML::XS::Load( File::Slurper::read_binary($from) ); return 1 }
+    sub new          ( $class, $netplan )   { return bless { netplan => $netplan, put => [] }, $class }
+    sub capture_sudo ( $self, @argv )       { push @{ $self->{asked} }, join( q{ }, @argv );                                 return $argv[0] eq 'cat' ? YAML::XS::Dump( $self->{netplan} ) : q{} }
+    sub put_file     ( $self, $from, $, % ) { push @{ $self->{put} },   YAML::XS::Load( File::Slurper::read_binary($from) ); return 1 }
 }
 
 subtest 'the addresses of a domain go on the adapter of the first static bridge' => sub {
@@ -988,7 +988,7 @@ subtest 'two guests consolidated with _shared: salvaged, then the old one goes, 
     $guest->redefine( key_path            => sub { my ( undef, $d, $file ) = @_; return $file } );
     $guest->redefine( new                 => sub { my ( $class, %a ) = @_; return bless {%a}, $class } );
     $guest->redefine( put_file            => sub { 1 } );
-    $guest->redefine( capture_cmd         => sub { my ( $self, $cmd ) = @_; push( @did, "run $1" ) if $cmd =~ m{at[ ]now[ ]-f[ ]/root/(setup-\S+)}; return q{} } );
+    $guest->redefine( capture_cmd         => sub { my ( $self, @argv ) = @_; my $cmd = join( q{ }, @argv ); push( @did, "run $1" ) if $cmd =~ m{at[ ]now[ ]-f[ ]/root/(setup-\S+)}; return q{} } );
     $guest->redefine( wait_for_ssh        => sub { 1 } );
     $guest->redefine( wait_for_cloud_init => sub { 1 } );
     $guest->redefine( wait_for_makefile   => sub { my ( $self, $d ) = @_; push( @did, "makefile of $d" ); return 1 } );
@@ -1214,7 +1214,7 @@ subtest 'an owner that does not exist yet is a note, and any other failure to gi
     my @asked;
     no warnings 'once';
     local *OwnerProbe::run_sudo    = sub { my ( undef, @argv ) = @_; return $argv[0] eq 'chown' ? 1 : 0 };
-    local *OwnerProbe::capture_cmd = sub { my ( undef, $cmd ) = @_; push( @asked, $cmd ); return $said };
+    local *OwnerProbe::capture_sudo = sub { my ( undef, @argv ) = @_; push( @asked, [@argv] ); return $said };
     local *OwnerProbe::write_text  = sub { return 1 };
     use warnings;
     my $guest = bless {}, 'OwnerProbe';
@@ -1231,7 +1231,8 @@ subtest 'an owner that does not exist yet is a note, and any other failure to gi
         is_deeply( \@warned, [], "no warning when the $what is not on the guest yet" ) or diag @warned;
         like( $out, qr{/bogus/signing[.]key[ ]is[ ]root's[ ]for[ ]now}, 'there is a plain note instead' );
     }
-    like( $asked[0], qr{LC_ALL=C[ ]chown[ ]'svc:svc'[ ]'[^']+'[ ]2>&1\z}, 'and the text came from the chown itself, in a locale that does not translate it' );
+    like( $asked[0][2], qr{LC_ALL=C[ ]chown}, 'and the text came from the chown itself, in a locale that does not translate it' );
+    is( $asked[0][4], 'svc:svc', 'with the owner as one word' );
 
     $said = "chown: changing ownership of '/bogus/signing.key': Operation not permitted\n";
     Trog::HV->forget();
@@ -1263,9 +1264,9 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
     no warnings 'once';
 
     # It reads a file with the loop variable of Config::Simple, which is $_.
-    local *IssuerProbe::capture_cmd = sub { my ( undef, $cmd ) = @_; push( @asked, $cmd ); $_ = 'clobbered'; return $answer };
-    local *SecretsProbe::run_sudo   = sub { return 0 };
-    local *SecretsProbe::write_text = sub { my ( undef, $path, $text ) = @_; $wrote{$path} = $text; return 1 };
+    local *IssuerProbe::capture_sudo = sub { my ( undef, @argv ) = @_; push( @asked, [@argv] ); $_ = 'clobbered'; return $answer };
+    local *SecretsProbe::run_sudo    = sub { return 0 };
+    local *SecretsProbe::write_text  = sub { my ( undef, $path, $text ) = @_; $wrote{$path} = $text; return 1 };
     use warnings;
 
     my @issuers;
@@ -1275,8 +1276,8 @@ subtest 'a secret that another guest issues is asked of that guest, and not of t
     $fleet->redefine( guest_of => sub { push( @issuers, $_[1] ); return bless {}, 'IssuerProbe' } );
 
     is( quietly( sub { Trog::Bin::Provisioner::place_guest_secrets( bless( {}, 'SecretsProbe' ), $domain ) } ), 1, 'the secrets are placed, without the password of the store' );
-    is_deeply( \@issuers, ['ns.test.test'],                                               'by the guest that the manifest names' );
-    is_deeply( \@asked,   [q{sudo -n sh -c 'exec 2>/dev/null; print '\''the token'\'''}], 'which runs the command as root, quoted for its shell, with what it says on stderr kept out of the secret' );
+    is_deeply( \@issuers, ['ns.test.test'],                                          'by the guest that the manifest names' );
+    is_deeply( \@asked,   [ [ qw{sh -c}, q{exec 2>/dev/null; print 'the token'} ] ], 'which runs the command as root, as one argument of sh -c, with what it says on stderr kept out of the secret' );
     is( $wrote{'/bogus/web.token'}, "a-token\n", 'and the guest gets what it printed' );
 
     $answer = q{};
@@ -1363,7 +1364,7 @@ subtest 'refresh_cloud_init gives the package install what first boot had' => su
     my @ran;
     my $guest = Test::MockModule->new('Trog::Guest');
     $guest->redefine( put_file    => sub { 1 } );
-    $guest->redefine( capture_cmd => sub { push( @ran, $_[1] ); q{} } );
+    $guest->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; push( @ran, join( q{ }, @argv ) ); q{} } );
 
     my $fake = bless {}, 'Trog::Guest';
     quietly( sub { Trog::Bin::Provisioner::refresh_cloud_init( $fake, qw{/bogus/domains layered.test ubuntu} ) } );

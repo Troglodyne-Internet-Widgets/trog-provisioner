@@ -132,12 +132,17 @@ sub mocked ( $state, $code ) {
     $mock->redefine( vmm         => sub ($hv) { Test::FakeVmm->new($state) } );
     $mock->redefine( network_vmm => sub ($hv) { Test::FakeVmm->new($state) } );
     $mock->redefine(
-        capture_cmd => sub ( $hv, $cmd ) {
-            if ( my ($dir) = $cmd =~ m{\Als[ ]-1[ ]'([^']+)'} ) {
-                return join "\n", map { m{\A\Q$dir\E/([^/]+)\z} ? $1 : () } sort keys %{ $state->{files} };
-            }
-            my ($file) = $cmd =~ m{\Asudo[ ]-n[ ]cat[ ]'([^']+)'} or die "the fake hypervisor was not expecting: $cmd\n";
+        capture_cmd => sub ( $hv, @argv ) {
+            my $file = $argv[-1];
+            die "the fake hypervisor was not expecting: @argv\n" if @argv < 5 || "@argv[ 0 .. 3 ]" ne 'sudo -n sh -c';
             return $state->{files}{$file} // q{};
+        }
+    );
+    $mock->define(
+        capture_quiet => sub ( $hv, @argv ) {
+            my $dir = $argv[-1];
+            "@argv[ 0 .. 1 ]" eq 'ls -1' or die "the fake hypervisor was not expecting: @argv\n";
+            return join "\n", map { m{\A\Q$dir\E/([^/]+)\z} ? $1 : () } sort keys %{ $state->{files} };
         }
     );
     $mock->redefine(

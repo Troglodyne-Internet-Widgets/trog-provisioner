@@ -646,8 +646,7 @@ sub via_clients {
     # capture_cmd gives no exit status, so the last line says that the
     # command finished.  The stderr goes, because sudo runs the command in a
     # pty that carries it along with stdout.
-    my $quoted = Trog::Utils::shell_quote("exec 2>/dev/null; $command && echo END");
-    my $said   = $guest->capture_cmd("sudo -n sh -c $quoted") // q{};
+    my $said = $guest->capture_sudo( qw{sh -c}, "exec 2>/dev/null; $command && echo END" ) // q{};
     die "$via did not say which addresses its VPN clients have.  Run $command there to see why.\n"
       unless $said =~ s/^END\n?\z//m;
 
@@ -966,7 +965,7 @@ sub seed {
             my @mine   = grep { $nic_of{$_} eq $nic } sort keys %nic_of;
             my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } @mine;
             $script .= " wait; ip -4 neigh show dev $nic";
-            $swept  .= ( $hv->capture_cmd( 'sh -c ' . Trog::Utils::shell_quote($script) ) // q{} ) . "\n";
+            $swept  .= ( $hv->capture_cmd( qw{sh -c}, $script ) // q{} ) . "\n";
         }
 
         # STALE is not a signal.  It outlives the machine, so reserving it
@@ -1007,7 +1006,7 @@ sub seed {
             # new_config, who is usually the login user.  A file that the login
             # user cannot read is the case above, which virsh covers.  virsh
             # needs only the access that list_all_domains has.
-            my $said = $hv->capture_cmd( 'sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
+            my $said = $hv->capture_cmd( qw{sh -c}, $script ) // q{};
 
             # A guest also answers on the NAT bridge, and libvirt gives out
             # those addresses, not this pool.

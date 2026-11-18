@@ -61,17 +61,20 @@ require_ok("$FindBin::Bin/../bin/remove_mail_user")    or die "could not require
     }
 
     sub capture_cmd {
-        my ( $self, $cmd ) = @_;
-        return "5000\n" if $cmd =~ m/\Aid[ ]-u[ ]dovecot/;
+        my ( $self, @argv ) = @_;
+        my $cmd = join q{ }, @argv;
+        return "5000\n" if $cmd eq 'id -u dovecot';
 
         # Another gid than the uid, as on a guest where another package took
         # the gid first.
-        return $self->{dovecot_group} // "dovecot:x:5001:\n" if $cmd =~ m/\Agetent[ ]group[ ]dovecot/;
-        $cmd =~ s/\Asudo[ ]-n[ ]//;
+        return $self->{dovecot_group} // "dovecot:x:5001:\n" if $cmd eq 'getent group dovecot';
         push @{ $self->{log} }, $cmd;
-        IPC::Run3::run3( $cmd, \undef, \my $out, undef );
+        IPC::Run3::run3( \@argv, \undef, \my $out, undef );
         return $out;
     }
+
+    # What Trog::Machine does, with the sudo -n in front left off here.
+    sub capture_sudo { my ( $self, @argv ) = @_; return $self->capture_cmd(@argv) }
 
     sub write_text {
         my ( $self, $path, $content, %opts ) = @_;

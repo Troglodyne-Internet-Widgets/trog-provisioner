@@ -19,7 +19,6 @@ use List::Util   qw{any};
 use Pod::Usage   qw{pod2usage};
 
 use Trog::Hypervisors();
-use Trog::Utils();
 
 # What this tool produces, a file name or a port, goes to stdout for capture.
 # Messages to the operator go to stderr with print and not warn, and each one
@@ -389,7 +388,7 @@ sub guest_tool {
 
     # As the owner of the disks, and through the daemon that holds the guest,
     # because -d asks libvirt for them.
-    my $out = $hv->disk_owner_says( join ' ', $hv->guestfs_env, $tool, map { Trog::Utils::shell_quote($_) } $hv->local_connect, @args );
+    my $out = $hv->disk_owner_says( $hv->guestfs_env, $tool, $hv->local_connect, @args );
     my $rc  = $? >> 8;
 
     die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install libguestfs-tools\n" if $rc == 127;

@@ -407,7 +407,7 @@ has C<cap_net_admin>.
 =cut
 
 sub has_capability ( $hv, $helper ) {
-    return ( $hv->capture_cmd("getcap '$helper' 2>/dev/null") // q{} ) =~ m/cap_net_admin/;
+    return index( $hv->capture_quiet( 'getcap', $helper ) // q{}, 'cap_net_admin' ) >= 0;
 }
 
 =head1 SEE ALSO

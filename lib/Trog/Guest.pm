@@ -181,7 +181,7 @@ sub wait_for_cloud_init {
     print "Done!\n";
     die 'Cloud init reported failure on ' . $self->describe . ", investigate the machine\n" if $rc;
 
-    my $raw    = $self->capture_cmd('sudo -n cloud-init analyze dump');
+    my $raw    = $self->capture_sudo(qw{cloud-init analyze dump});
     my $parsed = eval { JSON::MaybeXS->new( utf8 => 1 )->decode($raw) };
     die "cloud-init analyze dump on " . $self->describe . " did not return a JSON array\n"
       unless ref $parsed eq 'ARRAY';
@@ -194,7 +194,7 @@ sub wait_for_cloud_init {
 
         print "$target failed during $stage, re-running...\n";
         $self->run_sudo( qw{rm}, "/var/lib/cloud/instances/$domain/sem/$stage\_$target" );
-        print $self->capture_cmd("sudo -n cloud-init single --name $target") . "\n\n";
+        print $self->capture_sudo( qw{cloud-init single --name}, $target ) . "\n\n";
     }
     return 1;
 }
@@ -256,7 +256,7 @@ sub wait_for_makefile {
           $self->run_cmd('command -v atq >/dev/null') == 0
           ? 'setup.sh is not queued and not running, so it was never queued or it ended before make'
           : 'at is not installed, so cloud-init could not queue setup.sh';
-        my $tail = $self->capture_cmd('sudo -n tail -n 20 /var/log/cloud-init-output.log') // '';
+        my $tail = $self->capture_sudo(qw{tail -n 20 /var/log/cloud-init-output.log}) // '';
         die "The build of $domain never started on " . $self->describe . ": $why.\n" . "The end of /var/log/cloud-init-output.log:\n$tail\n";
     }
 
@@ -268,10 +268,10 @@ sub wait_for_makefile {
 
     print "Waiting up to $STATUS_GRACE for the build to record its result...\n";
     $self->run_cmd(qq{sudo -n timeout $STATUS_GRACE bash -c 'until [ -f $status ]; do sleep 1; done;'});
-    my $result = $self->capture_cmd("sudo -n cat $status") // '';
+    my $result = $self->capture_sudo( q{cat}, $status ) // '';
     $result =~ s/\s+//g;
 
-    print "Last log:\n" . ( $self->capture_cmd("sudo -n tail $log") // '' ) . "\n\nDone!\n";
+    print "Last log:\n" . ( $self->capture_sudo( q{tail}, $log ) // '' ) . "\n\nDone!\n";
     return $result eq '0';
 }
 

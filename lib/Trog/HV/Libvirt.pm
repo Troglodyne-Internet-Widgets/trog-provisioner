@@ -18,7 +18,6 @@ use URI::Split();
 use List::Util();
 use Time::HiRes qw{sleep time};
 use Trog::Local();
-use Trog::Utils();
 use File::Basename();
 use File::Slurper();
 use List::Util();
@@ -425,7 +424,7 @@ remembers the answer.
 
 sub session_slice ($self) {
     return $self->{session_slice} //= do {
-        my $uid = $self->capture_cmd('id -u') // q{};
+        my $uid = $self->capture_cmd(qw{id -u}) // q{};
         chomp $uid;
         die 'Could not ask ' . $self->describe . " for the uid of its user\n" unless $uid =~ m/\A\d+\z/;
         "user-$uid.slice";
@@ -443,7 +442,7 @@ sub slice_cpu_quota ( $self, $unit ) {
     # CPUQuotaPerSecUSec is the CPU time that the slice gets in each second,
     # such as 4s for 400% or 500ms for 50%.  A long fraction is written as
     # 1.500000s, and a mix of units as 1s 500ms, so each part adds up.
-    my $span = $self->capture_cmd("systemctl --no-pager show -p CPUQuotaPerSecUSec --value $unit") // q{};
+    my $span = $self->capture_cmd( qw{systemctl --no-pager show -p CPUQuotaPerSecUSec --value}, $unit ) // q{};
     chomp $span;
 
     my $seconds = 0;
@@ -720,7 +719,7 @@ sub console_output {
 
     # sudo, because libvirt writes the file as root.
     my $log = $self->console_log_path($name);
-    return $self->capture_cmd("sudo -n cat '$log'") || undef;
+    return $self->capture_sudo( 'cat', $log ) || undef;
 }
 
 =head2 ($advice, $port) = $hv->vnc_access($name)
@@ -1233,7 +1232,7 @@ The file is 600 MB or so, and this takes a few seconds.
 
 sub file_checksum {
     my ( $self, $path ) = @_;
-    my $said = eval { $self->capture_cmd( 'sha256sum ' . Trog::Utils::shell_quote($path) ) } // q{};
+    my $said = eval { $self->capture_cmd( 'sha256sum', $path ) } // q{};
     my ($sum) = $said =~ m/\A ([[:xdigit:]]{64}) \s/;
     return defined $sum ? lc $sum : undef;
 }
@@ -1274,7 +1273,7 @@ sub base_volumes {
     # libvirt knows no date for a volume.  Without one, the order is by name,
     # which is stable but means nothing.
     my $said = eval {
-        $self->capture_cmd( q{stat -c '%Y %n' } . join( q{ }, map { Trog::Utils::shell_quote( $_->{path} ) } @found ) );
+        $self->capture_cmd( qw{stat -c}, '%Y %n', map { $_->{path} } @found );
     } // q{};
     my %mtime;
     foreach my $line ( split m/\n/, $said ) {
@@ -1351,7 +1350,7 @@ sub prune_base_images {
         # has no backing file to read yet.
         next if $base{$name} || $name =~ m/[.]partial \z/;
 
-        my $json = $self->disk_owner_says( 'qemu-img info -U --output=json ' . Trog::Utils::shell_quote( $volume->get_path() ) );
+        my $json = $self->disk_owner_says( qw{qemu-img info -U --output=json}, $volume->get_path() );
         my $info = eval { Cpanel::JSON::XS::decode_json( $json // q{} ) };
         if ( ref $info ne 'HASH' ) {
             warn "Could not read the backing file of $name, so no base image in the pool is removed\n";
@@ -1537,7 +1536,7 @@ sub iso_maker {
     return $self->{_iso_maker} if $self->{_iso_maker};
 
     foreach my $maker (qw{xorriso genisoimage mkisofs}) {
-        next if $self->run_cmd( 'sh', '-c', "command -v $maker >/dev/null 2>&1" );
+        next if $self->run_cmd( qw{sh -c}, 'command -v "$1" >/dev/null 2>&1', 'sh', $maker );
         return $self->{_iso_maker} = $maker;
     }
 
@@ -1995,7 +1994,7 @@ sub qemu_img_options {
     return $self->{qemu_img_options} if $self->{qemu_img_options};
 
     # -o help lists the options for the format and exits.  It needs no filename.
-    my $help    = $self->capture_cmd('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
+    my $help    = $self->capture_quiet(qw{qemu-img create -f qcow2 -o help}) // '';
     my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gm );
 
     print "Could not ask qemu-img on " . $self->describe . " which qcow2 options it takes,\n" . "so this disk gets none of the optional ones.\n"
@@ -2030,11 +2029,7 @@ goes under, before the pool exists.
 sub path_fstype {
     my ( $self, $path ) = @_;
 
-    # capture_cmd takes a shell string, and the path can come from a
-    # configuration file.
-    my $quoted = Trog::Utils::shell_quote($path);
-
-    my $type = $self->capture_cmd("stat -f -c %T $quoted 2>/dev/null") // '';
+    my $type = $self->capture_quiet( qw{stat -f -c %T}, $path ) // '';
     chomp $type;
 
     return $type;
@@ -2089,7 +2084,7 @@ sub zfs_version {
     my ($self) = @_;
     return $self->{zfs_version} if exists $self->{zfs_version};
 
-    my $version = $self->capture_cmd('cat /sys/module/zfs/version 2>/dev/null') // '';
+    my $version = $self->capture_quiet(qw{cat /sys/module/zfs/version}) // '';
     chomp $version;
 
     return $self->{zfs_version} = $version ? $version : undef;
@@ -2296,13 +2291,13 @@ sub backup_volumes {
     return @names;
 }
 
-=head2 $hv->disk_owner_runs(@argv), $hv->disk_owner_says($cmd)
+=head2 $hv->disk_owner_runs(@argv), $hv->disk_owner_says(@argv)
 
 Run a command as the user that owns the disks of the pool, and return its exit
 code, or what it printed.  That is root on the system URI, because libvirt gives
 a disk to C<libvirt-qemu> when the guest starts.  On a session URI it is the
 user of the URI, because its qemu runs as that user, and the disks stay its own.
-C<$cmd> is a string for a shell, as C<capture_cmd> takes.
+C<@argv> is a list, as C<capture_cmd> takes.
 
 =cut
 
@@ -2310,15 +2305,15 @@ sub disk_owner_runs ( $self, @argv ) {
     return $self->is_session ? $self->run_cmd(@argv) : $self->run_sudo(@argv);
 }
 
-sub disk_owner_says ( $self, $cmd ) {
-    return $self->capture_cmd( $self->is_session ? $cmd : "sudo -n $cmd" );
+sub disk_owner_says ( $self, @argv ) {
+    return $self->is_session ? $self->capture_cmd(@argv) : $self->capture_sudo(@argv);
 }
 
 =head2 @words = $hv->guestfs_env()
 
-The environment that a tool of libguestfs needs on the hypervisor, as words for
-a shell command that C<disk_owner_says> runs.  On a session URI it is
-C<LIBGUESTFS_PATH>, set to C<$GUESTFS_APPLIANCE>.  On the system URI it is
+The environment that a tool of libguestfs needs on the hypervisor, as the
+leading words of an argument list for C<disk_owner_says>.  On a session URI it
+is C<env> and C<LIBGUESTFS_PATH=$GUESTFS_APPLIANCE>.  On the system URI it is
 empty.
 
 libguestfs boots a small VM of its own.  Without a fixed appliance, C<supermin>
@@ -2336,7 +2331,7 @@ sub guestfs_env ($self) {
     return () unless $self->is_session;
     die "There is no fixed appliance of libguestfs in $GUESTFS_APPLIANCE on " . $self->describe . ", so the user of a session cannot read a disk.  bin/runner_account builds it, through the block of an account with sudo on the same host.\n"
       unless has_appliance($self);
-    return 'LIBGUESTFS_PATH=' . Trog::Utils::shell_quote($GUESTFS_APPLIANCE);
+    return ( 'env', "LIBGUESTFS_PATH=$GUESTFS_APPLIANCE" );
 }
 
 =head2 $hv->disk_layout($volume)
@@ -2355,7 +2350,7 @@ sub disk_layout {
     # Either failure returns undef, which disk_reusable reads as a disk that
     # cannot be kept.  So the errors stay visible.
     my $path = $self->volume_path($name) or return undef;
-    my $json = $self->disk_owner_says("qemu-img info -U --output=json '$path'") // q{};
+    my $json = $self->disk_owner_says( qw{qemu-img info -U --output=json}, $path ) // q{};
     my $info = eval { Cpanel::JSON::XS::decode_json($json) } or return undef;
 
     my $format = $info->{'format-specific'}{data} // {};
@@ -2426,7 +2421,7 @@ sub disk_snapshot_names {
     # about a running guest.  If qemu-img cannot open the disk, the answer is
     # "no snapshots", and no rollback happens.
     my $path = $self->volume_path($name) or return ();
-    my $said = $self->disk_owner_says("qemu-img snapshot -l -U '$path'") // q{};
+    my $said = $self->disk_owner_says( qw{qemu-img snapshot -l -U}, $path ) // q{};
 
     # After the header, each line starts with a numeric id, and the tag is the
     # second field.
@@ -2466,9 +2461,8 @@ sub virbr_ip {
     return $self->{virbr_ip} if defined $self->{virbr_ip};
 
     my $device = $self->lease_nic;
-    my $ip     = $self->capture_cmd("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
+    my ($ip) = ( $self->capture_cmd( qw{ip addr show dev}, $device ) // q{} ) =~ m/^\s*inet\s+(\S+)/m;
     die "Could not determine IP address for $device\n" unless $ip;
-    chomp $ip;
     $ip =~ s{/\d+\z}{};
 
     return $self->{virbr_ip} = $ip;
@@ -3051,7 +3045,7 @@ be seen.  The same goes for L</libvirtd_may_run_shim>.
 sub virtiofsd_version ($self) {
     return $self->{virtiofsd_version} if exists $self->{virtiofsd_version};
 
-    my $said = eval { $self->capture_cmd("$VIRTIOFS_SHIM --version 2>/dev/null") } // q{};
+    my $said = eval { $self->capture_quiet( $VIRTIOFS_SHIM, '--version' ) } // q{};
     my ($version) = $said =~ m/^(virtiofsd [^\n]+)/m;
     return $self->{virtiofsd_version} = $version;
 }
@@ -3287,7 +3281,7 @@ sub check_passwordless_sudo {
     my ($self) = @_;
 
     if ( $self->run_cmd(qw{sudo -n true}) == 0 ) {
-        my $allowed = eval { $self->capture_cmd('sudo -n -l 2>/dev/null') } // q{};
+        my $allowed = eval { $self->capture_quiet(qw{sudo -n -l}) } // q{};
         my $whole   = $allowed =~ m/NOPASSWD:\s*ALL/;
 
         return $self->verdict( 1, 'Passwordless sudo, for everything', q{} ) if $whole;
@@ -3693,7 +3687,7 @@ sub check_guest_pool ($self) {
         chomp( $said = $@ ) unless defined $said;
         my $network = network_on( $self, $nic );
         if ( !$network ) {
-            my ($on) = ( $self->capture_cmd("ip -o -4 addr show dev $nic 2>/dev/null") // q{} ) =~ m{\binet[ ](\d+(?:[.]\d+){3}/\d+)};
+            my ($on) = ( $self->capture_quiet( qw{ip -o -4 addr show dev}, $nic ) // q{} ) =~ m{\binet[ ](\d+(?:[.]\d+){3}/\d+)};
             return unless $on;
             my ( $address, $prefix ) = split m{/}, $on;
             my $real = Trog::HV::network_of( $address, $prefix );
@@ -3755,7 +3749,7 @@ appliance of C<guestfs_env> must be there too.
 sub note_libguestfs {
     my ($self) = @_;
 
-    my ($found) = grep { $self->run_cmd( 'sh', '-c', "command -v $_ >/dev/null 2>&1" ) == 0 } qw{virt-cat virt-ls virt-edit};
+    my ($found) = grep { $self->run_cmd( qw{sh -c}, 'command -v "$1" >/dev/null 2>&1', 'sh', $_ ) == 0 } qw{virt-cat virt-ls virt-edit};
 
     return { ok => 1 } if $found && ( !$self->is_session || has_appliance($self) );
 
@@ -3790,7 +3784,7 @@ sub note_swtpm {
     my ($self) = @_;
 
     return { ok => 1 } unless $self->run_cmd( 'sh', '-c', 'test -c /dev/tpmrm0' ) == 0;
-    return { ok => 1 } if $self->run_cmd( 'sh', '-c', 'command -v swtpm >/dev/null 2>&1' ) == 0;
+    return { ok => 1 } if $self->run_cmd( qw{sh -c}, 'command -v "$1" >/dev/null 2>&1', 'sh', 'swtpm' ) == 0;
 
     return { ok => 0, what => 'This machine has a TPM, and no swtpm to share it out', fix => <<'FIX' };
 Guests built here get an emulated TPM when swtpm is installed, which is what lets
@@ -3905,19 +3899,17 @@ does not exist or C<df> does not answer.
 sub pool_space {
     my ( $self, $fstype ) = @_;
 
-    # capture_cmd takes a shell string, and the pool path can come from a
-    # configuration file.
-    my $quoted = Trog::Utils::shell_quote( $self->pool_path );
-
+    # The pool path can come from a configuration file, so it goes in as $1, and
+    # not into the text of the script.
     my @steps = (
-        "p=\$(realpath -e $quoted) || exit 0",
+        'p=$(realpath -e "$1") || exit 0',
         'echo "$p"',
         'df -B1 --output=avail,source,target "$p" | tail -n1',
         'df -B1 --output=avail "$(df --output=target "$p" | tail -n1)" | tail -n1',
     );
     push @steps, 's=$(df --output=source "$p" | tail -n1); zfs get -Hp -o value available "${s%%/*}"' if $fstype eq 'zfs';
 
-    my $said = eval { $self->capture_cmd( '{ ' . join( '; ', @steps ) . '; } 2>/dev/null' ) } // q{};
+    my $said = eval { $self->capture_quiet( qw{sh -c}, join( '; ', @steps ), 'sh', $self->pool_path ) } // q{};
     my ( $path, $here, $mount_avail, $zpool_avail ) = map { s/\A\s+|\s+\z//gr } split m/\n/, $said;
     return if !defined $here;
 
@@ -4314,17 +4306,17 @@ my sub sudoers_of ($user) { return "/etc/sudoers.d/90-trog-runner-$user" }
 my sub linger_of  ($user) { return "/var/lib/systemd/linger/$user" }
 
 # What a command printed, without its last newline, or an empty string.
-my sub said ( $hv, $cmd ) {
-    my $out = $hv->capture_cmd("$cmd 2>/dev/null") // q{};
+my sub said ( $hv, @argv ) {
+    my $out = $hv->capture_quiet(@argv) // q{};
     chomp $out;
     return $out;
 }
 
 # The home directory of $user, or an empty string when there is no such user.
-my sub home_of ( $hv, $user ) { return said( $hv, 'getent passwd ' . Trog::Utils::shell_quote($user) . ' | cut -d: -f6' ) }
+my sub home_of ( $hv, $user ) { return ( split m/:/, said( $hv, qw{getent passwd}, $user ) )[5] // q{} }
 
 # The uid of $user, or an empty string when there is no such user.
-my sub uid_of ( $hv, $user ) { return said( $hv, 'id -u ' . Trog::Utils::shell_quote($user) ) }
+my sub uid_of ( $hv, $user ) { return said( $hv, qw{id -u}, $user ) }
 
 # The drop-in that limits the user slice of the account with $uid.
 my sub slice_dropin ($uid) { return "/etc/systemd/system/user-$uid.slice.d/50-trog-runner.conf" }
@@ -4499,7 +4491,7 @@ sub runner_account_steps {
 
     die "An account for a runner needs a quota for its pool, or the pool can fill the disk of the hypervisor\n" unless defined $plan->{quota};
 
-    my ($version) = said( $hv, 'sudo -V' ) =~ m/version\s+(\d+)[.](\d+)[.](\d+)/ ? ( sprintf '%d.%03d%03d', $1, $2, $3 ) : (0);
+    my ($version) = said( $hv, qw{sudo -V} ) =~ m/version\s+(\d+)[.](\d+)[.](\d+)/ ? ( sprintf '%d.%03d%03d', $1, $2, $3 ) : (0);
     die "sudo on " . $hv->describe . " is older than 1.9.10, which is the first that takes the patterns the grant needs\n" if $version < 1.009010;
 
     my $lease = $hv->lease_helper or die 'There is no libvirt lease helper on ' . $hv->describe . "\n";
@@ -4516,8 +4508,8 @@ sub runner_account_steps {
     die "The parent of $path is on '$fstype', and a pool of a runner can have a quota here only on ZFS.\n" . pool_quota_advice( $fstype, $name, { path => $path, mount => $parent, source => $parent } )
       unless $fstype eq 'zfs';
 
-    my $parent_set = said( $hv, 'zfs list -H -o name ' . Trog::Utils::shell_quote($parent) );
-    my $mounted_at = said( $hv, 'zfs get -H -o value mountpoint ' . Trog::Utils::shell_quote($parent_set) );
+    my $parent_set = said( $hv, qw{zfs list -H -o name},            $parent );
+    my $mounted_at = said( $hv, qw{zfs get -H -o value mountpoint}, $parent_set );
     die "$parent is not where a ZFS dataset is mounted (it is inside $parent_set, mounted at $mounted_at), so a child dataset would not mount at $path\n"
       unless $parent_set && $mounted_at eq $parent;
     my $dataset = "$parent_set/" . File::Basename::basename($path);
@@ -4560,9 +4552,8 @@ sub runner_account_steps {
     # virsh as $user, in its own systemd manager.  So the session daemon that
     # it starts belongs to the account, and stops when the account stops
     # lingering, and not with the login of the operator.
-    my @virsh = ( qw{systemd-run --quiet --wait --pipe}, "--machine=$user\@.host", qw{--user virsh -q -c qemu:///session} );
-
-    my $session_says = sub ( $verb, $pool ) { said( $hv, join q{ }, 'sudo -n', @virsh, $verb, Trog::Utils::shell_quote($pool) ) };
+    my @virsh        = ( qw{systemd-run --quiet --wait --pipe}, "--machine=$user\@.host", qw{--user virsh -q -c qemu:///session} );
+    my $session_says = sub ( $verb, $pool ) { said( $hv, qw{sudo -n}, @virsh, $verb, $pool ) };
 
     my @steps = (
         {
@@ -4573,23 +4564,23 @@ sub runner_account_steps {
         {
             what => "put $user in the kvm group",
             done => sub {
-                List::Util::any { $_ eq 'kvm' } split q{ }, said( $hv, 'id -nG ' . Trog::Utils::shell_quote($user) );
+                List::Util::any { $_ eq 'kvm' } split q{ }, said( $hv, qw{id -nG}, $user );
             },
             do => sub { $hv->run_sudo_or_die( qw{usermod -aG kvm}, $user ) },
         },
         {
             what => "make the ZFS dataset $dataset at $path",
-            done => sub { said( $hv, 'zfs list -H -o name ' . Trog::Utils::shell_quote($dataset) ) eq $dataset },
+            done => sub { said( $hv, qw{zfs list -H -o name}, $dataset ) eq $dataset },
             do   => sub { $hv->run_sudo_or_die( qw{zfs create -o}, "quota=$plan->{quota}", $dataset ) },
         },
         {
             what => "set the quota of $dataset to $plan->{quota}",
-            done => sub { uc said( $hv, 'zfs get -H -o value quota ' . Trog::Utils::shell_quote($dataset) ) eq uc $plan->{quota} },
+            done => sub { uc said( $hv, qw{zfs get -H -o value quota}, $dataset ) eq uc $plan->{quota} },
             do   => sub { $hv->run_sudo_or_die( qw{zfs set}, "quota=$plan->{quota}", $dataset ) },
         },
         {
             what => "give $path to $user, with mode 0700",
-            done => sub { said( $hv, 'stat -c %U:%a ' . Trog::Utils::shell_quote($path) ) eq "$user:700" },
+            done => sub { said( $hv, qw{stat -c %U:%a}, $path ) eq "$user:700" },
             do   => sub { $hv->run_sudo_or_die( 'chown', "$user:", $path ); $hv->run_sudo_or_die( qw{chmod 0700}, $path ) },
         },
         {
@@ -4656,13 +4647,13 @@ sub runner_removal_steps {
     my ( $hv,   $plan ) = @_;
     my ( $user, $path ) = @{$plan}{qw{user pool_path}};
 
-    my $dataset = sub { said( $hv, 'zfs list -H -o name ' . Trog::Utils::shell_quote($path) ) };
+    my $dataset = sub { said( $hv, qw{zfs list -H -o name}, $path ) };
     my $helper  = Trog::HV::Libvirt::BridgeHelper::helper($hv);
 
     # The session keeps no volume that the directory does not have.  A base
     # image is a download that any guest can fetch again, and not a disk.
     my $refuse_if_full = sub {
-        my $first = said( $hv, 'sudo -n find ' . Trog::Utils::shell_quote($path) . q{ -mindepth 1 ! -name 'baseimage-*' -print -quit} );
+        my $first = said( $hv, qw{sudo -n find}, $path, qw{-mindepth 1 ! -name}, 'baseimage-*', qw{-print -quit} );
         die "$path still holds $first, and maybe more, so the account $user stays.  Destroy the guests of the runner first.\n" if $first ne q{};
     };
     $refuse_if_full->();
@@ -4700,12 +4691,12 @@ sub runner_removal_steps {
             # started it, in a scope that logind calls abandoned and does not
             # end.  userdel refuses a user that still has a process.
             what => "stop every process of $user",
-            done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || said( $hv, "systemctl is-active user-$uid.slice" ) ne 'active' },
+            done => sub { my $uid = uid_of( $hv, $user ); $uid eq q{} || said( $hv, qw{systemctl is-active}, "user-$uid.slice" ) ne 'active' },
             do   => sub { $hv->run_sudo_or_die( qw{systemctl stop}, 'user-' . uid_of( $hv, $user ) . '.slice' ) },
         },
         {
             what => "destroy the ZFS dataset at $path",
-            done => sub { my $set = $dataset->(); !$set || said( $hv, 'zfs get -H -o value mountpoint ' . Trog::Utils::shell_quote($set) ) ne $path },
+            done => sub { my $set = $dataset->(); !$set || said( $hv, qw{zfs get -H -o value mountpoint}, $set ) ne $path },
             do   => sub { $refuse_if_full->();    $hv->run_sudo_or_die( qw{zfs destroy}, $dataset->() ) },
         },
         {

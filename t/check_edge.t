@@ -39,7 +39,8 @@ require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test
     sub new { my ( $class, %o ) = @_; return $class->SUPER::new( rules => [], asked => [], %o ) }
 
     sub capture_cmd {
-        my ( $self, $command ) = @_;
+        my ( $self, @argv ) = @_;
+        my $command = join q{ }, @argv;
         push @{ $self->{asked} }, $command;
         foreach my $rule ( @{ $self->{rules} } ) {
             my ( $pattern, $answer ) = @$rule;
@@ -58,10 +59,10 @@ subtest 'as_root: the output and the exit status of a command on the far side' =
     is_deeply( [ Provisioner::Bin::check_edge::as_root( $m, 'true' ) ],  [ "said\n", 0 ],     'what it printed, and 0' );
     is_deeply( [ Provisioner::Bin::check_edge::as_root( $m, 'false' ) ], [ q{},      3 ],     'and a status that is not 0' );
     is_deeply( [ Provisioner::Bin::check_edge::as_root( $m, 'lost' ) ],  [ q{},      undef ], 'and no status when the command printed none' );
-    like( $m->{asked}[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]'true;/, 'as root' );
+    like( $m->{asked}[0], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]true;/, 'as root' );
 
     my ($quoted) = Provisioner::Bin::check_edge::as_root( machine( [ qr/./ => sub { return ( "$_[0]\n", 0 ) } ] ), q{echo 'x'} );
-    like( $quoted, qr/'echo[ ]'\\''x'\\''/, 'with a single quote in the command kept inside the quotes of sh -c' );
+    like( $quoted, qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]echo[ ]'x';/, 'with a single quote in the command left alone, as it is one argument of sh -c' );
 };
 
 subtest 'check_tunnel: a route through a tunnel to the address of the guest in the pool, and an answer there' => sub {
@@ -141,19 +142,19 @@ subtest 'check_ban: the ban reaches the edge, and the unban leaves it' => sub {
         [ qr/fail2ban-client[ ]status/        => [ "|- Number of jail: 2\n`- Jail list:\tsshd, nginx-http-auth\n", 0 ] ],
         [ qr/get[ ]sshd[ ]actions/            => [ "ufw\n",                                                        0 ] ],
         [ qr/get[ ]nginx-http-auth[ ]actions/ => [ "ufw\nnginxrelay-guest.test\n",                                 0 ] ],
-        [ qr/banip[ ](\S+)/                   => sub { $in_set{ ( $_[0] =~ m/banip[ ](\S+)/ )[0] } = $_[0] !~ m/unbanip/; return ( q{}, 0 ) } ],
+        [ qr/banip[ ](\S+)/                   => sub { $in_set{ ( $_[0] =~ m/banip[ ](\S+)/ )[0] } = index( $_[0], 'unbanip' ) < 0; return ( q{}, 0 ) } ],
     );
     my $edge = machine( [ qr/ipset[ ]-quiet[ ]test/ => sub { my ($ip) = $_[0] =~ m/test[ ]\S+[ ](\S+)/; return ( q{}, $in_set{$ip} ? 0 : 1 ) } ] );
 
     my $result = Provisioner::Bin::check_edge::check_ban( $guest, $edge, 'guest.test' );
     is( $result->[0], 1, 'passes when the address arrives in the set and leaves it' );
     like( $result->[1], qr/nginx-http-auth/, 'through the jail that bans through the edge' );
-    ok( ( grep { m/unbanip/ } @{ $guest->{asked} } ), 'and it unbans what it banned' );
+    ok( ( grep { index( $_, 'unbanip' ) >= 0 } @{ $guest->{asked} } ), 'and it unbans what it banned' );
 
     my $deaf = machine( [ qr/ipset/ => [ q{}, 1 ] ] );
     my $lost = Provisioner::Bin::check_edge::check_ban( $guest, $deaf, 'guest.test' );
     like( $lost->[2], qr/did[ ]not[ ]reach/, 'fails when the ban does not reach the edge' );
-    ok( ( grep { m/unbanip/ } @{ $guest->{asked} } ), 'and unbans it anyway' );
+    ok( ( grep { index( $_, 'unbanip' ) >= 0 } @{ $guest->{asked} } ), 'and unbans it anyway' );
 
     my $stuck = machine( [ qr/ipset/ => [ q{}, 0 ] ] );
     like( Provisioner::Bin::check_edge::check_ban( $guest, $stuck, 'guest.test' )->[2], qr/unban[ ]did[ ]not/, 'and when the unban does not take it out' );

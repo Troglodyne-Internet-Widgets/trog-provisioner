@@ -751,7 +751,7 @@ subtest 'the guests of a session are a share of their own, in the user slice of 
     $mock->redefine( vmm             => sub { FakeVMM->new(@session) } );
     $mock->redefine( network_vmm     => sub { FakeVMM->new(@system) } );
     $mock->redefine( pool_free       => sub { 200 * $GB } );
-    $mock->redefine( capture_cmd     => sub ( $, $cmd ) { $cmd eq 'id -u'                    ? "1001\n" : die "not expecting $cmd\n" } );
+    $mock->redefine( capture_cmd     => sub ( $, @argv ) { "@argv" eq 'id -u'                ? "1001\n" : die "not expecting @argv\n" } );
     $mock->redefine( slice_cpu_quota => sub ( $, $unit ) { return $unit eq 'user-1001.slice' ? 2        : undef } );
 
     Trog::HV->forget();
@@ -799,7 +799,7 @@ subtest 'the CPUQuota of a slice, from what systemctl says' => sub {
 
     # systemctl on the terminal that a remote command gets: its pager asks for
     # a key, unless it is told to use none.
-    $mock->redefine( capture_cmd => sub ( $, $cmd ) { return $cmd =~ m/--no-pager/ ? "4s\n" : "WARNING: terminal is not fully functional\nPress RETURN to continue" } );
+    $mock->redefine( capture_cmd => sub ( $, @argv ) { return index( "@argv", '--no-pager' ) >= 0 ? "4s\n" : "WARNING: terminal is not fully functional\nPress RETURN to continue" } );
     is( $hv->slice_cpu_quota('user-996.slice'), 4, 'systemctl is asked with no pager, which on a terminal would wait for a key' );
 
     like( exception { $hv->slice_cpu_quota(q{x'; reboot; '.slice}) }, qr/not[ ]the[ ]name[ ]of[ ]a[ ]slice/, 'a unit name that is not one never reaches the shell' );
