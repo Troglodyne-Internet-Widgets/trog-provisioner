@@ -141,6 +141,23 @@ salvages nothing of that home.
 The recipe grants the account nothing.  The program that runs claude as it
 needs a sudo rule for that, which the recipe of the program writes.
 
+=head2 INSTRUCTIONS OF THE OPERATOR
+
+The global F<CLAUDE.md> of a home holds instructions that apply to every
+session, in every project.  Like the auto mode configuration, they are data
+about the operator, so the recipe ships none.
+
+To give a domain some, write them in markdown to F<claude.CLAUDE.md> in the
+data directory of the domain.  C<claude_settings instructions> copies that file
+to F<.claude/OPERATOR.md> in the home of the agent, and in the home of the
+restricted agent if there is one.  It adds C<@OPERATOR.md> to the
+F<CLAUDE.md> beside it, which imports the file.  C<rtk init> writes that
+F<CLAUDE.md> with an import of its own, so the command runs after it, and the
+F<CLAUDE.md> keeps both.  A domain with no such file gets no F<OPERATOR.md>.
+
+If you delete the file later, a guest that already has F<OPERATOR.md> keeps it
+until the guest is built again.
+
 =head2 RTK
 
 L<rtk|https://github.com/rtk-ai/rtk> filters the output of a shell command

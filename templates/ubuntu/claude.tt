@@ -25,6 +25,10 @@ HOME='[% install_dir %]/[% domain %]' rtk init -g --auto-patch
 [% FOREACH plugin IN plugins -%]
 HOME='[% install_dir %]/[% domain %]' claude plugin install '[% plugin.name %]' --marketplace '[% plugin.repo %]'
 [% END -%]
+[%# The instructions of the operator, from the data directory of the domain,
+    if it has one.  After rtk init, which writes the CLAUDE.md that imports
+    them. -%]
+[% script_dir %]/claude_settings instructions '[% install_dir %]/[% domain %]/claude.CLAUDE.md' '[% install_dir %]/[% domain %]/.claude/CLAUDE.md'
 [%# Make runs as root, so everything above lands in the home of the agent as
     root: RTK.md, a CLAUDE.md that references it and a backup of the settings
     in .claude, the cache of npm in .npm, the filters and history of rtk under
@@ -46,6 +50,7 @@ HOME='[% restricted_home %]' rtk init -g --auto-patch
 [% FOREACH plugin IN plugins -%]
 HOME='[% restricted_home %]' claude plugin install '[% plugin.name %]' --marketplace '[% plugin.repo %]'
 [% END -%]
+[% script_dir %]/claude_settings instructions '[% install_dir %]/[% domain %]/claude.CLAUDE.md' '[% restricted_home %]/.claude/CLAUDE.md'
 HOME='[% restricted_home %]' git config --global --replace-all safe.directory '*'
 chown -R '[% restricted_user %]:[% restricted_user %]' '[% restricted_home %]'
 [% END -%]

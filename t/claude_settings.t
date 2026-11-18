@@ -145,6 +145,66 @@ subtest 'add-repos: a basedir that is not there stops the task' => sub {
     like( exception { run( 'add-repos', '/bogus/nowhere', "$dir/settings.json" ) }, qr{/bogus/nowhere}, 'naming it' );
 };
 
+# A .claude as rtk init -g leaves it: a CLAUDE.md that imports RTK.md.
+sub claude_dir {
+    my ($claude_md) = @_;
+    my $dir = tempdir( CLEANUP => 1 );
+    write_file( "$dir/CLAUDE.md", $claude_md ) if defined $claude_md;
+    return $dir;
+}
+
+my $RULES = "# Shell commands\n\nUnroll the loops.\n";
+
+subtest 'instructions: a domain without a fragment keeps its CLAUDE.md as it was' => sub {
+    my $dir = claude_dir("\@RTK.md\n");
+
+    is( run( 'instructions', "$dir/claude.CLAUDE.md", "$dir/CLAUDE.md" ), 0,            'exits 0' );
+    is( read_file("$dir/CLAUDE.md"),                                      "\@RTK.md\n", 'and does not touch CLAUDE.md' );
+    ok( !-e "$dir/OPERATOR.md", 'or write OPERATOR.md' );
+};
+
+subtest 'instructions: the fragment is imported, and the import of rtk stays' => sub {
+    my $dir = claude_dir("\@RTK.md\n");
+    write_file( "$dir/claude.CLAUDE.md", $RULES );
+
+    is( run( 'instructions', "$dir/claude.CLAUDE.md", "$dir/CLAUDE.md" ), 0,                           'exits 0' );
+    is( read_file("$dir/OPERATOR.md"),                                    $RULES,                      'OPERATOR.md holds the fragment' );
+    is( read_file("$dir/CLAUDE.md"),                                      "\@RTK.md\n\@OPERATOR.md\n", 'and CLAUDE.md imports it after RTK.md' );
+};
+
+# A second provision runs the command against a home that already has it.
+subtest 'instructions: a second run replaces the fragment and imports it once' => sub {
+    my $dir = claude_dir("\@RTK.md\n");
+    write_file( "$dir/claude.CLAUDE.md", "old\n" );
+    run( 'instructions', "$dir/claude.CLAUDE.md", "$dir/CLAUDE.md" );
+    write_file( "$dir/claude.CLAUDE.md", $RULES );
+    run( 'instructions', "$dir/claude.CLAUDE.md", "$dir/CLAUDE.md" );
+
+    is( read_file("$dir/OPERATOR.md"), $RULES,                      'OPERATOR.md holds the new fragment' );
+    is( read_file("$dir/CLAUDE.md"),   "\@RTK.md\n\@OPERATOR.md\n", 'and CLAUDE.md imports it once' );
+};
+
+subtest 'instructions: a CLAUDE.md that is missing or has no last newline' => sub {
+    my $none = claude_dir();
+    write_file( "$none/claude.CLAUDE.md", $RULES );
+    run( 'instructions', "$none/claude.CLAUDE.md", "$none/CLAUDE.md" );
+    is( read_file("$none/CLAUDE.md"), "\@OPERATOR.md\n", 'a home without CLAUDE.md gets one that imports the fragment' );
+
+    my $bare = claude_dir('@RTK.md');
+    write_file( "$bare/claude.CLAUDE.md", $RULES );
+    run( 'instructions', "$bare/claude.CLAUDE.md", "$bare/CLAUDE.md" );
+    is( read_file("$bare/CLAUDE.md"), "\@RTK.md\n\@OPERATOR.md\n", 'and the import goes on a line of its own after a last line with no newline' );
+};
+
+subtest 'instructions: a rewrite keeps the mode of CLAUDE.md' => sub {
+    my $dir = claude_dir("\@RTK.md\n");
+    chmod 0640, "$dir/CLAUDE.md" or BAIL_OUT("Cannot chmod: $!");
+    write_file( "$dir/claude.CLAUDE.md", $RULES );
+
+    run( 'instructions', "$dir/claude.CLAUDE.md", "$dir/CLAUDE.md" );
+    is( sprintf( '%04o', S_IMODE( ( stat "$dir/CLAUDE.md" )[2] ) ), '0640', 'the mode' );
+};
+
 # The postrun task runs as root, after the claude recipe gave the file to the
 # admin.  Root is not needed to see the owner kept: the file is already ours.
 subtest 'a rewrite keeps the owner and the mode of the settings' => sub {

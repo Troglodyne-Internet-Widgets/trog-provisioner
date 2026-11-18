@@ -17,6 +17,7 @@ use List::Util     ();
 my $USAGE = <<'EOF';
 usage: claude_settings auto-mode FRAGMENT SETTINGS
        claude_settings add-repos BASEDIR SETTINGS
+       claude_settings instructions FRAGMENT CLAUDE_MD
 EOF
 
 =head1 NAME
@@ -28,6 +29,7 @@ Code
 
     claude_settings auto-mode FRAGMENT SETTINGS
     claude_settings add-repos BASEDIR SETTINGS
+    claude_settings instructions FRAGMENT CLAUDE_MD
 
 C<SETTINGS> is the settings file to change.  Every key that the command does
 not name stays as it was.  The file keeps its owner and its mode.
@@ -42,6 +44,13 @@ agent can read and write each of them, from wherever its session starts.  It
 does not load their skills, which needs C<--add-dir>.  The directories that
 are there already stay.
 
+C<instructions> copies C<FRAGMENT>, instructions in markdown, to
+F<OPERATOR.md> beside C<CLAUDE_MD>, the global F<CLAUDE.md> of a home.  Then
+it adds the line C<@OPERATOR.md> to C<CLAUDE_MD>, which imports the file into
+every session, unless that line is there already.  It makes C<CLAUDE_MD> if
+there is none, and keeps every other line of it.  If C<FRAGMENT> does not
+exist, it changes nothing and exits 0.
+
 =head1 FUNCTIONS
 
 =head2 $exit = main(@args)
@@ -53,9 +62,12 @@ Runs the command in C<@args>, and returns the exit status.
 # JSON::PP and not JSON, because this runs on the system perl of a guest, and
 # the claude recipe installs no JSON module.  JSON::PP is core since 5.014.
 my %COMMANDS = (
-    'auto-mode' => \&auto_mode,
-    'add-repos' => \&add_repos,
+    'auto-mode'    => \&auto_mode,
+    'add-repos'    => \&add_repos,
+    'instructions' => \&instructions,
 );
+
+my $OPERATOR = 'OPERATOR.md';
 
 sub main {
     my ( $command, @args ) = @_;
@@ -120,6 +132,29 @@ sub add_repos {
     return 0;
 }
 
+=head2 $exit = instructions($fragment_file, $claude_md)
+
+The C<instructions> command.
+
+=cut
+
+sub instructions {
+    my ( $fragment_file, $claude_md ) = @_;
+
+    return 0 unless -e $fragment_file;
+
+    write_text( dirname($claude_md) . "/$OPERATOR", read_text($fragment_file) );
+
+    my $import = "\@$OPERATOR";
+    my $text   = -e $claude_md ? read_text($claude_md) : q{};
+    return 0 if List::Util::any { $_ eq $import } split /\n/, $text;
+
+    $text .= "\n" unless $text eq q{} || substr( $text, -1 ) eq "\n";
+    write_text( $claude_md, "$text$import\n" );
+
+    return 0;
+}
+
 =head2 $data = read_settings($path)
 
 Decodes the settings file at C<$path>, and dies unless it holds a JSON object.
@@ -144,42 +179,76 @@ Decodes the file at C<$path>, and dies with the path if it cannot.
 sub read_json {
     my ($path) = @_;
 
-    open my $fh, '<', $path or die "Cannot read $path: $!\n";
-    my $text = do { local $/; <$fh> };
-    close $fh or die "Cannot close $path: $!\n";
-
+    my $text = read_text($path);
     my $data;
     eval { $data = JSON::PP->new->decode($text); 1 } or die "$path is not valid JSON: $@";
 
     return $data;
 }
 
+=head2 $text = read_text($path)
+
+The content of the file at C<$path>.  Dies with the path if it cannot read it.
+
+=cut
+
+sub read_text {
+    my ($path) = @_;
+
+    open my $fh, '<', $path or die "Cannot read $path: $!\n";
+    my $text = do { local $/; <$fh> };
+    close $fh or die "Cannot close $path: $!\n";
+
+    return $text;
+}
+
 =head2 write_json($path, $data)
 
-Replaces the file at C<$path> with C<$data> in one rename, so that a failure
-leaves the old file in place and not half of the new one.  The new file gets
-the owner and the mode of the old one.
+Replaces the settings file at C<$path> with C<$data>, through C<write_text>.
+The file must exist.
 
 =cut
 
 sub write_json {
     my ( $path, $data ) = @_;
 
-    my ( $mode, $uid, $gid ) = ( stat $path )[ 2, 4, 5 ];
-    die "Cannot stat $path: $!\n" unless defined $mode;
-
+    die "Cannot stat $path: $!\n" unless -e $path;
     my $json = JSON::PP->new->canonical->pretty;
-    my $tmp  = File::Temp->new( DIR => dirname($path) );
-    print {$tmp} $json->encode($data) or die "Cannot write $tmp: $!\n";
-    close $tmp                        or die "Cannot close $tmp: $!\n";
+    write_text( $path, $json->encode($data) );
+
+    return;
+}
+
+=head2 write_text($path, $text)
+
+Replaces the file at C<$path> with C<$text> in one rename, so that a failure
+leaves the old file in place and not half of the new one.  The new file gets
+the owner and the mode of the old one.  A file that did not exist gets the
+owner of the process and the mode that the umask leaves.
+
+=cut
+
+sub write_text {
+    my ( $path, $text ) = @_;
+
+    my ( $mode, $uid, $gid ) = ( stat $path )[ 2, 4, 5 ];
+
+    my $tmp = File::Temp->new( DIR => dirname($path) );
+    print {$tmp} $text or die "Cannot write $tmp: $!\n";
+    close $tmp         or die "Cannot close $tmp: $!\n";
 
     # A postrun task runs as root, after the claude recipe gave the file to
     # the admin, who must still be able to change it.
-    chown $uid, $gid, "$tmp" or die "Cannot chown $tmp: $!\n";
-    chmod Fcntl::S_IMODE($mode), "$tmp" or die "Cannot chmod $tmp: $!\n";
+    if ( defined $mode ) {
+        chown $uid, $gid, "$tmp" or die "Cannot chown $tmp: $!\n";
+        chmod Fcntl::S_IMODE($mode), "$tmp" or die "Cannot chmod $tmp: $!\n";
+    }
+    else {
+        chmod oct('666') & ~umask, "$tmp" or die "Cannot chmod $tmp: $!\n";
+    }
     rename "$tmp", $path or die "Cannot rename $tmp to $path: $!\n";
 
-    # The name is the settings file now, so the object must not unlink it.
+    # The name is the file at $path now, so the object must not unlink it.
     $tmp->unlink_on_destroy(0);
 
     return;

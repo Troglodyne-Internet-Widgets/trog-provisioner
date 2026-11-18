@@ -123,6 +123,28 @@ subtest 'the auto mode configuration goes into the installed settings' => sub {
     ok( index( $said, 'claude_settings auto-mode' ) > index( $said, 'mv claude.settings.json' ), 'after the settings file is in place' );
 };
 
+# rtk init writes the CLAUDE.md that imports the instructions, and the chown
+# gives the agent what root wrote.  Out of that order, the import is lost or
+# root owns the file.
+subtest 'the instructions of the operator go into each home, after rtk and before the chown' => sub {
+    my $said = recipe()->render( %G, restricted_user => 'test-agent' );
+
+    my $domain     = q{/root/bin/claude_settings instructions '/opt/domains/agent.test.test/claude.CLAUDE.md' '/opt/domains/agent.test.test/.claude/CLAUDE.md'};
+    my $restricted = q{/root/bin/claude_settings instructions '/opt/domains/agent.test.test/claude.CLAUDE.md' '/opt/domains/agent.test.test/agents/test-agent/.claude/CLAUDE.md'};
+    my %at         = (
+        domain     => index( $said, $domain ),
+        restricted => index( $said, $restricted ),
+        init       => index( $said, q{HOME='/opt/domains/agent.test.test' rtk init} ),
+        chown      => index( $said, q{chown -R 'agent:someadmin'} ),
+        rinit      => index( $said, q{HOME='/opt/domains/agent.test.test/agents/test-agent' rtk init} ),
+        rchown     => index( $said, q{chown -R 'test-agent:test-agent'} ),
+    );
+    ok( $at{domain} >= 0, 'from the data directory of the domain, into the CLAUDE.md of its home' )                             or diag $said;
+    ok( $at{restricted} >= 0, 'and into the CLAUDE.md of the restricted agent' )                                                or diag $said;
+    ok( $at{init} < $at{domain} && $at{domain} < $at{chown}, 'after rtk init in the home of the domain, and before its chown' ) or diag explain \%at;
+    ok( $at{rinit} < $at{restricted} && $at{restricted} < $at{rchown}, 'and the same in the home of the restricted agent' )     or diag explain \%at;
+};
+
 subtest 'where it fetches from, and what the cache keeps' => sub {
     my @hosts = recipe()->fetch_hosts();
     ok( ( grep { $_ eq 'github.com' } @hosts ), 'the release comes from GitHub' );
