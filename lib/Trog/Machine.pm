@@ -200,7 +200,7 @@ sub transfer_user {
     return scalar getpwuid($<) if $self->is_local;
     return $self->ssh_user     if defined $self->ssh_user;
 
-    my $who = $self->capture_cmd('id -un');
+    my $who = $self->capture_cmd(qw{id -un});
     chomp $who if defined $who;
     return $who;
 }
@@ -223,8 +223,11 @@ sub sshd_port {
     # Read sshd_config.d as well as sshd_config, because a modern Ubuntu
     # includes that directory from the main file.  Any match will do, because
     # sshd listens on every Port line that it reads, not only the first.
-    my $port = $self->capture_cmd(q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | tail -n1 | awk '{print $2}'});
-    chomp $port if defined $port;
+    # The glob needs a shell, so sh expands it and perl does what tail and awk
+    # did: the second word of the last line.
+    my $said   = $self->capture_quiet( qw{sh -c}, q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf} ) // q{};
+    my $last   = ( split m/\n/, $said )[-1]                                                                                // q{};
+    my ($port) = $last =~ m/\A\s*Port\s+(\S+)/;
 
     # No Port line is the sshd default, not a failure, so it gets no warning on
     # every provision.
@@ -278,9 +281,29 @@ sub ssh {
 
 =head1 RUNNING THINGS
 
-=head2 capture_cmd($shell_command)
+=head2 capture_cmd(@argv)
 
-Takes a shell string, which can be a pipeline, and returns its standard output.
+Takes an argv list and returns its standard output.  This module quotes the
+arguments, so they can contain any character, a quote or a newline too.  A
+single argument goes to the shell instead, and that is how you write a
+pipeline.  Locally, a list goes to L<IPC::Run3> and a string goes to
+C</bin/sh>.
+
+=head2 capture_quiet(@argv)
+
+As C<capture_cmd>, and it throws standard error away, so that a command that
+can fail does not print to the terminal of the caller.  It takes the place of
+C<2E<gt>/dev/null>, which needs a shell.  Over ssh, the library hands back
+standard error apart from the output, so there it is the same as C<capture_cmd>.  A command under sudo
+can still carry its standard error in the output, because sudo can run it in a
+pty.  For that, drop it inside sudo: C<< capture_sudo( qw{sh -c}, 'exec 2>/dev/null; exec cat "$1"', 'sh', $path ) >>.
+
+=head2 capture_sudo(@argv)
+
+Returns C<< $self->capture_cmd( qw{sudo -n}, @argv ) >>.  The C<-n> makes sudo
+fail at once where it would ask for a password, so this never asks, and a
+caller cannot leave the C<-n> out.  It returns standard output.
+L</run_sudo(@argv)> returns the exit code, and it can ask.
 
 =head2 run_cmd(@argv)
 
@@ -372,7 +395,7 @@ my sub unhang ( $self, $what, $code ) {
 }
 
 # Dies if $what, a command for the far side as one string, starts with a sudo
-# that can ask for a password.  See capture_cmd($shell_command).
+# that can ask for a password.  See capture_cmd(@argv).
 my sub refuse_asking_sudo ( $self, $what ) {
     return if $what !~ m/\A\s*sudo\s/ || $what =~ m/\A\s*sudo\s+-[nV](?:\s|\z)/;
     die "Refusing to send '$what' to " . $self->describe . ": over ssh, nobody can type the password that sudo would ask for, so it would wait until the alarm.\n" . "Write sudo -n, which fails at once instead, or use run_sudo, which can give a password.\n";
@@ -394,20 +417,37 @@ sub unpaged (@command) {
     return ( 'env', @NO_PAGER, @command );
 }
 
-sub capture_cmd {
-    my ( $self, $cmd ) = @_;
+# Runs @argv and returns its standard output.  $quiet drops standard error: a
+# local command gets it discarded, and over ssh it is already kept apart from
+# the output, so a remote call needs nothing.  A single argument is a shell
+# string, and more than one is an argv list that nothing parses again.
+my sub capture ( $self, $quiet, @argv ) {
+    my $cmd = @argv == 1 ? $argv[0] : \@argv;
     if ( $self->is_local ) {
 
         # A string still goes to a shell, as documented, because callers write
         # pipelines.  run3 closes stdin, so a command that reads stdin cannot
         # wait on a terminal that is busy elsewhere.
-        IPC::Run3::run3( $cmd, \undef, \my $out, undef );
-        return $out;
+        #
+        # A list has no shell to say "not found" for a program that is not
+        # there, and run3 dies instead.  The shell form gave an empty answer
+        # for that, as does a remote machine, so a caller that tests for a
+        # tool by running it needs the same here.
+        my $out;
+        my $ran = eval { IPC::Run3::run3( $cmd, \undef, \$out, ( $quiet ? \undef : undef ) ); 1 };
+        return $ran ? $out : q{};
     }
 
-    refuse_asking_sudo( $self, $cmd );
-    return unhang( $self, $cmd, sub { ( $self->ssh->cmd( unpaged($cmd) ) )[0] } );
+    my $what = join( ' ', @argv );
+    refuse_asking_sudo( $self, $what );
+    return unhang( $self, $what, sub { ( $self->ssh->cmd( unpaged(@argv) ) )[0] } );
 }
+
+sub capture_cmd ( $self, @argv ) { return capture( $self, 0, @argv ) }
+
+sub capture_quiet ( $self, @argv ) { return capture( $self, 1, @argv ) }
+
+sub capture_sudo ( $self, @argv ) { return $self->capture_cmd( qw{sudo -n}, @argv ) }
 
 sub run_cmd {
     my ( $self, @argv ) = @_;
@@ -776,7 +816,7 @@ sub mkpath {
 
         # Somewhere above it belongs to root.  Make it anyway, then hand it to
         # the login user, who is the one that will be writing into it.
-        my $user = $self->ssh_user // $self->capture_cmd('id -un');
+        my $user = $self->ssh_user // $self->capture_cmd(qw{id -un});
         chomp $user if defined $user;
         return 0    if $self->run_sudo( qw{mkdir -p}, $path );
         $self->run_sudo( 'chown', "$user:", $path );
@@ -811,7 +851,7 @@ sub list_dir {
     }
 
     # ls, not sftp.  See "Why none of this uses sftp".
-    my $listing = $self->capture_cmd( 'ls -1 ' . Trog::Utils::shell_quote($path) . ' 2>/dev/null' ) // '';
+    my $listing = $self->capture_quiet( qw{ls -1}, $path ) // '';
     return grep { $_ } split( m/\n/, $listing );
 }
 
@@ -1002,7 +1042,11 @@ sub append_line {
 }
 
 sub root_text ( $self, $path ) {
-    my $text = $self->capture_cmd( 'sudo -n cat ' . Trog::Utils::shell_quote($path) . ' 2>/dev/null' ) // q{};
+
+    # The redirect is inside sudo, because sudo can run the command in a pty
+    # that carries its standard error along with its standard output, and the
+    # complaint of cat about a missing file is not the text of the file.
+    my $text = $self->capture_sudo( qw{sh -c}, 'exec 2>/dev/null; exec cat "$1"', 'sh', $path ) // q{};
     chomp $text;
     return $text;
 }

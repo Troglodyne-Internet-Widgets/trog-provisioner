@@ -266,12 +266,9 @@ sub probes {
 sub capture_to {
     my ( $guest, $command, $local ) = @_;
 
-    # Single quotes escaped the POSIX way, because the command goes inside a
-    # pair of them: a probe containing an awk '{print $1}' otherwise closed the
-    # quoting early and the guest answered with a syntax error instead.
-    ( my $quoted = $command ) =~ s/'/'\\''/g;
-
-    my $content = eval { $guest->capture_cmd("sudo -n sh -c '$quoted'") } // q{};
+    # The command is one argument of sh -c, so a probe containing an awk
+    # '{print $1}' reaches the guest as it was typed.
+    my $content = eval { $guest->capture_sudo( qw{sh -c}, $command ) } // q{};
     File::Slurper::Temp::write_text( $local, $content );
 
     return { remote => "\$ $command", ok => 1, local => $local, bytes => length $content };
@@ -359,7 +356,7 @@ sub fetch {
     return { remote => $remote, ok => 0, why => 'not there' }
       if $guest->run_sudo( qw{test -f}, $remote );
 
-    my $content = eval { $guest->capture_cmd("sudo -n cat '$remote'") } // q{};
+    my $content = eval { $guest->capture_sudo( 'cat', $remote ) } // q{};
 
     my $name  = $remote =~ s{\N*/}{}r;
     my $local = "$into/$name";

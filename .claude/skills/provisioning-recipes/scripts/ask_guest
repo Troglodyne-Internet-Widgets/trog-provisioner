@@ -56,11 +56,9 @@ sub main {
     my $guest = Trog::Hypervisors->guest_of($domain)
       or die "No hypervisor in the fleet runs $domain at an address, so there is nothing to ask.\n";
 
-    # Quoted the same way collect_artifacts does, so a command containing an
-    # awk program does not close the quoting early and get answered with a
-    # syntax error.
-    ( my $quoted = join( q{ }, @command ) ) =~ s/'/'\\''/g;
-    print $guest->capture_cmd("sudo -n sh -c '$quoted'") // q{};
+    # The command is one argument of sh -c, so a command containing an awk
+    # program reaches the guest as it was typed.
+    print $guest->capture_sudo( qw{sh -c}, join( q{ }, @command ) ) // q{};
 
     return 0;
 }

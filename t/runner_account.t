@@ -98,14 +98,14 @@ my @ANSWERS = (
     [ 'zfs list -H -o name'                        => sub ( $s, $arg, @ ) { index( $arg, q{/} ) == 0 ? dataset_holding( $s, $arg ) : exists $s->{datasets}{$arg} ? $arg : undef } ],
     [ 'zfs get -H -o value mountpoint'             => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{mountpoint} } ],
     [ 'zfs get -H -o value quota'                  => sub ( $s, $arg, @ ) { $s->{datasets}{$arg}{quota} } ],
-    [ 'getent passwd'                              => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? "/home/$arg"                                       : undef } ],
+    [ 'getent passwd'                              => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? "$arg:x:1001:1001::/home/$arg:/bin/sh"             : undef } ],
     [ 'id -nG'                                     => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? join( q{ }, $arg, @{ $s->{users}{$arg}{groups} } ) : undef } ],
     [ 'id -u'                                      => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
     [ 'id -g'                                      => sub ( $s, $arg, @ ) { $s->{users}{$arg}      ? 1001                                               : undef } ],
     [ 'sudo -n cat'                                => sub ( $s, $arg, @ ) { $s->{unreadable}{$arg} ? undef                                              : $s->{files}{$arg} } ],
     [
         'sudo -n find' => sub ( $s, $arg, $cmd ) {
-            my $images = index( $cmd, q{! -name 'baseimage-*'} ) < 0;
+            my $images = index( $cmd, q{! -name baseimage-*} ) < 0;
             ( grep { $images || !m{/baseimage-[^/]*\z} } @{ $s->{dirs}{$arg} // [] } )[0];
         }
     ],
@@ -181,13 +181,20 @@ sub entry_for ( $table, $command ) {
 sub with_hypervisor ( $state, $code ) {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
 
-    $mock->redefine(
-        capture_cmd => sub ( $hv, $cmd ) {
-            $cmd =~ s/\s+2>\/dev\/null\z//;
-            my ($arg) = $cmd =~ m/'([^']*)'/;
-            return entry_for( \@ANSWERS, $cmd )->( $state, $arg // q{}, $cmd ) // q{};
-        }
-    );
+    # capture_quiet and capture_sudo are the methods of Trog::Machine, so the
+    # one that the library reaches for is a thin layer over the same answers.
+    my $answer = sub ( $hv, @argv ) {
+
+        # A read as root goes through sh, so that the redirect is inside sudo.
+        my $cmd = @argv > 4 && "@argv[ 0 .. 3 ]" eq 'sudo -n sh -c' && $argv[4] =~ m/exec[ ]cat/ ? "sudo -n cat $argv[-1]" : "@argv";
+
+        # The first word of the path, or the last argument, as the caller
+        # puts what it is asked about last.
+        my $arg = $cmd =~ m/\Asudo[ ]-n[ ]find[ ]/ ? $argv[3] : $argv[-1];
+        return entry_for( \@ANSWERS, $cmd )->( $state, $arg // q{}, $cmd ) // q{};
+    };
+    $mock->redefine( capture_cmd => sub ( $hv, @argv ) { $answer->( $hv, @argv ) } );
+    $mock->define( capture_quiet => sub ( $hv, @argv ) { $answer->( $hv, @argv ) } );
     $mock->redefine(
         run_sudo => sub ( $hv, @argv ) {
             push @{ $state->{root} }, "@argv";
@@ -334,7 +341,7 @@ subtest 'a run makes the account, and a second run finds nothing to do' => sub {
     is_deeply( $state->{owners}{'/bogus/vm-disks/runner'}, { user => 'runner', mode => 700 },                                                      'and belongs to the user alone' );
     is_deeply( $state->{pools},                            {},                                                                                     'and no pool of the system daemon' );
     is_deeply( $state->{session_pools},                    { runner_disks => { path => '/bogus/vm-disks/runner', running => 1, autostart => 1 } }, 'but a pool in the session of the user, running and started with it, which placement asks for its free space' );
-    my ($defined) = grep { m/pool-define-as/ } @{ $state->{root} };
+    my ($defined) = grep { index( $_, 'pool-define-as' ) >= 0 } @{ $state->{root} };
     like( $defined, qr{\Asystemd-run[ ]},                         'defined through systemd-run' );
     like( $defined, qr{[ ]--machine=runner\@[.]host[ ]--user[ ]}, 'as the user, in its own systemd manager' );
     ok( exists $state->{files}{$LINGER}, 'the user lingers, so its guests outlive the login that started them' );

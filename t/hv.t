@@ -508,7 +508,7 @@ subtest 'a bridge nothing can find says where to name it' => sub {
 subtest 'a guest gets a TPM only where one means something' => sub {
     my ( $asked, $answer );
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return $answer } );
+    $mock->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; $asked = join( q{ }, @argv ); return $answer } );
 
     # Both halves: hardware here, and swtpm to emulate one there.  The command
     # says yes or says nothing, so anything that is not yes is no.
@@ -1095,7 +1095,7 @@ subtest 'what a disk was made with is read off the disk rather than remembered' 
     my $asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test-qcow2' } );
-    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return '{"cluster-size":65536,"format-specific":{"data":{"extended-l2":true}}}' } );
+    $mock->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; $asked = join( q{ }, @argv ); return '{"cluster-size":65536,"format-specific":{"data":{"extended-l2":true}}}' } );
 
     $hv->disk_layout('vm.test-qcow2');
 
@@ -1137,7 +1137,7 @@ LIST
     my $asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test-qcow2' } );
-    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return $listing } );
+    $mock->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; $asked = join( q{ }, @argv ); return $listing } );
 
     is_deeply(
         [ $hv->disk_snapshot_names('vm.test-qcow2') ],
@@ -1802,11 +1802,11 @@ subtest 'file_checksum asks the hypervisor, and base_volumes lists the builds ne
     my ( $said, @cmds );
     my $sum  = '0f' x 32;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( capture_cmd => sub { push @cmds, $_[1]; return $said } );
+    $mock->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; push @cmds, \@argv; return $said } );
 
     $said = "$sum  /pool/it's here\n";
     is( $hv->file_checksum(q{/pool/it's here}), $sum, 'the sum that sha256sum prints' );
-    like( $cmds[0], qr/\Asha256sum[ ]'\/pool\/it'\\''s[ ]here'\z/, 'with the path quoted for the shell' );
+    is_deeply( $cmds[0], [ 'sha256sum', q{/pool/it's here} ], 'with the path as one word of the list' );
     $said = "sha256sum: nothing\n";
     is( $hv->file_checksum('/pool/x'), undef, 'and nothing when it does not answer' );
 
@@ -1863,7 +1863,7 @@ subtest 'prune_base_images removes what no disk is backed by, and never the newe
     $mock->redefine( base_volumes    => sub { @bases } );
     $mock->redefine( pool            => sub { $pool } );
     $mock->redefine( delete_volume   => sub { push @deleted, $_[1]; return 1 } );
-    $mock->redefine( disk_owner_says => sub { my ( undef, $cmd ) = @_; push @asked, $cmd; my ($path) = $cmd =~ m{'(/pool/[^']+)'}; return $backing{$path} } );
+    $mock->redefine( disk_owner_says => sub { my ( undef, @argv ) = @_; push @asked, join( q{ }, @argv ); return $backing{ $argv[-1] } } );
 
     my $json = sub { my ($file) = @_; return defined $file ? qq({"format":"qcow2","full-backing-filename":"/other/dir/$file"}) : '{"format":"qcow2"}' };
     %backing = (
@@ -1874,7 +1874,7 @@ subtest 'prune_base_images removes what no disk is backed by, and never the newe
 
     quietly( sub { $hv->prune_base_images } );
     is_deeply( \@deleted, [$oldest], 'an old volume that no disk is backed by goes' ) or diag explain \@deleted;
-    ok( ( grep { m/qemu-img[ ]info[ ]-U[ ]--output=json[ ]'\/pool\/one-qcow2'/ } @asked ), 'found by asking qemu-img for the backing file of each disk' );
+    ok( ( grep { m{qemu-img[ ]info[ ]-U[ ]--output=json[ ]/pool/one-qcow2\z} } @asked ), 'found by asking qemu-img for the backing file of each disk' );
     ok( !( grep { index( $_, 'baseimage' ) >= 0 } @asked ),                                'and not of the base volumes' );
 
     # The last disk on the middle volume goes.
@@ -2266,7 +2266,7 @@ subtest 'leases are looked up by MAC, not by name' => sub {
 subtest 'a session reads disks only through the fixed appliance of libguestfs' => sub {
     my $fixed = 0;
     my $mock  = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( run_cmd     => sub ( $hv, @argv ) { return "@argv" =~ m/command[ ]-v[ ]virt-cat/ ? 0 : 1 } );
+    $mock->redefine( run_cmd     => sub ( $hv, @argv ) { return $argv[-1] eq 'virt-cat' ? 0 : 1 } );
     $mock->redefine( file_exists => sub ( $hv, $path ) { $fixed && $path eq "$Trog::HV::Libvirt::GUESTFS_APPLIANCE/README.fixed" } );
 
     my $note = fresh( uri => 'qemu+ssh://runner@hv/session' )->note_libguestfs;
@@ -2278,7 +2278,7 @@ subtest 'a session reads disks only through the fixed appliance of libguestfs' =
 
     $fixed = 1;
     ok( fresh( uri => 'qemu+ssh://runner@hv/session' )->note_libguestfs->{ok}, 'with the appliance, the session passes' );
-    is_deeply( [ fresh( uri => 'qemu+ssh://runner@hv/session' )->guestfs_env ], ["LIBGUESTFS_PATH='$Trog::HV::Libvirt::GUESTFS_APPLIANCE'"], 'and a tool there boots that appliance' );
+    is_deeply( [ fresh( uri => 'qemu+ssh://runner@hv/session' )->guestfs_env ], [ 'env', "LIBGUESTFS_PATH=$Trog::HV::Libvirt::GUESTFS_APPLIANCE" ], 'and a tool there boots that appliance' );
 };
 
 subtest 'a session reads its leases from the system daemon, and runs qemu-img as itself' => sub {
@@ -2307,15 +2307,15 @@ subtest 'a session reads its leases from the system daemon, and runs qemu-img as
 
     my @ran;
     $mock->redefine( volume_path => sub { '/bogus/pool/vm.test.test-qcow2' } );
-    $mock->redefine( run_cmd     => sub ( $, @argv ) { push @ran, "user: @argv"; 0 } );
-    $mock->redefine( run_sudo    => sub ( $, @argv ) { push @ran, "root: @argv"; 0 } );
-    $mock->redefine( capture_cmd => sub ( $, $cmd ) { push @ran, "says: $cmd"; q{} } );
+    $mock->redefine( run_cmd     => sub ( $, @argv ) { push @ran, "user: @argv";                  0 } );
+    $mock->redefine( run_sudo    => sub ( $, @argv ) { push @ran, "root: @argv";                  0 } );
+    $mock->redefine( capture_cmd => sub ( $, @argv ) { push @ran, 'says: ' . join( q{ }, @argv ); q{} } );
     $hv->snapshot_disk( 'vm.test.test-qcow2', 'trog-pristine' );
     $hv->revert_disk( 'vm.test.test-qcow2', 'trog-pristine' );
     $hv->disk_snapshot_names('vm.test.test-qcow2');
     is_deeply(
         \@ran,
-        [ 'user: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', 'user: qemu-img snapshot -a trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: qemu-img snapshot -l -U '/bogus/pool/vm.test.test-qcow2'} ],
+        [ 'user: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', 'user: qemu-img snapshot -a trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: qemu-img snapshot -l -U /bogus/pool/vm.test.test-qcow2} ],
         'qemu-img runs as the account, which owns the disks of its session'
     );
 
@@ -2325,7 +2325,7 @@ subtest 'a session reads its leases from the system daemon, and runs qemu-img as
     $system->disk_snapshot_names('vm.test.test-qcow2');
     is_deeply(
         \@ran,
-        [ 'root: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: sudo -n qemu-img snapshot -l -U '/bogus/pool/vm.test.test-qcow2'} ],
+        [ 'root: qemu-img snapshot -c trog-pristine /bogus/pool/vm.test.test-qcow2', q{says: sudo -n qemu-img snapshot -l -U /bogus/pool/vm.test.test-qcow2} ],
         'and as root on the system URI, where libvirt gives each disk to libvirt-qemu'
     );
 };
@@ -2543,13 +2543,13 @@ subtest 'a console capture redirects the serial port and restarts the guest' => 
 subtest 'the console of a libvirt guest is read off the hypervisor as root' => sub {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     my $asked;
-    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return "boot line\n" } );
+    $mock->redefine( capture_sudo => sub { my ( undef, @argv ) = @_; $asked = join( q{ }, qw{sudo -n}, @argv ); return "boot line\n" } );
 
     my $hv = bless( {}, 'Trog::HV::Libvirt' );
     is( $hv->console_output('vm.test'), "boot line\n", 'what the capture holds' );
-    like( $asked, qr{\Asudo[ ]-n[ ]cat[ ]'/tmp/vm[.]test-console[.]log'\z}, 'read with sudo, because libvirt writes it as root' );
+    like( $asked, qr{\Asudo[ ]-n[ ]cat[ ]/tmp/vm[.]test-console[.]log\z}, 'read with sudo, because libvirt writes it as root' );
 
-    $mock->redefine( capture_cmd => sub { q{} } );
+    $mock->redefine( capture_sudo => sub { q{} } );
     is( $hv->console_output('vm.test'), undef, 'and an empty capture is no console at all' );
 };
 
@@ -2696,6 +2696,20 @@ subtest 'nic_gateway and nic_pool: the network of a static adapter' => sub {
     my %gw = ( gateway_br0 => '192.0.2.1', prefix_br0 => 24 );
     is_deeply( $hv->( %gw, ip_pool_br0 => '192.0.2.0/26, 192.0.2.128/27', ip_addresses_br0 => '192.0.2.200 192.0.2.201' )->nic_pool('br0'), { cidr => [qw{192.0.2.0/26 192.0.2.128/27}], addresses => [qw{192.0.2.200 192.0.2.201}] }, 'the pool of the bridge, each key a list, whether commas or spaces separate it' );
     is_deeply( $hv->( %gw, ip_pool_br0 => [qw{192.0.2.0/26 192.0.2.128/27}] )->nic_pool('br0'), { cidr => [qw{192.0.2.0/26 192.0.2.128/27}] }, 'from the list that Config::Simple makes of one, without a key the block does not name' );
+};
+
+subtest 'a tool is looked for on the hypervisor with the shell, and its name is an argument and not part of the script' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+    my @asked;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( run_cmd => sub ( $, @argv ) { push @asked, [@argv]; return $argv[-1] eq 'genisoimage' ? 0 : 1 } );
+
+    is( $hv->iso_maker, 'genisoimage', 'the first one that is there' );
+    is_deeply(
+        \@asked,
+        [ map { [ qw{sh -c}, 'command -v "$1" >/dev/null 2>&1', 'sh', $_ ] } qw{xorriso genisoimage} ],
+        'each asked of sh -c as $1, so that nothing in a name can be read as shell syntax'
+    );
 };
 
 done_testing;

@@ -54,7 +54,7 @@ require_ok("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/collect
         return $self->{missing} ? 1 : 0;
     }
 
-    sub capture_cmd {
+    sub capture_sudo {
         my ($self) = @_;
         return $self->{content};
     }

@@ -130,19 +130,20 @@ subtest 'the port the far side listens on' => sub {
     my $asked;
 
     $mock->redefine(
-        capture_cmd => sub {
-            $asked = $_[1];
-            return "2222\n";
+        capture_quiet => sub {
+            shift;
+            $asked = join( q{ }, @_ );
+            return "Port 22\nPort 2222\n";
         }
     );
-    is( remote()->sshd_port, 2222, 'what its configuration says' );
+    is( remote()->sshd_port, 2222, 'the last Port line of its configuration' );
     like( $asked, qr{sshd_config[.]d}, 'asked of the drop-in directory as well as the main file' );
 
     # No Port line is not a failure to find one: it is how every stock install
     # says 22.  Test::NoWarnings at the end of this file is the assertion that
     # nothing was said about it -- this used to warn, and now runs against
     # ourselves on every provision.
-    $mock->redefine( capture_cmd => sub { return "\n" } );
+    $mock->redefine( capture_quiet => sub { return "\n" } );
     is( remote()->sshd_port, 22, 'and 22 when it says nothing' );
 };
 
@@ -354,8 +355,9 @@ sub with_root_files ( $files, $writes_fail, $code ) {
     my @did;
     my $mock = Test::MockModule->new('Trog::Machine');
     $mock->redefine(
-        capture_cmd => sub ( $self, $cmd ) {
-            my ($path) = $cmd =~ m{\Asudo[ ]-n[ ]cat[ ]'([^']+)'[ ]2>/dev/null\z} or die "not expecting: $cmd\n";
+        capture_cmd => sub ( $self, @argv ) {
+            my $path = $argv[-1];
+            join( q{ }, @argv[ 0 .. 3 ] ) eq 'sudo -n sh -c' or die "not expecting: @argv\n";
             return $files->{$path};
         }
     );
@@ -447,7 +449,7 @@ subtest 'list_dir takes a path with a space in it' => sub {
     # The command goes to a shell here rather than over ssh, which is what the
     # far side does with it too.
     my $remote = Test::MockModule->new('Trog::Machine');
-    $remote->redefine( capture_cmd => sub { IPC::Run3::run3( $_[1], \undef, \my $out, \undef ); return $out } );
+    $remote->redefine( capture_quiet => sub { my ( undef, @argv ) = @_; IPC::Run3::run3( \@argv, \undef, \my $out, \undef ); return $out } );
     is_deeply( [ remote()->list_dir("$dir/two words") ],         ['inside'], 'and on another' );
     is_deeply( [ remote()->list_dir("$dir/none; echo leaked") ], [],         'where a semicolon is part of the name, not the end of a command' );
 };
@@ -591,6 +593,80 @@ subtest 'what sudo says when the password it was given is wrong' => sub {
 
     is( sudo_reads("sudo: a password is required\n"),     'asked',      'wanting a password is not having been given a wrong one' );
     is( sudo_reads("sudo: incorrect password attempt\n"), 'given back', 'nor is a count that is not there' );
+};
+
+# What a caller can put in an argument.  None of it is special to a list.
+my @AWKWARD = ( q{plain}, q{it's}, q{say "hi"}, q{a b}, qq{two\nlines}, q{$HOME `x` ; | & \\}, q{} );
+
+subtest 'capture_cmd on this machine: a list reaches the program as it was written' => sub {
+    require Trog::Local;
+    my $here = Trog::Local->new;
+
+    foreach my $word (@AWKWARD) {
+        is( $here->capture_cmd( 'printf', '%s', $word ), $word, 'an argument of ' . ( $word ne q{} ? ( $word =~ s/\n/\\n/gr ) : 'nothing' ) . ' arrives unchanged' );
+    }
+    is( $here->capture_cmd( 'printf', '%s|%s|%s', "a b", q{'}, q{"} ), q{a b|'|"}, 'and each one stays one argument' );
+};
+
+subtest 'capture_cmd on this machine: one string is still a shell command' => sub {
+    require Trog::Local;
+    my $here = Trog::Local->new;
+
+    is( $here->capture_cmd(q{printf 'a\nb\nc\n' | tail -n1}), "c\n", 'a pipeline runs' );
+    is( $here->capture_cmd(q{echo "$$" | grep -c .}),         "1\n", 'and so does the expansion of a variable' );
+    is( $here->capture_cmd( 'false', 'x' ),                   q{},   'a list with a program that fails says nothing' );
+    is( $here->capture_cmd( '/bogus/not-a-program', 'x' ),    q{},   'and so does one that is not there, as the shell would give it' );
+};
+
+subtest 'capture_quiet on this machine: standard error goes, and standard output stays' => sub {
+    require Trog::Local;
+    my $here = Trog::Local->new;
+
+    my ( $out, $loud ) = ( q{}, q{} );
+    $loud = capture_stderr { $out = $here->capture_cmd( qw{sh -c}, 'echo said; echo complained >&2' ) };
+    is_deeply( [ $out, $loud ], [ "said\n", "complained\n" ], 'capture_cmd leaves it to the terminal' );
+
+    my $quiet = capture_stderr { $out = $here->capture_quiet( qw{sh -c}, 'echo said; echo complained >&2' ) };
+    is_deeply( [ $out, $quiet ], [ "said\n", q{} ], 'capture_quiet throws it away, with no shell redirect' );
+};
+
+subtest 'capture_sudo: sudo -n, and never a sudo that asks' => sub {
+    my @asked;
+    my $mock = Test::MockModule->new('Trog::Machine');
+    $mock->redefine( capture_cmd => sub ( $self, @argv ) { push @asked, [@argv]; return "out\n" } );
+
+    is( remote()->capture_sudo( 'cat', q{/bogus/it's} ), "out\n", 'it returns standard output, as capture_cmd does' );
+    is_deeply( \@asked, [ [ qw{sudo -n cat}, q{/bogus/it's} ] ], 'with -n in front, and the arguments as they were' );
+};
+
+subtest 'a remote list is sent to ssh as a list, and passes the sudo guard' => sub {
+    my @sent;
+    my $far = Test::MockModule->new( 'Trog::Machine::FarSide', no_auto => 1 );
+    $far->define( cmd => sub ( $, @command ) { push @sent, [@command]; return ( "ok\n", q{}, 0 ) } );
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( ssh => sub { return bless {}, 'Trog::Machine::FarSide' } );
+
+    foreach my $word (@AWKWARD) {
+        @sent = ();
+        remote()->capture_cmd( 'printf', '%s', $word );
+        is_deeply( \@sent, [ [ 'env', @Trog::Machine::NO_PAGER, 'printf', '%s', $word ] ], 'an argument of ' . ( $word ne q{} ? ( $word =~ s/\n/\\n/gr ) : 'nothing' ) . ' is one element, with no quoting of ours' );
+    }
+
+    @sent = ();
+    remote()->capture_cmd(q{ls | wc -l});
+    is_deeply( \@sent, [ ["export @Trog::Machine::NO_PAGER; ls | wc -l"] ], 'a single string stays one string, for the shell of the far side' );
+
+    @sent = ();
+    is( remote()->capture_sudo( qw{sh -c}, q{echo 'x'; echo "y"} ), "ok\n", 'capture_sudo passes the guard' );
+    is_deeply( \@sent, [ [ 'env', @Trog::Machine::NO_PAGER, qw{sudo -n sh -c}, q{echo 'x'; echo "y"} ] ], 'and the script is one element' );
+
+    @sent = ();
+    like( exception { remote()->capture_cmd(qw{sudo cat /bogus}) }, qr/sudo[ ]-n/, 'a list that starts with sudo and no -n is refused' );
+    is( scalar @sent, 0, 'and not sent' );
+
+    @sent = ();
+    remote()->capture_quiet( qw{ls -1}, '/bogus' );
+    is_deeply( \@sent, [ [ 'env', @Trog::Machine::NO_PAGER, qw{ls -1 /bogus} ] ], 'capture_quiet sends the same command, since ssh keeps standard error apart' );
 };
 
 # The file is usually authorized_keys, where one wrong write locks its owner

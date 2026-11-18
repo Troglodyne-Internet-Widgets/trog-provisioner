@@ -391,7 +391,10 @@ the text of sudo when sudo needs a password, which is not an account error.
 
 sub chown_error {
     my ( $guest, $owner, $path ) = @_;
-    return $guest->capture_cmd( join( q{ }, 'sudo -n env LC_ALL=C chown', Trog::Utils::shell_quote($owner), Trog::Utils::shell_quote($path), '2>&1' ) ) // q{};
+
+    # The redirect is inside sudo, because sudo can run the command in a pty
+    # that does not carry stderr into the answer.
+    return $guest->capture_sudo( qw{sh -c}, 'exec 2>&1; exec env LC_ALL=C chown "$1" "$2"', 'sh', $owner, $path ) // q{};
 }
 
 =head2 $secret = issue_secret($domain, $path, $issue)
@@ -417,8 +420,7 @@ sub issue_secret {
     # The stderr of the command is dropped, because sudo runs it in a pty that
     # carries stderr along with stdout, and anything said there would become
     # part of the secret.
-    my $quoted = Trog::Utils::shell_quote("exec 2>/dev/null; $issue->{command}");
-    my $secret = $guest->capture_cmd("sudo -n sh -c $quoted") // q{};
+    my $secret = $guest->capture_sudo( qw{sh -c}, "exec 2>/dev/null; $issue->{command}" ) // q{};
     chomp $secret;
     die "$issuer did not issue the secret that $domain needs at $path.  Ask it why: the command is in the guest-secrets.yaml of $domain.\n"
       unless $secret =~ m/\A\S+\z/;
@@ -1138,7 +1140,7 @@ sub reprovision_guest (%args) {
 
     place_guest_secrets( $guest, $domain );
 
-    print "Scheduling job to run setup script\n" . $guest->capture_cmd("sudo -n at now -f /root/setup-$domain.sh") . "Done.\n";
+    print "Scheduling job to run setup script\n" . $guest->capture_sudo( qw{at now -f}, "/root/setup-$domain.sh" ) . "Done.\n";
 
     return ( $reuser, $reuse );
 }
@@ -1167,7 +1169,7 @@ sub refresh_cloud_init {
     $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
 
     foreach my $module ( Provisioner::Cookbook->load( $distro // 'ubuntu' )->rerun_modules() ) {
-        print $guest->capture_cmd("sudo -n cloud-init single --name $module -f cloud-config.txt") . "\n";
+        print $guest->capture_sudo( qw{cloud-init single --name}, $module, qw{-f cloud-config.txt} ) . "\n";
     }
 
     return 1;
@@ -1202,7 +1204,7 @@ sub merge_guest_addresses (%args) {
     return 1 unless @$ips;
     my $index = $hv->address_index // die "$domain has the addresses @$ips, and " . ( $hv->name // $hv->describe ) . " names no static_nics, so no adapter of the guest can have them\n";
 
-    my $existing_nc = $guest->capture_cmd('sudo -n cat /etc/netplan/50-cloud-init.yaml');
+    my $existing_nc = $guest->capture_sudo(qw{cat /etc/netplan/50-cloud-init.yaml});
     my $parsed      = YAML::XS::Load($existing_nc);
 
     my $adapter   = primary_adapter( $parsed, $hv->guest_mac( $built_for, $index ) );
@@ -1219,7 +1221,7 @@ sub merge_guest_addresses (%args) {
     $guest->put_file( $new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600' )
       or die "Could not install the netplan config on $domain";
 
-    my $output = $guest->capture_cmd('sudo -n netplan apply');
+    my $output = $guest->capture_sudo(qw{netplan apply});
     chomp $output;
     print "$output\n" if $output;
 

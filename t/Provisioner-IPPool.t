@@ -398,7 +398,7 @@ subtest 'via_clients: what the server says its clients have' => sub {
     my @ran;
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
     $fleet->redefine( guest_of => via_server( \$said, \@ran ) );
-    local *ViaProbe::capture_cmd = sub { push( @ran, $_[1] ); return $said };
+    local *ViaProbe::capture_sudo = sub { my ( undef, @argv ) = @_; push( @ran, join( q{ }, qw{sudo -n}, @argv ) ); return $said };
 
     is_deeply( { Provisioner::IPPool::via_clients('vpn.test.test') }, { 'laptop.test' => '10.8.0.130' }, 'each client with an address, and not the one whose file has none' );
     like( $ran[-1], qr/\Asudo[ ]-n[ ]sh[ ]-c[ ]/, 'asked as root' );
@@ -423,7 +423,7 @@ subtest 'assign: a bin with via does not hand out what its server gave out by ha
     my @ran;
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
     $fleet->redefine( guest_of => via_server( \$said, \@ran ) );
-    local *ViaProbe::capture_cmd = sub { push( @ran, $_[1] ); return $said };
+    local *ViaProbe::capture_sudo = sub { my ( undef, @argv ) = @_; push( @ran, join( q{ }, qw{sudo -n}, @argv ) ); return $said };
 
     is( Provisioner::IPPool::assign( 'a.test', $VIA_POOL, 'vpnclients' ), '10.8.0.130',            'the address of the laptop is skipped' );
     is( Provisioner::IPPool::taken()->{'10.8.0.129'},                     'vpnclient:laptop.test', 'and reserved in its name' );
@@ -458,7 +458,7 @@ subtest 'refresh_via: the reservations match the server' => sub {
     my @ran;
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
     $fleet->redefine( guest_of => via_server( \$said, \@ran ) );
-    local *ViaProbe::capture_cmd = sub { push( @ran, $_[1] ); return $said };
+    local *ViaProbe::capture_sudo = sub { my ( undef, @argv ) = @_; push( @ran, join( q{ }, qw{sudo -n}, @argv ) ); return $said };
 
     is( Provisioner::IPPool::refresh_via( $VIA_POOL, 'vpnclients' ), 2, 'both clients are counted' );
     is_deeply( [ @{ Provisioner::IPPool::taken() }{qw{10.8.0.129 10.8.0.131}} ], [qw{vpnclient:laptop.test vpnclient:phone.test}], 'and reserved' );
@@ -571,11 +571,12 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
 
     # With a far side, the command runs in a shell here, with the programs of
     # that directory first on the PATH, as a hypervisor would run it.
-    sub capture_cmd ( $self, $cmd ) {
+    sub capture_cmd ( $self, @argv ) {
+        my $cmd = $argv[-1];
         push @{ $self->{asked} }, $cmd;
-        return $cmd =~ m/ping/ ? $self->{sweep} : $self->{guests} unless $self->{far_side};
+        return index( $cmd, 'ping' ) >= 0 ? $self->{sweep} : $self->{guests} unless $self->{far_side};
         local $ENV{PATH} = "$self->{far_side}:/usr/bin:/bin";
-        IPC::Run3::run3( [ 'sh', '-c', $cmd ], \undef, \my $out, \undef );
+        IPC::Run3::run3( \@argv, \undef, \my $out, \undef );
         return $out;
     }
 

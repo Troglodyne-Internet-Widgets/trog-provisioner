@@ -138,7 +138,8 @@ subtest 'wait_for_cloud_init re-runs the modules that failed' => sub {
     $machine->redefine( run_sudo => sub { my ( $s, @c ) = @_; push @ran, 'sudo ' . join( ' ', @c ); return 0 } );
     $machine->redefine(
         capture_cmd => sub {
-            my ( $s, $cmd ) = @_;
+            my ( $s, @argv ) = @_;
+            my $cmd = join( q{ }, @argv );
             push @ran, $cmd;
             return '[{"name":"modules-final/config-foo","result":"FAIL"},' . '{"name":"modules-config/config-bar","result":"SUCCESS"}]'
               if index( $cmd, 'analyze dump' ) >= 0;
@@ -198,7 +199,7 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
     my $machine = Test::MockModule->new('Trog::Machine');
     $machine->redefine( run_cmd     => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c );           return 0 } );
     $machine->redefine( run_sudo    => sub { my ( $s, @c ) = @_; push @ran, 'sudo ' . join( ' ', @c ); return 0 } );
-    $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
+    $machine->redefine( capture_cmd => sub { my ( $s, @argv ) = @_; my $cmd = join( q{ }, @argv ); return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
 
     ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'finishes' );
 
@@ -221,11 +222,11 @@ subtest 'a build make failed is not a build that finished' => sub {
 
     foreach my $case ( [ "2\n", 'make exited 2' ], [ "1\n", 'make exited 1' ], [ q{}, 'nothing recorded a result' ] ) {
         my ( $recorded, $desc ) = @$case;
-        $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? $recorded : 'the last few lines' } );
+        $machine->redefine( capture_cmd => sub { my ( $s, @argv ) = @_; my $cmd = join( q{ }, @argv ); return $cmd =~ m/setup[.]status/ ? $recorded : 'the last few lines' } );
         ok( !quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), "false when $desc" );
     }
 
-    $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
+    $machine->redefine( capture_cmd => sub { my ( $s, @argv ) = @_; my $cmd = join( q{ }, @argv ); return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
     ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'and true when it exited zero' );
 };
 
@@ -246,7 +247,7 @@ subtest 'a build that is never going to start is given up on, saying why' => sub
         }
     );
     $machine->redefine( run_sudo    => sub { 0 } );
-    $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/cloud-init-output/ ? "E: Unable to correct problems\n" : q{} } );
+    $machine->redefine( capture_cmd => sub { my ( $s, @argv ) = @_; my $cmd = join( q{ }, @argv ); return index( $cmd, 'cloud-init-output' ) >= 0 ? "E: Unable to correct problems\n" : q{} } );
 
     my $err = exception {
         quietly( sub { $guest->wait_for_makefile('vm.example.test') } )

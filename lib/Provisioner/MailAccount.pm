@@ -407,7 +407,7 @@ my sub root ( $guest, $script ) {
 
 # Runs $script as root on the guest, and returns what it printed.
 my sub root_out ( $guest, $script ) {
-    return $guest->capture_cmd( 'sudo -n sh -c ' . Trog::Utils::shell_quote($script) ) // q{};
+    return $guest->capture_sudo( qw{sh -c}, $script ) // q{};
 }
 
 # The text of the file at $path on the guest, or undef where it is not there.
@@ -538,11 +538,11 @@ Dies when the guest does not answer with a number for each.
 =cut
 
 sub dovecot_ids ($guest) {
-    my $uid = $guest->capture_cmd('id -u dovecot') // q{};
+    my $uid = $guest->capture_cmd(qw{id -u dovecot}) // q{};
     chomp $uid;
     die "Could not read the uid of dovecot on the guest.\n" unless $uid =~ m/\A\d+\z/;
 
-    my ($gid) = ( $guest->capture_cmd('getent group dovecot') // q{} ) =~ m/\A[^:\n]*:[^:\n]*:(\d+):/;
+    my ($gid) = ( $guest->capture_cmd(qw{getent group dovecot}) // q{} ) =~ m/\A[^:\n]*:[^:\n]*:(\d+):/;
     die "Could not read the gid of the dovecot group on the guest.\n" unless defined $gid;
 
     return ( $uid, $gid );
