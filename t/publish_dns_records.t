@@ -534,6 +534,58 @@ subtest 'a record without a match owns only the same content, and an empty match
     );
 };
 
+# lexicon names a record of easyDNS by its host and the zone, and easyDNS keeps
+# the apex as an empty host or as "@", whichever wrote it.  So the apex lists
+# as .DOMAIN or as @.DOMAIN, and both are the domain.
+subtest 'a record at the apex is the record of the domain, however the provider spells the apex' => sub {
+    my $file = records_file( \%MX, \%SPF );
+    foreach my $apex ( ".$DOMAIN", "\@.$DOMAIN" ) {
+        against(
+            holding(
+                { name => $apex, type => 'A',   content => '198.51.100.9',               id => 'old-a' },
+                { name => $apex, type => 'TXT', content => 'v=spf1 +mx ~all',            id => 'old-spf' },
+                { name => $apex, type => 'MX',  content => "10 mail.$DOMAIN.",           id => 'the-mx' },
+                { name => $apex, type => 'TXT', content => 'google-site-verification=x', id => 'theirs' },
+            ),
+            sub {
+                my ($ran) = @_;
+                my $rc;
+                my ( undef, $said ) = capture { $rc = Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+                is( $rc, 0, "the run succeeds, with the apex listed as $apex" ) or diag $said;
+                like( ( grep { index( $_, ' update A ' ) >= 0 } @{$ran} )[0]   // q{}, qr/--identifier='old-a'/,   'the A record of the apex is updated in place' );
+                like( ( grep { index( $_, ' update TXT ' ) >= 0 } @{$ran} )[0] // q{}, qr/--identifier='old-spf'/, 'and so is its SPF' );
+                is( scalar sent( $ran, 'create' ), 0, 'and nothing is created beside them, the MX being right already' ) or diag join "\n", @{$ran};
+            }
+        );
+    }
+};
+
+# A build before the apex was read as the domain created a second A record and
+# a second SPF beside the ones that were there.  Two SPF records are a permerror
+# to every receiver, and two addresses send half the clients to the old server.
+# Which of them to delete is the operator's to decide.
+subtest 'a second record where the domain owns one is reported, and not deleted' => sub {
+    my $file = records_file( \%SPF );
+    against(
+        holding(
+            { name => "\@.$DOMAIN", type => 'A',   content => '198.51.100.9',       id => 'old-a' },
+            { name => ".$DOMAIN",   type => 'A',   content => $ADDRESS,             id => 'our-a' },
+            { name => "\@.$DOMAIN", type => 'TXT', content => 'v=spf1 +mx ~all',    id => 'old-spf' },
+            { name => ".$DOMAIN",   type => 'TXT', content => 'v=spf1 +a +mx -all', id => 'our-spf' },
+        ),
+        sub {
+            my ($ran) = @_;
+            my $rc;
+            my ( undef, $said ) = capture { $rc = Trog::PublishDNSRecords::main( '--records', $file, $DOMAIN, $ADDRESS ) };
+            is( $rc, 1, 'the run fails, so the postrun says so' );
+            like( $said, qr/A[ ]\Q$DOMAIN\E[ ]also[ ]holds[ ]198[.]51[.]100[.]9/,      'naming the other address' );
+            like( $said, qr/--identifier='old-a'/,                                     'with the command that would delete it' );
+            like( $said, qr/TXT[ ]\Q$DOMAIN\E[ ]also[ ]holds[ ]v=spf1[ ][+]mx[ ]~all/, 'and the other SPF' );
+            is( scalar grep( { !is_action( $_, 'list' ) } @{$ran} ), 0, 'and sends nothing, because the records of ours are right' ) or diag join "\n", @{$ran};
+        }
+    );
+};
+
 subtest 'a record at a name that holds a CNAME is refused' => sub {
     my $file = records_file( { type => 'TXT', name => "_dmarc.$DOMAIN", content => 'v=DMARC1; p=none', match => 'v=DMARC1' } );
     against(

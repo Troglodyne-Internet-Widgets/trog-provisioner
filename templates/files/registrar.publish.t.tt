@@ -2,6 +2,12 @@
     included in its guest test.  Asked of the provider rather than of
     a resolver, because a resolver answers out of its cache. -%]
 [% IF publish_records -%]
+# A name as the provider lists it, for a comparison: some list it with its
+# trailing dot, and DNS ignores case.  lexicon lists a record of easyDNS as its
+# host, a dot and the zone, and easyDNS keeps the apex as an empty host or as
+# "@", so the apex lists as .zone or as @.zone.  See canonical in
+# scripts/publish_dns_records.
+sub listed_name { my ($name) = @_; return lc($name // '') =~ s/[.]+\z//r =~ s/\A[@]?[.]//r }
 [% IF unmanaged -%]
 # Nothing writes the zone of this domain.  See unmanaged in
 # Provisioner::Recipe::registrar.
@@ -24,19 +30,22 @@ subtest 'the records of the domain are published to the zone that holds it' => s
 
     my $a_records = $listed->('A');
     ok($a_records, 'the provider answered with a list of A records') or diag $why->('A');
-    ok((grep { ($_->{content} // '') eq '[% address %]' } @{ $a_records // [] }), 'holding the address of this domain')
+    my @apex = grep { listed_name($_->{name}) eq listed_name('[% domain %]') } @{ $a_records // [] };
+    ok((grep { ($_->{content} // '') eq '[% address %]' } @apex), 'holding the address of this domain')
         or diag explain $a_records;
+    # A second address beside it sends a part of the clients somewhere else.
+    is(scalar @apex, 1, 'and no other address') or diag explain \@apex;
 [% IF own_nameserver -%]
     # The zone itself answers for its nameserver, and a resolver that asks it
     # must get the address that the glue in the zone above gives.
-    my ($ns) = grep { lc($_->{name} // '') =~ m/\A\Q[% own_nameserver %]\E[.]?\z/ } @{ $a_records // [] };
+    my ($ns) = grep { listed_name($_->{name}) eq listed_name('[% own_nameserver %]') } @{ $a_records // [] };
     is(($ns // {})->{content}, '[% address %]', '[% own_nameserver %] is at that address too')
         or diag explain $a_records;
 [% END -%]
 [% FOREACH name IN address_names -%]
     {
         # The target of an MX or an SRV, which must not be a CNAME.
-        my ($held) = grep { lc($_->{name} // '') =~ m/\A\Q[% name %]\E[.]?\z/ } @{ $a_records // [] };
+        my ($held) = grep { listed_name($_->{name}) eq listed_name('[% name %]') } @{ $a_records // [] };
         is(($held // {})->{content}, '[% address %]', '[% name %] holds the address as an A record')
             or diag explain $a_records;
     }
@@ -44,9 +53,9 @@ subtest 'the records of the domain are published to the zone that holds it' => s
 
     my $cnames = $listed->('CNAME');
     ok($cnames, 'and with a list of CNAMEs') or diag $why->('CNAME');
-    my %cname = map { ($_->{name} // '') => 1 } @{ $cnames // [] };
+    my %cname = map { listed_name($_->{name}) => 1 } @{ $cnames // [] };
 [% FOREACH alias IN domain_aliases.sort() -%]
-    ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
+    ok($cname{listed_name('[% alias %]')}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
 
     # The records of the recipes other than names.  A TXT record can come back
@@ -58,9 +67,16 @@ subtest 'the records of the domain are published to the zone that holds it' => s
 [% FOREACH record IN zone_records -%]
     {
         my $rows = $of{'[% record.type %]'} //= $listed->('[% record.type %]');
+        my @here = grep { listed_name($_->{name}) eq listed_name('[% record.name %]') } @{ $rows // [] };
         my $want = $plain->(q{[% record.content | mark_raw %]});
-        ok((grep { $plain->($_->{name}) eq $plain->('[% record.name %]') && $plain->($_->{content}) eq $want } @{ $rows // [] }),
+        ok((grep { $plain->($_->{content}) eq $want } @here),
             '[% record.type %] [% record.name %] holds [% record.content | mark_raw %]') or diag explain $rows;
+[% IF record.match.defined() -%]
+        # Two records that the match claims both answer, and two SPF records
+        # are a permerror to every receiver.
+        my @claimed = grep { index($plain->($_->{content}), lc q{[% record.match | mark_raw %]}) == 0 } @here;
+        is(scalar @claimed, 1, 'and no other [% record.type %] at [% record.name %][% IF record.match != '' %] that starts with "[% record.match | mark_raw %]"[% END %]') or diag explain \@claimed;
+[% END -%]
     }
 [% END -%]
 };
@@ -77,15 +93,15 @@ subtest 'the names in [% zone %] are published there, through its own shortcut' 
         my $out  = `$shortcut list $type --output=JSON 2>&1`;
         my $list = eval { JSON::PP->new->utf8->decode($out) };
         ok(ref $list eq 'ARRAY', "the provider of the zone answered with a list of $type records") or diag $out;
-        $held{$type} = { map { lc(($_->{name} // '') =~ s/[.]\z//r) => lc(($_->{content} // '') =~ s/[.]\z//r) } @{ ref $list eq 'ARRAY' ? $list : [] } };
+        $held{$type} = { map { listed_name($_->{name}) => lc(($_->{content} // '') =~ s/[.]\z//r) } @{ ref $list eq 'ARRAY' ? $list : [] } };
     }
 [% FOREACH apex IN zone_apexes -%]
 [% IF apex == zone -%]
-    is($held{A}{'[% zone %]'}, '[% address %]', 'the apex of [% zone %] is at the address of this domain') or diag explain \%held;
+    is($held{A}{listed_name('[% zone %]')}, '[% address %]', 'the apex of [% zone %] is at the address of this domain') or diag explain \%held;
 [% END -%]
 [% END -%]
 [% FOREACH name IN zone_cnames[zone].sort() -%]
-    is($held{CNAME}{'[% name %]'}, '[% domain %]', '[% name %] is a CNAME of this domain') or diag explain \%held;
+    is($held{CNAME}{listed_name('[% name %]')}, '[% domain %]', '[% name %] is a CNAME of this domain') or diag explain \%held;
 [% END -%]
 };
 [% END -%]

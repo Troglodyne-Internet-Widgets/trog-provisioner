@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use JSON::PP     ();
+use List::Util   ();
 use Getopt::Long qw{GetOptionsFromArray};
 
 my $USAGE = "usage: publish_dns_records [--dryrun] [--shortcut PATH] [--addressed NAME ...] [--records FILE] DOMAIN ADDRESS [ALIAS ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --alias-of TARGET NAME [NAME ...]\n" . "       publish_dns_records [--dryrun] --shortcut PATH --delegate ZONE NAMESERVER [ADDRESS]\n";
@@ -44,11 +45,14 @@ sub run {
 }
 
 # A name or a target as a provider compares it: some answer with the trailing
-# dot and some without, and DNS ignores case.
+# dot and some without, and DNS ignores case.  lexicon lists a record of
+# easyDNS as its host, a dot and the zone, and easyDNS keeps the apex as an
+# empty host or as "@".  So the apex lists as .zone or as @.zone, and both are
+# the zone.  No name of a host starts with a dot or an "@".
 sub canonical {
     my ($value) = @_;
 
-    return lc( $value // q{} ) =~ s/[.]+\z//r;
+    return lc( $value // q{} ) =~ s/[.]+\z//r =~ s/\A[@]?[.]//r;
 }
 
 # The text of a TXT record.  Some providers answer with it in quotes.  pdns
@@ -86,13 +90,18 @@ sub existing {
     return @{$rows};
 }
 
+# The rows of those that are this name.
+sub rows_at {
+    my ( $rows, $name ) = @_;
+
+    return grep { canonical( $_->{name} ) eq canonical($name) } @{$rows};
+}
+
 # Whichever of those rows is this name, if the provider has one.
 sub held_for {
     my ( $rows, $name ) = @_;
 
-    my ($held) = grep { canonical( $_->{name} ) eq canonical($name) } @{$rows};
-
-    return $held;
+    return List::Util::first { canonical( $_->{name} ) eq canonical($name) } @{$rows};
 }
 
 # One record, put where the provider can serve it, without taking anything away.
@@ -199,14 +208,22 @@ sub replaceable {
     return defined $domain && $type eq 'A' && $clash->{type} eq 'CNAME' && canonical( $clash->{content} ) eq canonical($domain);
 }
 
+# The command that deletes $row, a record of $type at $name that the provider
+# listed.
+sub delete_command {
+    my ( $shortcut, $type, $name, $row ) = @_;
+
+    my @command = ( quoted($shortcut), 'delete', $type, '--name=' . quoted($name), '--content=' . quoted( $row->{content} ) );
+    push @command, '--identifier=' . quoted( $row->{id} ) if defined $row->{id};
+    return join ' ', @command;
+}
+
 # Takes that alias away.  Answers whether it is gone.
 sub unalias {
     my (%opts) = @_;
 
     my ( $clash, $name ) = @opts{qw{clash name}};
-    my @command = ( quoted( $opts{shortcut} ), qw{delete CNAME}, '--name=' . quoted($name), '--content=' . quoted( $clash->{content} ) );
-    push @command, '--identifier=' . quoted( $clash->{id} ) if defined $clash->{id};
-    my $command = join ' ', @command;
+    my $command = delete_command( $opts{shortcut}, 'CNAME', $name, $clash );
 
     if ( $opts{dryrun} ) {
         print "[DRY RUN] $command\n";
@@ -248,12 +265,38 @@ sub refusal {
 sub owned_row {
     my ( $rows, $record ) = @_;
 
-    my @here = grep { canonical( $_->{name} ) eq canonical( $record->{name} ) } @{$rows};
+    my @here = rows_at( $rows, $record->{name} );
     my ($same) = grep { same_content( $record->{type}, $_->{content}, $record->{content} ) } @here;
     return $same if $same || !defined $record->{match};
 
     my ($ours) = grep { index( unquoted( $_->{content} ), $record->{match} ) == 0 } @here;
     return $ours;
+}
+
+# The rows other than $owned that the match of the record claims as well: a
+# second SPF beside the SPF of the recipe, or a second address at a name whose
+# address this publishes.  A resolver answers with all of them, so the zone is
+# wrong while they are there.  A record without a match claims no other row.
+sub other_rows {
+    my ( $rows, $record, $owned ) = @_;
+    return if !defined $record->{match};
+
+    my @claimed = grep { index( unquoted( $_->{content} ), $record->{match} ) == 0 } rows_at( $rows, $record->{name} );
+
+    # The same row of the same list, and not a row with the same content.
+    return grep { !defined $owned || $_ != $owned } @claimed;
+}
+
+# Says that the provider holds $row beside the record, and how to delete it,
+# and counts it as a failure.  Reported rather than deleted: a hand or an older
+# server wrote the row, and which of the two is wrong is theirs to decide.
+sub report_other {
+    my ( $shortcut, $record, $row ) = @_;
+
+    my ( $type, $name ) = @{$record}{qw{type name}};
+    my $delete = delete_command( $shortcut, $type, $name, $row );
+    warn "$type $name also holds $row->{content}, beside $record->{content}, and both answer.  If it is not wanted, delete it:\n    $delete\n";
+    return 1;
 }
 
 sub main {
@@ -297,14 +340,24 @@ sub main {
                     next;
                 }
             }
+
+            # The name is ours, so an empty match claims every row of the type
+            # at it.  The row that is right already is the row of the name.
+            my $record = { type => $type, name => $name, content => $wanted{$type}{$name}, match => q{} };
+            my $owned  = owned_row( $held->($type), $record );
             $failures += publish(
                 shortcut => $shortcut,
-                held     => held_for( $held->($type), $name ),
+                held     => $owned,
                 type     => $type,
                 name     => $name,
-                content  => $wanted{$type}{$name},
+                content  => $record->{content},
                 dryrun   => $dryrun,
             );
+
+            # A zone can be delegated to several nameservers, so a second NS
+            # is no fault.  A name has one address here, and one CNAME at most.
+            next if $type eq 'NS';
+            $failures += report_other( $shortcut, $record, $_ ) foreach other_rows( $held->($type), $record, $owned );
         }
     }
 
@@ -315,14 +368,16 @@ sub main {
             $failures++;
             next;
         }
+        my $owned = owned_row( $held->($type), $record );
         $failures += publish(
             shortcut => $shortcut,
-            held     => owned_row( $held->($type), $record ),
+            held     => $owned,
             type     => $type,
             name     => $name,
             content  => $record->{content},
             dryrun   => $dryrun,
         );
+        $failures += report_other( $shortcut, $record, $_ ) foreach other_rows( $held->($type), $record, $owned );
     }
 
     return $failures ? 1 : 0;
