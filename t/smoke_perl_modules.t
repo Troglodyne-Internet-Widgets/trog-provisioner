@@ -130,14 +130,14 @@ subtest 'what root leaves in a checkout goes back to its owner' => sub {
     # $< stands for root, because every file here belongs to the account that
     # runs the test.
     Trog::Script::SmokePerlModules::give_back( $dir, $<, 4242, 4343 );
-    is_deeply( [ sort { $a->[0] cmp $b->[0] } @given ], [ map { [ $_, 4242, 4343 ] } q{}, qw{/.git /.git/index /Makefile} ], 'every file and directory, and not the symlink' );
+    is_deeply( [ sort { $a->[0] cmp $b->[0] } @given ], [ map { [ $_, 4242, 4343 ] } q{}, qw{/.git /.git/index /Makefile /link} ], 'every file, directory and symlink' );
 
     # The basedir can hold a checkout through a symlink, which glob and -d take.
     @given = ();
     my $links = tempdir( CLEANUP => 1 );
     symlink( $dir, "$links/checkout" ) or die "Cannot make the symlink: $!";
     Trog::Script::SmokePerlModules::give_back( "$links/checkout", $<, 4242, 4343 );
-    is( scalar @given, 4, 'and through a checkout that is a symlink' );
+    is( scalar @given, 5, 'and through a checkout that is a symlink' );
 
     @given = ();
     Trog::Script::SmokePerlModules::give_back( $dir, $< + 1, 4242, 4343 );
@@ -145,6 +145,18 @@ subtest 'what root leaves in a checkout goes back to its owner' => sub {
 
     Trog::Script::SmokePerlModules::give_back( $dir, $<, $<, 4343 );
     is_deeply( \@given, [], 'and nothing when the owner ran the install' );
+};
+
+subtest 'a symlink is given, not what it points at' => sub {
+
+    # A chown that followed this link would fail, because nothing is there.
+    my $dir = tempdir( CLEANUP => 1 );
+    symlink( '/bogus/nothing', "$dir/dangling" ) or die "Cannot make the symlink: $!";
+
+    my @warned;
+    local $SIG{__WARN__} = sub { push @warned, @_ };
+    Trog::Script::SmokePerlModules::set_owner( "$dir/dangling", $<, $( + 0 );
+    is_deeply( \@warned, [], 'the owner of the link changes, and its target is never touched' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 
 use Cwd        ();
 use File::Find ();
+use POSIX      ();
 
 =head1 smoke_perl_modules.pl
 
@@ -33,7 +34,7 @@ The install goes into the perl of the guest, so it runs as root.  It also
 writes in the checkout: Makefile.PL writes F<Makefile> and F<MYMETA.*>, and the
 git that dzil plugins run rewrites F<.git/index>.  So after the install, each
 file in the checkout that the script's own account owns goes to the owner of
-the checkout.  A symlink stays as it is, because chown follows it.
+the checkout, symlinks too.
 
 The tests then run as the owner of the checkout, through C<cpan_install --as>,
 so that nothing they write belongs to root.  A file that root owns in a checkout is one
@@ -121,7 +122,7 @@ sub as_owner {
 =head2 give_back($dir, $from, $uid, $gid)
 
 Gives each file and directory under C<$dir> that C<$from> owns to C<$uid> and
-C<$gid>, and leaves a symlink alone.  Nothing happens when C<$from> is
+C<$gid>, a symlink as well.  Nothing happens when C<$from> is
 C<$uid>.  When C<$dir> is itself a symlink, the walk goes through it, as the
 install and the tests did.
 
@@ -136,7 +137,7 @@ sub give_back {
             no_chdir => 1,
             wanted   => sub {
                 my @st = lstat $File::Find::name;
-                return if !@st || -l _ || $st[4] != $from;
+                return if !@st || $st[4] != $from;
                 set_owner( $File::Find::name, $uid, $gid );
             },
         },
@@ -147,14 +148,15 @@ sub give_back {
 
 =head2 set_owner($path, $uid, $gid)
 
-chown, in a sub of its own so that a test can see each call without root.
+lchown, which changes a symlink itself and never what it points at.  It is in a
+sub of its own, so that a test can see each call without root.
 Warns when the chown fails, and goes on.
 
 =cut
 
 sub set_owner {
     my ( $path, $uid, $gid ) = @_;
-    chown( $uid, $gid, $path ) or warn "smoke_perl_modules: cannot give $path to $uid:$gid: $!\n";
+    POSIX::lchown( $uid, $gid, $path ) or warn "smoke_perl_modules: cannot give $path to $uid:$gid: $!\n";
     return;
 }
 
