@@ -24,8 +24,8 @@ cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] [% a
     target can run after this one.  Each clone becomes a directory the agent
     may read and write. -%]
 [% script_dir %]/queue_postrun_task [% script_dir %]/claude_settings add-repos [% install_dir %]/[% domain %]/[% basedir %] [% install_dir %]/[% domain %]/.claude/settings.json
-[%# The function passes each clone to claude as --add-dir, which loads its
-    skills. -%]
+[%# The function passes each clone that has skills to claude as --add-dir,
+    which loads them. -%]
 [% script_dir %]/bashrc_d [% admin_user %] 50-admincode-[% domain %] admincode.claude.bash
 [% END -%]
 [% IF modules.grep('^perl$').size() %]

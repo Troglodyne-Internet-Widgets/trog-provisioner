@@ -88,12 +88,12 @@ subtest 'the checkouts are working directories of the agent only on a guest that
 
 # Claude Code loads the skills of a checkout only for --add-dir, so this runs
 # the function that the recipe writes, with a claude that prints what it got.
-subtest 'claude gets --add-dir for every clone, on a guest that runs claude' => sub {
+subtest 'claude gets --add-dir for every clone that has skills, on a guest that runs claude' => sub {
     my $root = tempdir( CLEANUP => 1 );
-    foreach my $repo (qw{one/.git .github/.git}) {
-        File::Path::make_path("$root/code.test.test/src/$repo");
+    foreach my $dir (qw{one/.git one/.claude/skills .github/.git .github/.claude/skills noskills/.git notarepo/.claude/skills}) {
+        File::Path::make_path("$root/code.test.test/src/$dir");
     }
-    File::Path::make_path( "$root/code.test.test/src/notarepo", "$root/other.test.test/src/two/.git" );
+    File::Path::make_path( "$root/other.test.test/src/two/.git", "$root/other.test.test/src/two/.claude/skills" );
 
     my $bin = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$bin/claude", qq{#!/bin/sh\nprintf '%s\\n' "\$@"\n} );
@@ -116,7 +116,7 @@ subtest 'claude gets --add-dir for every clone, on a guest that runs claude' => 
     };
 
     my @one = map { ( '--add-dir', "$root/code.test.test/src/$_" ) } qw{one .github};
-    is_deeply( [ sort @{ $run->( $sources[0], $sources[0] ) } ], [ sort @one, q{--resume} ], q{each clone of the basedir, dotted ones too, once each however often .bashrc runs, and the arguments of the caller} ) or diag explain $run->( $sources[0], $sources[0] );
+    is_deeply( [ sort @{ $run->( $sources[0], $sources[0] ) } ], [ sort @one, q{--resume} ], q{each clone of the basedir with skills, dotted ones too, once each however often .bashrc runs, and the arguments of the caller, but no clone without skills and no skills outside a clone} ) or diag explain $run->( $sources[0], $sources[0] );
     is_deeply( [ sort @{ $run->(@sources) } ], [ sort @one, '--add-dir', "$root/other.test.test/src/two", '--resume' ], 'and the clones of a second domain on the machine as well as the first' );
 
     my $alone = tempdir( CLEANUP => 1 );
