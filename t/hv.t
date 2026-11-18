@@ -1604,6 +1604,18 @@ subtest 'the base image is fetched once' => sub {
     # No image and no URL is an error, not an empty download.
     $mock->redefine( volume_path => sub { undef } );
     like( exception { $hv->base_image(undef) }, qr/No[ ]image[ ]URL[ ]configured/, 'and nothing to fetch is an error' );
+
+    # With no URL, nothing says which distribution the call is for, so the one
+    # volume that a pool held before is the answer, and pools that have it keep it.
+    my @asked;
+    $mock->redefine( volume_path => sub { push @asked, $_[1]; return $_[1] eq 'baseimage-qcow2' ? '/pool/baseimage-qcow2' : undef } );
+    is( $hv->base_image(undef), '/pool/baseimage-qcow2', 'with no URL, the volume that a pool held before is found' );
+    is_deeply( \@asked, ['baseimage-qcow2'], 'and no other name is looked for' );
+    isnt(
+        Trog::HV::Libvirt::image_volume_name('https://example.test/ubuntu/noble.img'),
+        Trog::HV::Libvirt::image_volume_name('https://example.test/fedora/noble.img'),
+        'while an image with a URL has a family of its own for each distribution'
+    );
 };
 
 # The URL of a distribution moves, so a volume named after the URL held the
@@ -1725,6 +1737,63 @@ subtest 'published_checksum reads the sums that sit beside the image' => sub {
     $res = { success => 0, status => 404 };
     is( $hv->published_checksum('https://example.test/noble/current/noble.img'), undef, 'no sums, no answer' );
     is( $hv->published_checksum(undef),                                          undef, 'and no URL, none either' );
+};
+
+subtest 'published_checksum reads the layouts of the other distributions' => sub {
+    my $hv = fresh();
+
+    my ( @asked, %files );
+    my $http = Test::MockModule->new('HTTP::Tiny');
+    $http->redefine(
+        get => sub {
+            push @asked, $_[1];
+            my ($name) = $_[1] =~ m{([^/]+)\z};
+            return exists $files{$name} ? { success => 1, content => $files{$name} } : { success => 0, status => 404 };
+        }
+    );
+
+    my $sum   = 'ab' x 32;
+    my $other = 'cd' x 32;
+    my $url   = 'https://example.test/dist/images/img.qcow2';
+
+    # Fedora, Rocky and Alma: BSD lines, and a comment, and a signature.
+    %files = ( CHECKSUM => "-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA256\n\n# img.qcow2: 1 bytes\nSHA256 (other.qcow2) = $other\nSHA256 (img.qcow2) = " . uc($sum) . "\n-----BEGIN PGP SIGNATURE-----\n" );
+    is( $hv->published_checksum($url), $sum,                                          'a CHECKSUM file of BSD lines gives the sum of the file' );
+    is( $asked[0],                     'https://example.test/dist/images/SHA256SUMS', 'after the sha256sum layout was tried' );
+    is( $asked[1],                     'https://example.test/dist/images/CHECKSUM',   'in the same directory' );
+
+    %files = ( CHECKSUM => "SHA512 (img.qcow2) = " . ( 'ef' x 64 ) . "\nSHA256 (img.qcow2.sig) = $other\n" );
+    is( $hv->published_checksum($url), undef, 'a line of another hash, or of another file, is not the sum' );
+
+    # One file for the one image.
+    %files = ( 'img.qcow2.CHECKSUM' => "SHA256 (img.qcow2) = $sum\n" );
+    is( $hv->published_checksum($url), $sum, 'a CHECKSUM file that is named after the image' );
+
+    %files = ( 'img.qcow2.sha256' => "$sum\n" );
+    is( $hv->published_checksum($url), $sum, 'a file of the bare sum of the image' );
+
+    %files = ( 'img.qcow2.sha256sum' => "$sum  img.qcow2\n" );
+    is( $hv->published_checksum($url), $sum, 'and a sha256sum line in a file for the image' );
+
+    # A bare sum in a file for a directory of images is not for this image.
+    %files = ( SHA256SUMS => "$sum\n" );
+    is( $hv->published_checksum($url), undef, 'a bare sum in the sums of a directory says nothing about which image it is' );
+
+    # The first file with a line for the image wins.
+    %files = ( SHA256SUMS => "$other  elsewhere.img\n", CHECKSUM => "SHA256 (img.qcow2) = $sum\n" );
+    is( $hv->published_checksum($url), $sum, 'a file with no line for the image is passed over' );
+
+    %files = ();
+    is( $hv->published_checksum($url), undef, 'a distribution with none of them gets no answer, and not an error' );
+};
+
+subtest 'parse_checksums' => sub {
+    my $sum = 'ab' x 32;
+    is( Trog::HV::Libvirt::parse_checksums( "$sum *a.img\r\n", 'a.img' ),             $sum,  'a line that ends in CRLF' );
+    is( Trog::HV::Libvirt::parse_checksums( "SHA256 (a b.img) = $sum\n", 'a b.img' ), $sum,  'a file name with a space in the BSD layout' );
+    is( Trog::HV::Libvirt::parse_checksums( "$sum\n", 'a.img' ),                      undef, 'a bare sum is refused unless the file is for one image' );
+    is( Trog::HV::Libvirt::parse_checksums( "$sum\n", 'a.img', 1 ),                   $sum,  'and taken when it is' );
+    is( Trog::HV::Libvirt::parse_checksums( undef, 'a.img' ),                         undef, 'no text, no sum' );
 };
 
 subtest 'file_checksum asks the hypervisor, and base_volumes lists the builds newest first' => sub {

@@ -1022,7 +1022,11 @@ no image and no URL, or if the download fails.
 With a C<$name>, or without a URL, this is the volume of that name, and nothing
 asks whether it is current.  If the pool has no such volume, this downloads
 C<$url> to it.  Without a URL, C<$name> is C<baseimage-qcow2>, the one volume
-that a pool held before.
+that a pool held before.  It has no operating system or distribution in its
+name, because a call with no URL has nothing that says which it is for.  Every
+caller that knows the distribution passes the URL of its image, and that URL
+has a family of its own (see C<image_volume_name>).  A caller that wants a name
+of its own passes C<$name>.  Pools that hold C<baseimage-qcow2> keep using it.
 
 Otherwise the image has a family of volumes, which C<image_volume_name> names.
 This asks for the checksum that the distribution publishes, as
@@ -1033,7 +1037,9 @@ because the disk of every guest built on it is an overlay on it, and a write to
 it would corrupt each of them.  C<prune_base_images> removes it once nothing is
 backed by it.  So a guest that is built now always gets the current image.
 
-If the checksum cannot be had, that is no reason to fail a build.  The newest
+If the checksum cannot be had, for example because the distribution does not
+publish it in one of the layouts that C<published_checksum> reads, that is no
+reason to fail a build.  The newest
 volume of the family is used, and a pool with none downloads the image under the
 bare C<image_volume_name>, as it did before there were builds.
 
@@ -1126,27 +1132,77 @@ sub install_download {
 =head2 $sum = $hv->published_checksum($url)
 
 The SHA256 checksum, in lower case hex, that the distribution publishes for the
-image at C<$url>.  It is in the file C<SHA256SUMS> in the same directory.  Undef
-when that file cannot be fetched, or has no line for the image.  This runs on
-this machine, and not on the hypervisor.
+image at C<$url>.  This runs on this machine, and not on the hypervisor.
+
+Distributions do not agree on where the sums are or how they look, so this
+tries each of these files in the directory of the image, in this order, and
+returns the first line for the image that it finds:
+
+=over 4
+
+=item * C<SHA256SUMS>, in the layout of C<sha256sum>: Ubuntu and Debian.
+
+=item * C<CHECKSUM>, and C<$file.CHECKSUM>, with lines such as
+C<SHA256 (file) = hex>: Fedora, Rocky and Alma.  A line of another hash, a
+comment, or a line of a PGP signature is skipped.
+
+=item * C<$file.sha256>, and C<$file.sha256sum>, which hold the sum of the one
+file, with or without its name.
+
+=back
+
+Undef when none of them can be fetched, or none has a line for the image.  That
+is not an error.  C<base_image> then uses the newest volume that it has, and
+C<note_stale_base_image> says nothing.  A distribution that publishes its sums
+somewhere else gets the same treatment, so its image is fetched once and then
+kept.
+
+=head2 $sum = parse_checksums($text, $file, $only)
+
+The SHA256 checksum of C<$file> from the text of a sums file, in lower case hex,
+or undef.  It reads the layout of C<sha256sum> (C<hex  file> or C<hex *file>)
+and the BSD layout (C<SHA256 (file) = hex>).  A line of only the hex is taken
+when C<$only> is true, which says that the text is the sums of this image alone,
+as C<$file.sha256> is.
 
 =cut
+
+sub parse_checksums ( $text, $file, $only = 0 ) {
+    foreach my $line ( split m/\r?\n/, $text // q{} ) {
+        if ( my ( $sum, $name ) = $line =~ m/\A ([[:xdigit:]]{64}) [ ][ *]? (\S.*?) \s* \z/x ) {
+            return lc $sum if $name eq $file;
+        }
+        if ( my ( $name, $sum ) = $line =~ m/\A SHA256 [ ] \( (.+) \) [ ] = [ ] ([[:xdigit:]]{64}) \s* \z/x ) {
+            return lc $sum if $name eq $file;
+        }
+        if ( $only && $line =~ m/\A ([[:xdigit:]]{64}) \s* \z/x ) {
+            return lc $1;
+        }
+    }
+    return undef;
+}
 
 sub published_checksum {
     my ( $self, $url ) = @_;
     return undef unless $url;
 
-    my $sums = URI->new($url);
-    my $file = File::Basename::basename( $sums->path // q{} );
-    $sums->path( File::Basename::dirname( $sums->path ) . '/SHA256SUMS' );
+    my $uri  = URI->new($url);
+    my $file = File::Basename::basename( $uri->path // q{} );
+    my $dir  = File::Basename::dirname( $uri->path  // q{} );
+    my $http = HTTP::Tiny->new( timeout => 10 );
 
-    my $res = HTTP::Tiny->new( timeout => 10 )->get( $sums->as_string );
-    return undef unless $res->{success};
+    # The flag says that the file is the sums of this image alone.
+    my @candidates = ( [ 'SHA256SUMS', 0 ], [ 'CHECKSUM', 0 ], [ "$file.CHECKSUM", 1 ], [ "$file.sha256", 1 ], [ "$file.sha256sum", 1 ] );
+    foreach my $candidate (@candidates) {
+        my ( $sums_file, $only ) = @$candidate;
+        my $sums = $uri->clone;
+        $sums->path("$dir/$sums_file");
 
-    # "<sum> *<file>", or with a space in place of the star for a text file.
-    foreach my $line ( split m/\n/, $res->{content} // q{} ) {
-        my ( $sum, $name ) = $line =~ m/\A ([[:xdigit:]]{64}) [ ][ *]? (\S.*?) \s* \z/;
-        return lc $sum if defined $name && $name eq $file;
+        my $res = $http->get( $sums->as_string );
+        next unless $res->{success};
+
+        my $sum = parse_checksums( $res->{content}, $file, $only );
+        return $sum if defined $sum;
     }
     return undef;
 }
@@ -3733,9 +3789,11 @@ sub note_pool_quota {
 
 Whether the copy of an image in the pool is the one that the distribution
 publishes now.  For each image that the configuration builds guests of, it
-compares the checksum of the newest base volume with the C<SHA256SUMS> that sits
-beside the image, and reports the age of each copy that differs.  It passes when
-the pool has no copy of an image, and when the sums cannot be fetched.
+compares the checksum of the newest base volume with the one that
+C<published_checksum> reads, and reports the age of each copy that differs.  It
+passes when the pool has no copy of an image, and when the sums cannot be
+fetched or are in no layout that C<published_checksum> reads.  So it says
+nothing about a distribution that publishes its sums somewhere else.
 
 It is a note and not a check.  A copy that is old still builds a guest.  Its cost
 is that the guest upgrades every package published since, on its first boot.
