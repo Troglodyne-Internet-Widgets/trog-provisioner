@@ -7,8 +7,9 @@ export PATH := [% script_dir %]/serial-apt:$(PATH)
 
 # Under make -j, MAKEFLAGS names a jobserver whose descriptors only a recursive
 # $(MAKE) inherits.  A make, cargo or rustc in a fragment would see a jobserver
-# that it cannot open, and warn, or run one job at a time.
-unexport MAKEFLAGS
+# that it cannot open, and warn, or run one job at a time.  MFLAGS names it too,
+# and cargo and rustc read that as well.
+unexport MAKEFLAGS MFLAGS
 
 [% FOR var IN vars.keys().sort() %]
 [% var %] := [% vars.$var | mark_raw %]
