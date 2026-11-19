@@ -85,12 +85,14 @@ our $GITHUB_REPO = qr/\A $LOGIN \/ (?! [.]{1,2} \z ) [[:alnum:]_.-]{1,100} \z/;
 =head2 $COMMIT_EMAIL
 
 The address that a commit carries, as a configuration writes it into a quoted
-string: no white space, no quote and no backslash, and an C<@> with something
-on each side of it.
+string: no white space, no control character, no quote and no backslash, and an
+C<@> with something on each side of it.  An C<&>, C<< < >> and C<< > >> pass,
+so a template must not HTML-escape the address.  A control character does not
+pass, because a JSON string cannot hold one.
 
 =cut
 
-our $COMMIT_EMAIL = qr/\A [^\s"'\\]+ @ [^\s"'\\]+ \z/;
+our $COMMIT_EMAIL = qr/\A [^\s[:cntrl:]"'\\]+ @ [^\s[:cntrl:]"'\\]+ \z/;
 
 =head2 $DOTTED_VERSION
 
