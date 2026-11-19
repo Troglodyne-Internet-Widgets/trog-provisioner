@@ -17,6 +17,7 @@ use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
+use YAML::XS();
 
 use FindBin::libs;
 
@@ -37,7 +38,7 @@ $r->generate_files(
     admin_user     => 'someadmin',
     script_dir     => '/root/bin',
     main_ip        => '192.0.2.9',
-    server_name    => 'matrix.chat.test.test',
+    server_name    => 'hs.test.test',
     admin_password => $PASSWORD,
     smtp_host      => 'mail.test.test',
     smtp_user      => 'notify@test.test',
@@ -52,17 +53,25 @@ sub rendered {
       // q{};
 }
 
-# homeserver.yaml makes synapse matrix.<domain>, and nginxproxy serves it on 443.
+# The server name is the identity of the homeserver, and it is not the name
+# that nginxproxy serves the client API at.  The configuration above makes the
+# two differ, so that a template that uses one for the other shows.
+subtest 'synapse is the server that server_name names' => sub {
+    my $hs = YAML::XS::Load( rendered('homeserver.yaml') );
+    is( $hs->{server_name}, 'hs.test.test', 'homeserver.yaml names the server server_name, not matrix.<domain>' );
+    is_deeply( $hs->{auto_join_rooms}, ['#general:hs.test.test'], 'and new accounts join a room on this server' );
+};
+
 subtest 'the index page names the homeserver synapse is' => sub {
     my $index = rendered('matrix.index.html');
     like( $index, qr{Home\ Server:\ https://matrix\.chat\.test\.test$}m, 'at its public URL, with no port nothing listens on' );
-    like( $index, qr{^\s*\#general:matrix\.chat\.test\.test$}m,          'and the channels as room aliases, #room:server' );
-    like( $index, qr{^\s*\#random:matrix\.chat\.test\.test$}m,           'every one of them' );
+    like( $index, qr{^\s*\#general:hs\.test\.test$}m,                    'and the channels as room aliases on the server, #room:server_name' );
+    like( $index, qr{^\s*\#random:hs\.test\.test$}m,                     'every one of them' );
 };
 
 subtest 'the admin registration script' => sub {
     my $script = rendered('matrix_register_admin.sh');
-    my @args   = grep { m/register_new_matrix_user/ } split m/\n/, $script;
+    my @args   = grep { index( $_, 'register_new_matrix_user' ) >= 0 } split m/\n/, $script;
     is( scalar @args, 1, 'runs register_new_matrix_user once' );
     unlike( $args[0] // q{}, qr/\Q$PASSWORD\E/, 'without the admin password on its command line' );
     like( $script, qr/^\Q$PASSWORD\E$/m, 'which it reads from a file instead' );

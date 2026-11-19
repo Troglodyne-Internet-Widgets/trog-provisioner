@@ -4,7 +4,7 @@
 # option.  It is also at
 # https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html
 
-server_name: "matrix.[% domain %]"
+server_name: "[% server_name %]"
 pid_file: /var/run/matrix-synapse.pid
 
 # Synapse does not start without a value here.  It stops with this configuration
