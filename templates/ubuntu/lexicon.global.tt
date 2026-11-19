@@ -10,3 +10,5 @@
 [% FOR patch IN ['lexicon-pdns-af-unix', 'lexicon-arbitrary-record-types', 'lexicon-pdns-absolute-cname', 'lexicon-easydns-priority', 'lexicon-pdns-identifier', 'lexicon-easydns-absolute-cname'] -%]
 @cd / && { git apply --reverse --check /var/tmp/domainsetup_[% domain %]/[% patch %].patch >/dev/null 2>&1 && echo "[% patch %]: already applied"; } || git apply /var/tmp/domainsetup_[% domain %]/[% patch %].patch || echo "[% patch %]: WOULD NOT APPLY -- lexicon may be missing it; see templates/files/patches" >&2
 [% END -%]
+[%# From here on the patched files differ from the package, on purpose. -%]
+install -D -o root -g root -m 0644 lexicon.changed_packaged_files /etc/changed_packaged_files.d/lexicon

@@ -42,6 +42,47 @@ my @hooks = $hook =~ m/^DPkg::Post-Invoke:: "(.*)";$/mg;
 system( 'sh', '-c', $_ ) for grep { m/rkhunter/ } @hooks;
 cmp_ok( ( stat $db )[9] // 0, '>', 0, 'the apt hook of rkhunter records the file properties again' ) or diag $hook;
 
+subtest 'changed_packaged_files' => sub {
+    my $script = '[% script_dir %]/changed_packaged_files';
+
+    # The build ran it once to record what differs.  Every packaged file that
+    # the build went on to change on purpose is in its lists, so nothing is new.
+    my $said = `$script 2>&1`;
+    is($?, 0, 'it runs');
+    is($said, '', 'and reports nothing on a fresh guest') or diag $said;
+
+    require $script;
+    my %expected = map { $_ => 1 } Trog::ChangedPackagedFiles::expected();
+    ok($expected{'/var/lib/rkhunter/db/mirrors.dat'}, 'it expects the database of mirrors that rkhunter rewrites to change');
+
+    # A file of the debsums package, which every guest with this recipe has,
+    # and which nothing runs while this test changes it.
+    my ($file) = grep { -f } map { m/^\S+\s+(\S+)$/ ? "/$1" : () }
+        split m/\n/, ( do { local (@ARGV, $/) = '/var/lib/dpkg/info/debsums.md5sums'; <> } // '' );
+    ok(defined $file, 'the debsums package has a file to change') or return;
+    my $was = do { local (@ARGV, $/) = $file; <> };
+    my @st  = stat $file;
+
+    open(my $fh, '>>', $file) or die "Cannot append to $file: $!";
+    print {$fh} "\n# changed by the test of changed_packaged_files\n";
+    close $fh or die "Cannot close $file: $!";
+
+    $said = `$script 2>&1`;
+    like($said, qr/^DANGER:/, 'a change to a packaged file is reported');
+    like($said, qr/^\Q$file\E$/m, 'and names the file') or diag $said;
+    is(`$script 2>&1`, '', 'and is not reported again');
+
+    open($fh, '>', $file) or die "Cannot restore $file: $!";
+    print {$fh} $was;
+    close $fh or die "Cannot close $file: $!";
+    utime(@st[8, 9], $file);
+    chmod($st[2] & 07777, $file);
+
+    is(`$script 2>&1`, '', 'nor once it is restored');
+    my $state = do { local (@ARGV, $/) = '/root/changed_packaged_files.log'; <> } // '';
+    unlike($state, qr/^\Q$file\E$/m, 'which drops it from the state');
+};
+
 done_testing();
 
 # What this recipe adds to each file that another recipe gave it: the two mail
