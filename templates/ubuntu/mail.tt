@@ -196,11 +196,17 @@ test ! -d /mail/[% domain %]/[% name %]/Maildir || doveadm force-resync -u [% na
     Then make each alias, which makes the link.  Without the link, the plugin
     does not know the name: a client that deletes it deletes the messages of
     the target, which was measured here. -%]
+[%# mark_raw, because Xslate escapes for HTML, and a folder named Spam & Ham
+    would reach make as Spam &amp; Ham.  The schema of mailbox_aliases refuses
+    a quote, a dollar sign, a percent sign and a backslash, so a name stays
+    between the single quotes.  The assignments mark the two values raw once,
+    for each use below. -%]
 [% FOR alias IN mailbox_aliases.keys().sort() -%]
-[% target = mailbox_aliases.$alias -%]
+[% target = mailbox_aliases.$alias | mark_raw -%]
+[% alias_raw = alias | mark_raw -%]
 doveadm mailbox status -u [% name %]@[% domain %] messages '[% target %]' > /dev/null 2>&1 || doveadm mailbox create -u [% name %]@[% domain %] '[% target %]'
-if test -d '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]' && ! test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]'; then doveadm move -u [% name %]@[% domain %] '[% target %]' mailbox '[% alias %]' all && doveadm mailbox delete -u [% name %]@[% domain %] '[% alias %]' && echo "mail: [% domain %]: [% name %]: moved the messages of the folder [% alias %] into [% target %], and deleted [% alias %]"; fi
-test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]' || doveadm mailbox create -u [% name %]@[% domain %] '[% alias %]'
+if test -d '/mail/[% domain %]/[% name %]/Maildir/.[% alias_raw %]' && ! test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias_raw %]'; then doveadm move -u [% name %]@[% domain %] '[% target %]' mailbox '[% alias_raw %]' all && doveadm mailbox delete -u [% name %]@[% domain %] '[% alias_raw %]' && echo "mail: [% domain %]: [% name %]: moved the messages of the folder [% alias_raw %] into [% target %], and deleted [% alias_raw %]"; fi
+test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias_raw %]' || doveadm mailbox create -u [% name %]@[% domain %] '[% alias_raw %]'
 [% END -%]
 [% END -%]
 # The same modes as the housekeeping at the top, again, because doveadm made

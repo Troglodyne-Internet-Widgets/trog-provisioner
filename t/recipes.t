@@ -2120,6 +2120,51 @@ subtest 'the root password survives being put in a SQL string' => sub {
     unlike( $cnf->(q{pa'ss}), qr/&[#]39;/, 'and nothing is HTML-escaped on the way' );
 };
 
+# Xslate escapes for HTML, and none of these files is HTML.  Each value here
+# passes its pattern with an ampersand in it, so a template that forgets
+# mark_raw writes &amp; where the guest needs a &.
+subtest 'a value with an ampersand reaches a file that is not HTML as it is' => sub {
+    my $folder = 'Spam & Ham';
+    my %mail   = (
+        names           => { someone => { gecos => 'Some One', password => 'store:mail/someone/password', spam_folders => [$folder] } },
+        mailbox_aliases => { $folder => $folder },
+    );
+    my $mail = sub { Provisioner::Cookbook->load( 'mail', distro => $DISTRO )->new(%PROV) };
+
+    my %files = (
+        'the dovecot configuration' => $mail->()->render_file( 'files/mail.dovecot.tt', %G, %mail ),
+        'the makefile fragment'     => $mail->()->render( %G, %mail ),
+        'the cron file'             => $mail->()->render_file( 'files/mail.cron.tt', %G, %mail ),
+        'the guest test of mail'    => $mail->()->render_file( 'tests/mail.tt',      %G, %mail ),
+    );
+    foreach my $what ( sort keys %files ) {
+        like( $files{$what}, qr/Spam[ ]&[ ]Ham/, "a folder with an ampersand is in $what" );
+        unlike( $files{$what}, qr/&(?:amp|lt|gt|quot|[#]39);/, "and nothing in $what is HTML-escaped" );
+    }
+
+    # The training line comes from one template, for the cron file and for the
+    # makefile.
+    foreach my $what ( 'the makefile fragment', 'the cron file' ) {
+        like( $files{$what}, qr/--spam-folder[ ]'Spam[ ]&[ ]Ham'/, "the training line in $what names the folder as it is" );
+    }
+
+    my $email = 'a&b@test.test';
+    my %bot   = ( bot_email => $email );
+    my $clod  = Provisioner::Cookbook->load( 'clod', distro => $DISTRO )->new(%PROV)->render_file( 'files/clod.conf.tt', %G, %{ $required_config{clod} }, %bot );
+    like( $clod, qr/bot_email\s+=>\s+'\Q$email\E'/, 'bot_email is in the configuration of clod as it is' );
+    unlike( $clod, qr/&amp;/, 'and is not HTML-escaped' );
+
+    my %claude = ( %{ $required_config{claude} // {} }, github_user => 'some-bot', github_token => 'ghp_fakefakefake', git_email => $email );
+    my $claude = sub { Provisioner::Cookbook->load( 'claude', distro => $DISTRO )->new(%PROV) };
+    my $json   = $claude->()->render_file( 'files/claude.settings.json.tt', %G, %claude );
+    like( $json, qr/"GIT_AUTHOR_EMAIL":\s+"\Q$email\E"/,    'git_email is in the settings of claude as it is' );
+    like( $json, qr/"GIT_COMMITTER_EMAIL":\s+"\Q$email\E"/, 'for the committer too' );
+    unlike( $json, qr/&amp;/, 'and is not HTML-escaped' );
+    my $test = $claude->()->render_file( 'tests/claude.tt', %G, %claude );
+    like( $test, qr/'\Q$email\E'\)/, 'the guest test of claude names the address as it is' );
+    unlike( $test, qr/&amp;/, 'and is not HTML-escaped' );
+};
+
 subtest 'a vhost serves files only where a recipe said it has some' => sub {
     my $vhost = sub {
         my (%vhosts) = @_;

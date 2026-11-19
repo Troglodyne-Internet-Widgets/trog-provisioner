@@ -69,10 +69,14 @@ namespace inbox {
 # sets of UIDs.  The plugin can alias only a name that is not a real folder, so
 # the build first moves the messages of a real folder under an alias name into
 # its target.
+[%# mark_raw, because Xslate escapes for HTML, and a folder named Spam & Ham
+    would reach this file as Spam &amp; Ham.  The schema of mailbox_aliases
+    refuses a quote, a percent sign, a dollar sign, a backslash, a slash, a dot
+    and a line break, so what is left is safe in this file. -%]
 plugin {
 [% FOR alias IN mailbox_aliases.keys().sort() -%]
-  mailbox_alias_old[% loop.count == 1 ? '' : loop.count %] = [% mailbox_aliases.$alias %]
-  mailbox_alias_new[% loop.count == 1 ? '' : loop.count %] = [% alias %]
+  mailbox_alias_old[% loop.count == 1 ? '' : loop.count %] = [% mailbox_aliases.$alias | mark_raw %]
+  mailbox_alias_new[% loop.count == 1 ? '' : loop.count %] = [% alias | mark_raw %]
 [% END -%]
 }
 

@@ -7,7 +7,10 @@
 {
     bot              => '[% bot %]',
 [% IF bot_email -%]
-    bot_email        => '[% bot_email %]',
+[%# mark_raw, because Xslate escapes for HTML, and an address can hold an &,
+    which would reach this file as &amp;.  The pattern of bot_email refuses a
+    quote and a backslash, so the address stays between the single quotes. -%]
+    bot_email        => '[% bot_email | mark_raw %]',
 [% END -%]
     workspace        => '[% home %]/workspace',
     minion           => 'sqlite:[% home %]/clod-state/minion.db',

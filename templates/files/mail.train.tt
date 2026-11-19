@@ -3,5 +3,9 @@
     folder name has no quote and no percent sign, which the schema of
     mail.names.$USER.spam_folders sees to.  In the makefile, a dollar sign must
     be doubled, because make takes the first one, and a folder is called
-    INBOX.$spam.  The cron file is no makefile, so it keeps one. -%]
-[% script_dir %]/sa_train_amavis[% FOR folder IN names.$account.spam_folders %] --spam-folder '[% IF make %][% folder.replace('[$]', '$$') %][% ELSE %][% folder %][% END %]'[% END %] /mail/[% domain %]/[% account %]/Maildir
+    INBOX.$spam.  The cron file is no makefile, so it keeps one.
+
+    mark_raw, because Xslate escapes for HTML, and a folder named Spam & Ham
+    would reach the shell as Spam &amp; Ham.  A double quote passes the schema,
+    and is safe, because the word is between single quotes. -%]
+[% script_dir %]/sa_train_amavis[% FOR folder IN names.$account.spam_folders %] --spam-folder '[% IF make %][% folder.replace('[$]', '$$') | mark_raw %][% ELSE %][% folder | mark_raw %][% END %]'[% END %] /mail/[% domain %]/[% account %]/Maildir
