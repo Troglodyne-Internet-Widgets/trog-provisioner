@@ -223,6 +223,7 @@ chrony
 chronyd
 chroot
 chrooted
+cisofy
 claude
 codeload
 codename
@@ -345,6 +346,7 @@ lookups
 loopback
 lowercased
 lsp
+lynis
 maildir
 maildirs
 mailserver

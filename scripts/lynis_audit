@@ -1,0 +1,20 @@
+#!/bin/sh
+# Run a Lynis audit, and send the hardening index, the warnings and the
+# suggestions to syslog with the tag lynis.  The full report stays in
+# /var/log/lynis-report.dat.
+set -eu
+
+report=/var/log/lynis-report.dat
+
+# Only stderr goes to cron, which mails it.  The findings go to syslog below.
+lynis audit system --cronjob --report-file "$report" > /dev/null
+
+index=$(sed -n 's/^hardening_index=//p' "$report")
+warnings=$(grep -c '^warning\[\]=' "$report" || true)
+suggestions=$(grep -c '^suggestion\[\]=' "$report" || true)
+logger -t lynis -p user.notice "hardening_index=$index warnings=$warnings suggestions=$suggestions"
+
+# A line of the report is "warning[]=TEST|TEXT|DETAILS|SOLUTION|".
+# logger sends each line of its input as one message.
+sed -n 's/^warning\[\]=\([^|]*\)|\([^|]*\)|.*/warning \1: \2/p' "$report" | logger -t lynis -p user.warning
+sed -n 's/^suggestion\[\]=\([^|]*\)|\([^|]*\)|.*/suggestion \1: \2/p' "$report" | logger -t lynis -p user.info

@@ -1,0 +1,4 @@
+# Install the profile that the lynis recipe generates.
+install -o root -g root -m 0644 lynis_custom.prf /etc/lynis/custom.prf
+# Audit the finished guest, so that the first report is not a day away.
+[% script_dir %]/queue_postrun_task [% script_dir %]/lynis_audit
