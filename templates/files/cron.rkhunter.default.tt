@@ -1,0 +1,11 @@
+# The cron recipe writes this file.  The jobs in /etc/cron.d run rkhunter, so
+# the daily job of the package does not.  APT_AUTOGEN makes the hook in
+# /etc/apt/apt.conf.d/90rkhunter record the file properties again after each
+# apt run, so an upgraded binary is not reported on every scan.
+CRON_DAILY_RUN="false"
+CRON_DB_UPDATE="false"
+DB_UPDATE_EMAIL="false"
+REPORT_EMAIL="root"
+APT_AUTOGEN="true"
+NICE="0"
+RUN_CHECK_ON_BATTERY="false"

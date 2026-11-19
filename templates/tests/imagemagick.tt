@@ -34,4 +34,6 @@ my $magick = `magick -version 2>/dev/null` || `convert -version 2>/dev/null`;
 like( $magick, qr/\QImageMagick $wanted\E/, "the installed imagemagick is $wanted" )
     or diag $magick;
 
+ok( !-e '/tmp/imagick', 'the build removed its source tree from /tmp' );
+
 done_testing();

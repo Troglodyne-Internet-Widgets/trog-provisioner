@@ -12,4 +12,10 @@ chmod 0644 /etc/cron.d/default
 mkdir /root/.cache; /bin/true
 # Install the rkhunter configuration, and record the file properties after the makefile is done.
 mv rkhunter.conf /etc/rkhunter.conf
+install -o root -g root -m 0644 rkhunter.default /etc/default/rkhunter
 [% script_dir %]/queue_postrun_task rkhunter --propupd
+[%# --propupd does not refresh the copies of passwd and group that rkhunter
+    compares with, and the copies date from when the package was installed.
+    These two tests refresh them, so the first nightly scan does not report
+    each account that the build made.  They exit 1 when they report one. -%]
+[% script_dir %]/queue_postrun_task "rkhunter --check --enable passwd_changes,group_changes --sk --nocolors --rwo >/dev/null; true"

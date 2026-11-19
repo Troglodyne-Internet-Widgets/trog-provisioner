@@ -40,3 +40,8 @@ make install
 grep -q "/usr/local/lib" /etc/ld.so.conf || echo "/usr/local/lib/" >> /etc/ld.so.conf
 ldconfig
 "$PERL" -MImage::Magick -e 'print $Image::Magick::VERSION'
+
+# The tree is 270M, and nothing else removes what is under /tmp.  set -e stops
+# a failed build above, so it keeps its tree, to read why.
+cd /
+rm -rf /tmp/imagick
