@@ -60,6 +60,13 @@ L<Provisioner::Recipe::grafanasyslog> is the reason for this feature.  It
 requires this recipe and asks for the stream on a loopback port.  So the logs of
 the fleet reach a dashboard without a second listener on the network.
 
+C<forward_text> is the same, in the text format that rsyslog writes to its own
+files: an RFC3339 time stamp, the host, the tag and the message, one message to a
+line.  It is for a consumer that cannot parse RFC5424.
+L<Provisioner::Recipe::ossec> asks for it, because the decoders of OSSEC match
+the text format and find nothing in RFC5424.  rsyslog puts the priority in front,
+in angle brackets, and the syslog listener of OSSEC removes it.
+
 This recipe opens no firewall port for a destination.  A consumer on this guest
 listens on loopback.  A consumer on a different guest is a second collector, and
 this feature is not for that.
@@ -185,13 +192,20 @@ sub args {
                 default     => [],
                 description => 'host:port destinations each received message is copied to, above the ruleset stop.  For a consumer on this guest, such as the telegraf grafanasyslog configures.  A bracketed IPv6 literal is refused rather than supported: the consumers this exists for are on loopback.',
             },
+            forward_text => {
+                type        => 'array',
+                items       => { type => 'string', pattern => "$HOST_PORT" },
+                default     => [],
+                description => 'host:port destinations each received message is copied to as a line of text, in the format rsyslog writes to its files, rather than as RFC5424.  For a consumer on this guest that cannot parse RFC5424, such as the OSSEC manager that the ossec recipe configures.',
+            },
         },
     );
 }
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Returns C<%opts> with each repeated C<forward> destination removed.
+Returns C<%opts> with each repeated C<forward> and C<forward_text> destination
+removed.
 
 More than one party can ask for the same destination.  For example, an operator
 names it, and L<Provisioner::Recipe::grafanasyslog> asks for it as a dependent.
@@ -204,7 +218,9 @@ each message to that port twice.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{forward} = [ uniq @{ $opts{forward} } ] if ref $opts{forward} eq 'ARRAY';
+    foreach my $field (qw{forward forward_text}) {
+        $opts{$field} = [ uniq @{ $opts{$field} } ] if ref $opts{$field} eq 'ARRAY';
+    }
 
     return %opts;
 }

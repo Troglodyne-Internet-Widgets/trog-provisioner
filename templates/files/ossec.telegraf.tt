@@ -1,0 +1,17 @@
+[%# The alerts of the OSSEC manager.  The manager sends each one as JSON in an
+    RFC3164 message over UDP, which is the only form of its syslog output.  So
+    this input reads RFC3164, and the input of grafanasyslog reads RFC5424.
+    Both write the syslog measurement, so the syslog dashboard shows the alerts
+    under the appname ossec.  Provisioner::Recipe::ossec has the full path. -%]
+[[inputs.syslog]]
+  server = "udp://127.0.0.1:[% alerts_port %]"
+  syslog_standard = "RFC3164"
+
+[%# InfluxQL cannot look into the JSON.  This makes its fields into tags and
+    fields that the OSSEC dashboard groups by. -%]
+[[processors.starlark]]
+  namepass = ["syslog"]
+  script = "/etc/telegraf/ossec_alerts.star"
+[%# Last, because every key below a table header belongs to that table. -%]
+  [processors.starlark.tagpass]
+    appname = ["ossec"]
