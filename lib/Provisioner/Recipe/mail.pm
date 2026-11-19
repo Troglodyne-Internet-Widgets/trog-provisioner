@@ -90,14 +90,15 @@ creates, renames and deletes the alias without touching the target.  A link made
 by hand is not safe, because dovecot keeps one index for each name, so the same
 messages show under two sets of UIDs.  An alias that has no link is not safe
 either: a client that deletes it deletes the messages of the target.  So the
-build makes the link of each alias for each account in C<names>.  The plugin
-makes one for any other account when a client first creates the alias.  The
+build makes the link of each alias for each account in C<names>, and for the
+catchall.  The plugin makes one for any other account when a client first
+creates the alias.  The
 plugin takes the target as its C<mailbox_alias_old> and the alias as its
 C<mailbox_alias_new>.
 
 The plugin can alias only a name that is not a real folder, and a restored store
-can have a real folder under an alias name.  So for each account and each
-alias, after the store is restored and before the training, the build does this
+can have a real folder under an alias name.  So for each account, the catchall
+among them, and each alias, after the store is restored and before the training, the build does this
 when the alias is a real folder.  It moves the messages into the target with
 C<doveadm move>, then deletes the empty folder, and writes a line about it in
 the setup log.  The move does not depend on whether the target exists, so
@@ -514,6 +515,7 @@ sub args {
         properties => {
             names => {
                 type                 => 'object',
+                default              => {},
                 additionalProperties => {
                     type       => 'object',
                     required   => [qw{password gecos}],

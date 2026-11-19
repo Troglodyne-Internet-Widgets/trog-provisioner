@@ -373,7 +373,10 @@ SKIP: {
     my $listed = `printf 'a1 LIST (SPECIAL-USE) "" "*"\\na2 LOGOUT\\n' | doveadm exec imap -u '$user' 2>&1`;
     foreach my $folder ( sort keys %use ) {
         my $name = $folder =~ m/\s/ ? qq{"$folder"} : $folder;
-        like( $listed, qr/^[*] LIST \(\Q$use{$folder}\E\) "[.]" \Q$name\E\s*$/m, "$folder has the special use $use{$folder}" ) or diag $listed;
+
+        # The special use is one attribute among others, such as \UnMarked
+        # on a folder that the build wrote to.
+        like( $listed, qr/^[*] LIST \((?:[^)]*[ ])?\Q$use{$folder}\E(?:[ ][^)]*)?\) "[.]" \Q$name\E\s*$/m, "$folder has the special use $use{$folder}" ) or diag $listed;
     }
     my $subscribed = `doveadm mailbox list -s -u '$user' 2>&1`;
     foreach my $folder ( sort keys %use ) {
