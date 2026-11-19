@@ -54,7 +54,7 @@ my $hv = Test::MockModule->new('Trog::HV');
 $hv->redefine( new => sub { return bless {}, 'FakeHV' } );
 
 subtest 'a domain without a command is refused with the usage' => sub {
-    like( exception { Trog::Skill::AskGuest::main('vm.test') }, qr/Usage: \s+ ask_guest \s+ DOMAIN \s+ COMMAND/, 'names what it takes' );
+    like( exception { Trog::Skill::AskGuest::main('vm.test') }, qr/Usage: \s+ ask_guest \s+ \[--agent\] \s+ DOMAIN \s+ COMMAND/, 'names what it takes' );
 };
 
 subtest 'a key the store never gave up is said so, rather than handed to ssh as nothing' => sub {
@@ -64,6 +64,25 @@ subtest 'a key the store never gave up is said so, rather than handed to ssh as 
     my $err = exception { Trog::Skill::AskGuest::main( 'vm.test', 'true' ) };
     like( $err, qr/No \s+ key \s+ for \s+ vm[.]test/,   'names the domain it has no key for' );
     like( $err, qr/password \s+ goes \s+ on \s+ stdin/, 'and says how to give the store one' );
+    like( $err, qr/ask_guest \s+ --agent/,              'or how to log in through the ssh agent' );
+};
+
+subtest '--agent logs in through the ssh agent, and never asks the store for the key' => sub {
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my ( $sent, %built ) = ( bless {}, 'FakeGuest' );
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { die "key_path was asked, which opens the store\n" } );
+    $guest->redefine( new      => sub { ( undef, %built ) = @_; return $sent } );
+
+    my $err = exception {
+        capture_stdout { Trog::Skill::AskGuest::main(qw{--agent vm.test true}) }
+    };
+    is( $err, undef, 'the store is never asked for the key' )                                       or diag $err;
+    ok( !exists $built{key_path}, 'and the guest has no key, so ssh offers the keys of the agent' ) or diag explain \%built;
+    is_deeply( $sent->{sent}, [qw{sh -c true}], 'and the command reaches it' );
+
+    delete local $ENV{SSH_AUTH_SOCK};
+    like( exception { Trog::Skill::AskGuest::main(qw{--agent vm.test true}) }, qr/SSH_AUTH_SOCK \s+ is \s+ not \s+ set/, 'with no agent, --agent is refused' );
 };
 
 subtest 'a guest that nothing runs at an address is said so' => sub {
@@ -99,6 +118,14 @@ subtest 'a domain that shares the guest of another is asked of that guest' => su
     is_deeply( \@addressed,   ['host.test.test'], 'the address is of the host' );
     is_deeply( \@keyed,       ['host.test.test'], 'and so is the key' );
     is_deeply( $sent->{sent}, [qw{sh -c true}],   'and the command reaches it' );
+
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my %built;
+    $guest->redefine( new => sub { ( undef, %built ) = @_; return $sent } );
+    @addressed = ();
+    capture_stdout { Trog::Skill::AskGuest::main(qw{--agent tenant.test.test true}) };
+    is_deeply( \@addressed, ['host.test.test'], 'with --agent, the address is of the host too' );
+    is( $built{name}, 'host.test.test', 'and so is the guest it logs in to' );
 };
 
 done_testing();

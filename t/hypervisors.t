@@ -505,6 +505,38 @@ subtest 'guest_of leaves $_ to its caller' => sub {
     is( $said[0][1], 'someadmin', 'and the guest gets the admin of the provision.conf' );
 };
 
+subtest 'guest_of_with_agent logs in to the guest of the host through the agent, with no key' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir("$dir/host.example.test") or die "mkdir: $!";
+    File::Slurper::Temp::write_text( "$dir/host.example.test/provision.conf", "        distro=ubuntu\n        admin_user=someadmin\n" );
+
+    my ( @machine_of, @addressed );
+    my $fleet    = Test::MockModule->new('Trog::Hypervisors');
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $guest    = Test::MockModule->new('Trog::Guest');
+    my $hv       = Test::MockModule->new('Trog::HV');
+    $fleet->redefine( load => sub { return bless {}, 'GuestOfFleet' } );
+    $cookbook->redefine( machine_of => sub { push( @machine_of, $_[1] ); return 'host.example.test' } );
+    $guest->redefine( key_path => sub { die "key_path was asked, which opens the store\n" } );
+    $hv->redefine( new => sub { return bless {}, 'GuestOfHV' } );
+    no warnings 'once';
+    local *GuestOfFleet::configured      = sub { 0 };
+    local *GuestOfHV::inspection_address = sub { push( @addressed, $_[1] ); '192.0.2.7' };
+    local *GuestOfHV::domain_dir         = sub { $dir };
+    use warnings;
+
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my $found = Trog::Hypervisors->guest_of_with_agent('tenant.example.test');
+    is_deeply( \@machine_of, ['tenant.example.test'], 'the domain is mapped to the machine that runs it' );
+    is_deeply( \@addressed,  ['host.example.test'],   'and the address is of that machine' );
+    is( $found->{name},     'host.example.test', 'the guest is the host' );
+    is( $found->{user},     'someadmin',         'as the admin of its provision.conf' );
+    is( $found->{key_path}, undef,               'with no key, so ssh offers the keys of the agent' );
+
+    delete local $ENV{SSH_AUTH_SOCK};
+    like( exception { Trog::Hypervisors->guest_of_with_agent('tenant.example.test') }, qr/SSH_AUTH_SOCK[ ]is[ ]not[ ]set/, 'with no agent, it dies rather than reaching for a key' );
+};
+
 # --- choose -------------------------------------------------------------------
 subtest 'choose' => sub {
     my $path = fleet_file();

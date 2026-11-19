@@ -147,7 +147,13 @@ subtest 'a file that is genuinely not there is still reported missing' => sub {
 
     package FakeHV;
 
-    sub domain_dir { return '/bogus/domains' }
+    sub domain_dir         { return '/bogus/domains' }
+    sub inspection_address { return '192.0.2.10' }
+    sub describe           { return 'a fake hypervisor' }
+
+    # A guest that answers whoami, and keeps what it was built with.
+    package FakeLogin;
+    sub capture_cmd { return "admin\n" }
 }
 
 subtest 'a key the store never gave up is said so, rather than handed to ssh as nothing' => sub {
@@ -166,7 +172,35 @@ subtest 'a key the store never gave up is said so, rather than handed to ssh as 
     # in a pattern is ignored and the match would pass on anything.
     like( $err, qr/No \s+ key \s+ for \s+ vm[.]test/,   'names the domain it has no key for' );
     like( $err, qr/password \s+ goes \s+ on \s+ stdin/, 'and says how to give the store one' );
+    like( $err, qr/collect_artifacts \s+ --agent/,      'or how to log in through the ssh agent' );
     unlike( $err, qr/Permission \s+ denied/, 'instead of leaving ssh to report a refusal it cannot explain' );
+};
+
+subtest '--agent logs in through the ssh agent, and never asks the store for the key' => sub {
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( new => sub { return bless {}, 'FakeHV' } );
+
+    my %built;
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { die "key_path was asked, which opens the store\n" } );
+    $guest->redefine( new      => sub { ( undef, %built ) = @_; return bless {}, 'FakeLogin' } );
+
+    my $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', agent => 1, user => 'admin' ) };
+    is( $err,             undef,        'the store is never asked for the key' ) or diag $err;
+    is( $built{key_path}, undef,        'and the guest has no key, so ssh offers the keys of the agent' );
+    is( $built{host},     '192.0.2.10', 'at the address from the hypervisor' );
+
+    delete local $ENV{SSH_AUTH_SOCK};
+    like( exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', agent => 1, user => 'admin' ) }, qr/SSH_AUTH_SOCK \s+ is \s+ not \s+ set/, 'with no agent, --agent is refused' );
+};
+
+subtest '--agent and --key together are refused, because they are two ways to log in' => sub {
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { die "key_path was asked, which opens the store\n" } );
+
+    like( exception { Trog::Skill::CollectArtifacts::main(qw{--agent --key /bogus/key.rsa vm.test}) }, qr/two \s+ ways \s+ to \s+ log \s+ in/, 'from the command line' );
 };
 
 subtest 'a domain that shares the guest of another is collected from that guest' => sub {

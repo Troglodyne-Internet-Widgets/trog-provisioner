@@ -337,11 +337,59 @@ L<Provisioner::Cookbook/host_of> names.
 
 Dies when there is no key for the guest.  The store holds the key, and a
 program with nobody at its terminal cannot ask for the password of the store,
-so the message says to give it on standard input.
+so the message says to give it on standard input, or to log in through the ssh
+agent with C<guest_of_with_agent>.
 
 =cut
 
 sub guest_of {
+    my ( $class, $domain ) = @_;
+
+    my $where = $class->locate_guest($domain) or return;
+    my $key   = Trog::Guest->key_path( $where->{name}, "$where->{dir}/key.rsa" )
+      or die "No key for $where->{name}, in the store or at $where->{dir}/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n" . "If its admin trusts a key in your ssh agent, log in with the agent instead, as ask_guest --agent does.\n";
+
+    return Trog::Guest->new( %{$where}{qw{name host user}}, key_path => $key );
+}
+
+=head2 $guest = Trog::Hypervisors->guest_of_with_agent($domain)
+
+As C<guest_of>, but the guest logs in with the keys of the ssh agent
+in C<SSH_AUTH_SOCK>, and never asks for the key of the guest.  So it never
+opens the store for that key.  The admin of a guest trusts the keys of
+F<admin_authorized_keys>, so an operator whose key is there needs no store to
+reach the guest.  Finding a guest on a hypervisor that needs a token, such as a
+cloud, still opens the store for that token.
+
+Returns undef when no hypervisor runs the guest.  Dies when C<SSH_AUTH_SOCK>
+is not set.
+
+=cut
+
+sub guest_of_with_agent {
+    my ( $class, $domain ) = @_;
+
+    die "SSH_AUTH_SOCK is not set, so there is no ssh agent to log in to $domain with.\n" unless $ENV{SSH_AUTH_SOCK};
+    my $where = $class->locate_guest($domain) or return;
+
+    return Trog::Guest->new( %{$where}{qw{name host user}} );
+}
+
+=head2 $where = Trog::Hypervisors->locate_guest($domain)
+
+Where the guest of C<$domain> is, for C<guest_of> and
+C<guest_of_with_agent>: a hash of C<name>, the machine, C<host>, its
+address, C<user>, its admin user, and C<dir>, the directory of its
+configuration on the hypervisor.  Returns undef when no hypervisor runs it at
+an address.
+
+The guest of a domain in C<_shared> is the guest of its host, which
+L<Provisioner::Cookbook/host_of> names.  The admin user comes from the
+F<provision.conf> of the guest, and is C<root> without one.
+
+=cut
+
+sub locate_guest {
     my ( $class, $domain ) = @_;
 
     my $machine = Provisioner::Cookbook->machine_of($domain);
@@ -355,12 +403,10 @@ sub guest_of {
     # Config::Simple reads into $_ without a local of its own, and a caller
     # can be inside a map.  Trog::Hypervisors::Config has the same guard.
     local $_;
-    my $cfg_dir = $hv->domain_dir . "/$machine";
-    my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
-    my $key     = Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" )
-      or die "No key for $machine, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n";
+    my $dir    = $hv->domain_dir . "/$machine";
+    my $config = eval { Config::Simple->new("$dir/provision.conf") };
 
-    return Trog::Guest->new( name => $machine, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', key_path => $key );
+    return { name => $machine, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', dir => $dir };
 }
 
 =head2 place($domain, %needs)
