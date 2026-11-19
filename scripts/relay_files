@@ -23,16 +23,16 @@ use Time::HiRes            ();
 
     require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' );
 
-    my $lock = Trog::RelayFiles::lock_dir( $dir, 'nginxrelay_client' );
+    my $lock = Trog::RelayFiles::lock_dir( $dir, 'relay_client' );
     Trog::RelayFiles::write_file( "$dir/$domain.map", $content );
 
 =head2 DESCRIPTION
 
-What F<scripts/nginxrelay_client> and F<scripts/mailrelay_client> share: each
-keeps the registrations of other guests in files of one directory, which a
-service reads, and issues the keys that those guests send their bans with.  This runs under the system perl of the guest, which has no
-Provisioner libraries, so the two load it from beside themselves.  It runs
-nothing on its own.
+The files and the keys of a relay, for F<scripts/relay_client>.  A relay keeps
+the registrations of other guests in files of one directory, which a service
+reads, and issues the keys that those guests send their bans with.  This runs
+under the system perl of the guest, which has no Provisioner libraries, so the
+client loads it from beside itself.  It runs nothing on its own.
 
 =head2 dns_name($name)
 
@@ -331,7 +331,7 @@ sub stream_server {
     my ( $dir, $relay, $port ) = @_;
     my $var = "\$${relay}_port_$port";
     return <<"END";
-# The registrations of $port, which ${relay}_client writes.
+# The registrations of $port, which relay_client writes.
 map \$ssl_preread_server_name $var {
     include $dir/*.port-$port.map;
     default "";
@@ -438,8 +438,15 @@ sub revoke_key {
     return;
 }
 
-# The keys of every domain, in the one file of $dir that sshd reads for root.
-# Only a line that restricts its key, so that a bare key never logs in as root.
+=head2 write_authorized_keys($dir)
+
+Writes the keys of every domain into C<$dir/authorized_keys.root>, the one file
+of C<$dir> that sshd reads for root.  It takes only a line that restricts its
+key, so that a bare key never logs in as root.  C<issue_key> and C<revoke_key>
+run it, and so does a client that changed a key file itself.
+
+=cut
+
 sub write_authorized_keys {
     my ($dir) = @_;
     my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort map { glob("$dir/*.$_.pub") } @KEY_KINDS;

@@ -34,14 +34,14 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
         { $relay->issue_grant( \%grant, %terms ) },
         {
             '/etc/postfix/mailrelay/web.test.test.password' => {
-                issue => { guest => 'relay.test.test', command => '/root/bin/mailrelay_client register web.test.test 192.0.2.10' },
+                issue => { guest => 'relay.test.test', command => '/root/bin/relay_client mail register web.test.test 192.0.2.10' },
                 owner => 'root:root',
                 mode  => '0600',
             },
             '/etc/fail2ban/mailrelay/web.test.test.key.b64' => {
                 issue => {
                     guest   => 'relay.test.test',
-                    command => '/root/bin/mailrelay_client register-clients web.test.test 192.0.2.10 web.test.test mail.web.test.test --port 465=10465 --port 993=10993 --port 995=10995',
+                    command => '/root/bin/relay_client mail register-clients web.test.test 192.0.2.10 web.test.test mail.web.test.test --port 465=10465 --port 993=10993 --port 995=10995',
                 },
                 owner => 'root:root',
                 mode  => '0600',
@@ -52,12 +52,12 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
                 mode  => '0644',
             },
         },
-        'mailrelay_client registers the login and the route in, the password lands where the mail recipe reads it, and the port of each service of the mail clients goes to the port where the guest takes it, beside the ban key and the host key of the relay'
+        'relay_client mail registers the login and the route in, the password lands where the mail recipe reads it, and the port of each service of the mail clients goes to the port where the guest takes it, beside the ban key and the host key of the relay'
     );
     is( $relay->password_path('web.test.test'), '/etc/postfix/mailrelay/web.test.test.password', 'which is the password path of the domain' );
 
     my %revocation = $relay->revoke_grant( \%grant );
-    is( $revocation{command}, '/root/bin/mailrelay_client release web.test.test', 'and bin/destroy removes it by the same script' );
+    is( $revocation{command}, '/root/bin/relay_client mail release web.test.test', 'and bin/destroy removes it by the same script' );
     like( $revocation{stays}, qr/Run[ ]\Q$revocation{command}\E[ ]there/, 'and a relay that is not up is told the same command' );
 };
 

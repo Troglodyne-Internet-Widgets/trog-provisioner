@@ -276,7 +276,7 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
         \%files,
         {
             '/etc/fail2ban/nginxrelay/shop.test.test.key.b64' => {
-                issue => { guest => 'relay.test.test', command => '/root/bin/nginxrelay_client register shop.test.test 192.0.2.10:8443 192.0.2.10:8080 public.shop.test.test www.customer.test' },
+                issue => { guest => 'relay.test.test', command => '/root/bin/relay_client nginx register shop.test.test 192.0.2.10:8443 192.0.2.10:8080 public.shop.test.test www.customer.test' },
                 owner => 'root:root',
                 mode  => '0600',
             },
@@ -426,9 +426,9 @@ subtest 'the teardown releases the names on the relay whenever the domain names 
     # and the teardown reads only what the operator wrote.
     %config = ( nginx => { relay => 'relay.test.test' } );
     my @revocations = $nginx->revocations('web.test.test');
-    is( scalar @revocations,      1,                                                   'a relay with no public name written' );
-    is( $revocations[0]{guest},   'relay.test.test',                                   'is told on the relay' );
-    is( $revocations[0]{command}, '/root/bin/nginxrelay_client release web.test.test', 'to release the names of the domain' );
+    is( scalar @revocations,      1,                                                    'a relay with no public name written' );
+    is( $revocations[0]{guest},   'relay.test.test',                                    'is told on the relay' );
+    is( $revocations[0]{command}, '/root/bin/relay_client nginx release web.test.test', 'to release the names of the domain' );
 
     %config = ( nginx => { public_names => { 'web.test.test' => 'web.test.test' } } );
     is_deeply( [ $nginx->revocations('web.test.test') ], [], 'a domain with no relay releases nothing' );

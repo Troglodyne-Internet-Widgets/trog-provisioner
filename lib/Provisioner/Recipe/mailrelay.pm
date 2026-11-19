@@ -42,7 +42,7 @@ L<Provisioner::RelayRecipe>.
 
 =head2 Mail out
 
-When the guest is built, C<mailrelay_client register> makes a login for its
+When the guest is built, C<relay_client mail register> makes a login for its
 domain, with a new password that it prints and does not keep.  The guest
 places the password as a grant.  F</etc/postfix/mailrelay.d> keeps the hash,
 for dovecot, which checks the logins for postfix and does nothing else.  It
@@ -53,13 +53,13 @@ The relay is postfix on C<relay_port>, bound to the address where the guests
 reach this guest, and not to the public address.  It takes mail only over TLS,
 only from a login, and only with a sender that the login owns.  It then
 delivers the mail itself, on port 25.  C<bin/destroy> runs
-C<mailrelay_client release>, which removes the login.
+C<relay_client mail release>, which removes the login.
 
 =head2 Mail in
 
 The registration of L</Mail out> also makes this guest take the mail of the
 domain from the internet, on 25, and relay it to the guest of the domain over
-the tunnel.  C<mailrelay_client register> gets the address of that guest from
+the tunnel.  C<relay_client mail register> gets the address of that guest from
 the grant, and writes the domain into C<relay_domains>, its route into
 C<transport_maps>, and C<@domain> into C<relay_recipient_maps>.  The guest
 delivers any address of its domain to its catchall, so the relay takes every
@@ -83,7 +83,7 @@ that no guest registered gets no TLS handshake.  The ports where a client starts
 TLS later, such as 587 and 143, are not passed, because no name arrives before
 the relay must choose a guest.
 
-C<mailrelay_client register-clients> registers the names of a domain when its
+C<relay_client mail register-clients> registers the names of a domain when its
 guest is built, which are the domain and C<mail.DOMAIN>, with the three ports
 as ports of its own, each mapped to the port where the guest takes it.  See
 L<Provisioner::RelayRecipe/Ports of the guests>.  It refuses a name that
@@ -94,7 +94,7 @@ banned address on the three ports.  See L<Provisioner::RelayRecipe/Bans> and
 L<Provisioner::Recipe::mail/Sending through a mail relay>.
 
 A relay built before the ports of the guests kept a map for each service,
-such as F<DOMAIN.imaps.map>.  The build runs C<mailrelay_client upgrade>,
+such as F<DOMAIN.imaps.map>.  The build runs C<relay_client mail upgrade>,
 which moves each into the map of its port, so the guests behind a rebuilt
 relay keep their mail clients before they are built again.
 
@@ -155,8 +155,8 @@ my sub relay_port (%opts) {
 }
 
 # The ports where this guest passes the mail clients to their guests, by the
-# service that the guest listens for.  Also in scripts/mailrelay_client, which
-# runs on the relay without these libraries.  t/mailrelay_client.t makes sure
+# service that the guest listens for.  Also in scripts/relay_client, which
+# runs on the relay without these libraries.  t/relay_client.t makes sure
 # that the two are equal.
 our %CLIENT_PORTS = ( imaps => 993, submissions => 465, pop3s => 995 );
 
@@ -323,7 +323,7 @@ L<Provisioner::RelayRecipe/issue_grant> adds the host key.
 =over 4
 
 =item * The password of its login, at C<password_path> of the client, from
-F<scripts/mailrelay_client> C<register>.  C<%terms> has
+F<scripts/relay_client> C<mail register>.  C<%terms> has
 C<< address => $address >>, where the relay sends the mail of the client that
 comes in.  See L</Mail out> and L</Mail in>.
 
@@ -340,7 +340,7 @@ a port of its own, mapped to the port of the guest.  See L</Mail clients>.
 sub registration_files {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
-    my $script = "$Provisioner::Vars::SCRIPT_DIR/mailrelay_client";
+    my $script = "$Provisioner::Vars::SCRIPT_DIR/relay_client mail";
 
     # Every service of the guest is on one address.
     my %upstream = map { ( $_ => [ split( m/:/, $terms{upstreams}{$_} ) ] ) } keys %CLIENT_PORTS;
@@ -367,7 +367,7 @@ sub registration_files {
 =head2 %revocation = $recipe->revoke_grant($grant)
 
 The removal of the login, the route in, the routes of the mail clients and the
-ban key of the client of C<$grant>, by F<scripts/mailrelay_client> C<release>,
+ban key of the client of C<$grant>, by F<scripts/relay_client> C<mail release>,
 as C<revoke_grant> in L<Provisioner::Recipe> says.
 
 =cut
@@ -375,7 +375,7 @@ as C<revoke_grant> in L<Provisioner::Recipe> says.
 sub revoke_grant {
     my ( $self, $grant ) = @_;
     my $client  = $grant->{client};
-    my $command = "$Provisioner::Vars::SCRIPT_DIR/mailrelay_client release $client";
+    my $command = "$Provisioner::Vars::SCRIPT_DIR/relay_client mail release $client";
     return (
         command => $command,
         doing   => "remove the relay login of $client",

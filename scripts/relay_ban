@@ -14,7 +14,7 @@ use List::Util ();
 =head2 SYNOPSIS
 
 In the line of the F<authorized_keys.root> of a relay that its client writes for
-a domain, such as F<scripts/nginxrelay_client>:
+a domain, F<scripts/relay_client>:
 
     restrict,from="ADDRESS",command="relay_ban SET DOMAIN" ssh-ed25519 ...
 

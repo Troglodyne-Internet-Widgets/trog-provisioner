@@ -52,7 +52,7 @@ server {
 
 [%# The stream proxy sends a media name here with the PROXY protocol, so the
     address of the client is in its header.  nginx loads a certificate that a
-    variable names in its workers, so nginxrelay_client cert leaves the key
+    variable names in its workers, so relay_client nginx cert leaves the key
     readable by www-data. -%]
 server {
     listen unix:[% media_socket %] ssl proxy_protocol;

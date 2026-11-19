@@ -8,7 +8,7 @@ install -o root -g root -m 0644 mailrelay_ufw.conf /etc/ufw/applications.d/mailr
     service go to the maps of their ports.  Provisioner::Recipe::mailrelay
     says why, under Mail clients. -%]
 rm -f /etc/nginx/relay-stream.d/mailrelay.conf
-[% script_dir %]/mailrelay_client upgrade
+[% script_dir %]/relay_client mail upgrade
 [% script_dir %]/queue_postrun_task systemctl reload nginx
 install -d -m 0755 -o root -g root /etc/postfix/main.cf.d /etc/postfix/master.cf.d
 install -m 0644 -o root -g root mailrelay.postfix.main /etc/postfix/main.cf.d/30-mailrelay

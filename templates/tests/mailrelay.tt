@@ -6,7 +6,7 @@ use IO::Select;
 use MIME::Base64 ();
 use IPC::Open2 ();
 
-my $client = '[% script_dir %]/mailrelay_client';
+my $client = '[% script_dir %]/relay_client mail';
 my $domain = 'relay-selftest.test.test';
 
 # Each command of an SMTP session with the relay over STARTTLS, and the reply of

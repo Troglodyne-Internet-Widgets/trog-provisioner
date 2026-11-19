@@ -6,7 +6,7 @@ use IO::Socket::INET;
 use IO::Select;
 use MIME::Base64 ();
 
-my $client = '[% script_dir %]/nginxrelay_client';
+my $client = '[% script_dir %]/relay_client nginx';
 my $domain = 'relay-selftest.test.test';
 # Long, because nginx refuses a map with a name longer than its bucket.
 my $name = 'selftest-' . ( 'x' x 50 ) . '.relay.test.test';
