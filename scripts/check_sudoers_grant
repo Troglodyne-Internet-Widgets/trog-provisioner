@@ -1,0 +1,138 @@
+#!/usr/bin/perl
+
+package Trog::CheckSudoersGrant;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use IPC::Open3 ();
+use JSON::PP   ();
+use List::Util ();
+
+my $USAGE = "usage: check_sudoers_grant SUDOERS USER COMMANDS\n";
+
+=head1 NAME
+
+check_sudoers_grant - make sure that a sudoers file grants a user exactly a
+list of commands, as root, with no password, as sudo reads it
+
+=head1 SYNOPSIS
+
+    check_sudoers_grant SUDOERS USER COMMANDS
+
+C<COMMANDS> is a file with one command on each line, in the syntax of
+F<sudoers>.  The check passes when C<cvtsudoers -f json SUDOERS> finds one
+rule for each line of C<COMMANDS>, in the same order: for C<USER>, as root,
+with no password, for that command and nothing else.  An empty C<COMMANDS>
+passes when the file grants nothing.
+
+C<visudo -c> checks only that sudo can parse a file.  A line can parse and
+still grant more than it says: a C<#> starts a comment, so
+C</usr/bin/ls #-l> grants C</usr/bin/ls> with any arguments, and a comma
+starts a second command.  C<cvtsudoers> parses the file as sudo does, so this
+compares what sudo will grant with what the configuration asked for.
+
+=head1 FUNCTIONS
+
+=head2 $exit = main(@args)
+
+Returns 0 when the grant is exactly C<COMMANDS>.  Otherwise it prints what
+sudo reads and what was asked for, on standard error, and returns 1.  Dies
+when it cannot read a file or run C<cvtsudoers>.
+
+=cut
+
+sub main {
+    my ( $sudoers, $user, $commands ) = @_;
+
+    die $USAGE if List::Util::any { !defined || $_ eq q{} } $sudoers, $user, $commands;
+
+    open my $in, '<', $commands or die "$commands is not a file that can be read: $!\n";
+    chomp( my @lines = <$in> );
+    close $in or die "Cannot close $commands: $!\n";
+    my @want = grep { $_ ne q{} } @lines;
+
+    my @got  = rules( cvtsudoers($sudoers) );
+    my @rule = map { { users => [$user], runas => ['root'], nopasswd => 1, commands => [$_] } } @want;
+
+    # The structures, not their text: a rule of two commands and a rule of one
+    # command with a comma in it print alike.
+    my $json = JSON::PP->new->canonical;
+    return 0 if $json->encode( \@got ) eq $json->encode( \@rule );
+
+    print {*STDERR} "check_sudoers_grant: $sudoers does not grant $user exactly the commands of $commands.\n",
+      "sudo reads:\n", map( { '  ' . rule_text($_) . "\n" } @got ),  ( @got  ? () : "  nothing\n" ),
+      "asked for:\n",  map( { '  ' . rule_text($_) . "\n" } @rule ), ( @rule ? () : "  nothing\n" );
+    return 1;
+}
+
+=head2 $parsed = cvtsudoers($file)
+
+What C<cvtsudoers -f json> makes of C<$file>, decoded.  For a file with no
+rule, it prints nothing, and this returns an empty hash.  Dies when it fails,
+and its own message is on standard error above.
+
+=cut
+
+sub cvtsudoers {
+    my ($file) = @_;
+
+    # Its standard error goes to ours, so that a warning does not break the JSON.
+    my $pid = IPC::Open3::open3( my $in, my $from, '>&STDERR', qw{cvtsudoers -f json}, $file );
+    close $in or die "Cannot close the input of cvtsudoers: $!\n";
+    my $out = do { local $/ = undef; <$from> }
+      // q{};
+    waitpid( $pid, 0 );
+    die "cvtsudoers could not read $file.\n" if $?;
+    return {}                                if $out !~ m/\S/;
+    return JSON::PP::decode_json($out);
+}
+
+=head2 @rules = rules($parsed)
+
+One hash for each command of each user specification in the output of
+C<cvtsudoers>: C<users> and C<runas>, the names, C<nopasswd>, true when
+the rule needs no password, and C<commands>, each with a C<!> in front when
+it is negated.  Other options of a rule make C<nopasswd> false, so that they
+show as a difference.
+
+=cut
+
+sub rules {
+    my ($parsed) = @_;
+
+    my @rules;
+    foreach my $spec ( @{ $parsed->{User_Specs} // [] } ) {
+        my @users = map { $_->{username} // '?' } @{ $spec->{User_List} // [] };
+        foreach my $cmnd ( @{ $spec->{Cmnd_Specs} // [] } ) {
+            my @options = @{ $cmnd->{Options} // [] };
+            push @rules, {
+                users    => \@users,
+                runas    => [ map { $_->{username} // '?' } @{ $cmnd->{runasusers} // [] } ],
+                nopasswd => ( @options == 1 && keys %{ $options[0] } == 1 && exists $options[0]{authenticate} && !$options[0]{authenticate} ) ? 1 : 0,
+                commands => [ map { ( $_->{negated} ? q{!} : q{} ) . ( $_->{command} // '?' ) } @{ $cmnd->{Commands} // [] } ],
+            };
+        }
+    }
+    return @rules;
+}
+
+=head2 $text = rule_text($rule)
+
+A rule from C<rules> as one line, for a message.  Each command is in
+brackets, so that a rule of two commands shows as two.
+
+=cut
+
+sub rule_text {
+    my ($rule) = @_;
+
+    my $password = $rule->{nopasswd} ? 'NOPASSWD' : 'other options';
+    return join( q{,}, @{ $rule->{users} } ) . ' as ' . join( q{,}, @{ $rule->{runas} } ) . ", $password: " . join( q{ }, map { "[$_]" } @{ $rule->{commands} } );
+}
+
+exit main(@ARGV) unless caller;
+
+1;

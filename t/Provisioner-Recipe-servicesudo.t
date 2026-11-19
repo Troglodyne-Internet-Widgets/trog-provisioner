@@ -18,7 +18,9 @@ use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use IPC::Run3();
 use File::Which();
+use File::Slurper::Temp();
 
+use FindBin;
 use FindBin::libs;
 
 use Provisioner::Cookbook();
@@ -103,6 +105,31 @@ subtest 'a command that is plainly wrong is refused' => sub {
     }
 
     is_deeply( { recipe()->validate(%G) }->{commands}, [], 'and the default is none' );
+};
+
+# The schema takes a # in an argument, and visudo parses the line, but sudo
+# reads the rest as a comment, and grants the program with any arguments.
+subtest 'a file that sudo reads as more than the commands is never installed' => sub {
+    my @commands = Provisioner::Recipe->fragment_commands( recipe()->render_file( 'ubuntu/servicesudo.tt', recipe()->validate(%G) ) );
+    chomp @commands;
+    my ($visudo_at)  = grep { $commands[$_] eq 'visudo -cf servicesudo.sudoers' } 0 .. $#commands;
+    my ($check_at)   = grep { $commands[$_] eq q{/root/bin/check_sudoers_grant servicesudo.sudoers 'svc' servicesudo.commands} } 0 .. $#commands;
+    my ($install_at) = grep { index( $commands[$_], 'install ' ) == 0 } 0 .. $#commands;
+    ok( defined $visudo_at && defined $check_at && defined $install_at && $visudo_at < $check_at && $check_at < $install_at, 'the fragment checks the grant after visudo, and before the install' ) or diag explain \@commands;
+
+  SKIP: {
+        skip 'no cvtsudoers here', 2 unless File::Which::which('cvtsudoers');
+        my $dir    = tempdir( CLEANUP => 1 );
+        my $script = "$FindBin::Bin/../scripts/check_sudoers_grant";
+        foreach my $case ( [ '/usr/bin/systemctl restart ssh', 0, 'a plain command passes' ], [ '/usr/bin/ls #-l', 1, 'a # in an argument, which the schema takes, fails' ] ) {
+            my ( $command, $want, $name ) = @$case;
+            my %opts = recipe()->validate( %G, commands => [$command] );
+            File::Slurper::Temp::write_text( "$dir/sudoers",  recipe()->render_file( 'files/servicesudo.sudoers.tt',  %opts ) );
+            File::Slurper::Temp::write_text( "$dir/commands", recipe()->render_file( 'files/servicesudo.commands.tt', %opts ) );
+            IPC::Run3::run3( [ $script, "$dir/sudoers", 'svc', "$dir/commands" ], \undef, \my $out, \my $err );
+            is( $? >> 8, $want, $name ) or diag "$out$err";
+        }
+    }
 };
 
 subtest 'a domain with no service user' => sub {

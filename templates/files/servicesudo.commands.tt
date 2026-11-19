@@ -1,0 +1,7 @@
+[%# The commands of the configuration, one on each line, for
+    check_sudoers_grant to compare with what sudo reads in the sudoers file.
+    No comment line, because each line is a command.  mark_raw, because
+    Xslate escapes for HTML, and a command can end in two double quotes. -%]
+[% FOR command IN commands -%]
+[% command | mark_raw %]
+[% END -%]

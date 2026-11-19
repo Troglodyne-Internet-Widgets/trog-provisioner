@@ -1,6 +1,8 @@
 [% IF user != admin_user -%]
 # visudo first, because sudo refuses to run at all while a file in
-# sudoers.d does not parse.
+# sudoers.d does not parse.  Then check_sudoers_grant, because a file that
+# parses can still grant more than the commands, and it must not go live.
 visudo -cf servicesudo.sudoers
+[% script_dir %]/check_sudoers_grant servicesudo.sudoers '[% user %]' servicesudo.commands
 install -m 0440 -o root -g root servicesudo.sudoers /etc/sudoers.d/servicesudo-[% user %]
 [% END -%]

@@ -35,10 +35,13 @@ command.
 
 The service user is C<user> in the C<_global> of the domain.  Each command
 goes on a line of its own in F</etc/sudoers.d/servicesudo-$user>.  A guest can
-hold several domains, so the file is named for the user.  C<visudo -cf> checks
-the file before C<install> puts it there with mode C<0440>, as
-L<Provisioner::Recipe::sssd> does.  sudo refuses to run at all while a file in
-F<sudoers.d> does not parse.
+hold several domains, so the file is named for the user.  Two checks run
+before C<install> puts it there with mode C<0440>.  C<visudo -cf> checks that
+sudo can parse it, as L<Provisioner::Recipe::sssd> does, because sudo refuses
+to run at all while a file in F<sudoers.d> does not parse.  Then
+F<check_sudoers_grant> asks C<cvtsudoers> what the file grants, and stops the
+build unless that is one rule for each command, for the service user, as
+root, with no password, and nothing else.
 
 With an empty C<commands>, the file holds a comment and no grant.  It is still
 installed, so a provision with an empty list takes back a grant that an earlier
@@ -61,9 +64,11 @@ path followed by C<""> alone to allow the program only with no arguments.
 The schema refuses the obvious mistakes: a path that is not absolute, which
 includes C<ALL> and a negation, a newline, a comma, which starts a second
 command, and an empty argument.  It does not judge the rest of the sudoers
-syntax.  C<visudo -cf> on the guest refuses a file that sudo cannot read, and
-the guest test asks C<cvtsudoers> what sudo makes of the installed file.  So a
-file that grants other than C<commands> fails the build.  A wildcard or a
+syntax.  The two checks above do: a C<#> in an argument, for example, starts
+a comment, so C</usr/bin/ls #-l> parses and grants C</usr/bin/ls> with any
+arguments.  F<check_sudoers_grant> sees that, and the file is never
+installed.  The guest test runs the same check on the installed file.  A
+wildcard or a
 C<^...$> argument is a pattern to sudo, and so allows more than the operator
 wrote.  The schema allows both, because the operator can mean them.
 
@@ -141,7 +146,7 @@ sub unit_commands {
 }
 
 sub template_files {
-    return ( 'servicesudo.sudoers.tt' => 'servicesudo.sudoers' );
+    return ( 'servicesudo.sudoers.tt' => 'servicesudo.sudoers', 'servicesudo.commands.tt' => 'servicesudo.commands' );
 }
 
 sub tests {
