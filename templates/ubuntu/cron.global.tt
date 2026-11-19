@@ -3,7 +3,7 @@ chown root:root /etc/cron.d/default
 chmod 0644 /etc/cron.d/default
 # Run each log watcher once, so that it records the entries already in the logs.
 /root/bin/segfaults.sh; /bin/true
-/root/bin/escalations.sh [% admin_user %]; /bin/true
+/root/bin/root_access [% admin_user %]; /bin/true
 /root/bin/oomdetect.sh; /bin/true
 /root/bin/newusers.sh; /bin/true
 /root/bin/logdrops.sh; /bin/true

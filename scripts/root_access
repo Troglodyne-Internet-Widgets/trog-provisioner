@@ -1,0 +1,261 @@
+#!/usr/bin/perl
+
+package Trog::RootAccess;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use File::Basename ();
+use File::Temp     ();
+use IPC::Open3     ();
+use List::Util     ();
+use Socket         ();
+
+=head1 NAME
+
+root_access - report a new way in to root: a user who is not an admin, or a
+root login from a host that is not trusted
+
+=head1 SYNOPSIS
+
+    root_access [ADMIN...]
+
+=head1 DESCRIPTION
+
+Cron runs this every few minutes, and mails what it prints.  It reads the auth
+log and prints each line of these two kinds that its last run did not print:
+
+=over 4
+
+=item * A session as root that a user other than root opened, such as with
+sudo or su, when that user is not one of the C<ADMIN>s.  A session that cron
+or atd opens is the job of root, and a session that root opens is not an
+escalation.  The log names the user who escalates by uid, so each C<ADMIN> is
+resolved to a uid.  A name that no account has exempts nobody.
+
+=item * An ssh login as root from an address outside the trusted networks.
+
+=back
+
+The trusted networks are loopback, the networks in F</etc/ufw/admin_networks>,
+which the ufw recipe writes from C<admin_networks>, and each C<from=> address
+of a key in the F<authorized_keys> files of root.  sshd itself refuses such a
+key from any other address.  A C<from=> entry that is a pattern or a negation
+trusts nothing, so a login that only such an entry allows is reported.
+
+The first run records what is already in the log, and prints it.  The cron
+recipe runs it once at the end of a build for that reason, so that its mail
+does not go out.
+
+=head1 FUNCTIONS
+
+=head2 $exit = main(@admins)
+
+Prints a warning and the new lines, and returns 0.  Dies when it cannot read
+the log or write its state.
+
+=cut
+
+# Only the test sets these, to point the script at files of its own.
+our $STATE_DIR      = '/root';
+our $AUTHLOG        = -e '/var/log/auth.log' ? '/var/log/auth.log' : '/var/log/secure';
+our $ADMIN_NETWORKS = '/etc/ufw/admin_networks';
+
+# The start of a syslog line, up to the name of the program: an ISO 8601 or a
+# classic BSD time stamp, then the host.
+my $PREFIX = qr/\A (?: \S+ | [[:alpha:]]{3} \s+ \d+ \s+ [\d:]+ ) \s+ \S+ \s+/x;
+
+# What pam_unix writes when a session as root opens: the service, then the uid
+# of the user who asked, which is the last thing on the line.
+my $PAM_SESSION = qr/\S+ \s+ pam_unix\( ([^:]+) :session\): \s+ session \s+ opened \s+/x;
+my $FOR_ROOT    = qr/for \s+ user \s+ root (?:\(uid=0\))? \s+/x;
+my $BY_UID      = qr/by \s+ \S*? \(uid=(\d+)\) \s* \z/x;
+
+# What sshd writes when it accepts a login as root, up to the address.
+my $SSHD_ACCEPTED = qr/sshd(?:-session)?\[\d+\]: \s+ Accepted \s+ \S+ \s+ for \s+ root \s+/x;
+
+sub main {
+    my (@admins) = @_;
+
+    my %admin_uid = map { $_ => 1 } grep { defined } map { scalar getpwnam($_) } @admins;
+    my @trusted   = ( qw{127.0.0.0/8 ::1/128}, admin_networks(), key_sources() );
+
+    open my $log, '<', $AUTHLOG or die "Cannot read $AUTHLOG: $!\n";
+    my %now;
+    while ( my $line = <$log> ) {
+        chomp $line;
+        $now{$line} = 1 if escalation( $line, \%admin_uid ) || untrusted_login( $line, \@trusted );
+    }
+    close $log or die "Cannot close $AUTHLOG: $!\n";
+
+    my $state = "$STATE_DIR/root_access.log";
+    my %seen;
+    if ( open my $in, '<', $state ) {
+        chomp( my @lines = <$in> );
+        %seen = map { $_ => 1 } @lines;
+        close $in or die "Cannot close $state: $!\n";
+    }
+
+    my @now = sort keys %now;
+    write_state( $state, @now );
+
+    my @new = grep { !$seen{$_} } @now;
+    print "DANGER: New root access by an unexpected user or host, investigate $AUTHLOG!\n", map { "$_\n" } @new if @new;
+    return 0;
+}
+
+=head2 $bool = escalation($line, \%admin_uid)
+
+Whether C<$line> is a session as root that a user who is neither root nor an
+admin opened.  Linux-PAM 1.4 and later write C<for user root(uid=0) by>, and
+older ones C<for user root by>.  Both end with the uid of the user who asked.
+
+=cut
+
+sub escalation {
+    my ( $line, $admin_uid ) = @_;
+
+    my ( $service, $uid ) = $line =~ m/$PREFIX $PAM_SESSION $FOR_ROOT $BY_UID/x
+      or return 0;
+    return 0 if $uid == 0 || $admin_uid->{$uid};
+    return 0 if List::Util::any { $_ eq $service } qw{cron atd};
+    return 1;
+}
+
+=head2 $bool = untrusted_login($line, \@trusted)
+
+Whether C<$line> is the line in which sshd accepts a login as root, from an
+address that no network in C<@trusted> holds.
+
+=cut
+
+sub untrusted_login {
+    my ( $line, $trusted ) = @_;
+
+    my ($from) = $line =~ m/$PREFIX $SSHD_ACCEPTED from \s+ (\S+) \s+ port \s/x
+      or return 0;
+    return ( List::Util::any { in_network( $from, $_ ) } @$trusted ) ? 0 : 1;
+}
+
+=head2 $bool = in_network($address, $network)
+
+Whether C<$address> is in C<$network>, an address or an address with a prefix
+length, of IPv4 or IPv6.  Anything that is not an address is in no network.
+
+=cut
+
+sub in_network {
+    my ( $address, $network ) = @_;
+
+    my ( $base, $bits ) = split( m{/}, $network, 2 );
+    my $addr = packed($address) // return 0;
+    my $net  = packed($base)    // return 0;
+    return 0 if length $addr != length $net;
+
+    my $width = 8 * length $net;
+    $bits //= $width;
+    return 0 if $bits !~ m/\A\d+\z/ || $bits > $width;
+    return substr( unpack( 'B*', $addr ), 0, $bits ) eq substr( unpack( 'B*', $net ), 0, $bits );
+}
+
+=head2 $packed = packed($address)
+
+C<$address> in network order, or undef when it is not an IPv4 or IPv6 address.
+
+=cut
+
+sub packed {
+    my ($address) = @_;
+    return unless defined $address;
+    return Socket::inet_pton( ( index( $address, q{:} ) >= 0 ) ? Socket::AF_INET6() : Socket::AF_INET(), $address );
+}
+
+=head2 @networks = admin_networks()
+
+The lines of F</etc/ufw/admin_networks>, or none when there is no such file.
+
+=cut
+
+sub admin_networks {
+    open my $in, '<', $ADMIN_NETWORKS or return;
+    chomp( my @lines = <$in> );
+    close $in or die "Cannot close $ADMIN_NETWORKS: $!\n";
+    return grep { m/\S/ } @lines;
+}
+
+=head2 @addresses = key_sources()
+
+Each C<from=> entry of the keys of root that is an address or a network.
+
+=cut
+
+sub key_sources {
+    my @sources;
+    foreach my $file ( authorized_keys_files() ) {
+        open my $in, '<', $file or next;
+        while ( my $line = <$in> ) {
+            next unless $line =~ m/(?:\A|,) from="([^"]*)"/x;
+            push @sources, grep { m{\A[[:xdigit:]:.]+(?:/\d+)?\z} } split( m/,/, $1 );
+        }
+        close $in or die "Cannot close $file: $!\n";
+    }
+    return @sources;
+}
+
+=head2 @files = authorized_keys_files()
+
+The files that sshd reads the keys of root from, as C<sshd -T> reports
+C<AuthorizedKeysFile>, with C<%u>, C<%h> and C<%%> expanded, and a relative
+path taken from the home of root.
+
+=cut
+
+sub authorized_keys_files {
+    my $home = ( getpwnam('root') )[7] // '/root';
+
+    my @files  = sshd_authorized_keys_file();
+    my %expand = ( u => 'root', h => $home, q{%} => q{%} );
+    s/%([uh%])/$expand{$1}/g for @files;
+    return map { m{\A/} ? $_ : "$home/$_" } @files;
+}
+
+=head2 @patterns = sshd_authorized_keys_file()
+
+The value of C<AuthorizedKeysFile> that C<sshd -T> reports, as a list, with
+no expansion.  Empty when sshd reports none.
+
+=cut
+
+sub sshd_authorized_keys_file {
+    my $pid = IPC::Open3::open3( my $in, my $from, '>&STDERR', qw{/usr/sbin/sshd -T} );
+    close $in or die "Cannot close the input of sshd -T: $!\n";
+    my ($setting) = grep { m/\Aauthorizedkeysfile\s/ } <$from>;
+    waitpid( $pid, 0 );
+    return unless defined $setting;
+
+    my ( undef, @files ) = split( ' ', $setting );
+    return @files;
+}
+
+=head2 write_state($path, @lines)
+
+Replaces C<$path> with C<@lines>, through a file beside it, so that a run that
+dies leaves the last state whole.
+
+=cut
+
+sub write_state {
+    my ( $path, @lines ) = @_;
+
+    my $tmp = File::Temp->new( DIR => File::Basename::dirname($path), UNLINK => 0 );
+    print {$tmp} map { "$_\n" } @lines;
+    close $tmp              or die "Cannot write $tmp: $!\n";
+    rename( "$tmp", $path ) or die "Cannot replace $path: $!\n";
+    return;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

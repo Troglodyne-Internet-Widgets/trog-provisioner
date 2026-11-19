@@ -88,6 +88,11 @@ like($limit_chain, qr{-s \Q[% net %]\E(?:/32)? -j RETURN}, '[% net %] is exempt 
     or diag $limit_chain;
 [% END -%]
 
+# root_access trusts a root login from these networks, as ufw exempts them.
+require '[% script_dir %]/root_access';
+is_deeply([ Trog::RootAccess::admin_networks() ], [ [% FOR net IN admin_networks %]'[% net %]', [% END %] ],
+    'root_access reads the admin_networks that ufw exempts');
+
 # Once, however many times the guest was provisioned.
 my $blocks = () = $before =~ m/^# BEGIN trog-provisioner rate limits$/gm;
 is($blocks, 1, 'the rate limit block appears exactly once');

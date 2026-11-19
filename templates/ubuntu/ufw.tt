@@ -1,4 +1,5 @@
 install -o root -g root -m 0750 ufw.after.init /etc/ufw/after.init
+install -o root -g root -m 0644 ufw.admin_networks /etc/ufw/admin_networks
 install -d -o root -g root -m 0750 /etc/ufw/after.init.d
 mv ufw/* /etc/ufw/applications.d/
 chmod 0644 /etc/ufw/applications.d/*

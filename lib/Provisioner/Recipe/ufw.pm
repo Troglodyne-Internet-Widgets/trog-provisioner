@@ -201,7 +201,9 @@ my %template2rule = (
 
 Removes the C<ufw> directory in C<output_dir> and makes a new, empty one.
 Returns the application profiles to render, as a map from template to output
-path.  The C<ufw.http.tt> profile is always in the map.  Each recipe in
+path.  The C<ufw.http.tt> profile is always in the map.  So is
+F<ufw.admin_networks>, one network of C<admin_networks> on each line, which
+F<scripts/root_access> reads as the hosts that may log in as root.  Each recipe in
 C<@recipes> that has a profile for fixed ports adds its own.
 
 Without C<ntp> in C<@recipes>, the map also has C<ufw.timesyncd.tt>, which
@@ -220,7 +222,7 @@ sub template_files {
     rmtree $dir;
     mkdir $dir;
 
-    my %ret = ( 'ufw.http.tt' => 'ufw/http', 'ufw.after.init.tt' => 'ufw.after.init' );
+    my %ret = ( 'ufw.http.tt' => 'ufw/http', 'ufw.after.init.tt' => 'ufw.after.init', 'ufw.admin_networks.tt' => 'ufw.admin_networks' );
     $ret{'ufw.timesyncd.tt'} = 'ufw/timesyncd' unless List::Util::any { $_ eq 'ntp' } @recipes;
 
     return %ret unless @recipes;
