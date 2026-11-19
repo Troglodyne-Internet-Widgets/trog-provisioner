@@ -5,8 +5,8 @@ local-port=2500
 # A path inside the chroot.  The recipe makes /var/spool/powerdns/run/pdns.
 socket-dir=/run/pdns
 # pdns starts as root so that it can chroot, and then drops to this user and
-# group.  configure_pdns runs the unit as root for this reason.  A pdns_server
-# that starts as pdns cannot enter the chroot, and looks for its database in
-# the real root.
+# group.  The drop-in chroot.conf of the unit starts it as root for this
+# reason.  A pdns_server that starts as pdns cannot enter the chroot, and looks
+# for its database in the real root.
 setuid=pdns
 setgid=pdns

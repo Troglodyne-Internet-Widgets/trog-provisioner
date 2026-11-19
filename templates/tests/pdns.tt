@@ -169,29 +169,59 @@ unlike($zones, qr/^test\.test=/m, 'no hardcoded test.test forward zone') or diag
 ok(!-e '/etc/powerdns/recursor.d/[% domain %].conf',
     'no per-domain fragment in recursor.d');
 
-# The unit that configure_pdns rewrites.  A --chroot with no value stops
-# pdns_server, and systemd says only "Failed to start pdns.service".
-my $execstart = `systemctl show -p ExecStart --value pdns 2>/dev/null`;
-like($execstart, qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or diag $execstart;
-unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
-    or diag $execstart;
+# The settings that run pdns in its chroot are in a drop-in, and the packaged
+# unit stays as the package left it.  The nightly check of packaged files
+# reports an edited one, and an upgrade of the package replaces it, and every
+# setting with it.  So ask systemd what it made of the two together.
+my @props = qw{FragmentPath DropInPaths Type User Group WorkingDirectory ExecStart CapabilityBoundingSet AmbientCapabilities SystemCallFilter};
+my $shown = `systemctl show pdns @{[ map { "-p $_" } @props ]} 2>&1`;
+my %unit  = map { m/\A([^=]+)=(.*)\z/ ? ( $1 => $2 ) : () } split m/\n/, $shown;
+like($unit{FragmentPath} // '', qr{\A/(?:usr/)?lib/systemd/system/pdns\.service\z}, 'the pdns unit is the packaged one') or diag $shown;
+like($unit{DropInPaths} // '', qr{(?:\A|\s)/etc/systemd/system/pdns\.service\.d/chroot\.conf(?:\s|\z)}, 'and the drop-in changes it') or diag $shown;
 
+# Type=notify does not work with a chroot, and pdns refuses to chroot under it.
+is($unit{Type}, 'simple', 'pdns is not told to notify systemd from inside its chroot');
 
 # chroot(2) needs CAP_SYS_CHROOT, so a pdns_server that starts as User=pdns
 # never enters the chroot.  Every path in its configuration is relative to that
 # root, so each one then points to the wrong place on the real filesystem.
-my $unit_user = `systemctl show -p User --value pdns 2>/dev/null`;
-chomp $unit_user;
-ok($unit_user eq 'root' || $unit_user eq '', 'pdns starts with the privilege it needs to chroot') or diag "User=$unit_user";
+is($unit{User},  'root', 'pdns starts with the privilege it needs to chroot');
+is($unit{Group}, 'root', 'and the group');
+is($unit{WorkingDirectory}, '/var/spool/powerdns', 'in its spool directory');
+
+# A drop-in adds an ExecStart to the one of the unit unless it clears it first,
+# and systemd refuses to load a simple service with two.  A --chroot with no
+# value stops pdns_server, and systemd says only "Failed to start pdns.service".
+my @starts = ($unit{ExecStart} // '') =~ m/\bpath=/g;
+is(scalar @starts, 1, 'the unit starts one pdns_server') or diag $unit{ExecStart};
+like($unit{ExecStart} // '', qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or diag $unit{ExecStart};
+unlike($unit{ExecStart} // '', qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
+    or diag $unit{ExecStart};
 
 # Both sets, not only the bounding set.  The process starts with the ambient
 # set.  A pdns that can chroot but cannot setuid fails to drop privileges once a
-# second.
+# second.  Exactly these, because a drop-in that does not clear a set adds to
+# what the packaged unit names.
+my @caps = qw{cap_chown cap_net_bind_service cap_setgid cap_setuid cap_sys_chroot};
 foreach my $set (qw{CapabilityBoundingSet AmbientCapabilities}) {
-    my $caps = `systemctl show -p $set --value pdns 2>/dev/null`;
-    like($caps, qr/cap_sys_chroot/i, "$set lets it chroot");
-    like($caps, qr/cap_setuid/i,     "$set lets it drop privileges afterwards");
+    is_deeply([ sort split ' ', lc($unit{$set} // '') ], \@caps, "$set lets it chroot and drop privileges afterwards, and no more")
+        or diag "$set=" . ($unit{$set} // '');
 }
+
+# chroot(2) is in the @mount group, which the packaged unit denies, and seccomp
+# kills the call with no reason given.  The other groups stay denied.
+my %denied = map { $_ => 1 } split ' ', (($unit{SystemCallFilter} // '') =~ s/\A~//r);
+ok(($unit{SystemCallFilter} // '') =~ m/\A~/, 'the unit denies a list of system calls') or diag $unit{SystemCallFilter};
+ok(!$denied{chroot}, 'and chroot is not among them');
+ok($denied{reboot},  'while reboot still is');
+
+# What the nightly check of packaged files would say about the package that
+# owns the unit.  dpkg checks the same md5sums that debsums does.  A conffile
+# is left out, as debsums -s leaves it out, because the recipe moves bind.conf.
+my ($package) = map { m/\A([^:\s]+):/ ? $1 : () } map { `dpkg -S '$_' 2>/dev/null` } grep { defined } $unit{FragmentPath}, ($unit{FragmentPath} // '') =~ s{\A/usr/lib/}{/lib/}r;
+ok($package, 'a package owns the pdns unit') or diag $unit{FragmentPath};
+my @changed = $package ? grep { !m/\A\S+\s+c\s/ } grep { m/\S/ } split m/\n/, `dpkg --verify '$package' 2>&1` : ('no package to verify');
+is_deeply(\@changed, [], 'no file that the package installed is changed') or diag join "\n", @changed;
 
 my $global_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/00-global.conf'; <> } // '';
 like($global_conf, qr/^setuid=pdns$/m, 'and gives it up itself once it is inside');

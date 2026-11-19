@@ -88,9 +88,8 @@ info_level = 30
 # stanza: JSON.  Everything under scripts/ runs on a guest's system perl, where
 # neither XS parser exists and there is no CPAN client to fetch one until the
 # perl recipe has run -- while Provisioner::Recipe::Ubuntu::pdns installs
-# libjson-perl for exactly this, next to libconfig-simple-perl and
-# libnet-dns-perl.  Cpanel::JSON::XS stays right for bin/ and lib/, which run on
-# the provisioner.
+# libjson-perl for exactly this, next to libnet-dns-perl.  Cpanel::JSON::XS
+# stays right for bin/ and lib/, which run on the provisioner.
 #
 # That reasoning is here rather than in the file it describes because
 # [PreferredModules] parses its config with Config::INI, which has no comment
