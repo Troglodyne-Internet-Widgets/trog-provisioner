@@ -63,7 +63,7 @@ The cron jobs of root run:
 
     * SAR gathering
     * rkhunter
-    * Log watchers (OOMs, SEGVs, root logins, new users, rsyslog drops,
+    * Log watchers (OOMs, SEGVs, root access, new users, rsyslog drops,
       outgoing ufw blocks)
     * scan for writes to packaged files
     * dehydrated, if the domain uses the letsencrypt recipe, and something

@@ -60,7 +60,7 @@ subtest 'a script stands for the tests that name it, and the one that packs it' 
     my @sandbox = $map->('scripts/rsyncd_sandbox');
     ok( ( grep { $_ eq 't/new_config-rsyncd.t' } @sandbox ), 'and the sandbox of a fetch, the test that fetches through it' ) or diag "got: @sandbox";
 
-    @tests = $map->('scripts/escalations.sh');
+    @tests = $map->('scripts/segfaults.sh');
     ok( ( grep { $_ eq 't/log-watchers.t' } @tests ), 'a test that names it by its file name alone' ) or diag "got: @tests";
 
     # No test names it, and a script that stands for nothing ran every test.

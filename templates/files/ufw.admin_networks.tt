@@ -1,0 +1,2 @@
+[% FOR net IN admin_networks %][% net %]
+[% END -%]
