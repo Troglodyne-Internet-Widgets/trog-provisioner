@@ -7,10 +7,9 @@
 set -e
 workspace='[% install_dir %]/[% domain %]/workspace'
 usermod -a -G '[% agent_user %]' '[% user %]'
-install -d -o '[% user %]' -g '[% agent_user %]' -m 2770 "$workspace"
-chgrp -R '[% agent_user %]' "$workspace"
-chmod -R g+rwX "$workspace"
-find "$workspace" -type d -exec chmod g+s {} +
+install -d -o '[% user %]' -g '[% agent_user %]' -m 3770 "$workspace"
+find "$workspace" -mindepth 1 -maxdepth 1 -user '[% user %]' ! -type l ! -name mirrors ! -name ref -exec chgrp -R '[% agent_user %]' {} + -exec chmod -R g+rwX {} +
+find "$workspace" \( -path "$workspace/mirrors" -o -path "$workspace/ref" \) -prune -o -type d -exec chmod g+s {} +
 
 # The agent lib, before clod deps install fills it, so what it installs takes
 # the group of the agent.  See THE AGENT LIB in Provisioner::Recipe::clod.
