@@ -1,0 +1,4 @@
+# Read by Lynis after default.prf.  The lynis recipe generates this file.
+[% FOR test IN skip_tests -%]
+skip-test=[% test %]
+[% END -%]

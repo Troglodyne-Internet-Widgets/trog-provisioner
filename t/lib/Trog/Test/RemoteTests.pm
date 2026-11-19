@@ -128,6 +128,16 @@ sub run {
     my $apt_mock = Test::MockModule->new('Provisioner::Packager::Deb');
     $apt_mock->redefine( fetch => sub { return { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
 
+    # That key has no fingerprint, so a source that pins one goes in without
+    # it.  t/Provisioner-Packager-Deb.t tests the pin.
+    my $files = $apt_mock->original('files');
+    $apt_mock->redefine(
+        files => sub {
+            my ( $class, @sources ) = @_;
+            return $files->( $class, map { my %source = %$_; delete $source{fingerprint}; \%source } @sources );
+        }
+    );
+
     # Nor is the repository of tCMS, whose metamerge.yml the tcms recipe reads
     # its packages from.
     require Provisioner::Recipe::tcms;

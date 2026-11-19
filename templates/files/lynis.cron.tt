@@ -1,0 +1,1 @@
+30 4 * * * root [% script_dir %]/lynis_audit

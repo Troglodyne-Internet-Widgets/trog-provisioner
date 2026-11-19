@@ -1,0 +1,40 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# The archive of CISOfy, not Ubuntu, which has 3.0.  See the lynis recipe.
+my $version = `lynis show version 2>&1`;
+chomp $version;
+like($version, qr/^3\.(?:[1-9]|\d{2,})\./, 'lynis is the version from the archive of CISOfy') or diag $version;
+
+my @skips = qw{[% skip_tests.join(' ') %]};
+my $profile = slurp('/etc/lynis/custom.prf');
+like($profile, qr/^skip-test=\Q$_\E$/m, "the profile skips $_") or diag $profile for @skips;
+
+# cron silently ignores a file in cron.d that is not owned by root or that
+# the group can write.
+my @st = stat '/etc/cron.d/lynis';
+is(scalar getpwuid($st[4] // -1), 'root', 'the lynis cron is owned by root');
+is(($st[2] // 0) & 022, 0, 'and is not group or world writable');
+like(slurp('/etc/cron.d/lynis'), qr{\Q[% script_dir %]\E/lynis_audit$}m, 'and runs lynis_audit');
+
+# The whole job, as cron runs it: the audit, then the summary in syslog.
+my $since = time;
+my $out = `[% script_dir %]/lynis_audit 2>&1`;
+is($?, 0, 'lynis_audit exits 0') or diag $out;
+my $report = slurp('/var/log/lynis-report.dat');
+like($report, qr/^hardening_index=\d+$/m, 'the report has a hardening index');
+
+# Lynis read the profile, not only found it there.  A skip of one key of a
+# test, such as KRNL-6000:net.ipv4.ip_forward, still runs the test, so only a
+# whole test is in tests_skipped.
+my ($skipped) = $report =~ m/^tests_skipped=(.*)$/m;
+like($skipped // '', qr/(?:^|\|)\Q$_\E\|/, "lynis skipped $_") or diag($skipped // '') for grep { !m/:/ } @skips;
+my $journal = `journalctl -t lynis --since \@$since --no-pager -o cat 2>&1`;
+like($journal, qr/^hardening_index=\d+ warnings=\d+ suggestions=\d+$/m, 'and syslog has the summary') or diag $journal;
+like($journal, qr/^suggestion [A-Z0-9]+-\d+: \S/m, 'and a suggestion') or diag $journal;
+
+sub slurp { my ($f) = @_; return do { local (@ARGV, $/) = $f; <> } // '' }
+
+done_testing();
