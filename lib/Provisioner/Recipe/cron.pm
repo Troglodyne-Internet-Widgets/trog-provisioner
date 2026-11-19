@@ -174,10 +174,11 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'cron.root.tt'          => 'root.crontab',
-        'cron.root.domain.tt'   => 'root.domain.crontab',
-        'cron.user.tt'          => 'user.crontab',
-        'cron.rkhunter.conf.tt' => 'rkhunter.conf',
+        'cron.root.tt'             => 'root.crontab',
+        'cron.root.domain.tt'      => 'root.domain.crontab',
+        'cron.user.tt'             => 'user.crontab',
+        'cron.rkhunter.conf.tt'    => 'rkhunter.conf',
+        'cron.rkhunter.default.tt' => 'rkhunter.default',
     );
 }
 

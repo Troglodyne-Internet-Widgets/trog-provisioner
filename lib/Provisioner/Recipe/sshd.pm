@@ -42,6 +42,12 @@ F<50-cloud-init.conf> and F<60-cloudimg-settings.conf>, and either can allow
 passwords.  The name starts with C<10->, so this drop-in comes first and its
 values win.
 
+Some images also set C<PermitRootLogin yes> in F</etc/ssh/sshd_config>
+itself.  The drop-in still wins, because the main file includes the drop-ins
+before that line.  But rkhunter reads the main file alone, and so does a
+person.  So the fragment comments out that line, and the drop-in is the one
+place that says who logs in as root.
+
 The makefile kept this policy in F<100-security.conf> before this recipe.  The
 fragment removes that file, so a guest provisioned in place has one copy of the
 policy.

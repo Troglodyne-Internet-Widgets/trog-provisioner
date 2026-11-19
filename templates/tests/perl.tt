@@ -82,6 +82,9 @@ SKIP: {
     is(readlink $tidyrc, '/etc/perltidyrc', "$tidyrc links to the tidy config");
 }
 
+# suspscan of rkhunter is off, but a 240M tree in /tmp outlives the build.
+ok(!-e '/tmp/src', 'the build removed its source tree from /tmp');
+
 # Nothing links tools into the bin directory of an account.
 ok(!-e "$home/bin/starman", "$home/bin holds no symlink farm");
 

@@ -53,6 +53,10 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     JOBS=$(nproc 2>/dev/null || echo 2)
     make -j"$JOBS"
     make -j"$JOBS" install
+    # The tree is 240M, and nothing else removes what is under /tmp.  A failed
+    # build keeps it, to read why.
+    cd /tmp
+    [ -x "/opt/perl5/$NICE_PERL_NAME/bin/perl" ] && rm -rf /tmp/src
 fi
 
 # What everything else installs into.  Written before cpanm, because

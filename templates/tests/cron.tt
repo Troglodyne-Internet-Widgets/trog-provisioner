@@ -23,6 +23,25 @@ subtest '/etc/cron.d/[% name %]' => sub { check_recipe_file('/etc/cron.d/[% name
 my $status = `systemctl is-active cronie 2>/dev/null || systemctl is-active cron 2>/dev/null`;
 like($status, qr/active/, 'cron is running');
 
+# A fresh guest is the baseline, so every warning here is a false positive that
+# would reach the admin each night.  --rwo prints the warnings and nothing else.
+# The makefile runs as an at job, and atd deletes the file of the job while it
+# runs.  So every process under the build, this test among them, holds that
+# deleted file, and rkhunter says so.  A nightly scan runs under cron.
+my $rkhunter = `rkhunter --check --sk --rwo --nocolors 2>&1`;
+( my $warnings = $rkhunter ) =~ s{^\s+Process:[^\n]*File:\s+/var/spool/cron/atjobs/[^\n]*\n}{}mg;
+$warnings =~ s{^Warning: The following processes are using deleted files:\n(?!\s+Process:)}{}mg;
+is($warnings, '', 'rkhunter finds nothing to warn about on a fresh guest') or diag $rkhunter;
+
+# The hook of the package records the file properties again after an apt run
+# when /etc/default/rkhunter allows it, so an upgrade is not a warning.
+my $db = '/var/lib/rkhunter/db/rkhunter.dat';
+utime( 0, 0, $db );
+my $hook = `apt-config dump DPkg::Post-Invoke 2>&1`;
+my @hooks = $hook =~ m/^DPkg::Post-Invoke:: "(.*)";$/mg;
+system( 'sh', '-c', $_ ) for grep { m/rkhunter/ } @hooks;
+cmp_ok( ( stat $db )[9] // 0, '>', 0, 'the apt hook of rkhunter records the file properties again' ) or diag $hook;
+
 done_testing();
 
 # What this recipe adds to each file that another recipe gave it: the two mail
