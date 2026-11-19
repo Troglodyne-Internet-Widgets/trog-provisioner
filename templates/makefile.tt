@@ -36,7 +36,12 @@ all:[% FOR t IN targets %] [% t.target %][% END %]
     the guest in its final state. -%]
 	[% script_dir %]/fetch_via_cache off
 [% END -%]
-	$(MAKE) --no-print-directory [% state_dir %]/test
+	[%# MAKEFLAGS for this make alone, because it inherits the descriptors of the
+	    jobserver.  Told of them, it closes them for prove, and a process that a
+	    test leaves behind cannot keep the make above waiting.  The unexport at
+	    the top says why no other recipe gets MAKEFLAGS.  Output sync is off, so
+	    that the tests stream into the log as they run. -%]
+	MAKEFLAGS='$(MAKEFLAGS)' $(MAKE) --no-print-directory --output-sync=none [% state_dir %]/test
 	test ! -f /root/.postrun_failed || { echo "post_install: some deferred work failed; see above" >&2; exit 1; }
 	touch /root/install_complete
 
