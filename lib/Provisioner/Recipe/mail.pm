@@ -504,10 +504,11 @@ sub required_recipes {
 # A value with no colon and no line break in it.
 my $NO_COLON = qr/\A [^:\r\n]* \z/;
 
-# A folder name with no quote, percent sign, dollar sign, backslash, slash or
-# dot: the name goes into a shell word, a make recipe, the dovecot
-# configuration and a Maildir++ directory name.
-my $FOLDER_NAME = q{\A[^'"%$\\\\/.\r\n]+\z};
+# A folder name with no quote, backtick, percent sign, dollar sign, backslash,
+# slash or dot: the name goes into a shell word, a make recipe, the dovecot
+# configuration and a Maildir++ directory name.  A space is legal, so the
+# templates put the name in single quotes.
+my $FOLDER_NAME = q{\A[^'"`%$\\\\/.\r\n]+\z};
 
 sub args {
     return (
@@ -540,7 +541,7 @@ sub args {
 
                         # The mailboxes that doveadm makes for this account,
                         # in addition to INBOX.
-                        mailboxes => { type => 'array', items => { type => 'string' }, default => [] },
+                        mailboxes => { type => 'array', items => { type => 'string', pattern => $FOLDER_NAME }, default => [] },
 
                         # The folders that sa_train_amavis learns as spam, in
                         # addition to the one with the \Junk special use.  No

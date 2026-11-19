@@ -172,7 +172,7 @@ test -f "/mail/[% domain %]/[% name %]/sieve/[% name %].sieve" && sudo -u doveco
 [% FOR box IN names.$name.mailboxes %]
 [%# Make the mailbox only if it is not there.  A rebuild restores the maildirs
     of this account first, and a second create fails with exit 65. -%]
-doveadm mailbox status -u [% name %]@[% domain %] messages [% box %] > /dev/null 2>&1 || doveadm mailbox create -u [% name %]@[% domain %] [% box %]
+doveadm mailbox status -u [% name %]@[% domain %] messages '[% box %]' > /dev/null 2>&1 || doveadm mailbox create -u [% name %]@[% domain %] '[% box %]'
 [% END -%]
 [% END -%]
 [%# Every account of the domain, the catchall among them.  Its store comes
@@ -199,7 +199,7 @@ test ! -d /mail/[% domain %]/[% name %]/Maildir || doveadm force-resync -u [% na
 [% FOR alias IN mailbox_aliases.keys().sort() -%]
 [% target = mailbox_aliases.$alias -%]
 doveadm mailbox status -u [% name %]@[% domain %] messages '[% target %]' > /dev/null 2>&1 || doveadm mailbox create -u [% name %]@[% domain %] '[% target %]'
-if test -d '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]' && ! test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]'; then doveadm move -u [% name %]@[% domain %] '[% target %]' mailbox '[% alias %]' all && doveadm mailbox delete -u [% name %]@[% domain %] '[% alias %]' && echo "mail: [% domain %]: [% name %]: moved the messages of the folder [% alias %] into [% target %], and deleted [% alias %]"; fi
+if test -d '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]' && ! test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]'; then doveadm move -u [% name %]@[% domain %] '[% target %]' mailbox '[% alias %]' all && doveadm mailbox delete -u [% name %]@[% domain %] '[% alias %]' && echo 'mail: [% domain %]: [% name %]: moved the messages of the folder [% alias %] into [% target %], and deleted [% alias %]'; fi
 test -L '/mail/[% domain %]/[% name %]/Maildir/.[% alias %]' || doveadm mailbox create -u [% name %]@[% domain %] '[% alias %]'
 [% END -%]
 [% END -%]

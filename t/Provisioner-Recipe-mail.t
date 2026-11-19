@@ -447,4 +447,28 @@ subtest 'the build merges a real folder under an alias name, in every account an
     ok( ( grep { m/\Aif[ ]test[ ]-d[ ].*catchall.*doveadm[ ]move/ } split m/\n/, $alone ), 'and a domain with no names merges the folders of its catchall' ) or diag $alone;
 };
 
+subtest 'a backtick in a folder name is refused, and the shell never expands a name it renders' => sub {
+    like( exception { $recipe->validate( %BASE, mailbox_aliases => { q{Old`date`Mail} => 'Sent Items' } ) }, qr{mailbox_aliases}, 'an alias with a backtick is refused' );
+    like( exception { $recipe->validate( %BASE, mailbox_aliases => { 'Sent'           => q{a`date`b} } ) },  qr{mailbox_aliases}, 'and so is a target with one' );
+
+    my %names    = ( names => { someuser => { password => 'x', gecos => 'Some User' } }, script_dir => '/nonexistent' );
+    my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, %names ) ) );
+    my @echoes   = $fragment =~ m/&&[ ]echo[ ](.*?);[ ]fi$/mg;
+    ok( scalar @echoes, 'the build says which folders it merged' );
+    unlike( $_, qr/\A"/, 'and the message is not in double quotes, where a backtick runs' ) for @echoes;
+};
+
+subtest 'mailboxes takes the rule of a folder name' => sub {
+    foreach my $bad ( qw{a$b a`date`b a;b/c a.b}, q{a'b} ) {
+        like( exception { $recipe->validate( %BASE, names => { someuser => { password => 'x', gecos => 'Some User', mailboxes => [$bad] } } ) }, qr{mailboxes}, "a mailbox that a shell or a Maildir cannot hold is refused: $bad" );
+    }
+    my %ok = $recipe->validate( %BASE, script_dir => '/nonexistent', names => { someuser => { password => 'x', gecos => 'Some User', mailboxes => [ 'Archive', 'Old Mail' ] } } );
+    is_deeply( $ok{names}{someuser}{mailboxes}, [ 'Archive', 'Old Mail' ], 'a plain name and a name with a space are kept' );
+
+    my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich(%ok) );
+    my $status   = qr/messages[ ]'Old[ ]Mail'[ ]/;
+    my $create   = qr/mailbox[ ]create[ ].*[ ]'Old[ ]Mail'$/m;
+    like( $fragment, qr/$status.*$create/m, 'and the template quotes the name, so the space stays one word' );
+};
+
 done_testing();
