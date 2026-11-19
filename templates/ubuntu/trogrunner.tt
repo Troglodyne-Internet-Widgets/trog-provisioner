@@ -115,3 +115,6 @@ install -o root -g root -m 0644 trogrunner.completion.bash /etc/bash_completion.
 [%# This recipe hands its CPAN modules to the perl recipe.  Its target installs
     them after this fragment makes the checkout: Sys::Virt pinned, and what the
     checkout needs.  See required_recipes in Provisioner::Recipe::trogrunner. -%]
+[%# Holds a reboot while bin/provision builds a guest.  See Reboot checks in
+    Provisioner::Recipe. -%]
+install -D -o root -g root -m 0755 trogrunner-reboot-check /etc/provisioner/reboot-checks.d/trogrunner-[% domain %]

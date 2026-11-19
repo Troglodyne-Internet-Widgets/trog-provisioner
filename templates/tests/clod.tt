@@ -228,4 +228,6 @@ foreach my $program (sort keys %runs) {
 [% END -%]
 }
 
+[% INCLUDE "files/reboot_check.test.tt" WITH name = "clod-" _ domain, reason = "^Minion jobs active: [0-9]+$", may_pass = 1 %]
+
 done_testing();

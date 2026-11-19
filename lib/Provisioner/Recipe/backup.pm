@@ -55,6 +55,9 @@ The daemon logs to /var/log/rsyncd/$DOMAIN.log.
 Without a log file, rsyncd sends its messages down the ssh connection, and this guest keeps no record of a failed module or transfer.
 Transfer logging is off, because the destination records what it asked for in /var/log/backups/$HOST.log.
 
+The recipe installs a reboot check that holds a reboot while a destination copies the domain, which is while that rsync daemon runs.
+See Reboot checks in L<Provisioner::Recipe>.
+
 TODO: Consult the other recipes on the guest to choose the user and group that each module runs as.
 
 =cut
@@ -140,8 +143,9 @@ sub enrich {
 
 sub template_files {
     return (
-        "backup.rsyncd.conf.tt" => "rsyncd.conf",
-        "backup.logrotate.tt"   => "backup.logrotate",
+        "backup.rsyncd.conf.tt"  => "rsyncd.conf",
+        "backup.logrotate.tt"    => "backup.logrotate",
+        "backup.reboot-check.tt" => "backup-reboot-check",
     );
 }
 

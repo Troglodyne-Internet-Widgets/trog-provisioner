@@ -11,3 +11,4 @@ install -o root -g root -m 0644 relay.stream.conf /etc/nginx/modules-enabled/99-
 install -d -o root -g root -m 0700 /var/lib/[% ban_set %]
 install -d -o root -g root -m 0750 /etc/ufw/after.init.d
 install -o root -g root -m 0750 [% relay_name %].bans /etc/ufw/after.init.d/[% ban_set %]
+install -D -o root -g root -m 0755 relay.reboot-check /etc/provisioner/reboot-checks.d/[% relay_name %]-[% domain %]

@@ -24,7 +24,27 @@ like($text, qr{> ?/var/log/autoupdate\.log 2>&1}, 'output and errors both go to 
 # guest.  scripts/reboot_if_needed has the whole account.
 ok(-e '/run/provisioner/no-reboot/[% domain %]', 'the build holds reboots while it runs');
 [% IF autorestart -%]
-like(slurp('/etc/cron.d/[% domain %]-autorestart'), qr{reboot_if_needed \Q[% autorestart %]\E$}m, 'the reboot cron passes the switch that holds it');
+like(slurp('/etc/cron.d/[% domain %]-autorestart'), qr{reboot_if_needed$}m, 'the reboot cron runs reboot_if_needed');
+
+# The switch holds the reboot through the reboot check.  Make it, if it is not
+# there, and take it away after.
+my $switch = '[% autorestart %]';
+my $made   = !-e $switch && open( my $fh, '>', $switch );
+close $fh if $made;
+[% INCLUDE "files/reboot_check.test.tt" WITH name = "autoupdate-" _ domain, reason = "^held by /" %]
+unlink $switch if $made;
+
+SKIP: {
+    skip 'the switch was there before the test', 1 unless $made;
+    my $said = `/etc/provisioner/reboot-checks.d/autoupdate-[% domain %]`;
+[% IF reboot_window -%]
+    my ( $from, $to, $hour ) = ( [% reboot_window.from %], [% reboot_window.to %], (localtime)[2] );
+    my $inside = $from < $to ? ( $hour >= $from && $hour < $to ) : $from > $to ? ( $hour >= $from || $hour < $to ) : 1;
+    is( $? ? 0 : 1, $inside ? 1 : 0, "without the switch, it says yes only in the window, and the hour is $hour" ) or diag $said;
+[% ELSE -%]
+    is( $?, 0, 'without the switch, it lets the guest reboot' ) or diag $said;
+[% END -%]
+}
 [% END -%]
 
 sub slurp { my ($f) = @_; return do { local (@ARGV, $/) = $f; <> } // '' }

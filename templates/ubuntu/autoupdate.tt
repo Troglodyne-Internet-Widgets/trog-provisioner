@@ -1,0 +1,7 @@
+[%# The reboot check of autorestart.  See Reboot checks in
+    Provisioner::Recipe. -%]
+[% IF autorestart -%]
+install -D -o root -g root -m 0755 autoupdate.reboot-check /etc/provisioner/reboot-checks.d/autoupdate-[% domain %]
+[% ELSE -%]
+rm -f /etc/provisioner/reboot-checks.d/autoupdate-[% domain %]
+[% END -%]

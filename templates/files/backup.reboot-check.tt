@@ -1,0 +1,8 @@
+#!/bin/sh
+# Hold the reboot while a backup destination copies this domain.  The copy is
+# an rsync daemon that the forced command of the backup key starts.  Generated
+# by Provisioner::Recipe::backup.  Do not edit by hand.
+count=$(pgrep -fc -- '--config=/etc/rsyncd\.[% domain %]\.conf')
+[ "$count" -eq 0 ] && exit 0
+echo "backups running: $count"
+exit 1

@@ -1,1 +1,4 @@
 chmod 0600 "[% install_dir %]/[% domain %]/[% key_file %]"
+[%# Holds a reboot while a backup runs.  See Reboot checks in
+    Provisioner::Recipe. -%]
+install -D -o root -g root -m 0755 backupdestination-reboot-check /etc/provisioner/reboot-checks.d/backupdestination-[% domain %]

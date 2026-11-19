@@ -31,3 +31,6 @@ systemctl daemon-reload
 systemctl reenable 'tcms-worker-[% domain %].service'
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl restart 'tcms-worker-[% domain %].service'
+[%# Holds a reboot while the worker transcodes.  See Reboot checks in
+    Provisioner::Recipe. -%]
+install -D -o root -g root -m 0755 tcms-reboot-check /etc/provisioner/reboot-checks.d/tcms-[% domain %]

@@ -185,6 +185,29 @@ fragment.  C<scripts/> is copied to the guest whole.
 
 =back
 
+=head3 Reboot checks
+
+A guest with the C<autorestart> of C<autoupdate> reboots itself after an
+update that needs it.  A recipe whose software must not stop at any moment can
+hold that reboot.  Its fragment installs a check, an executable in any language,
+at F</etc/provisioner/reboot-checks.d/E<lt>recipeE<gt>-E<lt>domainE<gt>>.  The
+domain is in the name, so two domains on one guest each keep a check.  Install
+it C<0755 root:root>, because root runs it:
+
+    install -D -o root -g root -m 0755 clod-reboot-check /etc/provisioner/reboot-checks.d/clod-[% domain %]
+
+The check exits 0 when a reboot is OK now.  Any other exit holds the reboot.
+The first line of its standard output is the reason, such as C<2 Minion jobs
+running>.  F<scripts/reboot_if_needed> runs every check, and reboots only when
+all of them exit 0.  A check that runs longer than a minute holds the reboot.
+The script logs each hold, with the reasons, to syslog under the tag
+C<reboot_if_needed>.  It logs a hold again when the reasons change, and
+otherwise once an hour.
+
+Render the check through C<template_files>.  F<templates/files/reboot_check.test.tt>
+tests it from the guest test of the recipe.  A recipe that has nothing to
+protect installs no check.
+
 =head3 Order
 
 The C<data> recipe runs first.  The rest run in the order the depsolver

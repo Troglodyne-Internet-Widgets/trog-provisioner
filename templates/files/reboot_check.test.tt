@@ -1,0 +1,28 @@
+[%# The part of a guest test that tests a reboot check.  Include it with
+    name, the file name of the check, and reason, a regex for the reason when
+    it holds the reboot.  Without reason, the check must say yes.  With
+    may_pass, either answer is right.  See Reboot checks in
+    Provisioner::Recipe. -%]
+{
+    my $check = '/etc/provisioner/reboot-checks.d/[% name %]';
+    my @st    = stat $check;
+    ok( -f $check && -x _, "the reboot check $check is installed" );
+    # root runs every check, so an account that can change one can run code as root.
+    is( $st[4] // -1, 0, 'and root owns it' );
+    is( ( $st[2] // 0 ) & 022, 0, 'and only root can change it' );
+
+    my $said   = `$check`;
+    my $status = $? >> 8;
+    my ($reason) = split m/\n/, $said // '';
+[% IF reason -%]
+    if ( [% may_pass ? 1 : 0 %] && !$status ) {
+        pass('and it says yes');
+    }
+    else {
+        isnt( $status, 0, 'and it holds the reboot' );
+        like( $reason // '', qr{[% reason %]}, 'and says why' ) or diag $said;
+    }
+[% ELSE -%]
+    is( $status, 0, 'and it lets the guest reboot now' ) or diag $said;
+[% END -%]
+}

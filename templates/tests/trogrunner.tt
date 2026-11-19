@@ -192,4 +192,6 @@ else {
 diag 'skipped: no checkout here to run it from';
 [% END %]
 
+[% INCLUDE "files/reboot_check.test.tt" WITH name = "trogrunner-" _ domain, reason = "^provisions running: [0-9]+$", may_pass = 1 %]
+
 done_testing;

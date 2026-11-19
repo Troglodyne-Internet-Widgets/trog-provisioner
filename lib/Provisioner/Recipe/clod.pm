@@ -159,6 +159,10 @@ which is how somebody finds out what such a run did.  So both survive a
 rebuild of the guest.  See C<remote_prepare>.  The workspace does not, because
 the bot fetches the mirrors again.
 
+The recipe installs a reboot check that holds a reboot while the worker has an
+active job, because a reboot fails the claude run of the job.  See Reboot
+checks in L<Provisioner::Recipe>.
+
 =head2 THE AGENT ACCOUNT
 
 Without C<agent_user>, every C<claude> run of the bot runs as C<user>, the
@@ -658,6 +662,7 @@ sub template_files {
         'clod.share.sh.tt'         => 'clod-share.sh',
         'clod.claude.sh.tt'        => 'clod-claude.sh',
         'clod.run.sh.tt'           => 'clod-run.sh',
+        'clod.reboot-check.tt'     => 'clod-reboot-check',
         'clod.agent-token.tt'      => 'clod-agent.token',
         'clod.install-packages.tt' => 'clod-install-packages',
 

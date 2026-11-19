@@ -195,6 +195,10 @@ for itself.  tpsgi grants the same for F<$domain.service>, and the two lists
 of commands add up.  C<ffmpeg> is one of the system
 packages that tCMS declares, below, and this recipe names no package for it.
 
+The recipe installs a reboot check that holds a reboot while the worker has an
+active job, because a reboot fails a transcode.  See Reboot checks in
+L<Provisioner::Recipe>.
+
 =head2 THE SYSTEM PACKAGES
 
 tCMS declares the system packages that it needs under C<x_system_packages> in
@@ -401,7 +405,10 @@ sub remote_skip {
 }
 
 sub template_files {
-    return ( 'tcms-worker.service.tt' => 'tcms-worker.service' );
+    return (
+        'tcms-worker.service.tt' => 'tcms-worker.service',
+        'tcms.reboot-check.tt'   => 'tcms-reboot-check',
+    );
 }
 
 sub tests {

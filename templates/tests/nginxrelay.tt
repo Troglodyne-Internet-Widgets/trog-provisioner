@@ -305,4 +305,6 @@ my ( $rc, $said ) = as_guest("check $abuser");
 is( $rc, 255, 'and the key logs in no more' ) or diag $said;
 unlink $keyfile;
 
+[% INCLUDE "files/reboot_check.test.tt" WITH name = "nginxrelay-" _ domain, reason = "^this guest reboots only by hand$" %]
+
 done_testing();

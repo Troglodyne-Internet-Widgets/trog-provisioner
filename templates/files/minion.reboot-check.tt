@@ -1,0 +1,8 @@
+[%# The end of the reboot check of a recipe whose Minion worker must finish
+    its jobs.  The check defines minion_active, which prints the active jobs of
+    the queue, one to a line.  See Reboot checks in Provisioner::Recipe. -%]
+active=$(minion_active 2>/dev/null) || { echo 'Minion did not list its active jobs'; exit 1; }
+count=$(printf '%s\n' "$active" | grep -c .)
+[ "$count" -eq 0 ] && exit 0
+echo "Minion jobs active: $count"
+exit 1
