@@ -118,9 +118,10 @@ sub enriched {
 subtest 'a port of its own is from 1024, and goes to a port of the guest' => sub {
     is_deeply( enriched()->{passthrough_ports},                                                        {},                               'a domain has none by default' );
     is_deeply( enriched( passthrough_ports => { 1024 => 8449, 65535 => 65535 } )->{passthrough_ports}, { 1024 => 8449, 65535 => 65535 }, 'from 1024 to 65535, to any port of the guest' );
-    like( exception { enriched( passthrough_ports => { 1023  => 8449 } ) }, qr{/passthrough_ports},      'below 1024 is refused, because a relay serves those itself' );
-    like( exception { enriched( passthrough_ports => { 65536 => 8449 } ) }, qr{/passthrough_ports},      'and above 65535' );
-    like( exception { enriched( passthrough_ports => { 8448  => 0 } ) },    qr{/passthrough_ports/8448}, 'and so is a port of the guest that is no port' );
+    like( exception { enriched( passthrough_ports => { 1023   => 8449 } ) }, qr{/passthrough_ports},      'below 1024 is refused, because a relay serves those itself' );
+    like( exception { enriched( passthrough_ports => { 65536  => 8449 } ) }, qr{/passthrough_ports},      'and above 65535' );
+    like( exception { enriched( passthrough_ports => { matrix => 8449 } ) }, qr{/passthrough_ports},      'and a name that is no number' );
+    like( exception { enriched( passthrough_ports => { 8448   => 0 } ) },    qr{/passthrough_ports/8448}, 'and so is a port of the guest that is no port' );
 };
 
 my %VPN = ( ip_pool => { cidr => '10.0.0.0/24', bins => { vpnclients => { cidr => '10.8.0.192/26', via => 'vpn.test.test' }, other => { cidr => '10.9.0.0/24' } } } );

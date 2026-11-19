@@ -335,10 +335,6 @@ sub cert_deployer {
     return "/etc/dehydrated/deployers/nginxrelay-$domain";
 }
 
-# A port from 1024 to 65535, for a name of a property, which a schema can only
-# match, and cannot compare.
-my $PORT_FROM_1024 = '(?:102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])';
-
 sub args {
     return (
         properties => {
@@ -381,8 +377,8 @@ sub args {
 
             passthrough_ports => {
                 type                 => 'object',
-                propertyNames        => { pattern => "\\A$PORT_FROM_1024\\z" },
-                additionalProperties => { type    => 'integer', minimum => 1, maximum => 65535 },
+                propertyNames        => { type => 'integer', minimum => 1024, maximum => 65535 },
+                additionalProperties => { type => 'integer', minimum => 1,    maximum => 65535 },
                 default              => {},
                 description          => 'Each port besides 443 on which the relay passes the public names of this domain through, by SNI and with the PROXY protocol, from 1024 to 65535, mapped to the port of this guest where the relay connects for it.  The recipe that listens there hands it over, as matrix does for 8448.  Needs relay.  See "Ports of its own".',
             },
