@@ -2,11 +2,17 @@
 use strict;
 use warnings;
 use Test::More;
+use JSON::PP ();
 
 my $status = `systemctl is-active matrix-synapse 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'matrix-synapse is running');
 ok(-f '/etc/matrix-synapse/homeserver.yaml', 'homeserver.yaml is where synapse reads it');
+
+# The name that other servers know this one by, and sign its keys under.
+my $keys = `curl -s --max-time 10 http://127.0.0.1:8008/_matrix/key/v2/server`;
+my $said = eval { JSON::PP::decode_json($keys)->{server_name} };
+is($said, '[% server_name %]', 'synapse federates as server_name') or diag $keys;
 
 # Each file that template_files generates, where the recipe puts it.
 ok(-f '/etc/matrix-synapse/log.yaml', 'log.yaml is there too');
@@ -29,7 +35,7 @@ ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
 my $index = do { local (@ARGV, $/) = '[% install_dir %]/[% domain %]/www/matrix.index.html'; <> } // '';
 unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $index;
 [% FOREACH chan IN channels %]
-like($index, qr/#\Q[% chan %]:matrix.[% domain %]\E/, 'channel [% chan %] is listed as a room alias on this homeserver');
+like($index, qr/#\Q[% chan %]:[% server_name %]\E/, 'channel [% chan %] is listed as a room alias on this homeserver');
 [% END %]
 # synapse listens only behind nginxproxy, at its public_baseurl.
 like($index, qr{Home Server: https://\Qmatrix.[% domain %]\E\s}, 'the page names the homeserver at its public URL') or diag $index;
@@ -58,7 +64,7 @@ SKIP: {
     my $db = '[% install_dir %]/matrix.[% domain %]/homeserver.db';
     skip 'synapse has made no database', 1 unless -e $db;
     skip 'no sqlite3 to read it with', 1 unless system('command -v sqlite3 >/dev/null 2>&1') == 0;
-    my $admin = `sqlite3 $db "SELECT admin FROM users WHERE name = '\@[% admin_user %]:matrix.[% domain %]'" 2>&1`;
+    my $admin = `sqlite3 $db "SELECT admin FROM users WHERE name = '\@[% admin_user %]:[% server_name %]'" 2>&1`;
     chomp $admin;
     is($admin, 1, 'the admin user is registered as an admin') or diag $admin;
 }

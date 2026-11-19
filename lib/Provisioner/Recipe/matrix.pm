@@ -34,10 +34,17 @@ Installs and configures a Matrix Synapse homeserver behind an nginx reverse
 proxy, with the ketesa admin web interface.  This recipe requires the
 C<nginxproxy> recipe.
 
-Synapse answers at C<matrix.$domain>, and the admin interface at
-C<admin.matrix.$domain>.  Add C<matrix.$domain> and C<admin.matrix.$domain> to
-the C<aliases> in the C<_global> of the domain, so that the SSL certificate
-covers them.
+C<server_name> is the identity of the homeserver.  Every account is
+C<@user:$server_name>, every room alias ends in C<:$server_name>, and other
+servers know this one by that name and its signing key.  It cannot change
+after the first start, so the recipe has no default for it.  To take over an
+existing homeserver, give the name that it already has.
+
+The client API answers at C<matrix.$domain>, and the admin interface at
+C<admin.matrix.$domain>.  Those are names of this guest, not the identity of
+the homeserver.  Add C<matrix.$domain> and C<admin.matrix.$domain> to the
+C<aliases> in the C<_global> of the domain, so that the SSL certificate covers
+them.
 
 The package names are in the subclass for each distribution, for example
 L<Provisioner::Recipe::Ubuntu::matrix>.
@@ -115,7 +122,7 @@ sub args {
         type       => 'object',
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_from}],
         properties => {
-            server_name => { type => 'string' },
+            server_name => { type => 'string', description => 'The permanent name of the homeserver, the part after the colon of every account and room alias.  See DESCRIPTION.' },
 
             redis_password => { type => 'string', 'x-secret' => 1, description => 'Password for the redis the homeserver caches in.  Unset configures the homeserver without one.' },
 

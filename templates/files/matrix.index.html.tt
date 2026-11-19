@@ -22,7 +22,7 @@ Connection Details
   Home Server: https://matrix.[% domain %]
   Suggested Channels:
     [% FOR chan IN channels %]
-    #[% chan %]:matrix.[% domain %]
+    #[% chan %]:[% server_name %]
     [% END %]
 
 If you already have a matrix account on another
