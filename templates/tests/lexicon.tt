@@ -86,8 +86,12 @@ is($identifier, "v=DKIM1; p=ab/cd+ef/gh==\n", 'the powerdns provider reads back 
 # changed_packaged_files expects to change, so it does not report it.
 require '[% script_dir %]/changed_packaged_files';
 my %expected = map { $_ => 1 } Trog::ChangedPackagedFiles::expected();
-my @patched = grep { m{^/} } split /\n/, `debsums -c python3-lexicon 2>/dev/null`;
-ok(scalar @patched, 'debsums sees the files that the patches change') or diag 'debsums -c python3-lexicon reports nothing';
+# dpkg --verify and not debsums, which only the cron recipe installs.  A 5 in
+# the third column is a checksum that differs from the package, and a c
+# before the path, which this leaves out as debsums -c does, is a conffile.
+my $verify = `dpkg --verify python3-lexicon 2>&1`;
+my @patched = map { m{\A..5\S*\s+(/\S+)\z} ? $1 : () } split /\n/, $verify;
+ok(scalar @patched, 'dpkg sees the files that the patches change') or diag "dpkg --verify python3-lexicon said:\n$verify";
 is_deeply([ grep { !$expected{$_} } @patched ], [], 'and changed_packaged_files expects each one to change');
 
 [% UNLESS unmanaged -%]
