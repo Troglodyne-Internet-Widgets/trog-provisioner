@@ -78,6 +78,15 @@ C<claude_settings auto-mode> puts it in place of C<autoMode> in the settings on
 the guest, and every other key stays.  A domain with no such file gets the
 defaults of Claude Code.
 
+=head2 THE INTERFACE
+
+C<tui> goes into the settings as the C<tui> of Claude Code.  C<default>
+writes the conversation into the scrollback of the terminal, so the copy mode
+of tmux can scroll back through it.  C<fullscreen> draws on the alternate
+screen, as an editor does, and tmux sees none of it.  The build installs the
+settings file again each time, so a change made with C</tui> on the guest
+lasts until the next build.
+
 =head2 THE CHECKOUTS OF ADMINCODE
 
 On a guest that also runs L<Provisioner::Recipe::admincode>, each repository
@@ -196,6 +205,13 @@ sub args {
             github_token => { type => 'string', 'x-secret' => 1,                               description => 'A personal access token for that account.' },
             git_email    => { type => 'string', pattern    => "$Trog::Patterns::COMMIT_EMAIL", description => 'The address that the commits of the bot carry.  GitHub links a commit to the account that has this address.' },
             pr_assignee  => { type => 'string', pattern    => "$Trog::Patterns::GITHUB_LOGIN", description => 'The login that each pull request of the agent is assigned to, as PERL_SLOP_ASSIGNEE.' },
+
+            tui => {
+                type        => 'string',
+                enum        => [qw{default fullscreen}],
+                default     => 'default',
+                description => 'The interface of Claude Code on the guest.  default keeps the scrollback of the terminal, which the copy mode of tmux needs.  fullscreen draws on the alternate screen, so tmux sees none of the conversation.',
+            },
 
             restricted_user => {
                 type        => 'string',
