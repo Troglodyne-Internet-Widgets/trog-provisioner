@@ -54,12 +54,21 @@ checkout of the guest that this build replaces.  If there is none, the fragment
 clones C<repo_branch> of C<repo_url>.  That happens for a domain that never existed, or for one whose
 data directory somebody emptied.
 
-This recipe leaves a checkout that is already there exactly as it is, in any
-state, except for the two hosts in L</THE HOSTS OF TCMS> and one more case,
-which is the execute bit.  It is the site that somebody runs, so this recipe
-does not reset, update or reconcile it.
-C<config/> is partly tracked, so a write into the working tree replaces a live
-configuration with what master says today.
+A checkout that is already there is the site that somebody runs, so this
+recipe does not reset or reconcile it.  It changes it in three ways only: the
+hosts in L</THE HOSTS OF TCMS>, the execute bit below, and a fast-forward.
+
+The fragment runs F<fast_forward_checkout> on the checkout, before the
+C<perl> target installs what its F<dist.ini> names.  It moves the checkout to
+the tip of C<repo_branch> of C<repo_url> only when that cannot lose anything:
+the checkout is on C<repo_branch>, no tracked file differs from C<HEAD>, and
+the tip is a descendant of C<HEAD>.  Otherwise it writes the reason in the
+setup log, and leaves the checkout as it is.  So a checkout on another branch,
+or with local commits or edits, stays where it is.  The configuration that
+tCMS writes, such as F<config/main.cfg>, is ignored by git, and the
+fast-forward does not touch it.  Without it, a rebuild runs code older than
+the recipe, which passes options that the old code does not take, and installs
+the modules of the old F<dist.ini>.
 
 The one case is a salvage from a guest that the C<data> target made every file
 executable.  git tracks the execute bit, so each file that it records as 644
@@ -140,12 +149,12 @@ one media name maps to the domain, because tCMS links to one.
 
 So the fragment queues F<bin/tcms-hostname> of the checkout to write all three
 into F<config/main.cfg>, as the service user, on every build.  An empty secure
-host or media base clears one that came down with the checkout.  It is the one
-change that this recipe makes to a checkout that is already there, and only
-these three settings.  It runs after the C<perl> recipe has built the modules
-that tCMS loads, and before the service of tPSGI starts.  The
+host or media base clears one that came down with the checkout.  It writes
+only these three settings.  It runs after the C<perl> recipe has built the
+modules that tCMS loads, and before the service of tPSGI starts.  The
 F<bin/tcms-hostname> of the checkout must take C<--secure> and C<--media>.  A
-checkout older than that does not, and then the task fails.
+checkout older than that, which the fast-forward above left as it is, does
+not, and then the task fails.
 
 The guest test asks F<bin/tcms-hostname> for the hostname, and expects the
 domain.  With C<secure_host>, it also asks tCMS for F</login> on the domain,
@@ -222,9 +231,9 @@ sub args {
                 default          => $DEFAULT_REPO,
                 pattern          => "$GIT_REMOTE",
                 'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
-                description      => 'The git repository to clone tCMS from, which declares its system packages.',
+                description      => 'The git repository to clone tCMS from, and to fast-forward a kept checkout from, which declares its system packages.',
             },
-            repo_branch => { type => 'string',  default => 'master',   pattern     => "$BRANCH", description => 'The branch of repo_url that a new guest clones, and whose metamerge.yml names the system packages.' },
+            repo_branch => { type => 'string',  default => 'master',   pattern     => "$BRANCH", description => 'The branch of repo_url that a new guest clones, that a kept checkout on it fast-forwards to, and whose metamerge.yml names the system packages.' },
             worker_jobs => { type => 'integer', default => 1,          minimum     => 1,         description => 'How many jobs the Minion worker of tCMS runs at once.  A job is one video transcode, and each one uses every core it can.' },
             secure_host => { type => 'string',  format  => 'hostname', description => 'The name that carries the logins of a site behind a relay, and that the relay passes through.  tCMS then sends the pages that need a login there, and readers to the domain.' },
         },
