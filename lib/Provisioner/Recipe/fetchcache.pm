@@ -529,8 +529,14 @@ sub enrich {
 =head2 $paths = Provisioner::Recipe::fetchcache->authority()
 
 Returns the authority that signs the certificate of the cache, as a hash
-reference of C<cert> and C<key>, the paths of the two files.  If the files are
-not there, it makes them first.  See L</The certificate, and who signs it>.
+reference of C<cert> and C<key>, the paths of the two files.  If the certificate
+is not there, it makes both files first.  See L</The certificate, and who signs
+it>.
+
+Dies if the certificate is there without its key.  That is an installation that
+trusts the authority of another one, and a new pair would replace the
+certificate that signed the cache.  A caller that needs only the certificate
+asks C<trusted_authority>.
 
 =cut
 
@@ -544,6 +550,8 @@ sub authority {
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return \%paths if -f $paths{cert} && -f $paths{key};
+    die "There is $paths{cert}, but no $paths{key} to sign with.\n" . "This installation trusts the authority of the installation that configures the\n" . "fetch cache, and only that one can sign.  To make a new authority here, remove\n" . "$paths{cert}, and copy the new one to each installation that trusts it.\n"
+      if -f $paths{cert};
 
     my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
         CA        => 1,
@@ -577,7 +585,7 @@ sub trusted_authority {
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return $cert if -f $cert;
-    die "There is no $cert, so a guest could not trust the fetch cache.\n" . "Configure the cache from this installation first, or copy fetchcache-ca.crt from\n" . "the installation that configures it.  Only the certificate: the key stays there.\n";
+    die "There is no $cert, so a guest could not trust the authority\n" . "that signs the fetch cache and the CA of acmeca.  Configure the cache or acmeca\n" . "from this installation first, or copy fetchcache-ca.crt from the installation\n" . "that does.  Only the certificate: the key stays there.\n";
 }
 
 =head2 @written = $recipe->certify($output_dir, @hosts)

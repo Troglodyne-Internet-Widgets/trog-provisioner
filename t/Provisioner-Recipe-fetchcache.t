@@ -357,6 +357,31 @@ subtest 'trusted_authority reads the certificate alone, and makes nothing' => su
     chmod oct('0600'), $paths->{key} or die "chmod: $!";
 };
 
+# An installation that holds the certificate alone trusts the authority of
+# another, and a new pair there would not be the one that signed the cache.
+subtest 'authority refuses to replace a certificate that has no key beside it' => sub {
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    my $config = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$config/fetchcache-ca.crt", "the authority of the fleet\n" );
+
+    my $error = exception { $FETCHCACHE->authority() };
+    like( $error, qr/\S+fetchcache-ca\.key/, 'it dies, and names the key that is missing' );
+    is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority of the fleet\n", 'and leaves the certificate as it was' );
+    is_deeply( [ map { s{\A.*/}{}r } glob("$config/*") ], ['fetchcache-ca.crt'], 'and writes no key' );
+};
+
+# The key is written first, so a run that stopped between the two files leaves
+# a key alone.  That is half a pair that nothing trusts yet.
+subtest 'authority makes a new pair over a key that has no certificate' => sub {
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    my $config = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$config/fetchcache-ca.key", "half a pair\n" );
+
+    my $paths = $FETCHCACHE->authority();
+    isnt( File::Slurper::read_text( $paths->{key} ), "half a pair\n", 'the key is a new one' );
+    like( File::Slurper::read_text( $paths->{cert} ), qr/BEGIN[ ]CERTIFICATE/, 'and its certificate is beside it' );
+};
+
 # The patterns are PCRE nginx evaluates; these ones read the same in perl, so what
 # each URL is taken for can be asked here rather than on a guest.
 subtest 'which kind each URL recipes fetch is taken for' => sub {

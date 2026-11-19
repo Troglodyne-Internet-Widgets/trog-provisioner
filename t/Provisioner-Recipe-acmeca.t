@@ -19,6 +19,7 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 use IO::Socket::SSL::Utils();
 use Net::SSLeay();
 
@@ -100,6 +101,17 @@ subtest 'the intermediate is issued by the authority the fetch cache signs with'
     is( Net::SSLeay::X509_verify( $intermediate, Net::SSLeay::X509_get_pubkey($root) ), 1, 'and the intermediate verifies against it' );
 
     is( extension( $intermediate, 'basicConstraints' ), 'CA:TRUE', 'the intermediate is a CA, so step-ca can issue from it' );
+};
+
+# Only the installation that made the authority holds its key.  Elsewhere the
+# intermediate cannot be signed, and the certificate of the fleet must survive.
+subtest 'no intermediate where the installation holds the certificate of the authority alone' => sub {
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    my $config = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$config/fetchcache-ca.crt", "the authority of the fleet\n" );
+
+    like( exception { generated() }, qr/\S+fetchcache-ca\.key/, 'it dies, and names the key that is missing' );
+    is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority of the fleet\n", 'and leaves the certificate as it was' );
 };
 
 subtest 'the intermediate may not vouch for anything outside the TLD it was made for' => sub {
