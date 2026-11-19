@@ -124,12 +124,12 @@ subtest 'files: a binary key' => sub {
         'https://apt.binary.test/dists/stable/InRelease' => q{},
     );
     my @files = Provisioner::Packager::Deb->files( source( name => 'binary', uri => 'https://apt.binary.test', key => 'https://apt.binary.test/key.gpg' ) );
-    my ($key) = grep { $_->{path} =~ m{keyrings} } @files;
+    my ($key) = grep { index( $_->{path}, 'keyrings' ) >= 0 } @files;
 
     is( $key->{path},                     '/etc/apt/keyrings/binary.gpg', 'a binary key goes in a .gpg' );
     is( $key->{encoding},                 'b64',                          'base64, because the user-data is text' );
     is( decode_base64( $key->{content} ), $BINARY,                        'and it decodes to the key' );
-    ok( !grep( { $_->{path} =~ m{preferences} } @files ), 'no pin without one' );
+    ok( !grep( { index( $_->{path}, 'preferences' ) >= 0 } @files ), 'no pin without one' );
 };
 
 subtest 'files: what stops the build' => sub {
@@ -150,6 +150,17 @@ subtest 'files: what stops the build' => sub {
     $suite //= q{};
     like( $suite, qr/The[ ]apt[ ]source[ ]nosuite[ ]has[ ]no[ ]suite[ ]noble/, 'an archive with no index for the suite' );
     like( $suite, qr{/dists/noble/InRelease[ ]answered[ ]404},                 'names what it asked for' );
+    like( $suite, qr{/dists/noble/Release[.]gpg[ ]answered[ ]404},             'and the detached signature that it asked for next' );
+};
+
+subtest 'files: a suite signed by Release.gpg, with no InRelease' => sub {
+    %answer = (
+        'https://apt.detached.test/key'                     => $ARMORED,
+        'https://apt.detached.test/dists/noble/Release.gpg' => q{},
+    );
+    my @files = Provisioner::Packager::Deb->files( source( name => 'detached', uri => 'https://apt.detached.test', key => 'https://apt.detached.test/key', suites => ['noble'] ) );
+    ok( scalar( grep { $_->{path} eq '/etc/apt/sources.list.d/detached.sources' } @files ), 'is a suite that apt reads' );
+    is( $asked{'HEAD https://apt.detached.test/dists/noble/InRelease'}, 1, 'after it asked for InRelease first' );
 };
 
 subtest 'files: a key is fetched once' => sub {
