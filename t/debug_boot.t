@@ -339,13 +339,13 @@ subtest 'a missing disk tool names the package preflight names' => sub {
 subtest 'a disk tool runs as the owner of the disks, through the daemon of the guest' => sub {
     my @said;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
-    $mock->redefine( capture_cmd => sub ( $hv, $cmd ) { push @said, $cmd; $? = 0; return "hv.test\n" } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
+    $mock->redefine( capture_cmd => sub ( $hv, @argv ) { push @said, \@argv; $? = 0; return "hv.test\n" } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
     my $fixed = 1;
     $mock->redefine( file_exists => sub ( $hv, $path ) { $fixed && $path eq q{/var/lib/trog-provisioner/guestfs-appliance/README.fixed} } );
 
     my %want = (
-        'qemu+ssh://someadmin@hv.test/session' => q{LIBGUESTFS_PATH='/var/lib/trog-provisioner/guestfs-appliance' virt-cat '-c' 'qemu:///session' '-d' 'vm.test' '/etc/hostname'},
-        'qemu+ssh://someadmin@hv.test/system'  => q{sudo -n virt-cat '-c' 'qemu:///system' '-d' 'vm.test' '/etc/hostname'},
+        'qemu+ssh://someadmin@hv.test/session' => [qw{env LIBGUESTFS_PATH=/var/lib/trog-provisioner/guestfs-appliance virt-cat -c qemu:///session -d vm.test /etc/hostname}],
+        'qemu+ssh://someadmin@hv.test/system'  => [qw{sudo -n virt-cat -c qemu:///system -d vm.test /etc/hostname}],
     );
     foreach my $uri ( sort keys %want ) {
         @said = ();
@@ -356,7 +356,7 @@ subtest 'a disk tool runs as the owner of the disks, through the daemon of the g
 
     @said = ();
     Trog::Bin::DebugBoot::guest_tool( Trog::HV::Libvirt->build(), qw{virt-cat -d vm.test /etc/hostname} );
-    is_deeply( \@said, [q{sudo -n virt-cat '-d' 'vm.test' '/etc/hostname'}], 'no uri runs it as root, with no -c' ) or diag explain \@said;
+    is_deeply( \@said, [ [qw{sudo -n virt-cat -d vm.test /etc/hostname}] ], 'no uri runs it as root, with no -c' ) or diag explain \@said;
 
     # The user of a session cannot read the kernel that libguestfs would build
     # its own VM from, so it needs the fixed appliance.
