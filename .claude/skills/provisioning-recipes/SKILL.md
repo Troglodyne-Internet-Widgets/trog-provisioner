@@ -336,6 +336,9 @@ the cache did about it: `MISS`, `HIT`, `STALE`. Tear both guests down at the end
 echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/collect_artifacts "$DOMAIN"
 ```
 
+The password opens the store for the key of the guest.  To log in with your ssh
+agent instead, see `--agent` under *Ask the guest*.
+
 Prints a directory holding whichever of these it found.  Under a scratch
 configuration the directory is inside it, in `artifacts/`, so the teardown of
 the last domain removes it with the rest:
@@ -406,10 +409,22 @@ an unrelated network problem.
 echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/ask_guest "$DOMAIN" 'postconf -h mydestination'
 ```
 
-The password on stdin for the same reason bin/provision wants it: the guest's
-key lives in the store, and asking for it is what opens that.  Without it these
-two are refused with `Permission denied (publickey)`, which looks like a guest
-problem and is not.
+The password goes on stdin because the key of the guest is in the store.
+Without it, these two stop before they connect, and say that they have no key.
+
+The store is needed only for that key.  The admin account of every guest also
+trusts the keys of `admin_authorized_keys`.  If one of those keys is in your ssh
+agent, give both scripts `--agent`, and pipe nothing in:
+
+```
+.claude/skills/provisioning-recipes/scripts/ask_guest --agent "$DOMAIN" 'ss -lnt'
+.claude/skills/provisioning-recipes/scripts/collect_artifacts --agent "$DOMAIN"
+```
+
+You choose `--agent`.  A missing key never switches to the agent, and `--agent`
+never asks the store for the key.  Without `SSH_AUTH_SOCK`, it is refused.  A guest on a hypervisor that needs
+a token, such as a cloud, still opens the store to find the guest, because only
+the API of the provider knows where the guest is.
 
 Runs a command on the guest as root and prints what it said. `collect_artifacts`
 gets the four logs and then the guest is usually destroyed; this is for the part

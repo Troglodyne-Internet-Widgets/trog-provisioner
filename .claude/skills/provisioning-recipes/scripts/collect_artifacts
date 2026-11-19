@@ -125,6 +125,15 @@ See L</"$dir = artifacts_dir($domain)">.
 =item B<--user> NAME, B<--key> FILE, B<--host> ADDRESS
 
 Override what would otherwise come from the configuration and the hypervisor.
+Without B<--key> or B<--agent>, the key of the guest comes out of the store,
+so the password of the store goes on standard input.
+
+=item B<--agent>
+
+Log in with the keys of the ssh agent in C<SSH_AUTH_SOCK>, and never ask the
+store for the key of the guest.  The admin of a guest trusts the keys of
+F<admin_authorized_keys>.  Refused without C<SSH_AUTH_SOCK>, and together with
+B<--key>.
 
 =item B<--hypervisor> NAME, B<--hvconf> FILE
 
@@ -139,13 +148,14 @@ C<bin/destroy> finds a guest to destroy.
 sub main {
     my @args = @_;
 
-    my ( $into, $user, $key, $host, $hv_name, $hvconf, $help );
+    my ( $into, $user, $key, $agent, $host, $hv_name, $hvconf, $help );
     GetOptionsFromArray(
         \@args,
         'config=s'     => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] },
         'into=s'       => \$into,
         'user=s'       => \$user,
         'key=s'        => \$key,
+        'agent'        => \$agent,
         'host=s'       => \$host,
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
@@ -159,7 +169,7 @@ sub main {
       unless $domain;
 
     Trog::Skill::Teardown::require_config();
-    my $guest = connect_to( $domain, user => $user, key => $key, host => $host, hypervisor => $hv_name, hvconf => $hvconf );
+    my $guest = connect_to( $domain, user => $user, key => $key, agent => $agent, host => $host, hypervisor => $hv_name, hvconf => $hvconf );
 
     $into //= artifacts_dir($domain);
     make_path($into);
@@ -278,6 +288,9 @@ sub capture_to {
 sub connect_to {
     my ( $domain, %opts ) = @_;
 
+    die "--agent and --key are two ways to log in.  Pass one of them.\n"           if $opts{agent} && defined $opts{key};
+    die "--agent logs in through an ssh agent, and SSH_AUTH_SOCK is not set.\n" if $opts{agent} && !$ENV{SSH_AUTH_SOCK};
+
     # A domain in _shared runs on the guest of its host, and has none of its own.
     my $machine = Provisioner::Cookbook->host_of($domain) // $domain;
 
@@ -285,15 +298,19 @@ sub connect_to {
     my $domain_dir = $hv->domain_dir;
     my $cfg_dir    = "$domain_dir/$machine";
 
-    my $key = $opts{key} // Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" );
+    my $key = $opts{agent} ? undef : $opts{key} // Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" );
 
     # Before the connection rather than after it fails.  key_path prompts for
     # the store's password and a script has nothing to type into, so it comes
     # back undef -- and ssh offered no key is refused with "Permission denied
     # (publickey)", which reads as a guest that will not have us rather than a
     # store we never opened.
-    die "No key for $machine, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | collect_artifacts $domain\n}
-      unless defined $key;
+    die "No key for $machine, in the store or at $cfg_dir/key.rsa.\n"
+      . "If it is in the store, the password goes on stdin, as for bin/provision:\n"
+      . qq{    echo "\$TROG_SCRATCH_PASS" | collect_artifacts $domain\n}
+      . "If its admin trusts a key in your ssh agent, log in with the agent instead:\n"
+      . "    collect_artifacts --agent $domain\n"
+      unless $opts{agent} || defined $key;
 
     my $user = $opts{user} // admin_user("$cfg_dir/provision.conf");
 
@@ -310,7 +327,12 @@ sub connect_to {
     # did -- and those want opposite things done about them.
     my $whoami = eval { $guest->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
-    die "Could not get a shell on $user\@$host for $machine.\n" . "  key:  $key\n" . "  host: $host (from the hypervisor; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
+    my $identity = $opts{agent} ? q{} : "-i $key ";
+    die "Could not get a shell on $user\@$host for $machine.\n"
+      . '  key:  '
+      . ( $opts{agent} ? 'the keys of the ssh agent' : $key ) . "\n"
+      . "  host: $host (from the hypervisor; --host overrides)\n"
+      . "Try it by hand: ssh $identity$user\@$host\n"
       if !defined $whoami || $whoami eq q{};
 
     return $guest;

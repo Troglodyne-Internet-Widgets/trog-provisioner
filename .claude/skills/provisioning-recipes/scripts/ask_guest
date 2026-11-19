@@ -30,6 +30,7 @@ ask_guest - ask a live guest a question, rather than reasoning about it
     ask_guest vm.test 'postconf -h mydestination'
     ask_guest vm.test 'configd status postfix'
     ask_guest --config /path/to/scratch vm.test 'ss -lnt'
+    ask_guest --agent vm.test 'ss -lnt'
 
 =head1 DESCRIPTION
 
@@ -40,20 +41,26 @@ is actually in a generated file, whether a port answers.
 
 Runs as root, because everything worth asking here is.
 
+It logs in with the key of the guest, out of the store, so the password of the
+store goes on standard input.  With B<--agent>, it logs in with the keys of
+your ssh agent instead, and needs no store for the key.  The admin of a guest
+trusts the keys of F<admin_authorized_keys>.
+
 =cut
 
 exit main(@ARGV) unless caller;
 
 sub main {
     my @args = @_;
-    # Only a --config before the domain, so that the command keeps its options.
+    # Only options before the domain, so that the command keeps its own.
+    my $agent;
     my $options = Getopt::Long::Parser->new( config => [qw{require_order pass_through}] );
-    $options->getoptionsfromarray( \@args, 'config=s' => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] } );
+    $options->getoptionsfromarray( \@args, 'config=s' => sub { $ENV{TROG_PROVISIONER_CONFIG} = $_[1] }, 'agent' => \$agent );
     my ( $domain, @command ) = @args;
-    die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
+    die "Usage: ask_guest [--agent] DOMAIN COMMAND...\n" unless $domain && @command;
     Trog::Skill::Teardown::require_config();
 
-    my $guest = Trog::Hypervisors->guest_of($domain)
+    my $guest = ( $agent ? Trog::Hypervisors->guest_of_with_agent($domain) : Trog::Hypervisors->guest_of($domain) )
       or die "No hypervisor in the fleet runs $domain at an address, so there is nothing to ask.\n";
 
     # The command is one argument of sh -c, so a command containing an awk
