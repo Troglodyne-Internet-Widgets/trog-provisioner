@@ -389,7 +389,7 @@ subtest 'mailbox_aliases maps the names that other clients make to the flagged f
     is( $more{mailbox_aliases}{Junk},     'Spam Box',      'a default name can change its target' );
     is( $more{mailbox_aliases}{Trash},    'Deleted Items', 'and the other defaults stay' );
 
-    foreach my $bad ( [ q{a.b} => 'Sent Items' ], [ 'Sent' => q{a'b} ], [ 'a/b' => 'Sent Items' ], [ 'Sent' => q{$x} ] ) {
+    foreach my $bad ( [ q{a.b} => 'Sent Items' ], [ 'Sent' => q{a'b} ], [ 'a/b' => 'Sent Items' ], [ 'Sent' => q{$x} ], [ 'Foo#Bar' => 'Sent Items' ], [ 'Sent' => 'Foo#Bar' ], [ '<file' => 'Sent Items' ], [ 'Sent' => '<file' ], [ ' Foo' => 'Sent Items' ], [ 'Foo ' => 'Sent Items' ], [ 'Sent' => ' Foo' ], [ 'Sent' => "Foo\t" ] ) {
         like( exception { $recipe->validate( %BASE, mailbox_aliases => { $bad->[0] => $bad->[1] } ) }, qr{mailbox_aliases}, "a name that a shell or a Maildir cannot hold is refused: $bad->[0] => $bad->[1]" );
     }
 };

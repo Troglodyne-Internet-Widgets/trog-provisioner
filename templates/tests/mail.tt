@@ -394,6 +394,22 @@ SKIP: {
         '[% old %]' => '[% mailbox_aliases.$old %]',
 [% END -%]
     );
+
+    # The configuration has each name without quotes, so dovecot reads what it
+    # was given only if the recipe refuses a hash sign, a leading less-than
+    # sign and white space at the ends.  Ask dovecot, rather than reason about
+    # its parser.
+    {
+        my %read;
+        foreach my $line ( `doveconf -n 2>&1` ) {
+            $read{$1}{$2} = $3 if $line =~ m/^\s*mailbox_alias_(old|new)(\d*)\s*=(?:\s(.*))?$/;
+        }
+        my @new = map { $read{new}{$_} // '' } sort { ( $a || 1 ) <=> ( $b || 1 ) } keys %{ $read{new} // {} };
+        my @old = map { $read{old}{$_} // '' } sort { ( $a || 1 ) <=> ( $b || 1 ) } keys %{ $read{old} // {} };
+        is_deeply( \@new, [ sort keys %aliases ],                       'dovecot reads each alias as it is written' ) or diag explain \@new;
+        is_deeply( \@old, [ map { $aliases{$_} } sort keys %aliases ], 'and each target as it is written' )       or diag explain \@old;
+    }
+
     my $n = 0;
     foreach my $alias ( sort keys %aliases ) {
         my $target  = $aliases{$alias};
