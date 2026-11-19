@@ -995,7 +995,8 @@ sub enrich {
 Writes the templates, and the C<zone_records> as F<registrar-records.json>
 where there are records to publish in the zone of the domain.  Also the
 certificate of the fleet authority as F<registrar-anchor.crt> where C<enrich>
-sets C<fleet_anchor>.
+sets C<fleet_anchor>.  Dies there if the installation has no certificate of the
+authority, as C<trusted_authority> in L<Provisioner::Recipe::fetchcache> says.
 
 =cut
 
@@ -1012,8 +1013,7 @@ sub generate_files {
     }
     return @written unless $opts{fleet_anchor};
 
-    my $authority = Provisioner::Cookbook->load('fetchcache')->authority();
-    File::Copy::copy( $authority->{cert}, "$output_dir/registrar-anchor.crt" )
+    File::Copy::copy( Provisioner::Cookbook->load('fetchcache')->trusted_authority(), "$output_dir/registrar-anchor.crt" )
       or die "Could not give the guest the authority that the API of its pdns guest chains to: $!\n";
 
     return ( @written, 'registrar-anchor.crt' );

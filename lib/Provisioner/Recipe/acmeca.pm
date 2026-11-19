@@ -345,7 +345,9 @@ The first of the two recipes to ask makes the authority, and both keep it.  So a
 fleet with a cache and a CA has one root.  Only the certificate of the root
 travels.  Its key stays where it was made.
 
-Dies if it cannot copy the certificate of the authority.
+Dies if it cannot copy the certificate of the authority.  Dies if the
+installation holds the certificate of the authority without its key, as
+C<authority> in L<Provisioner::Recipe::fetchcache> says.
 
 =cut
 

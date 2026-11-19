@@ -253,11 +253,11 @@ subtest 'a domain whose authority is under a reserved TLD trusts the authority o
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
     authority_conf( $conf, $name, 'ns.zone.test' );
 
-    my $dir    = tempdir( CLEANUP => 1 );
-    my $anchor = "$dir/authority.crt";
-    File::Slurper::Temp::write_text( $anchor, "the authority\n" );
-    my $fetchcache = Test::MockModule->new( Provisioner::Cookbook->load('fetchcache') );
-    $fetchcache->redefine( authority => sub { return { cert => $anchor, key => '/bogus' } } );
+    # An installation that configures guests under the authority, and not the
+    # authority itself, holds the certificate without its key.
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    my $config = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$config/fetchcache-ca.crt", "the authority\n" );
 
     my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.zone.test' => '192.0.2.53' }, authority => 'ns.zone.test' );
     my $out    = tempdir( CLEANUP => 1 );
@@ -265,9 +265,25 @@ subtest 'a domain whose authority is under a reserved TLD trusts the authority o
 
     ok( ( grep { $_ eq 'registrar-anchor.crt' } @wrote ), 'the payload carries the authority' );
     is( File::Slurper::read_text("$out/registrar-anchor.crt"), "the authority\n", 'which is the fleet authority' );
+    is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority\n", 'and the installation keeps the certificate that it had' );
+    is_deeply( [ map { s{\A.*/}{}r } glob("$config/*") ], ['fetchcache-ca.crt'], 'and makes no authority of its own beside it' );
     my $install = 'install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt';
     like( fresh('registrar')->render(%common), qr{^\Q$install\E$}m, 'and the fragment installs it where acmeca installs the same one' );
     unlike( fresh('registrar')->render(%common), qr{--delegate}, 'and under a reserved TLD there is no zone above to delegate from' );
+};
+
+subtest 'a domain under a reserved TLD is refused where the installation has no fleet authority' => sub {
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    authority_conf( $conf, 'web.lab.zone.test', 'ns.zone.test' );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    my $config = $ENV{TROG_PROVISIONER_CONFIG};
+
+    my %common = ( domain => 'web.lab.zone.test', install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.zone.test' => '192.0.2.53' }, authority => 'ns.zone.test' );
+    my $error  = exception { fresh('registrar')->generate_files( tempdir( CLEANUP => 1 ), %common ) };
+
+    like( $error, qr/There[ ]is[ ]no[ ]\S+fetchcache-ca\.crt/, 'it says which certificate is missing' );
+    is_deeply( [ glob("$config/*") ], [], 'and makes no authority, which signed nothing that the guest talks to' );
 };
 
 subtest 'which server holds the zone' => sub {
