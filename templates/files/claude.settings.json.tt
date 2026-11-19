@@ -15,8 +15,8 @@
 [% END %]
   },
   "env": {
-[%# A guest is used over ssh, and has no clipboard for the copy of the
-    fullscreen interface, so the terminal keeps the mouse to select text. -%]
+[%# A guest is used over ssh, and has no clipboard for a copy that Claude
+    Code makes, so the terminal keeps the mouse to select text. -%]
     "CLAUDE_CODE_DISABLE_MOUSE": "1"[% IF github_user && !restricted %],
     "GH_CONFIG_DIR": "[% gh_config_dir %]",
     "GIT_AUTHOR_NAME": "[% github_user %]",
@@ -28,6 +28,6 @@
     "GIT_CONFIG_VALUE_0": "git@github.com:"[% END %][% IF pr_assignee && !restricted %],
     "PERL_SLOP_ASSIGNEE": "[% pr_assignee %]"[% END %]
   },
-  "tui": "fullscreen",
+  "tui": "[% tui %]",
   "theme": "dark"
 }

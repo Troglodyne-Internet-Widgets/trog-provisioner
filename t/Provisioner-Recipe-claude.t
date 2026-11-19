@@ -483,6 +483,21 @@ subtest 'every guest leaves the mouse to the terminal' => sub {
     }
 };
 
+subtest 'the interface that the settings choose' => sub {
+    foreach my $case ( [ {}, 'default', 'by default, the one that keeps the scrollback of the terminal' ], [ { tui => 'fullscreen' }, 'fullscreen', 'and fullscreen when the domain asks for it' ] ) {
+        my ( $asked, $want, $name ) = @$case;
+        foreach my $file (qw{claude.settings.json claude.restricted.settings.json}) {
+            my $dir = tempdir( CLEANUP => 1 );
+            recipe()->generate_files( $dir, %G, %$asked, modules => ['claude'], restricted_user => 'test-agent' );
+            my $text = do { local ( @ARGV, $/ ) = "$dir/$file"; <> }
+              // q{};
+            my $conf = eval { Cpanel::JSON::XS::decode_json($text) };
+            is( $conf && $conf->{tui}, $want, "$file: $name" ) or diag $text;
+        }
+    }
+    like( exception { recipe()->validated( %G, tui => 'classic' ) }, qr/tui/, 'an interface that Claude Code does not have is refused' );
+};
+
 subtest 'a restricted agent' => sub {
     my %got = recipe()->validated( %G, restricted_user => 'test-agent' );
     is( $got{restricted_home}, '/opt/domains/agent.test.test/agents/test-agent', 'gets a home of its own in the directory of the domain' );
