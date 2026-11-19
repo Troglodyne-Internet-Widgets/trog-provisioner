@@ -75,9 +75,10 @@ drops the address only on the ports of that relay.
 =head2 Ports of the guests
 
 Besides the ports that a relay always serves, a guest can register ports of
-its own, each mapped to a port of the guest.  The relay passes such a port, by
-the SNI name and with the PROXY protocol, only for the names of the guest that
-registered it, and listens there only while a guest does.  The client script
+its own, each for some of its names, each name mapped to a port of the guest.
+The relay passes such a port, by the SNI name and with the PROXY protocol,
+only for the names that registered it, and listens there only while a guest
+does.  The client script
 of the relay writes the registration into C<relay_dir>, through
 C<write_ports> in F<scripts/relay_files>, which has the whole account.  The
 C<stream> block includes the server of each port from there.
@@ -127,6 +128,26 @@ guest registered.  See L</Ports of the guests>.
 
 sub port_rate_limit {
     return 1024;
+}
+
+=head2 @args = port_args(\%routes)
+
+The arguments of the client script of a relay for C<%routes>, which maps each
+port of its own to each name that passes on it, mapped to the port of the
+guest: a C<--port> and a C<PORT=GUEST_PORT:NAME,...> for each port and port of
+the guest, in order.  See L</Ports of the guests>.
+
+=cut
+
+sub port_args {
+    my ($routes) = @_;
+    my @args;
+    foreach my $port ( sort { $a <=> $b } keys %$routes ) {
+        my %names_of;
+        push( @{ $names_of{ $routes->{$port}{$_} } }, $_ ) foreach sort keys %{ $routes->{$port} };
+        push( @args,                                  map { ( '--port', "$port=$_:" . join( q{,}, @{ $names_of{$_} } ) ) } sort { $a <=> $b } keys %names_of );
+    }
+    return @args;
 }
 
 =head2 $set = $recipe->ban_set()

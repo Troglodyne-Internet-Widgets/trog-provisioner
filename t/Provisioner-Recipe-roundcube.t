@@ -34,9 +34,9 @@ sub asked_of_nginx {
 
 subtest 'with a relay, webmail is a public name, and its jail bans through the relay' => sub {
     my $asked = asked_of_nginx( nginx => { relay => 'relay.test.test' }, roundcube => { version => '1.6.9' } );
-    is_deeply( $asked->{sites},         ['webmail.webmail.test.test'],                                  'the vhost of webmail' );
-    is_deeply( $asked->{public_names},  { 'webmail.webmail.test.test' => 'webmail.webmail.test.test' }, 'is the name that the relay sends to it' );
-    is_deeply( $asked->{proxied_jails}, ['roundcube-auth'],                                             'and the jail that reads its failed logins bans through the relay' );
+    is_deeply( $asked->{sites},         ['webmail.webmail.test.test'],                                               'the vhost of webmail' );
+    is_deeply( $asked->{public_names},  { 'webmail.webmail.test.test' => { vhost => 'webmail.webmail.test.test' } }, 'is the name that the relay sends to it' );
+    is_deeply( $asked->{proxied_jails}, ['roundcube-auth'],                                                          'and the jail that reads its failed logins bans through the relay' );
 };
 
 subtest 'without a relay, webmail is only a vhost of the guest' => sub {

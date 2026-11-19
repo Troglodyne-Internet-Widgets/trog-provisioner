@@ -115,21 +115,35 @@ sub enriched {
     return { $recipe->enrich( $recipe->validate( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %extra ) ) };
 }
 
-subtest 'a port of its own is from 1024, and goes to a port of the guest' => sub {
-    is_deeply( enriched()->{passthrough_ports},                                                        {},                               'a domain has none by default' );
-    is_deeply( enriched( passthrough_ports => { 1024 => 8449, 65535 => 65535 } )->{passthrough_ports}, { 1024 => 8449, 65535 => 65535 }, 'from 1024 to 65535, to any port of the guest' );
-    like( exception { enriched( passthrough_ports => { 1023   => 8449 } ) }, qr{/passthrough_ports},      'below 1024 is refused, because a relay serves those itself' );
-    like( exception { enriched( passthrough_ports => { 65536  => 8449 } ) }, qr{/passthrough_ports},      'and above 65535' );
-    like( exception { enriched( passthrough_ports => { matrix => 8449 } ) }, qr{/passthrough_ports},      'and a name that is no number' );
-    like( exception { enriched( passthrough_ports => { 8448   => 0 } ) },    qr{/passthrough_ports/8448}, 'and so is a port of the guest that is no port' );
-};
-
 my %VPN = ( ip_pool => { cidr => '10.0.0.0/24', bins => { vpnclients => { cidr => '10.8.0.192/26', via => 'vpn.test.test' }, other => { cidr => '10.9.0.0/24' } } } );
+
+# public_names for %vhost, each public name mapped to the name of its vhost.
+sub publics (%vhost) {
+    return { map { $_ => { vhost => $vhost{$_} } } keys %vhost };
+}
+
+subtest 'a public name has a vhost, and can have ports of its own from 1024, each to a port of the guest' => sub {
+    my $ported = sub (%ports) { return enriched( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => { vhost => 'web.test.test', %ports } } ) };
+    is_deeply( $ported->()->{public_names}{'web.test.test'}{ports},                                            {},                               'a public name has none by default' );
+    is_deeply( $ported->( ports => { 1024 => 8449, 65535 => 65535 } )->{public_names}{'web.test.test'}{ports}, { 1024 => 8449, 65535 => 65535 }, 'from 1024 to 65535, to any port of the guest' );
+    my $at = qr{/public_names/web[.]test[.]test/ports};
+    like( exception { $ported->( ports => { 1023   => 8449 } ) }, $at,          'below 1024 is refused, because a relay serves those itself' );
+    like( exception { $ported->( ports => { 65536  => 8449 } ) }, $at,          'and above 65535' );
+    like( exception { $ported->( ports => { matrix => 8449 } ) }, $at,          'and a port that is no number' );
+    like( exception { $ported->( ports => { 8448   => 0 } ) },    qr{$at/8448}, 'and so is a port of the guest that is no port' );
+    my $refusal = '/public_names/web.test.test: is a map of vhost: NAME';
+    like(
+        exception { enriched( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } ) },
+        qr{\Q$refusal\E},
+        'a bare name of a vhost, the form before ports, is refused with the form that it takes now'
+    );
+    like( exception { 'Provisioner::Recipe::nginx'->served_names( domain => 'web.test.test', public_names => { 'web.test.test' => 'web.test.test' } ) }, qr/gives[ ]web[.]test[.]test[ ]a[ ]bare[ ]name/, 'and so it is where the zone is made, before validation' );
+};
 
 subtest 'a public name in the zone of the domain is served, and one outside it is served as public.VHOST' => sub {
     my $nginx = 'Provisioner::Recipe::nginx';
     is_deeply(
-        [ $nginx->served_names( domain => 'web.test.test', public_names => { 'web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' } ) ],
+        [ $nginx->served_names( domain => 'web.test.test', public_names => publics( 'web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' ) ) ],
         [qw{shop.web.test.test web.test.test}],
         'the domain and a name below it are published and certified as they are'
     );
@@ -137,14 +151,14 @@ subtest 'a public name in the zone of the domain is served, and one outside it i
         [
             $nginx->served_names(
                 domain       => 'web.test.test',
-                public_names => { 'www.customer.test' => 'web.test.test', 'xweb.test.test' => 'web.test.test', 'mail.customer.test' => 'webmail.web.test.test', 'webmail.customer.test' => 'webmail.web.test.test' }
+                public_names => publics( 'www.customer.test' => 'web.test.test', 'xweb.test.test' => 'web.test.test', 'mail.customer.test' => 'webmail.web.test.test', 'webmail.customer.test' => 'webmail.web.test.test' )
             )
         ],
         [qw{public.web.test.test public.webmail.web.test.test}],
         'a name of another zone, even one that ends in the same letters, is replaced by public.VHOST once for each vhost'
     );
     is_deeply(
-        [ $nginx->served_names( domain => 'web.test.test', aliases => { 'web.test.test' => ['alias.test.test'] }, public_names => { 'a.customer.test' => 'www.web.test.test', 'b.customer.test' => 'alias.test.test' } ) ],
+        [ $nginx->served_names( domain => 'web.test.test', aliases => { 'web.test.test' => ['alias.test.test'] }, public_names => publics( 'a.customer.test' => 'www.web.test.test', 'b.customer.test' => 'alias.test.test' ) ) ],
         ['public.web.test.test'],
         'www and an alias name the vhost of the domain'
     );
@@ -155,7 +169,7 @@ subtest 'each vhost that a public name names answers for it on the ports of the 
     my $opts = enriched(
         %VPN,
         sites        => [qw{web.test.test webmail.web.test.test}],
-        public_names => { 'shop.web.test.test' => 'web.test.test', 'webmail.customer.test' => 'webmail.web.test.test', 'webmail.web.test.test' => 'webmail.web.test.test' }
+        public_names => publics( 'shop.web.test.test' => 'web.test.test', 'webmail.customer.test' => 'webmail.web.test.test', 'webmail.web.test.test' => 'webmail.web.test.test' )
     );
     is_deeply(
         $opts->{proxied},
@@ -168,14 +182,14 @@ subtest 'each vhost that a public name names answers for it on the ports of the 
         %VPN,
         aliases      => { 'web.test.test' => ['old.web.test.test'] },
         sites        => [qw{web.test.test www.web.test.test}],
-        public_names => { 'www.web.test.test' => 'web.test.test', 'old.web.test.test' => 'web.test.test' }
+        public_names => publics( 'www.web.test.test' => 'web.test.test', 'old.web.test.test' => 'web.test.test' )
     );
     is_deeply( $opts->{proxied},      { 'web.test.test' => [] },             'www and an alias are public as names that the vhost of the domain has already' );
     is_deeply( $opts->{domain_names}, [qw{web.test.test old.web.test.test}], 'and it keeps the alias' );
     is_deeply( $opts->{proxy_from},   ['10.8.0.192/26'],                     'nginx believes a PROXY header from the bin that routes through the VPN, and from no other bin' );
 
     is_deeply(
-        enriched( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' }, proxy_from => ['192.0.2.1/32'] )->{proxy_from},
+        enriched( %VPN, sites => ['web.test.test'], public_names => publics( 'web.test.test' => 'web.test.test' ), proxy_from => ['192.0.2.1/32'] )->{proxy_from},
         ['192.0.2.1/32'], 'proxy_from, when it is set, is the whole list'
     );
     is( enriched( sites => ['web.test.test'] )->{proxied}, undef, 'and without public names no vhost listens for a proxy' );
@@ -187,28 +201,28 @@ subtest 'a public name that no vhost of the guest can answer for stops the build
     # The start of a refusal that names each of @names, in that order.
     my $naming = sub (@names) { my $list = join( ', ', @names ); return qr/points[ ]\Q$list\E[ ]at[ ]\S+,[ ]but[ ]/ };
     like(
-        exception { enriched( %webmail, public_names => { 'web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' } ) },
+        exception { enriched( %webmail, public_names => publics( 'web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' ) ) },
         qr/${\ $naming->(qw{shop.web.test.test web.test.test})}no[ ]recipe/,
         'no vhost serves the vhost that they name, and the message names each of them'
     );
-    is( exception { enriched( %webmail, public_names => { 'webmail.customer.test' => 'webmail.web.test.test' } ) }, undef, 'but a vhost that serves another name can answer for it' );
+    is( exception { enriched( %webmail, public_names => publics( 'webmail.customer.test' => 'webmail.web.test.test' ) ) }, undef, 'but a vhost that serves another name can answer for it' );
     like(
         exception {
             enriched(
                 %VPN,
                 sites        => [qw{web.test.test mail.web.test.test pop.web.test.test}],
-                public_names => { 'mail.web.test.test' => 'web.test.test', 'pop.web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' }
+                public_names => publics( 'mail.web.test.test' => 'web.test.test', 'pop.web.test.test' => 'web.test.test', 'shop.web.test.test' => 'web.test.test' )
             )
         },
         qr/${\ $naming->(qw{mail.web.test.test pop.web.test.test})}each[ ]is[ ]a[ ]name[ ]that[ ]another/,
         'another vhost lists the names, and the message names each of them and not the free one'
     );
     like(
-        exception { enriched( %VPN, sites => ['other.test'], public_names => { 'shop.other.test' => 'other.test', 'www.other.test' => 'other.test' } ) },
+        exception { enriched( %VPN, sites => ['other.test'], public_names => publics( 'shop.other.test' => 'other.test', 'www.other.test' => 'other.test' ) ) },
         qr/${\ $naming->(qw{shop.other.test www.other.test})}\S+[ ]is[ ]outside/,
         'the vhost is outside the zone of the domain, and the message names each of them'
     );
-    like( exception { enriched( ip_pool => { cidr => '10.0.0.0/24' }, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } ) }, qr/where[ ]the[ ]proxy[ ]connects/, 'no network to believe the header from' );
+    like( exception { enriched( ip_pool => { cidr => '10.0.0.0/24' }, sites => ['web.test.test'], public_names => publics( 'web.test.test' => 'web.test.test' ) ) }, qr/where[ ]the[ ]proxy[ ]connects/, 'no network to believe the header from' );
 };
 
 subtest 'a public name in a zone of the registrar is served as it is, without a stand-in' => sub {
@@ -218,12 +232,12 @@ subtest 'a public name in a zone of the registrar is served as it is, without a 
 
     my $nginx = 'Provisioner::Recipe::nginx';
     is_deeply(
-        [ $nginx->served_names( domain => 'web.test.test', public_names => { 'shop.customer.test' => 'webmail.web.test.test', 'customer.test' => 'webmail.web.test.test' } ) ],
+        [ $nginx->served_names( domain => 'web.test.test', public_names => publics( 'shop.customer.test' => 'webmail.web.test.test', 'customer.test' => 'webmail.web.test.test' ) ) ],
         [qw{customer.test shop.customer.test}],
         'each name of that zone is published and certified, and no public.VHOST joins them'
     );
     is_deeply(
-        [ $nginx->served_names( domain => 'web.test.test', public_names => { 'shop.customer.test' => 'webmail.web.test.test', 'other.example.test' => 'webmail.web.test.test' } ) ],
+        [ $nginx->served_names( domain => 'web.test.test', public_names => publics( 'shop.customer.test' => 'webmail.web.test.test', 'other.example.test' => 'webmail.web.test.test' ) ) ],
         [qw{shop.customer.test public.webmail.web.test.test}],
         'and a name of no zone that the guest can answer for still gets one'
     );
@@ -232,7 +246,7 @@ subtest 'a public name in a zone of the registrar is served as it is, without a 
 subtest 'a proxy routes every public name, and public.VHOST beside a name outside every zone' => sub {
     my $nginx = 'Provisioner::Recipe::nginx';
     is_deeply(
-        [ $nginx->proxied_names( domain => 'web.test.test', public_names => { 'shop.web.test.test' => 'web.test.test', 'www.customer.test' => 'www.web.test.test', 'mail.customer.test' => 'webmail.web.test.test' } ) ],
+        [ $nginx->proxied_names( domain => 'web.test.test', public_names => publics( 'shop.web.test.test' => 'web.test.test', 'www.customer.test' => 'www.web.test.test', 'mail.customer.test' => 'webmail.web.test.test' ) ) ],
         [qw{mail.customer.test public.web.test.test public.webmail.web.test.test shop.web.test.test www.customer.test}],
         'each name once, sorted, with the name that DNS-01 cannot certify as well as its stand-in'
     );
@@ -240,7 +254,7 @@ subtest 'a proxy routes every public name, and public.VHOST beside a name outsid
 };
 
 subtest 'the ports of the proxy get the limits of the ports that it fronts' => sub {
-    my %limits = 'Provisioner::Recipe::nginx'->rate_limits( public_names => { 'web.test.test' => 'web.test.test' } );
+    my %limits = 'Provisioner::Recipe::nginx'->rate_limits( public_names => publics( 'web.test.test' => 'web.test.test' ) );
     is_deeply( [ sort { $a <=> $b } keys %limits ], [ 80, 443, 8080, 8443 ], 'with public names' );
     is( $limits{8443}, $limits{443}, 'at the same limit' );
 };
@@ -249,7 +263,7 @@ subtest 'the jails of a domain with a relay ban through it' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
     $pool->redefine( main_addresses => sub { my ($domain) = @_; return $domain eq 'relay.test.test' ? { guests => '192.0.2.5', vpnclients => '10.8.0.197' } : {} } );
 
-    my %public = ( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } );
+    my %public = ( %VPN, sites => ['web.test.test'], public_names => publics( 'web.test.test' => 'web.test.test' ) );
     my $opts   = enriched( %public, relay => 'relay.test.test' );
     is( $opts->{relay_address}, '10.8.0.197', 'the guest reaches the relay at its address in the tunnel' );
     is_deeply( $opts->{relay_jails}, [qw{nginx-botsearch nginx-http-auth}], 'and every jail of nginx bans through it' );
@@ -270,7 +284,7 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
     $pool->redefine( assignments => sub { return { 'web.test.test' => '192.0.2.10', 'shop.test.test' => '192.0.2.99' } } );
 
     my $nginx  = 'Provisioner::Recipe::nginx';
-    my %public = ( public_names => { 'www.customer.test' => 'shop.test.test' } );
+    my %public = ( public_names => publics( 'www.customer.test' => 'shop.test.test' ) );
     my %files  = $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test' );
     is_deeply(
         \%files,
@@ -289,8 +303,21 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
         'the relay issues the key of the domain and its own host key, and a domain built onto another guest sends its names to that guest'
     );
 
-    my %ported = $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test', passthrough_ports => { 8448 => 8449 } );
-    like( $ported{'/etc/fail2ban/nginxrelay/shop.test.test.key.b64'}{issue}{command}, qr/[ ]www[.]customer[.]test[ ]--port[ ]8448=8449\z/, 'a port of its own goes to register, with the port of the guest' );
+    my %ported = $nginx->granted_secrets(
+        'shop.test.test',
+        relay        => 'relay.test.test',
+        public_names => {
+            'www.customer.test'  => { vhost => 'shop.test.test', ports => { 8448 => 8449 } },
+            'chat.customer.test' => { vhost => 'shop.test.test', ports => { 8448 => 9449, 5349 => 5349 } },
+            'shop.customer.test' => { vhost => 'shop.test.test' },
+        }
+    );
+    my ($port_args) = $ported{'/etc/fail2ban/nginxrelay/shop.test.test.key.b64'}{issue}{command} =~ m/[ ](--port[ ].*)\z/;
+    is(
+        $port_args,
+        '--port 5349=5349:chat.customer.test --port 8448=8449:www.customer.test --port 8448=9449:chat.customer.test',
+        'each port of its own goes to register with the names that list it alone, and the port of the guest of each'
+    );
 
     is_deeply( { $nginx->granted_secrets( 'shop.test.test', %public ) },                                        {}, 'a domain with no relay registers nothing' );
     is_deeply( { $nginx->granted_secrets( 'shop.test.test', public_names => {}, relay => 'relay.test.test' ) }, {}, 'and nor does one with no public name' );
@@ -332,11 +359,11 @@ subtest 'a media name is fetched by the relay on 8080, and gets a certificate of
 
     # What each case changes in %media, and why the build stops.
     my %refused = (
-        'a media name with no relay'                 => [ [ relay => undef ],                                                    qr/no[ ]relay/ ],
-        'a media name outside every zone'            => [ [ media_names => { 'media.customer.test' => 'web.test.test' } ],       qr/cannot[ ]get[ ]the[ ]certificate/ ],
-        'a name that is public and media'            => [ [ public_names => { 'media.web.test.test' => 'web.test.test' } ],      qr/both[ ]a[ ]public[ ]name[ ]and[ ]a[ ]media[ ]name/ ],
-        'a media name that a vhost lists'            => [ [ sites => [qw{web.test.test media.web.test.test}] ],                  qr/a[ ]vhost[ ]lists/ ],
-        'a media name of a vhost that nothing lists' => [ [ media_names => { 'media.web.test.test' => 'other.web.test.test' } ], qr/no[ ]recipe/ ],
+        'a media name with no relay'                 => [ [ relay        => undef ],                                               qr/no[ ]relay/ ],
+        'a media name outside every zone'            => [ [ media_names  => { 'media.customer.test' => 'web.test.test' } ],        qr/cannot[ ]get[ ]the[ ]certificate/ ],
+        'a name that is public and media'            => [ [ public_names => publics( 'media.web.test.test' => 'web.test.test' ) ], qr/both[ ]a[ ]public[ ]name[ ]and[ ]a[ ]media[ ]name/ ],
+        'a media name that a vhost lists'            => [ [ sites        => [qw{web.test.test media.web.test.test}] ],             qr/a[ ]vhost[ ]lists/ ],
+        'a media name of a vhost that nothing lists' => [ [ media_names  => { 'media.web.test.test' => 'other.web.test.test' } ],  qr/no[ ]recipe/ ],
     );
     foreach my $case ( sort keys %refused ) {
         my ( $change, $why ) = @{ $refused{$case} };
@@ -381,8 +408,8 @@ subtest 'a cached name is fetched by the relay on 8080, on a certificate that na
         %VPN,
         sites        => ['web.test.test'],
         relay        => 'relay.test.test',
-        public_names => { 'secure.web.test.test' => 'web.test.test' },
-        cached_names => { 'web.test.test'        => 'web.test.test' },
+        public_names => publics( 'secure.web.test.test' => 'web.test.test' ),
+        cached_names => { 'web.test.test' => 'web.test.test' },
     );
     my $opts = enriched(%cached);
     is_deeply( $opts->{proxied},           { 'web.test.test' => ['secure.web.test.test'] }, 'the secure name still passes through on 8443' );
@@ -403,7 +430,7 @@ subtest 'a cached name is fetched by the relay on 8080, on a certificate that na
     my %refused = (
         'a cached name with no relay'                 => [ [ relay => undef ],                                                                                                            qr/no[ ]relay/ ],
         'a cached name outside every zone'            => [ [ cached_names => { 'www.customer.test' => 'web.test.test' } ],                                                                qr/cannot[ ]get[ ]the[ ]certificate/ ],
-        'a name that is public and cached'            => [ [ public_names => { 'web.test.test' => 'web.test.test' } ],                                                                    qr/both[ ]a[ ]public[ ]name[ ]and[ ]a[ ]cached[ ]name/ ],
+        'a name that is public and cached'            => [ [ public_names => publics( 'web.test.test' => 'web.test.test' ) ],                                                             qr/both[ ]a[ ]public[ ]name[ ]and[ ]a[ ]cached[ ]name/ ],
         'a name that is media and cached'             => [ [ media_names => { 'media.web.test.test' => 'web.test.test' }, cached_names => { 'media.web.test.test' => 'web.test.test' } ], qr/both[ ]a[ ]media[ ]name[ ]and[ ]a[ ]cached[ ]name/ ],
         'a cached name of a vhost that nothing lists' => [ [ cached_names => { 'shop.web.test.test' => 'other.web.test.test' } ],                                                         qr/no[ ]recipe/ ],
         'a cached name that another vhost lists'      => [ [ sites => [qw{web.test.test shop.web.test.test}], cached_names => { 'shop.web.test.test' => 'web.test.test' } ],              qr/another[ ]vhost[ ]lists/ ],
@@ -430,7 +457,7 @@ subtest 'the teardown releases the names on the relay whenever the domain names 
     is( $revocations[0]{guest},   'relay.test.test',                                    'is told on the relay' );
     is( $revocations[0]{command}, '/root/bin/relay_client nginx release web.test.test', 'to release the names of the domain' );
 
-    %config = ( nginx => { public_names => { 'web.test.test' => 'web.test.test' } } );
+    %config = ( nginx => { public_names => publics( 'web.test.test' => 'web.test.test' ) } );
     is_deeply( [ $nginx->revocations('web.test.test') ], [], 'a domain with no relay releases nothing' );
 };
 

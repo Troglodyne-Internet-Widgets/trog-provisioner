@@ -33,7 +33,12 @@ my @NAMES  = qw{public.web.test.test www.customer.test};
 
 # Where the guest of $DOMAIN takes IMAP, submission and POP3 over TLS.
 my $ADDRESS = '192.0.2.10';
-my @PORTS   = qw{--port 993=10993 --port 465=10465 --port 995=10995};
+
+sub client_ports {
+    my (@names) = @_;
+    return map { ( '--port', "$_:" . join( q{,}, @names ) ) } qw{993=10993 465=10465 995=10995};
+}
+my @PORTS = client_ports( $DOMAIN, "mail.$DOMAIN" );
 
 # Every command answered: ssh-keygen makes a key where it is told to, doveadm
 # hashes what it reads, and nginx says what $nginx_ok says.  @ran holds the
@@ -138,11 +143,17 @@ subtest 'nginx register: a domain registers each name, for TLS and for plain HTT
     is( File::Slurper::read_text("$relay/$DOMAIN.tls.map"), "www.customer.test 192.0.2.10:8443;\n", 'a second registration replaces the first' );
 };
 
-subtest 'nginx register: a domain registers ports of its own, for its names alone' => sub {
+subtest 'nginx register: a domain registers ports of its own, for the names that list them alone' => sub {
     my $relay = fresh_relay('nginx');
-    my ( $out, $err, $rc ) = register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449' );
-    is( $rc,                                                      0,                                                                             'it exits 0' ) or diag $err;
-    is( File::Slurper::read_text("$relay/$DOMAIN.port-8448.map"), "public.web.test.test 192.0.2.10:8449;\nwww.customer.test 192.0.2.10:8449;\n", 'each name goes to the port of the guest on the address of its TLS' );
+    my ( $out, $err, $rc ) = register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449:public.web.test.test' );
+    is( $rc,                                                      0,                                         'it exits 0' ) or diag $err;
+    is( File::Slurper::read_text("$relay/$DOMAIN.port-8448.map"), "public.web.test.test 192.0.2.10:8449;\n", 'the name goes to the port of the guest on the address of its TLS, and the name that did not list the port does not' );
+
+    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, qw{--port 8448=8449:public.web.test.test --port 8448=9449:www.customer.test} );
+    is( File::Slurper::read_text("$relay/$DOMAIN.port-8448.map"), "public.web.test.test 192.0.2.10:8449;\nwww.customer.test 192.0.2.10:9449;\n", 'two names can take one port to two ports of the guest' );
+
+    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449:public.web.test.test,www.customer.test' );
+    is( File::Slurper::read_text("$relay/$DOMAIN.port-8448.map"), "public.web.test.test 192.0.2.10:8449;\nwww.customer.test 192.0.2.10:8449;\n", 'or list both names after one port' );
     my $server = File::Slurper::read_text("$relay/ports/8448.conf");
     like( $server, qr/^\s*listen[ ]8448;$/m,                         'nginx listens on the port' );
     like( $server, qr/include[ ]\Q$relay\E\/[*][.]port-8448[.]map;/, 'for the names in the maps of that port' );
@@ -156,9 +167,9 @@ subtest 'nginx register: a domain registers ports of its own, for its names alon
     ok( !-e "$relay/$DOMAIN.port-8448.map", 'a registration without the port takes it away' );
     ok( !-e "$relay/ports/8448.conf",       'and nginx stops listening there, because no domain has it' );
 
-    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449' );
+    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449:public.web.test.test' );
     $nginx_ok = 0;
-    ( $out, $err ) = register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '9448=9449' );
+    ( $out, $err ) = register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '9448=9449:public.web.test.test' );
     like( $err, qr/nginx[ ]said[ ]no/, 'a port that nginx refuses is an error' );
     ok( -e "$relay/ports/8448.conf" && -e "$relay/$DOMAIN.port-8448.map", 'and the domain keeps the port it had' );
     ok( !-e "$relay/ports/9448.conf",                                     'and nginx does not listen on the new one' );
@@ -236,14 +247,27 @@ subtest 'nginx register: it refuses what it cannot put in a file of nginx' => su
     }
     like( exception { Trog::RelayClient::main( 'nginx', 'release', $DOMAIN, 'extra' ) }, qr/\Ausage:/, 'a release with more than the domain' );
     my %bad_port = (
-        'a port below 1024, which nginx serves itself' => '443=8443',
-        'a port above 65535'                           => '70000=8449',
-        'a port with no port of the guest'             => '8448',
+        'a port below 1024, which nginx serves itself' => '443=8443:public.web.test.test',
+        'a port above 65535'                           => '70000=8449:public.web.test.test',
+        'a port with no port of the guest'             => '8448:public.web.test.test',
+        'a port with no names'                         => '8448=8449',
+        'a port with a colon too many'                 => '8448=8449:public.web.test.test:x',
     );
+    my $form = 'PORT=GUEST_PORT:NAME,..., with PORT from 1024';
     foreach my $case ( sort keys %bad_port ) {
-        like( exception { Trog::RelayClient::main( 'nginx', 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', $bad_port{$case} ) }, qr/PORT=GUEST_PORT,[ ]with[ ]PORT[ ]from[ ]1024/, $case );
+        like( exception { Trog::RelayClient::main( 'nginx', 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', $bad_port{$case} ) }, qr/\Q$form\E/, $case );
     }
-    like( exception { Trog::RelayClient::main( 'nginx', 'register', $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media media.web.test.test --port 8448=8449} ) }, qr/needs[ ]a[ ]name/, 'a port with no name that passes through' );
+    my $unlisted = 'which is not among the NAMEs';
+    my %bad_name = (
+        'a name that the command does not pass through' => [ qw{--media media.web.test.test --port 8448=8449:media.web.test.test}, qr/'media[.]web[.]test[.]test',[ ]\Q$unlisted\E/ ],
+        'an empty name'                                 => [ @NAMES, '--port', '8448=8449:public.web.test.test,', qr/names[ ]'',[ ]\Q$unlisted\E/ ],
+        'a name twice on one port'                      => [ @NAMES, qw{--port 8448=8449:public.web.test.test --port 8448=9449:public.web.test.test}, qr/on[ ]8448[ ]twice/ ],
+    );
+    foreach my $case ( sort keys %bad_name ) {
+        my @args = @{ $bad_name{$case} };
+        my $said = pop @args;
+        like( exception { Trog::RelayClient::main( 'nginx', 'register', $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080}, @args ) }, $said, $case );
+    }
     is_deeply( \@ran, [], 'and none of them ran anything' );
 };
 
@@ -444,9 +468,9 @@ subtest 'mail register-clients: a domain registers the names of its mail clients
 
     my ( $key, $said, $exit ) = client( 'mail', 'register-clients', $DOMAIN, $ADDRESS, @names, @PORTS );
     is( $exit,                                                 0,                                                             'it exits 0' ) or diag $said;
-    is( File::Slurper::read_text("$dir/$DOMAIN.port-993.map"), "$DOMAIN 192.0.2.10:10993;\nmail.$DOMAIN 192.0.2.10:10993;\n", 'each name goes to IMAP over TLS on the guest' );
-    is( File::Slurper::read_text("$dir/$DOMAIN.port-465.map"), "$DOMAIN 192.0.2.10:10465;\nmail.$DOMAIN 192.0.2.10:10465;\n", 'and to submission over TLS' );
-    is( File::Slurper::read_text("$dir/$DOMAIN.port-995.map"), "$DOMAIN 192.0.2.10:10995;\nmail.$DOMAIN 192.0.2.10:10995;\n", 'and to POP3 over TLS' );
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-993.map"), "mail.$DOMAIN 192.0.2.10:10993;\n$DOMAIN 192.0.2.10:10993;\n", 'each name goes to IMAP over TLS on the guest' );
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-465.map"), "mail.$DOMAIN 192.0.2.10:10465;\n$DOMAIN 192.0.2.10:10465;\n", 'and to submission over TLS' );
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-995.map"), "mail.$DOMAIN 192.0.2.10:10995;\n$DOMAIN 192.0.2.10:10995;\n", 'and to POP3 over TLS' );
     like( File::Slurper::read_text("$dir/ports/993.conf"), qr/^\s*listen[ ]993;$/m, 'and nginx listens on each port' );
     is( MIME::Base64::decode_base64($key), "PRIVATE KEY\n", 'it prints the private half of the ban key, in base64' );
     my $ban_command = qr/command="\S+[ ]mailrelay-bans[ ]\Q$DOMAIN\E"/;
@@ -457,13 +481,13 @@ subtest 'mail register-clients: a domain registers the names of its mail clients
         'after nginx accepts the maps, it reloads nginx, and the firewall opens the ports'
     );
 
-    my ( undef, $refused ) = client( qw{mail register-clients other.test.test 192.0.2.11}, "mail.$DOMAIN", @PORTS );
+    my ( undef, $refused ) = client( qw{mail register-clients other.test.test 192.0.2.11}, "mail.$DOMAIN", client_ports("mail.$DOMAIN") );
     like( $refused, qr/mail[.]\Q$DOMAIN\E[ ]is[ ]registered[ ]to[ ]\Q$DOMAIN\E/, 'another domain cannot register a name that this one holds' );
     ok( !-e "$dir/other.test.test.port-993.map", 'and gets no map' );
 
     $nginx_ok = 0;
     my $before = File::Slurper::read_text("$dir/$DOMAIN.port-993.map");
-    ( undef, $refused ) = client( 'mail', 'register-clients', $DOMAIN, $ADDRESS, 'new.test.test', @PORTS );
+    ( undef, $refused ) = client( 'mail', 'register-clients', $DOMAIN, $ADDRESS, 'new.test.test', client_ports('new.test.test') );
     like( $refused, qr/nginx[ ]refused[ ].*nginx[ ]said[ ]no/, 'a map that nginx refuses is an error' );
     is( File::Slurper::read_text("$dir/$DOMAIN.port-993.map"), $before, 'and the domain keeps what it had' );
 
@@ -488,7 +512,7 @@ subtest 'upgrade: the mail relay moves the routes that an older relay kept by se
     is( File::Slurper::read_text("$older/$DOMAIN.port-995.map"), "$DOMAIN 192.0.2.10:10995;\n", 'of POP3 to 995' );
     ok( !-e "$older/$DOMAIN.$_.map", "and the map of $_ is gone" ) foreach qw{imaps submissions pop3s};
     ok( -e "$older/ports/$_.conf",   "nginx listens on $_ again" ) foreach qw{993 465 995};
-    my ( undef, $refused ) = client( qw{mail register-clients other.test.test 192.0.2.11}, $DOMAIN, @PORTS );
+    my ( undef, $refused ) = client( qw{mail register-clients other.test.test 192.0.2.11}, $DOMAIN, client_ports($DOMAIN) );
     like( $refused, qr/is[ ]registered[ ]to[ ]\Q$DOMAIN\E/, 'and the names stay taken' );
 
     ( undef, $complaint, $upgraded ) = client( 'mail', 'upgrade' );
@@ -528,7 +552,7 @@ subtest 'mail: it refuses what it cannot put in a table of postfix' => sub {
     foreach my $case ( sort keys %bad ) {
         like( exception { Trog::RelayClient::main( 'mail', @{ $bad{$case} } ) }, qr/\Ausage:/, $case );
     }
-    like( exception { Trog::RelayClient::main( 'mail', 'register-clients', $DOMAIN, $ADDRESS, $DOMAIN, '--port', '25=10025' ) }, qr/one[ ]of[ ]465,[ ]993,[ ]995/, 'and of a port that postfix serves' );
+    like( exception { Trog::RelayClient::main( 'mail', 'register-clients', $DOMAIN, $ADDRESS, $DOMAIN, '--port', "25=10025:$DOMAIN" ) }, qr/one[ ]of[ ]465,[ ]993,[ ]995/, 'and of a port that postfix serves' );
     is_deeply( \@ran, [], 'and none of them ran anything' );
 };
 

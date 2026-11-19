@@ -13,6 +13,7 @@ use Fcntl                  qw{:flock};
 use File::Basename         ();
 use File::Temp             ();
 use IPC::Open3             ();
+use List::Util             ();
 use MIME::Base64           ();
 use Socket                 ();
 use Time::HiRes            ();
@@ -61,9 +62,25 @@ C<192.0.2.10:8443>.
 sub upstream {
     my ($upstream) = @_;
 
-    return 0 unless defined $upstream && $upstream =~ m/\A([^:]+):([[:digit:]]{1,5})\z/a;
-    my ( $address, $port ) = ( $1, $2 );
-    return defined Socket::inet_pton( Socket::AF_INET(), $address ) && $port >= 1 && $port <= 65535 ? 1 : 0;
+    my ( $address, $port, @more ) = split( m/:/, $upstream // q{}, -1 );
+    return 0 if @more || !defined $port;
+    return defined Socket::inet_pton( Socket::AF_INET(), $address ) && whole_number( $port, 1, 65535 ) ? 1 : 0;
+}
+
+=head2 whole_number($text, $min, $max)
+
+True when C<$text> is a whole number from C<$min> to C<$max>, spelled as perl
+spells that number, with no sign, space or zero in front.  Each one goes into a
+file name or a file that a service reads, so it must have one spelling.
+
+=cut
+
+sub whole_number {
+    my ( $text, $min, $max ) = @_;
+
+    # Under fatal warnings, int dies on what is no number.
+    local $@;
+    return eval { $text eq int($text) && $text >= $min && $text <= $max } ? 1 : 0;
 }
 
 =head2 ($output, $ok) = run([\%opts,] @command)
@@ -172,15 +189,16 @@ sub lock_dir {
 =head2 Ports of the guests
 
 A guest can register ports of its own besides the ones that the relay always
-serves.  Each is a public port mapped to the port of the guest where the relay
-sends it, by the SNI name, with the PROXY protocol.  Only the names of that
-guest pass on that port, and the relay listens on a port only while some guest
-registered it.  Everything is in C<$dir>, so the salvage of a rebuild keeps it:
+serves, each for some of its names.  The relay sends a connection on such a
+public port, by the SNI name, with the PROXY protocol, to the port of the guest
+that the name registered.  Only the names that registered the port pass on it,
+and the relay listens on a port only while some guest registered it.  Everything is in C<$dir>, so the salvage of a rebuild keeps it:
 
 =over 4
 
 =item * C<$dir/DOMAIN.port-PORT.map> holds a line C<NAME ADDRESS:GUEST_PORT;>
-for each name of DOMAIN, which the stream server of PORT includes.
+for each name of DOMAIN that registered PORT, which the stream server of PORT
+includes.
 
 =item * C<$dir/ports/PORT.conf> is that stream server, which the C<stream> block
 of every relay includes.  See L<Provisioner::RelayRecipe/Ports of the guests>.
@@ -201,10 +219,9 @@ it knows what else listens on the relay.
 
 sub port_pair {
     my ($pair) = @_;
-    return unless defined $pair && $pair =~ m/\A([1-9][[:digit:]]{0,4})=([1-9][[:digit:]]{0,4})\z/a;
-    my ( $port, $guest_port ) = ( $1, $2 );
-    return if $port > 65535 || $guest_port > 65535;
-    return ( $port, $guest_port );
+    my @ports = split( m/=/, $pair // q{}, -1 );
+    return if @ports != 2 || List::Util::any { !whole_number( $_, 1, 65535 ) } @ports;
+    return @ports;
 }
 
 =head2 %holder = port_names_of_others($dir, $domain)
@@ -269,9 +286,9 @@ sub restore_ports {
 
 =head2 write_ports($dir, $relay, $domain, \%registration)
 
-Registers the ports of C<$domain>.  C<%registration> has C<ports>, which maps
-each public port to a port of the guest, C<names>, the names that pass on
-them, and C<address>, the address of the guest.  It drops each other port that
+Registers the ports of C<$domain>.  C<%registration> has C<routes>, which maps
+each public port to each name that passes on it, mapped to a port of the
+guest, and C<address>, the address of the guest.  It drops each other port that
 C<$domain> registered before.  Then it runs C<write_listeners>.  C<$relay> is
 the name of the relay, which names the variables of nginx.  C<release_ports>
 releases the ports of C<$domain>.
@@ -280,13 +297,13 @@ releases the ports of C<$domain>.
 
 sub write_ports {
     my ( $dir, $relay, $domain, $registration ) = @_;
-    my ( $ports, $names, $address ) = @{$registration}{qw{ports names address}};
+    my ( $routes, $address ) = @{$registration}{qw{routes address}};
 
     my %old = port_maps_of( $dir, $domain );
-    write_file( $old{$_}, undef ) foreach grep { !exists $ports->{$_} } keys %old;
-    foreach my $port ( keys %$ports ) {
-        my $map = join( q{}, map { "$_ $address:$ports->{$port};\n" } @$names );
-        write_file( "$dir/$domain.port-$port.map", @$names ? $map : undef );
+    write_file( $old{$_}, undef ) foreach grep { !exists $routes->{$_} } keys %old;
+    foreach my $port ( keys %$routes ) {
+        my $names = $routes->{$port};
+        write_file( "$dir/$domain.port-$port.map", join( q{}, map { "$_ $address:$names->{$_};\n" } sort keys %$names ) );
     }
     return write_listeners( $dir, $relay );
 }

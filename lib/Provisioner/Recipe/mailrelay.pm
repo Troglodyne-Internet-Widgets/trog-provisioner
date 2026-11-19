@@ -345,7 +345,14 @@ sub registration_files {
     # Every service of the guest is on one address.
     my %upstream = map { ( $_ => [ split( m/:/, $terms{upstreams}{$_} ) ] ) } keys %CLIENT_PORTS;
     my $address  = $upstream{imaps}[0];
-    my @ports    = map { ( '--port', "$CLIENT_PORTS{$_}=$upstream{$_}[1]" ) } sort { $CLIENT_PORTS{$a} <=> $CLIENT_PORTS{$b} } keys %CLIENT_PORTS;
+    my @ports    = Provisioner::RelayRecipe::port_args(
+        {
+            map {
+                my $guest_port = $upstream{$_}[1];
+                ( $CLIENT_PORTS{$_} => { map { $_ => $guest_port } @{ $terms{names} } } )
+            } keys %CLIENT_PORTS
+        }
+    );
 
     return (
         $self->password_path($client) => {

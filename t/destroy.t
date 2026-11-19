@@ -288,7 +288,7 @@ subtest 'a VPN client is revoked on the server that issued it, which frees its a
 # --- revoke_grants: the web relay ---
 subtest 'the public names of a domain are released on its relay, which would send them to a freed address' => sub {
     my $domain   = 'web.test.test';
-    my %config   = ( nginx => { relay => 'relay.test.test', public_names => { 'shop.test.test' => $domain } } );
+    my %config   = ( nginx => { relay => 'relay.test.test', public_names => { 'shop.test.test' => { vhost => $domain } } } );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? {%config} : {} } );
 

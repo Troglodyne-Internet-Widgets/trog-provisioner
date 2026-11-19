@@ -56,8 +56,8 @@ File::Slurper::Temp::write_text(
             _base      => { _global => \%GLOBAL },
             'web.test' => {
                 nginxproxy => undef,
-                nginx      => { public_names => { 'shop.web.test' => 'web.test', 'www.customer.test' => 'web.test', 'shop.partner.test' => 'web.test' } },
-                registrar  => { accounts     => { partner         => { type => 'route53', zones => ['partner.test'] } } },
+                nginx      => { public_names => { map { $_ => { vhost => 'web.test' } } qw{shop.web.test www.customer.test shop.partner.test} } },
+                registrar  => { accounts     => { partner => { type => 'route53', zones => ['partner.test'] } } },
             },
             'post.test'  => { mail => undef },
             'plain.test' => { ntp  => undef },

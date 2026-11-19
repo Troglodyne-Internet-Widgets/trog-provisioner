@@ -75,9 +75,9 @@ an account of L<Provisioner::Recipe::registrar> lists.
 When the C<nginx> of the domain names a C<relay>, this recipe hands C<nginx>
 these C<public_names>: the domain and each of its aliases, for the page, and
 C<server_name>, for the vhost of the homeserver.  The relay passes them through
-on 443.  This recipe also hands C<nginx> the C<passthrough_ports> 8448, mapped
-to 8449, so the relay passes these names through on 8448 to 8449 of the guest.
-The vhost of the homeserver listens there, with the PROXY protocol.  See
+on 443.  C<server_name> also has the port 8448, mapped to 8449, so the relay
+passes it alone through on 8448 to 8449 of the guest.  The vhost of the
+homeserver listens there, with the PROXY protocol.  See
 L<Provisioner::Recipe::nginx/Ports of its own>.
 
 If C<server_name> is in no zone that the guest can publish and certify,
@@ -126,11 +126,10 @@ sub required_recipes {
             my %ours    = map  { $_ => 1 } @sites, $opts{server_name} // ();
             my @aliases = grep { !$ours{$_} } @{ Provisioner::Cookbook->alias_map()->{$domain} // [] };
             return (
-                sites             => [@sites],
-                passthrough_ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT },
-                public_names      => {
-                    ( map { $_ => $domain } $domain, @aliases ),
-                    ( defined $opts{server_name} ? ( $opts{server_name} => "matrix.$domain" ) : () ),
+                sites        => [@sites],
+                public_names => {
+                    ( map { $_ => { vhost => $domain } } $domain, @aliases ),
+                    ( defined $opts{server_name} ? ( $opts{server_name} => { vhost => "matrix.$domain", ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT } } ) : () ),
                 },
             );
         },

@@ -148,7 +148,7 @@ subtest 'a mail client goes by its SNI name to its guest, with the PROXY protoco
 
     my $name = "mail.$domain";
     my %port = ( [% FOR service IN client_ports.keys().sort() %][% service %] => [% client_ports.$service %], [% END %] );
-    my $key  = `$client register-clients $domain 127.0.0.1 $name @{[ map { "--port $port{$_}=" . $listener{$_}->sockport } qw{imaps submissions pop3s} ]} 2>&1`;
+    my $key  = `$client register-clients $domain 127.0.0.1 $name @{[ map { "--port $port{$_}=" . $listener{$_}->sockport . ":$name" } qw{imaps submissions pop3s} ]} 2>&1`;
     is( $?, 0, 'a guest registers the names of its mail clients' ) or diag $key;
     like( $key, qr/\A[A-Za-z0-9+\/=]+\z/, 'and gets its ban key in base64 on one line' );
     my $check = `nginx -t 2>&1`;

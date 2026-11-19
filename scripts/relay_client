@@ -18,11 +18,11 @@ BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_fi
 
 =head2 SYNOPSIS
 
-    relay_client nginx register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT ...]
+    relay_client nginx register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT:NAME,... ...]
     relay_client nginx media-key DOMAIN ADDRESS
     relay_client nginx cert DOMAIN    # "install NAME" from ssh, and the PEM on stdin
     relay_client mail register DOMAIN ADDRESS
-    relay_client mail register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT [--port ...]
+    relay_client mail register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT:NAME,... [--port ...]
     relay_client RELAY release DOMAIN
     relay_client RELAY upgrade
 
@@ -44,9 +44,11 @@ public half goes into F<authorized_keys.root>, which sshd reads beside the keys
 of root.  It can run only F<relay_ban> for DOMAIN and the set of bans of RELAY,
 and only from the address of the guest.  See F<scripts/relay_ban>.
 
-Each C<--port> PORT=GUEST_PORT is a port of its own.  The relay passes a TLS
-connection on PORT, by its SNI name and with the PROXY protocol, to the address
-of the guest on GUEST_PORT, for each name of DOMAIN, and for no other name.  It
+Each C<--port> PORT=GUEST_PORT:NAME,... is a port of its own, for the names
+after the colon, each of which the command also registers.  The relay passes a
+TLS connection on PORT, by its SNI name and with the PROXY protocol, to the
+address of the guest on GUEST_PORT, for each of those names, and for no other
+name.  A port can come twice, for other names and another GUEST_PORT.  It
 listens on PORT, and opens it in the firewall, while some domain registered it.
 A port that DOMAIN registered before and does not name now is dropped.  The
 web relay takes a PORT from 1024, because nginx serves 80 and 443 itself.  The
@@ -73,7 +75,8 @@ When a step fails, it says which, and exits with another status.
 C<register> sends each NAME to DOMAIN: a TLS connection by its SNI name to
 TLS_UPSTREAM, and a plain HTTP request by its C<Host> header to HTTP_UPSTREAM.
 An upstream is an IPv4 address and a port, such as C<192.0.2.10:8443>.  The
-ports of its own go to the address of TLS_UPSTREAM, and need a NAME.
+ports of its own go to the address of TLS_UPSTREAM, for names that pass
+through.
 
 Each C<--media> NAME is a media name, which this guest serves and caches
 itself.  The stream proxy sends it to the media server of this guest, on the
@@ -128,11 +131,11 @@ C<release> also removes the login and the route in.
 
 =cut
 
-my $USAGE = "usage: relay_client nginx register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT ...]
+my $USAGE = "usage: relay_client nginx register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT:NAME,... ...]
 " . "       relay_client nginx media-key DOMAIN ADDRESS
 " . "       relay_client nginx cert DOMAIN
 " . "       relay_client mail register DOMAIN ADDRESS
-" . "       relay_client mail register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT [--port ...]
+" . "       relay_client mail register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT:NAME,... [--port ...]
 " . "       relay_client RELAY release DOMAIN
 " . "       relay_client RELAY upgrade
 ";
@@ -226,15 +229,26 @@ sub refuse_taken {
     return;
 }
 
-# The ports of @pairs, each PORT=GUEST_PORT, as a map.  Dies on a pair that is
-# not one, or whose PORT $relay does not take.
-sub ports_of {
-    my ( $relay, @pairs ) = @_;
-    my %spec = %{ $RELAYS{$relay} };
-    return map {
-        my @pair = Trog::RelayFiles::port_pair($_);
-        @pair && $spec{takes_port}->( $pair[0] ) ? @pair : die "$_ is no PORT=GUEST_PORT, with PORT $spec{port_rule}\n"
-    } @pairs;
+# The routes of @specs, each PORT=GUEST_PORT:NAME,..., as a map of each PORT to
+# each NAME, mapped to its GUEST_PORT.  Dies on a spec that is not one, whose
+# PORT $relay does not take, or whose NAME is not among @names, or is on PORT
+# twice.
+sub routes_of {
+    my ( $relay, $specs, @names ) = @_;
+    my %spec       = %{ $RELAYS{$relay} };
+    my %registered = map { $_ => 1 } @names;
+    my %routes;
+    foreach my $port_spec (@$specs) {
+        my ( $pair, $list, @more ) = split( m/:/, $port_spec, -1 );
+        my ( $port, $guest_port ) = Trog::RelayFiles::port_pair($pair);
+        die "$port_spec is no PORT=GUEST_PORT:NAME,..., with PORT $spec{port_rule}\n" if @more || !defined $list || !defined $port || !$spec{takes_port}->($port);
+        foreach my $name ( split( m/,/, $list, -1 ) ) {
+            die "$port_spec names '$name', which is not among the NAMEs of the command\n" unless $registered{$name};
+            die "$port_spec names $name on $port twice\n" if exists $routes{$port}{$name};
+            $routes{$port}{$name} = $guest_port;
+        }
+    }
+    return %routes;
 }
 
 # Writes %$files, each path to its content or undef, and the ports of
@@ -358,12 +372,11 @@ sub nginx_owned_files {
 
 sub nginx_register {
     my ( $domain, @args ) = @_;
-    Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media, 'page=s@' => \my @pages, 'port=s@' => \my @port_pairs ) or die $USAGE;
+    Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media, 'page=s@' => \my @pages, 'port=s@' => \my @port_specs ) or die $USAGE;
     my ( $tls, $http, @names ) = @args;
     die $USAGE unless Trog::RelayFiles::upstream($tls) && Trog::RelayFiles::upstream($http) && ( @names || @media || @pages );
     die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names, @media, @pages;
-    my %ports = ports_of( 'nginx', @port_pairs );
-    die "A port of its own needs a name that passes through\n" if %ports && !@names;
+    my %routes = routes_of( 'nginx', \@port_specs, @names );
     my %count;
     $count{$_}++ foreach List::Util::uniq(@names), List::Util::uniq(@media), List::Util::uniq(@pages);
     my @twice = grep { $count{$_} > 1 } sort keys %count;
@@ -386,7 +399,7 @@ sub nginx_register {
         } keys %served,
     );
     my ($address) = split( m/:/, $tls );
-    return register_names( $dir, 'nginx', $domain, { address => $address, ports => \%ports, names => \@names }, \%files );
+    return register_names( $dir, 'nginx', $domain, { address => $address, routes => \%routes }, \%files );
 }
 
 sub media_key {
@@ -525,16 +538,16 @@ sub mail_register {
 
 sub register_clients {
     my ( $domain, @args ) = @_;
-    Getopt::Long::GetOptionsFromArray( \@args, 'port=s@' => \my @port_pairs ) or die $USAGE;
+    Getopt::Long::GetOptionsFromArray( \@args, 'port=s@' => \my @port_specs ) or die $USAGE;
     my ( $address, @names ) = @args;
     die $USAGE if !@names || !Trog::RelayFiles::upstream( ( $address // q{} ) . ':1' );
     die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names;
-    my %ports = ports_of( 'mail', @port_pairs );
-    die $USAGE unless %ports;
+    my %routes = routes_of( 'mail', \@port_specs, @names );
+    die $USAGE unless %routes;
 
     my $dir = lock_relay('mail');
     refuse_taken( $dir, $domain, @names );
-    return register_names( $dir, 'mail', $domain, { address => $address, ports => \%ports, names => \@names }, {} );
+    return register_names( $dir, 'mail', $domain, { address => $address, routes => \%routes }, {} );
 }
 
 # Moves the routes of each service that an older build kept in $dir into the

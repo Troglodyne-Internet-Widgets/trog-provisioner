@@ -23,7 +23,8 @@ use parent qw{Provisioner::RelayRecipe};
         nginx:
             relay: relay.somedomain
             public_names:
-                shop.internal.somedomain: internal.somedomain
+                shop.internal.somedomain:
+                    vhost: internal.somedomain
 
 =head2 DESCRIPTION
 
@@ -335,8 +336,9 @@ C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant
 adds the host key of the relay.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >>, C<< names => \@names >>, and
 can have C<< media => \@media >>, C<< pages => \@pages >> and
-C<< ports => \%ports >>, which maps each port of its own to a port of the guest,
-at the address of C<$tls>.  See L</Ports>.
+C<< ports => \%ports >>, which maps each port of its own to each name that
+passes on it, mapped to a port of the guest, at the address of C<$tls>.  Each
+goes to C<relay_client> as C<--port PORT=GUEST_PORT:NAME,...>.  See L</Ports>.
 
 The command is F<scripts/relay_client> C<nginx register>, which root runs on the
 relay.  C<$tls> and C<$http> are each an IPv4 address and a port, where the
@@ -354,15 +356,15 @@ sub registration_files {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
     my $script = "$Provisioner::Vars::SCRIPT_DIR/relay_client nginx";
-    my @media  = @{ $terms{media} // [] };
-    my @pages  = @{ $terms{pages} // [] };
-    my %ports  = %{ $terms{ports} // {} };
+    my @media  = @{ $terms{media}                                   // [] };
+    my @pages  = @{ $terms{pages}                                   // [] };
+    my @ports  = Provisioner::RelayRecipe::port_args( $terms{ports} // {} );
 
     my %files = (
         $self->key_path($client) => {
             issue => {
                 guest   => $grant->{guest},
-                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), ( map { ( '--page', $_ ) } @pages ), map { ( '--port', "$_=$ports{$_}" ) } sort { $a <=> $b } keys %ports ),
+                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), ( map { ( '--page', $_ ) } @pages ), @ports ),
             },
             owner => 'root:root',
             mode  => '0600',

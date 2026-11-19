@@ -41,7 +41,7 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
             '/etc/fail2ban/mailrelay/web.test.test.key.b64' => {
                 issue => {
                     guest   => 'relay.test.test',
-                    command => '/root/bin/relay_client mail register-clients web.test.test 192.0.2.10 web.test.test mail.web.test.test --port 465=10465 --port 993=10993 --port 995=10995',
+                    command => '/root/bin/relay_client mail register-clients web.test.test 192.0.2.10 web.test.test mail.web.test.test --port 465=10465:mail.web.test.test,web.test.test --port 993=10993:mail.web.test.test,web.test.test --port 995=10995:mail.web.test.test,web.test.test',
                 },
                 owner => 'root:root',
                 mode  => '0600',

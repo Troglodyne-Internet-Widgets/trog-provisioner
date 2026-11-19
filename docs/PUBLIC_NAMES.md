@@ -2,15 +2,19 @@
 
 A public name is a name under which the internet reaches a guest through a
 proxy, such as a relay guest on the VPN.  `nginx.public_names` maps each public
-name to the vhost that answers for it.  `perldoc Provisioner::Recipe::nginx`
-has the details, under "Names that reach the guest through a proxy".
+name to its `vhost`, the vhost that answers for it.  A name can also have
+`ports` of its own besides 443, which the relay passes for that name alone.
+`perldoc Provisioner::Recipe::nginx` has the details, under "Names that reach
+the guest through a proxy" and "Ports of its own".
 
 ```yaml
 staging.ours.example:
     nginx:
         public_names:
-            www.ours.example: staging.ours.example
-            shop.customer.example: staging.ours.example
+            www.ours.example:
+                vhost: staging.ours.example
+            shop.customer.example:
+                vhost: staging.ours.example
 ```
 
 A public name needs two things: a DNS record that points at the guest, and a
@@ -50,7 +54,8 @@ staging.ours.example:
     nginx:
         relay: relay.ours.example
         public_names:
-            www.ours.example: staging.ours.example
+            www.ours.example:
+                vhost: staging.ours.example
 ```
 
 Build the relay first.  When `bin/provision` builds a guest whose `nginx` names

@@ -284,9 +284,9 @@ subtest 'behind a relay of nginx, the settings of mail clients are public names'
     my @sites = qw{autodiscover.mail.test.test autoconfig.mail.test.test};
 
     my $relayed = $asked->( nginx => { relay => 'relay.test.test' } );
-    is_deeply( $relayed->{sites},                          \@sites,                     'the vhost answers for both names' );
-    is_deeply( $relayed->{public_names},                   { map { $_ => $_ } @sites }, 'and the relay sends both to it' );
-    is_deeply( [ sort keys %{ $asked->( nginx => {} ) } ], ['sites'],                   'without a relay, mail asks nginx for the vhost alone' );
+    is_deeply( $relayed->{sites},                          \@sites,                                  'the vhost answers for both names' );
+    is_deeply( $relayed->{public_names},                   { map { $_ => { vhost => $_ } } @sites }, 'and the relay sends both to it' );
+    is_deeply( [ sort keys %{ $asked->( nginx => {} ) } ], ['sites'],                                'without a relay, mail asks nginx for the vhost alone' );
 };
 
 subtest 'ManageSieve claims 4190 on loopback, and on no other address' => sub {
