@@ -402,6 +402,13 @@ subtest 'the key is declared always, and never salvaged' => sub {
     is( $secrets{$path}{mode}, '0600',                                              'kept to itself, which ssh insists on' );
     is( $secrets{$path}{ref},  "secret:trogrunner/$DOMAIN-hypervisor-key/password", 'held in the store, not in the domain directory' );
 
+    # The owner that t/guest_secrets.t expects after the build, which is the
+    # account that the owner script gives the key to.
+    my $owner = sub (%opts) { return ( values %{ { $recipe->guest_secrets( $INSTALL, $DOMAIN, %opts ) } } )[0]{owner} };
+    is( $owner->( provision_user => 'agent', user => 'svc', admin_user => 'someadmin' ), 'agent:agent',         'the key is the account that provisions' );
+    is( $owner->( user => 'svc', admin_user => 'someadmin' ),                            'svc:svc',             'which is the service user when no other is named' );
+    is( $owner->( admin_user => 'someadmin' ),                                           'someadmin:someadmin', 'and the admin when the domain names no service user' );
+
     # Unconditional because this is a class method and cannot see
     # hypervisor_access -- which is not a hole, because what that setting
     # decides is whether bin/provision writes the public half into anybody's
