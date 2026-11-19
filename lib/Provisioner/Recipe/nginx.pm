@@ -68,16 +68,21 @@ guest.
 =head2 Names that reach the guest through a proxy
 
 C<public_names> maps each name under which the internet reaches this guest,
-through a proxy elsewhere such as a relay guest on the VPN, to the vhost that
-answers for it.  The proxy passes TLS through by its SNI name, so the guest
-keeps its own certificate.  It speaks the PROXY protocol, so the guest learns
-the address of the real client.
+through a proxy elsewhere such as a relay guest on the VPN, to the C<vhost>
+that answers for it.  The proxy passes TLS through by its SNI name, so the
+guest keeps its own certificate.  It speaks the PROXY protocol, so the guest
+learns the address of the real client.
 
     internal.somedomain:
         nginx:
             public_names:
-                shop.internal.somedomain: internal.somedomain
-                webmail.customer.example: webmail.internal.somedomain
+                shop.internal.somedomain:
+                    vhost: internal.somedomain
+                webmail.customer.example:
+                    vhost: webmail.internal.somedomain
+
+Each value is a map with C<vhost>, and C<ports> when the name has ports of its
+own.  See L</Ports of its own>.
 
 The vhost is named by a name that a recipe lists in C<sites>.  A name that the
 vhost of the domain answers for, such as C<www> or an alias, names that vhost.
@@ -120,7 +125,8 @@ L<Provisioner::IPPool/BINS>.
         nginx:
             relay: relay.somedomain
             public_names:
-                shop.internal.somedomain: internal.somedomain
+                shop.internal.somedomain:
+                    vhost: internal.somedomain
 
 C<relay> names the guest that runs L<Provisioner::Recipe::nginxrelay>.  When
 this domain has public names, C<bin/provision> registers them there before the
@@ -135,6 +141,26 @@ this domain, which lands at F</etc/fail2ban/nginxrelay/DOMAIN.key.b64>.
 C<bin/destroy> releases the names on the relay.  If the relay is not up then, it
 warns and says what to run there.  Until then, the relay sends those names to an
 address that the pool can give to the next guest.
+
+=head2 Ports of its own
+
+    internal.somedomain:
+        nginx:
+            relay: relay.somedomain
+            public_names:
+                hs.internal.somedomain:
+                    vhost: matrix.internal.somedomain
+                    ports:
+                        8448: 8449
+
+C<ports> of a public name maps each port besides 443 on which the relay passes
+that name through to the port of this guest where the relay connects for it,
+with the PROXY protocol.  A port is from 1024 to 65535.  The relay listens on
+such a port only while a guest registered it, and passes it only for the names
+that list it.  Nothing on this guest listens there unless a recipe does it
+itself, so the recipe that listens hands the port over, as
+L<Provisioner::Recipe::matrix> does for federation.  See
+L<Provisioner::Recipe::nginxrelay/Ports>.
 
 =head2 Media names
 
@@ -187,7 +213,8 @@ and no vhost may list it in C<sites>.
         nginx:
             relay: relay.somedomain
             public_names:
-                secure.internal.somedomain: internal.somedomain
+                secure.internal.somedomain:
+                    vhost: internal.somedomain
             cached_names:
                 internal.somedomain: internal.somedomain
 
@@ -336,10 +363,25 @@ sub args {
             public_names => {
                 type                 => 'object',
                 propertyNames        => { format => 'hostname' },
-                additionalProperties => { type   => 'string', format => 'hostname' },
-                default              => {},
-                description          =>
-                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as a relay guest, mapped to a name of the vhost that answers for it.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
+                additionalProperties => {
+                    type                 => 'object',
+                    required             => ['vhost'],
+                    additionalProperties => 0,
+                    properties           => {
+                        vhost => { type => 'string', format => 'hostname', description => 'A name of the vhost that answers for the public name.' },
+                        ports => {
+                            type                 => 'object',
+                            propertyNames        => { type => 'integer', minimum => 1024, maximum => 65535 },
+                            additionalProperties => { type => 'integer', minimum => 1,    maximum => 65535 },
+                            default              => {},
+                            description          => 'Each port besides 443 on which the relay passes this name through, by SNI and with the PROXY protocol, from 1024 to 65535, mapped to the port of this guest where the relay connects for it.  The recipe that listens there hands it over, as matrix does for 8448.  Needs relay.  See "Ports of its own".',
+                        },
+                    },
+                    'x-errorMessage' => { type => 'is a map of vhost: NAME, and ports: { PUBLIC_PORT: GUEST_PORT } when it has ports of its own, not a bare name of a vhost' },
+                },
+                default     => {},
+                description =>
+                  'Each name under which the internet reaches this guest through a proxy that speaks the PROXY protocol, such as a relay guest, mapped to its vhost, a name of the vhost that answers for it, and its ports.  A public name in the zone of the domain, or in a zone that an account of the registrar lists, is also published and certified.  For any other name, public.VHOST is published and certified instead.  See "Names that reach the guest through a proxy".',
             },
 
             media_names => {
@@ -395,15 +437,25 @@ my sub vhost_of ( $name, %opts ) {
     return $of_domain{$name} ? $opts{domain} : $name;
 }
 
-# The names of the map in $opts{$field}, such as public_names, by the vhost
-# that answers for them.
-my sub names_by_vhost ( $field, %opts ) {
+# The names of %$vhosts, each mapped to a name of its vhost, by the vhost that
+# answers for them.
+my sub names_by_vhost ( $vhosts, %opts ) {
     my %by_vhost;
-    my $names = $opts{$field} // {};
-    foreach my $name ( sort keys %$names ) {
-        push( @{ $by_vhost{ vhost_of( $names->{$name}, %opts ) } }, $name );
+    foreach my $name ( sort keys %$vhosts ) {
+        push( @{ $by_vhost{ vhost_of( $vhosts->{$name}, %opts ) } }, $name );
     }
     return %by_vhost;
+}
+
+# Each public name, mapped to the name of its vhost.  bin/ipmap2zones reads the
+# configuration before it is validated, so a value of the older form, a bare
+# name, is refused here too.
+my sub public_vhosts (%opts) {
+    my $names = $opts{public_names} // {};
+    my @bare  = grep { ref $names->{$_} ne 'HASH' } sort keys %$names;
+    die "nginx: public_names gives " . join( ', ', @bare ) . " a bare name of a vhost.  Each value is a map of vhost: NAME, and ports: { PUBLIC_PORT: GUEST_PORT } when it has ports of its own.\n"
+      if @bare;
+    return { map { $_ => $names->{$_}{vhost} } keys %$names };
 }
 
 # Whether a DNS-01 challenge can answer for $name: it is in the zone of the
@@ -416,7 +468,7 @@ my sub certifiable ( $name, $domain ) {
 # for on the ports of the proxy: the public names that it can certify, then
 # public.VHOST when a public name is not one, then the others.
 my sub proxied_by_vhost (%opts) {
-    my %by_vhost = names_by_vhost( public_names => %opts );
+    my %by_vhost = names_by_vhost( public_vhosts(%opts), %opts );
     my %names;
     foreach my $vhost ( keys %by_vhost ) {
         my @inside  = grep { certifiable( $_,  $opts{domain} ) } @{ $by_vhost{$vhost} };
@@ -513,8 +565,9 @@ sub revocations {
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
 Where the relay sends TLS and plain HTTP for the client of C<$grant>, the names
-that it sends there, and the media names and the cached names, as page names,
-that it serves itself, as
+that it sends there, the media names and the cached names, as page names,
+that it serves itself, and the ports of its own of the public names, each
+mapped to the names that list it, mapped to the port of the guest, as
 L<Provisioner::Recipe::nginxrelay/issue_grant> takes them.
 
 Dies when the guest of the client has no address in the address pool, because
@@ -531,11 +584,21 @@ sub grant_terms {
       unless defined $address;
 
     my %port = $self->proxy_ports();
+
+    # Each port of its own, mapped to each name that lists it, mapped to the port of the guest.
+    my $names = $opts{public_names} // {};
+    my %routes;
+    foreach my $name ( keys %$names ) {
+        my $ports = $names->{$name}{ports} // {};
+        $routes{$_}{$name} = $ports->{$_} foreach keys %$ports;
+    }
+
     return (
         upstreams => { tls => "$address:$port{443}", http => "$address:$port{80}" },
         names     => [ $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() ) ],
         media     => [ sort keys %{ $opts{media_names}  // {} } ],
         pages     => [ sort keys %{ $opts{cached_names} // {} } ],
+        ports     => \%routes,
     );
 }
 
@@ -570,7 +633,7 @@ sub enrich {
 
     my %proxied = proxied_by_vhost(%opts);
     if (%proxied) {
-        my %by_vhost = names_by_vhost( public_names => %opts );
+        my %by_vhost = names_by_vhost( public_vhosts(%opts), %opts );
         foreach my $vhost ( sort keys %by_vhost ) {
             my $names = join( ', ', @{ $by_vhost{$vhost} } );
             die "nginx: public_names points $names at $vhost, but no recipe on $opts{domain} lists $vhost in sites.\n"
@@ -589,7 +652,7 @@ sub enrich {
         };
     }
 
-    my %media = names_by_vhost( media_names => %opts );
+    my %media = names_by_vhost( $opts{media_names} // {}, %opts );
     if (%media) {
         die "nginx: $opts{domain} has media_names, but no relay to serve them.\n" unless defined $opts{relay};
         my %public = map { $_ => 1 } keys %{ $opts{public_names} // {} };
@@ -606,7 +669,7 @@ sub enrich {
         }
     }
 
-    my %cached = names_by_vhost( cached_names => %opts );
+    my %cached = names_by_vhost( $opts{cached_names} // {}, %opts );
     if (%cached) {
         die "nginx: $opts{domain} has cached_names, but no relay to serve them.\n" unless defined $opts{relay};
         my %other = map {

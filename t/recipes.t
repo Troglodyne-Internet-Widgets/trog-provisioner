@@ -424,7 +424,7 @@ subtest 'a field named like a secret is marked x-secret' => sub {
 
         my ($field) = $path =~ m/([^.\[\]*]+)\z/;
         my @unmarked;
-        push( @unmarked, $path ) if defined $field && $field !~ m/_(?:file|path)\z/ && $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/ && !$schema->{'x-secret'};
+        push( @unmarked, $path ) if defined $field && $field !~ m/_(?:file|path)\z/ && $field =~ m/pass(?!through)|secret|token|credential|(?:\A|_)(?:key|pw)\z/ && !$schema->{'x-secret'};
 
         push( @unmarked, $walk->( $schema->{properties}{$_},       $path eq q{} ? $_ : "$path.$_" ) ) for sort keys %{ $schema->{properties} // {} };
         push( @unmarked, $walk->( $schema->{additionalProperties}, "$path.*" ) )  if ref $schema->{additionalProperties} eq 'HASH';
@@ -1064,7 +1064,7 @@ subtest 'matrix homeserver.yaml includes redis section when redis recipe is load
     use_ok('Provisioner::Recipe::matrix');
     my $r          = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
-        server_name    => 'test.test.test',
+        server_name    => 'hs.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
         smtp_user      => 'notify@test.test',
@@ -1088,7 +1088,7 @@ subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loa
     use_ok('Provisioner::Recipe::matrix');
     my $r          = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
-        server_name    => 'test.test.test',
+        server_name    => 'hs.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
         smtp_user      => 'notify@test.test',
@@ -1106,7 +1106,7 @@ subtest 'matrix homeserver.yaml includes redis password when redis_password is s
     use_ok('Provisioner::Recipe::matrix');
     my $r          = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
-        server_name    => 'test.test.test',
+        server_name    => 'hs.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
         smtp_user      => 'notify@test.test',

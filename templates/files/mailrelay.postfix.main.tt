@@ -22,7 +22,7 @@ smtpd_tls_security_level = may
 smtp_tls_security_level = may
 
 # The mail that comes in from the internet for each domain that registered,
-# relayed to its guest.  mailrelay_client writes these
+# relayed to its guest.  relay_client mail writes these
 # tables.  Provisioner::Recipe::mailrelay has the whole account, under Mail in.
 relay_domains = texthash:/etc/postfix/mailrelay.d/mail.relay_domains
 transport_maps = texthash:/etc/postfix/mailrelay.d/mail.transport

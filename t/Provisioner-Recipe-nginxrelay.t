@@ -31,7 +31,7 @@ subtest 'a guest registers its names on the relay, which issues it a key' => sub
         \%files,
         {
             '/etc/fail2ban/nginxrelay/web.test.test.key.b64' => {
-                issue => { guest => 'relay.test.test', command => '/root/bin/nginxrelay_client register web.test.test 192.0.2.10:8443 192.0.2.10:8080 public.web.test.test www.customer.test' },
+                issue => { guest => 'relay.test.test', command => '/root/bin/relay_client nginx register web.test.test 192.0.2.10:8443 192.0.2.10:8080 public.web.test.test www.customer.test' },
                 owner => 'root:root',
                 mode  => '0600',
             },
@@ -41,7 +41,7 @@ subtest 'a guest registers its names on the relay, which issues it a key' => sub
                 mode  => '0644',
             },
         },
-        'nginxrelay_client registers each name for TLS, then for plain HTTP, and the key lands at the key path of the domain, beside the host key of the relay'
+        'relay_client nginx registers each name for TLS, then for plain HTTP, and the key lands at the key path of the domain, beside the host key of the relay'
     );
     is( $relay->key_path('web.test.test'), '/etc/fail2ban/nginxrelay/web.test.test.key.b64', 'which is the one file of the domain' );
 };
@@ -50,10 +50,10 @@ subtest 'a guest with media names registers them too, and gets a key to send the
     my $grant = { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' };
     my %files = $relay->issue_grant( $grant, upstreams => { tls => '192.0.2.10:8443', http => '192.0.2.10:8080' }, names => ['public.web.test.test'], media => ['media.web.test.test'] );
 
-    is( $files{ $relay->key_path('web.test.test') }{issue}{command}, '/root/bin/nginxrelay_client register web.test.test 192.0.2.10:8443 192.0.2.10:8080 public.web.test.test --media media.web.test.test', 'each media name goes to register after --media' );
+    is( $files{ $relay->key_path('web.test.test') }{issue}{command}, '/root/bin/relay_client nginx register web.test.test 192.0.2.10:8443 192.0.2.10:8080 public.web.test.test --media media.web.test.test', 'each media name goes to register after --media' );
     is_deeply(
         $files{ $relay->media_key_path('web.test.test') },
-        { issue => { guest => 'relay.test.test', command => '/root/bin/nginxrelay_client media-key web.test.test 192.0.2.10' }, owner => 'root:root', mode => '0600' },
+        { issue => { guest => 'relay.test.test', command => '/root/bin/relay_client nginx media-key web.test.test 192.0.2.10' }, owner => 'root:root', mode => '0600' },
         'and the media key, which works only from the address of the guest, lands at its own path'
     );
     is( $relay->media_key_path('web.test.test'), '/etc/ssl/nginxrelay/web.test.test.media.key.b64', 'which is apart from the ban key' );
@@ -66,13 +66,13 @@ subtest 'a guest with page names registers them too, and gets the same key for t
     my $grant = { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' };
     my %files = $relay->issue_grant( $grant, upstreams => { tls => '192.0.2.10:8443', http => '192.0.2.10:8080' }, names => ['secure.web.test.test'], pages => ['web.test.test'] );
 
-    is( $files{ $relay->key_path('web.test.test') }{issue}{command},       '/root/bin/nginxrelay_client register web.test.test 192.0.2.10:8443 192.0.2.10:8080 secure.web.test.test --page web.test.test', 'each page name goes to register after --page' );
-    is( $files{ $relay->media_key_path('web.test.test') }{issue}{command}, '/root/bin/nginxrelay_client media-key web.test.test 192.0.2.10',                                                               'and a guest with page names and no media name gets the key of the certificates' );
+    is( $files{ $relay->key_path('web.test.test') }{issue}{command},       '/root/bin/relay_client nginx register web.test.test 192.0.2.10:8443 192.0.2.10:8080 secure.web.test.test --page web.test.test', 'each page name goes to register after --page' );
+    is( $files{ $relay->media_key_path('web.test.test') }{issue}{command}, '/root/bin/relay_client nginx media-key web.test.test 192.0.2.10',                                                               'and a guest with page names and no media name gets the key of the certificates' );
 };
 
 subtest 'bin/destroy releases them by the same script' => sub {
     my %revocation = $relay->revoke_grant( { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' } );
-    is( $revocation{command}, '/root/bin/nginxrelay_client release web.test.test', 'nginxrelay_client release, for the domain' );
+    is( $revocation{command}, '/root/bin/relay_client nginx release web.test.test', 'relay_client nginx release, for the domain' );
     like( $revocation{stays}, qr/Run[ ]\Q$revocation{command}\E[ ]there/, 'and a relay that is not up is told the same command' );
 };
 

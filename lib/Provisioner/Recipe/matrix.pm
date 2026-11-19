@@ -11,7 +11,10 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use Crypt::PRNG();
+use List::Util();
 use MIME::Base64();
+
+use Provisioner::Cookbook();
 
 =head1 Provisioner::Recipe::matrix
 
@@ -30,38 +33,106 @@ use MIME::Base64();
 
 =head2 DESCRIPTION
 
-Installs and configures a Matrix Synapse homeserver behind an nginx reverse
-proxy, with the ketesa admin web interface.  This recipe requires the
-C<nginxproxy> recipe.
+Installs and configures a Matrix Synapse homeserver behind nginx, with the
+ketesa admin web interface.
 
 C<server_name> is the identity of the homeserver.  Every account is
 C<@user:$server_name>, every room alias ends in C<:$server_name>, and other
 servers know this one by that name and its signing key.  It cannot change
 after the first start, so the recipe has no default for it.  To take over an
-existing homeserver, give the name that it already has.
+existing homeserver, give the name that it already has.  It cannot be the
+domain, C<www.$domain> or an alias of the domain, because the vhost of the
+domain answers for those, and the homeserver has a vhost of its own.
 
-The client API answers at C<matrix.$domain>, and the admin interface at
-C<admin.matrix.$domain>.  Those are names of this guest, not the identity of
-the homeserver.  Add C<matrix.$domain> and C<admin.matrix.$domain> to the
-C<aliases> in the C<_global> of the domain, so that the SSL certificate covers
-them.
+=head2 The names of the guest
+
+=over 4
+
+=item * The domain and its aliases serve a page that says how to connect: the
+homeserver, its server name, how to register, and the suggested channels.
+C<nginxproxy> serves it from F<www/index.html> in the domain directory, and
+sends the rest to synapse.
+
+=item * C<matrix.$domain> is the vhost of the homeserver, in
+F<matrix.nginx.conf>.  It serves synapse on 443 and on 8448, the port of
+federation.  It answers for C<server_name> too, and serves the two well-known
+documents there.  C<server_name> is the name that clients and other servers
+use: C</.well-known/matrix/server> says C<$server_name:8448>, and
+C</.well-known/matrix/client> says C<https://$server_name:8448>, which is the
+C<public_baseurl> of synapse.
+
+=item * C<admin.matrix.$domain> serves the admin interface.
+
+=back
+
+The certificate of the domain covers C<matrix.$domain> and
+C<admin.matrix.$domain>, because they are the C<subdomains> of this recipe.
+C<server_name> is on it when it is in the zone of the domain, or in a zone that
+an account of L<Provisioner::Recipe::registrar> lists.
+
+=head2 Behind a relay
+
+When the C<nginx> of the domain names a C<relay>, this recipe hands C<nginx>
+these C<public_names>: the domain and each of its aliases, for the page, and
+C<server_name>, for the vhost of the homeserver.  The relay passes them through
+on 443.  C<server_name> also has the port 8448, mapped to 8449, so the relay
+passes it alone through on 8448 to 8449 of the guest.  The vhost of the
+homeserver listens there, with the PROXY protocol.  See
+L<Provisioner::Recipe::nginx/Ports of its own>.
+
+If C<server_name> is in no zone that the guest can publish and certify,
+C<nginx> publishes and certifies C<public.matrix.$domain> in its place.  Then
+the operator points C<server_name> at the relay by hand, and the certificate of
+the guest does not cover it until it does.  See
+L<Provisioner::Recipe::nginx/Names that reach the guest through a proxy>.
 
 The package names are in the subclass for each distribution, for example
 L<Provisioner::Recipe::Ubuntu::matrix>.
 
+=cut
+
+# The port of federation, and of the client API at public_baseurl.
+our $FEDERATION_PORT = 8448;
+
+# Whether the nginx of $domain sends its public names through a relay.
+my sub relayed ($domain) {
+    return defined( ( Provisioner::Cookbook->domain_config($domain)->{nginx} // {} )->{relay} );
+}
+
+# The port of the guest where the relay passes federation through, with the
+# PROXY protocol.
+our $PASSTHROUGH_PORT = 8449;
+
 =head2 %required = $recipe->required_recipes(%opts)
 
+C<nginx>, with C<matrix.$domain> and C<admin.matrix.$domain> in C<sites>, and
+the C<public_names> of L</Behind a relay> when the domain has a relay.
+
 C<nginxproxy>, with a vhost on port 80 that redirects to SSL, and a vhost on
-port 443 that proxies to synapse on C<127.0.0.1:8008>.  nginx does not cache
-the C<_matrix> and C<_synapse/client> paths.
+port 443 that serves the page from F<www> and proxies the rest to synapse on
+C<127.0.0.1:8008>.  nginx does not cache the C<_matrix> and C<_synapse/client>
+paths.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
-    my $ipv6 = $opts{ipv6} // 1;
+    my $ipv6   = $opts{ipv6} // 1;
+    my $domain = $opts{domain};
     return (
-        nginx      => sub { return ( sites => ["admin.matrix.$opts{domain}"] ) },
+        nginx => sub {
+            my @sites = map { "$_.$domain" } $self->subdomains();
+            return ( sites => [@sites] ) unless relayed($domain);
+            my %ours    = map  { $_ => 1 } @sites, $opts{server_name} // ();
+            my @aliases = grep { !$ours{$_} } @{ Provisioner::Cookbook->alias_map()->{$domain} // [] };
+            return (
+                sites        => [@sites],
+                public_names => {
+                    ( map { $_ => { vhost => $domain } } $domain, @aliases ),
+                    ( defined $opts{server_name} ? ( $opts{server_name} => { vhost => "matrix.$domain", ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT } } ) : () ),
+                },
+            );
+        },
         nginxproxy => sub {
             (
                 vhosts => {
@@ -69,6 +140,7 @@ sub required_recipes {
                     443 => {
                         ssl            => 1,
                         proxy_uri      => 'http://127.0.0.1:8008',
+                        static_dir     => 'www',
                         nocache_prefix => '^~ /(_matrix|_synapse/client)/',
                         ipv6           => $ipv6,
                     },
@@ -86,6 +158,21 @@ synapse on 8008, on 127.0.0.1 and on ::1, for clients and for federation both.
 
 sub listens {
     return qw{127.0.0.1:8008 [::1]:8008};
+}
+
+=head2 %limits = $recipe->rate_limits(%opts)
+
+8448, where the vhost of the homeserver serves federation, at the limit that
+C<nginx> gives 443.  Behind a relay, also the port where the relay passes 8448
+through.  See L</Behind a relay>.  The ufw profile C<matrix-homeserver> opens
+the same ports.
+
+=cut
+
+sub rate_limits {
+    my ( $self, %opts ) = @_;
+    my %limits = Provisioner::Cookbook->load('nginx')->rate_limits();
+    return ( $FEDERATION_PORT => $limits{443}, relayed( $opts{domain} ) ? ( $PASSTHROUGH_PORT => $limits{443} ) : () );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()
@@ -147,6 +234,37 @@ sub args {
     );
 }
 
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<federation_port>, 8448, and C<relayed>, true when the domain has a
+relay.  Behind a relay, it also adds C<passthrough_port>, where the relay
+passes 8448 through.  See L</Behind a relay>.
+
+Adds C<homeserver_names>, the C<server_name> of the vhost of the homeserver:
+C<matrix.$domain>, and C<server_name> without a relay.  Behind one, the file
+of the proxy that the vhost includes names C<server_name>, so the vhost does
+not name it a second time.
+
+Dies when C<server_name> is the domain, C<www.$domain> or an alias of the
+domain, because the vhost of the domain answers for those.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    my $domain = $opts{domain};
+
+    my %of_domain = map { $_ => 1 } $domain, "www.$domain", @{ Provisioner::Cookbook->alias_map()->{$domain} // [] };
+    die "matrix: server_name is $opts{server_name}, which the vhost of $domain answers for.  The homeserver needs a name of its own, which can be the name that it already has.\n"
+      if $of_domain{ $opts{server_name} };
+
+    $opts{federation_port}  = $FEDERATION_PORT;
+    $opts{relayed}          = relayed($domain) ? 1 : 0;
+    $opts{passthrough_port} = $PASSTHROUGH_PORT if $opts{relayed};
+    $opts{homeserver_names} = [ List::Util::uniq( "matrix.$domain", $opts{relayed} ? () : $opts{server_name} ) ];
+    return %opts;
+}
+
 =head2 %files = $recipe->template_files()
 
 A map from each template to the name of the file that it renders.
@@ -161,6 +279,8 @@ sub template_files {
         'matrix.homeserver.yaml.tt'   => 'homeserver.yaml',
         'matrix.log.yaml.tt'          => 'log.yaml',
         'matrix.admin.nginx.tt'       => 'matrix-admin.nginx.conf',
+        'matrix.nginx.tt'             => 'matrix.nginx.conf',
+        'matrix.ufw.conf.tt'          => 'matrix_ufw.conf',
         'matrix.synapse.service.tt'   => 'matrix-synapse.service',
         'matrix.index.html.tt'        => 'matrix.index.html',
     );

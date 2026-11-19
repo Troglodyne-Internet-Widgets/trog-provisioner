@@ -23,7 +23,8 @@ use parent qw{Provisioner::RelayRecipe};
         nginx:
             relay: relay.somedomain
             public_names:
-                shop.internal.somedomain: internal.somedomain
+                shop.internal.somedomain:
+                    vhost: internal.somedomain
 
 =head2 DESCRIPTION
 
@@ -47,10 +48,10 @@ for what the guest does on those ports.
 =head2 Registration
 
 Nothing in the configuration of this guest names the guests behind it.  Each
-guest registers its own names when it is built, through C<nginxrelay_client
+guest registers its own names when it is built, through C<relay_client nginx
 register>, which C<bin/provision> runs here as root.  C<bin/destroy> runs
-C<nginxrelay_client release> when the guest goes away.  See
-F<scripts/nginxrelay_client>.
+C<relay_client nginx release> when the guest goes away.  See
+F<scripts/relay_client>.
 
 So this guest is built first, and a guest that names it fails to build while it
 is down.  A rebuild of this guest does not need the guests behind it, because
@@ -73,7 +74,7 @@ C<$MEDIA_SOCKET>, with the PROXY protocol.  That server:
 
 =item * presents the certificate of the SNI name from
 F</etc/nginx/nginxrelay.d/media>.  The guest gets that certificate itself, by
-DNS-01, and sends it here with a key that can run only C<nginxrelay_client
+DNS-01, and sends it here with a key that can run only C<relay_client nginx
 cert>.  So this guest holds the key of each media name, and of no name that
 passes through.  Until the certificate arrives, a TLS connection for the name
 fails its handshake.
@@ -152,7 +153,7 @@ own, which names nothing else.  See L<Provisioner::Recipe::nginx/Cached names>.
 
 A guest behind this relay sends its bans here, as
 L<Provisioner::RelayRecipe/Bans> says, and this guest drops the address on 80
-and on C<tls_port>.  C<nginxrelay_client register> issues the key of each
+and on C<tls_port>.  C<relay_client nginx register> issues the key of each
 domain, which F</etc/nginx/nginxrelay.d> keeps.  See
 L<Provisioner::Recipe::nginx/Bans through the relay> for what the guest does.
 
@@ -169,6 +170,15 @@ On 80, the server of this recipe is the default server of nginx.  A vhost of
 this guest on 80 still answers for its own names, because nginx chooses among
 the servers of one port by the C<Host> header.  This recipe takes the default
 site of the nginx package away, which would be a second default server.
+
+A guest can also register ports of its own, such as 8448, where matrix
+federates.  The stream proxy listens on each while some guest registered it,
+and passes a TLS connection there by its SNI name, with the PROXY protocol, to
+the port of the guest that registered the name.  A name that did not register
+the port gets no upstream, so nginx closes the connection.  The firewall opens
+these ports as they are, without a forward, under the bans and a rate limit.
+See L<Provisioner::Recipe::nginx/Ports of its own> for the guest, and
+L<Provisioner::RelayRecipe/Ports of the guests> for the relay.
 
 =cut
 
@@ -228,8 +238,8 @@ sub args {
     );
 }
 
-# Also in scripts/nginxrelay_client, which runs on the relay without these
-# libraries.  t/nginxrelay_client.t makes sure that the two are equal.
+# Also in scripts/relay_client, which runs on the relay without these
+# libraries.  t/relay_client.t makes sure that the two are equal.
 our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
 our $PAGE_SOCKET  = '/run/nginxrelay-pages.sock';
 
@@ -325,9 +335,12 @@ The ban key that the relay issues when it registers the names of the client of
 C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant>
 adds the host key of the relay.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >>, C<< names => \@names >>, and
-can have C<< media => \@media >> and C<< pages => \@pages >>.
+can have C<< media => \@media >>, C<< pages => \@pages >> and
+C<< ports => \%ports >>, which maps each port of its own to each name that
+passes on it, mapped to a port of the guest, at the address of C<$tls>.  Each
+goes to C<relay_client> as C<--port PORT=GUEST_PORT:NAME,...>.  See L</Ports>.
 
-The command is F<scripts/nginxrelay_client> C<register>, which root runs on the
+The command is F<scripts/relay_client> C<nginx register>, which root runs on the
 relay.  C<$tls> and C<$http> are each an IPv4 address and a port, where the
 relay sends TLS and plain HTTP for C<@names>.  See L</Registration>.
 
@@ -342,15 +355,16 @@ L</Media names> and L</Page names>.
 sub registration_files {
     my ( $self, $grant, %terms ) = @_;
     my $client = $grant->{client};
-    my $script = "$Provisioner::Vars::SCRIPT_DIR/nginxrelay_client";
-    my @media  = @{ $terms{media} // [] };
-    my @pages  = @{ $terms{pages} // [] };
+    my $script = "$Provisioner::Vars::SCRIPT_DIR/relay_client nginx";
+    my @media  = @{ $terms{media}                                   // [] };
+    my @pages  = @{ $terms{pages}                                   // [] };
+    my @ports  = Provisioner::RelayRecipe::port_args( $terms{ports} // {} );
 
     my %files = (
         $self->key_path($client) => {
             issue => {
                 guest   => $grant->{guest},
-                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), map { ( '--page', $_ ) } @pages ),
+                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), ( map { ( '--page', $_ ) } @pages ), @ports ),
             },
             owner => 'root:root',
             mode  => '0600',
@@ -385,7 +399,7 @@ sub media_key_path {
 =head2 %revocation = $recipe->revoke_grant($grant)
 
 The release of the names of the client of C<$grant>, by
-F<scripts/nginxrelay_client> C<release>, as C<revoke_grant> in
+F<scripts/relay_client> C<nginx release>, as C<revoke_grant> in
 L<Provisioner::Recipe> says.  If the relay is not up, the revocation says to
 run the command there by hand before another guest gets the address, because
 the relay sends the names to whatever answers at it.
@@ -395,7 +409,7 @@ the relay sends the names to whatever answers at it.
 sub revoke_grant {
     my ( $self, $grant ) = @_;
     my $client  = $grant->{client};
-    my $command = "$Provisioner::Vars::SCRIPT_DIR/nginxrelay_client release $client";
+    my $command = "$Provisioner::Vars::SCRIPT_DIR/relay_client nginx release $client";
     return (
         command => $command,
         doing   => "release the public names of $client",

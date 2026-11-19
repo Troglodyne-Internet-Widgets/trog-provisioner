@@ -34,14 +34,14 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
         { $relay->issue_grant( \%grant, %terms ) },
         {
             '/etc/postfix/mailrelay/web.test.test.password' => {
-                issue => { guest => 'relay.test.test', command => '/root/bin/mailrelay_client register web.test.test 192.0.2.10' },
+                issue => { guest => 'relay.test.test', command => '/root/bin/relay_client mail register web.test.test 192.0.2.10' },
                 owner => 'root:root',
                 mode  => '0600',
             },
             '/etc/fail2ban/mailrelay/web.test.test.key.b64' => {
                 issue => {
                     guest   => 'relay.test.test',
-                    command => '/root/bin/mailrelay_client register-clients web.test.test 192.0.2.10:10993 192.0.2.10:10465 192.0.2.10:10995 web.test.test mail.web.test.test',
+                    command => '/root/bin/relay_client mail register-clients web.test.test 192.0.2.10 web.test.test mail.web.test.test --port 465=10465:mail.web.test.test,web.test.test --port 993=10993:mail.web.test.test,web.test.test --port 995=10995:mail.web.test.test,web.test.test',
                 },
                 owner => 'root:root',
                 mode  => '0600',
@@ -52,12 +52,12 @@ subtest 'a mail guest gets a login on the relay, and loses it' => sub {
                 mode  => '0644',
             },
         },
-        'mailrelay_client registers the login and the route in, the password lands where the mail recipe reads it, and the mail clients get their routes, in the order of the services, beside the ban key and the host key of the relay'
+        'relay_client mail registers the login and the route in, the password lands where the mail recipe reads it, and the port of each service of the mail clients goes to the port where the guest takes it, beside the ban key and the host key of the relay'
     );
     is( $relay->password_path('web.test.test'), '/etc/postfix/mailrelay/web.test.test.password', 'which is the password path of the domain' );
 
     my %revocation = $relay->revoke_grant( \%grant );
-    is( $revocation{command}, '/root/bin/mailrelay_client release web.test.test', 'and bin/destroy removes it by the same script' );
+    is( $revocation{command}, '/root/bin/relay_client mail release web.test.test', 'and bin/destroy removes it by the same script' );
     like( $revocation{stays}, qr/Run[ ]\Q$revocation{command}\E[ ]there/, 'and a relay that is not up is told the same command' );
 };
 
@@ -72,10 +72,10 @@ subtest 'the relay listens at the address where the guests reach it, on its port
     my %opts = $relay->enrich( domain => 'relay.test.test' );
     is( $opts{relay_address}, '192.0.2.5',       'the relay binds the address in the pool' );
     is( $opts{helo_name},     'relay.test.test', 'and it announces the name of its machine' );
-    is_deeply( $opts{client_ports},   { imaps => 993, submissions => 465, pop3s => 995 }, 'the mail clients come in on the ports where TLS starts at once' );
-    is_deeply( $opts{upstream_ports}, [ 10465, 10993, 10995 ], 'and go out to the proxy ports of the mail recipe' );
-    is_deeply( $opts{banned_ports},   [ 465,   993,   995 ],   'where a ban closes them, but not 25' );
-    is( $opts{ban_set}, 'mailrelay-bans', 'in a set of its own' );
+    is_deeply( $opts{client_ports}, { imaps => 993, submissions => 465, pop3s => 995 }, 'the mail clients come in on the ports where TLS starts at once' );
+    is_deeply( $opts{banned_ports}, [],                                                 'and no port of its own is banned, because the ports of the guests are, and 25 bans here' );
+    is( $opts{port_rate_limit}, 64,               'at the limit of a port of mail' );
+    is( $opts{ban_set},         'mailrelay-bans', 'in a set of its own' );
 
     $config{'relay.test.test'} = { mailrelay => { relay_port => 3587 } };
     is( $relay->relay_port_of('relay.test.test'), 3587, 'the port that the relay sets' );

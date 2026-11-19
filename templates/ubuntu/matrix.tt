@@ -38,13 +38,17 @@ chmod 0600 /etc/matrix-synapse/homeserver.signing.key /etc/matrix-synapse/regist
 chown -R www-data:[% admin_user %] [% install_dir %]/admin.matrix.[% domain %]
 chmod -R 0750 [% install_dir %]/admin.matrix.[% domain %]
 mkdir -p /etc/nginx/sites-enabled
-# Only the admin vhost.  The vhost of the domain belongs to nginxproxy, which
-# this recipe requires, and it already has the _matrix nocache prefix.
-cp matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
-chown root:root /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
+# The vhosts of the homeserver and of the admin interface.  The vhost of the
+# domain belongs to nginxproxy, which this recipe requires, and serves the page
+# below from www.
+install -o root -g root -m 0644 matrix.nginx.conf /etc/nginx/sites-enabled/matrix.[% domain %].conf
+install -o root -g root -m 0644 matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
 chmod 0644 /etc/nginx/sites-enabled/*.conf
+install -o root -g root -m 0644 matrix_ufw.conf /etc/ufw/applications.d/matrix-homeserver
 install -m 0755 -o [% user %] -g www-data -d [% install_dir %]/[% domain %]/www
-install -m 0755 -o [% user %] -g www-data matrix.index.html [% install_dir %]/[% domain %]/www
+install -m 0644 -o [% user %] -g www-data matrix.index.html [% install_dir %]/[% domain %]/www/index.html
+[%# Where an older version of this recipe put the page, which nothing served. -%]
+rm -f [% install_dir %]/[% domain %]/www/matrix.index.html
 # Enable synapse now, and start it in postrun.
 systemctl daemon-reload
 systemctl enable matrix-synapse

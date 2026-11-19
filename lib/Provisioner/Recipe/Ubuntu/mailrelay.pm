@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::mailrelay - Ubuntu's C<deps> and C<dep_conflicts> f
 
 =cut
 
-# libcryptx-perl is for the passwords that mailrelay_client makes, and
+# libcryptx-perl is for the passwords that relay_client mail register makes, and
 # libcpanel-json-xs-perl for milterprobe, with which the guest test gives a
 # milter a message.  templates/files/milter_client.tt installs milterprobe.
 # The stream module of nginx passes the mail clients, and ipset holds the bans.

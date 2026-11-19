@@ -1,6 +1,6 @@
 # dovecot on the relay only checks the logins of the relay, for postfix.  It
 # serves no mail, so it has no protocols, and it knows no account but the logins
-# that mailrelay_client registers.  Provisioner::Recipe::mailrelay has the whole
+# that relay_client mail registers.  Provisioner::Recipe::mailrelay has the whole
 # account, under Mail out.
 protocols =
 auth_mechanisms = plain login

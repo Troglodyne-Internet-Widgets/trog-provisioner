@@ -7,6 +7,10 @@
 SET=[% ban_set %]
 CHAIN=trog-[% ban_set %]
 SAVED=/var/lib/[% ban_set %]/saved
+PORTS_IN=trog-[% relay_name %]-in
+PORTS_OUT=trog-[% relay_name %]-out
+PORTS_DIR=[% relay_dir %]/ports
+PORTS_MAPS=[% relay_dir %]
 
 start() {
     # A timeout of 0 by default, so that each ban gives its own.
@@ -18,16 +22,57 @@ start() {
     # after any forward, so that a banned address can still reach ssh.
     iptables -N "$CHAIN" 2>/dev/null
     iptables -F "$CHAIN"
+[% IF banned_ports.size() -%]
     iptables -A "$CHAIN" -p tcp -m multiport --dports [% banned_ports.join(',') %] -m set --match-set "$SET" src -j DROP
+[% END -%]
 
     # Once, because ufw-init runs start twice on a reload.
     iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
+
+    ports
+}
+
+# The ports that the guests registered, from the files in [% relay_dir %] that
+# the client of the relay writes.  Each one under the bans and a rate limit,
+# and out to the address and the port of each guest.  The client runs this
+# after each registration and release.  scripts/relay_files has the whole
+# account, under Ports of the guests.
+ports() {
+    ipset -exist create "$SET" hash:ip family inet timeout 0 || return 1
+    iptables -N "$PORTS_IN" 2>/dev/null
+    iptables -F "$PORTS_IN"
+    iptables -N "$PORTS_OUT" 2>/dev/null
+    iptables -F "$PORTS_OUT"
+
+    for conf in "$PORTS_DIR"/*.conf; do
+        port=${conf##*/}
+        port=${port%.conf}
+        case "$port" in '' | *[!0-9]*) continue ;; esac
+        iptables -A "$PORTS_IN" -p tcp --dport "$port" -m set --match-set "$SET" src -j DROP
+        iptables -A "$PORTS_IN" -p tcp --dport "$port" -m conntrack --ctstate NEW -m hashlimit --hashlimit-above [% port_rate_limit %]/sec --hashlimit-burst [% port_rate_limit %] --hashlimit-mode srcip --hashlimit-name "trogrly$port" -j DROP
+        iptables -A "$PORTS_IN" -p tcp --dport "$port" -j ACCEPT
+    done
+
+    # Each line of a map is "NAME ADDRESS:PORT;".
+    cat "$PORTS_MAPS"/*.port-*.map 2>/dev/null | sed -n 's/^[^ ]* \([0-9.]*\):\([0-9]*\);$/\1 \2/p' | sort -u |
+        while read -r address port; do
+            iptables -A "$PORTS_OUT" -p tcp -d "$address" --dport "$port" -j ACCEPT
+        done
+
+    iptables -C INPUT -j "$PORTS_IN" 2>/dev/null || iptables -I INPUT 1 -j "$PORTS_IN"
+    iptables -C OUTPUT -j "$PORTS_OUT" 2>/dev/null || iptables -I OUTPUT 1 -j "$PORTS_OUT"
 }
 
 stop() {
     while iptables -D INPUT -j "$CHAIN" 2>/dev/null; do :; done
     iptables -F "$CHAIN" 2>/dev/null
     iptables -X "$CHAIN" 2>/dev/null
+    while iptables -D INPUT -j "$PORTS_IN" 2>/dev/null; do :; done
+    iptables -F "$PORTS_IN" 2>/dev/null
+    iptables -X "$PORTS_IN" 2>/dev/null
+    while iptables -D OUTPUT -j "$PORTS_OUT" 2>/dev/null; do :; done
+    iptables -F "$PORTS_OUT" 2>/dev/null
+    iptables -X "$PORTS_OUT" 2>/dev/null
 
     # The time that each ban has left goes with it, through a reboot as well.
     ipset list -n "$SET" >/dev/null 2>&1 || return 0
@@ -36,5 +81,6 @@ stop() {
 
 case "$1" in
 start) start ;;
+ports) ports ;;
 stop | flush-all) stop ;;
 esac

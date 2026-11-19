@@ -6,7 +6,7 @@ use IO::Socket::INET;
 use IO::Select;
 use MIME::Base64 ();
 
-my $client = '[% script_dir %]/nginxrelay_client';
+my $client = '[% script_dir %]/relay_client nginx';
 my $domain = 'relay-selftest.test.test';
 # Long, because nginx refuses a map with a name longer than its bucket.
 my $name = 'selftest-' . ( 'x' x 50 ) . '.relay.test.test';
@@ -58,6 +58,38 @@ subtest 'a TLS connection goes by its SNI name, with the PROXY protocol' => sub 
     like( first_lines($tls), qr/\APROXY TCP4 127[.]0[.]0[.]1 /, 'the guest learns the address of the client' );
 };
 
+subtest 'a port of its own goes to the guest that registered it, for the names that list it alone' => sub {
+    my $port      = 18448;
+    my $ported    = "ports-$domain";
+    my $port_name = 'ports.relay.test.test';
+    my $page_name = 'page.ports.relay.test.test';
+    my $guest     = listener();
+    my $said      = `$client register $ported 127.0.0.1:@{[ $tls->sockport ]} 127.0.0.1:@{[ $http->sockport ]} $port_name $page_name --port $port=@{[ $guest->sockport ]}:$port_name 2>&1`;
+    is( $?, 0, 'a guest registers a port of its own' ) or diag $said;
+    settle();
+
+    system("curl -sk --max-time 5 --resolve '$port_name:$port:127.0.0.1' 'https://$port_name:$port/' >/dev/null 2>&1 &");
+    like( first_lines($guest), qr/\APROXY TCP4 127[.]0[.]0[.]1 /, 'a TLS connection on the port goes there, with the PROXY protocol' );
+    system("curl -sk --max-time 5 --resolve '$page_name:$port:127.0.0.1' 'https://$page_name:$port/' >/dev/null 2>&1 &");
+    is( first_lines($guest), q{}, 'and a name of the same guest that does not list the port gets nowhere' );
+    system("curl -sk --max-time 5 --resolve '$name:$port:127.0.0.1' 'https://$name:$port/' >/dev/null 2>&1 &");
+    is( first_lines($guest), q{}, 'and nor does a name that another domain registered without the port' );
+
+    my $in = `iptables -S trog-[% relay_name %]-in 2>&1`;
+    like( $in, qr/--dport $port .*--match-set [% ban_set %] src -j DROP/, 'the firewall drops a banned address on the port' ) or diag $in;
+    like( $in, qr/--dport $port .*--hashlimit-above [% port_rate_limit %]\/sec/, 'and limits each address' );
+    like( $in, qr/--dport $port -j ACCEPT/,                            'and lets the rest in' );
+    like( `iptables -S trog-[% relay_name %]-out 2>&1`, qr/-d 127[.]0[.]0[.]1\/32 .*--dport @{[ $guest->sockport ]} -j ACCEPT/, 'and the relay out to the guest' );
+    system('ufw reload >/dev/null 2>&1');
+    like( `iptables -S trog-[% relay_name %]-in 2>&1`, qr/--dport $port -j ACCEPT/, 'which a reload of ufw keeps' );
+
+    $said = `$client release $ported 2>&1`;
+    is( $?, 0, 'the guest releases it' ) or diag $said;
+    settle();
+    ok( !-e "/etc/nginx/nginxrelay.d/ports/$port.conf", 'and nginx stops listening there, because no guest has the port' );
+    unlike( `iptables -S trog-[% relay_name %]-in 2>&1`, qr/--dport $port /, 'and the firewall closes it' );
+};
+
 subtest 'a plain request goes by its Host header, with X-Forwarded-For' => sub {
     system("curl -s --max-time 5 --resolve '$name:80:127.0.0.1' 'http://$name/' -H 'X-Forwarded-For: 203.0.113.7' >/dev/null 2>&1 &");
     my $said = first_lines($http);
@@ -103,7 +135,7 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     ok( banned($abuser), 'and the address is in the set' );
 
     my $rules = `iptables -S trog-[% ban_set %] 2>&1`;
-    like( $rules, qr/--dports 80,[% tls_port %] .*--match-set [% ban_set %] src -j DROP/, 'whose members are dropped on the ports that the relay proxies' ) or diag $rules;
+    like( $rules, qr/--dports [% banned_ports.join(',') %] .*--match-set [% ban_set %] src -j DROP/, 'whose members are dropped on the ports that the relay proxies' ) or diag $rules;
 
     system('ufw reload >/dev/null 2>&1');
     my @jumps = `iptables -S INPUT` =~ m/^-A INPUT -j trog-[% ban_set %]$/mg;

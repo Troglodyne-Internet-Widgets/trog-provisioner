@@ -13,6 +13,7 @@ use Fcntl                  qw{:flock};
 use File::Basename         ();
 use File::Temp             ();
 use IPC::Open3             ();
+use List::Util             ();
 use MIME::Base64           ();
 use Socket                 ();
 use Time::HiRes            ();
@@ -23,16 +24,16 @@ use Time::HiRes            ();
 
     require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' );
 
-    my $lock = Trog::RelayFiles::lock_dir( $dir, 'nginxrelay_client' );
+    my $lock = Trog::RelayFiles::lock_dir( $dir, 'relay_client' );
     Trog::RelayFiles::write_file( "$dir/$domain.map", $content );
 
 =head2 DESCRIPTION
 
-What F<scripts/nginxrelay_client> and F<scripts/mailrelay_client> share: each
-keeps the registrations of other guests in files of one directory, which a
-service reads, and issues the keys that those guests send their bans with.  This runs under the system perl of the guest, which has no
-Provisioner libraries, so the two load it from beside themselves.  It runs
-nothing on its own.
+The files and the keys of a relay, for F<scripts/relay_client>.  A relay keeps
+the registrations of other guests in files of one directory, which a service
+reads, and issues the keys that those guests send their bans with.  This runs
+under the system perl of the guest, which has no Provisioner libraries, so the
+client loads it from beside itself.  It runs nothing on its own.
 
 =head2 dns_name($name)
 
@@ -61,9 +62,25 @@ C<192.0.2.10:8443>.
 sub upstream {
     my ($upstream) = @_;
 
-    return 0 unless defined $upstream && $upstream =~ m/\A([^:]+):([[:digit:]]{1,5})\z/a;
-    my ( $address, $port ) = ( $1, $2 );
-    return defined Socket::inet_pton( Socket::AF_INET(), $address ) && $port >= 1 && $port <= 65535 ? 1 : 0;
+    my ( $address, $port, @more ) = split( m/:/, $upstream // q{}, -1 );
+    return 0 if @more || !defined $port;
+    return defined Socket::inet_pton( Socket::AF_INET(), $address ) && whole_number( $port, 1, 65535 ) ? 1 : 0;
+}
+
+=head2 whole_number($text, $min, $max)
+
+True when C<$text> is a whole number from C<$min> to C<$max>, spelled as perl
+spells that number, with no sign, space or zero in front.  Each one goes into a
+file name or a file that a service reads, so it must have one spelling.
+
+=cut
+
+sub whole_number {
+    my ( $text, $min, $max ) = @_;
+
+    # Under fatal warnings, int dies on what is no number.
+    local $@;
+    return eval { $text eq int($text) && $text >= $min && $text <= $max } ? 1 : 0;
 }
 
 =head2 ($output, $ok) = run([\%opts,] @command)
@@ -169,6 +186,197 @@ sub lock_dir {
     return $fh;
 }
 
+=head2 Ports of the guests
+
+A guest can register ports of its own besides the ones that the relay always
+serves, each for some of its names.  The relay sends a connection on such a
+public port, by the SNI name, with the PROXY protocol, to the port of the guest
+that the name registered.  Only the names that registered the port pass on it,
+and the relay listens on a port only while some guest registered it.  Everything is in C<$dir>, so the salvage of a rebuild keeps it:
+
+=over 4
+
+=item * C<$dir/DOMAIN.port-PORT.map> holds a line C<NAME ADDRESS:GUEST_PORT;>
+for each name of DOMAIN that registered PORT, which the stream server of PORT
+includes.
+
+=item * C<$dir/ports/PORT.conf> is that stream server, which the C<stream> block
+of every relay includes.  See L<Provisioner::RelayRecipe/Ports of the guests>.
+
+=back
+
+The hook of the bans of the relay reads both, and opens each port in the
+firewall, under the bans and a rate limit, and lets the relay out to each
+guest port.
+
+=head2 ($port, $guest_port) = port_pair($pair)
+
+The two ports of C<$pair>, which is C<PORT=GUEST_PORT>, or nothing when it is
+not that.  Which ports a relay takes is for its client to say, because only
+it knows what else listens on the relay.
+
+=cut
+
+sub port_pair {
+    my ($pair) = @_;
+    my @ports = split( m/=/, $pair // q{}, -1 );
+    return if @ports != 2 || List::Util::any { !whole_number( $_, 1, 65535 ) } @ports;
+    return @ports;
+}
+
+=head2 %holder = port_names_of_others($dir, $domain)
+
+Each name that a domain other than C<$domain> registered on a port of its own,
+mapped to that domain.
+
+=cut
+
+sub port_names_of_others {
+    my ( $dir, $domain ) = @_;
+    my %holder;
+    foreach my $file ( glob("$dir/*.port-*.map") ) {
+        my ($other) = $file =~ m{/([^/]+)[.]port-[[:digit:]]+[.]map\z}a or next;
+        next if $other eq $domain;
+        $holder{$_} = $other foreach map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, read_file($file) // q{};
+    }
+    return %holder;
+}
+
+# Each port that $domain registered, mapped to its map.
+sub port_maps_of {
+    my ( $dir, $domain ) = @_;
+    my %maps;
+    foreach my $file ( glob("$dir/*.port-*.map") ) {
+        my ( $name, $port ) = $file =~ m{/([^/]+)[.]port-([[:digit:]]+)[.]map\z}a or next;
+        $maps{$port} = $file if $name eq $domain;
+    }
+    return %maps;
+}
+
+# Every file of the ports of the guests, which a registration can change.
+sub port_files {
+    my ($dir) = @_;
+    return glob("$dir/*.port-*.map"), glob("$dir/ports/*.conf");
+}
+
+=head2 \%files = port_snapshot($dir)
+
+The content of each file of the ports of the guests, for C<restore_ports>.
+
+=cut
+
+sub port_snapshot {
+    my ($dir) = @_;
+    return { map { $_ => scalar read_file($_) } port_files($dir) };
+}
+
+=head2 restore_ports($dir, \%files)
+
+Puts the files of the ports of the guests back as C<port_snapshot> found them,
+and removes the files that it did not find.
+
+=cut
+
+sub restore_ports {
+    my ( $dir, $files ) = @_;
+    write_file( $_, undef )        foreach grep { !exists $files->{$_} } port_files($dir);
+    write_file( $_, $files->{$_} ) foreach keys %$files;
+    return;
+}
+
+=head2 write_ports($dir, $relay, $domain, \%registration)
+
+Registers the ports of C<$domain>.  C<%registration> has C<routes>, which maps
+each public port to each name that passes on it, mapped to a port of the
+guest, and C<address>, the address of the guest.  It drops each other port that
+C<$domain> registered before.  Then it runs C<write_listeners>.  C<$relay> is
+the name of the relay, which names the variables of nginx.  C<release_ports>
+releases the ports of C<$domain>.
+
+=cut
+
+sub write_ports {
+    my ( $dir, $relay, $domain, $registration ) = @_;
+    my ( $routes, $address ) = @{$registration}{qw{routes address}};
+
+    my %old = port_maps_of( $dir, $domain );
+    write_file( $old{$_}, undef ) foreach grep { !exists $routes->{$_} } keys %old;
+    foreach my $port ( keys %$routes ) {
+        my $names = $routes->{$port};
+        write_file( "$dir/$domain.port-$port.map", join( q{}, map { "$_ $address:$names->{$_};\n" } sort keys %$names ) );
+    }
+    return write_listeners( $dir, $relay );
+}
+
+=head2 release_ports($dir, $relay, $domain)
+
+Drops every port that C<$domain> registered, and runs C<write_listeners>.
+
+=cut
+
+sub release_ports {
+    my ( $dir, $relay, $domain ) = @_;
+    my %old = port_maps_of( $dir, $domain );
+    write_file( $_, undef ) foreach values %old;
+    return write_listeners( $dir, $relay );
+}
+
+=head2 write_listeners($dir, $relay)
+
+Writes the stream server of each port that a domain registered, and removes
+the server of each port that none did.  C<write_ports> runs it, and so does a
+client that moves registrations of an older form into these files.
+
+=cut
+
+sub write_listeners {
+    my ( $dir, $relay ) = @_;
+    my %listened = map { m{[.]port-([[:digit:]]+)[.]map\z}a ? ( $1 => 1 ) : () } glob("$dir/*.port-*.map");
+    mkdir( "$dir/ports", oct 755 ) or $!{EEXIST} or die "Cannot make $dir/ports: $!\n";
+    foreach my $conf ( glob("$dir/ports/*.conf") ) {
+        my ($port) = $conf =~ m{/([[:digit:]]+)[.]conf\z}a;
+        write_file( $conf, undef ) unless defined $port && $listened{$port};
+    }
+    write_file( "$dir/ports/$_.conf", stream_server( $dir, $relay, $_ ) ) foreach keys %listened;
+    return;
+}
+
+# The stream server of $port, which sends the name of each connection to the
+# guest that registered it there, and closes any other connection, because
+# nginx has no upstream for it.
+sub stream_server {
+    my ( $dir, $relay, $port ) = @_;
+    my $var = "\$${relay}_port_$port";
+    return <<"END";
+# The registrations of $port, which relay_client writes.
+map \$ssl_preread_server_name $var {
+    include $dir/*.port-$port.map;
+    default "";
+}
+
+server {
+    listen $port;
+    ssl_preread on;
+    proxy_protocol on;
+    proxy_pass $var;
+}
+END
+}
+
+=head2 open_ports($hook)
+
+Runs C<$hook ports>, the hook of the bans of the relay, which opens the ports
+of the guests in the firewall as their files now say.  Dies when it fails.
+
+=cut
+
+sub open_ports {
+    my ($hook) = @_;
+    my ( $said, $ok ) = run( $hook, 'ports' );
+    die "The firewall did not take the ports of the guests: $said\n" unless $ok;
+    return;
+}
+
 =head2 $key = issue_ban_key($dir, $domain, $address, $set)
 
 Makes a new ed25519 key for C<$domain>, and returns the private half in base64
@@ -247,8 +455,15 @@ sub revoke_key {
     return;
 }
 
-# The keys of every domain, in the one file of $dir that sshd reads for root.
-# Only a line that restricts its key, so that a bare key never logs in as root.
+=head2 write_authorized_keys($dir)
+
+Writes the keys of every domain into C<$dir/authorized_keys.root>, the one file
+of C<$dir> that sshd reads for root.  It takes only a line that restricts its
+key, so that a bare key never logs in as root.  C<issue_key> and C<revoke_key>
+run it, and so does a client that changed a key file itself.
+
+=cut
+
 sub write_authorized_keys {
     my ($dir) = @_;
     my @lines = grep { m/\Arestrict,/ } map { split( m/^/m, read_file($_) // q{} ) } sort map { glob("$dir/*.$_.pub") } @KEY_KINDS;

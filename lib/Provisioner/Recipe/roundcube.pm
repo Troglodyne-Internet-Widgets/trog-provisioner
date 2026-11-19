@@ -98,7 +98,7 @@ sub required_recipes {
             return ( sites => \@sites ) unless defined( ( Provisioner::Cookbook->domain_config( $opts{domain} )->{nginx} // {} )->{relay} );
             return (
                 sites         => \@sites,
-                public_names  => { map { $_ => $_ } @sites },
+                public_names  => { map { $_ => { vhost => $_ } } @sites },
                 proxied_jails => [ sort keys %{ { $self->jails } } ],
             );
         },

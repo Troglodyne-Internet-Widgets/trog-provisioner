@@ -59,6 +59,7 @@ subtest 'sshd reads the keys of every relay of the guest from one directive' => 
     is_deeply( $opts{relay_dirs}, ['/etc/nginx/nginxrelay.d'], 'the directory of each relay, and of nothing else on the guest' );
     is( $opts{ban_set}, 'nginxrelay-bans', 'with the set' );
     is_deeply( $opts{banned_ports}, [ 80, 4443 ], 'and the ports that a ban closes' );
+    is( $opts{relay_dir}, '/etc/nginx/nginxrelay.d', 'and the directory where the hook of the bans finds the ports of the guests' );
 
     my %both = $nginxrelay->enrich( modules => [qw{ubuntu nginx nginxrelay mailrelay}] );
     is_deeply( $both{relay_dirs}, [qw{/etc/nginx/nginxrelay.d /etc/postfix/mailrelay.d}], 'and with two relays on the guest, sshd reads the keys of both' );

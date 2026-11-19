@@ -495,7 +495,7 @@ sub required_recipes {
         nginx   => sub {
             my @sites = map { "$_.$opts{domain}" } qw{autodiscover autoconfig};
             return ( sites => \@sites ) unless defined( ( Provisioner::Cookbook->domain_config( $opts{domain} )->{nginx} // {} )->{relay} );
-            return ( sites => \@sites, public_names => { map { $_ => $_ } @sites } );
+            return ( sites => \@sites, public_names => { map { $_ => { vhost => $_ } } @sites } );
         },
         letsencrypt => sub { return ( certificate_readers => [qw{postfix dovecot}] ) },
     );

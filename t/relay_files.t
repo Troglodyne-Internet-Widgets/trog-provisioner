@@ -33,7 +33,7 @@ require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test
 sub held_lock {
     my ($dir) = @_;
     open( my $held, '>>', "$dir/.lock" ) or die "Cannot open the lock: $!";
-    flock( $held, Fcntl::LOCK_EX() )     or die "Cannot take the lock: $!";
+    flock( $held, Fcntl::LOCK_EX() )     or die "Cannot take the lock: $!";    ## no critic (PreferredModules) -- relay_files locks with the builtin, which the system perl of a relay has, so the test holds the same lock
     return $held;
 }
 
@@ -114,8 +114,23 @@ subtest 'upstream: an IPv4 address and a port of 1 to 65535' => sub {
     foreach my $good (qw{192.0.2.10:8443 0.0.0.0:1 255.255.255.255:65535}) {
         is( Trog::RelayFiles::upstream($good), 1, "$good is an upstream" );
     }
-    foreach my $bad ( qw{999.0.2.1:80 192.0.2.1:99999 192.0.2.1:65536 192.0.2.1:0 192.0.2.1 192.0.2.1: 192.0.2:80 web.test:80}, "192.0.2.1:80\n", undef ) {
+    foreach my $bad ( qw{999.0.2.1:80 192.0.2.1:99999 192.0.2.1:65536 192.0.2.1:0 192.0.2.1 192.0.2.1: 192.0.2:80 web.test:80 192.0.2.1:80:80 192.0.2.1:8a 192.0.2.1:80.5 192.0.2.1:-80 192.0.2.1:Inf 192.0.2.1:NaN}, "192.0.2.1:80\n", '192.0.2.1: 80', undef ) {
         is( Trog::RelayFiles::upstream($bad), 0, ( $bad // 'undef' ) =~ s/\n/\\n/gr . ' is not' );
+    }
+};
+
+subtest 'port_pair: two ports of 1 to 65535, each spelled as its number' => sub {
+    my %good = (
+        '8448=8449' => [ 8448, 8449 ],
+        '1=65535'   => [ 1,    65535 ],
+    );
+    foreach my $pair ( sort keys %good ) {
+        is_deeply( [ Trog::RelayFiles::port_pair($pair) ], $good{$pair}, "$pair is the ports @{ $good{$pair} }" );
+    }
+
+    # A port names a file and goes into a file of nginx, so it has one spelling.
+    foreach my $bad ( qw{8448 8448= =8449 8448=8449=8450 0=8449 8448=0 -1=8449 +8448=8449 65536=8449 8448=65536 8448.5=8449 Inf=8449 NaN=8449 8448=NaN abc=8449 8448=8449a 0x20=8449 08448=8449 1e4=8449}, "8448=8449\n", ' 8448=8449', '8448 =8449', q{}, undef ) {
+        is_deeply( [ Trog::RelayFiles::port_pair($bad) ], [], ( $bad // 'undef' ) =~ s/\n/\\n/gr . ' is not' );
     }
 };
 

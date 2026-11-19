@@ -72,6 +72,27 @@ the time that each ban has left, and it comes back when ufw loads.
 Each relay has a set of its own.  So a ban that a guest sends to one relay
 drops the address only on the ports of that relay.
 
+=head2 Ports of the guests
+
+Besides the ports that a relay always serves, a guest can register ports of
+its own, each for some of its names, each name mapped to a port of the guest.
+The relay passes such a port, by the SNI name and with the PROXY protocol,
+only for the names that registered it, and listens there only while a guest
+does.  The client script
+of the relay writes the registration into C<relay_dir>, through
+C<write_ports> in F<scripts/relay_files>, which has the whole account.  The
+C<stream> block includes the server of each port from there.
+
+The same hook as the bans, F</etc/ufw/after.init.d/RECIPE-bans>, opens each
+of these ports in the firewall each time ufw loads, and again when the client
+runs it with C<ports> after a registration or a release.  A banned address is
+dropped there too, and each address has a limit of C<port_rate_limit> new
+connections a second on each port.  The relay may connect out to the address
+and the port of each guest that registered one.
+
+The salvage of C<relay_dir> keeps the registrations, so a rebuilt relay
+listens on the same ports.
+
 =head1 METHODS
 
 =head2 $dir = $recipe->relay_dir()
@@ -96,6 +117,37 @@ must say.
 sub banned_ports {
     my ($self) = @_;
     die ref($self) || $self, " is a relay, so it must say which ports a ban closes\n";
+}
+
+=head2 $hits = $recipe->port_rate_limit()
+
+How many new connections an address may open each second on each port that a
+guest registered.  See L</Ports of the guests>.
+
+=cut
+
+sub port_rate_limit {
+    return 1024;
+}
+
+=head2 @args = port_args(\%routes)
+
+The arguments of the client script of a relay for C<%routes>, which maps each
+port of its own to each name that passes on it, mapped to the port of the
+guest: a C<--port> and a C<PORT=GUEST_PORT:NAME,...> for each port and port of
+the guest, in order.  See L</Ports of the guests>.
+
+=cut
+
+sub port_args {
+    my ($routes) = @_;
+    my @args;
+    foreach my $port ( sort { $a <=> $b } keys %$routes ) {
+        my %names_of;
+        push( @{ $names_of{ $routes->{$port}{$_} } }, $_ ) foreach sort keys %{ $routes->{$port} };
+        push( @args,                                  map { ( '--port', "$port=$_:" . join( q{,}, @{ $names_of{$_} } ) ) } sort { $a <=> $b } keys %names_of );
+    }
+    return @args;
 }
 
 =head2 $set = $recipe->ban_set()
@@ -207,17 +259,20 @@ sub issue_grant {
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds what F<templates/files/relay.install.tt> renders: C<relay_name>, C<ban_set>,
-C<banned_ports>, and C<relay_dirs>, the C<relay_dir> of each relay in
-C<modules>.  sshd reads the keys of all of them from one directive.  A subclass
-that has an C<enrich> of its own calls this one.
+C<banned_ports>, C<relay_dir>, C<port_rate_limit>, and C<relay_dirs>, the
+C<relay_dir> of each relay in C<modules>.  sshd reads the keys of all of them
+from one directive, and the C<stream> block includes the ports of the guests
+from each.  A subclass that has an C<enrich> of its own calls this one.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    $opts{relay_name}   = $self->recipe_name;
-    $opts{ban_set}      = $self->ban_set;
-    $opts{banned_ports} = [ $self->banned_ports(%opts) ];
+    $opts{relay_name}      = $self->recipe_name;
+    $opts{ban_set}         = $self->ban_set;
+    $opts{banned_ports}    = [ $self->banned_ports(%opts) ];
+    $opts{relay_dir}       = $self->relay_dir;
+    $opts{port_rate_limit} = $self->port_rate_limit;
 
     my @relays = grep { $_->isa(__PACKAGE__) } map { Provisioner::Cookbook->load($_) } grep { $_ ne $self->recipe_name } @{ $opts{modules} // [] };
     $opts{relay_dirs} = [ sort map { $_->relay_dir } $self, @relays ];

@@ -1,0 +1,580 @@
+#!/usr/bin/perl
+
+package Trog::RelayClient;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use Cwd            ();
+use File::Basename ();
+use Getopt::Long   ();
+use List::Util     qw{any};
+
+BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' ) }
+
+=head1 relay_client
+
+=head2 SYNOPSIS
+
+    relay_client nginx register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT:NAME,... ...]
+    relay_client nginx media-key DOMAIN ADDRESS
+    relay_client nginx cert DOMAIN    # "install NAME" from ssh, and the PEM on stdin
+    relay_client mail register DOMAIN ADDRESS
+    relay_client mail register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT:NAME,... [--port ...]
+    relay_client RELAY release DOMAIN
+    relay_client RELAY upgrade
+
+=head2 DESCRIPTION
+
+Runs as root on a relay guest, for another guest that the relay passes
+connections to.  RELAY is C<nginx>, for L<Provisioner::Recipe::nginxrelay>, or
+C<mail>, for L<Provisioner::Recipe::mailrelay>.  One guest can run both, and
+each keeps its registrations in a directory of its own.
+
+=head3 What both relays do
+
+A registration replaces what DOMAIN registered before.  It refuses a name that
+another domain registered, because nginx would send that name to only one of
+them.  If C<nginx -t> refuses the result, it puts the old files of DOMAIN back.
+Then it makes a new key for DOMAIN, and prints the private half in base64 on
+one line.  The guest of DOMAIN pushes its bans to the relay with that key.  The
+public half goes into F<authorized_keys.root>, which sshd reads beside the keys
+of root.  It can run only F<relay_ban> for DOMAIN and the set of bans of RELAY,
+and only from the address of the guest.  See F<scripts/relay_ban>.
+
+Each C<--port> PORT=GUEST_PORT:NAME,... is a port of its own, for the names
+after the colon, each of which the command also registers.  The relay passes a
+TLS connection on PORT, by its SNI name and with the PROXY protocol, to the
+address of the guest on GUEST_PORT, for each of those names, and for no other
+name.  A port can come twice, for other names and another GUEST_PORT.  It
+listens on PORT, and opens it in the firewall, while some domain registered it.
+A port that DOMAIN registered before and does not name now is dropped.  The
+web relay takes a PORT from 1024, because nginx serves 80 and 443 itself.  The
+mail relay takes only the ports of C<%CLIENT_PORTS>, because postfix serves the
+others.  See L<Provisioner::RelayRecipe/Ports of the guests>.
+
+C<release> removes everything that DOMAIN registered on RELAY, its keys and
+its ports included.  Any of it can be gone already.  A service that does not
+reload is a warning, because it reads the files when it starts.
+
+C<upgrade> brings what the salvage of an older build put back up to this
+script.  It points each key whose command ran an older client at this one, and
+writes the stream server of each port.  On the mail relay, it also moves the
+routes that an older build kept for each service, in F<DOMAIN.SERVICE.map>,
+into the map of the port of the service.  The build of the relay runs it after
+the salvage is back.  A second run changes nothing.
+
+Each command waits up to a minute for another run on RELAY to finish, and then
+gives up and says which file is locked.  It exits 0 when it did what it says.
+When a step fails, it says which, and exits with another status.
+
+=head3 The web relay
+
+C<register> sends each NAME to DOMAIN: a TLS connection by its SNI name to
+TLS_UPSTREAM, and a plain HTTP request by its C<Host> header to HTTP_UPSTREAM.
+An upstream is an IPv4 address and a port, such as C<192.0.2.10:8443>.  The
+ports of its own go to the address of TLS_UPSTREAM, for names that pass
+through.
+
+Each C<--media> NAME is a media name, which this guest serves and caches
+itself.  The stream proxy sends it to the media server of this guest, on the
+socket C<$MEDIA_SOCKET>.  That server fetches from HTTP_UPSTREAM what it does
+not hold.  So a media name needs a certificate on this guest, which C<cert>
+installs.  Until then, a TLS connection for it fails its handshake.  See
+L<Provisioner::Recipe::nginxrelay/Media names>.
+
+Each C<--page> NAME is a page name, which this guest serves and caches as
+well, as a reader sees it.  The stream proxy sends it to the page server of
+this guest, on the socket C<$PAGE_SOCKET>, which fetches from HTTP_UPSTREAM.
+It needs a certificate as a media name does.  See
+L<Provisioner::Recipe::nginxrelay/Page names>.
+
+A name can be only one of the three: passed through, a media name, or a page
+name.
+
+C<media-key> makes a key for DOMAIN, and prints the private half in base64 on
+one line.  Like the ban key, it works only from ADDRESS.  It can run only
+C<relay_client nginx cert DOMAIN>, and the guest of DOMAIN sends its
+certificates with it.
+
+C<cert> is the forced command of that key.  sshd puts what the guest asked
+for in C<SSH_ORIGINAL_COMMAND>, which must be C<install NAME>, for a media name
+or a page name of DOMAIN.  The standard input holds the certificate of NAME,
+its chain and its private key, in PEM, as one file.  C<cert> installs them in
+the directory F<media> of the relay if C<openssl> agrees that the certificate
+is for NAME, has not expired, and goes with the key.  Then it reloads nginx.
+The key is readable by the group C<www-data>, because nginx loads a
+certificate that a variable names in its workers, and they run as
+C<www-data>.
+
+C<release> also removes the certificates of the media names and the page names
+of DOMAIN, and its media key.
+
+=head3 The mail relay
+
+C<register> lets the guest of DOMAIN send its mail out through this guest.  It
+makes a new password for the login DOMAIN, keeps only its hash, and prints the
+password on one line.  The relay takes mail from that login only with a sender
+in DOMAIN.  dovecot makes the hash, with its C<ARGON2ID> scheme.  It also makes
+this guest relay the mail for DOMAIN that comes in from the internet to
+ADDRESS, the IPv4 address of the guest, on port 25.  See
+L<Provisioner::Recipe::mailrelay/Mail out> and
+L<Provisioner::Recipe::mailrelay/Mail in>.
+
+C<register-clients> sends the mail clients of DOMAIN to its guest, at ADDRESS,
+on the ports of its own, which it must name.  It prints the ban key.  See
+L<Provisioner::Recipe::mailrelay/Mail clients>.
+
+C<release> also removes the login and the route in.
+
+=cut
+
+my $USAGE = "usage: relay_client nginx register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT:NAME,... ...]
+" . "       relay_client nginx media-key DOMAIN ADDRESS
+" . "       relay_client nginx cert DOMAIN
+" . "       relay_client mail register DOMAIN ADDRESS
+" . "       relay_client mail register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT:NAME,... [--port ...]
+" . "       relay_client RELAY release DOMAIN
+" . "       relay_client RELAY upgrade
+";
+
+# The path of this script, which the media key runs.
+our $SELF = Cwd::abs_path(__FILE__);
+
+# The port of each service of the mail clients.  The same as in
+# Provisioner::Recipe::mailrelay, which t/relay_client.t makes sure of.  An
+# older build kept the routes of each service in $domain.$service.map.
+our %CLIENT_PORTS = ( imaps => 993, submissions => 465, pop3s => 995 );
+
+# The lowest port of its own that a guest can register on the web relay.
+our $MIN_PORT = 1024;
+
+# What each relay does differently: its directory, the name that its set of
+# bans and its stream servers take, the services that read its files, the files
+# that a domain owns there, the ports that it takes, and its commands.
+our %RELAYS = (
+    nginx => {
+        dir        => '/etc/nginx/nginxrelay.d',
+        name       => 'nginxrelay',
+        services   => ['nginx'],
+        files_of   => \&nginx_owned_files,
+        takes_port => sub { $_[0] >= $MIN_PORT },
+        port_rule  => "from $MIN_PORT to 65535",
+        commands   => { register => \&nginx_register, 'media-key' => \&media_key, cert => \&cert },
+    },
+    mail => {
+        dir        => '/etc/postfix/mailrelay.d',
+        name       => 'mailrelay',
+        services   => [qw{postfix nginx}],
+        files_of   => sub { my %file = mail_files_of(@_); values %file },
+        tables     => \&write_tables,
+        upgrade    => \&upgrade_services,
+        takes_port => sub {
+            my ($port) = @_;
+            return any { $_ == $port } values %CLIENT_PORTS;
+        },
+        port_rule => 'one of ' . join( ', ', sort { $a <=> $b } values %CLIENT_PORTS ),
+        commands  => { register => \&mail_register, 'register-clients' => \&register_clients },
+    },
+);
+
+# The lock of the one command that a run of this script does, which it holds
+# until it exits.
+my $LOCK;
+
+# Locks the directory of $relay, and returns the directory.  The old lock goes
+# first, because a second lock of one file from one process waits for the first.
+sub lock_relay {
+    my ($relay) = @_;
+    my $dir = $RELAYS{$relay}{dir};
+    undef $LOCK;
+    $LOCK = Trog::RelayFiles::lock_dir( $dir, 'relay_client' );
+    return $dir;
+}
+
+# Runs the hook of the bans of $relay, which Provisioner::RelayRecipe installs,
+# so that the firewall opens the ports of the guests as their files now say.
+sub open_ports {
+    my ($relay) = @_;
+    return Trog::RelayFiles::open_ports("/etc/ufw/after.init.d/$RELAYS{$relay}{name}-bans");
+}
+
+sub reload {
+    my ($service) = @_;
+    my ( $said, $ok ) = Trog::RelayFiles::run( qw{systemctl reload}, $service );
+    die "$service did not reload: $said\n" unless $ok;
+    return;
+}
+
+# The names in the lines of a map, each NAME TARGET;.
+sub names_in {
+    my ($file) = @_;
+    return map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, Trog::RelayFiles::read_file($file) // q{};
+}
+
+# Dies, naming each of @names that another domain than $domain registered in
+# the relay directory $dir: on 443 of the web relay, or on a port of its own.
+sub refuse_taken {
+    my ( $dir, $domain, @names ) = @_;
+    my %holder = Trog::RelayFiles::port_names_of_others( $dir, $domain );
+    foreach my $map ( glob("$dir/*.tls.map") ) {
+        my ($other) = $map =~ m{/([^/]+)[.]tls[.]map\z};
+        next if $other eq $domain;
+        $holder{$_} = $other foreach names_in($map);
+    }
+    my @taken = grep { defined $holder{$_} } @names;
+    die join( q{}, map { "$_ is registered to $holder{$_}\n" } @taken ) . "So $domain cannot register it.  Release it there first.\n" if @taken;
+    return;
+}
+
+# The routes of @specs, each PORT=GUEST_PORT:NAME,..., as a map of each PORT to
+# each NAME, mapped to its GUEST_PORT.  Dies on a spec that is not one, whose
+# PORT $relay does not take, or whose NAME is not among @names, or is on PORT
+# twice.
+sub routes_of {
+    my ( $relay, $specs, @names ) = @_;
+    my %spec       = %{ $RELAYS{$relay} };
+    my %registered = map { $_ => 1 } @names;
+    my %routes;
+    foreach my $port_spec (@$specs) {
+        my ( $pair, $list, @more ) = split( m/:/, $port_spec, -1 );
+        my ( $port, $guest_port ) = Trog::RelayFiles::port_pair($pair);
+        die "$port_spec is no PORT=GUEST_PORT:NAME,..., with PORT $spec{port_rule}\n" if @more || !defined $list || !defined $port || !$spec{takes_port}->($port);
+        foreach my $name ( split( m/,/, $list, -1 ) ) {
+            die "$port_spec names '$name', which is not among the NAMEs of the command\n" unless $registered{$name};
+            die "$port_spec names $name on $port twice\n" if exists $routes{$port}{$name};
+            $routes{$port}{$name} = $guest_port;
+        }
+    }
+    return %routes;
+}
+
+# Writes %$files, each path to its content or undef, and the ports of
+# $registration for $domain, as Trog::RelayFiles::write_ports takes them, in
+# the directory $dir of $relay.  Puts all of it back when nginx refuses it.
+# Then prints the ban key of $domain.  The caller holds the lock.
+sub register_names {
+    my ( $dir, $relay, $domain, $registration, $files ) = @_;
+
+    my %old       = map { $_ => scalar Trog::RelayFiles::read_file($_) } keys %$files;
+    my $old_ports = Trog::RelayFiles::port_snapshot($dir);
+    Trog::RelayFiles::write_file( $_, $files->{$_} ) foreach keys %$files;
+    Trog::RelayFiles::write_ports( $dir, $RELAYS{$relay}{name}, $domain, $registration );
+
+    my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
+    if ( !$ok ) {
+        Trog::RelayFiles::write_file( $_, $old{$_} ) foreach keys %old;
+        Trog::RelayFiles::restore_ports( $dir, $old_ports );
+        die "nginx refused what $domain registered, so it keeps what it had: $said\n";
+    }
+
+    my $key = Trog::RelayFiles::issue_ban_key( $dir, $domain, $registration->{address}, "$RELAYS{$relay}{name}-bans" );
+    reload('nginx');
+    open_ports($relay);
+    print $key;
+    return 0;
+}
+
+sub release {
+    my ( $relay, $domain ) = @_;
+    my %spec = %{ $RELAYS{$relay} };
+    my $dir  = lock_relay($relay);
+    Trog::RelayFiles::write_file( $_, undef ) foreach $spec{files_of}->($domain);
+    Trog::RelayFiles::release_ports( $dir, $spec{name}, $domain );
+    $spec{tables}->() if $spec{tables};
+    Trog::RelayFiles::revoke_key( $dir, $domain, $_ ) foreach @Trog::RelayFiles::KEY_KINDS;
+
+    foreach my $step (
+        (
+            map {
+                my $service = $_;
+                sub { reload($service) }
+            } @{ $spec{services} }
+        ),
+        sub { open_ports($relay) }
+    ) {
+        my $err = do {
+            local $@;
+            eval { $step->(); 1 } ? undef : $@;
+        };
+        warn $err if defined $err;
+    }
+    return 0;
+}
+
+sub upgrade {
+    my ($relay) = @_;
+    my $dir = lock_relay($relay);
+    $RELAYS{$relay}{upgrade}->($dir) if $RELAYS{$relay}{upgrade};
+    foreach my $pub ( map { glob("$dir/*.$_.pub") } @Trog::RelayFiles::KEY_KINDS ) {
+        my $line = Trog::RelayFiles::read_file($pub) // next;
+        ( my $now = $line ) =~ s{command="\S*/(nginx|mail)relay_client[ ]}{command="$SELF $1 }g;
+        Trog::RelayFiles::write_file( $pub, $now ) if $now ne $line;
+    }
+    Trog::RelayFiles::write_authorized_keys($dir);
+    Trog::RelayFiles::write_listeners( $dir, $RELAYS{$relay}{name} );
+    return 0;
+}
+
+=head2 The web relay
+
+=cut
+
+# Where the stream proxy sends a media name, and where the media server of
+# templates/files/nginxrelay.http.conf.tt listens.
+our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
+
+# Where the stream proxy sends a page name, and where the page server listens.
+our $PAGE_SOCKET = '/run/nginxrelay-pages.sock';
+
+# The group of the workers of nginx, which read the key of a certificate here.
+our $KEY_GROUP = 'www-data';
+
+# The most that cert reads: a chain of a few certificates and a key.
+our $MAX_PEM = 65_536;
+
+# The certificates of the media names and the page names, by name, under the
+# salvage of the directory of the web relay.
+sub media_dir {
+    return "$RELAYS{nginx}{dir}/media";
+}
+
+# The files of $domain: the map of each port, and the origin of each media name
+# and of each page name.  relay_files keeps its keys.
+sub nginx_files_of {
+    my ($domain) = @_;
+    return map { $_ => "$RELAYS{nginx}{dir}/$domain.$_.map" } qw{tls http media page};
+}
+
+# The names of $domain that this guest serves itself, from their maps: the
+# names that have a certificate here.
+sub served_names_of {
+    my ($domain) = @_;
+    my %file = nginx_files_of($domain);
+    return map { names_in($_) } @file{qw{media page}};
+}
+
+# The certificate and the key of a name that this guest serves.
+sub cert_files {
+    my ($name) = @_;
+    my $dir = media_dir();
+    return ( crt => "$dir/$name.crt", key => "$dir/$name.key" );
+}
+
+# Every file of $domain on the web relay, its certificates included.
+sub nginx_owned_files {
+    my ($domain) = @_;
+    my %file = nginx_files_of($domain);
+    return values %file, map { my %cert = cert_files($_); values %cert } served_names_of($domain);
+}
+
+sub nginx_register {
+    my ( $domain, @args ) = @_;
+    Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media, 'page=s@' => \my @pages, 'port=s@' => \my @port_specs ) or die $USAGE;
+    my ( $tls, $http, @names ) = @args;
+    die $USAGE unless Trog::RelayFiles::upstream($tls) && Trog::RelayFiles::upstream($http) && ( @names || @media || @pages );
+    die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names, @media, @pages;
+    my %routes = routes_of( 'nginx', \@port_specs, @names );
+    my %count;
+    $count{$_}++ foreach List::Util::uniq(@names), List::Util::uniq(@media), List::Util::uniq(@pages);
+    my @twice = grep { $count{$_} > 1 } sort keys %count;
+    die join( q{}, map { "$_ is named twice, but it can only pass through, be a media name, or be a page name\n" } @twice ) if @twice;
+
+    my $dir = lock_relay('nginx');
+    refuse_taken( $dir, $domain, @names, @media, @pages );
+
+    # A media name or a page name has no line in the http map, so it does not pass through.
+    my %file   = nginx_files_of($domain);
+    my %served = ( media => \@media, page => \@pages );
+    my @tls    = ( ( map { "$_ $tls;\n" } @names ), ( map { "$_ unix:$MEDIA_SOCKET;\n" } @media ), map { "$_ unix:$PAGE_SOCKET;\n" } @pages );
+    my %files  = (
+        $file{tls}  => join( q{}, @tls ),
+        $file{http} => join( q{}, map { "$_ $http;\n" } @names ),
+        map {
+            $file{$_} => @{ $served{$_} }
+              ? join( q{}, map { "$_ $http;\n" } @{ $served{$_} } )
+              : undef
+        } keys %served,
+    );
+    my ($address) = split( m/:/, $tls );
+    return register_names( $dir, 'nginx', $domain, { address => $address, routes => \%routes }, \%files );
+}
+
+sub media_key {
+    my ( $domain, @args ) = @_;
+    my ($address) = @args;
+    die $USAGE unless @args == 1 && Trog::RelayFiles::upstream("$address:1");
+
+    my $dir = lock_relay('nginx');
+    print Trog::RelayFiles::issue_key( $dir, $domain, $address, 'media', "$SELF nginx cert $domain" );
+    return 0;
+}
+
+# What openssl printed for @args on $input, or undef when it failed.
+sub openssl {
+    my ( $input, @args ) = @_;
+    my ( $said,  $ok )   = Trog::RelayFiles::run( { input => $input }, 'openssl', @args );
+    return $ok ? $said : undef;
+}
+
+# The certificates and the one private key in $pem, each ending in a newline.
+sub split_pem {
+    my ($pem) = @_;
+    my $cert  = qr/CERTIFICATE/;
+    my $key   = qr/(?:RSA[ ]|EC[ ])?PRIVATE[ ]KEY/;
+    my @certs = map { m/\n\z/ ? $_ : "$_\n" } $pem =~ m/(-----BEGIN[ ]$cert-----\n.+?\n-----END[ ]$cert-----\n?)/sg;
+    my @keys  = map { m/\n\z/ ? $_ : "$_\n" } $pem =~ m/(-----BEGIN[ ]$key-----\n.+?\n-----END[ ]$key-----\n?)/sg;
+    die "The input must hold a certificate, its chain and one private key, in PEM\n" unless @certs && @keys == 1;
+    return ( \@certs, $keys[0] );
+}
+
+sub cert {
+    my ( $domain, @args ) = @_;
+    die $USAGE if @args;
+
+    my ( $verb, $name, @rest ) = split( q{ }, $ENV{SSH_ORIGINAL_COMMAND} // q{} );
+    die "usage: install NAME, with the certificate, its chain and its key on standard input\n"
+      if ( $verb // q{} ) ne 'install' || @rest || !Trog::RelayFiles::dns_name($name);
+
+    # <> would open the files that @ARGV names, and sshd puts "nginx cert DOMAIN" there.
+    my $pem = do {
+        local $/ = undef;
+        <STDIN>;    ## no critic (ProhibitExplicitStdin) -- sshd gives the PEM on the standard input of the forced command
+    };
+    $pem //= q{};
+    die "The input is more than $MAX_PEM bytes, which is no certificate and key\n" if length $pem > $MAX_PEM;
+    my ( $certs, $key ) = split_pem($pem);
+
+    lock_relay('nginx');
+    die "$name is no media name or page name of $domain\n" unless any { $_ eq $name } served_names_of($domain);
+
+    my $checked = openssl( $certs->[0], qw{x509 -noout -checkhost}, $name ) // q{};
+    die "The certificate is not for $name\n"     unless $checked =~ m/\bdoes[ ]match\b/;
+    die "The certificate of $name has expired\n" unless defined openssl( $certs->[0], qw{x509 -noout -checkend 0} );
+    my $public = openssl( $certs->[0], qw{x509 -noout -pubkey} );
+    die "The private key does not go with the certificate of $name\n" unless defined $public && ( openssl( $key, qw{pkey -pubout} ) // q{} ) eq $public;
+
+    my %file = cert_files($name);
+    my %old  = map { $_ => scalar Trog::RelayFiles::read_file( $file{$_} ) } keys %file;
+    mkdir( media_dir(), oct 755 ) or $!{EEXIST} or die "Cannot make " . media_dir() . ": $!\n";
+    my %mode = ( crt => [], key => [ oct 640, $KEY_GROUP ] );
+    Trog::RelayFiles::write_file( $file{crt}, join( q{}, @$certs ), @{ $mode{crt} } );
+    Trog::RelayFiles::write_file( $file{key}, $key,                 @{ $mode{key} } );
+
+    my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
+    if ( !$ok ) {
+        Trog::RelayFiles::write_file( $file{$_}, $old{$_}, @{ $mode{$_} } ) foreach keys %file;
+        die "nginx refused the certificate of $name, so it keeps what it had: $said\n";
+    }
+    reload('nginx');
+    return 0;
+}
+
+=head2 The mail relay
+
+=cut
+
+# The files of the mail of $domain, by the table that each goes into: the hash
+# of its login and the senders it owns, for mail out, and its domain, where
+# that goes, and its recipients, for mail in.
+my @TABLES = qw{passwd senders relay_domains transport recipients};
+
+# The group that dovecot reads the hashes as.
+our $DOVECOT_GROUP = 'dovecot';
+
+sub mail_files_of {
+    my ($domain) = @_;
+    return map { $_ => "$RELAYS{mail}{dir}/$domain.mail.$_" } @TABLES;
+}
+
+# The tables of every domain, in the files that dovecot and postfix read.
+sub write_tables {
+    my $dir = $RELAYS{mail}{dir};
+    foreach my $kind (@TABLES) {
+        my $content = join( q{}, map { Trog::RelayFiles::read_file($_) // q{} } sort glob("$dir/*.mail.$kind") );
+        Trog::RelayFiles::write_file( "$dir/mail.$kind", $content, $kind eq 'passwd' ? ( oct 640, $DOVECOT_GROUP ) : () );
+    }
+    return;
+}
+
+# The hash of $password that dovecot reads, made by dovecot itself, because the
+# CryptX of the system perl is too old for Argon2.  setsid, because doveadm
+# reads a password from the terminal when it has one, and bin/provision runs
+# this on a pty.  It asks twice, so it gets the password twice.
+sub hash_password {
+    my ($password) = @_;
+    my ( $hash, $ok ) = Trog::RelayFiles::run( { input => "$password\n$password\n" }, qw{setsid --wait doveadm pw -s ARGON2ID} );
+    die "doveadm could not hash the password: $hash\n" unless $ok && $hash =~ m/\A(\{ARGON2ID\}\S+)\s*\z/;
+    return $1;
+}
+
+sub mail_register {
+    my ( $domain,  @args ) = @_;
+    my ( $address, @rest ) = @args;
+    die $USAGE if @rest || !defined $address || !Trog::RelayFiles::upstream("$address:25");
+
+    # Only the mail relay installs CryptX, so the web relay must not load it.
+    require Crypt::PRNG;
+    lock_relay('mail');
+    my %file     = mail_files_of($domain);
+    my $password = Crypt::PRNG::random_bytes_hex(24);
+
+    Trog::RelayFiles::write_file( $file{passwd},        "$domain:" . hash_password($password) . "\n", oct 600 );
+    Trog::RelayFiles::write_file( $file{senders},       "\@$domain $domain\n" );
+    Trog::RelayFiles::write_file( $file{relay_domains}, "$domain OK\n" );
+    Trog::RelayFiles::write_file( $file{transport},     "$domain smtp:[$address]:25\n" );
+
+    # The guest takes mail for any address in its domain, which its catchall
+    # delivers.  So the relay takes every recipient there too.
+    Trog::RelayFiles::write_file( $file{recipients}, "\@$domain OK\n" );
+    write_tables();
+    reload('postfix');
+
+    print "$password\n";
+    return 0;
+}
+
+sub register_clients {
+    my ( $domain, @args ) = @_;
+    Getopt::Long::GetOptionsFromArray( \@args, 'port=s@' => \my @port_specs ) or die $USAGE;
+    my ( $address, @names ) = @args;
+    die $USAGE if !@names || !Trog::RelayFiles::upstream( ( $address // q{} ) . ':1' );
+    die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names;
+    my %routes = routes_of( 'mail', \@port_specs, @names );
+    die $USAGE unless %routes;
+
+    my $dir = lock_relay('mail');
+    refuse_taken( $dir, $domain, @names );
+    return register_names( $dir, 'mail', $domain, { address => $address, routes => \%routes }, {} );
+}
+
+# Moves the routes of each service that an older build kept in $dir into the
+# map of its port.  The caller holds the lock.
+sub upgrade_services {
+    my ($dir) = @_;
+    foreach my $service ( sort keys %CLIENT_PORTS ) {
+        foreach my $old ( glob("$dir/*.$service.map") ) {
+            my ($domain) = $old =~ m{/([^/]+)[.]\Q$service\E[.]map\z}a or next;
+            Trog::RelayFiles::write_file( "$dir/$domain.port-$CLIENT_PORTS{$service}.map", Trog::RelayFiles::read_file($old) );
+            Trog::RelayFiles::write_file( $old,                                            undef );
+        }
+    }
+    return;
+}
+
+sub main {
+    my ( $relay, $command, $domain, @args ) = @_;
+
+    die $USAGE unless defined $relay && $RELAYS{$relay} && defined $command;
+    return upgrade($relay) if $command eq 'upgrade' && !defined $domain;
+    die $USAGE unless Trog::RelayFiles::dns_name($domain);
+    return release( $relay, $domain ) if $command eq 'release' && !@args;
+    my $run = $RELAYS{$relay}{commands}{$command} or die $USAGE;
+    return $run->( $domain, @args );
+}
+
+exit main(@ARGV) unless caller;
+
+1;

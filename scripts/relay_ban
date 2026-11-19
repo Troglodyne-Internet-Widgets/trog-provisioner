@@ -8,13 +8,14 @@ use strict;
 use warnings FATAL => 'all';
 
 use List::Util ();
+use POSIX      ();
 
 =head1 relay_ban
 
 =head2 SYNOPSIS
 
 In the line of the F<authorized_keys.root> of a relay that its client writes for
-a domain, such as F<scripts/nginxrelay_client>:
+a domain, F<scripts/relay_client>:
 
     restrict,from="ADDRESS",command="relay_ban SET DOMAIN" ssh-ed25519 ...
 
@@ -67,6 +68,15 @@ sub run {
     return system(@command) == 0 ? 1 : 0;
 }
 
+# True when $seconds is a finite whole number spelled as perl spells it, which
+# fail2ban sends, with -1 for a ban for good.  Under fatal warnings, int dies on
+# what is no number.
+sub whole_seconds {
+    my ($seconds) = @_;
+    local $@;
+    return eval { $seconds eq int($seconds) && POSIX::isfinite($seconds) } ? 1 : 0;
+}
+
 sub ipset {
     my (@args) = @_;
     return run( 'ipset', @args );
@@ -100,7 +110,7 @@ sub main {
         return 0;
     }
 
-    if ( $verb eq 'ban' && defined $seconds && $seconds =~ m/\A-?[[:digit:]]+\z/ ) {
+    if ( $verb eq 'ban' && whole_seconds($seconds) ) {
         my $timeout = $seconds <= 0 ? 0 : List::Util::min( $seconds, $MAX_SECONDS );
         return 3 unless ipset( qw{-exist add}, $set, $ip, timeout => $timeout );
         logged( $domain, "ban $ip for " . ( $timeout ? "$timeout seconds" : 'good' ) );

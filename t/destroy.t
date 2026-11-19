@@ -288,7 +288,7 @@ subtest 'a VPN client is revoked on the server that issued it, which frees its a
 # --- revoke_grants: the web relay ---
 subtest 'the public names of a domain are released on its relay, which would send them to a freed address' => sub {
     my $domain   = 'web.test.test';
-    my %config   = ( nginx => { relay => 'relay.test.test', public_names => { 'shop.test.test' => $domain } } );
+    my %config   = ( nginx => { relay => 'relay.test.test', public_names => { 'shop.test.test' => { vhost => $domain } } } );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? {%config} : {} } );
 
@@ -304,7 +304,7 @@ subtest 'the public names of a domain are released on its relay, which would sen
     ($out) = capture { $released = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $released, 1, 'they are released' );
     is_deeply( \@asked, ['relay.test.test'], 'on the relay of its nginx' );
-    is( $ran[0], "sudo -n sh -c '/root/bin/nginxrelay_client release $domain'", 'as root, by the script that registered them' );
+    is( $ran[0], "sudo -n sh -c '/root/bin/relay_client nginx release $domain'", 'as root, by the script that registered them' );
     like( $out, qr/\QReleased the public names of $domain on relay.test.test\E/, 'and says so' );
 
     @ran = ();
@@ -315,15 +315,15 @@ subtest 'the public names of a domain are released on its relay, which would sen
     my %public = %{ $config{nginx}{public_names} };
     $config{nginx}{public_names} = {};
     capture { $released = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
-    is( $released, 1,                                                             'a domain with a relay and no public name written releases too, because a recipe such as roundcube can add one' );
-    is( $ran[0],   "sudo -n sh -c '/root/bin/nginxrelay_client release $domain'", 'by the same script' );
+    is( $released, 1,                                                              'a domain with a relay and no public name written releases too, because a recipe such as roundcube can add one' );
+    is( $ran[0],   "sudo -n sh -c '/root/bin/relay_client nginx release $domain'", 'by the same script' );
     @ran = ();
     $config{nginx}{public_names} = \%public;
 
     $fleet->redefine( guest_of => sub { return } );
     my ( undef, $warned ) = capture { $released = Trog::Bin::Destroy::revoke_grants( $domain, 0 ) };
     is( $released, 0, 'a relay that is not up releases nothing' );
-    like( $warned, qr/\Qrelay.test.test is not up\E .* \Qnginxrelay_client release $domain\E/, 'and the warning says what to run there' );
+    like( $warned, qr/\Qrelay.test.test is not up\E .* \Qrelay_client nginx release $domain\E/, 'and the warning says what to run there' );
 };
 
 # --- The key of a runner, through Trog::Steps->revert ---
