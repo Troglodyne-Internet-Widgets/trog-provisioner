@@ -1016,16 +1016,22 @@ key as text, without the last newline.
 L<Provisioner::Utils/new_ssh_private_key> makes it so that OpenSSH and CryptX
 can both read it.
 
+The owner is the account that provisions: C<provision_user>, else C<user>,
+else C<admin_user>, as L</THE PROVISIONING ACCOUNT> says.  F<t/guest_secrets.t>
+expects that owner after the build.  A caller that passes none of the three
+gets C<root>, and must use only the paths and the references.
+
 =cut
 
 sub guest_secrets {
-    my ( $self, $install_dir, $domain ) = @_;
+    my ( $self, $install_dir, $domain, %opts ) = @_;
+    my $who = $opts{provision_user} // $opts{user} // $opts{admin_user} // 'root';
 
     return (
         "$install_dir/$domain/.ssh/id_ed25519" => {
             ref      => key_ref($domain),
             generate => sub { Provisioner::Utils::new_ssh_private_key( Ed25519 => $ED25519_BITS, 'trog-provisioner runner' ) },
-            owner    => 'root:root',
+            owner    => "$who:$who",
             mode     => '0600',
         },
     );

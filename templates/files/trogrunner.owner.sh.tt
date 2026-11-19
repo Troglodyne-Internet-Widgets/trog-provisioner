@@ -32,9 +32,9 @@ install -d -o "$who" -g "$who" -m 0700 "$home/.ssh"
 if [ -f "$home/.ssh/config" ]; then chmod 0600 "$home/.ssh/config"; fi
 [% IF hypervisor_access != 'none' -%]
 
-# bin/provision put the key here from the secret store, owned by root, as
-# guest_secrets says.  The data target changes the modes in this tree, and ssh
-# refuses a key wider than 0600.
+# bin/provision put the key here from the secret store.  It is root's until
+# now if the account did not exist then.  The data target changes the modes
+# in this tree, and ssh refuses a key wider than 0600.
 key="$dir/.ssh/id_ed25519"
 if [ ! -f "$key" ]; then echo 'trogrunner: no hypervisor key was placed; bin/provision is what puts it here' >&2; exit 1; fi
 chown "$who:$who" "$key"

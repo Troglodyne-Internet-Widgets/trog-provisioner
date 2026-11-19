@@ -1332,10 +1332,12 @@ password as far as the store is concerned.
 
 A secret that another guest issues is not one of these.  See C<grants>.
 
-C<%opts> is the configuration of the recipe, for a secret that only some
-domains want.  If the recipe returns nothing for a domain, no secret is placed
-or generated for it.  Most recipes have an unconditional secret and can ignore
-C<%opts>.
+C<%opts> is the configuration of the recipe.  C<bin/new_config> lays it over
+the C<_global> of the domain, so an owner can come from a global such as
+C<user>.  L<Provisioner::Cookbook> passes the configuration of the recipe
+alone, and reads only the references.  If the recipe returns nothing for a
+domain, no secret is placed or generated for it.  Most recipes have an
+unconditional secret and can ignore C<%opts>.
 
 C<owner> is the final owner of the file, not the owner it lands with.
 Placement happens before the makefile runs, so the account usually belongs to

@@ -172,6 +172,22 @@ subtest 'the same domain with an address of the pool is not refused' => sub {
     is( scalar @$assigned, 1, 'which the pool gave it' );
 };
 
+subtest 'guest_secrets gets the configuration of its recipe over the globals' => sub {
+    my %asked;
+    my $ntp = Test::MockModule->new('Provisioner::Recipe::ntp');
+    $ntp->redefine( guest_secrets => sub ( $self, $install_dir, $domain, %opts ) { %asked = %opts; return () } );
+    my $gen = Test::MockModule->new( 'Trog::Provisioner::Config::Generator', no_auto => 1 );
+    $gen->redefine( transfer_to         => sub { return ( ['192.0.2.50'], 22, 'someadmin' ) } );
+    $gen->redefine( write_guest_secrets => sub { die "at the secrets\n" } );
+
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/$_" for qw{domains data};
+    my ( undef, $died ) = generate( nics => ['br0'], pools => { br0 => { cidr => ['192.0.2.0/24'] } }, on_nat_network => 0, virbr_ip => '192.168.122.1', dir => $dir, recipes => { ntp => { admin_user => 'ntpadmin' } } );
+    like( $died, qr/\Aat[ ]the[ ]secrets$/m, 'got as far as the secrets' ) or diag $died;
+    is( $asked{admin_email}, 'bogus@test.test', 'a global reaches it, so an owner can come from one' );
+    is( $asked{admin_user},  'ntpadmin',        'and the block of the recipe wins over the global of the same name' );
+};
+
 subtest 'each address reaches the network configuration of the guest' => sub {
     my %pools = ( br0 => { cidr => ['192.0.2.0/24'] }, virbr1 => { cidr => ['10.0.0.0/25'] } );
 
