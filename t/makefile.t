@@ -147,7 +147,7 @@ subtest 'the order of all is stated as prerequisites, so make -j keeps it' => su
 
     # A fragment runs make, cargo and rustc, and none of them can open the
     # jobserver that MAKEFLAGS names under -j.
-    like( $plain, qr{^unexport[ ]MAKEFLAGS$}m, 'the fragments do not inherit the jobserver' );
+    like( $plain, qr{^unexport[ ]MAKEFLAGS[ ]MFLAGS$}m, 'the fragments do not inherit the jobserver' );
     is_deeply( [ $plain =~ m{^\tln[ ]-sf[ ]/root/bin/serial_apt[ ](\S+)$}mg ], [qw{/root/bin/serial-apt/apt-get /root/bin/serial-apt/apt}], 'as apt-get and as apt' );
     is_deeply( [ $plain =~ m{^(\S+/perl):[ ][|][ ](\S+)$}m ],                  [ "$STATE/perl", "$STATE/testdeps" ],                        'without a cache, recipes wait for the last global target' );
 };
@@ -275,7 +275,7 @@ subtest 'a failed upgrade stops the build at the packages target' => sub {
     ok( !-e "$dir/packages", 'and the target is not marked done, so the next run upgrades again' );
 };
 
-subtest 'a guest test that leaves a process behind does not keep make waiting' => sub {
+subtest 'the make that runs the guest tests keeps its jobserver to itself' => sub {
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
     mkdir "$dir/t" or die "mkdir: $!";
 
@@ -285,6 +285,17 @@ subtest 'a guest test that leaves a process behind does not keep make waiting' =
         use Test::More;
         system q{setsid sleep 30 </dev/null >/dev/null 2>&1 &};
         ok( 1, 'left a process behind' );
+        done_testing;
+        TEST
+
+    # rustc and cargo read the jobserver from MFLAGS as well as MAKEFLAGS.
+    # The make that runs the tests closes the descriptors for prove, so a
+    # jobserver that either one names is one that a test cannot open.
+    File::Slurper::Temp::write_text( "$dir/t/jobserver.t", <<~'TEST' );
+        use Test::More;
+        foreach my $name (qw{MAKEFLAGS MFLAGS}) {
+            unlike( $ENV{$name} // q{}, qr/jobserver/, "$name names no jobserver that the test cannot open" );
+        }
         done_testing;
         TEST
     my $makefile = makefile( state_dir => $dir );
@@ -302,6 +313,7 @@ subtest 'a guest test that leaves a process behind does not keep make waiting' =
     my $status = $? >> 8;
     isnt( $status, 124, 'make finishes before the process does, and the timeout does not kill it' ) or diag $out;
     like( $out, qr/left[ ]a[ ]process[ ]behind/, 'after the test ran' );
+    is( $status, 0, 'and the tests pass, so none of them was told of a jobserver it cannot open' ) or diag $out;
 };
 
 Test::NoWarnings::had_no_warnings();
