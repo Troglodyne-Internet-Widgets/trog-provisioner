@@ -59,13 +59,14 @@ foreach my $command (@commands) {
     is( $exit, 0, "$user may run $command with sudo and no password" ) or diag $out;
 }
 
-# A command nobody listed, run for real: it must not run as root.  id is
-# harmless, and its output says whose it was.
+# A command nobody listed: sudo must refuse it.  This asks with -l and does
+# not run it.  A refused run makes sudo mail root a security warning, on every
+# build, and that noise hides a real attempt.
 my %listed = map { ( split / /, $_ )[0] => 1 } @commands;
 my ($unlisted) = grep { !$listed{$_} } qw{/usr/bin/id /usr/bin/whoami /usr/bin/true};
 SKIP: {
     skip 'every candidate for an unlisted command is listed', 2 unless $unlisted;
-    my ( $exit, $out ) = as_user( 'sudo', '-n', $unlisted );
+    my ( $exit, $out ) = as_user( 'sudo', '-n', '-l', $unlisted );
     isnt( $exit, 0, "$user may not run $unlisted with sudo" ) or diag $out;
     like( $out, qr/password is required|not allowed|may not run/, 'and sudo says it refused' ) or diag $out;
 }

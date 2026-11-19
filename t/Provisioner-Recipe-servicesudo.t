@@ -149,6 +149,15 @@ subtest 'a domain with no service user' => sub {
     like( exception { recipe()->validate( %G, user => 'a.b' ) }, qr/not[ ]a[ ]name/, 'a user that sudo would skip the file of is refused' );
 };
 
+# A refused run makes sudo mail root a security warning, so the guest test
+# asks about a command nobody listed, and never runs it.
+subtest 'the guest test asks about an unlisted command and does not run it' => sub {
+    my %opts = recipe()->validate( %G, commands => ['/usr/bin/systemctl restart ssh'] );
+    my $test = recipe()->render_file( 'tests/servicesudo.tt', %opts );
+    like( $test, qr/as_user[(][ ]'sudo',[ ]'-n',[ ]'-l',[ ]\$unlisted[ ][)]/, 'it passes -n -l with the unlisted command' ) or diag $test;
+    unlike( $test, qr/as_user[(][ ]'sudo',[ ]'-n',[ ]\$unlisted/, 'and never runs it with plain sudo -n' )                  or diag $test;
+};
+
 # What each recipe whose units run as the service user asks for, and what
 # servicesudo and visudo make of it.
 subtest 'the units of the recipes that run as the service user' => sub {
