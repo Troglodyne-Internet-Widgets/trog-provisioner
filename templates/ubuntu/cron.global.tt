@@ -1,13 +1,18 @@
 mv root.crontab /etc/cron.d/default
 chown root:root /etc/cron.d/default
 chmod 0644 /etc/cron.d/default
+[%# rkhunter rewrites a file of its own package.  The list must be there before
+    the first run of changed_packaged_files below. -%]
+install -D -o root -g root -m 0644 cron.changed_packaged_files /etc/changed_packaged_files.d/rkhunter
+[%# What changes_in_packaged_files.sh kept, which nothing reads now. -%]
+rm -f /root/bin/changes_in_packaged_files.sh /root/debcheck.log.old /root/debdiffs.log /root/rpmcheck.log.old /root/rpmdiffs.log
 # Run each log watcher once, so that it records the entries already in the logs.
 /root/bin/segfaults.sh; /bin/true
 /root/bin/root_access [% admin_user %]; /bin/true
 /root/bin/oomdetect.sh; /bin/true
 /root/bin/newusers.sh; /bin/true
 /root/bin/logdrops.sh; /bin/true
-/root/bin/changes_in_packaged_files.sh; /bin/true
+/root/bin/changed_packaged_files; /bin/true
 # The crontab command of cronie keeps a backup of the old crontab in ~/.cache.
 mkdir /root/.cache; /bin/true
 # Install the rkhunter configuration, and record the file properties after the makefile is done.

@@ -82,6 +82,14 @@ is($types, "easydns refuses TLSA\npowerdns takes TLSA\n", 'powerdns takes any ty
 my $identifier = `python3 -I -c 'from lexicon._private.providers.powerdns import Provider; c = "v=DKIM1; p=ab/cd+ef/gh=="; print(Provider._parse_identifier(None, Provider._make_identifier(None, "TXT", "x.zone.test.", c))[2])' 2>&1`;
 is($identifier, "v=DKIM1; p=ab/cd+ef/gh==\n", 'the powerdns provider reads back the content of a record that holds a slash, so it can delete it') or diag $identifier;
 
+# Each file of the package that the patches changed is one that
+# changed_packaged_files expects to change, so it does not report it.
+require '[% script_dir %]/changed_packaged_files';
+my %expected = map { $_ => 1 } Trog::ChangedPackagedFiles::expected();
+my @patched = grep { m{^/} } split /\n/, `debsums -c python3-lexicon 2>/dev/null`;
+ok(scalar @patched, 'debsums sees the files that the patches change') or diag 'debsums -c python3-lexicon reports nothing';
+is_deeply([ grep { !$expected{$_} } @patched ], [], 'and changed_packaged_files expects each one to change');
+
 [% UNLESS unmanaged -%]
 # An argument with spaces in it, such as the content of an SPF record, reaches
 # lexicon whole.  A fake lexicon early on PATH prints the last argument that

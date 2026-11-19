@@ -82,8 +82,10 @@ sub enrich {
 
 =head2 %files = $recipe->template_files()
 
-Returns the shortcut template and the six patches, each mapped to the name
-of the file that it becomes.
+Returns the shortcut template, the six patches, and the list of the files that
+the patches change, each mapped to the name of the file that it becomes.  The
+list goes into F</etc/changed_packaged_files.d>, so that the scan of the cron
+recipe does not report a patched file.
 
 =cut
 
@@ -96,6 +98,7 @@ sub template_files {
         'patches/lexicon-easydns-priority.patch'       => 'lexicon-easydns-priority.patch',
         'patches/lexicon-pdns-identifier.patch'        => 'lexicon-pdns-identifier.patch',
         'patches/lexicon-easydns-absolute-cname.patch' => 'lexicon-easydns-absolute-cname.patch',
+        'lexicon.changed_packaged_files.tt'            => 'lexicon.changed_packaged_files',
     );
 }
 

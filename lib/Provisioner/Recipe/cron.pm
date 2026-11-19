@@ -65,10 +65,15 @@ The cron jobs of root run:
     * rkhunter
     * Log watchers (OOMs, SEGVs, root access, new users, rsyslog drops,
       outgoing ufw blocks)
-    * scan for writes to packaged files
+    * scan for writes to packaged files, with changed_packaged_files
     * dehydrated, if the domain uses the letsencrypt recipe, and something
       here writes the zone of the domain.  See
       L<Provisioner::Recipe::letsencrypt/A domain whose zone nothing here writes>.
+
+A recipe that changes a file of a package on purpose lists it in a file of
+F</etc/changed_packaged_files.d>, named for the recipe, so that the scan does
+not report it.  This recipe lists the database of mirrors that rkhunter
+rewrites.  L<Provisioner::Recipe::lexicon> lists the files that it patches.
 
 They also run each configured C<root_scripts> entry, from a PATH that starts
 with C<script_dir>.  The service user runs each C<user_scripts> entry, from a
@@ -174,11 +179,12 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'cron.root.tt'             => 'root.crontab',
-        'cron.root.domain.tt'      => 'root.domain.crontab',
-        'cron.user.tt'             => 'user.crontab',
-        'cron.rkhunter.conf.tt'    => 'rkhunter.conf',
-        'cron.rkhunter.default.tt' => 'rkhunter.default',
+        'cron.root.tt'                   => 'root.crontab',
+        'cron.root.domain.tt'            => 'root.domain.crontab',
+        'cron.user.tt'                   => 'user.crontab',
+        'cron.rkhunter.conf.tt'          => 'rkhunter.conf',
+        'cron.rkhunter.default.tt'       => 'rkhunter.default',
+        'cron.changed_packaged_files.tt' => 'cron.changed_packaged_files',
     );
 }
 

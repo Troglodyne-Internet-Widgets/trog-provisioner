@@ -1,0 +1,5 @@
+# Files of packages that the cron recipe expects to change.  changed_packaged_files
+# does not report them.
+
+# rkhunter rewrites its list of mirrors at each update.
+/var/lib/rkhunter/db/mirrors.dat

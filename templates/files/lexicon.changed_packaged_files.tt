@@ -1,0 +1,6 @@
+# Files of the lexicon package that the patches of the lexicon recipe change.
+# changed_packaged_files does not report them.
+/usr/lib/python3/dist-packages/lexicon/_private/parser.py
+/usr/lib/python3/dist-packages/lexicon/_private/providers/easydns.py
+/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
+/usr/lib/python3/dist-packages/lexicon/interfaces.py
