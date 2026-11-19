@@ -23,22 +23,45 @@ ok(-f '/etc/nginx/sites-enabled/admin.matrix.[% domain %].conf', 'the admin vhos
 # and a download that fails leaves the vhost an empty directory.
 ok(-s '[% install_dir %]/admin.matrix.[% domain %]/index.html',
     'the admin interface was downloaded and extracted');
-ok(-f '[% install_dir %]/[% domain %]/www/matrix.index.html', 'the chat index page was installed');
+# What nginx answers on this guest for $url, with the name of the URL resolved
+# here.  -k, because a scratch guest has no certificate that a client trusts.
+# @extra goes to curl before the URL.
+sub fetch {
+    my ( $url, @extra ) = @_;
+    my ( $host, $port ) = $url =~ m{\Ahttps?://([^/:]+)(?::(\d+))?};
+    $port //= $url =~ m/\Ahttps/ ? 443 : 80;
+    my $body = `curl -sk --max-time 10 --resolve '$host:$port:127.0.0.1' @extra '$url' 2>/dev/null`;
+    return $body;
+}
 
-# The vhost of the domain belongs to nginxproxy.  This recipe requires
-# nginxproxy, and does not write a vhost of its own next to it.
-ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
-ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
-    'and matrix did not write a competing one');
-
-# The index page lists the channels that the recipe was given.
-my $index = do { local (@ARGV, $/) = '[% install_dir %]/[% domain %]/www/matrix.index.html'; <> } // '';
-unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $index;
+# The domain and its aliases serve the page, through the vhost of nginxproxy.
+my $index = fetch('https://[% domain %]/');
+like($index, qr{<code>https://\Q[% server_name %]:[% federation_port %]\E</code>}, 'the domain serves the page, which names the homeserver at its public URL') or diag $index;
 [% FOREACH chan IN channels %]
 like($index, qr/#\Q[% chan %]:[% server_name %]\E/, 'channel [% chan %] is listed as a room alias on this homeserver');
 [% END %]
-# synapse listens only behind nginxproxy, at its public_baseurl.
-like($index, qr{Home Server: https://\Qmatrix.[% domain %]\E\s}, 'the page names the homeserver at its public URL') or diag $index;
+
+# The vhost of the homeserver answers for server_name on 443, where the
+# well-known documents are, and on the port of federation.
+foreach my $port ( 443, [% federation_port %] ) {
+    my $server = eval { JSON::PP::decode_json( fetch("https://[% server_name %]:$port/.well-known/matrix/server") ) } // {};
+    is( $server->{'m.server'}, '[% server_name %]:[% federation_port %]', "on $port, /.well-known/matrix/server sends other servers to [% federation_port %]" );
+    my $client = eval { JSON::PP::decode_json( fetch("https://[% server_name %]:$port/.well-known/matrix/client") ) } // {};
+    is( ( $client->{'m.homeserver'} // {} )->{base_url}, 'https://[% server_name %]:[% federation_port %]', "and /.well-known/matrix/client sends clients there" );
+    my $version = eval { JSON::PP::decode_json( fetch("https://[% server_name %]:$port/_matrix/federation/v1/version") ) } // {};
+    is( ( $version->{server} // {} )->{name}, 'Synapse', "and synapse answers federation through nginx on $port" );
+}
+
+# Other servers reach federation from outside, so ufw lets it in.
+my $ufw = `ufw status 2>&1`;
+like( $ufw, qr/^matrix-homeserver\s+ALLOW/m, 'ufw lets federation in' ) or diag $ufw;
+[% IF relayed %]
+
+# Where the relay passes federation through, with the PROXY protocol, which
+# curl sends.
+my $relayed = eval { JSON::PP::decode_json( fetch( 'https://[% server_name %]:[% passthrough_port %]/_matrix/federation/v1/version', '--haproxy-protocol' ) ) } // {};
+is( ( $relayed->{server} // {} )->{name}, 'Synapse', 'synapse answers federation on [% passthrough_port %], where the relay passes [% federation_port %] through' );
+[% END %]
 
 # Some of the packages that the recipe asks for.  A package name that does not
 # exist makes nothing fail.  It is only never installed.

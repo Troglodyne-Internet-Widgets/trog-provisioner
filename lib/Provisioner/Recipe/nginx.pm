@@ -269,6 +269,21 @@ sub proxy_ports {
     return ( 443 => 8443, 80 => 8080 );
 }
 
+=head2 %ports = $recipe->passthrough_ports()
+
+Each other port that a relay passes through by SNI, with the PROXY protocol,
+mapped to the port of the guest that it connects to for it.  The relay sends
+a name there to the guest that registered the name for 443.  Unlike
+C<proxy_ports>, no vhost listens there unless its recipe does it itself, as
+L<Provisioner::Recipe::matrix> does for federation on 8448.  See
+L<Provisioner::Recipe::nginxrelay/Ports>.
+
+=cut
+
+sub passthrough_ports {
+    return ( 8448 => 8449 );
+}
+
 =head2 %jails = $recipe->jails()
 
 The jails that fail2ban ships for nginx: failed basic authentication, and

@@ -1,38 +1,41 @@
-<html>
+<!DOCTYPE html>
+[%# The page of the domain and its aliases: how to connect to the homeserver.
+    Provisioner::Recipe::matrix, under The names of the guest.  Xslate
+    escapes each value for HTML. -%]
+<html lang="en">
     <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>[% server_name %] chat server</title>
         <style>
-            body { background-color: #CCC; color: black; width: calc(100vw - 1rem); margin: 0; padding: 0; font-size: 1.5rem; }
-	    img { max-width: 30rem; }
-	    div { margin: auto; max-width: 50rem; }
+            body { font-family: sans-serif; line-height: 1.5; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+            code { font-size: 1.1em; }
+            dt { font-weight: bold; margin-top: 1rem; }
         </style>
-	<title>[% domain %] Chat Server</title>
     </head>
     <body>
-	<div>
-        <pre>
-[% domain %] Matrix chat server:
-****************************************
-Suggested Client: <a href="https://element.io" title="Element.io Client">Element</a>
-Other clients can be found at <a href="https://matrix.org" title="Matrix Home">the Matrix Homepage</a>
+        <h1>[% server_name %] chat server</h1>
+        <p>This is a <a href="https://matrix.org">Matrix</a> homeserver.  Use any Matrix client, for example <a href="https://element.io">Element</a>.  <a href="https://matrix.org/ecosystem/clients/">matrix.org lists others</a>.</p>
 
-Once you have loaded the client,
-use the below connection details.
+        <h2>Connection details</h2>
+        <dl>
+            <dt>Homeserver</dt>
+            <dd><code>https://[% server_name %]:[% federation_port %]</code></dd>
+            <dt>Server name</dt>
+            <dd><code>[% server_name %]</code>.  Accounts here are <code>@name:[% server_name %]</code>.</dd>
+        </dl>
 
-Connection Details
-  Home Server: https://matrix.[% domain %]
-  Suggested Channels:
-    [% FOR chan IN channels %]
-    #[% chan %]:[% server_name %]
-    [% END %]
+        <h2>Register</h2>
+        <p>In your client, choose to create an account, and give the homeserver above.  Registration needs an email address.  The homeserver sends a message to it, and you must open the link in that message to finish.</p>
+        <p>If you already have an account on another homeserver, you do not need one here.  Join the channels below from that account.</p>
+[% IF channels.size() %]
 
-If you already have a matrix account on another
-home server, just connect to the channels above,
-as federation works just fine.
-
-Otherwise, new user registrations currently are open,
-though you will need to pay attention to a verification
-email from an address at our server.
-        </pre>
-	</div>
+        <h2>Suggested channels</h2>
+        <ul>
+[% FOR chan IN channels %]
+            <li><code>#[% chan %]:[% server_name %]</code></li>
+[% END %]
+        </ul>
+[% END %]
     </body>
 </html>

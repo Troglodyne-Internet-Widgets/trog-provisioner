@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Provisioner::Cookbook();
 use Provisioner::Vars();
 
 use parent qw{Provisioner::RelayRecipe};
@@ -165,6 +166,16 @@ guest on 443 locally, such as the vhost that the letsencrypt guest test asks
 for its certificate.  From outside, a name that no guest registered gets no TLS
 handshake, the names of this guest included.
 
+The stream proxy also listens on each port of
+L<Provisioner::Recipe::nginx/passthrough_ports>, such as 8448, where matrix
+federates.  It passes a TLS connection there by its SNI name, with the PROXY
+protocol, to the address that the name is registered at for 443, on the port
+that C<passthrough_ports> maps it to.  So a guest needs no registration of its
+own for these ports, and a guest that does not listen there refuses the
+connection.  ufw opens these ports as they are, without a forward, because
+this guest serves nothing on them itself.  The bans and the rate limit of
+C<tls_port> cover them too.
+
 On 80, the server of this recipe is the default server of nginx.  A vhost of
 this guest on 80 still answers for its own names, because nginx chooses among
 the servers of one port by the C<Host> header.  This recipe takes the default
@@ -233,16 +244,23 @@ sub args {
 our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
 our $PAGE_SOCKET  = '/run/nginxrelay-pages.sock';
 
+# The ports that pass through besides 443, as the guests listen for them.
+my sub passthrough_ports {
+    return Provisioner::Cookbook->load('nginx')->passthrough_ports();
+}
+
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<media_socket> and C<page_socket>, where the media server and the page
-server listen, to what L<Provisioner::RelayRecipe/enrich> adds.
+server listen, and C<passthrough>, the map of
+L<Provisioner::Recipe::nginx/passthrough_ports>, to what
+L<Provisioner::RelayRecipe/enrich> adds.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET, page_socket => $PAGE_SOCKET );
+    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET, page_socket => $PAGE_SOCKET, passthrough => { passthrough_ports() } );
 }
 
 # Defaulted here as well as in args, because required_recipes and rate_limits
@@ -264,13 +282,15 @@ sub required_recipes {
 =head2 %limits = $recipe->rate_limits(%opts)
 
 The limit of 443 for C<tls_port>, because the forward happens before the limit
-counts a connection.
+counts a connection, and the same limit for each port that passes through.
+See L</Ports>.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
-    return ( tls_port(%opts) => 1024 );
+    my %passthrough = passthrough_ports();
+    return ( tls_port(%opts) => 1024, map { $_ => 1024 } keys %passthrough );
 }
 
 =head2 %path_map = $recipe->remote_files($install_dir, $domain)
@@ -309,14 +329,15 @@ sub relay_dir {
 
 =head2 @ports = $recipe->banned_ports(%opts)
 
-80 and C<tls_port>, where this guest proxies.  The ban closes C<tls_port> and
-not 443, because the forward comes first.
+80, C<tls_port> and each port that passes through, where this guest proxies.
+The ban closes C<tls_port> and not 443, because the forward comes first.
 
 =cut
 
 sub banned_ports {
     my ( $self, %opts ) = @_;
-    return ( 80, tls_port(%opts) );
+    my %passthrough = passthrough_ports();
+    return ( 80, tls_port(%opts), sort { $a <=> $b } keys %passthrough );
 }
 
 =head2 %files = $recipe->registration_files($grant, %terms)

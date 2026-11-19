@@ -104,7 +104,7 @@ sub required_config {
         pdns        => { api_key => 'test-api-key' },
         registrar   => { type    => 'easydns', user => 'somebody', key => 'a-token' },
         matrix      => {
-            server_name    => 'test.test.test',
+            server_name    => 'hs.test.test',
             admin_password => 's3cr3t',
             smtp_host      => 'mail.test.test',
             smtp_user      => 'notify@test.test',

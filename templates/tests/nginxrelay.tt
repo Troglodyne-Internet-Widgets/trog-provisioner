@@ -58,6 +58,15 @@ subtest 'a TLS connection goes by its SNI name, with the PROXY protocol' => sub 
     like( first_lines($tls), qr/\APROXY TCP4 127[.]0[.]0[.]1 /, 'the guest learns the address of the client' );
 };
 
+[% FOR port IN passthrough.keys().sort() -%]
+subtest 'on [% port %], a TLS connection goes to the address of the name, on [% passthrough.$port %]' => sub {
+    my $guest = IO::Socket::INET->new( Listen => 1, LocalAddr => '127.0.0.1', LocalPort => [% passthrough.$port %], ReuseAddr => 1 );
+    ok( $guest, 'a stand-in for the guest listens on [% passthrough.$port %]' ) or return diag $!;
+    system("curl -sk --max-time 5 --resolve '$name:[% port %]:127.0.0.1' 'https://$name:[% port %]/' >/dev/null 2>&1 &");
+    like( first_lines($guest), qr/\APROXY TCP4 127[.]0[.]0[.]1 /, 'with the PROXY protocol, for the name that the guest registered for 443' );
+};
+
+[% END -%]
 subtest 'a plain request goes by its Host header, with X-Forwarded-For' => sub {
     system("curl -s --max-time 5 --resolve '$name:80:127.0.0.1' 'http://$name/' -H 'X-Forwarded-For: 203.0.113.7' >/dev/null 2>&1 &");
     my $said = first_lines($http);
@@ -103,7 +112,7 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     ok( banned($abuser), 'and the address is in the set' );
 
     my $rules = `iptables -S trog-[% ban_set %] 2>&1`;
-    like( $rules, qr/--dports 80,[% tls_port %] .*--match-set [% ban_set %] src -j DROP/, 'whose members are dropped on the ports that the relay proxies' ) or diag $rules;
+    like( $rules, qr/--dports [% banned_ports.join(',') %] .*--match-set [% ban_set %] src -j DROP/, 'whose members are dropped on the ports that the relay proxies' ) or diag $rules;
 
     system('ufw reload >/dev/null 2>&1');
     my @jumps = `iptables -S INPUT` =~ m/^-A INPUT -j trog-[% ban_set %]$/mg;

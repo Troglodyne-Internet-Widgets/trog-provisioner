@@ -12,3 +12,20 @@ server {
     proxy_protocol on;
     proxy_pass $relay_tls;
 }
+[% FOR port IN passthrough.keys().sort() %]
+
+[%# The other ports that pass through, to the address of the guest that
+    registered the name for 443.  A media name or a page name, which goes to a
+    socket here, gets no upstream, so nginx closes the connection. -%]
+map $relay_tls $relay_tls_[% port %] {
+    "~^(?<relay_guest_[% port %]>[0-9.]+):[0-9]+$" "${relay_guest_[% port %]}:[% passthrough.$port %]";
+    default "";
+}
+
+server {
+    listen [% port %];
+    ssl_preread on;
+    proxy_protocol on;
+    proxy_pass $relay_tls_[% port %];
+}
+[% END -%]
