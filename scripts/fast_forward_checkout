@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Fast-forward a checkout that a recipe keeps to the tip of its branch, when
+# nobody changed it, and leave it as it is otherwise.
+#
+#     fast_forward_checkout <checkout> <repo url> <branch>
+#
+# A rebuild brings back the checkout of the guest that it replaces, and the
+# checkout is the live site.  So this changes it only when the change cannot
+# lose anything: the checkout is on <branch>, no tracked file differs from
+# HEAD, and the tip of <branch> at <repo url> is a descendant of HEAD.  Files
+# that git ignores, such as a configuration that the site writes, stay as they
+# are.  In every other case it says why on standard output and leaves the
+# checkout alone, so that a checkout on another branch, or with local commits
+# or edits, is never moved.
+#
+# It always exits 0.  A checkout that it leaves is still the site that ran
+# yesterday, and the recipe that kept it decides whether that is enough.  A
+# missing directory, or one that holds no checkout, is a domain whose fragment
+# clones one, and this says nothing about it.
+
+set -uo pipefail
+
+usage='usage: fast_forward_checkout <checkout> <repo url> <branch>'
+CHECKOUT="${1:?$usage}"
+URL="${2:?$usage}"
+BRANCH="${3:?$usage}"
+
+[ -e "$CHECKOUT/.git" ] || exit 0
+
+# root runs this over a checkout that the service user owns, so git needs the
+# directory marked safe, and a HOME to read.  Neither is written to the
+# configuration of an account.
+export HOME="${HOME:-$CHECKOUT}"
+git=(git -c "safe.directory=$CHECKOUT" -C "$CHECKOUT")
+
+say() { echo "fast_forward_checkout: $CHECKOUT: $*"; }
+
+on=$("${git[@]}" symbolic-ref --quiet --short HEAD 2>/dev/null)
+if [ "$on" != "$BRANCH" ]; then
+    say "left as it is: it is on ${on:-a detached HEAD}, not $BRANCH"
+    exit 0
+fi
+
+changed=$("${git[@]}" status --porcelain --untracked-files=no 2>&1)
+if [ -n "$changed" ]; then
+    say "left as it is: tracked files differ from HEAD:"
+    echo "$changed"
+    exit 0
+fi
+
+if ! out=$("${git[@]}" fetch --quiet "$URL" "$BRANCH" 2>&1); then
+    say "left as it is: could not fetch $BRANCH of $URL:"
+    echo "$out"
+    exit 0
+fi
+
+before=$("${git[@]}" rev-parse --short HEAD)
+if ! out=$("${git[@]}" merge --ff-only --quiet FETCH_HEAD 2>&1); then
+    say "left as it is: $BRANCH of $URL is not a fast-forward of $before:"
+    echo "$out"
+    exit 0
+fi
+
+after=$("${git[@]}" rev-parse --short HEAD)
+if [ "$before" = "$after" ]; then
+    say "already at $BRANCH of $URL, $after"
+else
+    say "fast-forwarded from $before to $after, $BRANCH of $URL"
+fi
+
+exit 0

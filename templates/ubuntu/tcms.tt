@@ -1,7 +1,10 @@
 [%# Clone only when nothing is there, which means a domain that never existed.
-    A checkout that came down from the last guest is the live site, and this
-    recipe leaves it alone.  See Provisioner::Recipe::tcms. -%]
+    A checkout that came down from the last guest is the live site, so it only
+    moves to the tip of its branch when nobody changed it.  Before the chown,
+    because git as root writes files that root owns.  See
+    Provisioner::Recipe::tcms. -%]
 [ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/tCMS'
+[% script_dir %]/fast_forward_checkout '[% install_dir %]/[% domain %]/tCMS' '[% repo_url %]' '[% repo_branch %]'
 [%# www/ has the group of nginx, which serves the files that tPSGI links out of
     it, and others get nothing.  See Provisioner::Recipe::tcms. -%]
 chown -R [% user %]: '[% install_dir %]/[% domain %]/tCMS'

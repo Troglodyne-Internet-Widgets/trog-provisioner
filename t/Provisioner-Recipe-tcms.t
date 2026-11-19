@@ -88,7 +88,7 @@ subtest 'the hosts of tCMS are written by tCMS, after the perl target' => sub {
     };
     my %base     = ( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', user => 'bogus', admin_user => 'bogusadmin' );
     my $hostname = sub (%opts) {
-        return grep { m/tcms-hostname/ } Provisioner::Recipe->fragment_commands( $recipe->()->render( %base, %opts ) );
+        return grep { index( $_, 'tcms-hostname' ) >= 0 } Provisioner::Recipe->fragment_commands( $recipe->()->render( %base, %opts ) );
     };
 
     my @one = $hostname->();
@@ -116,6 +116,21 @@ subtest 'the hosts of tCMS are written by tCMS, after the perl target' => sub {
 
     $config{'web.test.test'}{nginx}{media_names}{'cdn.web.test.test'} = 'web.test.test';
     like( exception { $hostname->() }, qr/more[ ]than[ ]one[ ]media[ ]name/, 'and two media names for the domain stop the build' );
+};
+
+subtest 'a kept checkout is fast-forwarded to the branch of the repository, before the owner is set' => sub {
+    my $recipe = Provisioner::Cookbook->load( 'tcms', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+    my @commands = Provisioner::Recipe->fragment_commands( $recipe->render( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', user => 'bogus', admin_user => 'bogusadmin', repo_url => 'https://forge.test.test/tCMS.git', repo_branch => 'stable' ) );
+    chomp @commands;
+    my ($forward) = grep { $commands[$_] =~ m{/fast_forward_checkout[ ]} } 0 .. $#commands;
+    my ($chown)   = grep { $commands[$_] =~ m{\Achown[ ]-R[ ]bogus:[ ]'/bogus/web[.]test[.]test/tCMS'} } 0 .. $#commands;
+    ok( defined $forward, 'the fragment runs fast_forward_checkout' ) or diag explain \@commands;
+    is( $commands[ $forward // 0 ], q{/bogus/bin/fast_forward_checkout '/bogus/web.test.test/tCMS' 'https://forge.test.test/tCMS.git' 'stable'}, 'on the checkout, with the repository and the branch of the configuration' );
+    ok( defined $chown && $forward < $chown, 'before the chown, so that what git writes as root goes to the service user' ) or diag explain \@commands;
 };
 
 # THE SYSTEM PACKAGES in Provisioner::Recipe::tcms.  git is faked: each answer

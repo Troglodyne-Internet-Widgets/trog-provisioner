@@ -186,7 +186,7 @@ subtest 'the build makes dovecot read each restored maildir again' => sub {
     my @lines    = grep { !m/\A\#/ } split m/\n/, $fragment;
 
     my @resync = grep { m/doveadm[ ]force-resync/ } @lines;
-    is( scalar @resync, 2, 'once for each account' ) or diag $fragment;
+    is( scalar @resync, 3, 'once for each account, and once for the catchall' ) or diag $fragment;
 
     # Run as make would hand them to the shell, with a doveadm that writes down
     # what it was asked, and a store where only someuser has a maildir.
@@ -417,6 +417,34 @@ subtest 'the dovecot configuration declares the four folders and one alias pair 
     is_deeply( \@old, [ map { $opts{mailbox_aliases}{$_} } sort keys %{ $opts{mailbox_aliases} } ], 'and each target is the old name, the real folder, in the same order' );
     like( $conf, qr/^\s*mailbox_alias_old\s*=/m,  'the first pair has no number' );
     like( $conf, qr/^\s*mailbox_alias_old5\s*=/m, 'and the fifth is numbered 5' );
+};
+
+subtest 'the build merges a real folder under an alias name, in every account and in the catchall' => sub {
+    my %names    = ( names => { someuser => { password => 'x', gecos => 'Some User' } }, script_dir => '/nonexistent' );
+    my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, %names ) ) );
+    my @merge    = grep { m/\Aif[ ]test[ ]-d[ ].*doveadm[ ]move/ } split m/\n/, $fragment;
+
+    # Run as make would hand them to the shell, with a doveadm that writes down
+    # what it was asked, and a store where the account and the catchall each
+    # came back with a real .Junk, and the account has Trash as a link.
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/$_" or die "mkdir: $!" for qw{bin store store/someuser store/someuser/Maildir store/someuser/Maildir/.Junk store/catchall store/catchall/Maildir store/catchall/Maildir/.Junk};
+    symlink '.Deleted Items', "$dir/store/someuser/Maildir/.Trash" or die "symlink: $!";
+    File::Slurper::Temp::write_text( "$dir/bin/doveadm", qq{#!/bin/sh\necho "\$*" >> "$dir/asked"\n} );
+    chmod 0755, "$dir/bin/doveadm" or die "chmod: $!";
+    foreach my $line (@merge) {
+        my $command = $line =~ s/\$\$/\$/gr =~ s{/mail/mail[.]test[.]test}{$dir/store}gr;
+        my $out;
+        IPC::Run3::run3( [ 'bash', '-c', "PATH='$dir/bin':\$PATH; $command" ], \undef, \$out, \$out );
+        is( $? >> 8, 0, 'the line succeeds' ) or diag $out;
+    }
+    my $asked = -e "$dir/asked" ? File::Slurper::read_text("$dir/asked") : q{};
+    is( $asked, join( q{}, map { "move -u $_\@mail.test.test Junk Email mailbox Junk all\nmailbox delete -u $_\@mail.test.test Junk\n" } qw{someuser catchall} ), 'the messages of each .Junk move into Junk Email, and the empty folder goes, in the catchall too' )
+      or diag $fragment;
+
+    # A domain with no names of its own still has a catchall to merge.
+    my $alone = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, script_dir => '/nonexistent' ) ) );
+    ok( ( grep { m/\Aif[ ]test[ ]-d[ ].*catchall.*doveadm[ ]move/ } split m/\n/, $alone ), 'and a domain with no names merges the folders of its catchall' ) or diag $alone;
 };
 
 done_testing();
