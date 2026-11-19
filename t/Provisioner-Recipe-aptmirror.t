@@ -102,6 +102,17 @@ subtest 'the refresh goes through that same unit' => sub {
     like( $cron, qr/^30[ ]4[ ]\*[ ]\*[ ]6[ ]root[ ]systemctl[ ]start[ ]--no-block[ ]apt-mirror\.service$/m, 'on the configured schedule' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
+subtest 'a refresh that is not five fields on one line is refused' => sub {
+
+    # A newline between fields passes \s, splits the cron line in two, and cron
+    # then rejects the whole file with the other jobs in it.
+    like( exception { generated( refresh => "15\n2 * * *" ) }, qr/refresh/, 'a newline between the fields' );
+    like( exception { generated( refresh => '15 2 * *' ) },    qr/refresh/, 'four fields' );
+
+    is( exception { generated( refresh => '15 2 * * *' ) },     undef, 'spaces pass' );
+    is( exception { generated( refresh => "15\t2\t*\t*\t*" ) }, undef, 'and so do tabs' );
+};
+
 subtest 'the vhost answers for the address, not only the name' => sub {
     my ( $dir, undef ) = generated();
     my $vhost = slurp( $dir, 'aptmirror.nginx.conf' );

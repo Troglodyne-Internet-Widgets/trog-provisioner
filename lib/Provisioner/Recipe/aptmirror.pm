@@ -174,8 +174,11 @@ passes.
 
 =cut
 
-# The five fields of a cron schedule.
-my $CRON_SCHEDULE = qr/\A \S+ (?: \s+ \S+ ){4} \z/;
+# The five fields of a cron schedule.  Between fields only a space or a tab
+# will do: \s takes a newline, which would split the cron line in two and make
+# cron refuse the whole file.  Under /xx a space in a bracket class is ignored,
+# hence \x20.
+my $CRON_SCHEDULE = qr/\A \S+ (?: [\x20\t]+ \S+ ){4} \z/;
 
 sub args {
     return (
