@@ -49,7 +49,7 @@ namespace inbox {
   mailbox "Sent Items" {
     special_use = \Sent
   }
-  mailbox Spamverdacht {
+  mailbox "Junk Email" {
     auto = subscribe
     special_use = \Junk
   }
@@ -102,8 +102,8 @@ sub learned {
 subtest 'spam is Junk and the folders named, ham is every other folder, and four kinds go to neither' => sub {
     my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
     my %dir     = map { $_ => folder( $maildir, $_ ) } (
-        qw{INBOX Spamverdacht INBOX.$suspicious INBOX.$spam Bin Entwuerfe Receipts INBOX.Family},
-        'Sent Items',
+        qw{INBOX INBOX.$suspicious INBOX.$spam Bin Entwuerfe Receipts INBOX.Family},
+        'Junk Email', 'Sent Items',
     );
     folder( $maildir, 'Junk' );    # By name only: this dovecot does not give it the special use.
 
@@ -112,7 +112,7 @@ subtest 'spam is Junk and the folders named, ham is every other folder, and four
 
     is_deeply(
         learned( $r->{calls}, 'spam' ),
-        [ sort @dir{qw{Spamverdacht INBOX.$suspicious INBOX.$spam}} ],
+        [ sort @dir{ 'Junk Email', qw{INBOX.$suspicious INBOX.$spam} } ],
         'the folder with the Junk special use and each folder that is named are spam'
     ) or diag explain $r->{calls};
     is_deeply(
@@ -128,8 +128,8 @@ subtest 'spam is Junk and the folders named, ham is every other folder, and four
     is( scalar( grep { m{--(?:spam|ham)[ ]\Q$maildir\E/(?:cur|new)\z} } @{ $r->{calls} } ), 0, 'and no call names the INBOX, read or not' ) or diag explain $r->{calls};
 
     my @spam_calls = grep { index( $_, '--spam' ) >= 0 } @{ $r->{calls} };
-    ok( scalar( grep { m{/[.]Spamverdacht/new\z} } @spam_calls ),        'spam that nobody opened, which dovecot keeps in new, is learned' ) or diag explain \@spam_calls;
-    ok( scalar( grep { m{/[.]Spamverdacht/cur\z} } @spam_calls ),        'and so is the spam in cur' );
+    ok( scalar( grep { m{/[.]Junk[ ]Email/new\z} } @spam_calls ),        'spam that nobody opened, which dovecot keeps in new, is learned' ) or diag explain \@spam_calls;
+    ok( scalar( grep { m{/[.]Junk[ ]Email/cur\z} } @spam_calls ),        'and so is the spam in cur' );
     ok( !scalar( grep { substr( $_, -4 ) eq '/tmp' } @{ $r->{calls} } ), 'tmp is not learned' );
 };
 
@@ -142,6 +142,16 @@ subtest 'a folder that dovecot gives a special use is found by the use, not the 
     is_deeply( learned( $r->{calls}, 'spam' ), [],      'Junk is not spam by its name' )                     or diag explain $r->{calls};
     is_deeply( learned( $r->{calls}, 'ham' ),  [$junk], 'it is ham with the others, and Bin is left alone' ) or diag explain $r->{calls};
     unlike( join( "\n", @{ $r->{calls} } ), qr{\Q$bin_dir\E}, 'the folder with the Trash special use is not learned' );
+};
+
+subtest 'an alias of a folder, which the mailbox_alias plugin makes a link, is not learned again' => sub {
+    my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
+    my $target  = folder( $maildir, 'Junk Email' );
+    symlink( $target, "$maildir/.Junk" ) or die "symlink: $!";
+
+    my $r = train($maildir);
+    is_deeply( learned( $r->{calls}, 'spam' ), [$target], 'the target is spam' )                                      or diag explain $r->{calls};
+    is_deeply( learned( $r->{calls}, 'ham' ),  [],        'and the link is not ham, though Junk has no special use' ) or diag explain $r->{calls};
 };
 
 subtest 'dovecot that cannot say its special uses stops the training' => sub {
@@ -158,7 +168,7 @@ subtest 'dovecot that cannot say its special uses stops the training' => sub {
 
 subtest 'every learn writes to the database of amavis, which gets it back' => sub {
     my $maildir = tempdir( CLEANUP => 1 ) . '/Maildir';
-    folder( $maildir, 'Spamverdacht' );
+    folder( $maildir, 'Junk Email' );
     folder( $maildir, 'Receipts' );
 
     my @calls  = @{ train($maildir)->{calls} };

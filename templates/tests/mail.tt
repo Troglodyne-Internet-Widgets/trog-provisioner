@@ -245,9 +245,10 @@ SKIP: {
         chomp $found;
         is( $found + 0, $files + 0, "dovecot finds the $files messages that the maildir of $user holds" );
 
+        # An alias is a link, and dovecot does not list it beside its target.
         my $boxes = `doveadm mailbox list -u '$user' 2>&1`;
         my @missing;
-        foreach my $folder ( grep { m/\A[.][^.]/ && -d "$maildir/$_/cur" } map { s{.*/}{}r } glob "'$maildir'/.*" ) {
+        foreach my $folder ( grep { m/\A[.][^.]/ && -d "$maildir/$_/cur" && !-l "$maildir/$_" } map { s{.*/}{}r } glob "'$maildir'/.*" ) {
             my $box = $folder =~ s/\A[.]//r;
             push @missing, $box unless $boxes =~ m/^(?:INBOX[.])?\Q$box\E$/m;
         }
@@ -317,7 +318,7 @@ SKIP: {
 }
 
 # Spam, end to end: GTUBE is the message that SpamAssassin always scores as
-# spam.  amavis must mark it, and the global sieve must file it into Junk.
+# spam.  amavis must mark it, and the global sieve must file it into Junk Email.
 {
     my $to      = 'catchall@[% domain %]';
     my $subject = 'spam probe of the guest tests';
@@ -328,13 +329,13 @@ SKIP: {
 
     my $found = '';
     foreach ( 1 .. 60 ) {
-        $found = `doveadm search -u '$to' mailbox Junk subject '$subject' 2>&1`;
+        $found = `doveadm search -u '$to' mailbox 'Junk Email' subject '$subject' 2>&1`;
         last if $found =~ m/\S/;
         sleep 1;
     }
-    like($found, qr/\S/, 'spam is filed into Junk') or diag `doveadm search -u '$to' mailbox INBOX subject '$subject' 2>&1`;
+    like($found, qr/\S/, 'spam is filed into Junk Email') or diag `doveadm search -u '$to' mailbox INBOX subject '$subject' 2>&1`;
 
-    my $headers = `doveadm fetch -u '$to' hdr mailbox Junk subject '$subject' 2>&1`;
+    my $headers = `doveadm fetch -u '$to' hdr mailbox 'Junk Email' subject '$subject' 2>&1`;
     like($headers, qr/^X-Spam-Flag:\s*YES/mi, 'because amavis marked it as spam') or diag $headers;
 
     # The nightly training, on the probe.  Then the database forgets it, because
@@ -348,9 +349,94 @@ SKIP: {
     my $owners = `find $db ! -user amavis 2>&1`;
     is($owners, '', 'and still owns all of its database') or diag $owners;
 
-    my ($file) = `grep -rl '$subject' /mail/[% domain %]/catchall/Maildir/.Junk 2>/dev/null` =~ m/^(.*\S)/m;
+    my ($file) = `grep -rl '$subject' '/mail/[% domain %]/catchall/Maildir/.Junk Email' 2>/dev/null` =~ m/^(.*\S)/m;
     system("sa-learn --dbpath $db --forget '$file' >/dev/null 2>&1; chown -R amavis:amavis $db") if $file;
-    system('doveadm', 'expunge', '-u', $to, 'mailbox', 'Junk', 'subject', $subject);
+    system('doveadm', 'expunge', '-u', $to, 'mailbox', 'Junk Email', 'subject', $subject);
+}
+
+# The four folders that carry a special use, named as classic Outlook names
+# them.  The spam probe above made Junk Email.  The other three are made when a
+# client first uses them, so make sure that they are there before asking.
+{
+    my $user = 'catchall@[% domain %]';
+    my %use  = (
+        'Sent Items'    => '\\Sent',
+        'Deleted Items' => '\\Trash',
+        'Junk Email'    => '\\Junk',
+        'Drafts'        => '\\Drafts',
+    );
+    foreach my $folder ( sort keys %use ) {
+        system( "doveadm mailbox status -u '$user' messages '$folder' >/dev/null 2>&1 || doveadm mailbox create -u '$user' '$folder'" );
+    }
+    # doveadm mailbox list prints no flags, so ask as a client does: LIST with
+    # SPECIAL-USE, on the imap process that doveadm runs already logged in.
+    my $listed = `printf 'a1 LIST (SPECIAL-USE) "" "*"\\na2 LOGOUT\\n' | doveadm exec imap -u '$user' 2>&1`;
+    foreach my $folder ( sort keys %use ) {
+        my $name = $folder =~ m/\s/ ? qq{"$folder"} : $folder;
+        like( $listed, qr/^[*] LIST \(\Q$use{$folder}\E\) "[.]" \Q$name\E\s*$/m, "$folder has the special use $use{$folder}" ) or diag $listed;
+    }
+    my $subscribed = `doveadm mailbox list -s -u '$user' 2>&1`;
+    foreach my $folder ( sort keys %use ) {
+        like( $subscribed, qr/^\Q$folder\E$/m, "and $folder is subscribed" ) or diag $subscribed;
+    }
+}
+
+# An alias is the name that another client makes for one of those folders.  A
+# message that a client appends to the alias must show in the target.  A client
+# that deletes the alias must leave the target with its messages.
+{
+    my $user    = 'catchall@[% domain %]';
+    my %aliases = (
+[% FOR old IN mailbox_aliases.keys().sort() -%]
+        '[% old %]' => '[% mailbox_aliases.$old %]',
+[% END -%]
+    );
+    my $n = 0;
+    foreach my $alias ( sort keys %aliases ) {
+        my $target  = $aliases{$alias};
+        my $subject = 'alias probe ' . ++$n . " of the guest tests $$";
+        my $link    = "/mail/[% domain %]/catchall/Maildir/.$alias";
+
+        # The catchall is no account of mail.names, so the build did not make
+        # its aliases.  A client makes one when it first uses the name.
+        system("doveadm mailbox create -u '$user' '$alias' >/dev/null 2>&1") unless -l $link;
+        ok( -l $link, "$alias is a link to its target, not a second folder" ) or diag `ls -la '/mail/[% domain %]/catchall/Maildir' 2>&1`;
+
+        open( my $save, '|-', 'doveadm', 'save', '-u', $user, '-m', $alias ) or die "doveadm save: $!";
+        print {$save} "From: postmaster\@[% domain %]\nTo: $user\nSubject: $subject\n\nbody\n";
+        is( close($save) ? 0 : $?, 0, "a message appended to $alias is accepted" );
+
+        my $found = `doveadm search -u '$user' mailbox '$target' subject '$subject' 2>&1`;
+        like( $found, qr/\S/, "and shows in $target" ) or diag $found;
+        system( 'doveadm', 'expunge', '-u', $user, 'mailbox', $target, 'subject', $subject );
+    }
+
+    # The build made the aliases of each account of mail.names.
+[% FOR name IN names.keys().sort() -%]
+    foreach my $alias ( sort keys %aliases ) {
+        ok( -l "/mail/[% domain %]/[% name %]/Maildir/.$alias", "the build made the alias $alias for [% name %]" ) or diag `ls -la '/mail/[% domain %]/[% name %]/Maildir' 2>&1`;
+    }
+[% END -%]
+
+    # Delete one alias, with a message in its target.
+    my ($alias) = grep { $aliases{$_} eq 'Sent Items' } sort keys %aliases;
+    SKIP: {
+        skip 'no alias of Sent Items', 3 unless defined $alias;
+        my $subject = "alias delete probe of the guest tests $$";
+        open( my $save, '|-', 'doveadm', 'save', '-u', $user, '-m', 'Sent Items' ) or die "doveadm save: $!";
+        print {$save} "From: postmaster\@[% domain %]\nTo: $user\nSubject: $subject\n\nbody\n";
+        close($save) or die "doveadm save exited $?";
+
+        my $out = `doveadm mailbox delete -u '$user' '$alias' 2>&1`;
+        is( $?, 0, "a client deletes the alias $alias" ) or diag $out;
+        my $found = `doveadm search -u '$user' mailbox 'Sent Items' subject '$subject' 2>&1`;
+        like( $found, qr/\S/, 'and Sent Items keeps its message' ) or diag $found;
+        system( 'doveadm', 'expunge', '-u', $user, 'mailbox', 'Sent Items', 'subject', $subject );
+
+        # Put the alias back, so that the guest is as the build left it.
+        $out = `doveadm mailbox create -u '$user' '$alias' 2>&1`;
+        ok( -l "/mail/[% domain %]/catchall/Maildir/.$alias", "and creating $alias makes the link again" ) or diag $out;
+    }
 }
 
 # The postfix filter goes to amavis, which scores the spam, and only there.

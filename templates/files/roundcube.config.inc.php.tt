@@ -20,6 +20,12 @@ $tls_options = [
 $config['imap_conn_options'] = $tls_options;
 $config['smtp_conn_options'] = $tls_options;
 $config['managesieve_conn_options'] = $tls_options;
+// The folders that the mail recipe declares with a special use.  Without these,
+// Roundcube falls back to its own names, and a user gets two sent folders.
+$config['sent_mbox'] = 'Sent Items';
+$config['trash_mbox'] = 'Deleted Items';
+$config['junk_mbox'] = 'Junk Email';
+$config['drafts_mbox'] = 'Drafts';
 $config['smtp_user'] = '%u';
 $config['smtp_pass'] = '%p';
 $config['support_url'] = 'https://mail.[% domain %]/support';

@@ -206,7 +206,7 @@ subtest 'the build makes dovecot read each restored maildir again' => sub {
     # dovecot answers doveadm only once the restart above has run, and the
     # sweep of the modes after it gives the files that doveadm writes to dovecot.
     my ($restart) = grep { $lines[$_] eq 'systemctl restart dovecot' } 0 .. $#lines;
-    my ($resync)  = grep { $lines[$_] =~ m/force-resync/ } 0 .. $#lines;
+    my ($resync)  = grep { index( $lines[$_], q{force-resync} ) >= 0 } 0 .. $#lines;
     my ($sweep)   = grep { $lines[$_] =~ m{\Achown[ ]-R[ ]dovecot:dovecot[ ]/mail/} } 0 .. $#lines;
     ok( defined $restart && defined $sweep && $restart < $resync && $resync < $sweep, 'after dovecot restarts, and before the store is given to dovecot' ) or diag $fragment;
 };
@@ -369,5 +369,54 @@ subtest 'the cron job trains each account with its own spam folders' => sub {
 };
 
 Test::NoWarnings::had_no_warnings();
+
+subtest 'mailbox_aliases maps the names that other clients make to the flagged folders' => sub {
+    my %default = $recipe->validate(%BASE);
+    is_deeply(
+        $default{mailbox_aliases},
+        {
+            'Junk'             => 'Junk Email',
+            'Sent'             => 'Sent Items',
+            'Trash'            => 'Deleted Items',
+            'Sent Messages'    => 'Sent Items',
+            'Deleted Messages' => 'Deleted Items',
+        },
+        'the five names of Thunderbird, Roundcube and Apple Mail are there by default'
+    );
+
+    my %more = $recipe->validate( %BASE, mailbox_aliases => { Gesendet => 'Sent Items', Junk => 'Spam Box' } );
+    is( $more{mailbox_aliases}{Gesendet}, 'Sent Items',    'a name that is added is kept' );
+    is( $more{mailbox_aliases}{Junk},     'Spam Box',      'a default name can change its target' );
+    is( $more{mailbox_aliases}{Trash},    'Deleted Items', 'and the other defaults stay' );
+
+    foreach my $bad ( [ q{a.b} => 'Sent Items' ], [ 'Sent' => q{a'b} ], [ 'a/b' => 'Sent Items' ], [ 'Sent' => q{$x} ] ) {
+        like( exception { $recipe->validate( %BASE, mailbox_aliases => { $bad->[0] => $bad->[1] } ) }, qr{mailbox_aliases}, "a name that a shell or a Maildir cannot hold is refused: $bad->[0] => $bad->[1]" );
+    }
+};
+
+subtest 'the dovecot configuration declares the four folders and one alias pair for each alias' => sub {
+    my %opts = $recipe->validate(%BASE);
+    my $conf = $recipe->render_raw( q{files/mail.dovecot.tt}, $recipe->enrich(%opts) );
+    like( $conf, qr/^mail_plugins[ ]=[ ].*\bmailbox_alias\b/m, 'the plugin is loaded' );
+    my %use = (
+        'Sent Items'    => '\\Sent',
+        'Deleted Items' => '\\Trash',
+        'Junk Email'    => '\\Junk',
+        'Drafts'        => '\\Drafts',
+    );
+    foreach my $name ( sort keys %use ) {
+        my $quoted  = $name =~ m/[ ]/ ? qq{"$name"} : $name;
+        my $head    = qr/mailbox[ ]\Q$quoted\E[ ]\{/;
+        my $special = qr/\s+special_use[ ]=[ ]\Q$use{$name}\E/;
+        my $auto    = qr/\s+auto[ ]=[ ]subscribe/;
+        like( $conf, qr/$head$special$auto/, "$name is declared with its special use, subscribed" );
+    }
+    my @old = $conf =~ m/^\s*mailbox_alias_old\d*\s*=\s*(.+?)\s*$/mg;
+    my @new = $conf =~ m/^\s*mailbox_alias_new\d*\s*=\s*(.+?)\s*$/mg;
+    is_deeply( \@new, [ sort keys %{ $opts{mailbox_aliases} } ],                                    'each alias is a new name, because the plugin makes the new name the link' );
+    is_deeply( \@old, [ map { $opts{mailbox_aliases}{$_} } sort keys %{ $opts{mailbox_aliases} } ], 'and each target is the old name, the real folder, in the same order' );
+    like( $conf, qr/^\s*mailbox_alias_old\s*=/m,  'the first pair has no number' );
+    like( $conf, qr/^\s*mailbox_alias_old5\s*=/m, 'and the fifth is numbered 5' );
+};
 
 done_testing();
