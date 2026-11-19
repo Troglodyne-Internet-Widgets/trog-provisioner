@@ -106,14 +106,17 @@ sub secret_ref ( $domain, $name ) {
 
 Returns 1 for a name that the passwd-file, a path and a shell command can all
 hold: letters, digits, dots, plus signs, hyphens and underscores.  Dies for any
-other.  The recipe asks this in C<enrich>, because the template engine only warns
+other.  It also dies for the whole names C<.> and C<..>, because the home of an
+account is F</mail/$domain/$name>, and those two names would put the home in the
+directory of the domain and in F</mail>.  A name that only holds dots, such as
+C<a.b>, C<.a> or C<a..b>, is fine.  The recipe asks this in C<enrich>, because the template engine only warns
 when a function dies, and then renders nothing.  An account would vanish from
 the passwd-file and the build would go on.
 
 =cut
 
 sub check_name ($name) {
-    die "The name of a mail account is letters, digits, dots, plus signs, hyphens and underscores, not '$name'.\n" unless $name =~ m/\A[\w.+-]+\z/;
+    die "The name of a mail account is letters, digits, dots, plus signs, hyphens and underscores, and not '.' or '..', not '$name'.\n" unless $name =~ m/\A(?![.]{1,2}\z)[\w.+-]+\z/;
     return 1;
 }
 
