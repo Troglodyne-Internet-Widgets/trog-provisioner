@@ -7,7 +7,11 @@
     settled by the time this goes. -%]
 [% IF publish_records -%]
 [%# Nothing in the zone of an unmanaged domain.  See unmanaged in
-    Provisioner::Recipe::registrar. -%]
+    Provisioner::Recipe::registrar.  The run says which record of the guest
+    itself the operator has to make. -%]
+[% IF unmanaged AND internal_record -%]
+echo 'registrar: nothing writes the zone of [% domain %], so make this record by hand: [% internal_record.name %] A [% internal_record.content %]'
+[% END -%]
 [% UNLESS unmanaged -%]
 [%# The records other than names.  A file, because their content holds
     spaces, semicolons and quotes.  See zone_records in

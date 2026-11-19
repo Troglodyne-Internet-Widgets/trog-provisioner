@@ -208,6 +208,29 @@ the zone, no account lists a zone that holds the domain, and the registrar
 names no C<type>, it asks at the terminal whether to build the domain anyway.
 A yes writes C<unmanaged> into the file of the domain.  See C<unmanaged>.
 
+=head2 The name of the guest itself
+
+Every name that the zone holds for a domain behind a relay of
+L<Provisioner::Recipe::nginxrelay> reaches the relay, because the relay serves
+them.  So the domain has one more name, C<internal_name> in its C<_global>,
+which reaches its guest and never the relay.  This recipe publishes it as an
+C<A> record at C<main_ip>, the address of the guest, and not at C<address>,
+which can be the address of the relay.  The default is C<internal.$domain>.
+
+One rule holds for every domain, relay or not.  The name is per domain: a domain
+in C<_shared> has a name of its own, at the address of the guest that it shares.
+The name goes in the zone of the domain, and a name that an account of
+C<accounts> holds is refused, because this recipe has no second zone setting.
+An RFC 1918 address in a public zone is ordinary, as C<publication> says.
+
+Where a registrar cannot take a private address, set C<unmanaged>.  The guest
+then publishes nothing, and the run reports the record that you have to make by
+hand, in the setup log.  Make it in a zone that you control, or in the DNS of
+your LAN.
+
+C<ssh> to this name, and not to the public name of the domain.  The public name
+reaches the relay, and the host key of the relay must not be accepted under it.
+
 =head2 It installs nothing, and publishes the records of the domain
 
 This recipe starts no service.  It supplies the credentials in
@@ -257,6 +280,11 @@ sub args {
                 type        => 'string',
                 default     => q{},
                 description => 'The account, where the provider wants one alongside the token.  Empty is normal: most of them authenticate with a token alone.',
+            },
+            internal_name => {
+                type        => 'string',
+                format      => 'hostname',
+                description => 'Not for an operator to write here.  The internal_name of the _global of the domain, which Provisioner::Cookbook declares and defaults, arrives in this field.  The guest publishes it as an A record at its own address.  See "The name of the guest itself".',
             },
             unmanaged => {
                 type        => 'boolean',
@@ -897,11 +925,22 @@ sub publication {
     }
     my %zone_access = map { $_ => { $self->zone_credentials( $_, $zones->{$_} ) } } keys %zone_cnames, keys %zone_apexes;
 
+    # At the address of the guest, which is main_ip.  The address above is what
+    # the public names of the domain get, and a relay can hold it.
+    my $internal = $opts{internal_name};
+    die "The internal_name of $opts{domain}, $internal, is in a zone of an account of its registrar.  This recipe publishes it in the zone of the domain only.\n"
+      if defined $internal && defined $self->zone_of( $internal, $opts{domain}, $zones );
+
+    # An empty match, because the name is ours alone: a guest that moved gets
+    # its record updated, and a second address there is reported.
+    my @internal = defined $internal && $opts{main_ip} ? ( { type => 'A', name => $internal, content => $opts{main_ip}, match => q{} } ) : ();
+
     return (
         address         => $address,
         domain_aliases  => [ $self->zone_aliases( %opts, zones => $zones ) ],
         address_names   => [ $self->zone_address_names( %opts, zones => $zones ) ],
-        zone_records    => [ $self->zone_records( %opts, zones => $zones ) ],
+        zone_records    => [ $self->zone_records( %opts, zones => $zones ), @internal ],
+        internal_record => $internal[0],
         zone_cnames     => \%zone_cnames,
         zone_apexes     => [ sort keys %zone_apexes ],
         zone_access     => \%zone_access,
