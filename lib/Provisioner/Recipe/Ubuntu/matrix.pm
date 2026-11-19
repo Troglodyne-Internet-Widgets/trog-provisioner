@@ -20,12 +20,14 @@ Provisioner::Recipe::Ubuntu::matrix - Ubuntu's C<deps> and archive for L<Provisi
 
 The synapse package, C<matrix-synapse-py3>, from the archive of matrix.org that
 C<package_sources> below names, and the Python libraries of synapse from Ubuntu.
+Also C<sqlite3>, which F<matrix_check_signing_key> reads the database with.
 
 =cut
 
 sub deps {
     return qw{
       matrix-synapse-py3
+      sqlite3
       python3-cryptography
       python3-bcrypt
       python3-pil

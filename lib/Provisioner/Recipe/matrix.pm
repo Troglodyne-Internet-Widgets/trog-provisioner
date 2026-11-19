@@ -86,6 +86,60 @@ the operator points C<server_name> at the relay by hand, and the certificate of
 the guest does not cover it until it does.  See
 L<Provisioner::Recipe::nginx/Names that reach the guest through a proxy>.
 
+=head2 Taking over a homeserver
+
+A homeserver is three things: its signing key, its database and its media
+store.  To move one that this recipe did not build onto a guest, put all three
+in place before the first build.  Give C<server_name> the name that the old
+server has.
+
+=over 4
+
+=item 1. Stop synapse on the old server, so that the database and the media
+store do not change while you copy them.
+
+=item 2. Put the signing key of the old server into the secret store.  It is
+the file that C<signing_key_path> in the old F<homeserver.yaml> names, one line
+of the form C<ed25519 $version $seed>:
+
+    bin/add_secret --group matrix --title $domain-signing-key --stdin < homeserver.signing.key
+
+Add C<--overwrite> if an earlier build already generated a key there.
+
+=item 3. Copy the database into the data directory of the domain, which is
+C<$data_source/$domain> on the machine that runs this tool.  See C<data_dir> in
+L<Provisioner::Cookbook>.  It goes to F<matrix/homeserver.db> there.  On the old
+server, make the copy with the backup command of sqlite3, which writes one
+consistent file, and move that file there:
+
+    sqlite3 /path/to/old/homeserver.db ".backup '/path/to/copy/homeserver.db'"
+
+=item 4. Copy the contents of the old C<media_store_path> into F<matrix/media/>
+in the same directory.
+
+=item 5. If the old server had keys before its current one, give their public
+halves in C<old_signing_keys>, as the C<old_verify_keys> of the old server's
+C</_matrix/key/v2/server> lists them.  Synapse keeps publishing them, so other
+servers can still check the events that they signed.
+
+=back
+
+The data target brings F<matrix/> onto the guest, and C<restores> moves it to
+C<$install_dir/matrix.$domain>, where synapse reads it.  That is the path of a
+salvage from a guest that this recipe built.
+
+The recipe takes sqlite3 only.  Synapse's C<synapse_port_db> moves a database
+from sqlite3 to PostgreSQL, and synapse ships no tool for the other direction.
+So a homeserver on PostgreSQL cannot be taken over.
+
+Before synapse is enabled, F<matrix_check_signing_key> reads the newest events
+that accounts of C<server_name> sent.  If there are some, and none of them
+carries a signature under the ID of the key in the store or of a key in
+C<old_signing_keys>, the build stops, and synapse does not start.  That
+combination is a restored database with a new key, usually because step 2 was
+missed.  Other servers would see a known name with a key they do not know.  Put
+the right key in the store, and build again.
+
 The package names are in the subclass for each distribution, for example
 L<Provisioner::Recipe::Ubuntu::matrix>.
 
@@ -212,6 +266,21 @@ sub args {
             server_name => { type => 'string', description => 'The permanent name of the homeserver, the part after the colon of every account and room alias.  See DESCRIPTION.' },
 
             redis_password => { type => 'string', 'x-secret' => 1, description => 'Password for the redis the homeserver caches in.  Unset configures the homeserver without one.' },
+
+            old_signing_keys => {
+                type                 => 'object',
+                default              => {},
+                description          => 'The keys that the homeserver signed with before its current one, by key ID.  See Taking over a homeserver.',
+                propertyNames        => { pattern => '\Aed25519:[A-Za-z0-9_]+\z' },
+                additionalProperties => {
+                    type       => 'object',
+                    required   => [qw{public expired_ts}],
+                    properties => {
+                        public     => { type => 'string',  pattern => '\A[A-Za-z0-9+/]{43}\z', description => 'The public half of the key, in base64 without padding, as /_matrix/key/v2/server published it.' },
+                        expired_ts => { type => 'integer', minimum => 0,                       description => 'When the key stopped signing, in milliseconds since the epoch.' },
+                    },
+                },
+            },
 
             # Listed on the index page of the guest.
             channels                   => { type => 'array',  items      => { type => 'string' }, default => [] },

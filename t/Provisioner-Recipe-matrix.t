@@ -9,7 +9,8 @@ use re '/aasx';
 =head1 NAME
 
 t/Provisioner-Recipe-matrix.t - the names of the homeserver, the page of the
-domain, the admin registration script, and where notices come from
+domain, its old signing keys, the admin registration script, and where notices
+come from
 
 =cut
 
@@ -140,6 +141,25 @@ subtest 'server_name cannot be a name of the vhost of the domain' => sub {
         like( exception { rendered( server_name => $name ) }, qr/server_name[ ]is[ ]\Q$name\E,[ ]which[ ]the[ ]vhost/, "$name is refused" );
     }
     is( exception { rendered( server_name => 'matrix.chat.test.test' ) }, undef, 'but the name of the vhost of the homeserver is fine' );
+};
+
+subtest 'the keys that the homeserver signed with before go to old_signing_keys' => sub {
+    %domain = ();
+    my %old = (
+        'ed25519:a_old1' => { public => 'A' x 43, expired_ts => 1_600_000_000_000 },
+        'ed25519:a_old2' => { public => 'B' x 43, expired_ts => 1_700_000_000_000 },
+    );
+    my $hs = YAML::XS::Load( { rendered( old_signing_keys => \%old ) }->{'homeserver.yaml'} );
+    is_deeply(
+        $hs->{old_signing_keys},
+        { map { $_ => { key => $old{$_}{public}, expired_ts => $old{$_}{expired_ts} } } keys %old },
+        'each under its key ID, with its public half as key, and when it expired'
+    );
+
+    my %good = ( domain => 'chat.test.test', server_name => 'hs.test.test', admin_password => 'p', smtp_host => 'mail.test.test', smtp_user => 'notify', smtp_pass => 'p', smtp_from => 'notify@test.test' );
+    like( exception { recipe()->validate( %good, old_signing_keys => { 'a_old1' => $old{'ed25519:a_old1'} } ) }, qr{/old_signing_keys:}, 'a key ID without its algorithm is refused' );
+    like( exception { recipe()->validate( %good, old_signing_keys => { 'ed25519:a_old1' => { public                              => 'A' x 43 } } ) }, qr{/expired_ts:}, 'and a key with no expiry' );
+    like( exception { recipe()->validate( %good, old_signing_keys => { 'ed25519:a_old1' => { %{ $old{'ed25519:a_old1'} }, public => 'A' x 44 } } ) }, qr{/public:},     'and a public half that is not 32 bytes in base64 without padding' );
 };
 
 subtest 'the admin registration script' => sub {
