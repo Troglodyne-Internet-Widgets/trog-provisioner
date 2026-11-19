@@ -275,6 +275,35 @@ subtest 'a failed upgrade stops the build at the packages target' => sub {
     ok( !-e "$dir/packages", 'and the target is not marked done, so the next run upgrades again' );
 };
 
+subtest 'a guest test that leaves a process behind does not keep make waiting' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/t" or die "mkdir: $!";
+
+    # A test that starts a daemon, as a login shell that starts an ssh-agent
+    # does.  It lets go of 0, 1 and 2, and keeps what else it was given.
+    File::Slurper::Temp::write_text( "$dir/t/daemon.t", <<~'TEST' );
+        use Test::More;
+        system q{setsid sleep 30 </dev/null >/dev/null 2>&1 &};
+        ok( 1, 'left a process behind' );
+        done_testing;
+        TEST
+    my $makefile = makefile( state_dir => $dir );
+    File::Slurper::Temp::write_text( "$dir/Makefile", $makefile );
+
+    # The line of all that runs the tests, in a makefile of its own, because
+    # the rest of all needs root.  The descriptors leak only through a
+    # recursive make, so a make of the test target alone would not show it.
+    my ($line) = grep { m{\$\(MAKE\).*[ ]\Q$dir\E/test\z} } split m/\n/, $makefile;
+    ok( $line, 'all runs the tests through a recursive make' ) or return;
+    File::Slurper::Temp::write_text( "$dir/all.mk", "SHELL := /bin/bash\nunexport MAKEFLAGS\nall:\n$line\n" );
+
+    my $out = q{};
+    IPC::Run3::run3( [ qw{timeout 20 make -j2 -Otarget -f all.mk -C}, $dir ], \undef, \$out, \$out );
+    my $status = $? >> 8;
+    isnt( $status, 124, 'make finishes before the process does, and the timeout does not kill it' ) or diag $out;
+    like( $out, qr/left[ ]a[ ]process[ ]behind/, 'after the test ran' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
