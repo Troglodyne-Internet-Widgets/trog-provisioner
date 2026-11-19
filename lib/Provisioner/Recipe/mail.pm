@@ -503,7 +503,9 @@ sub required_recipes {
 # A value with no colon and no line break in it.
 my $NO_COLON = qr/\A [^:\r\n]* \z/;
 
-# A folder name that is safe in all of those places.
+# A folder name with no quote, percent sign, dollar sign, backslash, slash or
+# dot: the name goes into a shell word, a make recipe, the dovecot
+# configuration and a Maildir++ directory name.
 my $FOLDER_NAME = q{\A[^'"%$\\\\/.\r\n]+\z};
 
 sub args {
@@ -560,9 +562,6 @@ sub args {
 
             # The default of each of the five is on the member, not on the map,
             # so that an operator who adds a translated name keeps the five.
-            # No quote, percent sign, dollar sign, backslash, slash or dot:
-            # the name goes into a shell word, a make recipe, the dovecot
-            # configuration and a Maildir++ directory name.
             mailbox_aliases => {
                 type                 => 'object',
                 default              => {},
