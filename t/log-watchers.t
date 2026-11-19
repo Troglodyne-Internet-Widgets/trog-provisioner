@@ -35,11 +35,14 @@ sub watch {
 }
 
 # UFW log lines: an incoming block has an empty OUT=, an outgoing one an empty
-# IN=.
+# IN=, and a forwarded one names both.  The flags are SYN, which opens a
+# connection, unless the caller names others.  ufw_connection_attempts drops
+# the rest.
 sub ufw_block {
-    my ( $in, $out, $dpt ) = @_;
+    my ( $in, $out, $dpt, $flags ) = @_;
+    $flags //= 'SYN';
 
-    return "Sep 18 10:00:00 host kernel: [12345.678901] [UFW BLOCK] IN=$in OUT=$out SRC=192.0.2.10 DST=198.51.100.7 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=1 DF PROTO=TCP SPT=50002 DPT=$dpt WINDOW=64240 RES=0x00 SYN URGP=0\n";
+    return "Sep 18 10:00:00 host kernel: [12345.678901] [UFW BLOCK] IN=$in OUT=$out SRC=192.0.2.10 DST=198.51.100.7 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=1 DF PROTO=TCP SPT=50002 DPT=$dpt WINDOW=64240 RES=0x00 $flags URGP=0\n";
 }
 
 subtest 'outgoing_blocks.sh' => sub {
@@ -47,16 +50,24 @@ subtest 'outgoing_blocks.sh' => sub {
 
     my $said = watch( $state, 'outgoing_blocks.sh', 'SYSLOG', ufw_block( '', 'ens3', 8443 ) . ufw_block( 'ens3', '', 23 ) );
     like( $said, qr/^DANGER:[^\n]*\Q$state\E\/log/, 'a new outgoing block is reported, naming the log it read' );
-    like( $said, qr/^DPT=8443$/m,                   'with the port' );
+    like( $said, qr/^PROTO=TCP[ ]DPT=8443$/m,       'with the protocol and the port' );
     unlike( $said, qr/DPT=23/, 'and not the incoming block' );
 
     is( watch( $state, 'outgoing_blocks.sh', 'SYSLOG', ufw_block( '', 'ens3', 8443 ) ), '', 'a block already reported is not reported again' );
 
     $said = watch( $state, 'outgoing_blocks.sh', 'SYSLOG', ufw_block( '', 'ens3', 8444 ) );
-    like( $said, qr/^DPT=8444$/m, 'a new port is reported when rotation took one of the same length away' );
+    like( $said, qr/^PROTO=TCP[ ]DPT=8444$/m, 'a new port is reported when rotation took one of the same length away' );
 
     $said = watch( $state, 'outgoing_blocks.sh', 'SYSLOG', "\0\0\0\n" . ufw_block( '', 'ens3', 9999 ) );
-    like( $said, qr/^DPT=9999$/m, 'a block after NUL bytes in the log is still read' );
+    like( $said, qr/^PROTO=TCP[ ]DPT=9999$/m, 'a block after NUL bytes in the log is still read' );
+
+    $said = watch( $state, 'outgoing_blocks.sh', 'SYSLOG', ufw_block( 'tun0', 'ens3', 9998 ) );
+    like( $said, qr/^PROTO=TCP[ ]DPT=9998$/m, 'a blocked forward is reported, since it leaves on an interface too' );
+
+    is(
+        watch( $state, 'outgoing_blocks.sh', 'SYSLOG', ufw_block( '', 'ens3', 40001, 'ACK FIN' ) . ufw_block( '', 'ens3', 40002, 'ACK SYN' ) ),
+        '', 'the late end of a connection, or the answer to one, is no new block'
+    );
 };
 
 subtest 'segfaults.sh' => sub {

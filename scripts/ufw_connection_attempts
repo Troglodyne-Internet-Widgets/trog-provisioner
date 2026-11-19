@@ -1,0 +1,19 @@
+#!/bin/sh
+# Read UFW BLOCK lines on standard input.  For each packet that tried to open
+# a connection, print its protocol and destination port, once each, sorted:
+#
+#     PROTO=TCP DPT=8443
+#
+# A TCP packet opens a connection when it has SYN and no ACK.  UFW also blocks
+# the late ACK, FIN and RST of a connection that conntrack already forgot, and
+# those go to the random port of the client, so a report of them never ends.
+# UDP has no flags, so every UDP packet counts.  A packet with no port, such
+# as ICMP, does not.
+#
+# The source port is left out on purpose.  The side that opens a connection
+# picks it at random.
+grep -a -P ' PROTO=UDP | PROTO=TCP .* SYN ' \
+    | grep -a -v -P ' PROTO=TCP .* ACK ' \
+    | grep -a -o -P 'PROTO=\S+ SPT=\d+ DPT=\d+' \
+    | sed -E 's/ SPT=[0-9]+//' \
+    | sort -u
