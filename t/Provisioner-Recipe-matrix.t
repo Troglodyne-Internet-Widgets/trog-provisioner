@@ -115,6 +115,7 @@ subtest 'the names that the relay passes to the guest' => sub {
         { 'chat.test.test' => 'chat.test.test', 'chat.other.test' => 'chat.test.test', 'hs.test.test' => 'matrix.chat.test.test' },
         'the domain and its alias go to the page, server_name to the vhost of the homeserver, and an alias that the recipe serves itself stays off'
     );
+    is_deeply( $asked{passthrough_ports}, { 8448 => 8449 }, 'and the relay passes them through on 8448, to 8449 of the guest' );
     my %limits = recipe()->rate_limits(%CONFIG);
     is_deeply( [ sort keys %limits ], [ 8448, 8449 ], 'the guest opens 8448, and the port where the relay passes 8448 through' );
     my $conf = { rendered() }->{'matrix.nginx.conf'};
@@ -124,7 +125,8 @@ subtest 'the names that the relay passes to the guest' => sub {
     %domain   = ();
     %required = recipe()->required_recipes(%CONFIG);
     %asked    = $required{nginx}->();
-    ok( !exists $asked{public_names}, 'without a relay, the recipe asks for no public name' );
+    ok( !exists $asked{public_names},      'without a relay, the recipe asks for no public name' );
+    ok( !exists $asked{passthrough_ports}, 'and no port of its own' );
     is_deeply( [ keys %{ { recipe()->rate_limits(%CONFIG) } } ], [8448], 'and opens 8448 alone' );
     my ($names) = { rendered() }->{'matrix.nginx.conf'} =~ m/^\s*server_name[ ]([^;]*);$/m;
     is( $names, 'matrix.chat.test.test hs.test.test', 'and the vhost answers for server_name itself' );

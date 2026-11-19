@@ -115,6 +115,14 @@ sub enriched {
     return { $recipe->enrich( $recipe->validate( domain => 'web.test.test', install_dir => '/bogus', script_dir => '/bogus/bin', %extra ) ) };
 }
 
+subtest 'a port of its own is from 1024, and goes to a port of the guest' => sub {
+    is_deeply( enriched()->{passthrough_ports},                                                        {},                               'a domain has none by default' );
+    is_deeply( enriched( passthrough_ports => { 1024 => 8449, 65535 => 65535 } )->{passthrough_ports}, { 1024 => 8449, 65535 => 65535 }, 'from 1024 to 65535, to any port of the guest' );
+    like( exception { enriched( passthrough_ports => { 1023  => 8449 } ) }, qr{/passthrough_ports},      'below 1024 is refused, because a relay serves those itself' );
+    like( exception { enriched( passthrough_ports => { 65536 => 8449 } ) }, qr{/passthrough_ports},      'and above 65535' );
+    like( exception { enriched( passthrough_ports => { 8448  => 0 } ) },    qr{/passthrough_ports/8448}, 'and so is a port of the guest that is no port' );
+};
+
 my %VPN = ( ip_pool => { cidr => '10.0.0.0/24', bins => { vpnclients => { cidr => '10.8.0.192/26', via => 'vpn.test.test' }, other => { cidr => '10.9.0.0/24' } } } );
 
 subtest 'a public name in the zone of the domain is served, and one outside it is served as public.VHOST' => sub {
@@ -279,6 +287,9 @@ subtest 'a domain with a relay registers there the names that the proxy routes, 
         },
         'the relay issues the key of the domain and its own host key, and a domain built onto another guest sends its names to that guest'
     );
+
+    my %ported = $nginx->granted_secrets( 'shop.test.test', %public, relay => 'relay.test.test', passthrough_ports => { 8448 => 8449 } );
+    like( $ported{'/etc/fail2ban/nginxrelay/shop.test.test.key.b64'}{issue}{command}, qr/[ ]www[.]customer[.]test[ ]--port[ ]8448=8449\z/, 'a port of its own goes to register, with the port of the guest' );
 
     is_deeply( { $nginx->granted_secrets( 'shop.test.test', %public ) },                                        {}, 'a domain with no relay registers nothing' );
     is_deeply( { $nginx->granted_secrets( 'shop.test.test', public_names => {}, relay => 'relay.test.test' ) }, {}, 'and nor does one with no public name' );

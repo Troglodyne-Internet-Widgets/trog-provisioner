@@ -112,6 +112,36 @@ subtest 'a domain registers each name, for TLS and for plain HTTP, and gets a ke
     is( File::Slurper::read_text("$relay/$DOMAIN.tls.map"), "www.customer.test 192.0.2.10:8443;\n", 'a second registration replaces the first' );
 };
 
+subtest 'a domain registers ports of its own, for its names alone' => sub {
+    my $relay = fresh_relay();
+    my ( $out, $err, $rc ) = register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449' );
+    is( $rc,                                                      0,                                                                             'it exits 0' ) or diag $err;
+    is( File::Slurper::read_text("$relay/$DOMAIN.port-8448.map"), "public.web.test.test 192.0.2.10:8449;\nwww.customer.test 192.0.2.10:8449;\n", 'each name goes to the port of the guest on the address of its TLS' );
+    my $server = File::Slurper::read_text("$relay/ports/8448.conf");
+    like( $server, qr/^\s*listen[ ]8448;$/m,                         'nginx listens on the port' );
+    like( $server, qr/include[ ]\Q$relay\E\/[*][.]port-8448[.]map;/, 'for the names in the maps of that port' );
+    like( $server, qr/^\s*proxy_protocol[ ]on;$/m,                   'with the PROXY protocol' );
+    ok( ( grep { $_ eq '/etc/ufw/after.init.d/nginxrelay-bans ports' } @ran ), 'and the firewall opens it' );
+
+    register(qw{other.test.test 192.0.2.11:8443 192.0.2.11:8080 other.test.test});
+    ok( !-e "$relay/other.test.test.port-8448.map", 'a domain that registers no port gets no route on it' );
+
+    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES );
+    ok( !-e "$relay/$DOMAIN.port-8448.map", 'a registration without the port takes it away' );
+    ok( !-e "$relay/ports/8448.conf",       'and nginx stops listening there, because no domain has it' );
+
+    register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '8448=8449' );
+    $nginx_ok = 0;
+    ( $out, $err ) = register( $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', '9448=9449' );
+    like( $err, qr/nginx[ ]said[ ]no/, 'a port that nginx refuses is an error' );
+    ok( -e "$relay/ports/8448.conf" && -e "$relay/$DOMAIN.port-8448.map", 'and the domain keeps the port it had' );
+    ok( !-e "$relay/ports/9448.conf",                                     'and nginx does not listen on the new one' );
+
+    $nginx_ok = 1;
+    capture { Trog::NginxRelayClient::main( 'release', $DOMAIN ) };
+    ok( !-e "$relay/$DOMAIN.port-8448.map" && !-e "$relay/ports/8448.conf", 'a release takes the port away' );
+};
+
 subtest 'root takes only a key that is restricted' => sub {
     my $relay = fresh_relay();
     File::Slurper::Temp::write_text( "$relay/old.test.test.ban.pub", "ssh-ed25519 AAAAbare bans of old.test.test\n" );
@@ -178,6 +208,15 @@ subtest 'it refuses what it cannot put in a file of nginx' => sub {
         like( exception { Trog::NginxRelayClient::main( 'register', @{ $bad{$case} } ) }, qr/\Ausage:/, $case );
     }
     like( exception { Trog::NginxRelayClient::main( 'release', $DOMAIN, 'extra' ) }, qr/\Ausage:/, 'a release with more than the domain' );
+    my %bad_port = (
+        'a port below 1024, which nginx serves itself' => '443=8443',
+        'a port above 65535'                           => '70000=8449',
+        'a port with no port of the guest'             => '8448',
+    );
+    foreach my $case ( sort keys %bad_port ) {
+        like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', $bad_port{$case} ) }, qr/PORT=GUEST_PORT/, $case );
+    }
+    like( exception { Trog::NginxRelayClient::main( 'register', $DOMAIN, qw{192.0.2.10:8443 192.0.2.10:8080 --media media.web.test.test --port 8448=8449} ) }, qr/needs[ ]a[ ]name/, 'a port with no name that passes through' );
     is_deeply( \@ran, [], 'and none of them ran anything' );
 };
 

@@ -8,7 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use Provisioner::Cookbook();
 use Provisioner::Vars();
 
 use parent qw{Provisioner::RelayRecipe};
@@ -166,20 +165,19 @@ guest on 443 locally, such as the vhost that the letsencrypt guest test asks
 for its certificate.  From outside, a name that no guest registered gets no TLS
 handshake, the names of this guest included.
 
-The stream proxy also listens on each port of
-L<Provisioner::Recipe::nginx/passthrough_ports>, such as 8448, where matrix
-federates.  It passes a TLS connection there by its SNI name, with the PROXY
-protocol, to the address that the name is registered at for 443, on the port
-that C<passthrough_ports> maps it to.  So a guest needs no registration of its
-own for these ports, and a guest that does not listen there refuses the
-connection.  ufw opens these ports as they are, without a forward, because
-this guest serves nothing on them itself.  The bans and the rate limit of
-C<tls_port> cover them too.
-
 On 80, the server of this recipe is the default server of nginx.  A vhost of
 this guest on 80 still answers for its own names, because nginx chooses among
 the servers of one port by the C<Host> header.  This recipe takes the default
 site of the nginx package away, which would be a second default server.
+
+A guest can also register ports of its own, such as 8448, where matrix
+federates.  The stream proxy listens on each while some guest registered it,
+and passes a TLS connection there by its SNI name, with the PROXY protocol, to
+the port of the guest that registered the name.  A name that did not register
+the port gets no upstream, so nginx closes the connection.  The firewall opens
+these ports as they are, without a forward, under the bans and a rate limit.
+See L<Provisioner::Recipe::nginx/Ports of its own> for the guest, and
+L<Provisioner::RelayRecipe/Ports of the guests> for the relay.
 
 =cut
 
@@ -244,23 +242,16 @@ sub args {
 our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
 our $PAGE_SOCKET  = '/run/nginxrelay-pages.sock';
 
-# The ports that pass through besides 443, as the guests listen for them.
-my sub passthrough_ports {
-    return Provisioner::Cookbook->load('nginx')->passthrough_ports();
-}
-
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds C<media_socket> and C<page_socket>, where the media server and the page
-server listen, and C<passthrough>, the map of
-L<Provisioner::Recipe::nginx/passthrough_ports>, to what
-L<Provisioner::RelayRecipe/enrich> adds.
+server listen, to what L<Provisioner::RelayRecipe/enrich> adds.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET, page_socket => $PAGE_SOCKET, passthrough => { passthrough_ports() } );
+    return ( $self->SUPER::enrich(%opts), media_socket => $MEDIA_SOCKET, page_socket => $PAGE_SOCKET );
 }
 
 # Defaulted here as well as in args, because required_recipes and rate_limits
@@ -282,15 +273,13 @@ sub required_recipes {
 =head2 %limits = $recipe->rate_limits(%opts)
 
 The limit of 443 for C<tls_port>, because the forward happens before the limit
-counts a connection, and the same limit for each port that passes through.
-See L</Ports>.
+counts a connection.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
-    my %passthrough = passthrough_ports();
-    return ( tls_port(%opts) => 1024, map { $_ => 1024 } keys %passthrough );
+    return ( tls_port(%opts) => 1024 );
 }
 
 =head2 %path_map = $recipe->remote_files($install_dir, $domain)
@@ -329,15 +318,14 @@ sub relay_dir {
 
 =head2 @ports = $recipe->banned_ports(%opts)
 
-80, C<tls_port> and each port that passes through, where this guest proxies.
-The ban closes C<tls_port> and not 443, because the forward comes first.
+80 and C<tls_port>, where this guest proxies.  The ban closes C<tls_port> and
+not 443, because the forward comes first.
 
 =cut
 
 sub banned_ports {
     my ( $self, %opts ) = @_;
-    my %passthrough = passthrough_ports();
-    return ( 80, tls_port(%opts), sort { $a <=> $b } keys %passthrough );
+    return ( 80, tls_port(%opts) );
 }
 
 =head2 %files = $recipe->registration_files($grant, %terms)
@@ -346,7 +334,9 @@ The ban key that the relay issues when it registers the names of the client of
 C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant>
 adds the host key of the relay.  C<%terms> has
 C<< upstreams => { tls => $tls, http => $http } >>, C<< names => \@names >>, and
-can have C<< media => \@media >> and C<< pages => \@pages >>.
+can have C<< media => \@media >>, C<< pages => \@pages >> and
+C<< ports => \%ports >>, which maps each port of its own to a port of the guest,
+at the address of C<$tls>.  See L</Ports>.
 
 The command is F<scripts/nginxrelay_client> C<register>, which root runs on the
 relay.  C<$tls> and C<$http> are each an IPv4 address and a port, where the
@@ -366,12 +356,13 @@ sub registration_files {
     my $script = "$Provisioner::Vars::SCRIPT_DIR/nginxrelay_client";
     my @media  = @{ $terms{media} // [] };
     my @pages  = @{ $terms{pages} // [] };
+    my %ports  = %{ $terms{ports} // {} };
 
     my %files = (
         $self->key_path($client) => {
             issue => {
                 guest   => $grant->{guest},
-                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), map { ( '--page', $_ ) } @pages ),
+                command => join( q{ }, "$script register", $client, @{ $terms{upstreams} }{qw{tls http}}, @{ $terms{names} }, ( map { ( '--media', $_ ) } @media ), ( map { ( '--page', $_ ) } @pages ), map { ( '--port', "$_=$ports{$_}" ) } sort { $a <=> $b } keys %ports ),
             },
             owner => 'root:root',
             mode  => '0600',

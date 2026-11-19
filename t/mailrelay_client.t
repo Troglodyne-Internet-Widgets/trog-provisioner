@@ -30,7 +30,8 @@ require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test
 my $DOMAIN = 'web.test.test';
 
 # Where the guest of $DOMAIN takes IMAP, submission and POP3 over TLS.
-my @UPSTREAMS = qw{192.0.2.10:10993 192.0.2.10:10465 192.0.2.10:10995};
+my $ADDRESS = '192.0.2.10';
+my @PORTS   = qw{--port 993=10993 --port 465=10465 --port 995=10995};
 
 # A fresh directory of registrations, and every command answered.  Answers the
 # commands that ran.
@@ -108,29 +109,65 @@ subtest 'a domain registers the names of its mail clients, and gets a key for it
     my $dir   = fresh_relay();
     my @names = ( $DOMAIN, "mail.$DOMAIN" );
 
-    my ( $key, $said, $exit ) = capture { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, @UPSTREAMS, @names ) };
-    is( $exit,                                                    0,                                                             'it exits 0' ) or diag $said;
-    is( File::Slurper::read_text("$dir/$DOMAIN.imaps.map"),       "$DOMAIN 192.0.2.10:10993;\nmail.$DOMAIN 192.0.2.10:10993;\n", 'each name goes to IMAP over TLS on the guest' );
-    is( File::Slurper::read_text("$dir/$DOMAIN.submissions.map"), "$DOMAIN 192.0.2.10:10465;\nmail.$DOMAIN 192.0.2.10:10465;\n", 'and to submission over TLS' );
-    is( File::Slurper::read_text("$dir/$DOMAIN.pop3s.map"),       "$DOMAIN 192.0.2.10:10995;\nmail.$DOMAIN 192.0.2.10:10995;\n", 'and to POP3 over TLS' );
-    is( MIME::Base64::decode_base64($key),                        "PRIVATE KEY\n",                                               'it prints the private half of the ban key, in base64' );
+    my ( $key, $said, $exit ) = capture { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, $ADDRESS, @names, @PORTS ) };
+    is( $exit,                                                 0,                                                             'it exits 0' ) or diag $said;
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-993.map"), "$DOMAIN 192.0.2.10:10993;\nmail.$DOMAIN 192.0.2.10:10993;\n", 'each name goes to IMAP over TLS on the guest' );
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-465.map"), "$DOMAIN 192.0.2.10:10465;\nmail.$DOMAIN 192.0.2.10:10465;\n", 'and to submission over TLS' );
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-995.map"), "$DOMAIN 192.0.2.10:10995;\nmail.$DOMAIN 192.0.2.10:10995;\n", 'and to POP3 over TLS' );
+    like( File::Slurper::read_text("$dir/ports/993.conf"), qr/^\s*listen[ ]993;$/m, 'and nginx listens on each port' );
+    is( MIME::Base64::decode_base64($key), "PRIVATE KEY\n", 'it prints the private half of the ban key, in base64' );
     my $ban_command = qr/command="\S+[ ]mailrelay-bans[ ]\Q$DOMAIN\E"/;
     like( File::Slurper::read_text("$dir/authorized_keys.root"), qr/\Arestrict,from="192[.]0[.]2[.]10",$ban_command/, 'which runs relay_ban for the set of this relay, from the guest alone' );
-    is_deeply( [ grep { m/\A(?:nginx|systemctl)/ } @ran ], [ 'nginx -t', 'systemctl reload nginx' ], 'after nginx accepts the maps, it reloads nginx' );
+    is_deeply(
+        [ grep { m{\A(?:nginx|systemctl|/etc/ufw)} } @ran ],
+        [ 'nginx -t', 'systemctl reload nginx', '/etc/ufw/after.init.d/mailrelay-bans ports' ],
+        'after nginx accepts the maps, it reloads nginx, and the firewall opens the ports'
+    );
 
-    like( exception { Trog::MailRelayClient::main( 'register-clients', 'other.test.test', @UPSTREAMS, "mail.$DOMAIN" ) }, qr/mail[.]\Q$DOMAIN\E[ ]is[ ]registered[ ]to[ ]\Q$DOMAIN\E/, 'another domain cannot register a name that this one holds' );
-    ok( !-e "$dir/other.test.test.imaps.map", 'and gets no map' );
+    like(
+        exception { Trog::MailRelayClient::main( qw{register-clients other.test.test 192.0.2.11}, "mail.$DOMAIN", @PORTS ) },
+        qr/mail[.]\Q$DOMAIN\E[ ]is[ ]registered[ ]to[ ]\Q$DOMAIN\E/,
+        'another domain cannot register a name that this one holds'
+    );
+    ok( !-e "$dir/other.test.test.port-993.map", 'and gets no map' );
 
     $nginx_ok = 0;
-    my $before = File::Slurper::read_text("$dir/$DOMAIN.imaps.map");
-    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, @UPSTREAMS, 'new.test.test' ) }, qr/nginx[ ]refused[ ].*nginx[ ]said[ ]no/, 'a map that nginx refuses is an error' );
-    is( File::Slurper::read_text("$dir/$DOMAIN.imaps.map"), $before, 'and the domain keeps what it had' );
+    my $before = File::Slurper::read_text("$dir/$DOMAIN.port-993.map");
+    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, $ADDRESS, 'new.test.test', @PORTS ) }, qr/nginx[ ]refused[ ].*nginx[ ]said[ ]no/, 'a map that nginx refuses is an error' );
+    is( File::Slurper::read_text("$dir/$DOMAIN.port-993.map"), $before, 'and the domain keeps what it had' );
 
     $nginx_ok = 1;
     ( undef, undef, $exit ) = capture { Trog::MailRelayClient::main( 'release', $DOMAIN ) };
     is( $exit, 0, 'a release exits 0' );
-    ok( !-e "$dir/$DOMAIN.$_.map", "and takes away the map of $_" ) foreach qw{imaps submissions pop3s};
+    ok( !-e "$dir/$DOMAIN.port-$_.map", "and takes away the map of $_" )                          foreach qw{993 465 995};
+    ok( !-e "$dir/ports/$_.conf",       "and nginx stops listening on $_, which no domain uses" ) foreach qw{993 465 995};
     is( File::Slurper::read_text("$dir/authorized_keys.root"), q{}, 'and the ban key' );
+};
+
+subtest 'an upgrade moves the routes that an older relay kept by service' => sub {
+    my $older = fresh_relay();
+    File::Slurper::Temp::write_text( "$older/$DOMAIN.imaps.map",       "$DOMAIN 192.0.2.10:10993;\n" );
+    File::Slurper::Temp::write_text( "$older/$DOMAIN.submissions.map", "$DOMAIN 192.0.2.10:10465;\n" );
+    File::Slurper::Temp::write_text( "$older/$DOMAIN.pop3s.map",       "$DOMAIN 192.0.2.10:10995;\n" );
+
+    my ( undef, $complaint, $upgraded ) = capture { Trog::MailRelayClient::main('upgrade') };
+    is( $upgraded,                                               0,                             'it exits 0' ) or diag $complaint;
+    is( File::Slurper::read_text("$older/$DOMAIN.port-993.map"), "$DOMAIN 192.0.2.10:10993;\n", 'the routes of IMAP go to the map of 993' );
+    is( File::Slurper::read_text("$older/$DOMAIN.port-465.map"), "$DOMAIN 192.0.2.10:10465;\n", 'of submission to 465' );
+    is( File::Slurper::read_text("$older/$DOMAIN.port-995.map"), "$DOMAIN 192.0.2.10:10995;\n", 'of POP3 to 995' );
+    ok( !-e "$older/$DOMAIN.$_.map", "and the map of $_ is gone" ) foreach qw{imaps submissions pop3s};
+    ok( -e "$older/ports/$_.conf",   "nginx listens on $_ again" ) foreach qw{993 465 995};
+    like( exception { Trog::MailRelayClient::main( qw{register-clients other.test.test 192.0.2.11}, $DOMAIN, @PORTS ) }, qr/is[ ]registered[ ]to[ ]\Q$DOMAIN\E/, 'and the names stay taken' );
+
+    ( undef, $complaint, $upgraded ) = capture { Trog::MailRelayClient::main('upgrade') };
+    is( $upgraded,                                               0,                             'a second upgrade changes nothing' ) or diag $complaint;
+    is( File::Slurper::read_text("$older/$DOMAIN.port-993.map"), "$DOMAIN 192.0.2.10:10993;\n", 'and keeps the routes' );
+};
+
+subtest 'the ports of the mail clients are those of the recipe' => sub {
+    require Provisioner::Recipe::mailrelay;
+    no warnings 'once';
+    is_deeply( \%Trog::MailRelayClient::CLIENT_PORTS, \%Provisioner::Recipe::mailrelay::CLIENT_PORTS, 'the client takes the ports that the relay registers for its guests' );
 };
 
 subtest 'a postfix that is not up does not stop a release' => sub {
@@ -146,14 +183,16 @@ subtest 'a postfix that is not up does not stop a release' => sub {
 
 subtest 'it refuses what it cannot put in a table of postfix' => sub {
     fresh_relay();
-    like( exception { Trog::MailRelayClient::main( 'register', $DOMAIN ) },                                       qr/\Ausage:/, 'a registration without the address of the guest is refused' );
-    like( exception { Trog::MailRelayClient::main( 'register', $DOMAIN, 'web.test.test' ) },                      qr/\Ausage:/, 'and one with a name for an address' );
-    like( exception { Trog::MailRelayClient::main( 'register', $DOMAIN, '192.0.2.10', 'extra' ) },                qr/\Ausage:/, 'and one with more' );
-    like( exception { Trog::MailRelayClient::main(qw{register WEB.test 192.0.2.10}) },                            qr/\Ausage:/, 'and a domain in upper case' );
-    like( exception { Trog::MailRelayClient::main( 'release', $DOMAIN, 'extra' ) },                               qr/\Ausage:/, 'and a release with more than the domain' );
-    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, @UPSTREAMS ) },                   qr/\Ausage:/, 'and the mail clients of no name' );
-    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, @UPSTREAMS[ 0, 1 ], $DOMAIN ) },  qr/\Ausage:/, 'and of a name for an upstream' );
-    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, @UPSTREAMS, 'Mail.test.test' ) }, qr/\Ausage:/, 'and of a name in upper case' );
+    like( exception { Trog::MailRelayClient::main( 'register', $DOMAIN ) },                                                  qr/\Ausage:/,                     'a registration without the address of the guest is refused' );
+    like( exception { Trog::MailRelayClient::main( 'register', $DOMAIN, 'web.test.test' ) },                                 qr/\Ausage:/,                     'and one with a name for an address' );
+    like( exception { Trog::MailRelayClient::main( 'register', $DOMAIN, '192.0.2.10', 'extra' ) },                           qr/\Ausage:/,                     'and one with more' );
+    like( exception { Trog::MailRelayClient::main(qw{register WEB.test 192.0.2.10}) },                                       qr/\Ausage:/,                     'and a domain in upper case' );
+    like( exception { Trog::MailRelayClient::main( 'release', $DOMAIN, 'extra' ) },                                          qr/\Ausage:/,                     'and a release with more than the domain' );
+    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, $ADDRESS, @PORTS ) },                        qr/\Ausage:/,                     'and the mail clients of no name' );
+    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, 'web.test.test', $DOMAIN, @PORTS ) },        qr/\Ausage:/,                     'and of a name for the address' );
+    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, $ADDRESS, 'Mail.test.test', @PORTS ) },      qr/\Ausage:/,                     'and of a name in upper case' );
+    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, $ADDRESS, $DOMAIN ) },                       qr/\Ausage:/,                     'and of no port' );
+    like( exception { Trog::MailRelayClient::main( 'register-clients', $DOMAIN, $ADDRESS, $DOMAIN, '--port', '25=10025' ) }, qr/one[ ]of[ ]465,[ ]993,[ ]995/, 'and of a port that postfix serves' );
     is_deeply( \@ran, [], 'and none of them ran anything' );
 };
 

@@ -9,4 +9,10 @@ stream {
     map_hash_bucket_size 256;
 
     include /etc/nginx/relay-stream.d/*.conf;
+
+    # The ports that the guests registered.  See Ports of the guests in
+    # scripts/relay_files.
+[% FOR dir IN relay_dirs -%]
+    include [% dir %]/ports/*.conf;
+[% END -%]
 }

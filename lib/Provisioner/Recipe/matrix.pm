@@ -75,10 +75,10 @@ an account of L<Provisioner::Recipe::registrar> lists.
 When the C<nginx> of the domain names a C<relay>, this recipe hands C<nginx>
 these C<public_names>: the domain and each of its aliases, for the page, and
 C<server_name>, for the vhost of the homeserver.  The relay passes them through
-on 443.  It passes C<server_name> through on 8448 as well, because 8448 is in
-L<Provisioner::Recipe::nginx/passthrough_ports>, to the port of the guest that
-it maps 8448 to.  The vhost of the homeserver listens there, with the PROXY
-protocol.  See L<Provisioner::Recipe::nginxrelay/Ports>.
+on 443.  This recipe also hands C<nginx> the C<passthrough_ports> 8448, mapped
+to 8449, so the relay passes these names through on 8448 to 8449 of the guest.
+The vhost of the homeserver listens there, with the PROXY protocol.  See
+L<Provisioner::Recipe::nginx/Ports of its own>.
 
 If C<server_name> is in no zone that the guest can publish and certify,
 C<nginx> publishes and certifies C<public.matrix.$domain> in its place.  Then
@@ -99,11 +99,9 @@ my sub relayed ($domain) {
     return defined( ( Provisioner::Cookbook->domain_config($domain)->{nginx} // {} )->{relay} );
 }
 
-# The port of the guest where the relay passes federation through.
-my sub passthrough_port {
-    my %ports = Provisioner::Cookbook->load('nginx')->passthrough_ports();
-    return $ports{$FEDERATION_PORT};
-}
+# The port of the guest where the relay passes federation through, with the
+# PROXY protocol.
+our $PASSTHROUGH_PORT = 8449;
 
 =head2 %required = $recipe->required_recipes(%opts)
 
@@ -128,8 +126,9 @@ sub required_recipes {
             my %ours    = map  { $_ => 1 } @sites, $opts{server_name} // ();
             my @aliases = grep { !$ours{$_} } @{ Provisioner::Cookbook->alias_map()->{$domain} // [] };
             return (
-                sites        => [@sites],
-                public_names => {
+                sites             => [@sites],
+                passthrough_ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT },
+                public_names      => {
                     ( map { $_ => $domain } $domain, @aliases ),
                     ( defined $opts{server_name} ? ( $opts{server_name} => "matrix.$domain" ) : () ),
                 },
@@ -174,7 +173,7 @@ the same ports.
 sub rate_limits {
     my ( $self, %opts ) = @_;
     my %limits = Provisioner::Cookbook->load('nginx')->rate_limits();
-    return ( $FEDERATION_PORT => $limits{443}, relayed( $opts{domain} ) ? ( passthrough_port() => $limits{443} ) : () );
+    return ( $FEDERATION_PORT => $limits{443}, relayed( $opts{domain} ) ? ( $PASSTHROUGH_PORT => $limits{443} ) : () );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()
@@ -262,7 +261,7 @@ sub enrich {
 
     $opts{federation_port}  = $FEDERATION_PORT;
     $opts{relayed}          = relayed($domain) ? 1 : 0;
-    $opts{passthrough_port} = passthrough_port() if $opts{relayed};
+    $opts{passthrough_port} = $PASSTHROUGH_PORT if $opts{relayed};
     $opts{homeserver_names} = [ List::Util::uniq( "matrix.$domain", $opts{relayed} ? () : $opts{server_name} ) ];
     return %opts;
 }

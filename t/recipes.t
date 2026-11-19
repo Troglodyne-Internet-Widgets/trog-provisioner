@@ -424,7 +424,7 @@ subtest 'a field named like a secret is marked x-secret' => sub {
 
         my ($field) = $path =~ m/([^.\[\]*]+)\z/;
         my @unmarked;
-        push( @unmarked, $path ) if defined $field && $field !~ m/_(?:file|path)\z/ && $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/ && !$schema->{'x-secret'};
+        push( @unmarked, $path ) if defined $field && $field !~ m/_(?:file|path)\z/ && $field =~ m/pass(?!through)|secret|token|credential|(?:\A|_)(?:key|pw)\z/ && !$schema->{'x-secret'};
 
         push( @unmarked, $walk->( $schema->{properties}{$_},       $path eq q{} ? $_ : "$path.$_" ) ) for sort keys %{ $schema->{properties} // {} };
         push( @unmarked, $walk->( $schema->{additionalProperties}, "$path.*" ) )  if ref $schema->{additionalProperties} eq 'HASH';

@@ -136,6 +136,23 @@ C<bin/destroy> releases the names on the relay.  If the relay is not up then, it
 warns and says what to run there.  Until then, the relay sends those names to an
 address that the pool can give to the next guest.
 
+=head2 Ports of its own
+
+    internal.somedomain:
+        nginx:
+            relay: relay.somedomain
+            passthrough_ports:
+                8448: 8449
+
+C<passthrough_ports> maps each port besides 443 on which the relay passes the
+public names of this domain through to the port of this guest where the relay
+connects for it, with the PROXY protocol.  The relay listens on such a port
+only while a guest registered it, and passes it only for the names of that
+guest.  Nothing on this guest listens there unless a recipe does it itself, so
+the recipe that listens hands the port over, as
+L<Provisioner::Recipe::matrix> does for federation.  See
+L<Provisioner::Recipe::nginxrelay/Ports>.
+
 =head2 Media names
 
     internal.somedomain:
@@ -269,21 +286,6 @@ sub proxy_ports {
     return ( 443 => 8443, 80 => 8080 );
 }
 
-=head2 %ports = $recipe->passthrough_ports()
-
-Each other port that a relay passes through by SNI, with the PROXY protocol,
-mapped to the port of the guest that it connects to for it.  The relay sends
-a name there to the guest that registered the name for 443.  Unlike
-C<proxy_ports>, no vhost listens there unless its recipe does it itself, as
-L<Provisioner::Recipe::matrix> does for federation on 8448.  See
-L<Provisioner::Recipe::nginxrelay/Ports>.
-
-=cut
-
-sub passthrough_ports {
-    return ( 8448 => 8449 );
-}
-
 =head2 %jails = $recipe->jails()
 
 The jails that fail2ban ships for nginx: failed basic authentication, and
@@ -333,6 +335,10 @@ sub cert_deployer {
     return "/etc/dehydrated/deployers/nginxrelay-$domain";
 }
 
+# A port from 1024 to 65535, for a name of a property, which a schema can only
+# match, and cannot compare.
+my $PORT_FROM_1024 = '(?:102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])';
+
 sub args {
     return (
         properties => {
@@ -371,6 +377,14 @@ sub args {
                 additionalProperties => { type   => 'string', format => 'hostname' },
                 default              => {},
                 description          => 'Each name whose pages the relay serves and caches for readers, usually the domain itself, mapped to a name of the vhost that serves them.  Needs relay, and a second name for the pages that need a login, among public_names.  See "Cached names".',
+            },
+
+            passthrough_ports => {
+                type                 => 'object',
+                propertyNames        => { pattern => "\\A$PORT_FROM_1024\\z" },
+                additionalProperties => { type    => 'integer', minimum => 1, maximum => 65535 },
+                default              => {},
+                description          => 'Each port besides 443 on which the relay passes the public names of this domain through, by SNI and with the PROXY protocol, from 1024 to 65535, mapped to the port of this guest where the relay connects for it.  The recipe that listens there hands it over, as matrix does for 8448.  Needs relay.  See "Ports of its own".',
             },
 
             relay => {
@@ -528,8 +542,8 @@ sub revocations {
 =head2 %terms = $recipe->grant_terms($grant, %opts)
 
 Where the relay sends TLS and plain HTTP for the client of C<$grant>, the names
-that it sends there, and the media names and the cached names, as page names,
-that it serves itself, as
+that it sends there, the media names and the cached names, as page names,
+that it serves itself, and the C<passthrough_ports>, as
 L<Provisioner::Recipe::nginxrelay/issue_grant> takes them.
 
 Dies when the guest of the client has no address in the address pool, because
@@ -551,6 +565,7 @@ sub grant_terms {
         names     => [ $self->proxied_names( %opts, domain => $domain, aliases => Provisioner::Cookbook->alias_map() ) ],
         media     => [ sort keys %{ $opts{media_names}  // {} } ],
         pages     => [ sort keys %{ $opts{cached_names} // {} } ],
+        ports     => { %{ $opts{passthrough_ports}      // {} } },
     );
 }
 

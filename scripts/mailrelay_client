@@ -10,6 +10,7 @@ use warnings FATAL => 'all';
 use Cwd            ();
 use File::Basename ();
 use Crypt::PRNG    ();
+use Getopt::Long   ();
 use List::Util     qw{any};
 
 BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_files' ) }
@@ -19,8 +20,9 @@ BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_fi
 =head2 SYNOPSIS
 
     mailrelay_client register DOMAIN ADDRESS
-    mailrelay_client register-clients DOMAIN IMAPS SUBMISSIONS POP3S NAME [NAME ...]
+    mailrelay_client register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT [--port ...]
     mailrelay_client release DOMAIN
+    mailrelay_client upgrade
 
 =head2 DESCRIPTION
 
@@ -36,18 +38,25 @@ ADDRESS, the IPv4 address of the guest, on port 25.  It replaces what DOMAIN
 registered before.  See L<Provisioner::Recipe::mailrelay/Mail out> and
 L<Provisioner::Recipe::mailrelay/Mail in>.
 
-C<register-clients> sends the mail clients of DOMAIN to its guest.  A TLS
-connection on 993, 465 or 995 whose SNI name is a NAME goes to IMAPS,
-SUBMISSIONS or POP3S, with the PROXY protocol.  Each of those is an IPv4
-address and a port, such as C<192.0.2.10:10993>.  It refuses a NAME that
-another domain registered.  If C<nginx -t> refuses the result, it puts the old
-files of DOMAIN back.  Then it issues DOMAIN the key that its guest sends its
-bans with, and prints the private half in base64 on one line.  The key runs only
-F<relay_ban> for DOMAIN and the set C<mailrelay-bans>, and only from the
-address of IMAPS.  See L<Provisioner::Recipe::mailrelay/Mail clients>.
+C<register-clients> sends the mail clients of DOMAIN to its guest, at ADDRESS,
+an IPv4 address.  For each C<--port> PORT=GUEST_PORT, a TLS connection on PORT
+whose SNI name is a NAME goes to GUEST_PORT of ADDRESS, with the PROXY
+protocol.  PORT is one of 993, 465 and 995, which are the ports of
+C<%CLIENT_PORTS>.  It refuses a NAME that another domain registered.  If
+C<nginx -t> refuses the result, it puts the old files back.  Then it issues
+DOMAIN the key that its guest sends its bans with, prints the private half in
+base64 on one line, and opens the ports in the firewall.  The key runs only
+F<relay_ban> for DOMAIN and the set C<mailrelay-bans>, and only from ADDRESS.
+See L<Provisioner::Recipe::mailrelay/Mail clients> and
+L<Provisioner::RelayRecipe/Ports of the guests>.
 
 C<release> removes all of it: the login, the relay, the routes of the clients
 and the key.  Any of it can be gone already.
+
+C<upgrade> moves the routes that an older build kept for each service, in
+F<DOMAIN.SERVICE.map>, into the map of the port of the service, and writes the
+stream servers of the ports.  The build of the relay runs it, after the salvage
+is back.
 
 Each one waits up to a minute for another C<register> or C<release> to
 finish, and then gives up and says which file is locked.
@@ -58,8 +67,9 @@ with another status.
 =cut
 
 my $USAGE = "usage: mailrelay_client register DOMAIN ADDRESS
-" . "       mailrelay_client register-clients DOMAIN IMAPS SUBMISSIONS POP3S NAME [NAME ...]
+" . "       mailrelay_client register-clients DOMAIN ADDRESS NAME [NAME ...] --port PORT=GUEST_PORT [--port ...]
 " . "       mailrelay_client release DOMAIN
+" . "       mailrelay_client upgrade
 ";
 
 our $RELAY_D = '/etc/postfix/mailrelay.d';
@@ -76,27 +86,15 @@ sub files_of {
 
 our $BAN_SET = 'mailrelay-bans';
 
-# The services of the mail clients, in the order of the arguments of
-# register-clients.  nginx reads the map of each, $domain.$service.map.
-my @SERVICES = qw{imaps submissions pop3s};
+# The hook of the bans, which opens the ports of the guests in the firewall.
+# Provisioner::RelayRecipe installs it.
+our $FIREWALL = "/etc/ufw/after.init.d/$BAN_SET";
 
-sub maps_of {
-    my ($domain) = @_;
-    return map { $_ => "$RELAY_D/$domain.$_.map" } @SERVICES;
-}
-
-# Each name that a domain other than $domain registered, mapped to that domain.
-sub names_of_others {
-    my ($domain) = @_;
-
-    my %holder;
-    foreach my $map ( glob("$RELAY_D/*.imaps.map") ) {
-        my ($other) = $map =~ m{/([^/]+)[.]imaps[.]map\z};
-        next if $other eq $domain;
-        $holder{$_} = $other foreach map { m/\A(\S+)\s/ ? $1 : () } split m/\n/, Trog::RelayFiles::read_file($map) // q{};
-    }
-    return %holder;
-}
+# The port of each service of the mail clients, the only ports that a guest can
+# register here, because postfix serves the others.  The same as in
+# Provisioner::Recipe::mailrelay, which t/mailrelay_client.t makes sure of.
+# An older build kept the routes of each service in $domain.$service.map.
+our %CLIENT_PORTS = ( imaps => 993, submissions => 465, pop3s => 995 );
 
 sub reload_nginx {
     my ( $said, $ok ) = Trog::RelayFiles::run(qw{systemctl reload nginx});
@@ -160,31 +158,46 @@ sub register {
     return 0;
 }
 
+# $ports maps each port of the mail clients to the port of the guest at
+# $address.
 sub register_clients {
-    my ( $domain, $upstreams, @names ) = @_;
+    my ( $domain, $address, $ports, @names ) = @_;
 
     my $lock   = lock_relay();
-    my %holder = names_of_others($domain);
+    my %holder = Trog::RelayFiles::port_names_of_others( $RELAY_D, $domain );
     my @taken  = grep { defined $holder{$_} } @names;
     die join( q{}, map { "$_ is registered to $holder{$_}\n" } @taken ) . "So $domain cannot register it.  Release it there first.\n" if @taken;
 
-    my %map = maps_of($domain);
-    my %old = map { $_ => scalar Trog::RelayFiles::read_file( $map{$_} ) } @SERVICES;
-    foreach my $service (@SERVICES) {
-        Trog::RelayFiles::write_file( $map{$service}, join( q{}, map { "$_ $upstreams->{$service};\n" } @names ) );
-    }
+    my $old = Trog::RelayFiles::port_snapshot($RELAY_D);
+    Trog::RelayFiles::write_ports( $RELAY_D, 'mailrelay', $domain, { address => $address, ports => $ports, names => \@names } );
 
     my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
     if ( !$ok ) {
-        Trog::RelayFiles::write_file( $map{$_}, $old{$_} ) foreach @SERVICES;
+        Trog::RelayFiles::restore_ports( $RELAY_D, $old );
         die "nginx refused what $domain registered, so it keeps what it had: $said\n";
     }
 
-    my ($address) = split( m/:/, $upstreams->{imaps} );
     my $key = Trog::RelayFiles::issue_ban_key( $RELAY_D, $domain, $address, $BAN_SET );
     reload_nginx();
+    Trog::RelayFiles::open_ports($FIREWALL);
 
     print $key;
+    close $lock or die "Cannot unlock $RELAY_D: $!\n";
+    return 0;
+}
+
+# Moves the routes of each service that an older build kept into the map of
+# its port, and writes the stream server of each port.
+sub upgrade {
+    my $lock = lock_relay();
+    foreach my $service ( sort keys %CLIENT_PORTS ) {
+        foreach my $old ( glob("$RELAY_D/*.$service.map") ) {
+            my ($domain) = $old =~ m{/([^/]+)[.]\Q$service\E[.]map\z}a or next;
+            Trog::RelayFiles::write_file( "$RELAY_D/$domain.port-$CLIENT_PORTS{$service}.map", Trog::RelayFiles::read_file($old) );
+            Trog::RelayFiles::write_file( $old,                                                undef );
+        }
+    }
+    Trog::RelayFiles::write_listeners( $RELAY_D, 'mailrelay' );
     close $lock or die "Cannot unlock $RELAY_D: $!\n";
     return 0;
 }
@@ -193,13 +206,14 @@ sub release {
     my ($domain) = @_;
 
     my $lock = lock_relay();
-    my %file = ( files_of($domain), maps_of($domain) );
+    my %file = files_of($domain);
     Trog::RelayFiles::write_file( $_, undef ) foreach values %file;
+    Trog::RelayFiles::release_ports( $RELAY_D, 'mailrelay', $domain );
     write_tables();
     Trog::RelayFiles::revoke_ban_key( $RELAY_D, $domain );
 
     # A service that is not up reads the files when it starts.
-    foreach my $reload ( \&reload_postfix, \&reload_nginx ) {
+    foreach my $reload ( \&reload_postfix, \&reload_nginx, sub { Trog::RelayFiles::open_ports($FIREWALL) } ) {
         my $err = do {
             local $@;
             eval { $reload->(); 1 } ? undef : $@;
@@ -213,6 +227,7 @@ sub release {
 sub main {
     my ( $command, $domain, @args ) = @_;
 
+    return upgrade() if defined $command && $command eq 'upgrade' && !defined $domain;
     die $USAGE unless defined $command && Trog::RelayFiles::dns_name($domain);
 
     if ( $command eq 'register' ) {
@@ -221,13 +236,17 @@ sub main {
         return register( $domain, $address );
     }
     if ( $command eq 'register-clients' ) {
-        my ( @upstreams, @names );
-        ( @upstreams[ 0 .. $#SERVICES ], @names ) = @args;
-        die $USAGE if !@names || any { !Trog::RelayFiles::upstream( $_ // q{} ) } @upstreams;
-        die $USAGE if any            { !Trog::RelayFiles::dns_name($_) } @names;
-        my %upstream;
-        @upstream{@SERVICES} = @upstreams;
-        return register_clients( $domain, \%upstream, @names );
+        Getopt::Long::GetOptionsFromArray( \@args, 'port=s@' => \my @port_pairs ) or die $USAGE;
+        my ( $address, @names ) = @args;
+        die $USAGE if !@names || !Trog::RelayFiles::upstream( ( $address // q{} ) . ':1' );
+        die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names;
+        my %allowed = map { $_ => 1 } values %CLIENT_PORTS;
+        my %ports   = map {
+            my @pair = Trog::RelayFiles::port_pair($_);
+            @pair && $allowed{ $pair[0] } ? @pair : die "$_ is no PORT=GUEST_PORT, with PORT one of " . join( ', ', sort { $a <=> $b } keys %allowed ) . "\n"
+        } @port_pairs;
+        die $USAGE unless %ports;
+        return register_clients( $domain, $address, \%ports, @names );
     }
     return release($domain) if $command eq 'release' && !@args;
     die $USAGE;

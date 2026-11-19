@@ -18,7 +18,7 @@ BEGIN { require( File::Basename::dirname( Cwd::abs_path(__FILE__) ) . '/relay_fi
 
 =head2 SYNOPSIS
 
-    nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...]
+    nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT ...]
     nginxrelay_client media-key DOMAIN ADDRESS
     nginxrelay_client cert DOMAIN    # "install NAME" from ssh, and the PEM on stdin
     nginxrelay_client release DOMAIN
@@ -59,6 +59,13 @@ L<Provisioner::Recipe::nginxrelay/Page names>.
 A name can be only one of the three: passed through, a media name, or a page
 name.
 
+Each C<--port> PORT=GUEST_PORT is a port of its own, with PORT from 1024.  The relay passes a TLS
+connection on PORT, by its SNI name and with the PROXY protocol, to the address
+of TLS_UPSTREAM on GUEST_PORT, for each NAME that passes through, and for no
+other name.  It listens on PORT, and opens it in the firewall, while some
+domain registered it.  A port that DOMAIN registered before and does not name
+now is dropped.  See L<Provisioner::RelayRecipe/Ports of the guests>.
+
 C<media-key> makes a key for DOMAIN, and prints the private half in base64 on
 one line.  Like the ban key, it works only from ADDRESS.  It can run only
 C<nginxrelay_client cert DOMAIN>, and the guest of DOMAIN sends its
@@ -73,7 +80,7 @@ with the key.  Then it reloads nginx.  The key is readable by the group
 C<www-data>, because nginx loads a certificate that a variable names in its
 workers, and they run as C<www-data>.
 
-C<release> removes everything that DOMAIN registered, its keys and the
+C<release> removes everything that DOMAIN registered, its keys, its ports and the
 certificates of its media names and its page names included.  Any of it can be gone already.
 
 Each one waits up to a minute for another C<register> or C<release> to
@@ -84,7 +91,7 @@ with another status.
 
 =cut
 
-my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...]
+my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM [NAME ...] [--media NAME ...] [--page NAME ...] [--port PORT=GUEST_PORT ...]
 " . "       nginxrelay_client media-key DOMAIN ADDRESS
 " . "       nginxrelay_client cert DOMAIN
 " . "       nginxrelay_client release DOMAIN
@@ -93,6 +100,14 @@ my $USAGE = "usage: nginxrelay_client register DOMAIN TLS_UPSTREAM HTTP_UPSTREAM
 our $RELAY_D = '/etc/nginx/nginxrelay.d';
 
 our $BAN_SET = 'nginxrelay-bans';
+
+# The lowest port of its own that a guest can register.  nginx serves 80 and
+# 443 here itself, and a stream server there would not bind.
+our $MIN_PORT = 1024;
+
+# The hook of the bans, which opens the ports of the guests in the firewall.
+# Provisioner::RelayRecipe installs it.
+our $FIREWALL = "/etc/ufw/after.init.d/$BAN_SET";
 
 # Where the stream proxy sends a media name, and where the media server of
 # templates/files/nginxrelay.http.conf.tt listens.
@@ -156,10 +171,12 @@ sub reload_nginx {
     return;
 }
 
-# $served holds the names that this guest serves itself, by their kind: media
-# or page.
+# $upstream holds the tls and the http upstream.  $served holds the names that
+# this guest serves itself, by their kind: media or page.  $ports maps each port
+# of its own that $domain registers to the port of its guest.
 sub register {
-    my ( $domain, $tls, $http, $names, $served ) = @_;
+    my ( $domain, $upstream, $names, $served, $ports ) = @_;
+    my ( $tls,   $http )  = @{$upstream}{qw{tls http}};
     my ( $media, $pages ) = @{$served}{qw{media page}};
 
     my $lock   = lock_relay();
@@ -176,15 +193,20 @@ sub register {
     Trog::RelayFiles::write_file( $file{http}, join( q{}, map { "$_ $http;\n" } @$names ) );
     Trog::RelayFiles::write_file( $file{$_},   @{ $served->{$_} } ? join( q{}, map { "$_ $http;\n" } @{ $served->{$_} } ) : undef ) foreach keys %$served;
 
+    my ($address) = split( m/:/, $tls );
+    my $old_ports = Trog::RelayFiles::port_snapshot($RELAY_D);
+    Trog::RelayFiles::write_ports( $RELAY_D, 'nginxrelay', $domain, { address => $address, ports => $ports, names => $names } );
+
     my ( $said, $ok ) = Trog::RelayFiles::run(qw{nginx -t});
     if ( !$ok ) {
         Trog::RelayFiles::write_file( $file{$_}, $old{$_} ) foreach @kinds;
+        Trog::RelayFiles::restore_ports( $RELAY_D, $old_ports );
         die "nginx refused what $domain registered, so it keeps what it had: $said\n";
     }
 
-    my ($address) = split( m/:/, $tls );
     my $key = Trog::RelayFiles::issue_ban_key( $RELAY_D, $domain, $address, $BAN_SET );
     reload_nginx();
+    Trog::RelayFiles::open_ports($FIREWALL);
 
     print $key;
     close $lock or die "Cannot unlock $RELAY_D: $!\n";
@@ -268,13 +290,14 @@ sub release {
     my %file  = files_of($domain);
     my @certs = map { my %cert = cert_files($_); values %cert } served_names_of($domain);
     Trog::RelayFiles::write_file( $_, undef ) foreach values %file, @certs;
+    Trog::RelayFiles::release_ports( $RELAY_D, 'nginxrelay', $domain );
     Trog::RelayFiles::revoke_ban_key( $RELAY_D, $domain );
     Trog::RelayFiles::revoke_key( $RELAY_D, $domain, 'media' );
 
-    # An nginx that is not up reads the files when it starts.
+    # An nginx or a firewall that is not up reads the files when it starts.
     my $err = do {
         local $@;
-        eval { reload_nginx(); 1 } ? undef : $@;
+        eval { reload_nginx(); Trog::RelayFiles::open_ports($FIREWALL); 1 } ? undef : $@;
     };
     warn $err if defined $err;
     close $lock or die "Cannot unlock $RELAY_D: $!\n";
@@ -287,15 +310,17 @@ sub main {
     die $USAGE unless defined $command && Trog::RelayFiles::dns_name($domain);
 
     if ( $command eq 'register' ) {
-        Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media, 'page=s@' => \my @pages ) or die $USAGE;
+        Getopt::Long::GetOptionsFromArray( \@args, 'media=s@' => \my @media, 'page=s@' => \my @pages, 'port=s@' => \my @port_pairs ) or die $USAGE;
         my ( $tls, $http, @names ) = @args;
         die $USAGE unless Trog::RelayFiles::upstream($tls) && Trog::RelayFiles::upstream($http) && ( @names || @media || @pages );
         die $USAGE if any { !Trog::RelayFiles::dns_name($_) } @names, @media, @pages;
+        my %ports = map { my @pair = Trog::RelayFiles::port_pair($_); @pair && $pair[0] >= $MIN_PORT ? @pair : die "$_ is no PORT=GUEST_PORT, with PORT from $MIN_PORT to 65535\n" } @port_pairs;
+        die "A port of its own needs a name that passes through\n" if %ports && !@names;
         my %count;
         $count{$_}++ foreach List::Util::uniq(@names), List::Util::uniq(@media), List::Util::uniq(@pages);
         my @twice = grep { $count{$_} > 1 } sort keys %count;
         die join( q{}, map { "$_ is named twice, but it can only pass through, be a media name, or be a page name\n" } @twice ) if @twice;
-        return register( $domain, $tls, $http, \@names, { media => \@media, page => \@pages } );
+        return register( $domain, { tls => $tls, http => $http }, \@names, { media => \@media, page => \@pages }, \%ports );
     }
     if ( $command eq 'media-key' ) {
         my ($address) = @args;

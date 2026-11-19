@@ -105,23 +105,6 @@ subtest 'nginx keeps free space on the disk of the caches' => sub {
     isnt( exception { $validate->($_) }, undef, "$_ has no unit of nginx, so it is refused" ) for qw{2 2x -1g};
 };
 
-subtest 'the ports that pass through are banned and limited as 443 is' => sub {
-    my %passthrough = Provisioner::Cookbook->load('nginx')->passthrough_ports();
-    ok( exists $passthrough{8448}, 'matrix federation on 8448 passes through' );
-    is_deeply( [ $relay->banned_ports( tls_port => 4443 ) ], [ 80, 4443, 8448 ], 'a ban closes it beside 80 and the stream proxy' );
-    my %limits = $relay->rate_limits( tls_port => 4443 );
-    is( $limits{8448}, $limits{4443}, 'at the limit of the stream proxy' );
-
-    my $dir    = tempdir( CLEANUP => 1 );
-    my $recipe = Provisioner::Cookbook->load( 'nginxrelay', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
-    $recipe->generate_files( $dir, domain => 'relay.test.test', main_ip => '192.0.2.9', install_dir => '/bogus', script_dir => '/bogus/bin', resolvers => ['192.0.2.253'] );
-    my $profiles   = File::Slurper::read_text("$dir/nginxrelay_ufw.conf");
-    my ($inbound)  = $profiles =~ m/^\[nginxrelay\]\n(?:[^\n]*\n)*?ports=(\S+)$/m;
-    my ($outbound) = $profiles =~ m/^\[nginxrelay-upstream\]\n(?:[^\n]*\n)*?ports=(\S+)$/m;
-    is( $inbound,  '4443,8448/tcp',      'ufw lets 8448 in as it is, beside the stream proxy' );
-    is( $outbound, '8080,8443,8449/tcp', 'and nginx out to the port where a guest listens for it' );
-};
-
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
