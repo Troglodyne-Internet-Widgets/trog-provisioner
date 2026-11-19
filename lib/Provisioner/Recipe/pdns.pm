@@ -491,19 +491,20 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'pdns.zone.tt'         => 'zonefile',
-        'pdns.held_zones.tt'   => 'pdns-held-zones.sh',
-        'pdns.domain.tt'       => 'pdns-domain.conf',
-        'pdns.global.tt'       => 'pdns-global.conf',
-        'pdns.recursor.tt'     => 'pdns-recursor-domain.conf',
-        'pdns.recursor.lua.tt' => 'pdns-recursor-domain.lua',
-        'pdns.rsyslog.tt'      => '10-powerdns.conf',
-        'pdns.api.tt'          => 'pdns-api.conf',
-        'pdns.acl.psgi.tt'     => 'pdns-acl.psgi',
-        'pdns.api_key.tt'      => 'pdns-api-key',
-        'pdns.acl.service.tt'  => 'pdns-acl.service',
-        'pdns.acl.nginx.tt'    => 'pdns-acl.nginx.conf',
-        'pdns.acl.dropin.tt'   => 'pdns-acl.dropin.conf',
+        'pdns.zone.tt'          => 'zonefile',
+        'pdns.held_zones.tt'    => 'pdns-held-zones.sh',
+        'pdns.domain.tt'        => 'pdns-domain.conf',
+        'pdns.global.tt'        => 'pdns-global.conf',
+        'pdns.recursor.tt'      => 'pdns-recursor-domain.conf',
+        'pdns.recursor.lua.tt'  => 'pdns-recursor-domain.lua',
+        'pdns.rsyslog.tt'       => '10-powerdns.conf',
+        'pdns.api.tt'           => 'pdns-api.conf',
+        'pdns.acl.psgi.tt'      => 'pdns-acl.psgi',
+        'pdns.api_key.tt'       => 'pdns-api-key',
+        'pdns.acl.service.tt'   => 'pdns-acl.service',
+        'pdns.acl.nginx.tt'     => 'pdns-acl.nginx.conf',
+        'pdns.acl.dropin.tt'    => 'pdns-acl.dropin.conf',
+        'pdns.chroot.dropin.tt' => 'pdns-chroot.dropin.conf',
     );
 }
 

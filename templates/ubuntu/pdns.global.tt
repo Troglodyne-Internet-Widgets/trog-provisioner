@@ -53,8 +53,10 @@ sqlite3 /var/spool/powerdns/zones.db 'SELECT 1 FROM domains LIMIT 1' >/dev/null 
 # Move the bind backend out of the way, because this recipe uses sqlite
 mkdir -p /etc/powerdns/config-available
 mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf
-# Make the pdns unit run in its chroot
-[% script_dir %]/configure_pdns
+[%# The settings that run pdns in its chroot, in a drop-in, so that the
+    packaged unit stays as the package left it. -%]
+install -d -o root -g root -m 0755 /etc/systemd/system/pdns.service.d
+install -o root -g root -m 0644 pdns-chroot.dropin.conf /etc/systemd/system/pdns.service.d/chroot.conf
 mkdir -p /var/spool/powerdns/run/pdns/; /bin/true
 chown -R pdns:pdns /var/spool/powerdns/run
 mv 10-powerdns.conf /etc/rsyslog.d/10-powerdns.conf
@@ -69,7 +71,6 @@ install -o root -g root -m 0644 pdns-acl.service /etc/systemd/system/pdns-acl.se
 [%# The umask with which pdns creates its API socket, so that the proxy, in the
     group pdns, can write to it.  Before the restart in the fragment of the
     domain. -%]
-install -d -o root -g root -m 0755 /etc/systemd/system/pdns.service.d
 install -o root -g root -m 0644 pdns-acl.dropin.conf /etc/systemd/system/pdns.service.d/pdns-acl.conf
 [%# In the postrun, because the perl target runs after this fragment, and it
     installs Starman and the proxy.  Slot 0, ahead of every other task,
@@ -79,7 +80,7 @@ POSTRUN_SLOT=0 [% script_dir %]/queue_postrun_task systemctl enable pdns-acl
 POSTRUN_SLOT=0 [% script_dir %]/queue_postrun_task systemctl restart pdns-acl
 [%# Here, not in the postrun queue.  post_install runs its queue one task at a
     time, and the letsencrypt certificate fetcher that needs pdns is ahead in
-    it.  configure_pdns rewrote the unit above, so the reload goes with it.
+    it.  The drop-ins above change the unit, so the reload goes with it.
     rsyslog stays queued, because nothing in the build reads its drop-in. -%]
 systemctl daemon-reload
 systemctl enable pdns
