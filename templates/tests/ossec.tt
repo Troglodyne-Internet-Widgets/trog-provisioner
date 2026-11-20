@@ -17,19 +17,39 @@ subtest 'the manager runs the daemons that read the stream and send the alerts' 
     }
 };
 
-subtest 'the manager loads the rule files that the package lists, in its order' => sub {
+sub conf {
+    my ($file) = @_;
+    my $xml = do { local ( @ARGV, $/ ) = "/var/ossec/etc/$file"; <> } // q{};
+    $xml =~ s{<!--.*?-->}{}gs;
+    return $xml;
+}
+
+subtest 'configd makes ossec.conf, with the rule files of the package in its order' => sub {
     my %includes;
-    foreach my $file (qw{ossec.conf.package ossec.conf}) {
-        my $xml = do { local ( @ARGV, $/ ) = "/var/ossec/etc/$file"; <> } // q{};
-        $xml =~ s{<!--.*?-->}{}gs;
-        my ($rules) = $xml =~ m{<rules>(.*?)</rules>}s;
+    foreach my $file (qw{ossec.conf.d/00-original ossec.conf}) {
+        my ($rules) = conf($file) =~ m{<rules>(.*?)</rules>}s;
         $includes{$file} = [ ( $rules // q{} ) =~ m{<include>([^<]+)</include>}g ];
     }
-    ok( scalar @{ $includes{'ossec.conf.package'} }, 'the configuration of the package is kept, with its list' ) or return;
-    is_deeply( $includes{'ossec.conf'}, $includes{'ossec.conf.package'}, 'and the running configuration has the same list' );
+    ok( scalar @{ $includes{'ossec.conf.d/00-original'} }, 'the file of the package is the first fragment, with its list' ) or return;
+    is_deeply( $includes{'ossec.conf'}, $includes{'ossec.conf.d/00-original'}, 'and the file that the manager reads has the same list' );
+
+    my $dropins = `systemctl show ossec -p DropInPaths --value 2>&1`;
+    like( $dropins, qr{configd}, 'configd makes it again each time the manager starts' ) or diag $dropins;
 
     my $check = `/var/ossec/bin/ossec-analysisd -t 2>&1`;
-    is( $?, 0, 'which analysisd loads' ) or diag $check;
+    is( $?, 0, 'and analysisd loads it' ) or diag $check;
+};
+
+subtest 'none of the defaults of the package that the fragment clears' => sub {
+    my $conf = conf('ossec.conf');
+    unlike( $conf, qr{<active-response>},            'no active response, which would block addresses in the firewall of the collector' );
+    unlike( $conf, qr{<connection>secure</connection>}, 'no listener of the agents' );
+    unlike( $conf, qr{<localfile>},                  'no log file of the example' );
+    unlike( $conf, qr{<white_list>},                 'no whitelist of private addresses' );
+    unlike( $conf, qr{<email_to>},                   'and no mail to an example address' );
+
+    my $listening = `ss -lnu 2>&1`;
+    unlike( $listening, qr{:1514\b}, 'and nothing listens where the agents would send' ) or diag $listening;
 };
 
 subtest 'each end listens on loopback, where the other end sends' => sub {

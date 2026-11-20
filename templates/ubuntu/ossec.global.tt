@@ -4,22 +4,24 @@
     The package comes in at first boot, so the manager is here.  Telegraf and
     grafana come in with the targets below this one, which is why root owns
     their files, as in grafanasyslog.global.tt. -%]
-[%# The list of rule files comes from the configuration that the package
-    installed, which is kept the first time so that a second run reads it
-    and not the one that this target wrote.  ossec_package_rules says why. -%]
-[ -e /var/ossec/etc/ossec.conf.package ] || cp -p /var/ossec/etc/ossec.conf /var/ossec/etc/ossec.conf.package
-[% script_dir %]/ossec_package_rules /var/ossec/etc/ossec.conf.package ossec.conf > ossec.conf.full
-install -o root -g ossec -m 0640 ossec.conf.full /var/ossec/etc/ossec.conf
+[%# configd makes ossec.conf from the file of the package and this fragment.
+    It adopts the file in the configd target, which comes after this one, and
+    the manager must not run the defaults of the package until then: they open
+    the listener of the agents and block addresses in the firewall.  So it
+    stops here, and the checks and the start wait for the end of the build. -%]
+install -d -m 0750 -o root -g ossec /var/ossec/etc/ossec.conf.d
+install -m 0640 -o root -g ossec ossec.conf /var/ossec/etc/ossec.conf.d/50-ossec
+systemctl stop ossec
 [%# ossec-control starts only the daemons in its process list, and the daemon
     that sends the alerts is not in it until this line adds it. -%]
 /var/ossec/bin/ossec-control enable client-syslog
-[%# Each daemon checks the configuration, so a mistake stops the build here and
-    not the manager later. -%]
-/var/ossec/bin/ossec-analysisd -t
-/var/ossec/bin/ossec-remoted -t
-/var/ossec/bin/ossec-csyslogd -t
-systemctl enable ossec
-systemctl restart ossec
+[%# Each daemon checks the configuration that configd made, so a mistake
+    stops the build and not the manager later. -%]
+[% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-analysisd -t
+[% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-remoted -t
+[% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-csyslogd -t
+[% script_dir %]/queue_postrun_task systemctl enable ossec
+[% script_dir %]/queue_postrun_task systemctl restart ossec
 install -d -m 0755 /etc/telegraf/telegraf.d
 install -o root -g root -m 0644 ossec_telegraf.conf /etc/telegraf/telegraf.d/61-ossec.conf
 install -o root -g root -m 0644 ossec_alerts.star /etc/telegraf/ossec_alerts.star

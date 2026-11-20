@@ -68,7 +68,8 @@ have the C</opt/perl5> build.  It must continue to work if that build is
 rebuilt or removed.
 
 Everything that Configd needs is core, so the perl of the distribution is
-sufficient.  C<scripts/install_configd> makes sure of this in three places,
+sufficient.  The C<ossec> language is the exception: it needs L<XML::LibXML>,
+which L<Provisioner::Recipe::ossec> installs from the distribution.  C<scripts/install_configd> makes sure of this in three places,
 because each one can install into the wrong perl without an error.
 
 =head3 What it does not do
@@ -94,7 +95,7 @@ Configd itself needs only core modules.
 =item languages
 
 The configuration file formats to adopt, by name: C<postfix>, C<opendkim>,
-C<opendmarc>, C<redis>, or any other name that has a C<Configd::Language::>
+C<opendmarc>, C<redis>, C<ossec>, or any other name that has a C<Configd::Language::>
 module in the installed Configd.  A name must be word characters only, because
 each name becomes part of a module name and a shell argument.
 
@@ -135,11 +136,11 @@ sub args {
                 items => { type => 'string', pattern => "$LANGUAGE" },
             },
 
-            # A guest with two mail domains needs every list that each domain
-            # adds to joined, and 0.005 is the first version that joins all
-            # of those that the mail recipe writes.  install_configd fails the
-            # build if it gets an older version.
-            version => { type => 'string', default => '0.005' },
+            # 0.007 is the first version with the ossec language, and 0.006
+            # the first that takes the new file of a package upgrade as
+            # 00-original.  install_configd fails the build if it gets an
+            # older version.
+            version => { type => 'string', default => '0.007' },
 
             source => { type => 'string' },
         },
