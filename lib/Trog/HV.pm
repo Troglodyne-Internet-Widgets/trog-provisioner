@@ -1538,13 +1538,15 @@ sub check_sandbox {
 
     my $local = Trog::Local->new();
     if ( my $missing = $local->sandbox_program_error // $local->guest_keys_error ) {
-        return $self->verdict( 0, "No sandbox for the fetches of a guest on this machine: $missing", <<'FIX' );
+        my $keys = eval { $local->guest_keys() } // $Trog::Utils::GUEST_KEYS;
+        my $env  = $keys eq $Trog::Utils::GUEST_KEYS ? q{} : "env TROG_GUEST_KEYS=$keys ";
+        return $self->verdict( 0, "No sandbox for the fetches of a guest on this machine: $missing", <<"FIX" );
 The key of each guest runs only the sandbox program, which root must own, so
 that the account that writes a domain directory cannot change what the key
 runs.  This account lets the key in by writing it into the directory of guest
 keys.  As root, with the account that guests connect as:
 
-    sudo scripts/setup_transfer_user USER
+    sudo ${env}scripts/setup_transfer_user USER
 
 The trogrunner recipe does the same on a guest that it builds.
 FIX

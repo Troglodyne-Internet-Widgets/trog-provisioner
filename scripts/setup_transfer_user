@@ -24,7 +24,9 @@
 #      it, with reload_sshd.
 #
 # The paths are those of $LIBEXEC and $GUEST_KEYS in Trog::Utils.  The
-# variables below move them, for a test.
+# variables below move them.  TROG_GUEST_KEYS names the directory that
+# guest_keys in the _global of _base names, when the installation sets it: see
+# Trog::Local.  The others are for a test.
 set -eu
 
 LIBEXEC=${TROG_LIBEXEC:-/usr/local/libexec/trog-provisioner}
@@ -77,8 +79,12 @@ for program in rsyncd_sandbox guest_authorized_keys; do
     mv -f "$LIBEXEC/.$program.new" "$LIBEXEC/$program"
 done
 
-# 3. The keys.  Setgid, so that every key file has the group too.
-install -d -o root -g root -m 0755 "$(dirname "$GUEST_KEYS")"
+# 3. The keys.  Setgid, so that every key file has the group too.  The parent
+# is made only when it is missing, because install -d gives an existing
+# directory the owner and the mode too, and a directory of guest keys on a
+# share has a parent that other accounts own.
+parent=$(dirname "$GUEST_KEYS")
+[ -d "$parent" ] || install -d -o root -g root -m 0755 "$parent"
 install -d -o root -g "$group" -m 2775 "$GUEST_KEYS"
 
 # 4. sshd.  A Match block in a file of its own ends with the file.

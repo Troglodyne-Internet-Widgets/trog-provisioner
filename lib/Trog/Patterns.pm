@@ -109,4 +109,16 @@ unit of C<s>, C<m>, C<h>, C<d> or C<w>, such as C<48h> or C<90d>.
 
 our $INFLUX_DURATION = qr/\A [[:digit:]]+ [smhdw] \z/;
 
+=head2 $SSHD_PATH
+
+An absolute path that a line of sshd can hold unquoted: letters, digits and
+C<._/+->.  The domain directory in the key line of a guest is one, and so is
+the directory of guest keys that the configuration of sshd names.
+F<scripts/guest_authorized_keys> checks the same rule, written out, because it
+loads nothing outside the core.
+
+=cut
+
+our $SSHD_PATH = qr{\A / [[:alnum:]._/+-]+ \z};
+
 1;

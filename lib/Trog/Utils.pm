@@ -37,9 +37,11 @@ our $LIBEXEC = '/usr/local/libexec/trog-provisioner';
 
 =head2 $GUEST_KEYS
 
-The directory of the guest keys that sshd lets in on such a machine:
+The directory of the guest keys that sshd lets in on such a machine, when the
+installation names no other as C<guest_keys>:
 F</var/lib/trog-provisioner/guest-keys>.  F<scripts/guest_authorized_keys>
 reads it for sshd, and C<authorize_guest_key> in L<Trog::Local> writes it.
+L<Trog::Local/guest_keys> says which directory is in use.
 
 =cut
 

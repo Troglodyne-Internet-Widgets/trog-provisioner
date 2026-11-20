@@ -158,8 +158,19 @@ subtest 'the sandbox program, which root must own so that the account that sshd 
     }
 };
 
+subtest 'guest_keys' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my %said;
+    $cookbook->redefine( base_globals => sub { return {%said} } );
+
+    $said{guest_keys} = '/bogus/shared/guest-keys';
+    is( Trog::Local->new()->guest_keys, '/bogus/shared/guest-keys', 'the directory that the _global of _base names' );
+};
+
 subtest 'the key of a guest is a file of its own, which sshd can read' => sub {
-    local $Trog::Utils::GUEST_KEYS = tempdir( CLEANUP => 1 );
+    my $keys     = tempdir( CLEANUP => 1 );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( base_globals => sub { return { guest_keys => $keys } } );
     my $this_machine = Trog::Local->new();
 
     is( $this_machine->guest_keys_error, undef, 'a directory that this account can write' );
@@ -168,7 +179,7 @@ subtest 'the key of a guest is a file of its own, which sshd can read' => sub {
     my $umask = umask oct('0077');
     is( $this_machine->authorize_guest_key( 'vm.test.test', '/bogus/domains/vm.test.test', 'ssh-rsa AAAA vm' ), 1, 'is written' );
     umask $umask;
-    my $file = "$Trog::Utils::GUEST_KEYS/vm.test.test";
+    my $file = "$keys/vm.test.test";
     is( File::Slurper::read_text($file), "/bogus/domains/vm.test.test\nssh-rsa AAAA vm\n", 'with the domain directory, and then the key' );
     is( ( stat $file )[2] & oct('0777'), oct('0644'),                                      'and everybody can read it, whatever the umask of the writer, because sshd reads it as nobody' );
 
@@ -183,8 +194,11 @@ subtest 'the key of a guest is a file of its own, which sshd can read' => sub {
     is( $this_machine->revoke_guest_key('vm.test.test'), 0, 'and a key that is not there is nothing to revoke' );
     like( exception { $this_machine->revoke_guest_key('../escape') }, qr/not[ ]a[ ]domain[ ]name/, 'and a name that is not a domain names nothing to remove' );
 
-    local $Trog::Utils::GUEST_KEYS = '/bogus/no/such/dir';
-    like( $this_machine->guest_keys_error, qr/is[ ]not[ ]there/, 'a directory that is not there' );
+    $cookbook->redefine( base_globals => sub { return { guest_keys => '/bogus/no/such/dir' } } );
+    like( $this_machine->guest_keys_error, qr{/bogus/no/such/dir[ ]is[ ]not[ ]there}, 'a directory that is not there, by the name that the installation gives it' );
+
+    $cookbook->redefine( base_globals => sub { die "The settings of this installation are not valid:\n  /guest_keys: bogus\n" } );
+    like( $this_machine->guest_keys_error, qr{not[ ]known:[ ]The[ ]settings.*/guest_keys}s, 'and settings that name no valid directory are the reason, not a death' );
 };
 
 Test::NoWarnings::had_no_warnings();
