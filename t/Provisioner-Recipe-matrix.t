@@ -181,6 +181,15 @@ subtest 'notices come from smtp_from, whatever the login is' => sub {
     like( exception { recipe()->validate( %good, smtp_from => 'notify' ) }, qr{/smtp_from:}, 'but a From that is not an address is refused' );
 };
 
+# The page writes each channel as #name:server_name, so a name that already has
+# the # or the server name comes out with two of it.
+subtest 'a channel is the local part of a room alias' => sub {
+    my %good = ( domain => 'chat.test.test', server_name => 'matrix.test.test', admin_password => 'p', smtp_host => 'mail.test.test', smtp_user => 'notify', smtp_pass => 'p', smtp_from => 'notify@test.test' );
+    ok( !exception { recipe()->validate( %good, channels => ['general'] ) }, 'a bare name is fine' );
+    like( exception { recipe()->validate( %good, channels => ['#general'] ) },                 qr{/channels/0:}, 'a name with its # is refused' );
+    like( exception { recipe()->validate( %good, channels => ['general:matrix.test.test'] ) }, qr{/channels/0:}, 'and so is one with the server name' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();
