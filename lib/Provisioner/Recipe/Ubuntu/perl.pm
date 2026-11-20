@@ -24,7 +24,10 @@ sub deps {
     # CPAN::Uploader.  Without libssl-dev, its configure stops with "COULD NOT
     # FIND LIBSSL HEADERS".  Without zlib1g-dev, ld stops with "cannot find
     # -lz", because zlib1g ships no .so for the linker.
-    return qw{perlbrew libcarp-always-perl libssl-dev zlib1g-dev};
+    #
+    # scripts/cpan_install runs on the system perl, before anything is installed
+    # from CPAN, and reads the output of dzil listdeps with Module::Runtime.
+    return qw{perlbrew libcarp-always-perl libmodule-runtime-perl libssl-dev zlib1g-dev};
 }
 
 1;
