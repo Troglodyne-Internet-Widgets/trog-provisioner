@@ -486,9 +486,20 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
 sub rebuild_answering {
     my (%answers) = @_;
 
-    my %seen = ( snapshots => [], cleared => {}, asked => [], cloned => [], uuid_asked => 0 );
+    my %seen = ( snapshots => [], cleared => {}, asked => [], cloned => [], uuid_asked => 0, checked => [] );
     my $hv   = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc  = Test::MockModule->new('Trog::Local');
+
+    # A case that expects the run to die reads what was seen through this.
+    $answers{seen_into}{seen} = \%seen if $answers{seen_into};
+
+    $hv->redefine(
+        check_user_data => sub {
+            push @{ $seen{checked} }, $_[1];
+            die "the backend will not take this seed\n" if $answers{seed_refused};
+            return 1;
+        }
+    );
 
     # The identity the rebuild has to carry forward.  A domain that is kept
     # rather than undefined keeps its uuid, and libvirt refuses to redefine it
@@ -588,6 +599,17 @@ subtest 'a rebuild that can be rolled back is snapshotted before it happens' => 
     # is refused with "domain already exists with uuid", which is where this
     # came from.  Measured on a hypervisor, twice.
     ok( $seen->{uuid_asked}, 'and the uuid it is already bound to is asked for, to be carried into the new XML' );
+};
+
+subtest 'a seed the backend cannot send stops the run before the guest is touched' => sub {
+    my ( undef, $seen ) = rebuild_answering( rollback_possible => 1 );
+    is_deeply( $seen->{checked}, ["#cloud-config\n"], 'the backend is asked about the seed that the guest would get' );
+
+    my %into;
+    my $refused = exception { rebuild_answering( rollback_possible => 1, seed_refused => 1, seen_into => \%into ) };
+    like( $refused, qr/will[ ]not[ ]take[ ]this[ ]seed/, 'a seed it refuses stops the run, with its reason' );
+    is_deeply( $into{seen}{snapshots}, [], 'before a snapshot, which shuts a cloud guest down' );
+    is_deeply( $into{seen}{cleared},   {}, 'and before the guest is cleared' );
 };
 
 subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by saying nothing' => sub {
@@ -1213,9 +1235,9 @@ subtest 'an owner that does not exist yet is a note, and any other failure to gi
     my $said = q{};
     my @asked;
     no warnings 'once';
-    local *OwnerProbe::run_sudo    = sub { my ( undef, @argv ) = @_; return $argv[0] eq 'chown' ? 1 : 0 };
+    local *OwnerProbe::run_sudo     = sub { my ( undef, @argv ) = @_; return $argv[0] eq 'chown' ? 1 : 0 };
     local *OwnerProbe::capture_sudo = sub { my ( undef, @argv ) = @_; push( @asked, [@argv] ); return $said };
-    local *OwnerProbe::write_text  = sub { return 1 };
+    local *OwnerProbe::write_text   = sub { return 1 };
     use warnings;
     my $guest = bless {}, 'OwnerProbe';
 

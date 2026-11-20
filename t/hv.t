@@ -1875,7 +1875,7 @@ subtest 'prune_base_images removes what no disk is backed by, and never the newe
     quietly( sub { $hv->prune_base_images } );
     is_deeply( \@deleted, [$oldest], 'an old volume that no disk is backed by goes' ) or diag explain \@deleted;
     ok( ( grep { m{qemu-img[ ]info[ ]-U[ ]--output=json[ ]/pool/one-qcow2\z} } @asked ), 'found by asking qemu-img for the backing file of each disk' );
-    ok( !( grep { index( $_, 'baseimage' ) >= 0 } @asked ),                                'and not of the base volumes' );
+    ok( !( grep { index( $_, 'baseimage' ) >= 0 } @asked ),                              'and not of the base volumes' );
 
     # The last disk on the middle volume goes.
     @deleted = ();
@@ -2579,7 +2579,7 @@ subtest 'each backend names the client it talks through' => sub {
     my %client = (
         'Trog::HV::Libvirt'   => ['Sys::Virt'],
         'Trog::HV::OpenStack' => ['OpenStack::MetaAPI'],
-        'Trog::HV::Linode'    => [ 'Linode::API',     '0.003' ],
+        'Trog::HV::Linode'    => [ 'Linode::API',     '0.004' ],
         'Trog::HV::SolusVM'   => [ 'SolusVM::Client', '0.001' ],
     );
 

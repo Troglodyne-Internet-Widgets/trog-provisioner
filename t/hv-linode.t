@@ -21,6 +21,8 @@ use Test::MockModule qw{strict};
 use Capture::Tiny();
 use Config::Simple();
 use Cpanel::JSON::XS();
+use Digest::SHA();
+use IO::Uncompress::Gunzip();
 use MIME::Base64();
 use Mojolicious();
 
@@ -291,6 +293,20 @@ sub first_asked_to ( $method, $path ) {
     return List::Util::first { is_request( $_, $method, $path ) } @ASKED;
 }
 
+# The cloud-init payload in a request, as the guest gets it.
+sub seed_of ($user_data) {
+    my $compressed = MIME::Base64::decode_base64($user_data);
+    IO::Uncompress::Gunzip::gunzip( \$compressed => \my $seed ) or die $IO::Uncompress::Gunzip::GunzipError;
+    return $seed;
+}
+
+# Bytes that gzip cannot shrink, so that a test chooses the compressed size.
+sub incompressible ($length) {
+    my $bytes = q{};
+    $bytes .= Digest::SHA::sha256( length $bytes ) while length $bytes < $length;
+    return substr( $bytes, 0, $length );
+}
+
 sub config_for ($domain) {
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( domain      => $domain );
@@ -454,16 +470,16 @@ subtest 'create_guest' => sub {
     is( $body->{firewall_id}, 42,                   'behind its firewall' );
     ok( $body->{private_ip}, 'with a private address, as asked' );
     is_deeply( $body->{tags}, ['trog-provisioner'], 'tagged as ours' );
-    is( MIME::Base64::decode_base64( $body->{metadata}{user_data} ), "#cloud-config\n", 'with the seed for the metadata service' );
+    is( seed_of( $body->{metadata}{user_data} ), "#cloud-config\n", 'with the seed for the metadata service, compressed' );
     like( $body->{root_pass}, qr/\A\S{48}\z/, 'and a long random root password, which Linode requires' );
 
     reset_linode();
     linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'again.test.test' );
     isnt( ( asked_to( POST => '/v4/linode/instances' ) )[0][2]{root_pass}, $body->{root_pass}, 'a different one each time' );
 
-    like( exception { linode_hv()->create_guest( name => 'x.test.test' ) },                                                                                     qr/needs[ ]an[ ]image/, 'no image is said, not sent' );
-    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'big.test.test', user_data => 'x' x 65536 ) }, qr/65536[ ]bytes/,      'nor a payload over what the metadata service takes' );
-    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'x' x 65 ) },                                  qr/64[ ]characters/,    'nor a label Linode would refuse' );
+    like( exception { linode_hv()->create_guest( name => 'x.test.test' ) },                                                                                               qr/needs[ ]an[ ]image/,               'no image is said, not sent' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'big.test.test', user_data => incompressible(16385) ) }, qr/16385[ ]bytes.*at[ ]most[ ]16384/, 'nor a payload over what the metadata service takes, compressed' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'x' x 65 ) },                                            qr/64[ ]characters/,                  'nor a label Linode would refuse' );
 
     reset_linode();
     like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'ab' ) }, qr/Linode[ ]refused[ ]post-linode-instance:[ ]400[ ]\/body/, 'a body the specification refuses is refused before it is sent' );
@@ -498,6 +514,28 @@ subtest 'reserve_guest' => sub {
     like( exception { linode_hv()->reserve_guest( name => 'x.test.test' ) }, qr/needs[ ]a[ ]size/, 'no size is said, not sent' );
 };
 
+subtest 'check_user_data' => sub {
+    my $hv = linode_hv();
+
+    # Over the limit before compression, and well under it after.
+    my $big = "#cloud-config\nwrite_files:\n" . join( q{}, map { "  - path: /bogus/$_\n    content: |\n" . ( "      the same line again\n" x 400 ) } 1 .. 2 );
+    ok( length($big) > 16384,        'a seed over what Linode takes before compression' ) or diag length $big;
+    ok( $hv->check_user_data($big),  'is taken, because Linode gets it compressed' );
+    ok( $hv->check_user_data(undef), 'and so is no seed at all' );
+
+    # Two different keys, because gzip stores a second copy of the same bytes as a reference to the first.
+    my $bytes   = incompressible(18000);
+    my @keys    = map { MIME::Base64::encode_base64($_) } substr( $bytes, 0, 9000 ), substr( $bytes, 9000 );
+    my $too_big = "#cloud-config\nwrite_files:\n";
+    $too_big .= "  - path: /bogus/$_->[0]\n    content: |\n" . join( q{}, map { "      $_\n" } split m/\n/, $_->[1] ) for [ 'small', 'tiny' ], [ 'key-one.gpg', $keys[0] . 'x' ], [ 'key-two.gpg', $keys[1] ], [ 'medium', 'x' x 300 ];
+    my $refused = exception { $hv->check_user_data($too_big) };
+    $refused //= q{};
+    like( $refused, qr/Linode[ ]will[ ]not[ ]take[ ]the[ ]cloud-init[ ]payload/, 'one that does not fit compressed is refused' );
+    like( $refused, qr/bytes[ ]compressed/,                                      'with both of its sizes' );
+    like( $refused, qr/key-one[.]gpg.*\n.*key-two[.]gpg.*\n.*medium/,            'and its three largest files, largest first' );
+    unlike( $refused, qr/small/, 'and no more than three' );
+};
+
 subtest 'rebuild_guest' => sub {
     reset_linode();
     add_linode( label => 'vm.test.test', type => 'g6-nanode-1' );
@@ -508,10 +546,10 @@ subtest 'rebuild_guest' => sub {
     is( linode_of('vm.test.test')->{status}, 'running', 'running after the rebuild, not the running Linode reported before it began' );
 
     my ($rebuilt) = map { $_->[2] } grep { $_->[1] =~ m{/rebuild\z} } @ASKED;
-    is( $rebuilt->{image},                                              'linode/ubuntu24.04', 'onto the image it was given' );
-    is( MIME::Base64::decode_base64( $rebuilt->{metadata}{user_data} ), "#cloud-config\n",    'with the new seed' );
-    is( $rebuilt->{type},                                               'g6-standard-2',      'and resized to the type the guest named, which it was not' );
-    is( scalar asked_to( POST => '/v4/linode/instances' ),              0,                    'without a new Linode' );
+    is( $rebuilt->{image},                                 'linode/ubuntu24.04', 'onto the image it was given' );
+    is( seed_of( $rebuilt->{metadata}{user_data} ),        "#cloud-config\n",    'with the new seed' );
+    is( $rebuilt->{type},                                  'g6-standard-2',      'and resized to the type the guest named, which it was not' );
+    is( scalar asked_to( POST => '/v4/linode/instances' ), 0,                    'without a new Linode' );
 
     @ASKED = ();
     $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' );
