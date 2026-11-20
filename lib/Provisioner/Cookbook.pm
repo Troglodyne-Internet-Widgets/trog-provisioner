@@ -25,6 +25,7 @@ use YAML::XS();
 
 use Trog::Config();
 use Trog::Hypervisors::Config();
+use Trog::Patterns();
 use Trog::Secrets();
 use Trog::Utils();
 
@@ -1811,6 +1812,13 @@ sub global_schema {
             transfer_user => { type => 'string',  description => 'The account on this machine that a guest fetches its payload as.  Unset is the account running the provision.' },
             transfer_port => { type => 'integer', description => 'The ssh port of this machine, when it is not the one this machine reports.' },
             transfer_ip   => { type => 'string',  format      => 'ipv4', description => 'The address of ours that a guest fetches from, for a machine with several routes to the guest.' },
+            guest_keys    => {
+                type        => 'string',
+                pattern     => "$Trog::Patterns::SSHD_PATH",
+                default     => $Trog::Utils::GUEST_KEYS,
+                description =>
+                  'The directory where bin/provision lets the key of each guest in, and where the sshd of the machine that guests fetch from reads it.  Name a directory of its own, on a share that both machines see at this path, when guests fetch from another machine than the one that runs bin/provision.  scripts/setup_transfer_user takes it as TROG_GUEST_KEYS.  Read from the _global of _base only.  See THE KEYS OF GUESTS in Trog::Local.',
+            },
 
             ip_pool => {
                 type                 => 'object',

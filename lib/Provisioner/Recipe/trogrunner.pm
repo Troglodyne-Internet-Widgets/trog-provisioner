@@ -181,6 +181,19 @@ C<agent_user> of L<Provisioner::Recipe::clod> must not:
         config:
             transfer_user: clod-transfer
 
+The keys of guests go into C<guest_keys> of C<config>, which the runner also
+gets as C<guest_keys> in the C<_global> of its C<_base>.  Empty, as it is by
+default, is the directory of L<Trog::Utils/$GUEST_KEYS>.  Name another when
+guests fetch from another machine than the runner, which sees the domain
+directories and that directory at the same paths, on a share.  Then the runner
+writes each key there, and the sshd of the other machine reads it.
+F<scripts/setup_transfer_user> gets it as C<TROG_GUEST_KEYS>, so that the
+runner can serve guests too:
+
+    trogrunner:
+        config:
+            guest_keys: /opt/domains/.trog-provisioner/guest-keys
+
 =head3 TAB COMPLETION
 
 The recipe puts F<completions/trog-provisioner.bash> into
@@ -413,6 +426,7 @@ sub args {
                     transfer_user => { type => 'string', default => q{} },
                     transfer_ip   => { type => 'string', default => q{} },
                     transfer_port => { type => 'string', default => q{} },
+                    guest_keys    => { type => 'string', default => q{}, pattern => "(?:\\A\\z|$Trog::Patterns::SSHD_PATH)" },
                 },
             },
 

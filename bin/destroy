@@ -365,8 +365,10 @@ sub remove_guest_key {
     my ( $domain, $dryrun ) = @_;
     return if $dryrun;
 
-    my $had = Trog::Local->new()->revoke_guest_key($domain);
-    print $had ? "Removed the SSH key of the domain from $Trog::Utils::GUEST_KEYS\n" : "Domain SSH key not found in $Trog::Utils::GUEST_KEYS, skipping.\n";
+    my $this_machine = Trog::Local->new();
+    my $had          = $this_machine->revoke_guest_key($domain);
+    my $keys         = $this_machine->guest_keys();
+    print $had ? "Removed the SSH key of the domain from $keys\n" : "Domain SSH key not found in $keys, skipping.\n";
     return;
 }
 

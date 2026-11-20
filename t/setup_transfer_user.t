@@ -109,6 +109,20 @@ Match User fetcher
 CONF
 };
 
+subtest 'a directory of guest keys on a share, whose parent another account owns' => sub {
+    my $share = tempdir( CLEANUP => 1 );
+    my ( $rc, $said, $log ) = setup( { TROG_GUEST_KEYS => "$share/.trog-provisioner/guest-keys" }, 'fetcher', 'agent' );
+    is( $rc, 0, 'it exits 0' ) or diag $said;
+    my @log = split /\n/, $log;
+    ok( ( grep { $_ eq "install -d -o root -g root -m 0755 $share/.trog-provisioner" } @log ), 'a parent that is missing is made, owned by root' );
+
+    ( $rc, $said, $log ) = setup( { TROG_GUEST_KEYS => "$share/guest-keys" }, 'fetcher', 'agent' );
+    is( $rc, 0, 'it exits 0 again' ) or diag $said;
+    @log = split /\n/, $log;
+    ok( !( grep { m{\Ainstall[ ]-d[ ].*[ ]\Q$share\E\z} } @log ),                              'and a parent that is there is left with its owner and its mode' ) or diag $log;
+    ok( ( grep { $_ eq "install -d -o root -g agent-group -m 2775 $share/guest-keys" } @log ), 'while the directory of guest keys is made in it' );
+};
+
 subtest 'an account with no shell, which --give-shell gives one' => sub {
     my ( $rc, $said, $log ) = setup( { FAKE_USERS => 'agent fetcher', FAKE_SHELL => '/usr/sbin/nologin' }, qw{--give-shell fetcher agent} );
     is( $rc, 0, 'it exits 0' ) or diag $said;

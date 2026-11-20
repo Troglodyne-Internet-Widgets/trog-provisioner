@@ -133,6 +133,22 @@ subtest 'the account that the guests of the runner fetch as' => sub {
     like( $setup->(), qr/--give-shell[ ]'svc'[ ]'svc'\z/, 'the service user, which is made with nologin, is given a shell, so that the defaults work' );
     unlike( $setup->( provision_user => 'agent' ),                                           qr/--give-shell/, 'and another provisioning account keeps the shell that it has' );
     unlike( $setup->( provision_user => 'agent', config => { transfer_user => 'fetcher' } ), qr/--give-shell/, 'and so does a named transfer account' );
+
+    unlike( $setup->(), qr/TROG_GUEST_KEYS/, 'with no directory of guest keys named, the script keeps its own' );
+    my $keys = qr{'TROG_GUEST_KEYS=/bogus/shared/guest-keys'};
+    my $env  = qr{queue_postrun_task[ ]env[ ]$keys};
+    like( $setup->( config => { guest_keys => '/bogus/shared/guest-keys' } ),                 qr{$env[ ]\S+/setup_transfer_user[ ]}, 'and a directory on a share is the one that it sets up' );
+    like( exception { built( user => 'svc', config => { guest_keys => '/bogus/a space' } ) }, qr{/config/guest_keys},                'which a line of sshd must be able to hold' );
+};
+
+subtest 'the directory of guest keys reaches the settings of the runner' => sub {
+    my ($dir) = built( config => { guest_keys => '/bogus/shared/guest-keys' } );
+    my $said = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) );
+    is( $said->{_base}{_global}{guest_keys}, '/bogus/shared/guest-keys', 'so that bin/provision on the runner writes the keys where the sshd of the share reads them' );
+
+    ($dir) = built();
+    $said = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) );
+    ok( !exists $said->{_base}{_global}{guest_keys}, 'and with none named, the runner keeps the default of the installation' );
 };
 
 subtest 'a runner told nothing at all can still build a guest' => sub {

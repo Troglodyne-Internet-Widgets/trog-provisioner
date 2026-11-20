@@ -14,8 +14,10 @@ use File::Which();
 use IPC::Run3();
 use Fcntl qw{S_ISREG};
 use File::Temp();
+use Trog::Patterns();
 use Trog::Utils();
 use Data::Validate::Domain();
+use Provisioner::Cookbook();
 
 =head1 NAME
 
@@ -301,11 +303,30 @@ sub sandbox_program_error {
 
 A guest fetches its payload from this machine over ssh, as the account that
 C<transfer_user> names.  sshd lets its key in through
-F<scripts/guest_authorized_keys>, which reads one file per guest from
-C<$Trog::Utils::GUEST_KEYS> and gives each key no command but the sandbox.  So
+F<scripts/guest_authorized_keys>, which reads one file per guest from the
+directory of guest keys and gives each key no command but the sandbox.  So
 the account that runs F<bin/provision> never edits an F<authorized_keys> file,
 and it can be another account than the one that the guest connects as.
 F<scripts/setup_transfer_user> sets this up.
+
+The machine that the guest fetches from can be another machine than this one,
+when both see the domain directories and the directory of guest keys at the
+same paths, as shares of one directory.  Then this machine writes the key, and
+the sshd of the other lets it in.
+
+=head2 $dir = guest_keys()
+
+The directory of guest keys: C<guest_keys> of the C<_global> of C<_base> in
+F<recipes.yaml>, which is C<$Trog::Utils::GUEST_KEYS> unless the installation
+names another.  Only C<_base> counts, because the sshd of the machine that
+guests fetch from reads one directory for every domain.
+
+=cut
+
+sub guest_keys {
+    my ($self) = @_;
+    return Provisioner::Cookbook->base_globals()->{guest_keys};
+}
 
 =head2 authorize_guest_key($name, $dir, $pubkey)
 
@@ -320,10 +341,8 @@ takes, or if it cannot write the file.
 =cut
 
 # What scripts/guest_authorized_keys takes, which a key line can hold
-# unquoted.  The pattern in guest_name is for the key line: is_domain takes a
-# final dot, and does not promise to stay inside ASCII.
-our $GUEST_DIR = qr{\A/[[:alnum:]._/+-]+\z};
-
+# unquoted: is_domain takes a final dot, and does not promise to stay inside
+# ASCII.
 my sub guest_name ($name) {
     return $name =~ m/\A[[:alnum:].-]+\z/ && $name !~ m/[.]\z/ && defined Data::Validate::Domain::is_domain( $name, { domain_disable_tld_validation => 1 } );
 }
@@ -333,9 +352,9 @@ sub authorize_guest_key {
 
     die "'$name' is not a domain name, so it cannot name a guest key\n" unless guest_name($name);
     die "sshd cannot be given '$dir' in a key line: it must be an absolute path of letters, digits and ._/+-\n"
-      unless $dir =~ $GUEST_DIR;
+      unless $dir =~ $Trog::Patterns::SSHD_PATH;
 
-    return Trog::Utils::write_binary_mode( "$Trog::Utils::GUEST_KEYS/$name", "$dir\n$pubkey\n", oct('0644') );
+    return Trog::Utils::write_binary_mode( $self->guest_keys() . "/$name", "$dir\n$pubkey\n", oct('0644') );
 }
 
 =head2 $had = revoke_guest_key($name)
@@ -351,7 +370,7 @@ sub revoke_guest_key {
 
     die "'$name' is not a domain name, so it names no guest key\n" unless guest_name($name);
 
-    my $file = "$Trog::Utils::GUEST_KEYS/$name";
+    my $file = $self->guest_keys() . "/$name";
     return 0 unless -e $file;
     unlink $file or die "Could not remove $file: $!\n";
     return 1;
@@ -361,14 +380,15 @@ sub revoke_guest_key {
 
 Returns undef if this account can write a file into the directory of guest
 keys, and otherwise the reason that it cannot.  It finds out by writing one,
-and removing it again.
+and removing it again.  When the settings of the installation do not say a
+valid directory, the reason is that.
 
 =cut
 
 sub guest_keys_error {
     my ($self) = @_;
 
-    my $dir = $Trog::Utils::GUEST_KEYS;
+    my $dir = eval { $self->guest_keys() } // return "the directory of guest keys is not known: $@";
     return "$dir is not there" unless -d $dir;
     my $probe = eval { File::Temp->new( DIR => $dir ) };
     return "this account cannot write $dir" unless $probe;

@@ -290,6 +290,8 @@ subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest c
     my $local = Test::MockModule->new('Trog::Local');
 
     $local->redefine( $_ => sub { undef } ) for qw{sandbox_error sandbox_program_error guest_keys_error};
+    my $keys = $Trog::Utils::GUEST_KEYS;
+    $local->redefine( guest_keys => sub { return $keys } );
     my ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
     ok( $result->{ok}, 'a sandbox that bwrap makes passes' );
 
@@ -297,10 +299,17 @@ subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest c
         $local->redefine( $check => sub { "the reason of $check" } );
         ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
         ok( !$result->{ok}, "a machine that fails $check fails" );
-        like( $result->{what}, qr/the[ ]reason[ ]of[ ]\Q$check\E/, 'with the reason' );
-        like( $result->{fix},  qr/scripts\/setup_transfer_user/,   'and what sets it up' );
+        like( $result->{what}, qr/the[ ]reason[ ]of[ ]\Q$check\E/,      'with the reason' );
+        like( $result->{fix},  qr/sudo[ ]scripts\/setup_transfer_user/, 'and what sets it up' );
         $local->redefine( $check => sub { undef } );
     }
+
+    $keys = '/bogus/shared/guest-keys';
+    $local->redefine( guest_keys_error => sub { "$keys is not there" } );
+    ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
+    my $env = qr{sudo[ ]env[ ]TROG_GUEST_KEYS=/bogus/shared/guest-keys};
+    like( $result->{fix}, qr{$env[ ]scripts/setup_transfer_user}, 'an installation that names its own directory of guest keys is told to set up that one' );
+    $local->redefine( guest_keys_error => sub { undef } );
 
     $local->redefine( sandbox_error => sub { 'bwrap could not make a sandbox: setting up uid map: Permission denied' } );
     ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );

@@ -98,16 +98,18 @@ subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
 
 # --- remove_guest_key ---
 subtest 'remove_guest_key stops only the key of the domain fetching' => sub {
-    local $Trog::Utils::GUEST_KEYS = tempdir( CLEANUP => 1 );
-    File::Slurper::Temp::write_text( "$Trog::Utils::GUEST_KEYS/$_", "/bogus/$_\nssh-rsa AAAA $_\n" ) for qw{gone.test.test kept.test.test};
+    my $keys  = tempdir( CLEANUP => 1 );
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( guest_keys => sub { return $keys } );
+    File::Slurper::Temp::write_text( "$keys/$_", "/bogus/$_\nssh-rsa AAAA $_\n" ) for qw{gone.test.test kept.test.test};
 
     my $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 1 ) };
-    ok( -e "$Trog::Utils::GUEST_KEYS/gone.test.test", 'a dry run leaves the key' );
+    ok( -e "$keys/gone.test.test", 'a dry run leaves the key' );
 
     $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 0 ) };
-    ok( !-e "$Trog::Utils::GUEST_KEYS/gone.test.test", 'the key of the domain goes' );
-    ok( -e "$Trog::Utils::GUEST_KEYS/kept.test.test",  'and the key of another stays' );
-    like( $said, qr/Removed/, 'saying so' );
+    ok( !-e "$keys/gone.test.test", 'the key of the domain goes from the directory of guest keys that the installation names' );
+    ok( -e "$keys/kept.test.test",  'and the key of another stays' );
+    like( $said, qr/Removed[ ].*[ ]from[ ]\Q$keys\E/, 'saying so, and where from' );
 
     $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 0 ) };
     like( $said, qr/not[ ]found/, 'a key that is not there is skipped' );

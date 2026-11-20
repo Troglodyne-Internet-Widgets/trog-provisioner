@@ -67,7 +67,7 @@ install -o root -g root -m 0700 trogrunner-owner.sh '[% install_dir %]/[% domain
 # that the provisioning account lets in.  After the owner script, because the
 # accounts must exist.  See THE TRANSFER ACCOUNT in
 # Provisioner::Recipe::trogrunner.
-[% script_dir %]/queue_postrun_task [% script_dir %]/setup_transfer_user [% IF transfer_account == user %]--give-shell [% END %]'[% transfer_account %]' '[% provision_user %]'
+[% script_dir %]/queue_postrun_task [% IF config.guest_keys %]env 'TROG_GUEST_KEYS=[% config.guest_keys %]' [% END %][% script_dir %]/setup_transfer_user [% IF transfer_account == user %]--give-shell [% END %]'[% transfer_account %]' '[% provision_user %]'
 [% IF checkout %]
 # The checkout.  A checkout salvaged from the replaced guest can hold work, so
 # it only fast-forwards, and a pull that cannot fast-forward stops the build.

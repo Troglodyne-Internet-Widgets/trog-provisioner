@@ -1344,6 +1344,19 @@ subtest 'distro is a setting of _global' => sub {
     like( exception { Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, distro => 'unbuntu' } } } ) }, qr{/distro:}, 'and one that has no recipes is refused' );
 };
 
+# Trog::Local reads it, and sshd takes it unquoted, through setup_transfer_user.
+subtest 'guest_keys is a setting of _global' => sub {
+    my $said = Provisioner::Cookbook->base_globals( { _base => { _global => \%BASE_GLOBAL } } );
+    is( $said->{guest_keys}, '/var/lib/trog-provisioner/guest-keys', 'an installation that names none keeps the directory that every machine used before' );
+
+    $said = Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, guest_keys => '/bogus/shared/guest-keys' } } } );
+    is( $said->{guest_keys}, '/bogus/shared/guest-keys', 'a directory on a share that two machines see' );
+
+    foreach my $bad ( 'bogus/relative', '/bogus/a space', '/bogus/a"quote' ) {
+        like( exception { Provisioner::Cookbook->base_globals( { _base => { _global => { %BASE_GLOBAL, guest_keys => $bad } } } ) }, qr{/guest_keys:}, "'$bad', which a line of sshd cannot hold, is refused" );
+    }
+};
+
 # A YAML scalar is a string, and a list of one written as a scalar is what an
 # operator writes.  A single alias anywhere in the map used to arrive as a
 # string, which the aliases schema refuses and which the caller cannot
@@ -1491,7 +1504,7 @@ subtest 'named_guests: each setting that names a guest here, and which' => sub {
 
     # The route to a bin needs only the address of the guest it goes through.
     $conf{'web.test'}{_global}{ip_pool} = { bins => { vpnclients => { via => 'logs.test', note => 'logs.test' } } };
-    my %pool = map { $_->{setting} => $_->{weak} } grep { $_->{setting} =~ m/ip_pool/ } Provisioner::Cookbook->named_guests( 'web.test', \%conf );
+    my %pool = map { $_->{setting} => $_->{weak} } grep { index( $_->{setting}, 'ip_pool' ) >= 0 } Provisioner::Cookbook->named_guests( 'web.test', \%conf );
     is_deeply(
         \%pool,
         { '_global.ip_pool.bins.vpnclients.via' => 1, '_global.ip_pool.bins.vpnclients.note' => 0 },

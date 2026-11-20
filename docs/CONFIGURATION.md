@@ -103,6 +103,26 @@ command of a key through it.  When the account that runs the tool has none,
 name another account as `transfer_user`, and give the account that runs the
 tool as the second argument.  `bin/preflight` says when this is missing.
 
+Guests can fetch from another machine than the one that runs the tool, when
+both machines see the domain directories at the same paths, as shares of one
+directory.  Then the keys of guests must go into a directory on a share too.
+Name it in the `_global` of `_base`:
+
+```yaml
+    guest_keys: /opt/domains/.trog-provisioner/guest-keys
+```
+
+Give it a directory of its own, because the script makes a missing parent
+owned by root.  Then run the script on the machine that guests fetch from,
+with that directory:
+
+```
+sudo env TROG_GUEST_KEYS=/opt/domains/.trog-provisioner/guest-keys scripts/setup_transfer_user ACCOUNT PROVISION_ACCOUNT
+```
+
+Each machine that runs the tool writes the keys there, and the sshd of the
+machine that guests fetch from reads them.
+
 `bin/new_config tickle.test.test` writes a configuration for that name at that
 address. It populates a `users.yaml` creating the admin user, granting them
 admin rights and authorizing the keys from `admin_authorized_keys`; you can add
