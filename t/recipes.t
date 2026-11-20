@@ -2370,7 +2370,7 @@ subtest 'the services that cannot be told about a second domain are named here' 
     # marked without cause.  bin/new_config refuses these for a domain being
     # layered onto another; everything else writes per domain, or goes through
     # configd, and does not care how many domains the guest holds.
-    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs grafana grafanaotel grafanasyslog koan ldap logcollector logshipper matrix openvpn ossec ossecagent trogrunner};
+    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs grafana grafanaossec grafanaotel grafanasyslog koan ldap logcollector matrix openvpn ossec trogrunner};
 
     foreach my $name ( sort Provisioner::Cookbook->names() ) {
         my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;
@@ -2712,11 +2712,11 @@ subtest 'the two halves of the dashboard agree about the datasource' => sub {
     my %stack  = Provisioner::Cookbook->defaults('grafana');
     my %syslog = Provisioner::Cookbook->defaults('grafanasyslog');
     my %otel   = Provisioner::Cookbook->defaults('grafanaotel');
-    my %ossec  = Provisioner::Cookbook->defaults('ossec');
+    my %ossec  = Provisioner::Cookbook->defaults('grafanaossec');
 
     is( $syslog{datasource}, $stack{datasource_name}, 'grafanasyslog reads the datasource grafana provisions' );
     is( $otel{datasource},   $stack{datasource_name}, 'and so does grafanaotel' );
-    is( $ossec{datasource},  $stack{datasource_name}, 'and so does ossec' );
+    is( $ossec{datasource},  $stack{datasource_name}, 'and so does grafanaossec' );
 };
 
 subtest 'the dashboard grafanaotel installs has the uid that clod links to' => sub {

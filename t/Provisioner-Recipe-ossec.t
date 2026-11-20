@@ -16,6 +16,7 @@ says which guests its manager watches
 use Test::More;
 use Test::NoWarnings qw{had_no_warnings};
 use Test::MockModule();
+use Test::Fatal qw{exception};
 
 use FindBin::libs;
 
@@ -25,8 +26,8 @@ my $recipe = 'Provisioner::Recipe::ossec'->new( output_dir => '/bogus', libdir =
 
 subtest 'required_recipes' => sub {
     my %required = $recipe->required_recipes();
-    ok( exists $required{grafanasyslog}, 'it needs grafanasyslog, which installs telegraf and grafana' );
-    is_deeply( { $required{configd}->() },      { languages    => ['ossec'] },           'and configd, with the language that makes ossec.conf' );
+    is_deeply( [ sort keys %required ],         [qw{configd logcollector}], 'it needs the collector that it reads and configd, and nothing that draws its alerts' );
+    is_deeply( { $required{configd}->() },      { languages    => ['ossec'] },           'configd, with the language that makes ossec.conf' );
     is_deeply( { $required{logcollector}->() }, { forward_text => ['127.0.0.1:10514'] }, 'and asks the collector for a copy as text on the default port' );
 
     my %moved = $recipe->required_recipes( port => 20514 );
@@ -34,8 +35,8 @@ subtest 'required_recipes' => sub {
 };
 
 subtest 'listens' => sub {
-    is_deeply( [ $recipe->listens() ],                                      [qw{127.0.0.1:10514 127.0.0.1:10516/udp 1514/udp}], 'the manager on TCP and telegraf on UDP, both on loopback, and the agents on every address' );
-    is_deeply( [ $recipe->listens( port => 20514, alerts_port => 20516 ) ], [qw{127.0.0.1:20514 127.0.0.1:20516/udp 1514/udp}], 'on the ports that the configuration names' );
+    is_deeply( [ $recipe->listens() ],                [qw{127.0.0.1:10514 1514/udp}], 'the manager on loopback for the stream, and on every address for the agents' );
+    is_deeply( [ $recipe->listens( port => 20514 ) ], [qw{127.0.0.1:20514 1514/udp}], 'on the port that the configuration names' );
 };
 
 subtest 'remote_prepare, remote_files and restores' => sub {
@@ -77,8 +78,10 @@ subtest 'issue_grant and revoke_grant' => sub {
 
 subtest 'args' => sub {
     my %opts = $recipe->validate();
-    is( $opts{port},        10514, 'the default port of the manager is the one that required_recipes and listens assume' );
-    is( $opts{alerts_port}, 10516, 'and so is the default port of the alerts' );
+    is( $opts{port}, 10514, 'the default port of the manager is the one that required_recipes and listens assume' );
+
+    my $err = exception { $recipe->validate( domain => 'logs.test.test', alerts_port => 10516, datasource => 'InfluxDB' ) };
+    like( $err, qr/Properties[ ]not[ ]allowed:[ ]alerts_port,[ ]datasource/, 'a configuration that still names the settings of grafanaossec here is refused, naming them' );
 };
 
 subtest 'watches' => sub {
@@ -111,11 +114,20 @@ subtest 'watches' => sub {
         0, 'a guest that ships only some facilities is not watched'
     );
     is( $watches->( 'guest.test.test', 'guest.test.test' => { logshipper => { selector => '*.*' } } ),                1, 'but one that names the default selector is' );
-    is( $watches->( 'guest.test.test', 'guest.test.test' => { logshipper => { host     => 'plain.test.test' } } ),    0, 'a guest that ships to a collector with no manager is not' );
+    is( $watches->( 'guest.test.test', 'guest.test.test' => { logshipper => { host     => 'plain.test.test' } } ),    1, 'a guest that ships to a collector that does not name the manager is, because logcollector requires it' );
     is( $watches->( 'guest.test.test', 'guest.test.test' => { logshipper => { host     => 'syslog.vendor.test' } } ), 0, 'nor one that ships outside this installation' );
 
     $conf = { 'logs.test.test' => {%collector}, 'guest.test.test' => {} };
     is( 'Provisioner::Recipe::ossec'->watches('guest.test.test'), 0, 'nor one that ships nowhere' );
+};
+
+subtest 'manager_of' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $conf     = { _base => { logshipper => { host => 'logs.test.test' } }, 'logs.test.test' => { logcollector => {} }, 'guest.test.test' => {} };
+    $cookbook->redefine( configuration => sub { return $conf } );
+
+    is( 'Provisioner::Recipe::ossec'->manager_of('guest.test.test'), 'logs.test.test', 'the collector that the guest ships everything to' );
+    is( 'Provisioner::Recipe::ossec'->manager_of('logs.test.test'),  undef,            'and none for the collector, which ships nowhere' );
 };
 
 had_no_warnings();

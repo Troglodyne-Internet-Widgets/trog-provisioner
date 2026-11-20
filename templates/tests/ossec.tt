@@ -2,18 +2,14 @@ use strict;
 use warnings;
 
 use Test::More;
-use JSON::PP;
 use MIME::Base64();
 use POSIX qw{strftime};
 
-my $port        = '[% port %]';
-my $alerts_port = '[% alerts_port %]';
-my $datasource  = '[% datasource %]';
-my $influx      = 'http://127.0.0.1:8086';
+my $port = '[% port %]';
 
-subtest 'the manager runs the daemons that read the stream, and send the alerts and their mail' => sub {
+subtest 'the manager runs the daemons that read the stream and send the mail of the alerts' => sub {
     my $status = `/var/ossec/bin/ossec-control status 2>&1`;
-    foreach my $daemon (qw{ossec-analysisd ossec-remoted ossec-csyslogd ossec-maild}) {
+    foreach my $daemon (qw{ossec-analysisd ossec-remoted ossec-maild}) {
         like( $status, qr/^\Q$daemon\E is running/m, "$daemon is running" ) or diag $status;
     }
 };
@@ -51,18 +47,16 @@ subtest 'none of the defaults of the package that the fragment clears' => sub {
 
 };
 
-subtest 'each end listens on loopback, where the other end sends' => sub {
+subtest 'the manager listens on loopback, where the collector sends' => sub {
 
-    # Polls, because a postrun task restarts telegraf.
+    # Polls, because a postrun task restarts the manager.
     my $listening = q{};
     foreach ( 1 .. 30 ) {
-        $listening = `ss -lntu 2>/dev/null`;
-        last if $listening =~ m/^udp\s+\S+\s+\S+\s+\S+\s+127\.0\.0\.1:$alerts_port\b/m;
+        $listening = `ss -lnt 2>/dev/null`;
+        last if $listening =~ m/^LISTEN\s+\S+\s+\S+\s+(?:\[::ffff:)?127\.0\.0\.1\]?:$port\b/m;
         sleep 2;
     }
-    like( $listening, qr/^tcp\s+LISTEN\s+\S+\s+\S+\s+(?:\[::ffff:)?127\.0\.0\.1\]?:$port\b/m, "the manager reads the stream on 127.0.0.1:$port" )
-      or diag $listening;
-    like( $listening, qr/^udp\s+\S+\s+\S+\s+\S+\s+127\.0\.0\.1:$alerts_port\b/m, "and telegraf reads the alerts on 127.0.0.1:$alerts_port" )
+    like( $listening, qr/^LISTEN\s+\S+\s+\S+\s+(?:\[::ffff:)?127\.0\.0\.1\]?:$port\b/m, "the manager reads the stream on 127.0.0.1:$port" )
       or diag $listening;
 
     my $conf = do { local ( @ARGV, $/ ) = glob('/etc/rsyslog.d/*logcollector.conf'); <> } // q{};
@@ -95,15 +89,6 @@ subtest 'the manager listens for agents, and issues and revokes their keys' => s
     unlike( $keys, qr/^\d+ \Q$agent\E /m, 'and removes the agent' ) or diag $keys;
 };
 
-subtest 'the dashboard is in place, and names the datasource that exists' => sub {
-    my $file = '/var/lib/grafana/dashboards/ossec.json';
-    my $body = do { local ( @ARGV, $/ ) = $file; <> } // q{};
-    my $json = eval { JSON::PP->new->decode($body) };
-    ok( $json, "$file is JSON that grafana can read" ) or return diag $@;
-    is( $json->{uid}, 'ossec-alerts', 'it is the OSSEC dashboard' );
-    like( $body, qr/\Q"$datasource"\E/, "and it names the $datasource datasource" );
-};
-
 # What segfaults.sh mailed: the line of a guest goes through the collector to
 # the manager, which raises the alert of the rule of the watchers and hands its
 # mail to the mail server on loopback.
@@ -133,52 +118,6 @@ subtest 'a segfault on a guest is an alert that goes to the admin by mail' => su
       or return diag `tail -n 20 /var/ossec/logs/alerts/alerts.log 2>&1`;
     like( $mail, qr/nrcpts?=1/, 'and the mail server takes its mail' )
       or diag $mail . `tail -n 5 /var/ossec/logs/ossec.log 2>&1` . `tail -n 5 /var/log/mail.log 2>&1`;
-};
-
-# The full path: a line from a guest goes to the port of the collector, out of
-# its copy as text, into the manager, out as an alert, into telegraf and the
-# Starlark processor, and into influxdb with the tags that the dashboard reads.
-subtest 'a root login on a guest arrives in influxdb as an alert about that guest' => sub {
-    my $conf = do { local ( @ARGV, $/ ) = glob('/etc/rsyslog.d/*logcollector.conf'); <> } // q{};
-    my ($cport) = $conf =~ m/input\(type="imtcp"\s+port="(\d+)"/;
-    ok( $cport, 'the collector says which TCP port it listens on' ) or return;
-
-    my $dbs = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
-    my @dbs = $dbs =~ m/\["([^"]+)"\]/g;
-    ok( scalar @dbs, 'influxdb has a database to look in' ) or return diag $dbs;
-
-    # A name that no real guest has, so the alert can only be this one.
-    my $guest = "ossec-selftest-$$-" . time() . '.test.test';
-    my $stamp = strftime( '%b %e %H:%M:%S', localtime );
-    my $line  = "<38>$stamp $guest sshd[4242]: Accepted publickey for root from 203.0.113.9 port 50486 ssh2: ED25519 SHA256:bogus\n";
-    open( my $nc, '|-', 'nc', '-q1', '127.0.0.1', $cport ) or return fail("nc: $!");
-    print {$nc} $line;
-    close($nc);
-
-    my ( $found, $out ) = ( q{}, q{} );
-    foreach ( 1 .. 24 ) {
-        foreach my $db (@dbs) {
-            $out = `curl -fsS -G $influx/query --data-urlencode 'db=$db' --data-urlencode "q=SELECT \\"ossec_rule\\", \\"ossec_level\\", \\"ossec_groups\\", \\"message\\" FROM syslog WHERE \\"appname\\" = 'ossec' AND \\"ossec_host\\" = '$guest' AND time > now() - 10m" 2>&1`;
-            next unless index( $out, $guest ) >= 0;
-            $found = $db;
-            last;
-        }
-        last if $found;
-        sleep 5;
-    }
-    ok( $found, 'an alert about the guest arrived in influxdb' )
-      or return diag "Nothing for $guest after two minutes.\n" . `tail -n 5 /var/ossec/logs/alerts/alerts.log 2>&1` . `journalctl -u telegraf --no-pager -n 20 2>&1`;
-
-    my $rows = eval { JSON::PP->new->decode($out)->{results}[0]{series}[0]{values} } // [];
-    my ( undef, $rule, $level, $groups, $message ) = @{ $rows->[0] // [] };
-    my $alert = eval { JSON::PP->new->decode( $message // q{} ) } // {};
-    ok( defined $alert->{id}, 'the point keeps the alert as JSON in its message' ) or return diag $message;
-
-    # Which rule matches depends on the hour: at night it is a login outside of
-    # business hours.  So these compare with the alert itself.
-    is( $rule,  $alert->{id},   'with the rule that matched as a tag' );
-    is( $level, $alert->{crit}, 'and its level' );
-    is( $groups, join( q{,}, grep { length } map { s/\A\s+|\s+\z//gr } split( m/,/, $alert->{classification} // q{} ) ), 'and its groups, without the spaces and the empty names' );
 };
 
 done_testing();

@@ -414,6 +414,26 @@ Empty by default.
 
 sub exclusive_on_machine_with { return () }
 
+=head3 %settings = $recipe->machine_wide(%opts)
+
+The settings of this recipe that its global half applies to the whole
+machine, from C<%opts>, the configuration of the recipe for one domain, with
+the defaults of the schema in place of what it leaves out.
+
+The global half runs once on a machine, with the configuration of the domain
+that built it first.  A tenant that names the recipe with other values for
+these settings would get the values of its host, and nothing would say so.  So
+F<bin/new_config> refuses a tenant whose settings here differ from those of its
+host, and names each setting, with both values.  A tenant with the same values,
+for example values that both inherit from C<_base>, generates.
+
+Empty by default, which compares nothing.  A recipe that is not
+C<is_multi_tenant> needs none, because its tenant is refused anyway.
+
+=cut
+
+sub machine_wide { return () }
+
 =head3 %args = $recipe->args()
 
 Declares the arguments of the recipe as a hash for the schema() method of

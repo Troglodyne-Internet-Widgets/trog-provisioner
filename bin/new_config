@@ -277,6 +277,10 @@ our %SALVAGE_GAPS;
 # before its tenants are generated.
 our %MACHINE_MODULES;
 
+# The machine_wide settings of each recipe of each domain, for the same
+# comparison.  See machine_wide in Provisioner::Recipe.
+our %MACHINE_WIDE;
+
 # The ports that the domains of each guest so far claim, keyed by the guest's
 # own domain, in the form of ufw's listeners.  See handle_domain.
 our %MACHINE_LISTENERS;
@@ -1195,12 +1199,26 @@ sub handle_domain {
     # recipes that cannot share a machine collide, so refuse both here.  This
     # compares a tenant with its host only, not with the other tenants.
     $MACHINE_MODULES{$domain} = [@modules];
+    $MACHINE_WIDE{$domain}    = { map { $_ => { $builders{$_}->machine_wide( %{ $rconf->{$domain}{$_} // {} } ) } } @modules };
     if ($depends_on) {
         my %on_host = map  { $_ => 1 } @{ $MACHINE_MODULES{$depends_on} // [] };
         my @cannot  = grep { $on_host{$_} && !$builders{$_}->is_multi_tenant } @modules;
 
         die "$domain is provisioned onto $depends_on, and both are configured with: " . join( ', ', @cannot ) . "\n" . "There is one of that on a guest, and it cannot be told about a second domain -- so this\n" . "would replace what $depends_on configured rather than add to it.  Configure it on one of\n" . "the two, or give $domain a machine of its own.\n"
           if @cannot;
+
+        # The global half runs once on the machine, with the settings of the
+        # host, so a tenant that asks for others would not get them.
+        foreach my $module ( grep { $on_host{$_} } @modules ) {
+            my $mine   = $MACHINE_WIDE{$domain}{$module};
+            my $theirs = $MACHINE_WIDE{$depends_on}{$module} // {};
+            my @differ = grep { ( $mine->{$_} // q{} ) ne ( $theirs->{$_} // q{} ) } sort( uniq( keys %$mine, keys %$theirs ) );
+            next unless @differ;
+            die "$domain is provisioned onto $depends_on, and the $module of each says something different:\n"
+              . join( q{}, map { "  $_: '" . ( $mine->{$_} // q{} ) . "' for $domain, '" . ( $theirs->{$_} // q{} ) . "' for $depends_on\n" } @differ )
+              . "The machine applies one $module, with the settings of $depends_on.  Give $domain the same\n"
+              . "settings, or leave them out so that it inherits them, or give $domain a machine of its own.\n";
+        }
 
         foreach my $mine (@modules) {
             foreach my $theirs ( sort keys %on_host ) {

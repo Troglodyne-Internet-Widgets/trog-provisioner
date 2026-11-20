@@ -52,13 +52,14 @@ C<forward> adds one C<omfwd> action for each destination to the collector
 ruleset, above the C<stop>.  The position is necessary.  C<stop> ends the
 processing of the message, so an action below it never runs.
 
-The copy goes out as RFC5424 with octet-counted framing.  The telegraf
-C<[[inputs.syslog]]> input parses that format, and it rejects RFC3164, which
-rsyslog sends by default.
+The copy goes out as RFC5424 with octet-counted framing.  RFC5424 keeps the
+severity, the facility, the host and the application as fields, and the framing
+says where each message ends.  RFC3164, which rsyslog sends by default, keeps
+neither, and some parsers reject it.
 
-L<Provisioner::Recipe::grafanasyslog> is the reason for this feature.  It
-requires this recipe and asks for the stream on a loopback port.  So the logs of
-the fleet reach a dashboard without a second listener on the network.
+A recipe that reads the stream requires this recipe and asks for a copy on a
+loopback port.  So it gets the logs of the fleet without a second listener on
+the network, and this recipe does not need to know what it does with them.
 
 C<forward_text> is the same, in the text format that rsyslog writes to its own
 files: an RFC3339 time stamp, the host, the tag and the message, one message to a
@@ -190,7 +191,7 @@ sub args {
                 # bad destination and its field.
                 items       => { type => 'string', pattern => "$HOST_PORT" },
                 default     => [],
-                description => 'host:port destinations each received message is copied to, above the ruleset stop.  For a consumer on this guest, such as the telegraf grafanasyslog configures.  A bracketed IPv6 literal is refused rather than supported: the consumers this exists for are on loopback.',
+                description => 'host:port destinations each received message is copied to, above the ruleset stop, as RFC5424.  For a consumer on this guest.  A bracketed IPv6 literal is refused rather than supported: the consumers this exists for are on loopback.',
             },
             forward_text => {
                 type        => 'array',
@@ -208,7 +209,7 @@ Returns C<%opts> with each repeated C<forward> and C<forward_text> destination
 removed.
 
 More than one party can ask for the same destination.  For example, an operator
-names it, and L<Provisioner::Recipe::grafanasyslog> asks for it as a dependent.
+names it, and a recipe that reads the stream asks for it as a dependent.
 C<reconcile> settles only scalar fields, and L<Hash::Merge> joins the two arrays.
 Without this method, the ruleset gets two identical C<omfwd> actions and sends
 each message to that port twice.
@@ -223,6 +224,19 @@ sub enrich {
     }
 
     return %opts;
+}
+
+=head2 %required = $recipe->required_recipes(%opts)
+
+C<ossec>, so that every collector runs an OSSEC manager over what it receives,
+with its rules and its mail to the admin.  The two require each other, because
+C<ossec> asks this recipe for a copy of the stream.  See
+L<Provisioner::Cookbook/Recipes that require each other>.
+
+=cut
+
+sub required_recipes {
+    return ( ossec => sub { () } );
 }
 
 =head2 %limits = $recipe->rate_limits(%opts)

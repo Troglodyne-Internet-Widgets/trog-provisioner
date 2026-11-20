@@ -29,9 +29,9 @@ ruleset(name="logcollector") {
 [%# Above the stop, because stop ends the processing of the message.  A forward
     below it never runs.
 
-    RFC5424 with octet-counted framing, because the telegraf syslog input parses
-    that.  It rejects RFC3164, the default format of rsyslog.  These copies go to
-    a consumer on this guest (see Provisioner::Recipe::logcollector). -%]
+    RFC5424 with octet-counted framing, which keeps the fields of each message.
+    These copies go to a consumer on this guest.  Provisioner::Recipe::logcollector
+    has the whole account. -%]
 [% FOR dest IN forward -%]
 [% parts = dest.split(':') -%]
     action(type="omfwd" target="[% parts.0 %]" port="[% parts.1 %]" protocol="tcp"
