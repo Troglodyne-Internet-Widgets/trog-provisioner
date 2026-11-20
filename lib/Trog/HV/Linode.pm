@@ -11,8 +11,8 @@ use re '/aasx';
 use parent 'Trog::HV::Cloud';
 
 use List::Util qw{any sum0};
-use MIME::Base64();
 use Cpanel::JSON::XS();
+use YAML::XS();
 use Crypt::PRNG();
 use Time::HiRes qw{sleep time};
 use Provisioner::Vars();
@@ -93,7 +93,10 @@ L<Trog::HV/backend_for(%opts)>.
 
 Returns L<Linode::API> and the version of it that this backend needs, which
 L<Trog::HV/$module = $hv-E<gt>require_client> loads when a client is first
-built.  0.003 is the first release that has a rule for the C<ip> format, without
+built.  0.004 is the first release with C<encode_user_data>, which compresses
+the cloud-init payload under the 16384 bytes that Linode takes, and the first
+that refuses a longer one before it is sent.
+0.003 is the first release that has a rule for the C<ip> format, without
 which every call of L</$address = $hv-E<gt>set_reverse_dns($domain, $name)> warns.
 0.002 is the first that reads a path Linode writes a slash into as a path rather
 than as one escaped segment, without which every call about a type is a 404.
@@ -105,7 +108,7 @@ sub config_keys {
 }
 sub marker        { return 'linode_token' }
 sub size_key      { return 'linode_type' }
-sub client_module { return ( 'Linode::API', '0.003' ) }
+sub client_module { return ( 'Linode::API', '0.004' ) }
 
 =head2 build(%opts)
 
@@ -511,12 +514,34 @@ sub set_reverse_dns ( $self, $domain, $name ) {
     return $address;
 }
 
-# Linode takes the payload base64 encoded, for its metadata service to hand to
-# cloud-init, and refuses one over 64KB before encoding.
-my sub metadata ($user_data) {
+# The payload compressed, which cloud-init uncompresses, because Linode refuses
+# one over 16384 bytes after decoding.
+my sub metadata ( $self, $user_data ) {
     return () unless $user_data;
-    die 'The cloud-init payload is ' . length($user_data) . " bytes, and Linode takes 65535 at most\n" if length $user_data > 65535;
-    return ( metadata => { user_data => MIME::Base64::encode_base64( $user_data, q{} ) } );
+    $self->require_client;
+    return ( metadata => { user_data => Linode::API->encode_user_data($user_data) } );
+}
+
+=head2 $hv->check_user_data($user_data)
+
+Dies when Linode would refuse C<$user_data> even compressed, with both of its
+sizes and the three largest files of its C<write_files>, which are where to
+look for something to take out.  Returns true otherwise.  See
+L<Trog::HV/$hv-E<gt>check_user_data($user_data)>.
+
+=cut
+
+sub check_user_data {
+    my ( $self, $user_data ) = @_;
+    return 1 if eval { metadata( $self, $user_data ); 1 };
+
+    # Where in this file encode_user_data was called from, which croak adds.
+    my $why = $@ =~ s/[ ]at[ ]\S+[ ]line[ ]\d+[.]?\n?\z/\n/r;
+
+    my $seed  = eval { YAML::XS::Load($user_data) } // {};
+    my @files = grep { ref $_ eq 'HASH' } @{ ref $seed->{write_files} eq 'ARRAY' ? $seed->{write_files} : [] };
+    my @large = grep { defined } ( reverse sort { $a->[0] <=> $b->[0] } map { [ length( $_->{content} // q{} ), $_->{path} // '(no path)' ] } @files )[ 0 .. 2 ];
+    die 'Linode will not take the cloud-init payload of ' . $self->describe . ": $why" . ( @large ? "The largest files that it writes:\n" . join( q{}, map { sprintf "  %6d bytes  %s\n", @$_ } @large ) : q{} );
 }
 
 # Linode requires one to deploy an image, and scores its strength.
@@ -582,7 +607,7 @@ sub create_guest {
     die "Building '" . ( $spec{name} // q{} ) . "' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
     my %body = instance_body( $self, %spec );
 
-    %body = ( %body, image => $spec{image}, root_pass => root_pass(), booted => Cpanel::JSON::XS::true(), metadata( $spec{user_data} ) );
+    %body = ( %body, image => $spec{image}, root_pass => root_pass(), booted => Cpanel::JSON::XS::true(), metadata( $self, $spec{user_data} ) );
     my $linode = call( $self, 'post-linode-instance', {}, json => \%body );
     return wait_for( $self, $linode->{id}, $body{label}, 'running' );
 }
@@ -651,7 +676,7 @@ sub rebuild_guest {
     my $image = $spec{image};
     die "Rebuilding '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $image;
 
-    my %body = ( image => $image, root_pass => root_pass(), booted => Cpanel::JSON::XS::true(), metadata( $spec{user_data} ) );
+    my %body = ( image => $image, root_pass => root_pass(), booted => Cpanel::JSON::XS::true(), metadata( $self, $spec{user_data} ) );
     $body{type} = $spec{size} if $spec{size} && $spec{size} ne $linode->{type};
 
     call( $self, 'post-rebuild-linode-instance', { linodeId => $linode->{id} }, json => \%body );

@@ -1032,8 +1032,12 @@ sub provision_domain (%args) {
 
     return reprovision_guest( hv => $hv, config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, own_hv => $own_hv ) if $reuse;
 
-    # The guest fetches its payload from this machine, so let its key in.
+    # Before the snapshot, which shuts a cloud guest down, so that a seed the
+    # backend cannot send stops the run while the guest is as it was.
     my %seed = read_seed($config);
+    $hv->check_user_data( $seed{'user-data'} );
+
+    # The guest fetches its payload from this machine, so let its key in.
     authorize_guest_key($domain);
 
     # All that provision.conf says, as a plain hash for a recipe, without the

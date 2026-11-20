@@ -42,7 +42,8 @@ $mock->redefine(
         return exists $answer{$url}
           ? { success => 1, status => 200, reason => 'OK',        content => $answer{$url} }
           : { success => 0, status => 404, reason => 'Not Found', content => q{} };
-    }
+    },
+    trim_key => sub { "trimmed:$_[0]" },
 );
 
 sub source {
@@ -102,16 +103,17 @@ subtest 'files: an armored key, a source and a pin' => sub {
     );
     my %file = map { $_->{path} => $_ } @files;
 
-    is_deeply( [ sort keys %file ], [qw{/etc/apt/keyrings/vendor.asc /etc/apt/preferences.d/vendor.pref /etc/apt/sources.list.d/vendor.sources}], 'a key, a source and a pin' );
-    is( $file{'/etc/apt/keyrings/vendor.asc'}{content}, $ARMORED, 'the armored key as it came, which apt reads from a .asc' );
-    ok( !$file{'/etc/apt/keyrings/vendor.asc'}{encoding}, 'as text' );
-    is( $file{'/etc/apt/sources.list.d/vendor.sources'}{content}, <<'SOURCES', 'the source in deb822, signed by that key' );
+    is_deeply( [ sort keys %file ], [qw{/etc/apt/keyrings/vendor.gpg /etc/apt/preferences.d/vendor.pref /etc/apt/sources.list.d/vendor.sources}], 'a key, a source and a pin' );
+    is( decode_base64( $file{'/etc/apt/keyrings/vendor.gpg'}{content} ), "trimmed:$ARMORED", 'the armored key as trim_key leaves it, in a .gpg' );
+    is( $file{'/etc/apt/keyrings/vendor.gpg'}{encoding},                 'b64',              'in base64, because the user-data is text' );
+    is( index( $file{'/etc/apt/keyrings/vendor.gpg'}{content}, "\n" ),   -1,                 'on one line, which the user-data indents once' );
+    is( $file{'/etc/apt/sources.list.d/vendor.sources'}{content},        <<'SOURCES',        'the source in deb822, signed by that key' );
 Types: deb
 URIs: https://apt.vendor.test/debian/
 Suites: stable unstable
 Components: main contrib
 Architectures: amd64
-Signed-By: /etc/apt/keyrings/vendor.asc
+Signed-By: /etc/apt/keyrings/vendor.gpg
 SOURCES
     is( $file{'/etc/apt/preferences.d/vendor.pref'}{content},                   "Package: vendor-*\nPin: origin apt.vendor.test\nPin-Priority: 600\n", 'the pin names the host of the archive' );
     is( $asked{'HEAD https://apt.vendor.test/debian/dists/unstable/InRelease'}, 1,                                                                     'each suite was asked for, without the doubled slash' );
@@ -126,9 +128,9 @@ subtest 'files: a binary key' => sub {
     my @files = Provisioner::Packager::Deb->files( source( name => 'binary', uri => 'https://apt.binary.test', key => 'https://apt.binary.test/key.gpg' ) );
     my ($key) = grep { index( $_->{path}, 'keyrings' ) >= 0 } @files;
 
-    is( $key->{path},                     '/etc/apt/keyrings/binary.gpg', 'a binary key goes in a .gpg' );
+    is( $key->{path},                     '/etc/apt/keyrings/binary.gpg', 'a binary key goes in a .gpg too' );
     is( $key->{encoding},                 'b64',                          'base64, because the user-data is text' );
-    is( decode_base64( $key->{content} ), $BINARY,                        'and it decodes to the key' );
+    is( decode_base64( $key->{content} ), "trimmed:$BINARY",              'and it decodes to the key as trim_key leaves it' );
     ok( !grep( { index( $_->{path}, 'preferences' ) >= 0 } @files ), 'no pin without one' );
 };
 
@@ -216,12 +218,56 @@ subtest 'files: a key that must have its fingerprint' => sub {
     %answer = ( %suite, 'https://apt.fpr.test/one.asc' => $armored, 'https://apt.fpr.test/both.asc' => $both );
     my %fpr_source = ( name => 'fpr', uri => 'https://apt.fpr.test', key => 'https://apt.fpr.test/one.asc' );
     my ($keyring)  = Provisioner::Packager::Deb->files( source( %fpr_source, fingerprint => lc $fpr{one} ) );
-    is( $keyring->{content}, $armored, 'a key with the fingerprint of its source is written, whatever its case' );
+    is( decode_base64( $keyring->{content} ), "trimmed:$armored", 'a key with the fingerprint of its source is written, whatever its case' );
     like( exception { Provisioner::Packager::Deb->files( source( %fpr_source, fingerprint => $fpr{two} ) ) }, qr/is[ ]$fpr{one},[ ]not[ ]$fpr{two}/, 'one with another stops the build' );
     like( exception { Provisioner::Packager::Deb->files( source( %fpr_source, key => 'https://apt.fpr.test/both.asc', fingerprint => $fpr{one} ) ) }, qr/[ ]and[ ]/, 'and so does a file that holds a second key beside it' );
 
     is( scalar Provisioner::Packager::Deb->merge( source( fingerprint => $fpr{one} ) ), 1, 'merge takes a source with a fingerprint' );
     like( exception { Provisioner::Packager::Deb->merge( source( fingerprint => 'ABCD' ) ) }, qr/fingerprint/, 'and refuses one that is not 40 hex digits' );
+};
+
+# Keys that gpg makes here, and what gpg says is left of them.
+subtest 'trim_key: only what apt needs to check a signature' => sub {
+    my $gpg = File::Which::which('gpg');
+    plan skip_all => 'no gpg here to make keys with' unless $gpg;
+    my $trim = $mock->original('trim_key');
+    my $home = File::Temp::tempdir( CLEANUP => 1 );
+    my $run  = sub {
+        my ( $input, @args ) = @_;
+        IPC::Run3::run3( [ $gpg, '--homedir', $home, '--batch', @args ], \$input, \my $out, \my $err );
+        die "gpg @args: $err" if $?;
+        return $out;
+    };
+    my $fpr_of = sub { ( $run->( q{}, qw{--with-colons --list-keys}, $_[0] ) =~ m/^fpr:+([[:xdigit:]]{40}):/m )[0] };
+
+    # Subkeys as their usage, which is what gpg --show-keys says of what is left.
+    my $shown = sub {
+        my ($key) = @_;
+        my @lines = map { [ split m/:/ ] } split m/\n/, $run->( $key, qw{--with-colons --show-keys} );
+        return {
+            primary => ( map { $_->[9] } grep { $_->[0] eq 'fpr' } @lines )[0],
+            subkeys => [ sort map { $_->[11] } grep { $_->[0] eq 'sub' } @lines ],
+        };
+    };
+
+    $run->( q{}, qw{--passphrase}, q{}, '--quick-gen-key', 'vendor <vendor@test.test>', qw{rsa2048 cert never} );
+    my $vendor = $fpr_of->('vendor@test.test');
+    my @usages = do { no warnings 'qw'; qw{encr sign,encr sign} };
+    $run->( q{}, '--passphrase', q{}, '--quick-add-key', $vendor, 'rsa2048', $_, 'never' ) for @usages;
+    my $armored = $run->( q{}, qw{--armor --export}, 'vendor@test.test' );
+    is_deeply( $shown->($armored)->{subkeys}, [qw{e es s}], 'a key that can encrypt, sign and do both' );
+
+    my $trimmed = $trim->($armored);
+    is_deeply( $shown->($trimmed), { primary => $vendor, subkeys => [qw{es s}] }, 'keeps its primary key and the subkeys that sign, and drops the one that only encrypts' );
+    unlike( $trimmed, qr/BEGIN[ ]PGP/, 'binary' );
+    ok( length($trimmed) < length( $run->( q{}, qw{--export}, 'vendor@test.test' ) ), 'and smaller than the whole key in binary' );
+
+    $run->( q{}, qw{--passphrase}, q{}, '--quick-gen-key', 'plain <plain@test.test>', qw{rsa2048 sign never} );
+    my $plain = $fpr_of->('plain@test.test');
+    $run->( q{}, '--passphrase', q{}, '--quick-add-key', $plain, qw{rsa2048 encr never} );
+    is_deeply( $shown->( $trim->( $run->( q{}, qw{--export}, 'plain@test.test' ) ) ), { primary => $plain, subkeys => [] }, 'a primary key that signs itself keeps it, without its subkey that encrypts' );
+
+    like( exception { $trim->('not a key') }, qr/gpg[ ]reads[ ]no[ ]OpenPGP[ ]key/, 'what is not a key is refused' );
 };
 
 subtest 'forbid: a pin that keeps packages out, for one domain' => sub {

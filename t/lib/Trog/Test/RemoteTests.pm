@@ -122,11 +122,13 @@ sub run {
     );
 
     # The archive of a vendor is not part of it either.  The generator fetches
-    # the key and asks for the suites of each one that a recipe names, and pdns
-    # names one for every domain here, because each holds its own zone.
+    # the key, trims it with gpg, and asks for the suites of each one that a
+    # recipe names, and pdns names one for every domain here, because each
+    # holds its own zone.
     require Provisioner::Packager::Deb;
     my $apt_mock = Test::MockModule->new('Provisioner::Packager::Deb');
-    $apt_mock->redefine( fetch => sub { return { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+    $apt_mock->redefine( fetch    => sub { return { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+    $apt_mock->redefine( trim_key => sub { return "trimmed:$_[0]" } );
 
     # That key has no fingerprint, so a source that pins one goes in without
     # it.  t/Provisioner-Packager-Deb.t tests the pin.

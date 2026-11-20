@@ -999,6 +999,21 @@ sub nic_slots             ( $self, @ ) { return abstract( $self, 'nic_slots' ) }
 sub nic_names             ( $self, @ ) { return abstract( $self, 'nic_names' ) }
 sub has_tpm               ( $self, @ ) { return abstract( $self, 'has_tpm' ) }
 
+=head2 $hv->check_user_data($user_data)
+
+Dies with the reason when this backend cannot hand the cloud-init payload
+C<$user_data> to a guest, and returns true when it can.  F<bin/provision> asks
+it before it snapshots or clears the guest, so a payload that cannot be sent
+stops the run while the guest is as it was.
+
+True here, because libvirt writes the seed to an ISO, which has no limit to
+speak of.  A backend that sends the payload through an API with a limit
+overrides it, as L<Trog::HV::Linode> does.
+
+=cut
+
+sub check_user_data { return 1 }
+
 =head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
 
 Takes a snapshot just before a rebuild, as the rollback point, and returns its

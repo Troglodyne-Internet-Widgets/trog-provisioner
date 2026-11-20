@@ -266,10 +266,15 @@ sub merge {
 
 Fetches the key of each source, asks the archive for each suite, and returns
 the files for them.  Each file is a hash reference with C<path>, C<content>,
-C<permissions>, and C<encoding>, which is C<b64> for a binary key and absent
+C<permissions>, and C<encoding>, which is C<b64> for the key and absent
 otherwise.
 
-A key is fetched once for each process, however many domains name it.
+The key goes in the keyring as L</$trimmed = trim_key($key)> leaves it:
+binary, in base64 on one line.  That is its smallest form in the user-data,
+whose size a cloud such as Linode limits.  Armor wraps the same base64 in lines
+with a header, and the user-data indents each line.
+
+A key is fetched and trimmed once for each process, however many domains name it.
 
 Dies when a key cannot be fetched or is not a PGP key, when a source has a
 C<fingerprint> and its key is not one primary key with it, and when the archive
@@ -294,12 +299,13 @@ sub files {
             check_suite( $source->{uri}, $suite, $name );
         }
 
-        my $armored = $key =~ $ARMORED;
-        my $keyring = "/etc/apt/keyrings/$name." . ( $armored ? 'asc' : 'gpg' );
+        state %trimmed;
+        my $keyring = "/etc/apt/keyrings/$name.gpg";
         push @files, {
             path        => $keyring,
             permissions => '0644',
-            ( $armored ? ( content => $key ) : ( content => encode_base64($key), encoding => 'b64' ) ),
+            content     => encode_base64( $trimmed{ $source->{key} } //= trim_key($key), q{} ),
+            encoding    => 'b64',
         };
 
         my @lines = (
@@ -389,16 +395,23 @@ when gpg reads no key in C<$key>.
 # The command, so that a test can run another one.
 our @GPG = ('gpg');
 
-# The first release of GnuPG with --show-keys.
+# The first release of GnuPG with --show-keys.  --export-filter is older.
 our $GPG_SHOW_KEYS = '2.2.8';
+
+# What gpg prints when it reads $input with @args, in the home directory $home,
+# so that no keyring of the user changes.  $doing names the job, and $refusal
+# starts the error when gpg exits with a failure.
+my sub gpg ( $home, $input, $doing, $refusal, @args ) {
+    my ( $out, $err ) = ( q{}, q{} );
+    eval { IPC::Run3::run3( [ @GPG, '--homedir', "$home", qw{--batch --no-tty --quiet}, @args ], \$input, \$out, \$err ); 1 }
+      or die "$doing needs gpg, which did not run: $@";
+    die "$refusal: " . ( ( split m/\n/, $err )[0] // 'it exited with ' . ( $? >> 8 ) ) . "\n" if $?;
+    return $out;
+}
 
 sub key_fingerprints {
     my ($key) = @_;
-    my $home = File::Temp->newdir;
-    my ( $out, $err ) = ( q{}, q{} );
-    eval { IPC::Run3::run3( [ @GPG, '--homedir', "$home", qw{--batch --no-tty --with-colons --show-keys} ], \$key, \$out, \$err ); 1 }
-      or die "Reading the fingerprint of a signing key needs gpg, which did not run: $@";
-    die 'gpg reads no OpenPGP key in it: ' . ( ( split m/\n/, $err )[0] // 'it exited with ' . ( $? >> 8 ) ) . "\n" if $?;
+    my $out = gpg( File::Temp->newdir, $key, 'Reading the fingerprint of a signing key', 'gpg reads no OpenPGP key in it', qw{--with-colons --show-keys} );
 
     # One pub line for each primary key, and one fpr line after it, and after each of its subkeys.
     my ( @fingerprints, $primary );
@@ -410,6 +423,31 @@ sub key_fingerprints {
         elsif ( $type eq 'fpr' && $primary ) { push @fingerprints, uc $field[8] }
     }
     return @fingerprints;
+}
+
+=head2 $trimmed = trim_key($key)
+
+C<$key>, an armored or a binary key, as a binary key with only what apt needs
+to check the signature of an archive.  Each primary key keeps its user IDs, its
+newest self-signatures and each subkey that can sign.  A subkey that can only
+encrypt goes, with the signatures of other people.  A vendor key often has an
+RSA-4096 subkey to encrypt with, which is more than a kilobyte that apt never
+reads.  A subkey that can both sign and encrypt stays.
+
+gpg reads it in a home directory of its own, as
+L</@fingerprints = key_fingerprints($key)> does.
+Dies when there is no gpg to run, and when gpg reads no key in C<$key>.
+
+=cut
+
+sub trim_key {
+    my ($key) = @_;
+    my $home  = File::Temp->newdir;
+    my $doing = 'Trimming a signing key';
+    gpg( $home, $key, $doing, 'gpg reads no OpenPGP key in it', qw{--import} );
+
+    # = is a match of the whole usage, where =~ would also drop a subkey that signs.
+    return gpg( $home, q{}, $doing, 'gpg could not export the key', qw{--export --export-options export-minimal --export-filter}, 'drop-subkey=usage = e' );
 }
 
 =head2 $why = Provisioner::Packager::Deb->gpg_error()
