@@ -482,6 +482,14 @@ Both name C<mail.DOMAIN>, and the ports where TLS starts at once.  Behind a
 relay of L<Provisioner::Recipe::nginx>, this recipe makes both names public
 names, so that a client outside can fetch them.
 
+Both also give the whole address as the user name, because dovecot and the
+SASL of postfix know each account as C<$name@$domain>.  A client that is set up
+by hand often gives the name alone, and then every login fails, with any
+password.  With C<default_realm> on, dovecot adds the domain to a name that has
+none, for IMAP, POP3 and the SASL of postfix.  dovecot has one default realm
+for the guest, so only one domain of a guest can turn it on.  The build of a
+second domain that turns it on stops, and names the file that already sets it.
+
 =cut
 
 sub required_recipes {
@@ -555,6 +563,11 @@ sub args {
                         },
                     },
                 },
+            },
+            default_realm => {
+                type        => 'boolean',
+                default     => 0,
+                description => 'Whether an account name with no domain logs in to this domain, so that a client can give someuser for someuser@$domain.  One domain of a guest can set it.  The build refuses a second.',
             },
             unlisted_accounts => {
                 type        => 'string',

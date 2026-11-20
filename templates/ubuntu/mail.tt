@@ -53,6 +53,12 @@ mkdir -p /etc/dovecot/conf.d
     warning runs as dovecot, cannot read its configuration. -%]
 install -m 0644 -o root -g root dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
 install -m 0644 -o root -g root dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
+[% IF default_realm -%]
+[%# dovecot has one default realm, and takes the last file that sets it with no
+    warning.  So a second domain that asks for it would take the bare names of
+    the first.  Stop and name the files instead. -%]
+test -z "$$(grep -l '^auth_default_realm' /etc/dovecot/conf.d/*.conf | grep -vxF /etc/dovecot/conf.d/10-[% domain %].conf)" || { echo "mail: [% domain %]: default_realm is on, and another file of dovecot already sets the default realm.  Turn default_realm off for one of the domains:"; grep -H '^auth_default_realm' /etc/dovecot/conf.d/*.conf | sed 's/^/mail:   /'; exit 1; }
+[% END -%]
 # The accounts come from the recipe, so keep the salvaged passwd file as
 # passwd.old.  The data target restored the mailboxes before this target ran.
 [%# An address that the salvaged file holds and mail.names lacks has a mailbox
