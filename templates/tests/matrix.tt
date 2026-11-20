@@ -135,6 +135,19 @@ foreach my $secret ($signing_key, $reg_secret) {
 my $keyline = do { local (@ARGV, $/) = $signing_key; <> } // '';
 like($keyline, qr/\Aed25519 \S+ \S+/, 'the key is the one the store handed over, in the format synapse reads');
 
+# What other servers learn about the keys of this one.
+my $published = eval { JSON::PP::decode_json($keys) } // {};
+my ($version) = $keyline =~ m/\Aed25519 (\S+)/;
+ok( exists( ( $published->{verify_keys} // {} )->{ 'ed25519:' . ( $version // '' ) } ), 'synapse signs with the key from the store' ) or diag $keys;
+[% FOR id IN old_signing_keys.keys().sort() %]
+is( ( ( $published->{old_verify_keys} // {} )->{'[% id %]'} // {} )->{key}, '[% old_signing_keys.$id.public %]', 'and publishes the old key [% id %] under old_verify_keys' ) or diag $keys;
+[% END %]
+
+# The check that the build ran before synapse started, now that synapse wrote
+# events of its own.
+my $check = `[% script_dir %]/matrix_check_signing_key $live/homeserver.db '[% server_name %]' $signing_key 2>&1`;
+is( $? >> 8, 0, 'the key from the store signed the events of this homeserver' ) or diag $check;
+
 # homeserver.yaml must name these paths, so that synapse uses the secrets from
 # the store.
 my $hs = do { local (@ARGV, $/) = '/etc/matrix-synapse/homeserver.yaml'; <> } // '';

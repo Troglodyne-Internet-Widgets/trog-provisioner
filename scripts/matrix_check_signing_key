@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# Refuse a homeserver whose database holds events that its signing key did not
+# sign.  That is a restored database with a new key: other servers know the
+# server name with the old key, and reject what the new key signs.
+#
+#     matrix_check_signing_key <database> <server_name> <signing key file> [old key ID ...]
+#
+# It passes (exits 0) when the database does not exist or holds no event that a
+# local account sent, which is a first build.  It also passes when one of the
+# newest local events carries a signature of server_name under the ID of the key
+# in the file, or under one of the old key IDs.  Otherwise it says so and exits 1.
+#
+# Only the newest local events are read, so the check stays quick on a database
+# of millions of events.  A key that signed the newest events is the current key.
+# The old key IDs cover a rotation that no local event followed yet.
+
+set -euo pipefail
+
+DATABASE="${1:?usage: matrix_check_signing_key <database> <server_name> <signing key file> [old key ID ...]}"
+SERVER_NAME="${2:?usage: matrix_check_signing_key <database> <server_name> <signing key file> [old key ID ...]}"
+KEY_FILE="${3:?usage: matrix_check_signing_key <database> <server_name> <signing key file> [old key ID ...]}"
+shift 3
+
+# How many of the newest local events to read.
+RECENT=200
+
+# The values go into SQL as literals, so each one must be a plain name.
+NAME_RE='^[A-Za-z0-9.-]+(:[0-9]+)?$'
+ID_RE='^ed25519:[A-Za-z0-9_]+$'
+
+if [[ ! "$SERVER_NAME" =~ $NAME_RE ]]; then
+    echo "matrix_check_signing_key: $SERVER_NAME is not a server name" >&2
+    exit 2
+fi
+
+if [ ! -s "$DATABASE" ]; then
+    echo "matrix_check_signing_key: no database at $DATABASE yet, so no key to keep"
+    exit 0
+fi
+
+# The file holds one line: the algorithm, the version of the key, and its seed.
+read -r algorithm version _ < "$KEY_FILE"
+CURRENT="$algorithm:$version"
+
+ids=()
+for id in "$CURRENT" "$@"; do
+    if [[ ! "$id" =~ $ID_RE ]]; then
+        echo "matrix_check_signing_key: $id is not the ID of an ed25519 key" >&2
+        exit 2
+    fi
+    ids+=("'$id'")
+done
+known="$(IFS=,; echo "${ids[*]}")"
+
+# The events table of a database that synapse never started does not exist.
+if [ -z "$(sqlite3 -readonly "$DATABASE" "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'")" ]; then
+    echo "matrix_check_signing_key: $DATABASE has no events table yet, so no key to keep"
+    exit 0
+fi
+
+read -r local signed < <(sqlite3 -readonly -separator ' ' "$DATABASE" "
+    WITH recent AS (
+        SELECT event_id FROM events
+        WHERE sender LIKE '%:$SERVER_NAME'
+        ORDER BY stream_ordering DESC
+        LIMIT $RECENT
+    )
+    SELECT count(*),
+           coalesce(sum(EXISTS (
+               SELECT 1 FROM json_each(j.json, '\$.signatures.\"$SERVER_NAME\"')
+               WHERE json_each.key IN ($known)
+           )), 0)
+    FROM recent JOIN event_json AS j USING (event_id)")
+
+if [ "$local" -eq 0 ]; then
+    echo "matrix_check_signing_key: $DATABASE holds no event from $SERVER_NAME, so no key to keep"
+    exit 0
+fi
+
+if [ "$signed" -eq 0 ]; then
+    echo "matrix_check_signing_key: none of the newest $local events from $SERVER_NAME in $DATABASE is signed by $CURRENT, the key in $KEY_FILE${1:+, or by an old key}" >&2
+    exit 1
+fi
+
+echo "matrix_check_signing_key: $signed of the newest $local events from $SERVER_NAME are signed by a key of this homeserver"
+exit 0

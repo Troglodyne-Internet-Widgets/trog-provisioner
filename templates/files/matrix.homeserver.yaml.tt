@@ -37,6 +37,17 @@ log_config: "/etc/matrix-synapse/log.yaml"
 media_store_path: [% install_dir %]/matrix.[% domain %]/media
 
 signing_key_path: /etc/matrix-synapse/homeserver.signing.key
+[% IF old_signing_keys.keys().size() %]
+
+# Synapse publishes these as old_verify_keys, so that other servers can still
+# check the events that each key signed.
+old_signing_keys:
+[% FOR id IN old_signing_keys.keys().sort() -%]
+  "[% id %]":
+    key: "[% old_signing_keys.$id.public %]"
+    expired_ts: [% old_signing_keys.$id.expired_ts %]
+[% END -%]
+[% END %]
 
 trusted_key_servers:
   - server_name: "matrix.org"
