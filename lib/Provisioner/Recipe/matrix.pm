@@ -283,7 +283,15 @@ sub args {
             },
 
             # Listed on the index page of the guest.
-            channels                   => { type => 'array',  items      => { type => 'string' }, default => [] },
+            channels => {
+                type    => 'array',
+                default => [],
+                items   => {
+                    type        => 'string',
+                    pattern     => '^[^#:]+$',
+                    description => 'The local part of a room alias, such as general.  The page adds the # and the server name.',
+                },
+            },
             admin_user                 => { type => 'string', default    => 'admin' },
             admin_password             => { type => 'string', 'x-secret' => 1 },
             smtp_host                  => { type => 'string' },
