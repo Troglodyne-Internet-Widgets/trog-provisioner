@@ -7,8 +7,9 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use Cwd          ();
-use Getopt::Long ();
+use Cwd             ();
+use Getopt::Long    ();
+use Module::Runtime ();
 
 =head1 cpan_install
 
@@ -179,7 +180,9 @@ sub main {
                 print {*STDERR} "cpan_install: dzil $which --missing exited $failed in $dir, so what it needs is not known\n";
                 return $failed;
             }
-            my @missing = grep { $_ } map { s/\s+\z//r } @said;
+            my @lines   = grep { $_ ne q{} } map { s/\s+\z//r } @said;
+            my @missing = grep { Module::Runtime::is_module_name($_) } @lines;
+            print {*STDERR} "cpan_install: dzil $which printed '$_', which names no module, so it is not installed\n" for grep { !Module::Runtime::is_module_name($_) } @lines;
             next unless @missing;
             $rc = install_specs( $bin, \%opt, @missing ) and last;
         }

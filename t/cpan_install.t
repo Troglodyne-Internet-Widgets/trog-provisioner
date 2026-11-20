@@ -126,6 +126,14 @@ subtest 'installdeps and dzil' => sub {
     $r = install( args => [qw{dzil /bogus/checkout}] );
     is( scalar( grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
 
+    # What a plugin prints while dzil builds, as TidyAll and Test2 do.
+    $r = install(
+        args    => [qw{dzil /bogus/checkout}],
+        capture => { "$PERL/bin/dzil listdeps" => [ "[tidied]  lib/Bogus.pm\n", "# Seeded srand with seed '20261120' from local date.\n", "Moo\n" ] },
+    );
+    is_deeply( [ grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ], [ [ undef, @CPM, '--test', 'Moo' ] ], 'a line that names no module is not installed' );
+    ok( index( $r->{err}, q{'[tidied]  lib/Bogus.pm', which names no module} ) >= 0, 'and the log says which line it left out' ) or diag $r->{err};
+
     $r = install( args => [qw{--notest dzil /bogus/old-checkout}] );
     is_deeply( $r->{ran}, [ [ '/bogus/old-checkout', @CPM, '--top-level-phase', 'configure,build,test,runtime' ] ], 'a checkout with no dist.ini, from before its distribution used dzil, is read as installdeps reads it' );
     like( $r->{err}, qr{/bogus/old-checkout[ ]has[ ]no[ ]dist[.]ini}, 'and the log says why dzil was not asked' );
