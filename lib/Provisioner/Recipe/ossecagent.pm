@@ -66,11 +66,25 @@ F<ossec.conf.d/50-ossecagent>.
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One agent runs on the machine.
+False.  One agent runs on the machine, with one F<client.keys> that holds the
+key of one domain.  The grant of a second domain on the machine would replace
+that key with its own, so the build of the second would cut off the first.
 
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 @names = $recipe->exclusive_on_machine_with()
+
+C<ossec>.  The package of the agent conflicts with the package of the manager,
+so a machine has one or the other.  The manager reads the logs of its own
+machine from the stream, and needs no agent there.
+
+=cut
+
+sub exclusive_on_machine_with {
+    return qw{ossec};
+}
 
 =head2 %args = $recipe->args()
 
