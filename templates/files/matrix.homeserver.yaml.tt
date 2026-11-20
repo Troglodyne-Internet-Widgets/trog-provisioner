@@ -85,8 +85,14 @@ url_preview_accept_language:
 registrations_require_3pid:
   - email
 
+[% IF channels.size() -%]
 auto_join_rooms:
-  - "#general:[% server_name %]"
+[% FOR chan IN channels -%]
+  - "#[% chan %]:[% server_name %]"
+[% END -%]
+[% ELSE -%]
+auto_join_rooms: []
+[% END -%]
 
 email:
   smtp_host: "[% smtp_host %]"

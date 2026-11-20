@@ -34,7 +34,7 @@ use Provisioner::Cookbook();
 =head2 DESCRIPTION
 
 Installs and configures a Matrix Synapse homeserver behind nginx, with the
-ketesa admin web interface.
+ketesa admin web interface and Element Web, a client in the browser.
 
 C<server_name> is the identity of the homeserver.  Every account is
 C<@user:$server_name>, every room alias ends in C<:$server_name>, and other
@@ -48,8 +48,7 @@ domain answers for those, and the homeserver has a vhost of its own.
 
 =over 4
 
-=item * The domain and its aliases serve a page that says how to connect: the
-homeserver, its server name, how to register, and the suggested channels.
+=item * The domain and its aliases serve a page with a link to Element.
 C<nginxproxy> serves it from F<www/index.html> in the domain directory, and
 sends the rest to synapse.
 
@@ -61,29 +60,39 @@ use: C</.well-known/matrix/server> says C<$server_name:8448>, and
 C</.well-known/matrix/client> says C<https://$server_name:8448>, which is the
 C<public_baseurl> of synapse.
 
-=item * C<admin.matrix.$domain> serves the admin interface.
+=item * C<admin.matrix.$domain> is the vhost of the admin interface, and
+C<element.matrix.$domain> that of Element.  Users reach them as
+C<admin.$server_name> and C<element.$server_name>, which each vhost also
+answers for.  Element starts at the homeserver, C<https://$server_name:8448>.
+Both are downloaded from their GitHub releases on every provision.
 
 =back
 
-The certificate of the domain covers C<matrix.$domain> and
-C<admin.matrix.$domain>, because they are the C<subdomains> of this recipe.
+The certificate of the domain covers C<matrix.$domain>,
+C<admin.matrix.$domain> and C<element.matrix.$domain>, because they are the
+C<subdomains> of this recipe.
 C<server_name> is on it when it is in the zone of the domain, or in a zone that
 an account of L<Provisioner::Recipe::registrar> lists.
 
 =head2 Behind a relay
 
 When the C<nginx> of the domain names a C<relay>, this recipe hands C<nginx>
-these C<public_names>: the domain and each of its aliases, for the page, and
-C<server_name>, for the vhost of the homeserver.  The relay passes them through
-on 443.  C<server_name> also has the port 8448, mapped to 8449, so the relay
+these C<public_names>: the domain and each of its aliases, for the page,
+C<server_name>, for the vhost of the homeserver, and C<admin.$server_name> and
+C<element.$server_name>, for their vhosts.  The admin interface is public as
+the admin API that it calls is, through C<server_name> on 8448.  The relay
+passes them through on 443.  C<server_name> also has the port 8448, mapped to
+8449, so the relay
 passes it alone through on 8448 to 8449 of the guest.  The vhost of the
 homeserver listens there, with the PROXY protocol.  See
 L<Provisioner::Recipe::nginx/Ports of its own>.
 
 If C<server_name> is in no zone that the guest can publish and certify,
-C<nginx> publishes and certifies C<public.matrix.$domain> in its place.  Then
-the operator points C<server_name> at the relay by hand, and the certificate of
-the guest does not cover it until it does.  See
+C<nginx> publishes and certifies C<public.matrix.$domain> in its place, and
+C<public.admin.matrix.$domain> and C<public.element.matrix.$domain> for the
+names under it.  Then the operator points C<server_name> and
+those names at the relay by hand, and the certificate of the guest does not
+cover them until they do.  See
 L<Provisioner::Recipe::nginx/Names that reach the guest through a proxy>.
 
 =head2 Taking over a homeserver
@@ -157,10 +166,16 @@ my sub relayed ($domain) {
 # PROXY protocol.
 our $PASSTHROUGH_PORT = 8449;
 
+# The names under server_name of the admin interface and of Element.
+my sub client_names ($server_name) {
+    return ( "admin.$server_name", "element.$server_name" );
+}
+
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<nginx>, with C<matrix.$domain> and C<admin.matrix.$domain> in C<sites>, and
-the C<public_names> of L</Behind a relay> when the domain has a relay.
+C<nginx>, with C<matrix.$domain>, C<admin.matrix.$domain> and
+C<element.matrix.$domain> in C<sites>, and the C<public_names> of
+L</Behind a relay> when the domain has a relay.
 
 C<nginxproxy>, with a vhost on port 80 that redirects to SSL, and a vhost on
 port 443 that serves the page from F<www> and proxies the rest to synapse on
@@ -177,13 +192,21 @@ sub required_recipes {
         nginx => sub {
             my @sites = map { "$_.$domain" } $self->subdomains();
             return ( sites => [@sites] ) unless relayed($domain);
-            my %ours    = map  { $_ => 1 } @sites, $opts{server_name} // ();
+            my %ours    = map  { $_ => 1 } @sites, defined $opts{server_name} ? ( $opts{server_name}, client_names( $opts{server_name} ) ) : ();
             my @aliases = grep { !$ours{$_} } @{ Provisioner::Cookbook->alias_map()->{$domain} // [] };
             return (
                 sites        => [@sites],
                 public_names => {
                     ( map { $_ => { vhost => $domain } } $domain, @aliases ),
-                    ( defined $opts{server_name} ? ( $opts{server_name} => { vhost => "matrix.$domain", ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT } } ) : () ),
+                    (
+                        defined $opts{server_name}
+                        ? (
+                            $opts{server_name}           => { vhost => "matrix.$domain", ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT } },
+                            "admin.$opts{server_name}"   => { vhost => "admin.matrix.$domain" },
+                            "element.$opts{server_name}" => { vhost => "element.matrix.$domain" },
+                          )
+                        : ()
+                    ),
                 },
             );
         },
@@ -242,13 +265,15 @@ sub is_multi_tenant { return 0 }
 
 =head2 @names = $recipe->subdomains()
 
-C<matrix>, which synapse is reached at, and C<admin.matrix>, which its admin
-vhost answers for.
+C<matrix>, which synapse is reached at, and C<admin.matrix> and
+C<element.matrix>, the vhosts of the admin interface and of Element.  Users
+reach those two at the names under C<server_name>.  See L</The names of the
+guest>.
 
 =cut
 
 sub subdomains {
-    return qw{matrix admin.matrix};
+    return qw{matrix admin.matrix element.matrix};
 }
 
 =head2 %args = $recipe->args()
@@ -282,14 +307,14 @@ sub args {
                 },
             },
 
-            # Listed on the index page of the guest.
             channels => {
-                type    => 'array',
-                default => [],
-                items   => {
+                type        => 'array',
+                default     => ['general'],
+                description => 'The rooms that each new account joins.  synapse makes a room that does not exist yet.',
+                items       => {
                     type        => 'string',
                     pattern     => '^[^#:]+$',
-                    description => 'The local part of a room alias, such as general.  The page adds the # and the server name.',
+                    description => 'The local part of a room alias, such as general.  The recipe adds the # and the server name.',
                 },
             },
             admin_user                 => { type => 'string', default    => 'admin' },
@@ -321,7 +346,9 @@ passes 8448 through.  See L</Behind a relay>.
 Adds C<homeserver_names>, the C<server_name> of the vhost of the homeserver:
 C<matrix.$domain>, and C<server_name> without a relay.  Behind one, the file
 of the proxy that the vhost includes names C<server_name>, so the vhost does
-not name it a second time.
+not name it a second time.  C<admin_names> and C<element_names> are the same
+for the vhosts of the admin interface and of Element, with
+C<admin.$server_name> and C<element.$server_name>.
 
 Dies when C<server_name> is the domain, C<www.$domain> or an alias of the
 domain, because the vhost of the domain answers for those.
@@ -340,6 +367,9 @@ sub enrich {
     $opts{relayed}          = relayed($domain) ? 1 : 0;
     $opts{passthrough_port} = $PASSTHROUGH_PORT if $opts{relayed};
     $opts{homeserver_names} = [ List::Util::uniq( "matrix.$domain", $opts{relayed} ? () : $opts{server_name} ) ];
+    my ( $admin, $element ) = client_names( $opts{server_name} );
+    $opts{admin_names}   = [ "admin.matrix.$domain",   $opts{relayed} ? () : $admin ];
+    $opts{element_names} = [ "element.matrix.$domain", $opts{relayed} ? () : $element ];
     return %opts;
 }
 
@@ -353,14 +383,16 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'matrix.register_admin.sh.tt' => 'matrix_register_admin.sh',
-        'matrix.homeserver.yaml.tt'   => 'homeserver.yaml',
-        'matrix.log.yaml.tt'          => 'log.yaml',
-        'matrix.admin.nginx.tt'       => 'matrix-admin.nginx.conf',
-        'matrix.nginx.tt'             => 'matrix.nginx.conf',
-        'matrix.ufw.conf.tt'          => 'matrix_ufw.conf',
-        'matrix.synapse.service.tt'   => 'matrix-synapse.service',
-        'matrix.index.html.tt'        => 'matrix.index.html',
+        'matrix.register_admin.sh.tt'   => 'matrix_register_admin.sh',
+        'matrix.homeserver.yaml.tt'     => 'homeserver.yaml',
+        'matrix.log.yaml.tt'            => 'log.yaml',
+        'matrix.admin.nginx.tt'         => 'matrix-admin.nginx.conf',
+        'matrix.element.nginx.tt'       => 'matrix-element.nginx.conf',
+        'matrix.element.config.json.tt' => 'element.config.json',
+        'matrix.nginx.tt'               => 'matrix.nginx.conf',
+        'matrix.ufw.conf.tt'            => 'matrix_ufw.conf',
+        'matrix.synapse.service.tt'     => 'matrix-synapse.service',
+        'matrix.index.html.tt'          => 'matrix.index.html',
     );
 }
 

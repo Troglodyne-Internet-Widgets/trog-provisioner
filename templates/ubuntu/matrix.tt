@@ -6,6 +6,7 @@
 mkdir -p [% install_dir %]/matrix.[% domain %]
 mkdir -p [% install_dir %]/matrix.[% domain %]/media
 mkdir -p [% install_dir %]/admin.matrix.[% domain %]
+mkdir -p [% install_dir %]/element.matrix.[% domain %]
 mkdir -p /etc/matrix-synapse
 mkdir -p /var/log/matrix-synapse
 chown -R matrix-synapse:[% admin_user %] [% install_dir %]/matrix.[% domain %]
@@ -44,12 +45,17 @@ chmod 0600 /etc/matrix-synapse/homeserver.signing.key /etc/matrix-synapse/regist
 [% script_dir %]/matrix.download-admin.sh [% install_dir %]/admin.matrix.[% domain %]
 chown -R www-data:[% admin_user %] [% install_dir %]/admin.matrix.[% domain %]
 chmod -R 0750 [% install_dir %]/admin.matrix.[% domain %]
+[% script_dir %]/matrix.download-element.sh [% install_dir %]/element.matrix.[% domain %]
+install -m 0644 element.config.json [% install_dir %]/element.matrix.[% domain %]/config.json
+chown -R www-data:[% admin_user %] [% install_dir %]/element.matrix.[% domain %]
+chmod -R 0750 [% install_dir %]/element.matrix.[% domain %]
 mkdir -p /etc/nginx/sites-enabled
-# The vhosts of the homeserver and of the admin interface.  The vhost of the
-# domain belongs to nginxproxy, which this recipe requires, and serves the page
-# below from www.
+# The vhosts of the homeserver, of the admin interface and of Element.  The
+# vhost of the domain belongs to nginxproxy, which this recipe requires, and
+# serves the page below from www.
 install -o root -g root -m 0644 matrix.nginx.conf /etc/nginx/sites-enabled/matrix.[% domain %].conf
 install -o root -g root -m 0644 matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
+install -o root -g root -m 0644 matrix-element.nginx.conf /etc/nginx/sites-enabled/element.matrix.[% domain %].conf
 chmod 0644 /etc/nginx/sites-enabled/*.conf
 install -o root -g root -m 0644 matrix_ufw.conf /etc/ufw/applications.d/matrix-homeserver
 install -m 0755 -o [% user %] -g www-data -d [% install_dir %]/[% domain %]/www
