@@ -49,9 +49,11 @@ my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
 $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
 $hv_mock->redefine( sshd_port => sub { 22 } );
 
-# pdns names a vendor archive, whose key and suite the generator asks for.
+# pdns names a vendor archive, whose key and suite the generator asks for, and
+# whose key gpg would trim.
 my $apt_mock = Test::MockModule->new('Provisioner::Packager::Deb');
-$apt_mock->redefine( fetch => sub { { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+$apt_mock->redefine( fetch    => sub { { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+$apt_mock->redefine( trim_key => sub { "trimmed:$_[0]" } );
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
@@ -217,7 +219,7 @@ subtest 'first boot gets the archive of pdns, and the pin of what conflicts' => 
     my %written   = map { $_->{path} => $_ } @{ $user_data->{write_files} // [] };
 
     like( $written{'/etc/apt/sources.list.d/powerdns.sources'}{content} // q{}, qr{^URIs:[ ]https://repo[.]powerdns[.]com/ubuntu$}m, 'the archive of pdns' );
-    ok( $written{'/etc/apt/keyrings/powerdns.asc'}, 'and its key' );
+    ok( $written{'/etc/apt/keyrings/powerdns.gpg'}, 'and its key' );
     like( $written{"/etc/apt/preferences.d/$LOCAL-conflicts.pref"}{content} // q{}, qr{^Package:[ ].*\bapache2\b}m, 'and nginx keeps apache2 out, by a pin named for the domain' );
 };
 

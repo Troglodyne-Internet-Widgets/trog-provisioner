@@ -23,6 +23,7 @@ use File::Path();
 use Test::MockModule qw{strict};
 use IPC::Run3();
 use Cpanel::JSON::XS();
+use MIME::Base64();
 
 use FindBin::libs;
 
@@ -549,7 +550,7 @@ subtest 'the installer adds a source whose key has its fingerprint, and refuses 
     };
     my $written = sub {
         my %files;
-        File::Find::find( { no_chdir => 1, wanted => sub { $files{ '/etc/apt' . substr( $_, length $apt ) } = File::Slurper::read_text($_) unless -d } }, $apt );
+        File::Find::find( { no_chdir => 1, wanted => sub { $files{ '/etc/apt' . substr( $_, length $apt ) } = File::Slurper::read_binary($_) unless -d } }, $apt );
         return %files;
     };
 
@@ -594,7 +595,8 @@ subtest 'the installer adds a source whose key has its fingerprint, and refuses 
     $deb->redefine( fetch => sub { return { success => 1, status => 200, content => $good } } );
     my %plain = %source;
     delete $plain{fingerprint};
-    is_deeply( { $written->() }, { map { ( $_->{path} => $_->{content} ) } Provisioner::Packager::Deb->files( \%plain ) }, 'with the files that first boot writes for it' );
+    my %first_boot = map { ( $_->{path} => ( ( $_->{encoding} // q{} ) eq 'b64' ? MIME::Base64::decode_base64( $_->{content} ) : $_->{content} ) ) } Provisioner::Packager::Deb->files( \%plain );
+    is_deeply( { $written->() }, \%first_boot, 'with the files that first boot writes for it, the key trimmed alike' );
     is( sprintf( '%04o', ( stat "$apt/sources.list.d/vendor.sources" )[2] & oct 7777 ), '0644', 'which every account may read' );
     is_deeply( $ran->{update},  ["$apt/sources.list.d/vendor.sources"], 'then it updates that source, which {sources} in the command stands for' ) or diag explain $ran;
     is_deeply( $ran->{install}, ['vendor-tool'],                        'and installs' );

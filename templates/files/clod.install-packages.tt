@@ -97,6 +97,21 @@ sub fingerprints {
     return @fingerprints;
 }
 
+# The key in $file as trim_key of Provisioner::Packager::Deb leaves it, binary,
+# without a subkey that can only encrypt, or nothing when gpg fails.
+sub trimmed {
+    my ($file) = @_;
+    my $home = File::Temp->newdir;
+    my @gpg  = ( @GPG, '--homedir', "$home", qw{--batch --no-tty --quiet} );
+    system { $gpg[0] } @gpg, '--import', $file;
+    return if $?;
+    open( my $fh, '-|', @gpg, qw{--export --export-options export-minimal --export-filter}, 'drop-subkey=usage = e' ) or return;
+    binmode $fh;
+    my $key = do { local $/; <$fh> };
+    close $fh or return;
+    return length $key ? $key : ();
+}
+
 # The files of a source, as Provisioner::Packager::Deb writes them, with the
 # key that $FETCH brought, or what is wrong with the key.
 sub source_files {
@@ -115,7 +130,9 @@ sub source_files {
     return "the key of $name at $source->{key} is " . ( @found ? join( ' and ', @found ) : 'none that gpg reads' ) . ", not " . uc $source->{fingerprint}
       unless @found == 1 && $found[0] eq uc $source->{fingerprint};
 
-    my $keyring = "/etc/apt/keyrings/$name." . ( $armored ? 'asc' : 'gpg' );
+    my ($trimmed) = trimmed("$tmp") or return "gpg could not trim the key of $name at $source->{key}";
+
+    my $keyring = "/etc/apt/keyrings/$name.gpg";
     my @lines   = (
         'Types: deb',
         "URIs: $source->{uri}",
@@ -124,7 +141,7 @@ sub source_files {
         ( $source->{architectures} ? 'Architectures: ' . join( ' ', @{ $source->{architectures} } ) : () ),
         "Signed-By: $keyring",
     );
-    my %files = ( $keyring => $key, "/etc/apt/sources.list.d/$name.sources" => join( "\n", @lines ) . "\n" );
+    my %files = ( $keyring => $trimmed, "/etc/apt/sources.list.d/$name.sources" => join( "\n", @lines ) . "\n" );
     if ( my $pin = $source->{pin} ) {
         my ($host) = $source->{uri} =~ m{\Ahttps?://(?:[^/\@]*\@)?([^/:]+)};
         $files{"/etc/apt/preferences.d/$name.pref"} = 'Package: ' . ( $pin->{packages} // '*' ) . "\nPin: origin \L$host\E\nPin-Priority: $pin->{priority}\n";
