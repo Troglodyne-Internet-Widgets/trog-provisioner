@@ -287,7 +287,7 @@ sub args {
             admin_user                 => { type => 'string', default    => 'admin' },
             admin_password             => { type => 'string', 'x-secret' => 1 },
             smtp_host                  => { type => 'string' },
-            smtp_port                  => { type => 'integer', default     => 465, minimum => 0 },
+            smtp_port                  => { type => 'integer', default     => 465, minimum => 0, description => 'The port of smtp_host.  The ufw profile matrix-smtp opens it outbound.' },
             smtp_user                  => { type => 'string',  description => 'The login to smtp_host, which is not always an address.' },
             smtp_pass                  => { type => 'string',  'x-secret'  => 1 },
             smtp_from                  => { type => 'string',  format      => 'email', description => 'The address that notices from the homeserver come from.' },

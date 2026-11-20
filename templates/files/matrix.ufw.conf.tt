@@ -6,3 +6,11 @@
 title=Matrix homeserver
 description=Federation and the client API of synapse, through nginx
 ports=[% federation_port %][% IF relayed %],[% passthrough_port %][% END %]/tcp
+
+[%# Outbound, the mail server of smtp_host.  The guests deny outgoing traffic
+    by default, and setup-ufw-rules issues "allow out" for every profile, and
+    opens the port inbound too, where nothing listens. -%]
+[matrix-smtp]
+title=Matrix mail
+description=The mail server that synapse sends its notices through
+ports=[% smtp_port %]/tcp
