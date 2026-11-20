@@ -55,6 +55,10 @@ foreach my $port ( 443, [% federation_port %] ) {
 # Other servers reach federation from outside, so ufw lets it in.
 my $ufw = `ufw status 2>&1`;
 like( $ufw, qr/^matrix-homeserver\s+ALLOW/m, 'ufw lets federation in' ) or diag $ufw;
+
+# synapse sends its notices to smtp_host, and the guest denies outgoing
+# traffic that no profile names.
+like( $ufw, qr/^matrix-smtp\s+ALLOW[ ]OUT/m, 'ufw lets synapse send mail to port [% smtp_port %]' ) or diag $ufw;
 [% IF relayed %]
 
 # Where the relay passes federation through, with the PROXY protocol, which
