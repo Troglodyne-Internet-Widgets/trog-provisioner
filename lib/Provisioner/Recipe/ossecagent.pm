@@ -66,13 +66,26 @@ F<ossec.conf.d/50-ossecagent>.
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One agent runs on the machine, with one F<client.keys> that holds the
-key of one domain.  The grant of a second domain on the machine would replace
-that key with its own, so the build of the second would cut off the first.
+True.  One agent runs on the machine, under the name of the machine, with one
+F<client.keys>.  Only the domain that is its own machine holds the key, as
+C<grants> says, so the build of a tenant does not replace it, and the removal
+of a tenant does not revoke it.  The global half runs once, from the host.
 
 =cut
 
-sub is_multi_tenant { return 0 }
+sub is_multi_tenant { return 1 }
+
+=head2 %settings = $recipe->machine_wide(%opts)
+
+C<manager>, because the one agent of the machine sends to one manager.  See
+L<Provisioner::Recipe/machine_wide>.
+
+=cut
+
+sub machine_wide {
+    my ( $self, %opts ) = @_;
+    return ( manager => $opts{manager} );
+}
 
 =head2 @names = $recipe->exclusive_on_machine_with()
 
@@ -113,12 +126,15 @@ sub args {
 
 Returns C<%opts> with C<manager_ip>, the address that the ip pool assigns
 C<manager>, or empty when the pool assigns it none.  Then the build looks up
-the address of C<manager> on the guest.  Dies when C<manager> is a URL.
+the address of C<manager> on the guest.  Also adds C<agent>, the name of the
+agent, which is the machine of C<domain>.  Dies when C<manager> is a URL.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    $opts{agent} = Provisioner::Cookbook->machine_of( $opts{domain} );
 
     my ( $kind, $address ) = Provisioner::Utils::fleet_address( $opts{manager}, domain => $opts{domain}, ipmap => $opts{ipmap} );
     die "The OSSEC agent of $opts{domain} sends to a host, and '$opts{manager}' is a URL.\n" if $kind eq 'url';
@@ -129,14 +145,16 @@ sub enrich {
 
 =head2 @grants = $recipe->grants($domain, %opts)
 
-The key of the agent of C<$domain>, which the C<ossec> recipe of C<manager>
-issues.
+The key of the agent of the machine, which the C<ossec> recipe of C<manager>
+issues, when C<$domain> is its own machine.  Nothing for a tenant, whose
+machine holds the key for it.
 
 =cut
 
 sub grants {
     my ( $self, $domain, %opts ) = @_;
     return () unless defined $opts{manager};
+    return () unless Provisioner::Cookbook->machine_of($domain) eq $domain;
     return { recipe => 'ossec', guest => $opts{manager}, client => $domain };
 }
 

@@ -167,6 +167,17 @@ subtest 'naming the recipe without a destination fails the build' => sub {
     );
 };
 
+subtest 'machine_wide' => sub {
+    my ( undef, $recipe ) = generated();
+
+    is_deeply(
+        { $recipe->machine_wide( host => 'logs.test.test' ) },
+        { host => 'logs.test.test', port => 514, protocol => 'tcp', selector => '*.*', retry => 100, queue_size => 10000 },
+        'every setting goes into the one forwarder of the machine, with the defaults of the schema for what is left out'
+    );
+    is( { $recipe->machine_wide( host => 'logs.test.test', selector => 'auth.*' ) }->{selector}, 'auth.*', 'and what the configuration names' );
+};
+
 subtest 'required_recipes' => sub {
     my ( undef, $recipe ) = generated();
 

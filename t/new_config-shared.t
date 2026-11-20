@@ -34,6 +34,7 @@ use File::Slurper::Temp();
 use YAML::XS();
 
 use Provisioner::Cookbook();
+use Trog::Config();
 use Trog::Test::Store();
 
 Trog::Test::Store::throwaway();
@@ -104,15 +105,23 @@ sub generate {
 
     my %recipes = (
 
-        _base   => { _global => \%global },
+        _base   => { _global => \%global, %{ $on{base} // {} } },
         _shared => { $HOST   => [$TENANT] },
         $HOST   => $on{host}   // { nosnap => undef },
         $TENANT => $on{tenant} // { nosnap => undef },
+        %{ $on{others} // {} },
     );
 
     my ( $rh, $recipe_file ) = tempfile( UNLINK => 1 );
     print {$rh} YAML::XS::Dump( \%recipes );
     close($rh) or die "Could not close $recipe_file: $!";
+
+    # A recipe that asks about another domain, as ossec does in watches, reads
+    # the configuration of the installation, whatever --recipes says.
+    if ( $on{installation} ) {
+        File::Slurper::Temp::write_text( Trog::Config->path('recipes.yaml'), YAML::XS::Dump( \%recipes ) );
+        Provisioner::Cookbook->forget();
+    }
 
     # Nothing to reset between runs: each one generates the host again, which
     # replaces what it recorded last time.
@@ -313,6 +322,40 @@ subtest 'two recipes that cannot share a machine are refused on a host and its t
     $nosnap->unmock('exclusive_on_machine_with');
     ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
     is( $err, undef, 'and when neither names the other, both generate' ) or diag $err;
+};
+
+# The usual way to turn on logging for a fleet is one logshipper in _base, which
+# every tenant inherits.  The machine runs one rsyslog, so the tenant gets the
+# shipping of its host, and an agent of OSSEC when the collector runs a manager.
+subtest 'a tenant ships its logs with its host, and runs its agent of OSSEC' => sub {
+    my $LOGS   = 'logs.test.test';
+    my %fleet  = ( installation => 1, base => { logshipper => { host => $LOGS } }, others => { $LOGS => { ossec => undef } } );
+    my $tmpdir = sub {
+        my $dir = tempdir( CLEANUP => 1 );
+        mkdir "$dir/data";
+        mkdir "$dir/data/$LOGS";
+        return $dir;
+    };
+
+    my ( $err, $domains ) = generate( %fleet, tmpdir => $tmpdir->() );
+    is( $err, undef, 'a tenant that inherits the logshipper of _base generates' ) or return diag $err;
+
+    my $makefile = File::Slurper::read_text("$domains/$TENANT/Makefile");
+    like( $makefile, qr{^/etc/provisioner/state/global_logshipper:$}m, 'its makefile ships the logs of the machine, as the host does' );
+    like( $makefile, qr{^/etc/provisioner/state/global_ossecagent:$}m, 'and runs the agent of the machine' );
+
+    my $wanted = YAML::XS::LoadFile("$domains/$HOST/guest-secrets.yaml");
+    ok( $wanted->{'/etc/ossec-client.keys.b64'}, 'the host holds the key of the agent of the machine' );
+    $wanted = YAML::XS::LoadFile("$domains/$TENANT/guest-secrets.yaml");
+    ok( !exists $wanted->{'/etc/ossec-client.keys.b64'}, 'and the tenant holds none, so its build does not give the agent a new key' );
+
+    ( $err, $domains ) = generate( %fleet, tmpdir => $tmpdir->(), tenant => { nosnap => undef, logshipper => { host => $LOGS, selector => 'auth,authpriv.*' } } );
+    ok( $err, 'a tenant that asks for other logs than its host is refused' ) or return;
+    like( $err, qr/logshipper/,          'naming the recipe' );
+    like( $err, qr/selector/,            'and the setting' );
+    like( $err, qr/auth,authpriv[.][*]/, 'and what the tenant asks for' );
+    like( $err, qr/[*][.][*]/,           'and what the host ships' );
+    ok( !-f "$domains/$TENANT/Makefile", 'and nothing is generated for the tenant' );
 };
 
 done_testing;
