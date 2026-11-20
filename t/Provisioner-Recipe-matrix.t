@@ -190,6 +190,15 @@ subtest 'a channel is the local part of a room alias' => sub {
     like( exception { recipe()->validate( %good, channels => ['general:matrix.test.test'] ) }, qr{/channels/0:}, 'and so is one with the server name' );
 };
 
+# Port 465 waits for a TLS handshake, and synapse sends a plain greeting there
+# unless force_tls is on.  Then no mail goes, and synapse logs no error.
+subtest 'synapse speaks TLS from the first byte to the default port' => sub {
+    %domain = ();
+    my $email = sub { YAML::XS::Load( { rendered(@_) }->{'homeserver.yaml'} )->{email} };
+    ok( $email->()->{force_tls},                                            'on 465, the default' );
+    ok( !$email->( smtp_port => 587, smtp_implicit_tls => 0 )->{force_tls}, 'and not on a port that offers STARTTLS, when it is turned off' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();
