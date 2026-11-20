@@ -13,6 +13,9 @@ use parent qw{Provisioner::DistroRecipe};
 # What ssh-keygen defaults to for RSA.
 my $RSA_BITS = 3072;
 
+# The apt hook of first boot, which the POD of enrich describes.
+our $FIRST_BOOT_APT_HOOK = '/etc/apt/apt.conf.d/99zz-provisioner-first-boot';
+
 use File::Basename();
 use File::Slurper();
 use HTTP::Tiny();
@@ -409,6 +412,15 @@ has made its first state file.  A reboot of a built guest then leaves its hosts
 alone.  C<refresh_cloud_init> in F<bin/provision> runs it again for a domain
 added to a guest that is up, whose state directory is not there yet.
 
+C<first_boot_apt_hook> is the path of an apt hook that the seed writes before
+the upgrade, and that F<setup.sh> removes, so only the first boot has it.  After
+each run of dpkg, it asks needrestart whether a service still runs code that
+the upgrade replaced, and if one does, it makes F</run/reboot-required>.
+cloud-init reboots after its upgrade only when that file is there, and Ubuntu
+makes it for a new kernel or C library but not for a new systemd.  Without the
+reboot, rkhunter reports C<systemd-logind> as a process that uses a deleted
+file every night.
+
 Dies if C<ips> is set without C<gateway>, or with no static adapter to put it
 on, or if C<contact_email> is not set.
 
@@ -537,6 +549,8 @@ sub enrich {
         qq{echo "root:$opts{contact_email}\n" > /etc/aliases },
         q{echo 'bash /root/setup.sh' | at now},
     ];
+
+    $opts{first_boot_apt_hook} = $FIRST_BOOT_APT_HOOK;
 
     # From the templates of the recipe, so a distribution can have its own.
     $opts{setup_script} = $self->render_raw( "files/$sub.setup.sh.tt", %opts );

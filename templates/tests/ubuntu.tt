@@ -3,18 +3,27 @@ use strict;
 use warnings;
 use Test::More;
 
-plan skip_all => 'rsyslog is not installed' unless -e '/usr/lib/tmpfiles.d/00rsyslog.conf';
+# cloud-init reboots the guest after its upgrade when the upgrade asks for
+# that.  Without the reboot, a guest runs the kernel of its image.
+my @installed = split /\n/, `linux-version list | linux-version sort`;
+chomp( my $running = `uname -r` );
+is( $running, $installed[-1], 'the guest runs the newest kernel that it has' )
+    or diag "installed: @installed";
 
-# What the postinst of systemd runs on each upgrade of systemd: var.conf by
-# name, without 00rsyslog.conf.  Provisioner::Recipe::ubuntu has the account.
-system( 'systemd-tmpfiles', '--create', 'var.conf' );
-is( $?, 0, 'systemd-tmpfiles applies var.conf by name, as an upgrade of systemd does' );
+SKIP: {
+    skip 'rsyslog is not installed', 2 unless -e '/usr/lib/tmpfiles.d/00rsyslog.conf';
 
-my $file = '/var/log/.provisioner-syslog-test';
-unlink $file;
-system( 'runuser', '-u', 'syslog', '--', 'touch', $file );
-ok( -e $file, 'and then syslog, the user that rsyslog runs as, can still make a log in /var/log' )
-    or diag `stat -c '%U:%G %a' /var/log`;
-unlink $file;
+    # What the postinst of systemd runs on each upgrade of systemd: var.conf by
+    # name, without 00rsyslog.conf.  Provisioner::Recipe::ubuntu has the account.
+    system( 'systemd-tmpfiles', '--create', 'var.conf' );
+    is( $?, 0, 'systemd-tmpfiles applies var.conf by name, as an upgrade of systemd does' );
+
+    my $file = '/var/log/.provisioner-syslog-test';
+    unlink $file;
+    system( 'runuser', '-u', 'syslog', '--', 'touch', $file );
+    ok( -e $file, 'and then syslog, the user that rsyslog runs as, can still make a log in /var/log' )
+        or diag `stat -c '%U:%G %a' /var/log`;
+    unlink $file;
+}
 
 done_testing();

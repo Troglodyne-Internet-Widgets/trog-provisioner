@@ -15,6 +15,11 @@ final_message: Boot configuration complete.
 
 package_update: true
 package_upgrade: true
+[%# Reboot before the build when the upgrade asks for that, so that no daemon
+    runs a binary that the upgrade replaced.  The apt hook of first boot in
+    write_files asks for it in more cases than Ubuntu does.  wait_for_cloud_init
+    in Trog::Guest connects again after the reboot. -%]
+package_reboot_if_required: true
 packages:
 [% packages | yaml %]
 [% IF bootcmd.size() %]
@@ -79,10 +84,11 @@ apt:
 users:
 [% users | yaml %]
 
-[%# Everything here is deferred except the mirrorlist and the first_boot_files.
-    apt needs them before it installs the packages above.  The mirrorlist is
-    only written when a mirror is configured.  The packager of the distribution
-    makes the first_boot_files. -%]
+[%# Everything here is deferred except the apt hook, the mirrorlist and the
+    first_boot_files.  apt needs them before it installs the packages above.
+    The mirrorlist is only written when a mirror is configured.  The packager of
+    the distribution makes the first_boot_files.  Provisioner::Recipe::ubuntu
+    says what the hook does, and setup.sh removes it. -%]
 write_files:
   - path: /root/.ssh/id_rsa
     owner: root:root
@@ -102,6 +108,12 @@ write_files:
     defer: true
     content: |
 [% setup_script | indent %]
+  - path: [% first_boot_apt_hook | yaml %]
+    owner: root:root
+    permissions: '0644'
+    defer: false
+    content: |
+      DPkg::Post-Invoke { "if needrestart -b -r l 2>/dev/null | grep -q '^NEEDRESTART-SVC:'; then touch /run/reboot-required; fi"; };
 [% IF mirror_uri -%]
 [%# Tabs, not spaces: the apt mirror+file format separates fields with tabs. -%]
   - path: /etc/apt/mirrorlist

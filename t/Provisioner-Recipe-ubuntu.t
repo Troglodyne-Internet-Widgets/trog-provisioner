@@ -231,6 +231,15 @@ subtest 'setup.sh waits for the secrets of a domain that has any' => sub {
     like( File::Slurper::read_text("$tmp/$DOMAIN.setup.log"), qr/\Q$marker\E/, 'with a log that names the marker it waited for' );
 };
 
+subtest 'setup.sh removes the apt hook of first boot once the upgrade is over' => sub {
+    my ( $dir, undef ) = generated();
+    my $setup  = File::Slurper::read_text("$dir/setup.sh");
+    my $remove = index( $setup, 'rm -f /etc/apt/apt.conf.d/99zz-provisioner-first-boot' );
+    ok( $remove >= 0, 'it removes the hook that the seed writes' ) or return diag $setup;
+    cmp_ok( $remove, '>', index( $setup, 'cloud-init status --wait' ), 'after cloud-init, whose upgrade it was for' );
+    cmp_ok( $remove, '<', index( $setup, 'make -j' ),                  'and before make, whose installs do not reboot the guest' );
+};
+
 # apt hands an option to dpkg only when it is spelled Dpkg::Options::=.  With one
 # pair of colons apt takes it and dpkg never sees it, so a changed conffile
 # stops the upgrade with exit 100, which a guest showed.
@@ -341,6 +350,9 @@ CONF
             package_update   => bool(1),
             package_upgrade  => bool(1),
 
+            # So that the build starts with no daemon that runs a replaced binary.
+            package_reboot_if_required => bool(1),
+
             # atd is how the makefile gets started, make is what runs it, bash is
             # the shell it runs recipe lines with, and
             # something has to take mail -- none of which any recipe asked for.
@@ -370,8 +382,15 @@ CONF
                 { path => '/root/.ssh/id_rsa.pub', owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\Assh-rsa[ ]/) },
                 { path => '/root/setup.sh',        owner => 'root:root', permissions => '0775', defer => bool(1), content => re(qr/cloud-init[ ]status[ ]--wait/) },
 
-                # No mirrorlist, and so nothing left that cloud-init has to write
-                # before it installs anything: it was the only defer: false entry.
+                # Before the upgrade, so the only entry that cloud-init writes
+                # early when there is no mirrorlist.
+                {
+                    path        => '/etc/apt/apt.conf.d/99zz-provisioner-first-boot',
+                    owner       => 'root:root',
+                    permissions => '0644',
+                    defer       => bool(0),
+                    content     => all( re(qr/\ADPkg::Post-Invoke[ ]/), re(qr/needrestart/), re(qr{touch[ ]/run/reboot-required}) ),
+                },
             ],
 
             # The override of var.conf, which the subtest of /var/log below
