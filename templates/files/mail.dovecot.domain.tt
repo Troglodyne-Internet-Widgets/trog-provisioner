@@ -9,6 +9,10 @@ passdb {
     driver = passwd-file
     args = /mail/[% domain %]/passwd
 }
+[% IF default_realm %]
+# A name with no domain is an account of this domain.
+auth_default_realm = [% domain %]
+[% END %]
 
 # SNI
 local_name [% domain %] {
