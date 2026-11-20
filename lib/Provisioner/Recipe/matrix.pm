@@ -300,6 +300,7 @@ sub args {
             smtp_pass                  => { type => 'string',  'x-secret'  => 1 },
             smtp_from                  => { type => 'string',  format      => 'email', description => 'The address that notices from the homeserver come from.' },
             require_transport_security => { type => 'boolean', default     => 1 },
+            smtp_implicit_tls          => { type => 'boolean', default     => 1, description => 'TLS from the first byte, as port 465 speaks it.  Turn it off for a port that offers STARTTLS, such as 587.  synapse calls it force_tls.' },
             ipv6                       => { type => 'boolean', default     => 1 },
 
             # Off by default, because the operator decides whether to report

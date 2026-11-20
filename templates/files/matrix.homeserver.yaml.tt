@@ -94,6 +94,7 @@ email:
   smtp_user: "[% smtp_user %]"
   smtp_pass: "[% smtp_pass %]"
   require_transport_security: "[% require_transport_security %]"
+  force_tls: [% IF smtp_implicit_tls %]true[% ELSE %]false[% END %]
   notif_from: "%(app)s chat server <[% smtp_from %]>"
 [% IF modules.grep('redis').size() %]
 
