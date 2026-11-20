@@ -12,6 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 use List::Util();
 
+use Provisioner::Packager();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::admincode
@@ -75,8 +76,17 @@ installed into the perl that it built, and then the tests of the repository run
 against that perl.  A repository with a F<dist.ini> gets what C<dzil> says it
 needs, author dependencies included.  One with a F<Makefile.PL> or a
 F<Build.PL> gets what cpanm reads from it.  A repository with none of these is
-skipped.  So this recipe can smoke your own personal PAN.  If your repositories need system packages, list
-them in C<extra_pkgs>.
+skipped.  So this recipe can smoke your own personal PAN.
+
+A repository that the API calls a fork is cloned, and not smoked.  Its suite is
+the business of the project that it came from.
+
+A repository declares the system packages that it needs in F<metamerge.yml>,
+as L<Dist::Conformance::Check::SystemPackages> describes.  The smoke installs
+what each declaration names for the guest before the dependencies from CPAN,
+with C<conformance packages> from L<Dist::Conformance>, which it installs into
+the perl first.  A package that a repository needs and does not declare goes
+in C<extra_pkgs>.
 
 The install runs as root, and the tests run as the admin, who owns the clones.
 Every file that the install leaves in a clone goes to the admin afterwards.  See
@@ -173,6 +183,20 @@ sub args {
 
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds C<install_command>, the words of the C<install_command> of the
+L<Provisioner::Packager> that C<distro_packager> names, which the smoke runs
+with the system packages that a repository declares.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+    $opts{install_command} = [ Provisioner::Packager->named( $self->distro_packager )->install_command ];
+    return %opts;
 }
 
 =head2 %files = $recipe->template_files(@loaded_recipes)

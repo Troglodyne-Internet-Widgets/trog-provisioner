@@ -28,6 +28,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
+use Provisioner::Packager();
 
 my %COMMON = (
     domain      => 'code.test.test',
@@ -56,6 +57,19 @@ subtest 'the checkouts are smoked only on a guest that builds a perl' => sub {
 
     my $built = fresh()->render( %COMMON, modules => [qw{admincode perl perllsp}] );
     like( $built, qr/smoke_perl_modules/, 'a guest with the perl recipe does' );
+
+    # The words that the smoke gets, out of the quotes of queue_postrun_task.
+    my @queued  = map { [ split ' ' ] } $built =~ m{^/root/bin/queue_postrun_task[ ]"([^"]+)"$}mg;
+    my ($smoke) = grep { $_->[0] =~ m{/smoke_perl_modules[.]pl\z} } @queued;
+    my $flag    = '--install-command=';
+    my @install = map { substr( $_, length $flag ) } grep { index( $_, $flag ) == 0 } @$smoke;
+    is_deeply( \@install, [ Provisioner::Packager->named('deb')->install_command ], 'it installs system packages with the install command of the packager of the guest, word by word' );
+    is_deeply(
+        [ @$smoke[ 1 .. 4 ] ],
+        [qw{--forks /opt/domains/code.test.test/.repos_for.json --conformance-command=/opt/perl5/current/bin/perl --conformance-command=/opt/perl5/current/bin/conformance}],
+        'reads the forks from the cache that repos_for writes in the home of the admin, and asks conformance under the perl that it went into'
+    );
+    is_deeply( $queued[-2], [qw{/root/bin/cpan_install --notest install Dist::Conformance}], 'which goes into the perl just before the smoke' );
 };
 
 # The git recipe scans these for their ssh host keys, and a host that serves

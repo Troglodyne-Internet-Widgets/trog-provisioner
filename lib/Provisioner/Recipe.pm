@@ -713,6 +713,20 @@ sub dep_conflicts {
     return ();
 }
 
+=head3 $packager = $recipe->distro_packager()
+
+The name of the packager of the distribution, such as C<deb>, for a recipe
+that installs packages on the running guest, after first boot.  The subclass
+of the recipe for each distribution answers it, from its distro recipe, as
+L<Provisioner::Recipe::Ubuntu::clod> does.  This class dies.
+
+=cut
+
+sub distro_packager {
+    my ($self) = @_;
+    die( ( ref $self || $self ) . " does not say which packager its distribution has, so it cannot install packages on the guest there.\n" );
+}
+
 =head3 @hosts = $recipe->fetch_hosts(%recipe_config)
 
 The hosts that this recipe downloads from on the guest, by name, such as

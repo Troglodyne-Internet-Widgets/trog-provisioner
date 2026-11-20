@@ -32,6 +32,12 @@ cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] [% a
 [%# --notest always, because this smokes the suites of the repositories and not
     the suites of their dependencies.  smoke_perl_modules.pl runs those suites
     with cpan_install test, against the perl that the dependencies went into.
-    The cpan_notest setting of the perl recipe does not apply. -%]
-[% script_dir %]/queue_postrun_task "[% script_dir %]/smoke_perl_modules.pl [% install_dir %]/[% domain %]/[% basedir %] [% script_dir %]/cpan_install --notest"
+    The cpan_notest setting of the perl recipe does not apply.  The smoke asks
+    conformance of Dist::Conformance which system packages each clone needs,
+    so that goes into the perl first.  It runs under that perl, because its
+    shebang is env perl, which finds the system perl first.  The smoke reads
+    which clones are forks from the cache of repos_for, in the home of the
+    admin. -%]
+[% script_dir %]/queue_postrun_task "[% script_dir %]/cpan_install --notest install Dist::Conformance"
+[% script_dir %]/queue_postrun_task "[% script_dir %]/smoke_perl_modules.pl --forks [% admin_home %]/.repos_for.json --conformance-command=/opt/perl5/current/bin/perl --conformance-command=/opt/perl5/current/bin/conformance[% FOR word IN install_command %] --install-command=[% word %][% END %] [% install_dir %]/[% domain %]/[% basedir %] [% script_dir %]/cpan_install --notest"
 [% END -%]
