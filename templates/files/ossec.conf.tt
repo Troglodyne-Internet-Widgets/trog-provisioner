@@ -3,12 +3,27 @@
      what the package put in that list.  Provisioner::Recipe::ossec says why
      each part is here. -->
 <ossec_config>
+  <!-- Mail goes only for the rules that mark their alerts alert_by_email,
+       which are the rules of watchers_rules.xml.  No alert reaches the
+       level. -->
   <global>
-    <email_notification>no</email_notification>
+    <email_notification>yes</email_notification>
     <email_to/>
+    <email_to>[% admin_email %]</email_to>
+    <email_from>ossec@[% domain %]</email_from>
+    <smtp_server>127.0.0.1</smtp_server>
     <jsonout_output>yes</jsonout_output>
     <white_list/>
   </global>
+  <alerts>
+    <email_alert_level>16</email_alert_level>
+  </alerts>
+
+  <!-- After the rule files of the package, because each of its rules is a
+       child of rules in those files. -->
+  <rules>
+    <include>watchers_rules.xml</include>
+  </rules>
 
   <!-- The copy of the fleet's stream, from logcollector, as text, and not the
        listener of the agents that the package configures. -->

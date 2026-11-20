@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Cookbook();
+
 =head1 NAME
 
 Provisioner::Recipe::ossec - intrusion detection over the logs that the collector already receives.
@@ -70,10 +72,22 @@ on its own alert.
 
 Active response is off.  fail2ban stays, and the manager blocks nothing.
 
-The manager sends no mail.  The cron jobs of L<Provisioner::Recipe::cron> still
-mail what they find.  Each one goes when a rule here covers it.
+The manager mails only the alerts of the rules that do the jobs of the log
+watchers.  See L</The rules that replace the log watchers>.
 
 syscheck and rootcheck are off on the manager.  They belong to the agents.
+
+=head2 The rules that replace the log watchers
+
+L<Provisioner::Recipe::cron> runs four scripts on a guest every five minutes.
+They read the system log and mail the admin what they find: segfaults, the OOM
+killer, new users, and messages that rsyslog dropped.  F<watchers_rules.xml>
+has a rule for each.  The configuration adds it after the rule files of the
+package, because each rule is a child of rules in those files.  Each rule mails its alert, as the script mailed its finding, to the
+C<admin_email> of the collector, through the mail server on loopback port 25.
+No other alert sends mail.
+
+A guest does not run the four scripts when C<watches> is true for it.
 
 =head2 The package comes from Atomicorp
 
@@ -117,6 +131,35 @@ False.  There is one manager on the machine, and one collector that feeds it.
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 $bool = Provisioner::Recipe::ossec->watches($domain)
+
+True when an OSSEC manager of this installation reads every log line of the
+machine of C<$domain>.  That is the case when the machine runs
+L<Provisioner::Recipe::logshipper> with the selector C<*.*>, and its C<host> is
+another domain of this installation whose configuration names this recipe.
+
+A selector that is not C<*.*> can leave out a facility that a rule needs, so
+it gives false.  So does a C<host> that is an address or a name outside this
+installation, because nothing here says what runs there.  The collector itself
+ships nowhere, so it is false for the collector too.
+
+=cut
+
+sub watches {
+    my ( $class, $domain ) = @_;
+
+    my $machine = Provisioner::Cookbook->machine_of($domain);
+    my $shipper = Provisioner::Cookbook->domain_config($machine)->{logshipper};
+    return 0 unless ref $shipper eq 'HASH' && defined $shipper->{host};
+
+    my %default = Provisioner::Cookbook->defaults('logshipper');
+    return 0 if ( $shipper->{selector} // $default{selector} ) ne '*.*';
+
+    my $collector = $shipper->{host};
+    return 0 if $collector eq $machine || !Provisioner::Cookbook->configures($collector);
+    return exists( Provisioner::Cookbook->domain_config($collector)->{ossec} ) ? 1 : 0;
+}
 
 =head2 %args = $recipe->args()
 
@@ -221,14 +264,15 @@ sub cache_classes {
 
 =head2 %files = $recipe->template_files()
 
-The configuration of the manager, the telegraf fragment, the Starlark processor
-and the dashboard.
+The configuration of the manager, its rules for the log watchers, the telegraf
+fragment, the Starlark processor and the dashboard.
 
 =cut
 
 sub template_files {
     return (
         'ossec.conf.tt'      => 'ossec.conf',
+        'ossec.rules.tt'     => 'watchers_rules.xml',
         'ossec.telegraf.tt'  => 'ossec_telegraf.conf',
         'ossec.alerts.tt'    => 'ossec_alerts.star',
         'ossec.dashboard.tt' => 'ossec_dashboard.json',

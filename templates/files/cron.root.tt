@@ -11,10 +11,13 @@ MAILFROM="[% from %]"
 # Security scans
 0    0 * * *  root command rkhunter --update >/dev/null 2>&1
 5    0 * * *  root command rkhunter --rwo --nomow -l /root/rkhunter.log --check
-*/5  * * * *  root command segfaults.sh
 */5  * * * *  root command root_access [% admin_user %]
+[%# Provisioner::Recipe::ossec has the rules that do the jobs of these four. -%]
+[% UNLESS ossec_watches -%]
+*/5  * * * *  root command segfaults.sh
 */5  * * * *  root command oomdetect.sh
 */5  * * * *  root command newusers.sh
 */5  * * * *  root command logdrops.sh
+[% END -%]
 */5  * * * *  root command outgoing_blocks.sh
 */30 * * * *  root command changed_packaged_files
