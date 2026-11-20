@@ -64,7 +64,9 @@ The cron jobs of root run:
     * SAR gathering
     * rkhunter
     * Log watchers (OOMs, SEGVs, root access, new users, rsyslog drops,
-      outgoing ufw blocks)
+      outgoing ufw blocks).  The watchers of OOMs, SEGVs, new users and
+      rsyslog drops do not run where an OSSEC manager reads the logs of the
+      guest.  See L<Provisioner::Recipe::ossec/The rules that replace the log watchers>.
     * scan for writes to packaged files, with changed_packaged_files
     * dehydrated, if the domain uses the letsencrypt recipe, and something
       here writes the zone of the domain.  See
@@ -86,7 +88,8 @@ PATH that starts with the C<bin/> directory of the service install dir.
 Sets what MAILFROM and each MAILTO say, and returns the options.
 
 It also sets C<renews_certificate>, which is true where the letsencrypt recipe
-set up dehydrated for the domain.
+set up dehydrated for the domain, and C<ossec_watches>, which is true where
+L<Provisioner::Recipe::ossec/watches> is.
 
 A local part in C<from> or C<mailto>, for example C<from: cron>, gets this
 domain appended.  An address does not change, because a second domain gives
@@ -104,6 +107,7 @@ sub enrich {
 
     my $certified = List::Util::any { $_ eq 'letsencrypt' } @{ $opts{modules} // [] };
     $opts{renews_certificate} = ( $certified && !Provisioner::Cookbook->load('registrar')->unmanaged( $opts{domain} ) ) ? 1 : 0;
+    $opts{ossec_watches}      = Provisioner::Cookbook->load('ossec')->watches( $opts{domain} );
 
     foreach my $key (qw{root_scripts user_scripts}) {
         next unless ref $opts{$key} eq 'ARRAY';

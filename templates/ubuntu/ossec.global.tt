@@ -11,6 +11,7 @@
     stops here, and the checks and the start wait for the end of the build. -%]
 install -d -m 0750 -o root -g ossec /var/ossec/etc/ossec.conf.d
 install -m 0640 -o root -g ossec ossec.conf /var/ossec/etc/ossec.conf.d/50-ossec
+install -m 0640 -o root -g ossec watchers_rules.xml /var/ossec/rules/watchers_rules.xml
 systemctl stop ossec
 [%# ossec-control starts only the daemons in its process list, and the daemon
     that sends the alerts is not in it until this line adds it. -%]

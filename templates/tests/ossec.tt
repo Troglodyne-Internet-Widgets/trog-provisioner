@@ -10,9 +10,9 @@ my $alerts_port = '[% alerts_port %]';
 my $datasource  = '[% datasource %]';
 my $influx      = 'http://127.0.0.1:8086';
 
-subtest 'the manager runs the daemons that read the stream and send the alerts' => sub {
+subtest 'the manager runs the daemons that read the stream, and send the alerts and their mail' => sub {
     my $status = `/var/ossec/bin/ossec-control status 2>&1`;
-    foreach my $daemon (qw{ossec-analysisd ossec-remoted ossec-csyslogd}) {
+    foreach my $daemon (qw{ossec-analysisd ossec-remoted ossec-csyslogd ossec-maild}) {
         like( $status, qr/^\Q$daemon\E is running/m, "$daemon is running" ) or diag $status;
     }
 };
@@ -24,14 +24,14 @@ sub conf {
     return $xml;
 }
 
-subtest 'configd makes ossec.conf, with the rule files of the package in its order' => sub {
+subtest 'configd makes ossec.conf, with the rule files of the package in its order, and the rules of the watchers last' => sub {
     my %includes;
     foreach my $file (qw{ossec.conf.d/00-original ossec.conf}) {
         my ($rules) = conf($file) =~ m{<rules>(.*?)</rules>}s;
         $includes{$file} = [ ( $rules // q{} ) =~ m{<include>([^<]+)</include>}g ];
     }
     ok( scalar @{ $includes{'ossec.conf.d/00-original'} }, 'the file of the package is the first fragment, with its list' ) or return;
-    is_deeply( $includes{'ossec.conf'}, $includes{'ossec.conf.d/00-original'}, 'and the file that the manager reads has the same list' );
+    is_deeply( $includes{'ossec.conf'}, [ @{ $includes{'ossec.conf.d/00-original'} }, 'watchers_rules.xml' ], 'and the file that the manager reads has the same list, then the rules of the watchers' );
 
     my $dropins = `systemctl show ossec -p DropInPaths --value 2>&1`;
     like( $dropins, qr{configd}, 'configd makes it again each time the manager starts' ) or diag $dropins;
@@ -46,7 +46,8 @@ subtest 'none of the defaults of the package that the fragment clears' => sub {
     unlike( $conf, qr{<connection>secure</connection>}, 'no listener of the agents' );
     unlike( $conf, qr{<localfile>},                  'no log file of the example' );
     unlike( $conf, qr{<white_list>},                 'no whitelist of private addresses' );
-    unlike( $conf, qr{<email_to>},                   'and no mail to an example address' );
+    my @to = $conf =~ m{<email_to>([^<]*)</email_to>}g;
+    is_deeply( \@to, ['[% admin_email %]'], 'and no mail to an example address, only to the admin' );
 
     my $listening = `ss -lnu 2>&1`;
     unlike( $listening, qr{:1514\b}, 'and nothing listens where the agents would send' ) or diag $listening;
@@ -78,6 +79,37 @@ subtest 'the dashboard is in place, and names the datasource that exists' => sub
     ok( $json, "$file is JSON that grafana can read" ) or return diag $@;
     is( $json->{uid}, 'ossec-alerts', 'it is the OSSEC dashboard' );
     like( $body, qr/\Q"$datasource"\E/, "and it names the $datasource datasource" );
+};
+
+# What segfaults.sh mailed: the line of a guest goes through the collector to
+# the manager, which raises the alert of the rule of the watchers and hands its
+# mail to the mail server on loopback.
+subtest 'a segfault on a guest is an alert that goes to the admin by mail' => sub {
+    my $conf = do { local ( @ARGV, $/ ) = glob('/etc/rsyslog.d/*logcollector.conf'); <> } // q{};
+    my ($cport) = $conf =~ m/input\(type="imtcp"\s+port="(\d+)"/;
+    ok( $cport, 'the collector says which TCP port it listens on' ) or return;
+
+    my $guest = "ossec-segfault-$$-" . time() . '.test.test';
+    my $stamp = strftime( '%b %e %H:%M:%S', localtime );
+    my $line  = "<4>$stamp $guest kernel: bogus[4242]: segfault at 0 ip 00005555d00d sp 00007ffd00d0 error 4 in bogus[555500000000+1000]\n";
+    open( my $nc, '|-', 'nc', '-q1', '127.0.0.1', $cport ) or return fail("nc: $!");
+    print {$nc} $line;
+    close($nc);
+
+    # alerts.log has the host and the rule of an alert on separate lines.
+    my ( $alert, $mail ) = ( q{}, q{} );
+    foreach ( 1 .. 24 ) {
+        my $alerts = do { local ( @ARGV, $/ ) = '/var/ossec/logs/alerts/alerts.log'; <> } // q{};
+        ($alert) = $alerts =~ m/^(\N*\Q$guest\E\N*\nRule:\s+\d+\N*)/m;
+        my $log = `grep -h 'from=<ossec\@[% domain %]>' /var/log/mail.log 2>/dev/null`;
+        $mail = $log if $alert;
+        last if $alert && $log =~ m/nrcpts?=1/;
+        sleep 5;
+    }
+    like( $alert // q{}, qr/Rule:\s+100100\b/, 'the rule of the watchers raises the alert' )
+      or return diag `tail -n 20 /var/ossec/logs/alerts/alerts.log 2>&1`;
+    like( $mail, qr/nrcpts?=1/, 'and the mail server takes its mail' )
+      or diag $mail . `tail -n 5 /var/ossec/logs/ossec.log 2>&1` . `tail -n 5 /var/log/mail.log 2>&1`;
 };
 
 # The full path: a line from a guest goes to the port of the collector, out of

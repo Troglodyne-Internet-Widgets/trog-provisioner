@@ -1,0 +1,45 @@
+<!-- The rules that do the jobs of the log watchers of the cron recipe, each of
+     which mails its alert.  Provisioner::Recipe::ossec has the whole account.
+     A rule that names a rule of the package in if_sid is a child of it: it
+     takes the alert of that rule, adds the mail, and keeps its level. -->
+<group name="watchers,">
+
+  <!-- segfaults.sh -->
+  <rule id="100100" level="5">
+    <if_sid>1010</if_sid>
+    <options>alert_by_email</options>
+    <description>A process segfaulted.</description>
+  </rule>
+
+  <!-- oomdetect.sh.  The kernel writes "Out of memory: Killed process" after
+       "invoked oom-killer", and the rule of the package matches the first. -->
+  <rule id="100101" level="12">
+    <if_sid>5108</if_sid>
+    <options>alert_by_email</options>
+    <description>The OOM killer stopped a process.</description>
+  </rule>
+
+  <!-- newusers.sh -->
+  <rule id="100102" level="8">
+    <if_sid>5902</if_sid>
+    <options>alert_by_email</options>
+    <description>A user was added to the system.</description>
+  </rule>
+
+  <!-- logdrops.sh.  rsyslog 8.2312 and later say "begin to drop", which the
+       rule of the package does not match, and older ones "begins to drop",
+       which it does. -->
+  <rule id="100103" level="4">
+    <program_name_pcre2>^rsyslogd</program_name_pcre2>
+    <pcre2>begin to drop messages due to rate-limiting|messages lost due to rate-limiting</pcre2>
+    <options>alert_by_email</options>
+    <description>rsyslog dropped messages because of rate limiting.</description>
+  </rule>
+
+  <rule id="100104" level="4">
+    <if_sid>2945</if_sid>
+    <options>alert_by_email</options>
+    <description>rsyslog dropped messages because of rate limiting.</description>
+  </rule>
+
+</group>
