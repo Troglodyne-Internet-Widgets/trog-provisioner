@@ -123,4 +123,6 @@ is($? >> 8, 0, '[% user %] may restart the job worker with sudo, without waiting
 my $safe = `HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null`;
 like($safe, qr{\Q$dir\E}, 'the checkout is registered as a git safe.directory') or diag $safe;
 
+[% INCLUDE "files/reboot_check.test.tt" WITH name = "tcms-" _ domain, reason = "^Minion jobs active: [0-9]+$", may_pass = 1 %]
+
 done_testing();

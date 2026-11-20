@@ -19,6 +19,10 @@ In recipes.yaml:
     somedomain:
         autoupdate:
             autorestart: "/root/noautorestart"
+            # Optional.  Reboot only from 02:00 up to 05:00.
+            reboot_window:
+                from: 2
+                to: 5
 
 =head2 DESCRIPTION
 
@@ -28,6 +32,15 @@ If you set C<autorestart> to a path, the guest also reboots after an update that
 It does not reboot while a file exists at that path.
 If you do not set C<autorestart>, the guest never reboots itself.
 
+With C<reboot_window>, the guest reboots only from the hour C<from> up to the
+hour C<to>, in the time zone of the guest.  If C<to> is less than C<from>, the
+window goes past midnight.  If the two are equal, every hour is in the window.
+
+The recipe holds the reboot with a reboot check, which says why in the log:
+C<held by /root/noautorestart>, or C<outside the reboot window 02:00-05:00>.
+Other recipes hold it with checks of their own.  See Reboot checks in
+L<Provisioner::Recipe>.
+
 =cut
 
 sub args {
@@ -35,11 +48,21 @@ sub args {
         type       => 'object',
         properties => {
 
-            # A path, not a boolean: reboot_if_needed reads it as a touchfile
-            # that says "not now".
+            # A path, not a boolean: the reboot check reads it as a touchfile
+            # that says "not now", and quotes it in single quotes.
             autorestart => {
                 type        => 'string',
+                pattern     => '^/[^\'\\s]+$',
                 description => 'Reboot after an update that asks for one, unless this path exists on the guest.  Unset installs no reboot cron, so the guest never restarts itself.',
+            },
+            reboot_window => {
+                type        => 'object',
+                required    => [qw{from to}],
+                description => 'The hours when the guest can reboot itself, from the hour from up to the hour to.  Unset, it can reboot at any hour.  It has no effect without autorestart.',
+                properties  => {
+                    from => { type => 'integer', minimum => 0, maximum => 23, description => 'The first hour of the window.' },
+                    to   => { type => 'integer', minimum => 0, maximum => 23, description => 'The hour when the window ends.' },
+                },
             },
         },
     );
@@ -47,8 +70,9 @@ sub args {
 
 sub template_files {
     return (
-        'autoupdate.cron.tt'  => 'autoupdate_cron',
-        'autorestart.cron.tt' => 'autorestart_cron',
+        'autoupdate.cron.tt'         => 'autoupdate_cron',
+        'autorestart.cron.tt'        => 'autorestart_cron',
+        'autoupdate.reboot-check.tt' => 'autoupdate.reboot-check',
     );
 }
 

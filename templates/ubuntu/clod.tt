@@ -63,6 +63,9 @@ systemctl enable 'clod-[% domain %].service' 'clod-worker-[% domain %].service'
 # install of the system packages that the spokes need.  THE SYSTEM PACKAGES in
 # Provisioner::Recipe::clod says why.
 install -o root -g root -m 0755 clod-run.sh '[% install_dir %]/[% domain %]/clod-run.sh'
+[%# Holds a reboot while the worker runs a job.  See Reboot checks in
+    Provisioner::Recipe. -%]
+install -D -o root -g root -m 0755 clod-reboot-check /etc/provisioner/reboot-checks.d/clod-[% domain %]
 [% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/clod-run.sh' deps install
 [% script_dir %]/queue_postrun_task systemctl restart 'clod-[% domain %].service' 'clod-worker-[% domain %].service'
 [% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/clod-run.sh' minion job -e packages_restore

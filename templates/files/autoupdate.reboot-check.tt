@@ -1,0 +1,23 @@
+#!/bin/sh
+# Hold the reboot while the switch of autorestart exists[% IF reboot_window %], and outside the
+# reboot window[% END %].  See Provisioner::Recipe::autoupdate.
+reason=
+if [ -e '[% autorestart %]' ]; then
+    reason='held by [% autorestart %]'
+fi
+[% IF reboot_window -%]
+[% from = reboot_window.from; to = reboot_window.to -%]
+hour=$(date +%-H)
+[% IF from < to -%]
+if [ "$hour" -lt [% from %] ] || [ "$hour" -ge [% to %] ]; then
+[% ELSIF from > to -%]
+if [ "$hour" -lt [% from %] ] && [ "$hour" -ge [% to %] ]; then
+[% ELSE -%]
+if false; then
+[% END -%]
+    reason="${reason:+$reason, }$(printf 'outside the reboot window %02d:00-%02d:00' [% from %] [% to %])"
+fi
+[% END -%]
+[ -z "$reason" ] && exit 0
+echo "$reason"
+exit 1

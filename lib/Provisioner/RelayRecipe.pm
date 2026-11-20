@@ -48,6 +48,14 @@ The guests behind a relay pin its ssh host key.  Every guest keeps that key
 across a rebuild, because L<Provisioner::Recipe::sshd> places it from the secret
 store.  C<issue_grant> hands out its public half.
 
+=head2 Reboots
+
+A relay reboots only by hand, because every guest behind it is offline while
+it reboots.  So F<templates/files/relay.install.tt> installs a reboot check
+that always holds the reboot, with the reason C<this guest reboots only by
+hand>.  The relay still logs that it needs a reboot.  See Reboot checks in
+L<Provisioner::Recipe>.
+
 =head2 Bans
 
 A guest behind a relay sees the address of each client, so its fail2ban finds
@@ -289,9 +297,10 @@ its own to these.
 sub template_files {
     my ($self) = @_;
     return (
-        'relay.sshd.tt'        => 'relay.sshd.conf',
-        'relay.stream.conf.tt' => 'relay.stream.conf',
-        'relay.bans.tt'        => $self->recipe_name . '.bans',
+        'relay.sshd.tt'         => 'relay.sshd.conf',
+        'relay.stream.conf.tt'  => 'relay.stream.conf',
+        'relay.bans.tt'         => $self->recipe_name . '.bans',
+        'relay.reboot-check.tt' => 'relay.reboot-check',
     );
 }
 

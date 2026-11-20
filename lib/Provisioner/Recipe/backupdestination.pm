@@ -59,7 +59,10 @@ TODO: Make the retention period configurable.
 
 While a backup of a host runs, the script keeps the file /root/backup_in_progress_$HOST.
 A second backup of that host exits while the file exists.
-Other jobs can also use it, for example to hold off a reboot until the backup ends.
+
+The recipe installs a reboot check that holds a reboot while F<backup.sh> or F<retention.sh> runs.
+It asks for the process and not for that file, because a run that is killed leaves the file behind.
+See Reboot checks in L<Provisioner::Recipe>.
 
 The scripts log to /var/log/backups/$HOST.log, and logrotate rotates those logs weekly.
 
@@ -114,8 +117,9 @@ sub enrich {
 
 sub template_files {
     return (
-        'backupdestination.cron.tt'      => 'backupdestination.cron',
-        'backupdestination.logrotate.tt' => 'backupdestination.logrotate',
+        'backupdestination.cron.tt'         => 'backupdestination.cron',
+        'backupdestination.logrotate.tt'    => 'backupdestination.logrotate',
+        'backupdestination.reboot-check.tt' => 'backupdestination-reboot-check',
     );
 }
 

@@ -16,3 +16,6 @@ touch /root/.ssh/authorized_keys; chmod 0600 /root/.ssh/authorized_keys
     appears once and with the current forced command. -%]
 sed -i '\|[% pubkey %]|d' /root/.ssh/authorized_keys
 echo "command=\"rsync --daemon --server --config=/etc/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys
+[%# Holds a reboot while a destination copies this domain.  See Reboot checks
+    in Provisioner::Recipe. -%]
+install -D -o root -g root -m 0755 backup-reboot-check /etc/provisioner/reboot-checks.d/backup-[% domain %]

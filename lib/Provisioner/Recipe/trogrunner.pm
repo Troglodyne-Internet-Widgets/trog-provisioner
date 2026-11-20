@@ -212,6 +212,12 @@ commented out, and the recipe leaves that file alone.  So the completion works
 in a tmux pane and in an ssh session, which start login shells by default.  A
 plain C<bash> that is not a login shell has no completion.  Run C<bash -l> there.
 
+=head3 REBOOTS
+
+The recipe installs a reboot check that holds a reboot while perl runs
+F<bin/provision>, because a reboot cuts the build off and leaves a half-built
+guest.  See Reboot checks in L<Provisioner::Recipe>.
+
 =head3 What it needs from the guest, and how long it takes
 
 The build was measured on four vCPUs and 8GB.  Nobody tuned these numbers.
@@ -989,6 +995,7 @@ sub template_files {
         'trogrunner.owner.sh.tt'              => 'trogrunner-owner.sh',
         'trogrunner.bwrap.apparmor.tt'        => 'trogrunner.bwrap.apparmor',
         'trogrunner.completion.bash'          => 'trogrunner.completion.bash',
+        'trogrunner.reboot-check.tt'          => 'trogrunner-reboot-check',
     );
 }
 

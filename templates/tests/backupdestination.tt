@@ -51,4 +51,6 @@ my @complaints = grep { m/error:/i && !m/state file/i } split m/\n/, $debug;
 is_deeply(\@complaints, [], 'and finds nothing to complain about in it') or diag $debug;
 like($debug, qr{/var/log/backups/}, 'and it is the backup logs it rotates') or diag $debug;
 
+[% INCLUDE "files/reboot_check.test.tt" WITH name = "backupdestination-" _ domain %]
+
 done_testing();

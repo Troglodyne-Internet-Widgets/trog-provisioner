@@ -1,26 +1,35 @@
 #!/bin/bash
-# Reboot if the system says that it needs a reboot.
+# Reboot if the system says that it needs a reboot, and nothing objects.
 #
-#     reboot_if_needed [SWITCH]
+#     reboot_if_needed
 #
-# With SWITCH, hold reboots while that file exists, so an operator touches it
-# to hold them and removes it to let them happen.
+# Each executable in CHECKS_DIR says whether a reboot is OK now.  It exits 0
+# for yes, and anything else for no, with the reason on the first line of its
+# standard output.  Provisioner::Recipe has the contract, under Reboot checks.
+# Every check runs, also after one refuses, so the log names all that holds the
+# guest.  A check that does not end in CHECK_TIMEOUT seconds refuses.
 #
 # Never reboot while a build runs.  setup.sh puts a file for its domain in
 # NO_REBOOT_DIR before it starts and removes it when it ends, however it ends.
 # A reboot in the middle cuts the makefile off and leaves a half-built guest.
 # /run is emptied at boot, so a flag cannot outlive the build that placed it.
 #
-# REBOOT_REQUIRED and NO_REBOOT_DIR name other files than the real ones, for
-# the test of this script.
+# The decision goes to syslog under the tag reboot_if_needed.  This runs every
+# five minutes, so a hold is logged when its reasons change, and otherwise once
+# in LOG_EVERY seconds.  HOLD_LOG keeps the last hold that was logged.
+#
+# The variables in capitals name other files and limits than the real ones,
+# for the test of this script.
 
-SWITCH=$1
 REBOOT_REQUIRED=${REBOOT_REQUIRED:-/var/run/reboot-required}
 NO_REBOOT_DIR=${NO_REBOOT_DIR:-/run/provisioner/no-reboot}
+CHECKS_DIR=${CHECKS_DIR:-/etc/provisioner/reboot-checks.d}
+HOLD_LOG=${HOLD_LOG:-/run/provisioner/reboot-held}
+CHECK_TIMEOUT=${CHECK_TIMEOUT:-60}
+LOG_EVERY=${LOG_EVERY:-3600}
 
-[ -f "$REBOOT_REQUIRED" ] || exit 0
-
-if [ -n "$SWITCH" ] && [ -e "$SWITCH" ]; then
+if [ ! -f "$REBOOT_REQUIRED" ]; then
+    rm -f "$HOLD_LOG"
     exit 0
 fi
 
@@ -28,4 +37,44 @@ if [ -n "$(ls -A "$NO_REBOOT_DIR" 2>/dev/null)" ]; then
     exit 0
 fi
 
+reasons=()
+for check in "$CHECKS_DIR"/*; do
+    [ -e "$check" ] || continue
+    name=${check##*/}
+    if [ ! -f "$check" ] || [ ! -x "$check" ]; then
+        reasons+=("$name: not an executable file")
+        continue
+    fi
+
+    # timeout signals the process group of the check, so a child that holds
+    # the pipe open cannot keep the substitution waiting.
+    out=$(timeout -k 5 "$CHECK_TIMEOUT" "$check" </dev/null 2>/dev/null)
+    status=$?
+    [ "$status" -eq 0 ] && continue
+
+    reason=${out%%$'\n'*}
+    if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+        reason="no answer in ${CHECK_TIMEOUT} seconds"
+    elif [ -z "$reason" ]; then
+        reason="exited $status with no reason"
+    fi
+    reasons+=("$name: $reason")
+done
+
+if [ "${#reasons[@]}" -gt 0 ]; then
+    printf -v message '%s; ' "${reasons[@]}"
+    message="held: ${message%; }"
+
+    last=$(cat "$HOLD_LOG" 2>/dev/null)
+    logged=$(stat -c %Y "$HOLD_LOG" 2>/dev/null || echo 0)
+    if [ "$message" != "$last" ] || [ $(( $(date +%s) - logged )) -ge "$LOG_EVERY" ]; then
+        logger -t reboot_if_needed -- "$message"
+        mkdir -p "${HOLD_LOG%/*}"
+        printf '%s' "$message" > "$HOLD_LOG"
+    fi
+    exit 0
+fi
+
+logger -t reboot_if_needed -- "rebooting: required since $(date -r "$REBOOT_REQUIRED" '+%F %T %Z'), no check objected"
+rm -f "$HOLD_LOG"
 reboot now

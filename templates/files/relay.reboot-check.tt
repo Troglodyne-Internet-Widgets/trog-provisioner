@@ -1,0 +1,4 @@
+#!/bin/sh
+# A relay reboots only by hand.  See Reboots in Provisioner::RelayRecipe.
+echo 'this guest reboots only by hand'
+exit 1
