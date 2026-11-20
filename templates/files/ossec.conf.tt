@@ -25,8 +25,8 @@
     <include>watchers_rules.xml</include>
   </rules>
 
-  <!-- The copy of the fleet's stream, from logcollector, as text, and not the
-       listener of the agents that the package configures. -->
+  <!-- The copy of the fleet's stream, from logcollector, as text, and the
+       agents of the guests.  The package's listeners are cleared first. -->
   <remote/>
   <remote>
     <connection>syslog</connection>
@@ -34,6 +34,11 @@
     <port>[% port %]</port>
     <local_ip>127.0.0.1</local_ip>
     <allowed-ips>127.0.0.1</allowed-ips>
+  </remote>
+  <remote>
+    <connection>secure</connection>
+    <protocol>udp</protocol>
+    <port>1514</port>
   </remote>
 
   <!-- Every alert, as JSON, to the syslog input of telegraf. -->

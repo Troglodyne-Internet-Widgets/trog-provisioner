@@ -1,0 +1,34 @@
+#!/bin/sh
+# ossec-agent-key NAME: give the OSSEC agent NAME a new key, and print its line
+# of client.keys in base64, which the agent decodes into its own client.keys.
+# bin/provision takes a secret of one word, and the line has spaces.
+# Provisioner::Recipe::ossec has the whole account: bin/provision runs this for
+# each build of the guest NAME, and each build is a new agent.
+set -eu
+
+name="$1"
+keys=/var/ossec/etc/client.keys
+
+# Two guests can build at the same time, and manage_agents rewrites the file.
+exec 9>/var/ossec/etc/.client.keys.lock
+flock 9
+
+# The second field is the name.  manage_agents marks the line of a removed
+# agent in that field, so a removed agent does not match.
+id_of() {
+    awk -v name="$1" '$2 == name { print $1 }' "$keys" 2>/dev/null
+}
+
+old=$(id_of "$name")
+if [ -n "$old" ]; then
+    /var/ossec/bin/manage_agents -r "$old" >/dev/null
+fi
+/var/ossec/bin/manage_agents -a any -n "$name" >/dev/null
+
+new=$(id_of "$name")
+if [ -z "$new" ]; then
+    echo "ossec-agent-key: manage_agents did not add $name to $keys" >&2
+    exit 1
+fi
+awk -v id="$new" '$1 == id' "$keys" | base64 -w0
+echo

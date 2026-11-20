@@ -34,8 +34,45 @@ subtest 'required_recipes' => sub {
 };
 
 subtest 'listens' => sub {
-    is_deeply( [ $recipe->listens() ],                                      [qw{127.0.0.1:10514 127.0.0.1:10516/udp}], 'the manager on TCP and telegraf on UDP, both on loopback' );
-    is_deeply( [ $recipe->listens( port => 20514, alerts_port => 20516 ) ], [qw{127.0.0.1:20514 127.0.0.1:20516/udp}], 'on the ports that the configuration names' );
+    is_deeply( [ $recipe->listens() ],                                      [qw{127.0.0.1:10514 127.0.0.1:10516/udp 1514/udp}], 'the manager on TCP and telegraf on UDP, both on loopback, and the agents on every address' );
+    is_deeply( [ $recipe->listens( port => 20514, alerts_port => 20516 ) ], [qw{127.0.0.1:20514 127.0.0.1:20516/udp 1514/udp}], 'on the ports that the configuration names' );
+};
+
+subtest 'remote_prepare, remote_files and restores' => sub {
+    my ($prepare) = $recipe->remote_prepare();
+    my %salvage   = $recipe->remote_files();
+    my %restores  = $recipe->restores( install_dir => '/bogus', domain => 'logs.test.test' );
+    is(
+        $prepare,
+        'install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 /var/ossec/etc/client.keys /var/lib/ossec-salvage/client.keys',
+        'a rebuild of the collector copies the keys of the agents for root alone'
+    );
+    is_deeply( \%salvage, { '/var/lib/ossec-salvage/' => 'ossec-salvage/' }, 'and salvages the copy' );
+    is_deeply(
+        \%restores,
+        { '/var/ossec/etc/client.keys' => { from => '/bogus/logs.test.test/ossec-salvage/client.keys', owner => 'root:ossec', mode => '0440' } },
+        'and puts them back from where the salvage lands, for the manager alone'
+    );
+};
+
+subtest 'issue_grant and revoke_grant' => sub {
+    my $grant = { recipe => 'ossec', guest => 'logs.test.test', client => 'guest.test.test' };
+
+    is_deeply(
+        { $recipe->issue_grant($grant) },
+        {
+            '/etc/ossec-client.keys.b64' => {
+                issue => { guest => 'logs.test.test', command => '/usr/local/sbin/ossec-agent-key guest.test.test' },
+                owner => 'root:root',
+                mode  => '0600',
+            },
+        },
+        'the manager issues the key of the agent of the client, for root alone, which the build of the agent decodes'
+    );
+
+    my %revocation = $recipe->revoke_grant($grant);
+    is( $revocation{command}, '/usr/local/sbin/ossec-agent-revoke guest.test.test', 'and removes the agent of the client when it goes away' );
+    like( $revocation{stays}, qr/ossec-agent-revoke[ ]guest\.test\.test/, 'and says how to remove it by hand when the manager is down' );
 };
 
 subtest 'args' => sub {

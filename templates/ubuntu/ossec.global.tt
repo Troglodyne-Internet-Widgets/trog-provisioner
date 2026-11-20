@@ -12,6 +12,16 @@
 install -d -m 0750 -o root -g ossec /var/ossec/etc/ossec.conf.d
 install -m 0640 -o root -g ossec ossec.conf /var/ossec/etc/ossec.conf.d/50-ossec
 install -m 0640 -o root -g ossec watchers_rules.xml /var/ossec/rules/watchers_rules.xml
+[%# bin/provision runs these over ssh, to issue and revoke the keys of the
+    agents.  See issue_grant in Provisioner::Recipe::ossec. -%]
+install -m 0700 -o root -g root ossec-agent-key /usr/local/sbin/ossec-agent-key
+install -m 0700 -o root -g root ossec-agent-revoke /usr/local/sbin/ossec-agent-revoke
+[%# remoted exits when client.keys names no agent, and takes the listener of
+    the stream with it.  So the manager has an agent that nothing runs.  The
+    data target restored the keys of the agents before this line, if there
+    were any. -%]
+grep -q ' manager-placeholder ' /var/ossec/etc/client.keys 2>/dev/null || /var/ossec/bin/manage_agents -a any -n manager-placeholder >/dev/null
+install -o root -g root -m 0644 ossec_ufw.conf /etc/ufw/applications.d/ossec-agents
 systemctl stop ossec
 [%# ossec-control starts only the daemons in its process list, and the daemon
     that sends the alerts is not in it until this line adds it. -%]

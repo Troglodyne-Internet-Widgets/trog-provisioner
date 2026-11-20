@@ -18,6 +18,7 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use Test::MockModule();
 
 use FindBin::libs;
 
@@ -166,12 +167,24 @@ subtest 'naming the recipe without a destination fails the build' => sub {
     );
 };
 
-subtest 'nothing is required of anyone else' => sub {
+subtest 'required_recipes' => sub {
     my ( undef, $recipe ) = generated();
 
-    my %required = $recipe->required_recipes();
-    is_deeply( [ sort keys %required ],    [], 'a sender needs no other recipe, and no firewall hole' );
-    is_deeply( [ $recipe->rate_limits() ], [], 'because it listens on nothing' );
+    my $ossec = Test::MockModule->new('Provisioner::Recipe::ossec');
+    my %asked;
+    my $watches;
+    $ossec->redefine( watches => sub { my ( undef, $domain ) = @_; $asked{$domain}++; return $watches } );
+
+    $watches = 0;
+    my %required = $recipe->required_recipes( domain => $DOMAIN, host => 'logs.test.test' );
+    is_deeply( [ sort keys %required ],    [],               'a sender that no OSSEC manager watches needs no other recipe, and no firewall hole' );
+    is_deeply( [ $recipe->rate_limits() ], [],               'because it listens on nothing' );
+    is_deeply( \%asked,                    { $DOMAIN => 1 }, 'and the recipe asked about this domain' );
+
+    $watches  = 1;
+    %required = $recipe->required_recipes( domain => $DOMAIN, host => 'logs.test.test' );
+    is_deeply( [ sort keys %required ],       ['ossecagent'],                  'a sender that an OSSEC manager watches gets the agent' );
+    is_deeply( { $required{ossecagent}->() }, { manager => 'logs.test.test' }, 'which sends to the manager on the host of the logs' );
 };
 
 Test::NoWarnings::had_no_warnings();

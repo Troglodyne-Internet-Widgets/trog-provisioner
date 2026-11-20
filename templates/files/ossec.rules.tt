@@ -42,4 +42,14 @@
     <description>rsyslog dropped messages because of rate limiting.</description>
   </rule>
 
+  <!-- root_access, which the agent of a guest runs.  The script prints only
+       the lines that its last run did not, so any output is new. -->
+  <rule id="100105" level="10">
+    <if_sid>530</if_sid>
+    <match>^ossec: output: 'root_access'</match>
+    <regex>DANGER</regex>
+    <options>alert_by_email</options>
+    <description>A user who is not an admin, or a host that is not trusted, got in to root.</description>
+  </rule>
+
 </group>

@@ -1,0 +1,20 @@
+[%# One agent for the machine, so all of it is in the global half.
+    configd adopts ossec.conf in the configd target, after this one, so the
+    checks and the start wait for the end of the build, as on the manager. -%]
+install -d -m 0750 -o root -g ossec /var/ossec/etc/ossec.conf.d
+[% UNLESS manager_ip -%]
+[%# The pool assigns the manager no address, and the agent takes no name. -%]
+address=$$(getent ahostsv4 [% manager %] | awk '{ print $$1; exit }') && test -n "$$address" && sed -i "s/MANAGER_ADDRESS/$$address/" ossecagent.conf
+[% END -%]
+install -m 0640 -o root -g ossec ossecagent.conf /var/ossec/etc/ossec.conf.d/50-ossecagent
+[%# bin/provision placed the key in base64.  See issue_grant in
+    Provisioner::Recipe::ossec. -%]
+base64 -d /etc/ossec-client.keys.b64 > client.keys
+install -m 0440 -o root -g ossec client.keys /var/ossec/etc/client.keys
+rm -f client.keys
+install -o root -g root -m 0644 ossecagent_ufw.conf /etc/ufw/applications.d/ossec-agent
+[% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-logcollector -t
+[% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-agentd -t
+[% script_dir %]/queue_postrun_task systemctl enable ossec
+[% script_dir %]/queue_postrun_task systemctl restart ossec
+echo 'ossecagent: the agent sends to the OSSEC manager on [% manager %], port 1514/udp.'
