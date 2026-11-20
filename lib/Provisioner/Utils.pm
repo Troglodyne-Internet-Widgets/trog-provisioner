@@ -27,6 +27,9 @@ use File::Slurper();
 use Trog::Utils();
 use Crypt::PK::ECC();
 use Crypt::PK::RSA();
+use IO::Socket::SSL::Utils();
+use Time::HiRes();
+use Provisioner::Vars();
 ## use critic
 
 =head1 NAME
@@ -348,6 +351,32 @@ sub in_zone {
     my ( $name, $zone ) = @_;
     my ( $n,    $z )    = ( dns_name($name), dns_name($zone) );
     return $n eq $z || $n =~ m/[.]\Q$z\E\z/;
+}
+
+=head3 write_authority($cert_path, $key_path, $name, $days)
+
+Makes a certificate authority with an EC key on prime256v1, valid for C<$days>
+days, with C<$name> as its common name.  Writes the key to C<$key_path>, 0600,
+and then the certificate to C<$cert_path>, 0644.  The key comes first, because
+a caller counts the pair as made only when both files exist.
+
+=cut
+
+sub write_authority {
+    my ( $cert_path, $key_path, $name, $days ) = @_;
+
+    my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
+        CA        => 1,
+        subject   => { commonName => $name },
+        not_after => int( Time::HiRes::time() ) + $days * $Provisioner::Vars::SECONDS_A_DAY,
+        key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
+    );
+    Trog::Utils::write_binary_mode( $key_path,  IO::Socket::SSL::Utils::PEM_key2string($key),   oct('0600') );
+    Trog::Utils::write_binary_mode( $cert_path, IO::Socket::SSL::Utils::PEM_cert2string($cert), oct('0644') );
+
+    IO::Socket::SSL::Utils::CERT_free($cert);
+    IO::Socket::SSL::Utils::KEY_free($key);
+    return;
 }
 
 =head3 write_ssh_keypair($path, $type, $bits, $comment)

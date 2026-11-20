@@ -993,10 +993,24 @@ sub enrich {
 =head2 @written = $recipe->generate_files($output_dir, %vars)
 
 Writes the templates, and the C<zone_records> as F<registrar-records.json>
-where there are records to publish in the zone of the domain.  Also the
-certificate of the fleet authority as F<registrar-anchor.crt> where C<enrich>
-sets C<fleet_anchor>.  Dies there if the installation has no certificate of the
-authority, as C<trusted_authority> in L<Provisioner::Recipe::fetchcache> says.
+where there are records to publish in the zone of the domain.  Also, where
+C<enrich> sets C<fleet_anchor>, the root that the API of the authority chains
+to, as F<registrar-anchor.crt>.  The CA of L<Provisioner::Recipe::acmeca> on the
+authority issues the certificate of that API:
+
+=over 4
+
+=item * Where this installation configures the authority, it also makes the
+intermediate of that CA, so the root is C<issuing_authority> in
+L<Provisioner::Recipe::acmeca>, made here if it must be.  A guest and its
+authority then agree, whichever of the two this run generates first.
+
+=item * Where another installation configures it, the root is the authority of
+the fleet, from C<trusted_root> in L<Provisioner::Recipe::acmeca>, and nothing
+is made here.  That dies if the installation has no certificate of the
+authority.
+
+=back
 
 =cut
 
@@ -1013,7 +1027,10 @@ sub generate_files {
     }
     return @written unless $opts{fleet_anchor};
 
-    File::Copy::copy( Provisioner::Cookbook->load('fetchcache')->trusted_authority(), "$output_dir/registrar-anchor.crt" )
+    my $acmeca = Provisioner::Cookbook->load('acmeca');
+    my $here   = grep { $_ eq $opts{authority} } Provisioner::Cookbook->domains();
+    my $root   = $here ? $acmeca->issuing_authority()->{cert} : $acmeca->trusted_root();
+    File::Copy::copy( $root, "$output_dir/registrar-anchor.crt" )
       or die "Could not give the guest the authority that the API of its pdns guest chains to: $!\n";
 
     return ( @written, 'registrar-anchor.crt' );

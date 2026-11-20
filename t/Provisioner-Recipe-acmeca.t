@@ -103,15 +103,34 @@ subtest 'the intermediate is issued by the authority the fetch cache signs with'
     is( extension( $intermediate, 'basicConstraints' ), 'CA:TRUE', 'the intermediate is a CA, so step-ca can issue from it' );
 };
 
-# Only the installation that made the authority holds its key.  Elsewhere the
-# intermediate cannot be signed, and the certificate of the fleet must survive.
-subtest 'no intermediate where the installation holds the certificate of the authority alone' => sub {
+# An installation that trusts a cache that another one signed, as a scratch
+# configuration does, holds the certificate of that authority and not its key.
+# It still issues to its guests, from an authority of its own.
+subtest 'an authority of its own where the installation holds the certificate of the cache alone' => sub {
     local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
     my $config = $ENV{TROG_PROVISIONER_CONFIG};
     File::Slurper::Temp::write_text( "$config/fetchcache-ca.crt", "the authority of the fleet\n" );
 
-    like( exception { generated() }, qr/\S+fetchcache-ca\.key/, 'it dies, and names the key that is missing' );
-    is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority of the fleet\n", 'and leaves the certificate as it was' );
+    my ( undef, $dir ) = generated();
+    is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority of the fleet\n", 'the certificate of the fleet is left as it was' );
+    ok( !-e "$config/fetchcache-ca.key", 'and gets no key beside it' );
+    is( File::Slurper::read_text("$dir/acmeca-root.crt"), File::Slurper::read_text("$config/acmeca-ca.crt"), 'the root handed over is an authority of its own' );
+
+    my $root         = IO::Socket::SSL::Utils::PEM_file2cert("$config/acmeca-ca.crt");
+    my $intermediate = IO::Socket::SSL::Utils::PEM_file2cert("$dir/acmeca-intermediate.crt");
+    is( Net::SSLeay::X509_verify( $intermediate, Net::SSLeay::X509_get_pubkey($root) ), 1, 'and the intermediate verifies against it' );
+
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
+    is( ( stat "$config/acmeca-ca.key" )[2] & 07777, 0600, 'its key is readable by its owner alone' );
+
+    my $first = File::Slurper::read_text("$config/acmeca-ca.crt");
+    generated();
+    is( File::Slurper::read_text("$config/acmeca-ca.crt"),     $first,                  'and the next guest gets the same one' );
+    is( Provisioner::Cookbook->load('acmeca')->trusted_root(), "$config/acmeca-ca.crt", 'which is the root that the guests are told to trust' );
+
+    unlink "$config/acmeca-ca.key";
+    like( exception { generated() }, qr/\S+acmeca-ca\.key/, 'its certificate without its key is refused, and the key named' );
+    is( File::Slurper::read_text("$config/acmeca-ca.crt"), $first, 'and left as it was' );
 };
 
 subtest 'the intermediate may not vouch for anything outside the TLD it was made for' => sub {
