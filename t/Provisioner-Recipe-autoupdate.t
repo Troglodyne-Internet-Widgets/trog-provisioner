@@ -109,6 +109,26 @@ subtest 'the switch and the window together' => sub {
     unlink $switch;
 };
 
+subtest 'one reboot cron for the machine, whatever the domain' => sub {
+    my $recipe = Provisioner::Cookbook->load( 'autoupdate', distro => 'ubuntu' )->new(%PROV);
+    my sub cron_files (%opts) {
+        my %required = $recipe->required_recipes( domain => 'up.test.test', %opts );
+        return { $required{cron}->() }->{files};
+    }
+
+    is_deeply(
+        cron_files( autorestart => $switch ),
+        { autoupdate => 'autoupdate_cron', autorestart => 'autorestart_cron' },
+        'with autorestart, the reboot cron is named for the machine',
+    );
+    is_deeply(
+        cron_files( domain      => 'other.test.test', autorestart => $switch ),
+        cron_files( autorestart => $switch ),
+        'and a second domain on the guest names the same file, so it runs once',
+    );
+    is_deeply( cron_files(), { autoupdate => 'autoupdate_cron' }, 'without autorestart, no reboot cron' );
+};
+
 had_no_warnings();
 
 done_testing();

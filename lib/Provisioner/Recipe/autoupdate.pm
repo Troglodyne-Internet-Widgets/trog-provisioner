@@ -80,7 +80,9 @@ sub template_files {
 
 C<cron>, which installs F<autoupdate_cron> as F</etc/cron.d/autoupdate>.  When
 C<autorestart> is set, it also installs F<autorestart_cron> as
-F</etc/cron.d/E<lt>domainE<gt>-autorestart>.
+F</etc/cron.d/autorestart>.  The name has no domain in it, so a guest that
+holds several domains runs F<reboot_if_needed> once.  The reboot check of each
+domain is its own.
 
 =cut
 
@@ -88,7 +90,7 @@ sub required_recipes {
     my ( $self, %opts ) = @_;
 
     my %files = ( autoupdate => 'autoupdate_cron' );
-    $files{"$opts{domain}-autorestart"} = 'autorestart_cron' if $opts{autorestart};
+    $files{autorestart} = 'autorestart_cron' if $opts{autorestart};
 
     return ( cron => sub { return ( files => \%files ) } );
 }

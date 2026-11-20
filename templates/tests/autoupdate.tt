@@ -24,7 +24,7 @@ like($text, qr{> ?/var/log/autoupdate\.log 2>&1}, 'output and errors both go to 
 # guest.  scripts/reboot_if_needed has the whole account.
 ok(-e '/run/provisioner/no-reboot/[% domain %]', 'the build holds reboots while it runs');
 [% IF autorestart -%]
-like(slurp('/etc/cron.d/[% domain %]-autorestart'), qr{reboot_if_needed$}m, 'the reboot cron runs reboot_if_needed');
+like(slurp('/etc/cron.d/autorestart'), qr{reboot_if_needed$}m, 'the reboot cron runs reboot_if_needed');
 
 # The switch holds the reboot through the reboot check.  Make it, if it is not
 # there, and take it away after.
