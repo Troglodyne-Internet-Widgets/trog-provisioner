@@ -461,18 +461,6 @@ in the salvaged Minion database.  See
 L<App::Clod::Tasks/packages_restore>.  On a guest with no salvage, the bot
 has no scan yet, so the task installs nothing, and the buttons stay.
 
-=head2 $packager = $recipe->distro_packager()
-
-The name of the packager of the distribution, such as C<deb>.  The subclass of
-each distribution answers it, from its distro recipe.  This class dies.
-
-=cut
-
-sub distro_packager {
-    my ($self) = @_;
-    die( ( ref $self || $self ) . " does not say which packager its distribution has, so clod cannot install the packages of a spoke there.\n" );
-}
-
 =head2 %required = $recipe->required_recipes(%opts)
 
 C<perl>, which installs what the checkout needs, C<App::cpanoutdated>, the

@@ -21,6 +21,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use List::Util qw{any};
 use IPC::Run3();
+use Cpanel::JSON::XS();
 use Test::MockModule();
 
 use FindBin;
@@ -38,9 +39,15 @@ sub checkout {
     return;
 }
 
-# Runs the script against a stand-in for cpan_install, which writes each call
-# to a log and fails the verbs in $fails.  Returns the exit code, and each call
-# as a list of its words, with the base directory taken off, in the order made.
+# Runs the script against stand-ins for cpan_install, conformance and the
+# installer of the packager, which write each call to one log.  cpan_install
+# fails the verbs in $fails.  conformance prints the packages that $declared
+# names for a checkout, fails for one that it names as undef, and writes
+# nothing to the log for the rest, which declare nothing.  The installer fails
+# when $install_fails is true.  $forks are the names that the cache of
+# repos_for records as forks.  Returns the exit code, what the script printed
+# to stderr, and each call as a list of its words, with the base directory
+# taken off, in the order made.
 sub smoke {
     my ( $base, %opts ) = @_;
 
@@ -53,14 +60,45 @@ print {\$fh} "\@ARGV\\n";
 close(\$fh) or die \$!;
 exit( grep( { \$_ eq \$ARGV[-2] } split( ' ', \$ENV{SMOKE_FAILS} // '' ) ) ? 1 : 0 );
 FAKE
-    chmod 0755, "$bin/cpan_install" or die "Cannot make the stand-in executable: $!";
 
-    local $ENV{SMOKE_FAILS} = $opts{fails} // '';
-    IPC::Run3::run3( [ $^X, $script, $base, "$bin/cpan_install", @{ $opts{flags} // [] } ], \undef, \my $out, \my $err );
+    my $declared = $opts{declared} // {};
+    File::Slurper::Temp::write_text( "$bin/declared", join q{}, map { "$_ " . ( $declared->{$_} // 'FAIL' ) . "\n" } keys %$declared );
+    File::Slurper::Temp::write_text( "$bin/conformance", <<"FAKE" );
+#!$^X
+my ( \$verb, \$dir ) = \@ARGV;
+my (\$name) = \$dir =~ m{([^/]+)\\z};
+open( my \$in, '<', '$bin/declared' ) or die \$!;
+my %declared = map { chomp; split( ' ', \$_, 2 ) } <\$in>;
+exit 0 unless exists \$declared{\$name};
+open( my \$fh, '>>', '$log' ) or die \$!;
+print {\$fh} "conformance \$verb \$dir\\n";
+close(\$fh) or die \$!;
+exit 2 if \$declared{\$name} eq 'FAIL';
+print "\$_\\n" for split ' ', \$declared{\$name};
+exit 0;
+FAKE
+    File::Slurper::Temp::write_text( "$bin/install", <<"FAKE" );
+#!$^X
+open( my \$fh, '>>', '$log' ) or die \$!;
+print {\$fh} "install \@ARGV\\n";
+close(\$fh) or die \$!;
+exit( \$ENV{SMOKE_INSTALL_FAILS} ? 100 : 0 );
+FAKE
+    for my $fake (qw{cpan_install conformance install}) {
+        chmod 0755, "$bin/$fake" or die "Cannot make the stand-in $fake executable: $!";
+    }
+
+    my $forks = $opts{forks} // [];
+    File::Slurper::Temp::write_text( "$bin/repos_for.json", Cpanel::JSON::XS->new->encode( { 'https://api.test' => { entity => { map { $_ => { fork => 1 } } @$forks } } } ) );
+
+    local $ENV{SMOKE_FAILS}         = $opts{fails}         // '';
+    local $ENV{SMOKE_INSTALL_FAILS} = $opts{install_fails} // '';
+    my @options = ( '--forks', "$bin/repos_for.json", "--conformance-command=$^X", "--conformance-command=$bin/conformance", "--install-command=$bin/install", '--install-command=-y' );
+    IPC::Run3::run3( [ $^X, $script, @options, $base, "$bin/cpan_install", @{ $opts{flags} // [] } ], \undef, \my $out, \my $err );
     my $rc = $?;
 
-    my @calls = -e $log ? map { [ split ' ', s{\Q$base\E/}{}r ] } split /\n/, File::Slurper::read_text($log) : ();
-    return ( $rc, @calls );
+    my @calls = -e $log ? map { [ split ' ', s{\Q$base\E/}{}gr ] } split /\n/, File::Slurper::read_text($log) : ();
+    return ( $rc, $err, @calls );
 }
 
 subtest 'each checkout gets the installer that its build system needs' => sub {
@@ -71,7 +109,7 @@ subtest 'each checkout gets the installer that its build system needs' => sub {
     checkout( $base, qw{d-none README} );
     checkout( $base, qw{e-untested Makefile.PL no-t} );
 
-    my ( $rc, @calls ) = smoke( $base, flags => ['--notest'] );
+    my ( $rc, undef, @calls ) = smoke( $base, flags => ['--notest'] );
     is( $rc, 0, 'it exits 0' );
     is_deeply(
         \@calls,
@@ -93,7 +131,7 @@ subtest 'a suite fails' => sub {
     checkout( $base, qw{a-good Makefile.PL} );
     checkout( $base, qw{b-good Makefile.PL} );
 
-    my ( $rc, @calls ) = smoke( $base, fails => 'test' );
+    my ( $rc, undef, @calls ) = smoke( $base, fails => 'test' );
     isnt( $rc, 0, 'it exits non-zero' );
     is( scalar( grep { $_->[0] eq 'test' } @calls ), 2, 'and still tests every checkout' );
 };
@@ -102,9 +140,56 @@ subtest 'dependencies fail to install' => sub {
     my $base = tempdir( CLEANUP => 1 );
     checkout( $base, qw{a-dzil dist.ini} );
 
-    my ( $rc, @calls ) = smoke( $base, fails => 'dzil' );
+    my ( $rc, undef, @calls ) = smoke( $base, fails => 'dzil' );
     isnt( $rc, 0, 'it exits non-zero' );
     is_deeply( \@calls, [ [qw{dzil a-dzil}] ], 'and does not test what it could not install for' );
+};
+
+subtest 'a fork is not smoked' => sub {
+    my $base = tempdir( CLEANUP => 1 );
+    checkout( $base, qw{a-forked Makefile.PL} );
+    checkout( $base, qw{b-own Makefile.PL} );
+
+    my ( $rc, $err, @calls ) = smoke( $base, forks => ['a-forked'] );
+    is( $rc, 0, 'it exits 0' );
+    is_deeply( \@calls, [ [qw{installdeps b-own}], [qw{test b-own}] ], 'and smokes the checkouts that the cache of repos_for does not record as a fork' );
+    like( $err, qr{a-forked[ ]is[ ]a[ ]fork}, 'and says which one it left out' );
+};
+
+subtest 'the system packages that a checkout declares go in first' => sub {
+    my $base = tempdir( CLEANUP => 1 );
+    checkout( $base, qw{a-declares dist.ini} );
+    checkout( $base, qw{b-plain Makefile.PL} );
+
+    my ( $rc, undef, @calls ) = smoke( $base, declared => { 'a-declares' => 'libfoo-dev ffmpeg' } );
+    is( $rc, 0, 'it exits 0' );
+    is_deeply(
+        [ @calls[ 0 .. 3 ] ],
+        [ [qw{conformance packages a-declares}], [qw{install -y libfoo-dev ffmpeg}], [qw{dzil a-declares}], [qw{test a-declares}] ],
+        'what conformance names for the host, with the install command, before its CPAN dependencies'
+    );
+    is_deeply( [ @calls[ 4, 5 ] ], [ [qw{installdeps b-plain}], [qw{test b-plain}] ], 'and a checkout that declares nothing goes straight on' );
+};
+
+subtest 'a declaration that does not resolve, or packages that do not install' => sub {
+    my $base = tempdir( CLEANUP => 1 );
+    checkout( $base, qw{a-bad dist.ini} );
+    checkout( $base, qw{b-plain Makefile.PL} );
+
+    my ( $rc, undef, @calls ) = smoke( $base, declared => { 'a-bad' => undef } );
+    isnt( $rc, 0, 'a conformance that fails is a failure' );
+    is_deeply( \@calls, [ [qw{conformance packages a-bad}], [qw{installdeps b-plain}], [qw{test b-plain}] ], 'and that checkout is not installed or tested, but the next one is' );
+
+    ( $rc, undef, @calls ) = smoke( $base, declared => { 'a-bad' => 'libfoo-dev' }, install_fails => 1 );
+    isnt( $rc, 0, 'and so is an install that fails' );
+    is_deeply( [ map { $_->[0] } @calls[ 2 .. 3 ] ], [qw{installdeps test}], 'which also leaves only the next checkout to go on' );
+};
+
+subtest 'the options are required' => sub {
+    my $base = tempdir( CLEANUP => 1 );
+    IPC::Run3::run3( [ $^X, $script, $base, '/bogus/cpan_install' ], \undef, \my $out, \my $err );
+    isnt( $?, 0, 'it refuses to run without them' );
+    like( $err, qr{--forks}, 'and names what it needs' );
 };
 
 require_ok($script);

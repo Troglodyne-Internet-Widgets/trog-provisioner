@@ -31,7 +31,12 @@ again.
 =head2 $path = cache_file()
 
 Returns the path of the file that keeps the answers from an api_url between
-runs.
+runs.  It is JSON, keyed by the api_url, then the entity, then the name of the
+repository, which is also the name of its clone.  Each repository has
+C<clone_url>, C<ssh_url>, C<default_branch>, and C<fork>, which is 1 when the
+API says that the repository is a fork, and 0 when it does not.
+F<scripts/smoke_perl_modules.pl> reads C<fork>.  A cache written before C<fork>
+was recorded has no such key, until C<--reset>.
 
 =cut
 
@@ -74,6 +79,7 @@ sub main {
                 clone_url      => $row->{clone_url},
                 ssh_url        => $row->{ssh_url},
                 default_branch => $row->{default_branch},
+                fork           => $row->{fork} ? 1 : 0,
             };
         }
         $fetched++;

@@ -151,6 +151,19 @@ subtest 'the cache is data rather than perl' => sub {
     ok( exists $cache->{'https://api.test/'}{alice}, 'keyed by url and then entity' );
 };
 
+subtest 'the cache says which repositories are forks' => sub {
+    my $fork_home = tempdir( CLEANUP => 1 );
+    my $r         = repos_for(
+        home  => $fork_home,
+        args  => [qw{https://api.test/ carol}],
+        repos => { carol => [ +{ %{ row( 'carol', 'own' ) }, fork => Cpanel::JSON::XS::false }, +{ %{ row( 'carol', 'forked' ) }, fork => Cpanel::JSON::XS::true } ] },
+    );
+    is( $r->{rc}, 0, 'it clones both' ) or diag $r->{err};
+
+    my $cache = Trog::repogetter::read_cache("$fork_home/.repos_for.json");
+    is_deeply( { map { $_ => $cache->{'https://api.test/'}{carol}{$_}{fork} } qw{own forked} }, { own => 0, forked => 1 }, 'as 1 for a fork and 0 for the rest, which the smoke of admincode reads' );
+};
+
 subtest 'a name that is not a plain directory component is refused' => sub {
     foreach my $name (qw{../escape . .. a/b}) {
         my $nasty = repos_for(

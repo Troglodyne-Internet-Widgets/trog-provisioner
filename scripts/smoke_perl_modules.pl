@@ -7,15 +7,20 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use Cwd        ();
-use File::Find ();
-use POSIX      ();
+use Cwd          ();
+use File::Find   ();
+use Getopt::Long ();
+use JSON::PP     ();
+use POSIX        ();
 
 =head1 smoke_perl_modules.pl
 
 =head2 SYNOPSIS
 
-    smoke_perl_modules.pl BASEDIR CPAN_INSTALL [FLAG ...]
+    smoke_perl_modules.pl --forks FILE \
+        --conformance-command=WORD [--conformance-command=WORD ...] \
+        --install-command=WORD [--install-command=WORD ...] \
+        BASEDIR CPAN_INSTALL [FLAG ...]
 
 =head2 DESCRIPTION
 
@@ -23,7 +28,29 @@ Installs the dependencies of each checkout in C<BASEDIR>, then runs its tests.
 C<CPAN_INSTALL> is the path of F<scripts/cpan_install>, and each C<FLAG> goes
 to it before the verb, such as C<--notest>.  admincode passes its basedir.
 
-Every checkout is tried, and the exit code says whether any failed.
+Every checkout is tried, and the exit code says whether any failed.  The
+options are required, and come before C<BASEDIR>.
+
+=head3 Forks
+
+C<--forks> is the cache of F<scripts/repos_for>, which records which
+repositories the API calls forks.  A checkout whose name the cache records as a
+fork is not smoked, because its suite is the business of the project it came
+from.
+
+=head3 System packages
+
+The words of C<--conformance-command> run the C<conformance> program of
+L<Dist::Conformance>, such as the perl that it is installed into and then its
+path.  Before the dependencies of a checkout from CPAN, the script asks
+C<conformance packages> which packages the F<metamerge.yml> of the checkout
+declares for this host, and runs the words of C<--install-command> with those
+names after them.  The install command is the C<install_command> of the
+packager of the guest, which L<Provisioner::Packager> gives.  A
+declaration that does not resolve for the host, or an install that fails,
+fails that checkout, and the script goes on to the next.  The packages come
+from the archives that the guest already has: an archive that a declaration
+names in C<x_system_sources> is not added.
 
 =head3 Whose files
 
@@ -55,10 +82,20 @@ bash says nothing changes nothing.
 =cut
 
 sub main {
-    my ( $basedir, $cpan_install, @flags ) = @_;
+    my @args = @_;
 
+    # require_order, so that the flags of cpan_install after BASEDIR stay there.
+    Getopt::Long::Configure('require_order');
+    my ( $forks_file, @conformance, @install );
+    Getopt::Long::GetOptionsFromArray( \@args, 'forks=s' => \$forks_file, 'conformance-command=s' => \@conformance, 'install-command=s' => \@install )
+      or die "smoke_perl_modules: cannot read the options\n";
+    die "smoke_perl_modules: --forks, --conformance-command and --install-command are required\n" unless defined $forks_file && @conformance && @install;
+
+    my ( $basedir, $cpan_install, @flags ) = @args;
     die "Must pass repo basedir as first arg\n"         unless $basedir;
     die "Must pass the path of cpan_install after it\n" unless $cpan_install;
+
+    my %fork = map { $_ => 1 } forks_in($forks_file);
 
     # One level only, so glob is enough, and * skips the dot entries.
     my @subdirs = grep { -d $_ } glob("$basedir/*");
@@ -67,6 +104,18 @@ sub main {
     foreach my $repo_dir (@subdirs) {
         my $verb = verb_for($repo_dir);
         next unless $verb;
+
+        my ($name) = $repo_dir =~ m{([^/]+)\z};
+        if ( $fork{$name} ) {
+            print {*STDERR} "smoke_perl_modules: $name is a fork, so it is not smoked\n";
+            next;
+        }
+
+        if ( install_system_packages( \@conformance, \@install, $repo_dir ) ) {
+            print {*STDERR} "smoke_perl_modules: the system packages of $repo_dir did not install, so it is not smoked\n";
+            $had_failures++;
+            next;
+        }
 
         my ( $uid, $gid ) = ( stat $repo_dir )[ 4, 5 ];
         unless ( defined getpwuid $uid ) {
@@ -116,6 +165,55 @@ sub verb_for {
     return;
 }
 ## use critic
+
+=head2 @names = forks_in($file)
+
+The names of the repositories that C<$file>, the cache of
+F<scripts/repos_for>, records as forks, under every api_url and entity.  Dies
+when C<$file> cannot be read or is not JSON.
+
+=cut
+
+sub forks_in {
+    my ($file) = @_;
+
+    open( my $fh, '<', $file ) or die "smoke_perl_modules: cannot read $file, the cache of repos_for: $!\n";
+    my $json = do { local $/; <$fh> };
+    close($fh) or die "smoke_perl_modules: cannot close $file: $!\n";
+    my $cache = eval { JSON::PP->new->utf8->decode($json) } // die "smoke_perl_modules: $file is not JSON\n";
+
+    my @forks;
+    foreach my $entities ( values %$cache ) {
+        foreach my $repos ( values %$entities ) {
+            push @forks, grep { $repos->{$_}{fork} } keys %$repos;
+        }
+    }
+    return @forks;
+}
+
+=head2 $failed = install_system_packages(\@conformance, \@install, $dir)
+
+Asks C<conformance>, which the words of C<@conformance> run, which system
+packages the checkout in C<$dir> declares for this host, and runs C<@install>
+with them.  See L</System packages>.  Returns 0 when that worked, or when the
+checkout declares nothing, and the exit status of what failed otherwise.
+
+=cut
+
+sub install_system_packages {
+    my ( $conformance, $install, $dir ) = @_;
+
+    open( my $fh, '-|', @$conformance, 'packages', $dir ) or return 127;    ## no critic (ProhibitPipeOpen) -- the names conformance prints are the answer
+    my @packages = map { s/\s+\z//r } <$fh>;
+
+    # Unchecked, because close is false for any nonzero exit, which $? holds.
+    close $fh;                                                              ## no critic (InputOutput::RequireCheckedSyscalls)
+    return $? if $?;
+    return 0 unless @packages;
+
+    system( @$install, @packages );
+    return $?;
+}
 
 =head2 @flags = as_owner($uid)
 
