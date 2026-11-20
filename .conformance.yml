@@ -32,7 +32,7 @@ checks:
           note_plaintext_secrets Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region
           Trog::OpenStack::Auth::interface forget forget_sudo_passwords
       ProhibitUnusedImports:
-        allow: IO::Prompter Text::Xslate::Bridge::TT2 re
+        allow: IO::Prompter Text::Xslate::Bridge::TT2
       Variables::ProhibitUnusedVarsStricter:
         allow_if_computed_by: Test::MockModule->new Test::MockFile->file Test::MockFile->new_dir
           pushd with_capacity with_vmm with_registrar guest_that cloud_hv here http
