@@ -1,0 +1,81 @@
+[%# The alerts of the OSSEC manager on the collector.  They are points of the
+    syslog measurement with the appname ossec.  The Starlark processor of
+    Provisioner::Recipe::ossec gives each one the ossec_* tags that the panels
+    group by. -%]
+{
+  "uid": "ossec-alerts",
+  "title": "OSSEC alerts",
+  "description": "The alerts that the OSSEC manager raises on the logs of the fleet.",
+  "editable": false,
+  "schemaVersion": 39,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "5m",
+  "tags": ["ossec", "security"],
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "label": "Guest",
+        "type": "query",
+        "datasource": "[% datasource %]",
+        "query": "SHOW TAG VALUES FROM \"syslog\" WITH KEY = \"ossec_host\" WHERE \"appname\" = 'ossec'",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Alerts by level",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "level [[tag_ossec_level]]",
+          "query": "SELECT count(\"message\") FROM \"syslog\" WHERE $timeFilter AND \"appname\" = 'ossec' AND \"ossec_host\" =~ /^$host$/ GROUP BY time($__interval), \"ossec_level\" fill(none)" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Alerts by rule",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 9 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "rule [[tag_ossec_rule]]",
+          "query": "SELECT count(\"message\") FROM \"syslog\" WHERE $timeFilter AND \"appname\" = 'ossec' AND \"ossec_host\" =~ /^$host$/ GROUP BY time($__interval), \"ossec_rule\" fill(none)" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Alerts by guest",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 9 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_ossec_host]]",
+          "query": "SELECT count(\"message\") FROM \"syslog\" WHERE $timeFilter AND \"appname\" = 'ossec' AND \"ossec_host\" =~ /^$host$/ GROUP BY time($__interval), \"ossec_host\" fill(none)" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Newest alerts",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 12 },
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "Time", "desc": true } ] },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "table",
+          "query": "SELECT \"ossec_level\" AS \"level\", \"ossec_rule\" AS \"rule\", \"ossec_host\" AS \"guest\", \"ossec_groups\" AS \"groups\", \"ossec_description\" AS \"description\", \"ossec_log\" AS \"log\" FROM \"syslog\" WHERE $timeFilter AND \"appname\" = 'ossec' AND \"ossec_host\" =~ /^$host$/ ORDER BY time DESC LIMIT 200" }
+      ]
+    }
+  ]
+}

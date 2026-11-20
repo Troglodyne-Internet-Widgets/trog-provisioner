@@ -169,7 +169,8 @@ subtest 'it salvages nothing, and nothing acquires it by shipping to it' => sub 
     # allowed to say so.  grafanasyslog draws what the collector receives and is
     # put on a guest that is already one, so it names it and configures the
     # forward rather than leaving that to be wired up by hand at the far end.
-    my %consumers = ( grafanasyslog => 1 );
+    # ossec reads it the same way, through forward_text.
+    my %consumers = ( grafanasyslog => 1, ossec => 1 );
 
     foreach my $name ( Provisioner::Cookbook->names() ) {
         next if $consumers{$name};
@@ -214,8 +215,24 @@ subtest 'the same destination asked for twice is forwarded to once' => sub {
     # Two dependents naming one destination are concatenated rather than
     # reconciled, arrays being left to Hash::Merge -- so without enrich the
     # ruleset gets the identical omfwd twice and doubles every message.
-    my %opts = $recipe->enrich( forward => [qw{127.0.0.1:6514 10.0.0.9:514 127.0.0.1:6514}] );
-    is_deeply( $opts{forward}, [qw{127.0.0.1:6514 10.0.0.9:514}], 'the repeat is dropped and the order kept' );
+    my %opts = $recipe->enrich( forward => [qw{127.0.0.1:6514 10.0.0.9:514 127.0.0.1:6514}], forward_text => [qw{127.0.0.1:10514 127.0.0.1:10514}] );
+    is_deeply( $opts{forward},      [qw{127.0.0.1:6514 10.0.0.9:514}], 'the repeat is dropped and the order kept' );
+    is_deeply( $opts{forward_text}, [qw{127.0.0.1:10514}],             'and the same for a copy as text' );
+};
+
+subtest 'a copy as text is the format of the files, above the stop' => sub {
+    my ($dir) = generated( forward => [qw{127.0.0.1:6514}], forward_text => [qw{127.0.0.1:10514}] );
+    my $conf = slurp( $dir, 'logcollector.conf' );
+
+    my ($ruleset) = $conf =~ m/ruleset\(name="logcollector"\)\s*\{(.*?)\n\}/s;
+    ok( $ruleset, 'the collector ruleset is there' ) or return;
+
+    my $omfwd  = qr/action\(type="omfwd"\s+/;
+    my $dest   = qr/target="127[.]0[.]0[.]1"\s+port="10514"/;
+    my ($text) = $ruleset =~ m/($omfwd$dest.*?\))/s;
+    ok( $text, 'the copy as text is an action in the ruleset' ) or return diag $ruleset;
+    cmp_ok( index( $ruleset, $text ), '<', index( $ruleset, 'stop' ), 'above the stop' );
+    like( $text, qr/template="RSYSLOG_ForwardFormat"/, 'in the format of the files, which OSSEC decodes' );
 };
 
 Test::NoWarnings::had_no_warnings();

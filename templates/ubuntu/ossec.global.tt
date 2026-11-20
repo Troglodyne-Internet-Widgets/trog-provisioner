@@ -1,0 +1,29 @@
+[%# One manager for the machine, so all of it is in the global half.
+    Provisioner::Recipe::ossec has the path that a message takes.
+
+    The package comes in at first boot, so the manager is here.  Telegraf and
+    grafana come in with the targets below this one, which is why root owns
+    their files, as in grafanasyslog.global.tt. -%]
+[%# The list of rule files comes from the configuration that the package
+    installed, which is kept the first time so that a second run reads it
+    and not the one that this target wrote.  ossec_package_rules says why. -%]
+[ -e /var/ossec/etc/ossec.conf.package ] || cp -p /var/ossec/etc/ossec.conf /var/ossec/etc/ossec.conf.package
+[% script_dir %]/ossec_package_rules /var/ossec/etc/ossec.conf.package ossec.conf > ossec.conf.full
+install -o root -g ossec -m 0640 ossec.conf.full /var/ossec/etc/ossec.conf
+[%# ossec-control starts only the daemons in its process list, and the daemon
+    that sends the alerts is not in it until this line adds it. -%]
+/var/ossec/bin/ossec-control enable client-syslog
+[%# Each daemon checks the configuration, so a mistake stops the build here and
+    not the manager later. -%]
+/var/ossec/bin/ossec-analysisd -t
+/var/ossec/bin/ossec-remoted -t
+/var/ossec/bin/ossec-csyslogd -t
+systemctl enable ossec
+systemctl restart ossec
+install -d -m 0755 /etc/telegraf/telegraf.d
+install -o root -g root -m 0644 ossec_telegraf.conf /etc/telegraf/telegraf.d/61-ossec.conf
+install -o root -g root -m 0644 ossec_alerts.star /etc/telegraf/ossec_alerts.star
+install -d -m 0755 /var/lib/grafana/dashboards
+install -o root -g root -m 0644 ossec_dashboard.json /var/lib/grafana/dashboards/ossec.json
+[% script_dir %]/queue_postrun_task systemctl restart telegraf
+echo 'ossec: the manager reads the collector stream on 127.0.0.1:[% port %], and its alerts are drawn on the OSSEC alerts dashboard.'

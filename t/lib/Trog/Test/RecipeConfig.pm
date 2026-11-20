@@ -81,6 +81,7 @@ sub required_config {
         grafana       => { admin_password => 's3cr3t' },
         grafanaotel   => { modules        => ['grafana'] },
         grafanasyslog => { modules        => ['grafana'] },
+        ossec         => { modules        => ['grafana'] },
         grubconf      => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
         ldap          => { admin_password => 's3cr3t' },
 

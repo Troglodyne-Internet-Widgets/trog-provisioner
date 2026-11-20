@@ -435,19 +435,26 @@ Dies unless the archive at C<$uri> has a signed index for C<$suite>.  An archive
 often lacks a suite for a new release of the distribution, and MariaDB has
 none for a release older than the distribution.
 
+A signed index is F<InRelease>, or F<Release> with its signature beside it in
+F<Release.gpg>.  apt reads either, and some archives, such as that of
+Atomicorp, publish only the second.
+
 =cut
 
 sub check_suite {
     my ( $uri, $suite, $name ) = @_;
 
     state %seen;
-    my $index = ( $uri =~ s{/+\z}{}r ) . "/dists/$suite/InRelease";
-    return 1 if $seen{$index};
+    my $dists = ( $uri =~ s{/+\z}{}r ) . "/dists/$suite";
+    return 1 if $seen{$dists};
 
-    my $res = fetch( $index, 'HEAD' );
-    die "The apt source $name has no suite $suite: $index answered $res->{status} $res->{reason}.\n"
-      unless $res->{success};
-    return $seen{$index} = 1;
+    my @answers;
+    foreach my $index ( "$dists/InRelease", "$dists/Release.gpg" ) {
+        my $res = fetch( $index, 'HEAD' );
+        return $seen{$dists} = 1 if $res->{success};
+        push @answers, "$index answered $res->{status} $res->{reason}";
+    }
+    die "The apt source $name has no suite $suite: " . join( ', and ', @answers ) . ".\n";
 }
 
 =head2 $res = fetch($url, $method)

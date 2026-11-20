@@ -39,5 +39,15 @@ ruleset(name="logcollector") {
            action.resumeRetryCount="-1"
            queue.type="linkedList" queue.size="10000")
 [% END -%]
+[%# The format of the files of rsyslog, one message to a line, for a consumer
+    that cannot parse RFC5424.  See forward_text in
+    Provisioner::Recipe::logcollector. -%]
+[% FOR dest IN forward_text -%]
+[% parts = dest.split(':') -%]
+    action(type="omfwd" target="[% parts.0 %]" port="[% parts.1 %]" protocol="tcp"
+           template="RSYSLOG_ForwardFormat"
+           action.resumeRetryCount="-1"
+           queue.type="linkedList" queue.size="10000")
+[% END -%]
     stop
 }
