@@ -23,6 +23,7 @@ use File::Temp       qw{tempdir};
 use File::Path       qw{make_path};
 use Test::MockFile   qw{nostrict};
 
+use Cwd ();
 use FindBin;
 use FindBin::libs;
 use Provisioner::Vars();
@@ -278,6 +279,21 @@ subtest 'the perl that was built is the one installed into' => sub {
 
     rmdir "$PERL_ROOT/perl5.40.0/bin";
     rmdir "$PERL_ROOT/perl5.40.0";
+};
+
+subtest 'run_in and capture_in: the command is told the directory it runs in' => sub {
+    my $dir = Cwd::realpath( tempdir( CLEANUP => 1 ) );
+
+    # Perl and not sh, because sh sets PWD again when it names another directory.
+    my @show = ( $^X, '-e', 'print "$ENV{PWD}\n"' );
+    local $ENV{PWD} = '/bogus/stale';
+
+    my ( $rc, @said ) = Trog::Script::CpanInstall::capture_in( $dir, @show );
+    is_deeply( [ $rc, @said ], [ 0, "$dir\n" ], 'capture_in sets PWD to the directory that it enters' );
+
+    my $out = capture { Trog::Script::CpanInstall::run_in( $dir, @show ) };
+    like( $out, qr/^\Q$dir\E$/m, 'and so does run_in' );
+    is( $ENV{PWD}, '/bogus/stale', 'and neither changes the PWD of the script itself' );
 };
 
 subtest 'it has to be told what to do, and have a perl to do it in' => sub {

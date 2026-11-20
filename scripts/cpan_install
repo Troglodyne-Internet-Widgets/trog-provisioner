@@ -362,6 +362,10 @@ Runs C<@cmd> in C<$dir>, or in the current directory if C<$dir> is undef.
 Returns its exit code, as C<exit_code> gives it.  Dies if it cannot enter
 C<$dir>.
 
+C<@cmd> gets C<PWD> set to the directory that it runs in.  The C<PWD> of the
+caller can name another directory, and C<FindBin> warns when the two differ,
+which fails every suite that fails on a warning.  C<capture_in> does the same.
+
 This sub and C<capture_in> are the only ways the script touches anything
 outside itself, so that a test can replace both.
 
@@ -372,6 +376,7 @@ sub run_in {
 
     my $was = Cwd::getcwd();
     chdir $dir or die "cpan_install: cannot enter $dir: $!\n" if defined $dir;
+    local $ENV{PWD} = Cwd::getcwd();
     print "cpan_install: @cmd\n";
     system(@cmd);
     my $rc = exit_code($?);
@@ -391,8 +396,9 @@ sub capture_in {
     my ( $dir, @cmd ) = @_;
 
     my $was = Cwd::getcwd();
-    chdir $dir                 or die "cpan_install: cannot enter $dir: $!\n" if defined $dir;
-    open( my $fh, '-|', @cmd ) or die "cpan_install: cannot run $cmd[0]: $!\n";                  ## no critic (ProhibitPipeOpen) -- reading what the child said is the whole point of this sub
+    chdir $dir or die "cpan_install: cannot enter $dir: $!\n" if defined $dir;
+    local $ENV{PWD} = Cwd::getcwd();
+    open( my $fh, '-|', @cmd ) or die "cpan_install: cannot run $cmd[0]: $!\n";    ## no critic (ProhibitPipeOpen) -- reading what the child said is the whole point of this sub
     my @lines = <$fh>;
 
     # Unchecked, because close is false for any nonzero exit, which this sub
