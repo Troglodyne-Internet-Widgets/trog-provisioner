@@ -114,11 +114,12 @@ subtest 'the names that the relay passes to the guest' => sub {
     is_deeply(
         $asked{public_names},
         {
-            'chat.test.test'  => { vhost => 'chat.test.test' },
-            'chat.other.test' => { vhost => 'chat.test.test' },
-            'hs.test.test'    => { vhost => 'matrix.chat.test.test', ports => { 8448 => 8449 } },
+            'chat.test.test'              => { vhost => 'chat.test.test' },
+            'chat.other.test'             => { vhost => 'chat.test.test' },
+            'admin.matrix.chat.test.test' => { vhost => 'admin.matrix.chat.test.test' },
+            'hs.test.test'                => { vhost => 'matrix.chat.test.test', ports => { 8448 => 8449 } },
         },
-        'the domain and its alias go to the page, server_name to the vhost of the homeserver, which the relay alone passes through on 8448, to 8449 of the guest, and an alias that the recipe serves itself stays off'
+        'the domain and its alias go to the page, the admin interface to its own vhost, server_name to the vhost of the homeserver, which the relay alone passes through on 8448, to 8449 of the guest, and an alias that the recipe serves itself stays off'
     );
     my %limits = recipe()->rate_limits(%CONFIG);
     is_deeply( [ sort keys %limits ], [ 8448, 8449 ], 'the guest opens 8448, and the port where the relay passes 8448 through' );

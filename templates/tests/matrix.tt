@@ -65,6 +65,9 @@ like( $ufw, qr/^matrix-smtp\s+ALLOW[ ]OUT/m, 'ufw lets synapse send mail to port
 # curl sends.
 my $relayed = eval { JSON::PP::decode_json( fetch( 'https://[% server_name %]:[% passthrough_port %]/_matrix/federation/v1/version', '--haproxy-protocol' ) ) } // {};
 is( ( $relayed->{server} // {} )->{name}, 'Synapse', 'synapse answers federation on [% passthrough_port %], where the relay passes [% federation_port %] through' );
+
+# The relay passes 443 to 8443, with the PROXY protocol, for each public name.
+like( fetch( 'https://admin.matrix.[% domain %]:8443/', '--haproxy-protocol' ), qr/<html/i, 'the admin interface answers where the relay passes its name' );
 [% END %]
 
 # Some of the packages that the recipe asks for.  A package name that does not
