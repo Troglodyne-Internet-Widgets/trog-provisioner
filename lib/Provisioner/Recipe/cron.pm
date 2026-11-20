@@ -64,9 +64,9 @@ The cron jobs of root run:
     * SAR gathering
     * rkhunter
     * Log watchers (OOMs, SEGVs, root access, new users, rsyslog drops,
-      outgoing ufw blocks).  The watchers of OOMs, SEGVs, new users and
-      rsyslog drops do not run where an OSSEC manager reads the logs of the
-      guest.  See L<Provisioner::Recipe::ossec/The rules that replace the log watchers>.
+      outgoing ufw blocks).  The watchers of OOMs, SEGVs, root access, new
+      users and rsyslog drops do not run where an OSSEC manager reads the logs
+      of the guest.  See L<Provisioner::Recipe::ossec/The rules that replace the log watchers>.
     * scan for writes to packaged files, with changed_packaged_files
     * dehydrated, if the domain uses the letsencrypt recipe, and something
       here writes the zone of the domain.  See

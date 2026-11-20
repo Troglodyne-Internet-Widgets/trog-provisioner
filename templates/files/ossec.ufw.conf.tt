@@ -1,0 +1,7 @@
+[%# setup-ufw-rules opens every profile in /etc/ufw/applications.d, so this
+    lets the agents reach the manager.  Each message is encrypted with the key
+    of its agent, and the manager drops a message that no key opens. -%]
+[ossec-agents]
+title=OSSEC agents
+description=The agents of the guests send their events to the manager here
+ports=1514/udp

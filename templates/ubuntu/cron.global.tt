@@ -7,6 +7,8 @@ install -D -o root -g root -m 0644 cron.changed_packaged_files /etc/changed_pack
 [%# What changes_in_packaged_files.sh kept, which nothing reads now. -%]
 rm -f /root/bin/changes_in_packaged_files.sh /root/debcheck.log.old /root/debdiffs.log /root/rpmcheck.log.old /root/rpmdiffs.log
 # Run each log watcher once, so that it records the entries already in the logs.
+[%# The agent of OSSEC runs root_access where cron does not, so it records
+    them for either. -%]
 /root/bin/root_access [% admin_user %]; /bin/true
 [%# Provisioner::Recipe::ossec has the rules that do the jobs of these four. -%]
 [% UNLESS ossec_watches -%]

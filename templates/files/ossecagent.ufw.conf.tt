@@ -1,0 +1,7 @@
+[%# The outbound hole to the manager.  The guests deny outgoing traffic by
+    default, and setup-ufw-rules issues an allow out for every profile.  It
+    opens the port inbound too, where nothing listens. -%]
+[ossec-agent]
+title=OSSEC agent
+description=Outbound events to the OSSEC manager on the collector
+ports=1514/udp

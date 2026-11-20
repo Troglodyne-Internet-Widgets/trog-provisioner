@@ -10,11 +10,11 @@ use Test::More;
 subtest '/etc/cron.d/[% domain %]' => sub { check_crontab( '/etc/cron.d/[% domain %]', '[% from %]' ) };
 subtest '/etc/cron.d/default'     => sub { check_crontab('/etc/cron.d/default') };
 
-# Provisioner::Recipe::ossec has the rules that do the jobs of these four.
+# Provisioner::Recipe::ossec has the rules that do the jobs of these five.
 subtest 'the log watchers that OSSEC can replace' => sub {
     my $text = do { local (@ARGV, $/) = '/etc/cron.d/default'; <> } // '';
     my %job  = map { m/^(?:\S+\s+){6}command\s+(\S+)/ ? ( $1 => 1 ) : () } split m/\n/, $text;
-    foreach my $script (qw{segfaults.sh oomdetect.sh newusers.sh logdrops.sh}) {
+    foreach my $script (qw{root_access segfaults.sh oomdetect.sh newusers.sh logdrops.sh}) {
 [% IF ossec_watches -%]
         ok(!$job{$script}, "cron does not run $script, because an OSSEC manager reads the logs of this guest") or diag $text;
 [% ELSE -%]

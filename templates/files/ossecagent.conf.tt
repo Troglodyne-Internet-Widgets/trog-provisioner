@@ -1,0 +1,29 @@
+<!-- configd merges this over the ossec.conf of the package, which it keeps as
+     00-original.  An empty element clears what the package put in that list.
+     Provisioner::Recipe::ossecagent says why each part is here. -->
+<ossec_config>
+  <client>
+    <!-- When the pool assigns the manager no address, the build of the
+         guest puts the address of its name here. -->
+    <server-ip>[% manager_ip || 'MANAGER_ADDRESS' %]</server-ip>
+  </client>
+
+  <!-- The manager has every log line from the stream already. -->
+  <localfile/>
+
+  <!-- root_access prints only what its last run did not, and a rule on the
+       manager raises an alert on it. -->
+  <localfile>
+    <log_format>full_command</log_format>
+    <command>[% script_dir %]/root_access [% admin_user %]</command>
+    <alias>root_access</alias>
+    <frequency>300</frequency>
+  </localfile>
+
+  <syscheck>
+    <disabled>yes</disabled>
+  </syscheck>
+  <rootcheck>
+    <disabled>yes</disabled>
+  </rootcheck>
+</ossec_config>

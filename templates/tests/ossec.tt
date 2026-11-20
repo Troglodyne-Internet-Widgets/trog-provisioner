@@ -3,6 +3,7 @@ use warnings;
 
 use Test::More;
 use JSON::PP;
+use MIME::Base64();
 use POSIX qw{strftime};
 
 my $port        = '[% port %]';
@@ -43,14 +44,11 @@ subtest 'configd makes ossec.conf, with the rule files of the package in its ord
 subtest 'none of the defaults of the package that the fragment clears' => sub {
     my $conf = conf('ossec.conf');
     unlike( $conf, qr{<active-response>},            'no active response, which would block addresses in the firewall of the collector' );
-    unlike( $conf, qr{<connection>secure</connection>}, 'no listener of the agents' );
     unlike( $conf, qr{<localfile>},                  'no log file of the example' );
     unlike( $conf, qr{<white_list>},                 'no whitelist of private addresses' );
     my @to = $conf =~ m{<email_to>([^<]*)</email_to>}g;
     is_deeply( \@to, ['[% admin_email %]'], 'and no mail to an example address, only to the admin' );
 
-    my $listening = `ss -lnu 2>&1`;
-    unlike( $listening, qr{:1514\b}, 'and nothing listens where the agents would send' ) or diag $listening;
 };
 
 subtest 'each end listens on loopback, where the other end sends' => sub {
@@ -70,6 +68,31 @@ subtest 'each end listens on loopback, where the other end sends' => sub {
     my $conf = do { local ( @ARGV, $/ ) = glob('/etc/rsyslog.d/*logcollector.conf'); <> } // q{};
     like( $conf, qr/target="127\.0\.0\.1"\s+port="$port"[^)]*template="RSYSLOG_ForwardFormat"/s, 'and the collector copies the stream there as text' )
       or diag $conf;
+};
+
+subtest 'the manager listens for agents, and issues and revokes their keys' => sub {
+    my $listening = `ss -lnu 2>&1`;
+    like( $listening, qr/^UNCONN\s+\S+\s+\S+\s+\S+:1514\b/m, 'the manager listens for agents on 1514/udp' ) or diag $listening;
+
+    my $agent = 'agent-probe.[% domain %]';
+    my $line  = qr/^(\d+) \Q$agent\E any ([[:xdigit:]]+)$/;
+
+    my $first = MIME::Base64::decode_base64( scalar `/usr/local/sbin/ossec-agent-key $agent` );
+    like( $first, $line, 'ossec-agent-key prints the line of a new agent, in base64' ) or diag $first;
+    my $second = MIME::Base64::decode_base64( scalar `/usr/local/sbin/ossec-agent-key $agent` );
+    like( $second, $line, 'and a line again for the next build of the guest' ) or diag $second;
+    my ($old_id) = $first  =~ $line;
+    my ($new_id) = $second =~ $line;
+    isnt( $new_id, $old_id, 'with a new agent, whose count of messages starts again' );
+
+    my $keys = do { local ( @ARGV, $/ ) = '/var/ossec/etc/client.keys'; <> } // q{};
+    my @live = grep { m/^\d+ \Q$agent\E / } split m/\n/, $keys;
+    is( scalar @live, 1, 'and the agent of the last build is the only one of that name' ) or diag $keys;
+
+    system( '/usr/local/sbin/ossec-agent-revoke', $agent );
+    is( $?, 0, 'ossec-agent-revoke succeeds' );
+    $keys = do { local ( @ARGV, $/ ) = '/var/ossec/etc/client.keys'; <> } // q{};
+    unlike( $keys, qr/^\d+ \Q$agent\E /m, 'and removes the agent' ) or diag $keys;
 };
 
 subtest 'the dashboard is in place, and names the datasource that exists' => sub {

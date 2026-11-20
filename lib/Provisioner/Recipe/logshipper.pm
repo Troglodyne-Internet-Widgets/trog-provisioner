@@ -10,6 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 =head1 NAME
@@ -151,6 +152,22 @@ logs go, including the logs of the second domain.
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 %required = $recipe->required_recipes(%opts)
+
+L<Provisioner::Recipe::ossecagent>, with C<host> as its manager, when an OSSEC
+manager on C<host> reads every line of this guest, as
+L<Provisioner::Recipe::ossec/watches> decides.  The agent runs what the
+manager cannot learn from the logs.  Nothing otherwise.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    return () unless defined $opts{domain} && Provisioner::Cookbook->load('ossec')->watches( $opts{domain} );
+    return ( ossecagent => sub { ( manager => $opts{host} ) } );
+}
 
 sub args {
     return (

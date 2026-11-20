@@ -1,0 +1,15 @@
+#!/bin/sh
+# ossec-agent-revoke NAME: remove the OSSEC agent NAME from the manager, so its
+# key stops working.  bin/destroy runs this when the guest NAME goes away.
+set -eu
+
+name="$1"
+keys=/var/ossec/etc/client.keys
+
+exec 9>/var/ossec/etc/.client.keys.lock
+flock 9
+
+id=$(awk -v name="$name" '$2 == name { print $1 }' "$keys" 2>/dev/null)
+if [ -n "$id" ]; then
+    /var/ossec/bin/manage_agents -r "$id" >/dev/null
+fi

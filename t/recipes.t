@@ -190,7 +190,7 @@ my %G = (
     transfer_user              => 'transfer',
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
     modules                    => [],
-    ipmap                      => { test => '192.0.2.100' },
+    ipmap                      => { test => '192.0.2.100', 'ossec.test.test' => '192.0.2.101' },
     network_peers              => [],
     disk_devices               => ['vd*'],
     ip_pool                    => { cidr => '192.0.2.0/24' },
@@ -2370,7 +2370,7 @@ subtest 'the services that cannot be told about a second domain are named here' 
     # marked without cause.  bin/new_config refuses these for a domain being
     # layered onto another; everything else writes per domain, or goes through
     # configd, and does not care how many domains the guest holds.
-    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs grafana grafanaotel grafanasyslog koan ldap logcollector logshipper matrix openvpn ossec trogrunner};
+    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs grafana grafanaotel grafanasyslog koan ldap logcollector logshipper matrix openvpn ossec ossecagent trogrunner};
 
     foreach my $name ( sort Provisioner::Cookbook->names() ) {
         my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;

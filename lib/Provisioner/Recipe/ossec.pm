@@ -61,12 +61,42 @@ groups and the guest into tags.  The OSSEC dashboard groups by those tags.
 
 =back
 
-Every hop is on loopback, so nothing goes on the wire and no firewall profile is
-necessary.
+Every hop is on loopback, so nothing goes on the wire.
 
 The alerts do not go back through rsyslog.  If they did, the collector copies
 them to the manager like any other message, and the manager can raise an alert
 on its own alert.
+
+=head2 The agents
+
+The stream carries what a guest logs, and not what only the guest can find
+out.  L<Provisioner::Recipe::ossecagent> runs the agent of OSSEC on a guest for
+that.  The agent sends its events to the manager on port 1514/udp, which this
+recipe opens in the firewall.  Each message is encrypted with the key of its
+agent.
+
+The manager issues each key as a grant, as C<grants> in
+L<Provisioner::Recipe> describes.  C<bin/provision> runs
+F</usr/local/sbin/ossec-agent-key> here before the makefile of the guest
+starts, and places the key on the guest.  Each build of the guest gets a new
+key, and the old agent of that name is removed.  The manager counts the
+messages of each agent, and refuses a message whose count is not higher than
+the last one.  A rebuilt agent counts from zero again, so the old key would
+not work.  C<bin/destroy> runs F</usr/local/sbin/ossec-agent-revoke>, which
+removes the agent of the guest.
+
+The keys are in F</var/ossec/etc/client.keys>, which C<remote_prepare> and
+C<remote_files> salvage when the collector is built again, and C<restores> puts
+back.  Without the salvage, a new collector knows no agent until each guest is
+built again.  The agents keep their counts, which are higher than any that the
+new manager has seen, so it takes their messages.  The salvage is in the data
+directory of the domain, as the keys of L<Provisioner::Recipe::letsencrypt>
+are.  A key there lets its holder send events to the manager in the name of
+that one guest.
+
+remoted exits when F<client.keys> names no agent, and the listener of the
+stream stops with it.  So the build adds an agent named
+C<manager-placeholder>, which nothing runs, when the file has none.
 
 =head2 What is not on yet
 
@@ -75,7 +105,7 @@ Active response is off.  fail2ban stays, and the manager blocks nothing.
 The manager mails only the alerts of the rules that do the jobs of the log
 watchers.  See L</The rules that replace the log watchers>.
 
-syscheck and rootcheck are off on the manager.  They belong to the agents.
+syscheck and rootcheck are off on the manager and on the agents.
 
 =head2 The rules that replace the log watchers
 
@@ -88,6 +118,11 @@ C<admin_email> of the collector, through the mail server on loopback port 25.
 No other alert sends mail.
 
 A guest does not run the four scripts when C<watches> is true for it.
+
+The fifth, F<root_access>, needs facts that only the guest has: the uid of its
+admin, and the addresses that the keys of root accept.  So the agent runs it,
+and the rule raises an alert on what it prints.  When C<watches> is true, cron
+does not run it either.
 
 =head2 The package comes from Atomicorp
 
@@ -112,10 +147,10 @@ the package leaves its new file as F<ossec.conf.dpkg-dist>, configd takes it as
 the new F<00-original> at the next start.
 
 The file of the package also configures what this recipe does not want, and
-the fragment clears each of those with an empty element: the listener of the
-agents on port 1514, active response that blocks addresses in the firewall of
-the collector, the log files of its example, a whitelist of private addresses
-and mail to an example address.
+the fragment clears each of those with an empty element: its listeners, active
+response that blocks addresses in the firewall of the collector, the log files
+of its example, a whitelist of private addresses and mail to an example
+address.  The fragment then adds the listeners that this recipe wants.
 
 The C<ossec> language reads XML with L<XML::LibXML>, which is not in core perl,
 so L<Provisioner::Recipe::Ubuntu::ossec> installs it with the manager.
@@ -229,7 +264,8 @@ sub required_recipes {
 =head2 @claims = $recipe->listens(%opts)
 
 The listener of the manager on C<port>, and the input of telegraf on
-C<alerts_port>, both on 127.0.0.1.
+C<alerts_port>, both on 127.0.0.1.  The listener of the agents on 1514/udp,
+on every address.
 
 =cut
 
@@ -237,7 +273,84 @@ sub listens {
     my ( $self, %opts ) = @_;
 
     # Defaulted here as well as in args, as required_recipes does.
-    return ( '127.0.0.1:' . ( $opts{port} // 10514 ), '127.0.0.1:' . ( $opts{alerts_port} // 10516 ) . '/udp' );
+    return ( '127.0.0.1:' . ( $opts{port} // 10514 ), '127.0.0.1:' . ( $opts{alerts_port} // 10516 ) . '/udp', '1514/udp' );
+}
+
+=head2 %files = $recipe->issue_grant($grant)
+
+The key of the agent of the C<client> of C<$grant>, as
+F</etc/ossec-client.keys.b64> on that guest: its line of F<client.keys>, in
+base64, because C<bin/provision> takes a secret of one word.  The build of the
+agent decodes it into F<client.keys>.  It is outside F</var/ossec>, because the
+package gives every file in F</var/ossec/etc> to the group C<ossec> each time
+it installs.  The manager on the C<guest> of C<$grant>
+makes a new one each time.  See L</The agents>.
+
+=cut
+
+sub issue_grant {
+    my ( $self, $grant ) = @_;
+    return (
+        '/etc/ossec-client.keys.b64' => {
+            issue => { guest => $grant->{guest}, command => "/usr/local/sbin/ossec-agent-key $grant->{client}" },
+            owner => 'root:root',
+            mode  => '0600',
+        },
+    );
+}
+
+=head2 @commands = $recipe->remote_prepare()
+
+A copy of F</var/ossec/etc/client.keys>, the keys of the agents, in
+F</var/lib/ossec-salvage>, because a salvage fetches a directory and not a
+file.  The copy stays on the collector, and only root reads it there.  In the
+domain directory, the service user could read it.  See L</The agents>.
+
+=cut
+
+sub remote_prepare {
+    return ('install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 /var/ossec/etc/client.keys /var/lib/ossec-salvage/client.keys');
+}
+
+=head2 %path_map = $recipe->remote_files()
+
+The copy that C<remote_prepare> made.
+
+=cut
+
+sub remote_files {
+    return ( '/var/lib/ossec-salvage/' => 'ossec-salvage/' );
+}
+
+=head2 %restores = $recipe->restores(%opts)
+
+The keys of the agents, back where the manager reads them, readable by the
+manager and nobody else.
+
+=cut
+
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    return ( '/var/ossec/etc/client.keys' => { from => "$install_dir/$domain/ossec-salvage/client.keys", owner => 'root:ossec', mode => '0440' } );
+}
+
+=head2 %revocation = $recipe->revoke_grant($grant)
+
+The removal of the agent of the C<client> of C<$grant> from the manager.
+
+=cut
+
+sub revoke_grant {
+    my ( $self, $grant ) = @_;
+    my $client = $grant->{client};
+    return (
+        command => "/usr/local/sbin/ossec-agent-revoke $client",
+        doing   => "remove the OSSEC agent of $client",
+        done    => "Removed the OSSEC agent of $client",
+        stays   => "the key of the OSSEC agent of $client stays on it.  Run ossec-agent-revoke $client there",
+    );
 }
 
 =head2 @hosts = $recipe->fetch_hosts()
@@ -264,18 +377,22 @@ sub cache_classes {
 
 =head2 %files = $recipe->template_files()
 
-The configuration of the manager, its rules for the log watchers, the telegraf
-fragment, the Starlark processor and the dashboard.
+The configuration of the manager, its rules for the log watchers, the scripts
+that issue and revoke the keys of the agents, the firewall profile for the
+agents, the telegraf fragment, the Starlark processor and the dashboard.
 
 =cut
 
 sub template_files {
     return (
-        'ossec.conf.tt'      => 'ossec.conf',
-        'ossec.rules.tt'     => 'watchers_rules.xml',
-        'ossec.telegraf.tt'  => 'ossec_telegraf.conf',
-        'ossec.alerts.tt'    => 'ossec_alerts.star',
-        'ossec.dashboard.tt' => 'ossec_dashboard.json',
+        'ossec.conf.tt'         => 'ossec.conf',
+        'ossec.rules.tt'        => 'watchers_rules.xml',
+        'ossec.agent-key.tt'    => 'ossec-agent-key',
+        'ossec.agent-revoke.tt' => 'ossec-agent-revoke',
+        'ossec.ufw.conf.tt'     => 'ossec_ufw.conf',
+        'ossec.telegraf.tt'     => 'ossec_telegraf.conf',
+        'ossec.alerts.tt'       => 'ossec_alerts.star',
+        'ossec.dashboard.tt'    => 'ossec_dashboard.json',
     );
 }
 

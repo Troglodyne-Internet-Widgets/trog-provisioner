@@ -64,6 +64,7 @@ sub required_config {
         # A mirror of no release, and a shipper with nowhere to ship.
         aptmirror  => { releases => ['noble'] },
         logshipper => { host     => 'logs.test.test' },
+        ossecagent => { manager  => 'ossec.test.test' },
 
         # Full releases on purpose.  The archives they come from publish one
         # artifact per release, so a series like 7.1 or 11.4 is a 404 that the

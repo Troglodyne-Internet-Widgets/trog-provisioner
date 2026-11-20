@@ -1,0 +1,39 @@
+use strict;
+use warnings;
+
+use Test::More;
+
+subtest 'the agent runs, with the key that the manager issued' => sub {
+    my $status = `/var/ossec/bin/ossec-control status 2>&1`;
+    foreach my $daemon (qw{ossec-agentd ossec-logcollector}) {
+        like( $status, qr/^\Q$daemon\E is running/m, "$daemon is running" ) or diag $status;
+    }
+
+    my $keys = do { local ( @ARGV, $/ ) = '/var/ossec/etc/client.keys'; <> } // q{};
+    like( $keys, qr/^\d+ \Q[% domain %]\E \S+ [[:xdigit:]]+$/m, 'its key is named for this guest' );
+    my @stat = stat '/var/ossec/etc/client.keys';
+    is( ( getgrgid( $stat[5] ) )[0], 'ossec', 'and the agent can read it' );
+};
+
+subtest 'the manager accepts what the agent sends' => sub {
+
+    # The agent says so in its log once the manager answers it.  Polls, because a
+    # postrun task starts the agent.
+    my $log = q{};
+    foreach ( 1 .. 60 ) {
+        $log = `grep -h 'Connected to server' /var/ossec/logs/ossec.log 2>/dev/null`;
+        last if $log;
+        sleep 2;
+    }
+    like( $log, qr/Connected to server/, 'the agent connected to the manager on [% manager %]' )
+      or diag `tail -n 20 /var/ossec/logs/ossec.log`;
+};
+
+subtest 'the agent runs root_access, and reads no log file' => sub {
+    my $xml = do { local ( @ARGV, $/ ) = '/var/ossec/etc/ossec.conf'; <> } // q{};
+    my @files = $xml =~ m{<location>([^<]+)</location>}g;
+    is_deeply( \@files, [], 'the manager has every log line from the stream, so the agent reads none' );
+    like( $xml, qr{<command>\Q[% script_dir %]/root_access [% admin_user %]\E</command>}, 'and it runs root_access for the admin' );
+};
+
+done_testing();

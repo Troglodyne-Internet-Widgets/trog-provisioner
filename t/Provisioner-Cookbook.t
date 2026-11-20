@@ -977,8 +977,9 @@ subtest 'two recipes that cannot share a domain are refused, however they got th
     $loner->unmock_all();
 
     $mock->unmock('load');
-    is_deeply( [ Provisioner::Cookbook->load('nginxdirindex')->exclusive_with() ],        [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
-    is_deeply( [ Provisioner::Cookbook->load('mailrelay')->exclusive_on_machine_with() ], [qw{mail}],       'mailrelay and mail both answer port 25 of the machine' );
+    is_deeply( [ Provisioner::Cookbook->load('nginxdirindex')->exclusive_with() ],         [qw{nginxproxy}], 'nginxdirindex and nginxproxy both write the vhost of the domain' );
+    is_deeply( [ Provisioner::Cookbook->load('mailrelay')->exclusive_on_machine_with() ],  [qw{mail}],       'mailrelay and mail both answer port 25 of the machine' );
+    is_deeply( [ Provisioner::Cookbook->load('ossecagent')->exclusive_on_machine_with() ], [qw{ossec}],      'the packages of the OSSEC agent and manager conflict' );
 };
 
 subtest 'a recipe the caller already named is left to the caller' => sub {
