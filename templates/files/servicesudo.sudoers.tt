@@ -6,6 +6,7 @@
     than the commands, before it is installed.  See
     Provisioner::Recipe::servicesudo. -%]
 [% IF user != admin_user -%]
+Defaults:[% user %] !mail_badpass, !mail_no_perms
 [% FOR command IN commands -%]
 [% user %] ALL=(root) NOPASSWD: [% command | mark_raw %]
 [% END -%]

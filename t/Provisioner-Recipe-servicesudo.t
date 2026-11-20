@@ -65,7 +65,13 @@ subtest 'commands' => sub {
     unlike( $sudoers, qr/&quot;/, 'and a command with no arguments keeps its quotes' );
 
     my $none = recipe()->render_file( 'files/servicesudo.sudoers.tt', %G );
-    unlike( $none, qr/^[^#\n]/m, 'with no commands, the file grants nothing' ) or diag $none;
+    unlike( $none, qr/ALL=/, 'with no commands, the file grants nothing' ) or diag $none;
+
+    # sudo mails root when the service user asks about a command that it may
+    # not run, as the test of the guest does.  Nobody reads that mail.
+    foreach my $file ( $sudoers, $none ) {
+        like( $file, qr/^Defaults:svc[ ]!mail_badpass,[ ]!mail_no_perms$/m, 'sudo sends no mail about the service user' ) or diag $file;
+    }
 
   SKIP: {
         skip 'no visudo here', 2 unless $visudo;
@@ -147,6 +153,15 @@ subtest 'a domain with no service user' => sub {
     like( $test, qr/^plan[ ]skip_all/m, 'and the guest test skips' );
 
     like( exception { recipe()->validate( %G, user => 'a.b' ) }, qr/not[ ]a[ ]name/, 'a user that sudo would skip the file of is refused' );
+};
+
+# A refused run makes sudo mail root a security warning, so the guest test
+# asks about a command nobody listed, and never runs it.
+subtest 'the guest test asks about an unlisted command and does not run it' => sub {
+    my %opts = recipe()->validate( %G, commands => ['/usr/bin/systemctl restart ssh'] );
+    my $test = recipe()->render_file( 'tests/servicesudo.tt', %opts );
+    like( $test, qr/as_user[(][ ]'sudo',[ ]'-n',[ ]'-l',[ ]\$unlisted[ ][)]/, 'it passes -n -l with the unlisted command' ) or diag $test;
+    unlike( $test, qr/as_user[(][ ]'sudo',[ ]'-n',[ ]\$unlisted/, 'and never runs it with plain sudo -n' )                  or diag $test;
 };
 
 # What each recipe whose units run as the service user asks for, and what
