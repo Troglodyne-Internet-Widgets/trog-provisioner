@@ -58,7 +58,9 @@ subtest 'the records of the domain are published to the zone that holds it' => s
     ok($cname{listed_name('[% alias %]')}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
 
-    # The records of the recipes other than names.  A TXT record can come back
+    # The records of the recipes other than names.  Among them is the A record of
+    # the internal name, at the address of the guest and not at the address of a
+    # relay.  A TXT record can come back
     # in quotes, and a name or target with its trailing dot.  pdns quotes each
     # string of a long record apart, and lexicon takes off only the outer
     # quotes, so a long one can read a" "b.

@@ -128,4 +128,29 @@ subtest 'a domain that shares the guest of another is asked of that guest' => su
     is( $built{name}, 'host.test.test', 'and so is the guest it logs in to' );
 };
 
+subtest 'the guest is reached at its internal name, with the key of the store or with --agent' => sub {
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    _global: {}\nrelayed.test.test:\n    _global:\n        internal_name: guest.relayed.test.test\n" );
+    Provisioner::Cookbook->forget();
+
+    my ( @made, @keyed );
+    my $sent  = bless {}, 'FakeGuest';
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { push( @keyed, $_[1] ); return '/bogus/key.rsa' } );
+    $guest->redefine( new => sub { my ( undef, %args ) = @_; push( @made, \%args ); return $sent } );
+
+    capture_stdout { Trog::Skill::AskGuest::main( 'relayed.test.test', 'true' ) };
+    is( $made[-1]{host},     'guest.relayed.test.test', 'an explicit internal name, and not the address 192.0.2.10' );
+    is( $made[-1]{key_path}, '/bogus/key.rsa',          'with the key of the store' );
+
+    capture_stdout { Trog::Skill::AskGuest::main( 'other.test.test', 'true' ) };
+    is( $made[-1]{host}, 'internal.other.test.test', 'a domain that sets none gets the default' );
+
+    @keyed = ();
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    capture_stdout { Trog::Skill::AskGuest::main(qw{--agent relayed.test.test true}) };
+    is( $made[-1]{host}, 'guest.relayed.test.test', 'with --agent, it is the internal name too' );
+    is_deeply( \@keyed, [], 'and the store is not asked for a key' );
+    ok( !defined $made[-1]{key_path}, 'the guest is given none, so ssh uses the agent' );
+};
+
 done_testing();

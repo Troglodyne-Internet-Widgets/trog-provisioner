@@ -75,6 +75,12 @@ of mail clients either.  `mail` adds `autodiscover.$domain` and
 The DNS record of a public name points at the address of the relay.  So for
 each domain behind the relay, set `registrar.address` to that address.
 
+The public name of such a domain reaches the relay, not the guest.  So
+`ssh $domain` reaches the relay, and the host key of the relay must not be
+accepted under that name.  To reach the guest, use its `internal_name`.  The
+registrar publishes it as an `A` record at the address of the guest, and the
+default is `internal.$domain`.  See `internal_name` in `docs/CONFIGURATION.md`.
+
 ## A zone at a registrar that we have an account with
 
 List the zone under the account in `_base`, and rebuild the guest:

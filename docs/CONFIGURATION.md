@@ -398,6 +398,34 @@ typo is refused before anything is built. A domain on the guest of another
 domain has to name the same release as its host, and is refused when it does
 not. `perldoc Provisioner::Recipe::ubuntu` has the rest.
 
+`internal_name` is the name that reaches the guest of a domain itself. The public
+names of a domain behind a relay reach the relay, so they cannot do that. The
+registrar publishes the name as an `A` record at the address of the guest, and
+`ssh`, `collect_artifacts` and `ask_guest` use it. It defaults to
+`internal.$domain`, so most domains need nothing:
+
+```yaml
+web.example.test:
+    _global:
+        internal_name: guest.web.example.test    # only to name it otherwise
+```
+
+Three decisions hold for it:
+
+- The name is per domain. A domain in `_shared` has a name of its own, which
+  reaches the guest that it shares.
+- One rule applies to every domain, whether it is behind a relay or not.
+- The name goes in the zone of the domain. A registrar that cannot take a
+  private address needs `registrar.unmanaged`. The guest then publishes nothing,
+  and the setup log says which record you have to make by hand, in a zone that
+  you control or in the DNS of your LAN. There is no second zone setting.
+
+Set `internal_name` in the `_global` of a domain, never in `_base`, where it
+would give every guest the same name. `ssh` to this name. The public name of a
+domain behind a relay reaches the relay, and the host key of the relay must not
+be accepted under it. `perldoc Provisioner::Recipe::registrar` has the details,
+under "The name of the guest itself".
+
 `mirror` names a package mirror for guests to prefer over the distribution's own
 archive. Two shapes:
 
