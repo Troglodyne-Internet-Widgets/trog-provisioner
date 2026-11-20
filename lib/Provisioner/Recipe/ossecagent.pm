@@ -149,13 +149,20 @@ The key of the agent of the machine, which the C<ossec> recipe of C<manager>
 issues, when C<$domain> is its own machine.  Nothing for a tenant, whose
 machine holds the key for it.
 
+C<bin/destroy> asks with the configuration as the file holds it, which names
+no C<manager>, because logshipper adds this recipe.  So the manager is then
+the one that L<Provisioner::Recipe::ossec/manager_of> finds, and the key is
+revoked when the guest goes away.
+
 =cut
 
 sub grants {
     my ( $self, $domain, %opts ) = @_;
-    return () unless defined $opts{manager};
     return () unless Provisioner::Cookbook->machine_of($domain) eq $domain;
-    return { recipe => 'ossec', guest => $opts{manager}, client => $domain };
+
+    my $manager = $opts{manager} // Provisioner::Cookbook->load('ossec')->manager_of($domain);
+    return () unless defined $manager;
+    return { recipe => 'ossec', guest => $manager, client => $domain };
 }
 
 =head2 %required = $recipe->required_recipes(%opts)

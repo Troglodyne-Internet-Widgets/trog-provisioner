@@ -123,8 +123,18 @@ subtest 'the firewall hole is asked for on the port it actually listens on' => s
     my %both = $recipe->rate_limits( port => 514, protocol => 'both' );
     is_deeply( [ sort keys %both ], [ '514', '514/udp' ], 'both transports get a limit, or the unlimited one is the one that gets used' );
 
-    my %required = $recipe->required_recipes();
+    # The base class adds ufw, and Provisioner::Cookbook calls it beside the
+    # method of the recipe.  See Provisioner::Recipe/required_recipes.
+    my %required = Provisioner::Recipe::required_recipes($recipe);
     is_deeply( [ sort keys %required ], ['ufw'], 'which is what pulls ufw in, rather than naming it' );
+};
+
+subtest 'required_recipes' => sub {
+    my ( undef, $recipe ) = generated();
+
+    my %required = $recipe->required_recipes();
+    is_deeply( [ sort keys %required ],  ['ossec'], 'every collector runs the OSSEC manager over what it receives' );
+    is_deeply( { $required{ossec}->() }, {},        'with its own settings' );
 };
 
 subtest 'the directory is writable by the user rsyslog becomes' => sub {
@@ -166,25 +176,21 @@ subtest 'it salvages nothing, and nothing acquires it by shipping to it' => sub 
     # its own logs kept somewhere.
     #
     # Reading the stream is the other direction, and a recipe that does it is
-    # allowed to say so.  grafanasyslog draws what the collector receives and is
-    # put on a guest that is already one, so it names it and configures the
-    # forward rather than leaving that to be wired up by hand at the far end.
-    # ossec reads it the same way, through forward_text.
-    my %consumers = ( grafanasyslog => 1, ossec => 1 );
-
+    # allowed to say so: it requires the collector, and asks it for a copy
+    # through forward or forward_text, rather than leaving that to be wired up
+    # by hand at the far end.  So the exemption is what the recipe asks for,
+    # and a recipe that stops consuming the stream loses it.
+    my $consumers = 0;
     foreach my $name ( Provisioner::Cookbook->names() ) {
-        next if $consumers{$name};
         my $class  = Provisioner::Cookbook->load($name);
         my %theirs = eval { $class->required_recipes() };
-        ok( !exists $theirs{logcollector}, "$name does not drag a log sink into its dependency graph" );
-    }
+        next unless exists $theirs{logcollector};
 
-    # The exemption is held to being the thing it claims, so it cannot quietly
-    # become cover for a recipe that stopped consuming the stream.
-    foreach my $name ( sort keys %consumers ) {
-        my %theirs = Provisioner::Cookbook->load($name)->required_recipes();
-        ok( exists $theirs{logcollector}, "$name names the collector it reads, which is what exempts it above" );
+        my %asks = $theirs{logcollector}->();
+        ok( @{ $asks{forward} // [] } || @{ $asks{forward_text} // [] }, "$name requires the collector only to read a copy of the stream" ) or diag explain \%asks;
+        $consumers++;
     }
+    ok( $consumers, 'and some recipe does, so the loop above tested something' );
 };
 
 subtest 'a forwarded copy is written where the ruleset will still reach it' => sub {
@@ -203,8 +209,8 @@ subtest 'a forwarded copy is written where the ruleset will still reach it' => s
         cmp_ok( $at, '<',  $stop, "and is above the stop that would otherwise drop it" );
     }
 
-    # RFC5424 with octet-counted framing, which is what a telegraf syslog input
-    # parses.  The rsyslog default is RFC3164, which it rejects.
+    # RFC5424 with octet-counted framing, which keeps the fields of each
+    # message.  The rsyslog default is RFC3164, which keeps none of them.
     like( $ruleset, qr/template="RSYSLOG_SyslogProtocol23Format"/, 'forwarded as RFC5424' );
     like( $ruleset, qr/TCP_Framing="octet-counted"/,               'and framed the way the reader expects' );
 };

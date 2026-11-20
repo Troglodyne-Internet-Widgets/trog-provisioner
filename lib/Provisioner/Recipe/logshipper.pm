@@ -107,8 +107,8 @@ setting of Ubuntu.
 
 Everything that reaches rsyslog.  journald forwards the journal to rsyslog, so
 a service that logs to the journal arrives: sshd, postfix, dovecot, roundcube,
-garage, openvpn, and grafana and synapse, which log to the console as well as to
-their files.
+garage, openvpn, and synapse, which logs to the console as well as to its
+files.
 
 rsyslog does not read other files.  So a service that writes only to a file
 also sends its lines to syslog, where its recipe can make it: nginx with

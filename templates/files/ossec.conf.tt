@@ -12,7 +12,6 @@
     <email_to>[% admin_email %]</email_to>
     <email_from>ossec@[% domain %]</email_from>
     <smtp_server>127.0.0.1</smtp_server>
-    <jsonout_output>yes</jsonout_output>
     <white_list/>
   </global>
   <alerts>
@@ -40,13 +39,6 @@
     <protocol>udp</protocol>
     <port>1514</port>
   </remote>
-
-  <!-- Every alert, as JSON, to the syslog input of telegraf. -->
-  <syslog_output>
-    <server>127.0.0.1</server>
-    <port>[% alerts_port %]</port>
-    <format>json</format>
-  </syslog_output>
 
   <!-- No active response, and none of the log files of the example. -->
   <command/>

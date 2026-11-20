@@ -1,0 +1,15 @@
+<!-- configd merges this over the ossec.conf of the package and the fragment
+     of the ossec recipe.  Provisioner::Recipe::grafanaossec says why each part
+     is here. -->
+<ossec_config>
+  <global>
+    <jsonout_output>yes</jsonout_output>
+  </global>
+
+  <!-- Every alert, as JSON, to the syslog input of telegraf. -->
+  <syslog_output>
+    <server>127.0.0.1</server>
+    <port>[% alerts_port %]</port>
+    <format>json</format>
+  </syslog_output>
+</ossec_config>
