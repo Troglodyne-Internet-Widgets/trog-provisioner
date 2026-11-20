@@ -16,6 +16,10 @@ mkdir -p /run/provisioner/no-reboot
 touch /run/provisioner/no-reboot/[% domain %]
 trap 'rm -f /run/provisioner/no-reboot/[% domain %]' EXIT
 cloud-init status --wait
+
+# The upgrade of first boot is over, and with it the use of this apt hook.
+# Provisioner::Recipe::ubuntu says what it does.
+rm -f [% first_boot_apt_hook %]
 [% IF secrets_marker -%]
 
 # The recipes read files that bin/provision copies from the secret store, and

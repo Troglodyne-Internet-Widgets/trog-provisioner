@@ -21,6 +21,7 @@ use Test::NoWarnings;
 use File::Slurper();
 use File::Slurper::Temp();
 use IPC::Run3();
+use Cpanel::JSON::XS();
 use Time::HiRes();
 use FindBin::libs;
 use Trog::Config();
@@ -173,6 +174,93 @@ subtest 'a cloud-init that reports failure is fatal' => sub {
         qr/Cloud[ ]init[ ]reported[ ]failure/,
         'dies'
     );
+};
+
+subtest 'a guest keeps its connection until it is told to drop it' => sub {
+    my $opened = 0;
+    my $mock   = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine( new => sub { my ($class) = @_; $opened++; return bless {}, $class } );
+
+    my $guest = Trog::Guest->new( host => '203.0.113.10', user => 'ubuntu' );
+    my $first = $guest->ssh;
+    is( $guest->ssh, $first, 'a second call gets the connection that is open' );
+    is( $opened,     1,      'and opens nothing' );
+
+    is( $guest->disconnect, $guest, 'disconnect returns the guest, for a call after it' );
+    isnt( $guest->ssh, $first, 'and the next call opens a new connection' );
+    is( $opened, 2, 'which is the second' );
+};
+
+subtest 'a wait that the reboot after the upgrade cuts connects again and waits again' => sub {
+    my $guest = Trog::Guest->new( host => '203.0.113.10', user => 'ubuntu' );
+
+    my @exits = ( $Trog::Guest::SSH_DROPPED, 0 );
+    my ( $waits, $dropped, $reconnected ) = ( 0, 0, 0 );
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( run_cmd     => sub { $waits++; return shift @exits } );
+    $machine->redefine( capture_cmd => sub { '[]' } );
+    my $mock = Test::MockModule->new('Trog::Guest');
+    $mock->redefine( disconnect   => sub { $dropped++;     return $_[0] } );
+    $mock->redefine( wait_for_ssh => sub { $reconnected++; return $_[0] } );
+
+    ok( quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } ), 'finishes' );
+    is( $dropped,     1, 'drops the connection that the reboot cut' );
+    is( $reconnected, 1, 'waits for ssh to come back' );
+    is( $waits,       2, 'and waits for cloud-init again' );
+};
+
+subtest 'a module that failed on one boot and succeeded on the next is not run again' => sub {
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
+
+    # What a guest that rebooted after its upgrade dumps: the module that the
+    # reboot cut, FAIL on the first boot, then SUCCESS as "previously ran".
+    my $dump = Cpanel::JSON::XS::encode_json(
+        [
+            { event_type => 'start',  name => 'modules-final/config-upgrade' },
+            { event_type => 'finish', name => 'modules-final/config-upgrade', result => 'FAIL' },
+            { event_type => 'finish', name => 'modules-final/config-broken',  result => 'FAIL' },
+            { event_type => 'finish', name => 'modules-final',                result => 'FAIL' },
+            { event_type => 'finish', name => 'modules-final/config-upgrade', result => 'SUCCESS' },
+            { event_type => 'finish', name => 'modules-final',                result => 'SUCCESS' },
+        ]
+    );
+    my @ran;
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( run_cmd  => sub { 0 } );
+    $machine->redefine( run_sudo => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
+    $machine->redefine(
+        capture_cmd => sub {
+            my ( $s, @argv ) = @_;
+            my $cmd = join( q{ }, @argv );
+            return $dump if index( $cmd, 'analyze dump' ) >= 0;
+            push @ran, $cmd;
+            return q{};
+        }
+    );
+
+    ok( quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } ), 'finishes' );
+    ok( !( grep { index( $_, 'upgrade' ) >= 0 } @ran ),                         'leaves alone the module whose last run succeeded' ) or diag explain \@ran;
+    ok( ( grep { index( $_,  'cloud-init single --name broken' ) >= 0 } @ran ), 'and re-runs the one whose last run failed' )        or diag explain \@ran;
+};
+
+subtest 'a guest that keeps dropping the connection is a failure' => sub {
+    my $guest = Trog::Guest->new( host => '203.0.113.10', user => 'ubuntu' );
+
+    my $waits   = 0;
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( run_cmd => sub { $waits++; return $Trog::Guest::SSH_DROPPED } );
+    my $mock = Test::MockModule->new('Trog::Guest');
+    $mock->redefine( disconnect   => sub { $_[0] } );
+    $mock->redefine( wait_for_ssh => sub { $_[0] } );
+
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
+        },
+        qr/Cloud[ ]init[ ]reported[ ]failure/,
+        'dies'
+    );
+    is( $waits, $Trog::Guest::MAX_RECONNECTS + 1, 'after the first wait and one for each reconnect' );
 };
 
 subtest 'cloud-init that does not return JSON is fatal' => sub {

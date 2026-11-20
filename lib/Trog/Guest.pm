@@ -82,6 +82,14 @@ our $STATUS_GRACE = '60s';
 # job and the job starting setup.sh is not taken for nothing.
 our $NEVER_GRACE = 10;
 
+# What ssh exits with when the connection drops under a command.
+our $SSH_DROPPED = 255;
+
+# How many times wait_for_cloud_init connects again after a drop.  cloud-init
+# reboots at most once, and the rest allows for a connection that opened while
+# the guest shut down.
+our $MAX_RECONNECTS = 3;
+
 # The keys that key_path fetched from the store in this run, by domain, each
 # with the temporary file that holds it.
 my %MATERIALISED;
@@ -154,6 +162,22 @@ sub wait_for_ssh {
     return $self;
 }
 
+=head2 disconnect
+
+Closes the connection, if one is open, and returns the guest.  The next call
+to L<Trog::Machine/ssh> then opens a new one, with the options of that call.
+
+Use it after the guest rebooted.  L<Net::OpenSSH::More> opens a new master
+when a command fails to start, but its object keeps the old one, so the command
+fails again.
+
+=cut
+
+sub disconnect ($self) {
+    delete $self->{ssh};
+    return $self;
+}
+
 =head2 wait_for_cloud_init($domain, %opts)
 
 Waits for cloud-init to finish, then makes sure that it told the truth.
@@ -161,10 +185,14 @@ C<$domain> defaults to L</name>.  Takes C<timeout>, default C<$SETUP_TIMEOUT>.
 Returns 1.
 
 The wait ends when F</var/log/cloud-init-output.log> says C<Boot configuration
-complete.>  cloud-init can say that after a run in which some modules failed.
+complete.>  cloud-init reboots the guest after its upgrade when the upgrade asks
+for that, which drops the connection.  Then this waits for ssh again, as
+L</wait_for_ssh(%opts)> does, and waits again, up to C<$MAX_RECONNECTS> times.
+
+cloud-init can say that it is complete after a run in which some modules failed.
 So this then reads C<cloud-init analyze dump>, and runs again each module that
-came back C<FAIL>.  It first removes the semaphore of that module, because
-otherwise cloud-init does not run it a second time.
+came back C<FAIL> the last time that it ran.  It first removes the semaphore of
+that module, because otherwise cloud-init does not run it a second time.
 
 Dies when the wait fails or times out, or when C<cloud-init analyze dump> does
 not return a JSON array.
@@ -177,7 +205,14 @@ sub wait_for_cloud_init {
     $domain //= $self->name;
 
     print "Waiting up to $timeout for Cloud-init to finish...\n";
-    my $rc = $self->run_cmd(qq{sudo -n timeout $timeout bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
+    my $wait       = qq{sudo -n timeout $timeout bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'};
+    my $rc         = $self->run_cmd($wait);
+    my $reconnects = 0;
+    while ( $rc == $SSH_DROPPED && $reconnects++ < $MAX_RECONNECTS ) {
+        print 'The connection to ' . $self->describe . " dropped, as it does when cloud-init reboots the guest after its upgrade.\n";
+        $self->disconnect->wait_for_ssh();
+        $rc = $self->run_cmd($wait);
+    }
     print "Done!\n";
     die 'Cloud init reported failure on ' . $self->describe . ", investigate the machine\n" if $rc;
 
@@ -186,8 +221,16 @@ sub wait_for_cloud_init {
     die "cloud-init analyze dump on " . $self->describe . " did not return a JSON array\n"
       unless ref $parsed eq 'ARRAY';
 
-    foreach my $fail ( grep { ( $_->{result} // '' ) eq 'FAIL' } @$parsed ) {
-        my ( undef, $mtarget ) = split( m{/}, $fail->{name} );
+    # The dump holds every boot, and the module that the reboot after the upgrade
+    # cut fails on the first and succeeds on the second, so its last result counts.
+    my ( @order, %last );
+    foreach my $event ( grep { defined $_->{result} && defined $_->{name} } @$parsed ) {
+        push( @order, $event->{name} ) unless exists $last{ $event->{name} };
+        $last{ $event->{name} } = $event->{result};
+    }
+
+    foreach my $name ( grep { $last{$_} eq 'FAIL' } @order ) {
+        my ( undef, $mtarget ) = split( m{/}, $name );
         next unless $mtarget;
         my ( $stage, $target ) = split( m/-/, $mtarget );
         next unless $target;
