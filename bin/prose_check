@@ -1,0 +1,273 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::ProseCheck;
+
+#ABSTRACT: Refuse prose that names the fleet: its domains, accounts, hosts or addresses.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+use List::Util   qw{any none uniq};
+use IPC::Run3();
+use File::Temp();
+use Net::CIDR();
+
+use Provisioner::Cookbook();
+use Trog::Hypervisors::Config();
+
+=head1 NAME
+
+prose_check - refuse prose that names the fleet: its domains, accounts, hosts or addresses
+
+=head1 SYNOPSIS
+
+    bin/prose_check < pr-body.md
+    bin/prose_check --recipes /path/to/recipes.yaml --hypervisors /path/to/hypervisors.conf < message.txt
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--recipes> FILE
+
+The recipe configuration to read.  The default is F<recipes.yaml> in the
+directory of L<Trog::Config>, with the files of F<recipes.d> beside it.
+
+=item B<--hypervisors> FILE
+
+The fleet to read.  The default is F<hypervisors.conf> in the directory of
+L<Trog::Config>.
+
+=back
+
+=head1 DESCRIPTION
+
+This repository is public, and the fleet that it runs on is not.  The
+C<prose_check> of F<.perl-slop.json> names this command, so the hooks of the
+perl-slop plugin run it on the prose of each post and each commit message.  It
+reads the prose on standard input.  It exits 0 when the prose names nothing
+of the installation.  Otherwise it prints one line for each line of the prose
+that names something, with the kind of name, and exits 1:
+
+    line 3: a domain of the configuration
+
+It never prints the name.  Whoever wrote the prose can find it on that line,
+and a log or a transcript of the refusal must not hold it.
+
+These are the names that it refuses:
+
+=over 4
+
+=item *
+
+Each domain of the configuration and each of its aliases, and each parent
+domain of them, such as F<example.test> for F<shop.example.test>.
+
+=item *
+
+The C<user>, C<admin_user> and C<admin_gecos> of C<_base> and of each domain.
+
+=item *
+
+Each host name, mail address and IPv4 address that a value of the
+configuration or of the fleet holds, wherever it is.  So a forge, a log host
+or a hypervisor in a C<libvirt_uri> is refused without a list of keys.
+
+=item *
+
+The name of each hypervisor of the fleet.
+
+=item *
+
+An IPv4 address inside a range that the configuration or the fleet names,
+such as an C<ip_pool_br0>.
+
+=back
+
+A name that a tracked file of the repository already holds is public, and is
+not refused.  Examples are F<github.com>, F<test.test>, or an account named
+C<root>.  A domain of the configuration and its aliases are refused anyway,
+because an earlier commit that leaked one does not make it public.
+
+It reads the installation that L<Trog::Config> names, so
+C<TROG_PROVISIONER_CONFIG> in the environment of Claude Code moves it.  On a
+machine with no configuration, it refuses nothing.
+
+=cut
+
+# Shorter than this, a name of an account matches words of ordinary prose.
+our $SHORTEST_NAME = 3;
+
+# A host name: dotted labels that end in letters.  A name inside a longer
+# dotted name does not count, so example.test is not found in a.example.test.
+our $LABEL_RX = qr/[[:alnum:]](?:[[:alnum:]-]*[[:alnum:]])?/;
+our $NAME_RX  = qr/(?:$LABEL_RX\.)+ [[:alpha:]]{2,24}/x;
+our $HOST_RX  = qr/(?<![\w.-]) $NAME_RX (?![\w-]|\.\w)/x;
+our $EMAIL_RX = qr/(?<![\w.+-]) [\w.+-]+ @ $NAME_RX (?![\w-]|\.\w)/x;
+our $IPV4_RX  = qr/(?<![\w.]) (?:\d{1,3}\.){3}\d{1,3} (?![\w.])/x;
+our $CIDR_RX  = qr/(?<![\w.]) (?:\d{1,3}\.){3}\d{1,3}\/\d{1,2} (?![\w.])/x;
+
+our $DOMAIN = 'a domain of the configuration';
+
+sub main {
+    my @args = @_;
+
+    my ( $recipes, $hypervisors, $help );
+    GetOptionsFromArray(
+        \@args,
+        'recipes=s'     => \$recipes,
+        'hypervisors=s' => \$hypervisors,
+        'help'          => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'prose_check reads standard input and takes no arguments' ) if @args;
+
+    my $conf  = Provisioner::Cookbook->configuration($recipes);
+    my $fleet = Trog::Hypervisors::Config->load( $hypervisors // Trog::Hypervisors::Config->default_path );
+    my ( $names, $ranges ) = private_names( $conf, $fleet );
+    forget_public($names);
+
+    # Empty, so that <> reads standard input and not an option left in @ARGV.
+    local @ARGV = ();
+    my $prose = do { local $/ = undef; <> }
+      // q{};
+    my @found = findings( $names, $ranges, $prose );
+    print map { "$_\n" } @found;
+    return @found ? 1 : 0;
+}
+
+=head2 (\%names, \@ranges) = private_names($conf, $fleet)
+
+The names that the configuration C<$conf> and the fleet C<$fleet> hold, each
+in lower case and mapped to its kind, and the IPv4 ranges that they name.
+See L</DESCRIPTION>.
+
+=cut
+
+sub private_names ( $conf, $fleet ) {
+    my ( %names, @ranges );
+    my $add = sub ( $kind, @found ) {
+        $names{ lc $_ } //= $kind for grep { length >= $SHORTEST_NAME } @found;
+    };
+
+    my @domains = Provisioner::Cookbook->domains($conf);
+    my $aliases = Provisioner::Cookbook->alias_map($conf);
+    my @own     = uniq( @domains, map { @$_ } values %$aliases );
+    $add->( $DOMAIN,                                       @own );
+    $add->( 'the parent of a domain of the configuration', map { parents($_) } @own );
+
+    foreach my $global ( Provisioner::Cookbook->base_global($conf), map { Provisioner::Cookbook->global_config( $_, $conf ) } @domains ) {
+        $add->( 'an account of the configuration', grep { defined && !ref } @{$global}{qw{user admin_user}} );
+        $add->( 'the name of a person',            grep { defined && !ref } $global->{admin_gecos} );
+    }
+
+    $add->( 'a hypervisor of the fleet', $fleet->names );
+    foreach my $string ( strings_in( $conf, map { $fleet->block($_) } $fleet->names ) ) {
+        $add->( 'a mail address that the configuration names', $string =~ m/$EMAIL_RX/g );
+        $add->( 'a host that the configuration names',         $string =~ m/$HOST_RX/g );
+        push @ranges, $string =~ m/$CIDR_RX/g;
+        $add->( 'an address that the configuration names', ( $string =~ s/$CIDR_RX//gr ) =~ m/$IPV4_RX/g );
+    }
+
+    return ( \%names, [ uniq @ranges ] );
+}
+
+=head2 @parents = parents($domain)
+
+Each parent of C<$domain> that has two labels or more: F<b.c.test> and
+F<c.test> for F<a.b.c.test>.
+
+=cut
+
+sub parents ($domain) {
+    my @labels = split m/\./, $domain;
+    return map { join q{.}, @labels[ $_ .. $#labels ] } 1 .. $#labels - 1;
+}
+
+=head2 @strings = strings_in(@data)
+
+Every string in C<@data>, a list of structures of hashes and arrays, keys
+included.
+
+=cut
+
+sub strings_in (@data) {
+    my @strings;
+    while (@data) {
+        my $item = shift @data;
+        if    ( ref $item eq 'HASH' )         { unshift @data, %$item }
+        elsif ( ref $item eq 'ARRAY' )        { unshift @data, @$item }
+        elsif ( defined $item && !ref $item ) { push @strings, $item }
+    }
+    return @strings;
+}
+
+=head2 forget_public(\%names)
+
+Removes from C<%names> each name that a tracked file of the repository in the
+current directory holds, as a word, in any case.  A domain of the
+configuration stays.  Outside a repository, it removes nothing.
+
+=cut
+
+sub forget_public ($names) {
+    my @asked = grep { $names->{$_} ne $DOMAIN } sort keys %$names;
+    return if !@asked;
+
+    my $patterns = File::Temp->new;
+    print {$patterns} map { "$_\n" } @asked;
+    close($patterns) or die "Cannot write the names to look for: $!\n";
+
+    my $said = q{};
+    IPC::Run3::run3( [ qw{git grep --no-color -I -i -o -h -w -F -f}, $patterns->filename ], \undef, \$said, \undef );
+    delete @{$names}{ map { lc } split m/\n/, $said };
+    return;
+}
+
+=head2 @findings = findings(\%names, \@ranges, $prose)
+
+One line for each line of C<$prose> and each kind of name that it holds:
+C<line N: KIND>.  It matches C<%names> in any case, as whole names, and each
+IPv4 address against C<@ranges>.
+
+=cut
+
+sub findings ( $names, $ranges, $prose ) {
+
+    # Longest first, because a match ends at the first name that fits: an
+    # account before the @ of its mail address, for one.
+    my @sorted = reverse sort { length $a <=> length $b || $a cmp $b } keys %$names;
+    my $any    = @sorted ? join( q{|}, map { quotemeta } @sorted ) : '(?!)';
+    my $rx     = qr/(?<![\w.@-]) ($any) (?![\w-]|\.\w)/xi;
+
+    my ( @found, $line );
+    foreach my $text ( split m/\n/, $prose ) {
+        $line++;
+        my @kinds = map { $names->{ lc $_ } } $text =~ m/$rx/g;
+        push @kinds, 'an address of the fleet' if @$ranges && any { valid_ipv4($_) && Net::CIDR::cidrlookup( $_, @$ranges ) } $text =~ m/$IPV4_RX/g;
+        push @found, map { "line $line: $_" } uniq @kinds;
+    }
+    return @found;
+}
+
+=head2 $bool = valid_ipv4($address)
+
+Whether each of the four parts of C<$address> is 255 or less.
+
+=cut
+
+sub valid_ipv4 ($address) {
+    return none { $_ > 255 } split m/\./, $address;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
