@@ -17,6 +17,21 @@ subtest 'the manager runs the daemons that read the stream and send the alerts' 
     }
 };
 
+subtest 'the manager loads the rule files that the package lists, in its order' => sub {
+    my %includes;
+    foreach my $file (qw{ossec.conf.package ossec.conf}) {
+        my $xml = do { local ( @ARGV, $/ ) = "/var/ossec/etc/$file"; <> } // q{};
+        $xml =~ s{<!--.*?-->}{}gs;
+        my ($rules) = $xml =~ m{<rules>(.*?)</rules>}s;
+        $includes{$file} = [ ( $rules // q{} ) =~ m{<include>([^<]+)</include>}g ];
+    }
+    ok( scalar @{ $includes{'ossec.conf.package'} }, 'the configuration of the package is kept, with its list' ) or return;
+    is_deeply( $includes{'ossec.conf'}, $includes{'ossec.conf.package'}, 'and the running configuration has the same list' );
+
+    my $check = `/var/ossec/bin/ossec-analysisd -t 2>&1`;
+    is( $?, 0, 'which analysisd loads' ) or diag $check;
+};
+
 subtest 'each end listens on loopback, where the other end sends' => sub {
 
     # Polls, because a postrun task restarts telegraf.

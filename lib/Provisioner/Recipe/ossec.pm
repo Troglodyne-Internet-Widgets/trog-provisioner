@@ -82,13 +82,18 @@ C<ossec-hids-server> in an archive of their own, and
 L<Provisioner::Recipe::Ubuntu::ossec> takes the package from there.  The archive
 can be a release behind the source.
 
-=head2 The rules are listed in order
+=head2 The rules come from the package
 
-F<ossec.conf> includes each rule file of the package by name, in the order of
-the configuration that the package installs.  A rule refers to rules in the
-files before it, so the files cannot load in the order of a directory.  If a new
-package drops a file in the list, the manager does not start, and the guest test
-fails.
+OSSEC loads its rule files in the order that F<ossec.conf> lists them, and a
+rule can name rules in the files before it, so the files cannot load in the
+order of a directory.  The package lists them in the F<ossec.conf> that it
+installs.  The global fragment keeps that file as F<ossec.conf.package>, and
+F<scripts/ossec_package_rules> copies its C<< <rules> >> element into the
+configuration of this recipe.  So a new package brings its own list, and
+nothing here names a rule file.
+
+OSSEC reads one F<ossec.conf> and has no directory of configuration, so this
+cannot add to the file of the package instead.
 
 =cut
 

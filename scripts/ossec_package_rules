@@ -1,0 +1,96 @@
+#!/usr/bin/perl
+
+package Trog::OssecPackageRules;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+=head1 NAME
+
+ossec_package_rules - put the rule list of the OSSEC package into another
+ossec.conf
+
+=head1 SYNOPSIS
+
+    ossec_package_rules PACKAGE_CONF OUR_CONF > ossec.conf
+
+=head1 DESCRIPTION
+
+Prints C<OUR_CONF> with its C<< <rules> >> element replaced by the one in
+C<PACKAGE_CONF>, the F<ossec.conf> that the package installed.
+
+OSSEC loads its rule files in the order that F<ossec.conf> lists them, and a
+rule can name rules in the files before it.  A directory of rule files loads
+in the order of the names, which breaks those references, so the list must be
+written out.  The package writes it, in the configuration that it installs.
+This takes it from there, so the list comes with the package, and nothing here
+names a rule file.
+
+Comments inside the package's element are left out, so a rule file that the
+package comments out stays out.
+
+=head1 FUNCTIONS
+
+=head2 $exit = main($package_conf, $our_conf)
+
+Prints the result and returns 0.  Dies when it cannot read a file, or when
+either file has no C<< <rules> >> element, or the package's element includes no
+rule file.
+
+=cut
+
+sub main {
+    my ( $package_conf, $our_conf ) = @_;
+
+    die "usage: ossec_package_rules PACKAGE_CONF OUR_CONF\n" unless defined $our_conf;
+
+    my $rules = rules( slurp($package_conf) ) // die "$package_conf has no <rules> element.\n";
+    die "The <rules> element of $package_conf includes no rule file.\n" unless $rules =~ m{<include>[^<]+</include>};
+
+    my $ours = slurp($our_conf);
+    $ours =~ s{<rules>.*?</rules>}{$rules}s or die "$our_conf has no <rules> element.\n";
+    print $ours;
+    return 0;
+}
+
+=head2 $element = rules($xml)
+
+The first C<< <rules> >> element of C<$xml>, with its comments taken out, or
+undef when there is none.
+
+A regex and not an XML parser, because the perl of the guest has none in its
+core modules, and the element is a flat list of includes.
+
+=cut
+
+sub rules {
+    my ($xml) = @_;
+
+    # Out of the whole file first, so a <rules> inside a comment is not taken.
+    $xml =~ s{<!--.*?-->}{}gs;
+    my ($rules) = $xml =~ m{(<rules>.*?</rules>)}s or return;
+    $rules =~ s{^[ \t]*\n}{}gm;
+    return $rules;
+}
+
+=head2 $text = slurp($path)
+
+The contents of C<$path>.  Dies when it cannot read it.
+
+=cut
+
+sub slurp {
+    my ($path) = @_;
+
+    open my $in, '<', $path or die "Cannot read $path: $!\n";
+    local $/ = undef;
+    my $text = <$in>;
+    close $in or die "Cannot close $path: $!\n";
+    return $text;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

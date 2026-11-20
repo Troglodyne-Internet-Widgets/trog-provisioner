@@ -4,7 +4,12 @@
     The package comes in at first boot, so the manager is here.  Telegraf and
     grafana come in with the targets below this one, which is why root owns
     their files, as in grafanasyslog.global.tt. -%]
-install -o root -g ossec -m 0640 ossec.conf /var/ossec/etc/ossec.conf
+[%# The list of rule files comes from the configuration that the package
+    installed, which is kept the first time so that a second run reads it
+    and not the one that this target wrote.  ossec_package_rules says why. -%]
+[ -e /var/ossec/etc/ossec.conf.package ] || cp -p /var/ossec/etc/ossec.conf /var/ossec/etc/ossec.conf.package
+[% script_dir %]/ossec_package_rules /var/ossec/etc/ossec.conf.package ossec.conf > ossec.conf.full
+install -o root -g ossec -m 0640 ossec.conf.full /var/ossec/etc/ossec.conf
 [%# ossec-control starts only the daemons in its process list, and the daemon
     that sends the alerts is not in it until this line adds it. -%]
 /var/ossec/bin/ossec-control enable client-syslog
