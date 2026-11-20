@@ -179,7 +179,9 @@ sub main {
                 print {*STDERR} "cpan_install: dzil $which --missing exited $failed in $dir, so what it needs is not known\n";
                 return $failed;
             }
-            my @missing = grep { $_ } map { s/\s+\z//r } @said;
+            my @lines   = grep { $_ ne q{} } map { s/\s+\z//r } @said;
+            my @missing = grep { is_module_name($_) } @lines;
+            print {*STDERR} "cpan_install: dzil $which printed '$_', which names no module, so it is not installed\n" for grep { !is_module_name($_) } @lines;
             next unless @missing;
             $rc = install_specs( $bin, \%opt, @missing ) and last;
         }
@@ -223,6 +225,20 @@ sub install_specs {
     }
     return 0 if !@newest;
     return ensure_cpm($bin) || cpm_then_cpanm( undef, [ cpm( $bin, $opt ), @newest ], [ cpanm( $bin, $opt ), '--mirror-only', @newest ] );
+}
+
+=head2 $bool = is_module_name($line)
+
+True when C<$line> is the name of a perl package, such as C<Foo::Bar>.  dzil
+prints what a distribution needs one name to a line, and a plugin can print to
+the same stream while dzil builds, such as C<[tidied] lib/Foo.pm> from
+C<[TidyAll]>.
+
+=cut
+
+sub is_module_name {
+    my ($line) = @_;
+    return $line =~ m{\A [[:alpha:]_] \w* (?: :: \w+ )* \z}xaa ? 1 : 0;
 }
 
 =head2 $rc = cpm_then_cpanm($dir, \@cpm, \@cpanm)
