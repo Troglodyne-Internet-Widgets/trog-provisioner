@@ -22,7 +22,10 @@ C<package_sources> below names.  Ubuntu has no OSSEC.
 =cut
 
 sub deps {
-    return qw{ossec-hids-server};
+
+    # libxml-libxml-perl for the ossec language of configd, which reads
+    # ossec.conf with XML::LibXML under the perl of the system.
+    return qw{ossec-hids-server libxml-libxml-perl};
 }
 
 =head2 @sources = $recipe->package_sources()

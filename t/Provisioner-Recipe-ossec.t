@@ -24,6 +24,7 @@ my $recipe = 'Provisioner::Recipe::ossec'->new( output_dir => '/bogus', libdir =
 subtest 'required_recipes' => sub {
     my %required = $recipe->required_recipes();
     ok( exists $required{grafanasyslog}, 'it needs grafanasyslog, which installs telegraf and grafana' );
+    is_deeply( { $required{configd}->() },      { languages    => ['ossec'] },           'and configd, with the language that makes ossec.conf' );
     is_deeply( { $required{logcollector}->() }, { forward_text => ['127.0.0.1:10514'] }, 'and asks the collector for a copy as text on the default port' );
 
     my %moved = $recipe->required_recipes( port => 20514 );

@@ -82,18 +82,29 @@ C<ossec-hids-server> in an archive of their own, and
 L<Provisioner::Recipe::Ubuntu::ossec> takes the package from there.  The archive
 can be a release behind the source.
 
-=head2 The rules come from the package
+=head2 configd makes ossec.conf
 
-OSSEC loads its rule files in the order that F<ossec.conf> lists them, and a
-rule can name rules in the files before it, so the files cannot load in the
-order of a directory.  The package lists them in the F<ossec.conf> that it
-installs.  The global fragment keeps that file as F<ossec.conf.package>, and
-F<scripts/ossec_package_rules> copies its C<< <rules> >> element into the
-configuration of this recipe.  So a new package brings its own list, and
-nothing here names a rule file.
+OSSEC reads one F<ossec.conf> and has no directory of configuration.  So
+L<Provisioner::Recipe::configd> adopts it with the C<ossec> language of
+L<Configd>: the file of the package becomes F<ossec.conf.d/00-original>, this
+recipe writes F<ossec.conf.d/50-ossec>, and configd merges the two each time
+the manager starts.
 
-OSSEC reads one F<ossec.conf> and has no directory of configuration, so this
-cannot add to the file of the package instead.
+The rule list comes from the package that way.  OSSEC loads its rule files in
+the order of the list, and a rule can name rules in the files before it, so the
+files cannot load in the order of a directory.  The list of the package keeps
+its order in the merge, and nothing here names a rule file.  When an upgrade of
+the package leaves its new file as F<ossec.conf.dpkg-dist>, configd takes it as
+the new F<00-original> at the next start.
+
+The file of the package also configures what this recipe does not want, and
+the fragment clears each of those with an empty element: the listener of the
+agents on port 1514, active response that blocks addresses in the firewall of
+the collector, the log files of its example, a whitelist of private addresses
+and mail to an example address.
+
+The C<ossec> language reads XML with L<XML::LibXML>, which is not in core perl,
+so L<Provisioner::Recipe::Ubuntu::ossec> installs it with the manager.
 
 =cut
 
@@ -153,9 +164,9 @@ sub args {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<logcollector>, with the copy as text that the manager reads, and
+C<logcollector>, with the copy as text that the manager reads,
 C<grafanasyslog>, which installs telegraf and grafana and puts the stream in the
-measurement that the alerts join.
+measurement that the alerts join, and C<configd>, which makes F<ossec.conf>.
 
 =cut
 
@@ -168,6 +179,7 @@ sub required_recipes {
     return (
         logcollector  => sub { ( forward_text => ["127.0.0.1:$port"] ) },
         grafanasyslog => sub { () },
+        configd       => sub { ( languages => ['ossec'] ) },
     );
 }
 
