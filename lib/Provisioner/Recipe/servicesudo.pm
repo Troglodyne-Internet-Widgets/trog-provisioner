@@ -43,7 +43,13 @@ F<check_sudoers_grant> asks C<cvtsudoers> what the file grants, and stops the
 build unless that is one rule for each command, for the service user, as
 root, with no password, and nothing else.
 
-With an empty C<commands>, the file holds a comment and no grant.  It is still
+The file also turns off the mail that sudo sends to root when this user is
+refused (C<mail_badpass> and C<mail_no_perms>).  The guest test asks sudo
+about a command that is not listed, and sudo mails root about that question
+as it does about an attempt.  The mail looks like a real attempt.  The line
+is a C<Defaults> and not a rule, so C<check_sudoers_grant> does not count it.
+
+With an empty C<commands>, the file holds a comment, that line, and no grant.  It is still
 installed, so a provision with an empty list takes back a grant that an earlier
 provision made.
 

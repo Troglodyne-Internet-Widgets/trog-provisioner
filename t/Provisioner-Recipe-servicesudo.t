@@ -65,7 +65,13 @@ subtest 'commands' => sub {
     unlike( $sudoers, qr/&quot;/, 'and a command with no arguments keeps its quotes' );
 
     my $none = recipe()->render_file( 'files/servicesudo.sudoers.tt', %G );
-    unlike( $none, qr/^[^#\n]/m, 'with no commands, the file grants nothing' ) or diag $none;
+    unlike( $none, qr/ALL=/, 'with no commands, the file grants nothing' ) or diag $none;
+
+    # sudo mails root when the service user asks about a command that it may
+    # not run, as the test of the guest does.  Nobody reads that mail.
+    foreach my $file ( $sudoers, $none ) {
+        like( $file, qr/^Defaults:svc[ ]!mail_badpass,[ ]!mail_no_perms$/m, 'sudo sends no mail about the service user' ) or diag $file;
+    }
 
   SKIP: {
         skip 'no visudo here', 2 unless $visudo;
