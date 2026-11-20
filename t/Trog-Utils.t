@@ -21,9 +21,6 @@ use IPC::Run3();
 
 use FindBin::libs;
 
-# Loaded so Test::MockModule has a package to attach to: Trog::Utils names it
-# only inside the sub under test.
-use IO::Prompter();
 use Trog::Utils();
 
 subtest 'a prompt is asked with nothing left in @ARGV for it to open' => sub {
