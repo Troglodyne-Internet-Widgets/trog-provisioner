@@ -553,19 +553,7 @@ sub authority {
     die "There is $paths{cert}, but no $paths{key} to sign with.\n" . "This installation trusts the authority of the installation that configures the\n" . "fetch cache, and only that one can sign.  To make a new authority here, remove\n" . "$paths{cert}, and copy the new one to each installation that trusts it.\n"
       if -f $paths{cert};
 
-    my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
-        CA        => 1,
-        subject   => { commonName => 'trog-provisioner fetch cache authority' },
-        not_after => int(time) + $AUTHORITY_DAYS * $Provisioner::Vars::SECONDS_A_DAY,
-        key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
-    );
-
-    # The key first, because the pair counts as made only when both files exist.
-    Trog::Utils::write_binary_mode( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   oct('0600') );
-    Trog::Utils::write_binary_mode( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), oct('0644') );
-
-    IO::Socket::SSL::Utils::CERT_free($cert);
-    IO::Socket::SSL::Utils::KEY_free($key);
+    Provisioner::Utils::write_authority( $paths{cert}, $paths{key}, 'trog-provisioner fetch cache authority', $AUTHORITY_DAYS );
 
     return \%paths;
 }

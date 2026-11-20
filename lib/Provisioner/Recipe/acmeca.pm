@@ -11,6 +11,7 @@ use re '/aasx';
 use parent qw{Provisioner::Recipe};
 
 use File::Copy();
+use Readonly;
 use IO::Socket::SSL::Utils();
 
 use Time::HiRes qw{time};
@@ -18,6 +19,7 @@ use Provisioner::Cookbook();
 use Provisioner::Vars();
 use Provisioner::Utils();
 use Trog::Utils();
+use Trog::Config();
 use Trog::Patterns();
 
 =head1 Provisioner::Recipe::acmeca
@@ -33,7 +35,10 @@ use Trog::Patterns();
 =head2 DESCRIPTION
 
 An ACME server on the guest.  It issues from the same authority that signs the
-certificate of the fetch cache.  See L<Provisioner::Recipe::fetchcache/authority>.
+certificate of the fetch cache, where this installation holds the key of that
+authority.  See L<Provisioner::Recipe::fetchcache/authority>, and
+C<issuing_authority> below for an installation that holds only its
+certificate.
 
 A public CA cannot issue a certificate for a name under a reserved TLD.  Nothing
 outside this fleet can resolve the name, so the CA cannot validate a challenge
@@ -333,28 +338,86 @@ sub generate_files {
     return ( @written, $self->intermediate( $output_dir, $opts{constrain_to} ) );
 }
 
+=head2 $paths = Provisioner::Recipe::acmeca->issuing_authority()
+
+The authority that this CA issues from, as a hash reference of C<cert> and
+C<key>, the paths of the two files:
+
+=over 4
+
+=item * The authority of the fetch cache, where this installation holds its key
+or holds nothing yet.  The first of the cache and this CA to ask makes it, and
+both keep it.  So a fleet with a cache and a CA has one root.  See
+L<Provisioner::Recipe::fetchcache/authority>.
+
+=item * An authority of its own, in F<acmeca-ca.crt> and F<acmeca-ca.key>
+beside F<ips.db>, where this installation holds the certificate of the cache
+and not its key.  Such an installation trusts a cache that another one signed,
+as a scratch configuration does, and it cannot sign with that authority.  It
+still issues to its guests, because SSL on a guest under a reserved TLD has no
+other issuer.  This makes the pair the first time, and keeps it.
+
+=back
+
+Dies if F<acmeca-ca.crt> is there without its key, for the reason that
+L<Provisioner::Recipe::fetchcache/authority> dies.
+
+=cut
+
+Readonly my $AUTHORITY_DAYS => 3650;
+
+sub issuing_authority {
+    my ($class) = @_;
+
+    my %own   = ( cert => Trog::Config->path('acmeca-ca.crt'),     key => Trog::Config->path('acmeca-ca.key') );
+    my %cache = ( cert => Trog::Config->path('fetchcache-ca.crt'), key => Trog::Config->path('fetchcache-ca.key') );
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether each file of a pair was made, not whether it can be read
+    return \%own if -f $own{cert} && -f $own{key};
+    die "There is $own{cert}, but no $own{key} to sign with.  To make a new authority for acmeca, remove $own{cert}, and copy the new one to each installation that trusts it.\n"
+      if -f $own{cert};
+    return Provisioner::Cookbook->load('fetchcache')->authority() if !-f $cache{cert} || -f $cache{key};
+
+    Provisioner::Utils::write_authority( $own{cert}, $own{key}, 'trog-provisioner acme authority', $AUTHORITY_DAYS );
+    return \%own;
+}
+
+=head2 $path = Provisioner::Recipe::acmeca->trusted_root()
+
+The certificate of the authority that this CA issues from, as
+C<issuing_authority> chooses it, but never made: F<acmeca-ca.crt> where this installation made one,
+or else the certificate of the fetch cache, from
+L<Provisioner::Recipe::fetchcache/trusted_authority>, which dies when there is
+none.
+
+=cut
+
+sub trusted_root {
+    my ($class) = @_;
+
+    my $own = Trog::Config->path('acmeca-ca.crt');
+    return $own if -f $own;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether this installation made one
+    return Provisioner::Cookbook->load('fetchcache')->trusted_authority();
+}
+
 =head2 @written = $recipe->intermediate($output_dir, $tld)
 
-Signs an intermediate with the authority of the fetch cache, constrained to
-names under C<$tld> and C<localhost>.  Writes it into C<$output_dir> as
+Signs an intermediate with C<issuing_authority>, constrained to names under C<$tld>
+and C<localhost>.  Writes it into C<$output_dir> as
 F<acmeca-intermediate.crt>, and its key as F<acmeca-intermediate.key>.  Also
 writes the authority as F<acmeca-root.crt>, which the guest chains to and
 trusts.  Returns those three file names.
 
-The first of the two recipes to ask makes the authority, and both keep it.  So a
-fleet with a cache and a CA has one root.  Only the certificate of the root
-travels.  Its key stays where it was made.
+Only the certificate of the root travels.  Its key stays where it was made.
 
-Dies if it cannot copy the certificate of the authority.  Dies if the
-installation holds the certificate of the authority without its key, as
-C<authority> in L<Provisioner::Recipe::fetchcache> says.
+Dies if it cannot copy the certificate of the authority.
 
 =cut
 
 sub intermediate {
     my ( $self, $output_dir, $tld ) = @_;
 
-    my $authority = Provisioner::Cookbook->load('fetchcache')->authority();
+    my $authority = $self->issuing_authority();
     my $ca_cert   = IO::Socket::SSL::Utils::PEM_file2cert( $authority->{cert} );
     my $ca_key    = IO::Socket::SSL::Utils::PEM_file2key( $authority->{key} );
 

@@ -272,6 +272,28 @@ subtest 'a domain whose authority is under a reserved TLD trusts the authority o
     unlike( fresh('registrar')->render(%common), qr{--delegate}, 'and under a reserved TLD there is no zone above to delegate from' );
 };
 
+subtest 'a domain whose authority is configured here trusts the CA that the authority runs' => sub {
+    my $name = 'web.lab.zone.test';
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    authority_conf( $conf, $name, 'ns.zone.test' );
+    $conf->redefine( domains => sub { return ( 'ns.zone.test', $name ) } );
+
+    # A scratch configuration: the certificate of the cache of the fleet, and
+    # the authority among its own domains, so acmeca issues to it from a root
+    # of its own.
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+    my $config = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$config/fetchcache-ca.crt", "the authority of the fleet\n" );
+
+    my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.zone.test' => '192.0.2.53' }, authority => 'ns.zone.test' );
+    my $out    = tempdir( CLEANUP => 1 );
+    fresh('registrar')->generate_files( $out, %common );
+
+    ok( -e "$config/acmeca-ca.crt", 'the root of acmeca is made, whether or not the authority was generated first' );
+    is( File::Slurper::read_text("$out/registrar-anchor.crt"), File::Slurper::read_text("$config/acmeca-ca.crt"), 'and is what the guest trusts' );
+    is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority of the fleet\n",                    'and the certificate of the fleet is left as it was' );
+};
+
 subtest 'a domain under a reserved TLD is refused where the installation has no fleet authority' => sub {
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
     authority_conf( $conf, 'web.lab.zone.test', 'ns.zone.test' );
