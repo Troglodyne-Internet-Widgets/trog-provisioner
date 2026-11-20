@@ -2,6 +2,7 @@
   "before_edit": {
     "lib/Provisioner/Recipe/**": ["writing-recipes"]
   },
+  "prose_check": "bin/prose_check",
   "before_commit": {
     "lib/Provisioner/Recipe/**": ["provisioning-recipes"],
     "templates/**": ["provisioning-recipes"]
