@@ -36,10 +36,12 @@ sub fetch {
 
 # The domain and its aliases serve the page, through the vhost of nginxproxy.
 my $index = fetch('https://[% domain %]/');
-like($index, qr{<code>https://\Q[% server_name %]:[% federation_port %]\E</code>}, 'the domain serves the page, which names the homeserver at its public URL') or diag $index;
-[% FOREACH chan IN channels %]
-like($index, qr/#\Q[% chan %]:[% server_name %]\E/, 'channel [% chan %] is listed as a room alias on this homeserver');
-[% END %]
+like($index, qr{href="https://element\.\Q[% server_name %]\E/"}, 'the domain serves the page, which links to Element') or diag $index;
+
+# Element, from its release, and set to start at the homeserver.
+ok(-s '[% install_dir %]/element.matrix.[% domain %]/index.html', 'Element was downloaded and extracted');
+my $element = eval { JSON::PP::decode_json( fetch('https://element.matrix.[% domain %]/config.json') ) } // {};
+is( ( ( $element->{default_server_config} // {} )->{'m.homeserver'} // {} )->{base_url}, 'https://[% server_name %]:[% federation_port %]', 'Element starts at the homeserver' );
 
 # The vhost of the homeserver answers for server_name on 443, where the
 # well-known documents are, and on the port of federation.
@@ -67,7 +69,13 @@ my $relayed = eval { JSON::PP::decode_json( fetch( 'https://[% server_name %]:[%
 is( ( $relayed->{server} // {} )->{name}, 'Synapse', 'synapse answers federation on [% passthrough_port %], where the relay passes [% federation_port %] through' );
 
 # The relay passes 443 to 8443, with the PROXY protocol, for each public name.
-like( fetch( 'https://admin.matrix.[% domain %]:8443/', '--haproxy-protocol' ), qr/<html/i, 'the admin interface answers where the relay passes its name' );
+like( fetch( 'https://admin.[% server_name %]:8443/',   '--haproxy-protocol' ), qr/<html/i, 'the admin interface answers where the relay passes admin.[% server_name %]' );
+like( fetch( 'https://element.[% server_name %]:8443/', '--haproxy-protocol' ), qr/<html/i, 'and Element where the relay passes element.[% server_name %]' );
+[% ELSE %]
+
+# Without a relay, the vhosts answer for the names under server_name themselves.
+like( fetch('https://admin.[% server_name %]/'),   qr/<html/i, 'the admin interface answers for admin.[% server_name %]' );
+like( fetch('https://element.[% server_name %]/'), qr/<html/i, 'and Element for element.[% server_name %]' );
 [% END %]
 
 # Some of the packages that the recipe asks for.  A package name that does not

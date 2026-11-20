@@ -1,0 +1,11 @@
+{
+    "default_server_config": {
+        "m.homeserver": {
+            "base_url": "https://[% server_name %]:[% federation_port %]",
+            "server_name": "[% server_name %]"
+        }
+    },
+    "disable_custom_urls": false,
+    "disable_guests": true,
+    "brand": "[% server_name %]"
+}

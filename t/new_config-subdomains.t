@@ -142,11 +142,11 @@ subtest 'a recipe says which names it serves' => sub {
 
     # The names are labels rather than whole names: configures in
     # Provisioner::Recipe puts the domain on the end of each.
-    is_deeply( [ Provisioner::Cookbook->load('nginxproxy')->subdomains ],  ['www'],                            'the vhost of the domain serves www' );
-    is_deeply( [ Provisioner::Cookbook->load('nginx')->subdomains ],       [],                                 'and nginx itself serves none, because not every vhost serves the domain' );
-    is_deeply( [ Provisioner::Cookbook->load('roundcube')->subdomains ],   ['webmail'],                        'roundcube serves webmail' );
-    is_deeply( [ sort Provisioner::Cookbook->load('mail')->subdomains ],   [qw{autoconfig autodiscover mail}], 'mail serves its own three' );
-    is_deeply( [ sort Provisioner::Cookbook->load('matrix')->subdomains ], [qw{admin.matrix matrix}],          'matrix serves two' );
+    is_deeply( [ Provisioner::Cookbook->load('nginxproxy')->subdomains ],  ['www'],                                  'the vhost of the domain serves www' );
+    is_deeply( [ Provisioner::Cookbook->load('nginx')->subdomains ],       [],                                       'and nginx itself serves none, because not every vhost serves the domain' );
+    is_deeply( [ Provisioner::Cookbook->load('roundcube')->subdomains ],   ['webmail'],                              'roundcube serves webmail' );
+    is_deeply( [ sort Provisioner::Cookbook->load('mail')->subdomains ],   [qw{autoconfig autodiscover mail}],       'mail serves its own three' );
+    is_deeply( [ sort Provisioner::Cookbook->load('matrix')->subdomains ], [qw{admin.matrix element.matrix matrix}], 'matrix serves three' );
 
     # Served at the domain itself, deliberately: git.$domain is a directory
     # name here and was never guaranteed to resolve, which is why gogs writes
