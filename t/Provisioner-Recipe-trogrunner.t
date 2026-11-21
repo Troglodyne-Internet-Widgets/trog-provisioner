@@ -384,7 +384,7 @@ subtest 'a path meant to be under the domain directory has to be' => sub {
 
 subtest 'the key it generates is one both readers of these agree on' => sub {
     my ( undef, $recipe ) = built();
-    my %secrets = $recipe->guest_secrets( $INSTALL, $DOMAIN );
+    my %secrets = $recipe->guest_secrets( $INSTALL, $DOMAIN, hypervisor_access => 'least' );
     my ($path) = keys %secrets;
 
     my $key = $secrets{$path}{generate}->();
@@ -409,10 +409,10 @@ subtest 'the key it generates is one both readers of these agree on' => sub {
     like( $pub // "died: $@", qr/\Assh-ed25519[ ]/, 'and bin/provision can derive its public half' );
 };
 
-subtest 'the key is declared always, and never salvaged' => sub {
+subtest 'the key is declared when a hypervisor is to trust it, and never salvaged' => sub {
     my ( undef, $recipe ) = built();
 
-    my %secrets = $recipe->guest_secrets( $INSTALL, $DOMAIN );
+    my %secrets = $recipe->guest_secrets( $INSTALL, $DOMAIN, hypervisor_access => 'least' );
     my ($path) = keys %secrets;
     is( $path,                 "$INSTALL/$DOMAIN/.ssh/id_ed25519",                  'one key, where ssh will look for it' );
     is( $secrets{$path}{mode}, '0600',                                              'kept to itself, which ssh insists on' );
@@ -420,17 +420,15 @@ subtest 'the key is declared always, and never salvaged' => sub {
 
     # The owner that t/guest_secrets.t expects after the build, which is the
     # account that the owner script gives the key to.
-    my $owner = sub (%opts) { return ( values %{ { $recipe->guest_secrets( $INSTALL, $DOMAIN, %opts ) } } )[0]{owner} };
+    my $owner = sub (%opts) { return ( values %{ { $recipe->guest_secrets( $INSTALL, $DOMAIN, hypervisor_access => 'least', %opts ) } } )[0]{owner} };
     is( $owner->( provision_user => 'agent', user => 'svc', admin_user => 'someadmin' ), 'agent:agent',         'the key is the account that provisions' );
     is( $owner->( user => 'svc', admin_user => 'someadmin' ),                            'svc:svc',             'which is the service user when no other is named' );
     is( $owner->( admin_user => 'someadmin' ),                                           'someadmin:someadmin', 'and the admin when the domain names no service user' );
 
-    # Unconditional because this is a class method and cannot see
-    # hypervisor_access -- which is not a hole, because what that setting
-    # decides is whether bin/provision writes the public half into anybody's
-    # authorized_keys.  A key no machine trusts opens nothing.
-    my %none = $recipe->guest_secrets( $INSTALL, $DOMAIN );
-    is_deeply( [ sort keys %none ], [ sort keys %secrets ], 'the same with or without access configured' );
+    # With none, nothing gives the key back its mode after the data target
+    # resets the domain directory, so it must not be placed at all.
+    is_deeply( { $recipe->guest_secrets( $INSTALL, $DOMAIN ) }, {}, 'no key when hypervisor_access is left at none' );
+    is_deeply( { $recipe->guest_secrets( $INSTALL, $DOMAIN, hypervisor_access => 'none' ) }, {}, 'nor when it says none' );
 
     # The reason remote_skip exists: a secret salvaged off a guest lands in the
     # domain directory and from there into every backup taken of it.
@@ -723,7 +721,7 @@ subtest 'a runner with access and no key stops the postrun, which fails the buil
 # it because the two do not agree by default.
 sub runner_secrets {
     my ( undef, $recipe ) = built();
-    my ($entry) = values %{ { $recipe->guest_secrets( $INSTALL, $DOMAIN ) } };
+    my ($entry) = values %{ { $recipe->guest_secrets( $INSTALL, $DOMAIN, hypervisor_access => 'least' ) } };
     return { $entry->{ref} => $entry->{generate}->() };
 }
 
