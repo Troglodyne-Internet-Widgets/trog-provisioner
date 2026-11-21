@@ -53,6 +53,28 @@ subtest 'each relay has its own set of bans, and its own files on the guests beh
     );
 };
 
+subtest 'a rebuilt relay keeps its registrations and the bans in force' => sub {
+    my %relay = (
+        nginxrelay => '/etc/nginx/nginxrelay.d',
+        mailrelay  => '/etc/postfix/mailrelay.d',
+    );
+    foreach my $name ( sort keys %relay ) {
+        my $recipe = Provisioner::Cookbook->load($name);
+        my $dir    = $relay{$name};
+
+        is_deeply( { $recipe->remote_files( '/bogus', 'relay.test.test' ) },   { "$dir/" => "$name.d/", "/var/lib/$name-bans/" => "$name-bans/" }, "$name salvages its registrations and its saved bans" );
+        is_deeply( [ $recipe->remote_prepare( '/bogus', 'relay.test.test' ) ], ["/etc/ufw/after.init.d/$name-bans save"],                          'after the hook saves the bans in force' );
+        is_deeply(
+            { $recipe->restores( install_dir => '/bogus', domain => 'relay.test.test' ) },
+            {
+                $dir                  => { from => "/bogus/relay.test.test/$name.d",    owner => 'root:root' },
+                "/var/lib/$name-bans" => { from => "/bogus/relay.test.test/$name-bans", owner => 'root:root', mode => '0700' },
+            },
+            'and puts both back where they came from'
+        );
+    }
+};
+
 subtest 'sshd reads the keys of every relay of the guest from one directive' => sub {
     my $nginxrelay = Provisioner::Cookbook->load('nginxrelay');
     my %opts       = $nginxrelay->enrich( modules => [qw{ubuntu nginx nginxrelay}] );

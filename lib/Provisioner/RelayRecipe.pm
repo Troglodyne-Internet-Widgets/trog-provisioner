@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use File::Basename();
+
 use Provisioner::Cookbook();
 
 use parent qw{Provisioner::Recipe};
@@ -68,7 +70,8 @@ key, through C<issue_ban_key> in F<scripts/relay_files>.  The key runs only
 F<scripts/relay_ban> for that domain, and only from the address of its guest.
 C<relay_ban> adds the address to the ipset C<ban_set> for the time of the ban,
 or removes it.  The keys are in C<relay_dir> with the registrations, so the
-salvage of a rebuild keeps both.
+salvage of a rebuild keeps both.  The salvage also keeps the bans in force, in
+C<ban_dir>.  See C<remote_files>.
 
 F</etc/ufw/after.init.d/RECIPE-bans> drops every packet from an address in the
 set to C<banned_ports>, each time ufw loads.  See
@@ -170,6 +173,76 @@ sub ban_set {
     return $self->recipe_name . '-bans';
 }
 
+=head2 $dir = $recipe->ban_dir()
+
+The directory where the hook of the bans saves C<ban_set>, with the time that
+each ban has left: F</var/lib/> and the name of the set.
+
+=cut
+
+sub ban_dir {
+    my ($self) = @_;
+    return '/var/lib/' . $self->ban_set;
+}
+
+=head2 $path = $recipe->ban_hook()
+
+The hook of the bans in F</etc/ufw/after.init.d>, which loads C<ban_set> into
+the firewall when ufw loads, and saves it to C<ban_dir> when ufw unloads, or
+when it is run with C<save>.
+
+=cut
+
+sub ban_hook {
+    my ($self) = @_;
+    return '/etc/ufw/after.init.d/' . $self->ban_set;
+}
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+C<relay_dir>, which holds the registrations and the keys that the relay issued,
+and C<ban_dir>, which holds the bans in force.  Without the first, a rebuilt
+relay serves no guest behind it until each one is built again.  Without the
+second, an address that a guest banned connects again until it offends again,
+because a guest sends a ban only when it bans.
+
+=cut
+
+sub remote_files {
+    my ($self) = @_;
+    return (
+        $self->relay_dir . '/' => File::Basename::basename( $self->relay_dir ) . '/',
+        $self->ban_dir . '/'   => $self->ban_set . '/',
+    );
+}
+
+=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Runs C<ban_hook> with C<save>, so that the salvage holds the bans in force
+now, and not those of the last time that ufw unloaded.
+
+=cut
+
+sub remote_prepare {
+    my ($self) = @_;
+    return ( $self->ban_hook . ' save' );
+}
+
+=head2 %restores = $recipe->restores(%opts)
+
+The salvage of C<relay_dir> and of C<ban_dir> goes back where it came from.
+
+=cut
+
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+    return (
+        $self->relay_dir => { from => "$install_dir/$domain/" . File::Basename::basename( $self->relay_dir ), owner => 'root:root' },
+        $self->ban_dir   => { from => "$install_dir/$domain/" . $self->ban_set, owner => 'root:root', mode => '0700' },
+    );
+}
+
 =head2 $path = $recipe->key_path($domain)
 
 Where the ban key that this relay issues for C<$domain> is, on the guest of
@@ -267,7 +340,8 @@ sub issue_grant {
 =head2 %opts = $recipe->enrich(%opts)
 
 Adds what F<templates/files/relay.install.tt> renders: C<relay_name>, C<ban_set>,
-C<banned_ports>, C<relay_dir>, C<port_rate_limit>, and C<relay_dirs>, the
+C<ban_dir>, C<ban_hook>, C<banned_ports>, C<relay_dir>, C<port_rate_limit>, and
+C<relay_dirs>, the
 C<relay_dir> of each relay in C<modules>.  sshd reads the keys of all of them
 from one directive, and the C<stream> block includes the ports of the guests
 from each.  A subclass that has an C<enrich> of its own calls this one.
@@ -278,6 +352,8 @@ sub enrich {
     my ( $self, %opts ) = @_;
     $opts{relay_name}      = $self->recipe_name;
     $opts{ban_set}         = $self->ban_set;
+    $opts{ban_dir}         = $self->ban_dir;
+    $opts{ban_hook}        = $self->ban_hook;
     $opts{banned_ports}    = [ $self->banned_ports(%opts) ];
     $opts{relay_dir}       = $self->relay_dir;
     $opts{port_rate_limit} = $self->port_rate_limit;

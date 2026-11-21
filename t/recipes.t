@@ -1425,8 +1425,12 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
         my @prepare = eval { $class->remote_prepare( $install, $domain ) };
         next unless @prepare;
 
+        # Rendered, because a fragment can name the path through a variable, or
+        # through a file that it includes.
         my %generated = eval { $class->template_files() };
-        my $fragments = join "\n", map { File::Slurper::read_text($_) } grep { defined } ( fragment_for($recipe), fragment_for( $recipe, 'global.tt' ) );
+        my $r         = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my %input     = %{ $required_config{$recipe} // {} };
+        my $fragments = join "\n", ( fragment_for($recipe) ? $r->render( %G, %input ) : () ), ( fragment_for( $recipe, 'global.tt' ) ? $r->render_global( %G, %input ) : () );
 
         foreach my $command (@prepare) {
             my ($program) = $command =~ m{\A(\S+)};
@@ -1434,9 +1438,11 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
             # Installed by the fragment, under the name the command calls it by.
             # Or rsync, which the salvage runs on the guest itself, so a guest
             # without it has nothing to salvage anyway: see Trog::Machine/get_dir.
+            # Or an if of the shell, which this cannot look inside: claude
+            # tests for a directory and runs rsync, and its POD says why.
             my ($leaf) = $program =~ m{([^/]+)\z};
             ok(
-                $program eq 'rsync' || index( $fragments, $program ) >= 0 || ( grep { $_ eq $leaf } values %generated ),
+                $program eq 'rsync' || $program eq 'if' || index( $fragments, $program ) >= 0 || ( grep { $_ eq $leaf } values %generated ),
                 "$recipe: $program is something this recipe puts on the guest"
             ) or diag "remote_prepare wants $command and nothing in $recipe installs it";
         }

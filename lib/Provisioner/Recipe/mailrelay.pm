@@ -291,30 +291,6 @@ sub password_path {
     return "/etc/postfix/mailrelay/$domain.password";
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
-
-F</etc/postfix/mailrelay.d>, which holds the registrations.  Without it, a
-rebuilt relay takes no mail from a guest, and for none, until each guest behind
-it is built again.
-
-=cut
-
-sub remote_files {
-    return ( '/etc/postfix/mailrelay.d/' => 'mailrelay.d/' );
-}
-
-=head2 %restores = $recipe->restores(%opts)
-
-The salvage of F</etc/postfix/mailrelay.d> goes back there.
-
-=cut
-
-sub restores {
-    my ( $self,        %opts )   = @_;
-    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
-    return ( '/etc/postfix/mailrelay.d' => { from => "$install_dir/$domain/mailrelay.d", owner => 'root:root' } );
-}
-
 =head2 %files = $recipe->registration_files($grant, %terms)
 
 What this guest issues to the client of C<$grant> when it registers.
