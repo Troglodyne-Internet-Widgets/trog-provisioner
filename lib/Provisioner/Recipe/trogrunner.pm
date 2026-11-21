@@ -1022,11 +1022,10 @@ sub datadirs {
 The key that a hypervisor is asked to trust.  It is in the secret store, not in
 the domain directory.
 
-This declares the key even if C<hypervisor_access> is not set, because this is
-a class method and cannot see it.  L</remote_files> has the same limit.  This
-is not a hole.  The setting decides whether C<bin/provision> writes the public
-half into an F<authorized_keys>.  A private key with mode 0600 on a guest that
-no machine trusts opens nothing.
+It declares the key only when C<grant> asks a hypervisor to trust it, which
+is when C<hypervisor_access> is not C<none>.  With C<none>, nothing uses the
+key, and F<trogrunner-owner.sh> does not give it back its owner and mode after
+the data target resets every mode under the domain directory.
 
 The key stays in the store, and is not made again on each provision.  So a
 rebuild gets the same key, and the line that the hypervisor has still matches.
@@ -1046,6 +1045,7 @@ gets C<root>, and must use only the paths and the references.
 
 sub guest_secrets {
     my ( $self, $install_dir, $domain, %opts ) = @_;
+    return () unless $self->grant( \%opts );
     my $who = $opts{provision_user} // $opts{user} // $opts{admin_user} // 'root';
 
     return (
