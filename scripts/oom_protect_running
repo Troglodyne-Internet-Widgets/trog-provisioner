@@ -1,0 +1,17 @@
+#!/bin/bash
+# Give the running main process of each unit named the OOM score of the
+# drop-in that the zswap recipe installs.  A process reads OOMScoreAdjust only
+# when it starts.
+set -eu
+
+SCORE=${1:?usage: oom_protect_running <score> <unit>...}
+shift
+
+for UNIT in "$@"; do
+    PID=$(systemctl show -p MainPID --value "$UNIT")
+    if [ "${PID:-0}" = 0 ]; then
+        # Not running.  It reads the drop-in when it starts.
+        continue
+    fi
+    choom -p "$PID" -n "$SCORE"
+done

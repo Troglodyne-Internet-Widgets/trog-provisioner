@@ -12,11 +12,18 @@ install -D -m 0644 -o root -g root zswap-oomd-pressure.conf '/etc/systemd/system
 [% FOR unit IN protect -%]
 install -D -m 0644 -o root -g root zswap-protect.conf '/etc/systemd/system/[% unit %].d/60-zswap.conf'
 [% END -%]
+[% FOR unit IN oomd_omit -%]
+install -D -m 0644 -o root -g root zswap-oomd-omit.conf '/etc/systemd/system/[% unit %].d/60-zswap.conf'
+[% END -%]
 systemctl daemon-reload
 systemctl enable --now swapfile.swap
-systemctl enable --now systemd-oomd.service
-[% FOR unit IN protect -%]
+# Restart, because the package started oomd before there was swap, and while
+# dbus reloaded its policy for the new systemd-oom user.  Such an oomd can
+# miss its bus name, and enable --now leaves a running unit alone.
+systemctl enable systemd-oomd.service
+systemctl restart systemd-oomd.service
 # A running process takes OOMScoreAdjust only when it starts, and a restart of
-# dbus breaks every session.  So set the score of the running process.
-pid=$$(systemctl show -p MainPID --value '[% unit %]'); [ "$${pid:-0}" = 0 ] || choom -p "$$pid" -n -900
-[% END -%]
+# dbus breaks every session.  So set the score of each running process, after
+# the makefile, because a unit can start in a target that runs after this one.
+# The score is the one in zswap-protect.conf.
+[% script_dir %]/queue_postrun_task [% script_dir %]/oom_protect_running -900[% FOR unit IN protect %] '[% unit %]'[% END %]

@@ -1,0 +1,5 @@
+# Written by the zswap recipe.  systemd-oomd never picks this unit.  The score
+# of the kernel OOM killer stays as it is, because the children of this unit
+# inherit it.
+[Service]
+ManagedOOMPreference=omit

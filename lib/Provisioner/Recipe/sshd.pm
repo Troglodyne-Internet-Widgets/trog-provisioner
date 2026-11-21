@@ -154,4 +154,17 @@ sub tests {
     return qw{sshd.tt};
 }
 
+=head2 @units = $recipe->oomd_omit()
+
+C<ssh.service>, so that systemd-oomd does not kill the listener.  It is not in
+C<oom_protect>, because sshd gives each session the score that systemd gives
+the listener.  sshd already sets its listener to -1000 by itself.  See
+L<Provisioner::Recipe::zswap/What is protected>.
+
+=cut
+
+sub oomd_omit {
+    return qw{ssh.service};
+}
+
 1;

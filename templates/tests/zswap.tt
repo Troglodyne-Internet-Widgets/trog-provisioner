@@ -69,4 +69,14 @@ SKIP: {
 }
 [% END %]
 
+[% FOR unit IN oomd_omit %]
+{
+    my $show = `systemctl show -p OOMScoreAdjust -p ManagedOOMPreference '[% unit %]' 2>&1`;
+    like($show, qr/^ManagedOOMPreference=omit$/m, 'systemd-oomd skips [% unit %]') or diag $show;
+
+    # Its children inherit this score, which is why the unit is not in protect.
+    unlike($show, qr/^OOMScoreAdjust=-900$/m, 'and [% unit %] keeps its own kernel OOM score') or diag $show;
+}
+[% END %]
+
 done_testing();

@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use List::Util qw{uniq};
 use Provisioner::Cookbook();
 
 use parent qw{Provisioner::Recipe};
@@ -28,7 +29,9 @@ use parent qw{Provisioner::Recipe};
             kill_on_pressure: []
             protect:
                 - dbus.service
-                - ssh.service
+                - someservice.service
+            oomd_omit:
+                - otherservice.service
 
 =head2 DESCRIPTION
 
@@ -92,6 +95,11 @@ of its own, and keeps it beside the file.
 
 =head3 What systemd-oomd watches
 
+The package starts systemd-oomd when it installs, before the swap file exists.
+That oomd logs C<No swap; memory pressure usage will be degraded>, and on one
+guest it never took its name on D-Bus, so C<oomctl> timed out.  So the
+fragment restarts it after the swap file is on.
+
 systemd-oomd acts only on the cgroups that a unit marks for it.  With nothing
 marked, it runs and does nothing.  The recipe marks these:
 
@@ -128,12 +136,28 @@ almost anything else first.  The second makes systemd-oomd skip the unit.
 -900 and not -1000, because at -1000 the kernel cannot kill the unit even when
 the unit is the leak.
 
-A running process reads C<OOMScoreAdjust> only when it starts.  The fragment
-does not restart the unit to apply it, because to restart dbus on a running
-guest breaks logind and every session.  It sets the score of the running main
-process with C<choom> instead.  systemd applies C<ManagedOOMPreference> when
-the unit starts.  Whether it also applies to a unit that already runs was not
-measured.
+A recipe names its own units in L<Provisioner::Recipe/oom_protect>, for
+example C<mariadb.service>.  The recipe adds the units of each recipe on the
+guest to C<protect>.  An operator does not have to list them.
+
+Each unit in C<oomd_omit> gets a drop-in with C<ManagedOOMPreference=omit>
+alone.  A recipe names such units in L<Provisioner::Recipe/oomd_omit>.  This is
+for a unit whose children must keep the score of the kernel, such as
+C<ssh.service>.  Measured on a guest: sshd sets its listener to -1000 by itself,
+and gives each session the score that systemd gave the listener.  With
+C<ssh.service> in C<protect>, every login shell ran at -900.  So do not put
+C<ssh.service> in C<protect>.  A unit in both lists is protected.
+
+A running process reads C<OOMScoreAdjust> only when it starts.  The recipe does
+not restart a unit to apply it, because to restart dbus on a running guest
+breaks logind and every session.  After the makefile,
+F<scripts/oom_protect_running> sets the score of each running main process with
+C<choom> instead.  It runs after the makefile, because a unit such as
+C<mariadb.service> starts in the target of its own recipe, which can run after
+this one.
+
+systemd applies C<ManagedOOMPreference> when the unit starts.  Whether it also
+applies to a unit that already runs was not measured.
 
 =head3 deps
 
@@ -177,19 +201,26 @@ the watch on swap.
 =item protect
 
 The units that systemd-oomd skips and the kernel OOM killer avoids, see
-L</What is protected>.  The default is C<dbus.service>.
+L</What is protected>.  The default is C<dbus.service>.  The recipe adds the
+units that the recipes on the guest name, whatever this list says.
+
+=item oomd_omit
+
+The units that systemd-oomd skips, with no change to their kernel OOM score,
+see L</What is protected>.  Empty by default.  The recipe adds the units that
+the recipes on the guest name.
 
 =back
 
 =cut
 
-# A systemd unit name, with its type.  It becomes a path under
-# /etc/systemd/system, so nothing that can climb out of it.
 # A size as make_swapfile takes it: bytes, a percent of memory, or K, M or G.
 # make_swapfile reads the suffix with numfmt --from=iec, which takes the
 # suffixes in upper case only.
 my $SWAP_SIZE = qr/\A [1-9] [[:digit:]]* (?: % | [KMG] )? \z/;
 
+# A systemd unit name, with its type.  It becomes a path under
+# /etc/systemd/system, so nothing that can climb out of it.
 my $UNIT_NAME = qr/\A [[:alnum:]_\@:.-]+ [.] (?: service | slice | scope ) \z/;
 
 sub args {
@@ -233,8 +264,35 @@ sub args {
                 default     => [qw{dbus.service}],
                 description => 'The units that systemd-oomd skips and the kernel OOM killer avoids.',
             },
+            oomd_omit => {
+                type        => 'array',
+                items       => { type => 'string', pattern => "$UNIT_NAME" },
+                default     => [],
+                description => 'The units that systemd-oomd skips, with their kernel OOM score left alone.',
+            },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds to C<protect> the units that each recipe in C<modules> names in
+L<Provisioner::Recipe/oom_protect>, and to C<oomd_omit> the units that each
+names in L<Provisioner::Recipe/oomd_omit>.  Takes out of C<oomd_omit> each unit
+that is in C<protect>, because two drop-ins for one unit would disagree.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    my @recipes = map { Provisioner::Cookbook->load($_) } @{ $opts{modules} // [] };
+    $opts{protect} = [ sort( uniq( @{ $opts{protect} }, map { $_->oom_protect() } @recipes ) ) ];
+
+    my %protected = map { $_ => 1 } @{ $opts{protect} };
+    $opts{oomd_omit} = [ sort grep { !$protected{$_} } uniq( @{ $opts{oomd_omit} }, map { $_->oomd_omit() } @recipes ) ];
+
+    return %opts;
 }
 
 =head2 %settings = $recipe->machine_wide(%opts)
@@ -249,11 +307,11 @@ sub machine_wide {
     my ( $self, %opts ) = @_;
 
     my %default  = Provisioner::Cookbook->defaults('zswap');
-    my %settings = map { $_ => $opts{$_} // $default{$_} } qw{swap_size compressor zpool max_pool_percent kill_on_pressure protect};
+    my %settings = map { $_ => $opts{$_} // $default{$_} } qw{swap_size compressor zpool max_pool_percent kill_on_pressure protect oomd_omit};
 
     # bin/new_config compares each setting as a string, so a list goes in as
     # one.  The order of a list does not change what the machine does.
-    $settings{$_} = join( ',', sort @{ $settings{$_} } ) for qw{kill_on_pressure protect};
+    $settings{$_} = join( ',', sort @{ $settings{$_} } ) for qw{kill_on_pressure protect oomd_omit};
 
     return %settings;
 }
@@ -265,6 +323,7 @@ sub template_files {
         'zswap.oomd-swap.conf.tt'     => 'zswap-oomd-swap.conf',
         'zswap.oomd-pressure.conf.tt' => 'zswap-oomd-pressure.conf',
         'zswap.protect.conf.tt'       => 'zswap-protect.conf',
+        'zswap.oomd-omit.conf.tt'     => 'zswap-oomd-omit.conf',
     );
 }
 
