@@ -504,11 +504,14 @@ sub required_recipes {
 # A value with no colon and no line break in it.
 my $NO_COLON = qr/\A [^:\r\n]* \z/;
 
-# A folder name with no quote, backtick, percent sign, dollar sign, backslash,
-# slash or dot: the name goes into a shell word, a make recipe, the dovecot
-# configuration and a Maildir++ directory name.  A space is legal, so the
-# templates put the name in single quotes.
-my $FOLDER_NAME = q{\A[^'"`%$\\\\/.\r\n]+\z};
+# A folder name with no quote, backtick, percent sign, asterisk, question mark,
+# dollar sign, backslash, slash or dot: the name goes into a shell word, a make
+# recipe, the dovecot configuration and a Maildir++ directory name.  A space is
+# legal, so the templates put the name in single quotes.  Doveadm reads % and *
+# as wildcards in a mailbox mask, and * and ? as wildcards in the mailbox key of
+# a search query (doveadm-mailbox(1), doveadm-search-query(7)), so an alias with
+# one of them would move and delete the mail of every folder that matches.
+my $FOLDER_NAME = q{\A[^'"`%*?$\\\\/.\r\n]+\z};
 
 sub args {
     return (
