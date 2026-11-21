@@ -180,6 +180,23 @@ subtest 'an account that only the salvaged passwd-file holds is refused, or kept
     is( $still_there, 0, 'and the salvaged file moved aside' );
 };
 
+subtest 'a bare name logs in to the domain of the machine, and to no domain built onto it' => sub {
+    my $cookbook = Test::MockModule->new( 'Provisioner::Cookbook', no_auto => 1 );
+    $cookbook->redefine(
+        configuration => sub {
+            return { _shared => { 'mail.test.test' => ['hosted.test.test'] }, map { $_ => { mail => {} } } qw{mail.test.test hosted.test.test} };
+        }
+    );
+    my $realm_of = sub {
+        my ($domain) = @_;
+        my $conf = $recipe->render_raw( 'files/mail.dovecot.domain.tt', $recipe->enrich( $recipe->validate( %BASE, domain => $domain, script_dir => '/nonexistent' ) ) );
+        return $conf =~ m/^auth_default_realm[ ]=[ ](\S+)$/m ? $1 : 'none';
+    };
+
+    is( $realm_of->('mail.test.test'),   'mail.test.test', 'the machine makes its own domain the default realm' );
+    is( $realm_of->('hosted.test.test'), 'none',           'a domain built onto it sets none, so dovecot keeps the realm of the machine' );
+};
+
 subtest 'the build makes dovecot read each restored maildir again' => sub {
     my %names    = ( names => { someuser => { password => 'x', gecos => 'Some User' }, other => { password => 'y', gecos => 'Other' } }, script_dir => '/nonexistent' );
     my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, %names ) ) );

@@ -40,6 +40,13 @@ SKIP: {
     is($maps, "static:$dovecot_gid", 'and so does postfix, for its virtual mailboxes');
 }
 
+[% IF default_realm -%]
+# Every domain has a catchall account, so its bare name is always there to ask.
+my $bare = `doveadm user -f user catchall 2>&1`;
+chomp $bare;
+is($bare, 'catchall@[% domain %]', 'dovecot finds a name with no domain in [% domain %], the default realm');
+
+[% END -%]
 # Every maildir and message under the store, because a fetch walks the whole
 # tree.  Nothing in the tree is open wider than the top of it.
 my @exposed;

@@ -482,6 +482,21 @@ Both name C<mail.DOMAIN>, and the ports where TLS starts at once.  Behind a
 relay of L<Provisioner::Recipe::nginx>, this recipe makes both names public
 names, so that a client outside can fetch them.
 
+Both also give the whole address as the user name, because dovecot and the
+SASL of postfix know each account as C<$name@$domain>.  A client that is set up
+by hand often gives the name alone, and then every login fails, with any
+password.  So dovecot adds a domain to a name that has none, for IMAP, POP3 and
+the SASL of postfix.  dovecot has one such default realm for the guest.  It is
+the domain of the machine, C<machine_of> in L<Provisioner::Cookbook>, and never
+a domain that C<_shared> builds onto it.  A user of a domain built onto another
+gives the whole address.  When the machine itself has no mail, no domain of the
+guest takes a bare name.
+
+dovecot logs why each login fails (C<auth_verbose>), for example an unknown
+user or a password mismatch.  The filter of the dovecot jail matches that line
+as well as the line of the disconnect, so one failed login counts two times.
+The jail allows ten matches, which is five failed logins.
+
 =cut
 
 sub required_recipes {
@@ -658,13 +673,15 @@ sub proxied_ports {
 
 The jails that fail2ban ships for postfix and dovecot.  They ban a host whose
 logins to SMTP, IMAP or POP fail too often, and read both from the journal.
+The dovecot jail allows ten matches.  L</The settings of a mail client> says
+why.
 
 =cut
 
 sub jails {
     return (
         postfix => {},
-        dovecot => {},
+        dovecot => { maxretry => 10 },
     );
 }
 
@@ -911,6 +928,7 @@ sub enrich {
     $opts{sender_logins}  = \@logins;
     $opts{domain_aliases} = [ $self->domain_aliases(%opts) ];
     $opts{helo_name}      = Provisioner::Cookbook->helo_name_of( $opts{domain} );
+    $opts{default_realm}  = Provisioner::Cookbook->machine_of( $opts{domain} ) eq $opts{domain} ? 1 : 0;
     $opts{proxied_ports}  = { $self->proxied_ports };
 
     # See "Asking blocklists from this guest" in the POD.
