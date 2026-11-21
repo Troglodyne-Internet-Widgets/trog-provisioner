@@ -59,7 +59,11 @@ A global half alone is not a reason to make it false.  The refusal also stops `_
 
 ### machine_wide
 
-The global half takes its settings from the configuration of one domain.  A tenant that names other values gets a global half that never runs, and nothing reports it.  `machine_wide` names the settings that the global half applies to the whole machine.  `bin/new_config` refuses a tenant whose values for them differ from those of its host, and names each setting with both values.  A tenant that inherits the same values from `_base` passes.
+The global half takes its settings from the configuration of one domain, usually the host.  A tenant whose settings differ gets those of the host, and the build ignores its own.  That was always so.  `machine_wide` changes only one thing: a difference now stops the build, where before it was ignored.
+
+The case for this rests on one question: is it better to die or to ignore?  It is better to die, because of a core goal of this software.  A hosting package must be fungible, which means that it can move between hosts and hypervisors and get the same result.  A tenant whose logshipper settings are ignored ships its logs to the collector of its host.  Move it to a machine of its own, and the same configuration ships them somewhere else.  Its configuration then does not say what the domain gets.  So if a domain cannot get the logshipper that it is configured with, its build must die.
+
+`machine_wide` names the settings that the global half applies to the whole machine.  `bin/new_config` refuses a tenant whose values for them differ from those of its host, and names each setting with both values.  A tenant that inherits the same values from `_base` passes.
 
 Name a setting here when the global half writes it into something that the machine has one of.  logshipper names all six of its settings, because each one goes into the one forwarder file of rsyslog.  ossecagent names `manager`, because the one agent of the machine sends to one manager.  A recipe that is not `is_multi_tenant` needs none, because its tenant is refused anyway.
 
