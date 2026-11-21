@@ -26,4 +26,17 @@ unlike($shell, qr/reached-a-shell/, 'and runs no command but rsync there');
 my $path = `rsync --list-only -e '$ssh' ${from}:/etc/passwd 2>&1`;
 isnt($? >> 8, 0, 'and no path of that machine outside its modules') or diag $path;
 
+# ssh, and Net::OpenSSH under it, refuse a config or a private key that the
+# group can read.  The data target opens the group on the domain directory,
+# which is the home of the service user, and closes it again on its .ssh.
+my $dotssh = '[% install_dir %]/[% domain %]/.ssh';
+SKIP: {
+    skip 'the domain directory has no .ssh', 1 unless -d $dotssh;
+    opendir( my $dh, $dotssh ) or die "cannot read $dotssh: $!";
+    my @private = grep { -f "$dotssh/$_" && ( $_ eq 'config' || ( m/^id_/ && !m/[.]pub\z/ ) ) } readdir $dh;
+    closedir $dh;
+    my @open = map { sprintf( '%s %04o', $_, ( stat "$dotssh/$_" )[2] & 07777 ) } grep { ( stat "$dotssh/$_" )[2] & 077 } sort @private;
+    is_deeply(\@open, [], 'no config or private key in the .ssh of the domain is open to the group or to others') or diag join "\n", @open;
+}
+
 done_testing();
