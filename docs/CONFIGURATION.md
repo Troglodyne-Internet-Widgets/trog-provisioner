@@ -724,9 +724,24 @@ that it needs is, and places it only on a hypervisor of that guest's network:
   reaches both.
 - A guest on the network of the VPN server of an `openvpnclient` limits
   nothing, because the client reaches that network from anywhere.
+- A guest that it needs and that is itself a VPN client, with an address in a
+  bin that names a `via`, limits the choice to the network of that `via`.  The
+  other guests reach a VPN client at its address in the tunnel, through the
+  VPN server, not on the network of the hypervisor of the client.  See
+  [Static addresses for VPN clients](NETWORK.md#static-addresses-for-vpn-clients).
 - A guest that it needs and that is not up yet limits nothing, and it says so.
   `bin/provision` builds that guest first, so it is up by the time the guest
   that needs it is placed.
+
+A guest needs each guest that a setting of its configuration names, as
+`named_guests` in `perldoc Provisioner::Cookbook` finds them.  That is every
+setting of `_global` and of each recipe, the settings that `_base` gives it
+included.  A weak setting counts as well, because weak says only that the build
+can go on without the guest, not that the guest can reach it from anywhere.  So
+a `logshipper` in `_base` ties every guest to the network of the collector.  A
+guest on another network, such as a relay at a cloud, needs an `openvpnclient`
+whose server is on the network of the collector.  Without one, it is refused,
+and the message names the collector.
 
 A block also names the resolvers that its guests use:
 

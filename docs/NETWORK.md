@@ -112,6 +112,15 @@ These must be true:
 `perldoc Provisioner::Recipe::openvpn` has the details, under "Static
 addresses".
 
+## Which network a guest goes on
+
+The `network` of each block in `hypervisors.conf` names the machines whose
+guests reach each other: one LAN, or one region of one cloud.  `bin/new_config`
+places a guest only where it reaches each guest that its configuration names,
+`_base` included.  A VPN client reaches the network of its server from
+anywhere.  A guest that names guests on two networks is refused, because no
+hypervisor reaches both.  [Networks](CONFIGURATION.md#networks) has each rule.
+
 ## A remote hypervisor
 
 When the hypervisor is not this machine, the NAT lease of a guest is reachable
