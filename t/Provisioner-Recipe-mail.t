@@ -180,37 +180,21 @@ subtest 'an account that only the salvaged passwd-file holds is refused, or kept
     is( $still_there, 0, 'and the salvaged file moved aside' );
 };
 
-subtest 'default_realm lets a bare name log in, for one domain of a guest' => sub {
-    my %opts  = ( %BASE, script_dir => '/nonexistent' );
-    my $realm = qr/^auth_default_realm[ ]=[ ]mail[.]test[.]test$/m;
-
-    unlike( $recipe->render_raw( 'files/mail.dovecot.domain.tt', $recipe->enrich( $recipe->validate(%opts) ) ), qr/auth_default_realm/, 'off by default, so a name with no domain fails as before' );
-    like( $recipe->render_raw( 'files/mail.dovecot.domain.tt', $recipe->enrich( $recipe->validate( %opts, default_realm => 1 ) ) ), $realm, 'on, the file of the domain makes it the default realm' );
-
-    # Run the guard as make would hand it to the shell, against a scratch
-    # conf.d that holds the file of this domain, and maybe one more.
-    my ($guard) = grep { index( $_, 'auth_default_realm' ) >= 0 && !m/\A\#/ } split m/\n/, $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %opts, default_realm => 1 ) ) );
-    ok( defined $guard, 'the fragment checks for another default realm' ) or return;
-    my $run = sub {
-        my (%files) = @_;
-        my $dir = File::Temp::tempdir( CLEANUP => 1 );
-        File::Slurper::Temp::write_text( "$dir/$_", $files{$_} ) for keys %files;
-        my $command = $guard =~ s/\$\$/\$/gr =~ s{/etc/dovecot/conf[.]d}{$dir}gr;
-        my $out;
-        IPC::Run3::run3( [ 'bash', '-c', $command ], \undef, \$out, \$out );
-        return ( $? >> 8, $out );
+subtest 'a bare name logs in to the domain of the machine, and to no domain built onto it' => sub {
+    my $cookbook = Test::MockModule->new( 'Provisioner::Cookbook', no_auto => 1 );
+    $cookbook->redefine(
+        configuration => sub {
+            return { _shared => { 'mail.test.test' => ['hosted.test.test'] }, map { $_ => { mail => {} } } qw{mail.test.test hosted.test.test} };
+        }
+    );
+    my $realm_of = sub {
+        my ($domain) = @_;
+        my $conf = $recipe->render_raw( 'files/mail.dovecot.domain.tt', $recipe->enrich( $recipe->validate( %BASE, domain => $domain, script_dir => '/nonexistent' ) ) );
+        return $conf =~ m/^auth_default_realm[ ]=[ ](\S+)$/m ? $1 : 'none';
     };
 
-    my %ours = ( '10-mail.test.test.conf' => "auth_default_realm = mail.test.test\n" );
-    my ( $status, $said ) = $run->(%ours);
-    is( $status, 0, 'the file of this domain alone passes, so a rebuild of the domain goes on' ) or diag $said;
-
-    ( $status, $said ) = $run->( %ours, '10-other.test.conf' => "auth_default_realm = other.test\n" );
-    isnt( $status, 0, 'a second domain that sets the default realm stops the build' );
-    like( $said, qr{10-other[.]test[.]conf:auth_default_realm[ ]=[ ]other[.]test}, 'and the log names the file and the realm that it sets' );
-
-    ( $status, $said ) = $run->( %ours, '10-other.test.conf' => "passdb {\n}\n" );
-    is( $status, 0, 'a second domain that does not set it changes nothing' ) or diag $said;
+    is( $realm_of->('mail.test.test'),   'mail.test.test', 'the machine makes its own domain the default realm' );
+    is( $realm_of->('hosted.test.test'), 'none',           'a domain built onto it sets none, so dovecot keeps the realm of the machine' );
 };
 
 subtest 'the build makes dovecot read each restored maildir again' => sub {

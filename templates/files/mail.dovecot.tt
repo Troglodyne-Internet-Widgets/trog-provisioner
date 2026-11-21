@@ -144,3 +144,5 @@ service auth {
     }   
 }
 auth_mechanisms = plain login
+# Log why a login fails, never the password.
+auth_verbose = yes

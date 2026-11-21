@@ -10,7 +10,7 @@ passdb {
     args = /mail/[% domain %]/passwd
 }
 [% IF default_realm %]
-# A name with no domain is an account of this domain.
+# A name with no domain is an account of this domain, the domain of the machine.
 auth_default_realm = [% domain %]
 [% END %]
 
