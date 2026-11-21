@@ -124,7 +124,8 @@ See L</"$dir = artifacts_dir($domain)">.
 
 =item B<--user> NAME, B<--key> FILE, B<--host> ADDRESS
 
-Override what would otherwise come from the configuration and the hypervisor.
+Override what would otherwise come from the configuration.  The host is the
+C<internal_name> of the domain, which reaches the guest itself and not a relay.
 Without B<--key> or B<--agent>, the key of the guest comes out of the store,
 so the password of the store goes on standard input.
 
@@ -314,8 +315,11 @@ sub connect_to {
 
     my $user = $opts{user} // admin_user("$cfg_dir/provision.conf");
 
-    my $host = $opts{host} // $hv->inspection_address($machine);
-    die "Could not find an address for $machine on " . $hv->describe . ", so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
+    # The internal name, not the address, and not the public name: a domain
+    # behind a relay has a public name that reaches the relay.  The hypervisor
+    # is still asked for a guest it has, above.  See internal_name in
+    # Provisioner::Cookbook.
+    my $host = $opts{host} // Provisioner::Cookbook->internal_name($domain);
 
     print {*STDERR} "Collecting from $machine at $user\@$host\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT carries the artifact directory alone
 
@@ -331,7 +335,7 @@ sub connect_to {
     die "Could not get a shell on $user\@$host for $machine.\n"
       . '  key:  '
       . ( $opts{agent} ? 'the keys of the ssh agent' : $key ) . "\n"
-      . "  host: $host (from the hypervisor; --host overrides)\n"
+      . "  host: $host (the internal name; --host overrides)\n"
       . "Try it by hand: ssh $identity$user\@$host\n"
       if !defined $whoami || $whoami eq q{};
 

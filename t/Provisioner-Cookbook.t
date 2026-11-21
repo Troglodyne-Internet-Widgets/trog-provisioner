@@ -1328,6 +1328,22 @@ subtest 'a setting that nothing declares is refused' => sub {
     like( $err, qr{own[.]test[.]test.*/wibble:}s, 'including one in the _global of a domain, naming the domain' );
 };
 
+subtest 'the internal name of a domain is its own, and has a default' => sub {
+    my %said = (
+        _base           => { _global => \%BASE_GLOBAL },
+        'one.test.test' => { _global => { internal_name => 'guest.one.test.test' } },
+        'two.test.test' => { _global => {} },
+    );
+
+    is( Provisioner::Cookbook->globals( 'two.test.test', \%said )->{internal_name}, 'internal.two.test.test', 'a domain that says nothing gets internal.$domain' );
+    is( Provisioner::Cookbook->globals( 'one.test.test', \%said )->{internal_name}, 'guest.one.test.test',    'and an explicit value is kept' );
+    is( Provisioner::Cookbook->internal_name( 'two.test.test', \%said ),            'internal.two.test.test', 'internal_name gives the same default to a tool' );
+    is( Provisioner::Cookbook->internal_name( 'one.test.test', \%said ),            'guest.one.test.test',    'and the same explicit value' );
+
+    like( exception { Provisioner::Cookbook->globals( 'one.test.test', { %said, 'one.test.test' => { _global => { internal_name => 'not a name' } } } ) }, qr{/internal_name:}, 'a value that is no hostname is refused' );
+    ok( ( grep { $_ eq 'internal_name' } Provisioner::Cookbook->declared_globals ), 'and it is a declared setting of _global' );
+};
+
 # bin/new_config and the hypervisors read distro from _global, which is where
 # docs/CONFIGURATION.md tells an operator to write it.
 subtest 'distro is a setting of _global' => sub {

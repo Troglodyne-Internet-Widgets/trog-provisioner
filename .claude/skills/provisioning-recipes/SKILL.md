@@ -426,6 +426,14 @@ never asks the store for the key.  Without `SSH_AUTH_SOCK`, it is refused.  A gu
 a token, such as a cloud, still opens the store to find the guest, because only
 the API of the provider knows where the guest is.
 
+Both reach the guest at its `internal_name`, which the registrar publishes as an
+`A` record at the address of the guest itself.  When you `ssh` to a guest by
+hand, use that name, `internal.$domain` unless `_global` sets another.  Do not
+use the public name of a domain behind a relay: it reaches the relay, and the
+host key of the relay must not go into `known_hosts` under it.  See "The name of
+the guest itself" in `perldoc Provisioner::Recipe::registrar`.  On a guest that
+has just been built, the record can take a moment to reach your resolver.
+
 Runs a command on the guest as root and prints what it said. `collect_artifacts`
 gets the four logs and then the guest is usually destroyed; this is for the part
 in between, where the question is one only a running service can answer. What

@@ -527,6 +527,32 @@ subtest 'the registrar publishes the records of the domain' => sub {
     is( $reserved->{publish_records}, 1, 'and for a name under a reserved TLD, which only the guest can serve' );
 };
 
+subtest 'the internal name is an A record at the address of the guest, and not of the relay' => sub {
+    my $relay = '192.0.2.99';
+    my %given = ( %ON_PUBLIC, address => $relay, internal_name => "internal.$PUBLIC" );
+    my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %given );
+
+    my ($record) = grep { $_->{name} eq "internal.$PUBLIC" } @{ $opts->{zone_records} };
+    is_deeply( $record, { type => 'A', name => "internal.$PUBLIC", content => '192.0.2.50', match => q{} }, 'the record holds main_ip, though the public names hold the address of the relay' );
+    like( $fragment, qr/\Q$PUBLIC\E[ ]\Q$relay\E[ ]/,              'while the public names go to the relay' );
+    like( $fragment, qr{publish_dns_records[ ]--records[ ]\S+[ ]}, 'and the record reaches the publisher in the file of records' );
+
+    my ($none) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC );
+    is_deeply( $none->{zone_records}, [], 'a guest that is given no internal name publishes none' );
+
+    my ($noaddress) = publishing( 'registrar', $REGISTRAR, %given, main_ip => undef );
+    is_deeply( $noaddress->{zone_records}, [], 'and there is nothing to publish before the guest has an address' );
+
+    my ( $unmanaged, $by_hand ) = publishing( 'registrar', { registrar => { unmanaged => 1 } }, %given );
+    ok( $unmanaged->{unmanaged}, 'where nothing writes the zone' );
+    my $make = qr/make[ ]this[ ]record[ ]by[ ]hand:/;
+    like( $by_hand, qr/$make[ ]internal[.]\Q$PUBLIC\E[ ]A[ ]192[.]0[.]2[.]50/, 'the run says which record the operator has to make' );
+    unlike( $by_hand, qr/publish_dns_records/, 'and publishes nothing' );
+
+    my $err = exception { publishing( 'registrar', { registrar => { type => 'easydns', accounts => { customer => { type => 'route53', zones => ['customer.test'] } } } }, %given, internal_name => 'guest.customer.test' ) };
+    like( $err, qr/internal_name .* guest[.]customer[.]test/sx, 'a name in a zone of an account is refused, rather than written in the wrong zone' );
+};
+
 subtest 'the address of the A record' => sub {
     my ($allocated) = publishing( 'registrar', $REGISTRAR, %ON_PUBLIC, main_ip => undef );
     is( $allocated->{publish_records}, 0, 'nothing is published where the hypervisor allocates the address' );
