@@ -5,6 +5,14 @@ mv claude.settings.json [% install_dir %]/[% domain %]/.claude/settings.json
     domain, if it has one.  After the mv, because every provision replaces the
     settings file with one that knows nothing of it. -%]
 [% script_dir %]/claude_settings auto-mode '[% install_dir %]/[% domain %]/claude.auto-mode.json' '[% install_dir %]/[% domain %]/.claude/settings.json'
+[%# The hook and the status line that the settings name, and the badge that
+    tmux draws from the hook.  See TMUX in Provisioner::Recipe::claude.  tmux
+    reads /etc/tmux.conf before ~/.tmux.conf, so the dotfiles of the admin
+    keep the last word. -%]
+install -m 0755 claude-tmux-state /usr/local/bin/claude-tmux-state
+install -m 0755 claude-statusline /usr/local/bin/claude-statusline
+install -m 0644 -D claude.tmux.conf /etc/tmux.conf.d/claude.conf
+grep -qxF "source-file -q '/etc/tmux.conf.d/*.conf'" /etc/tmux.conf 2>/dev/null || echo "source-file -q '/etc/tmux.conf.d/*.conf'" >> /etc/tmux.conf
 [%# rtk, from the .deb its release publishes: one binary in /usr/bin that every
     account can run, and a version dpkg can be asked about.
 

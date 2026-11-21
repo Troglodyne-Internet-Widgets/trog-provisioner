@@ -18,6 +18,7 @@ use File::Temp  qw{tempdir};
 use File::Basename();
 use File::Find();
 use File::Path();
+use File::Which();
 use IPC::Run3();
 use Cpanel::JSON::XS();
 
@@ -529,6 +530,125 @@ subtest 'a restricted agent' => sub {
     ok( $mv_at >= 0 && $init_at > $mv_at,                                      'rtk goes into its settings after they are in place' );
     ok( index( $said, "chown -R 'test-agent:test-agent' '$home'" ) > $init_at, 'and the account owns its home after rtk has written there' );
     unlike( recipe()->render(%G), qr/useradd|agents/, 'a domain that names no restricted agent makes no account' );
+    ok( !$restricted->{hooks} && !$restricted->{statusLine}, 'and its settings have no tmux hooks and no status line, because nobody watches it' );
+};
+
+# The fragment lines that put the hook, the status line and the tmux
+# configuration in place, run in $dir with every system path under it.  So
+# what tmux reads is what the guest gets.
+sub install_tmux_parts {
+    my ($dir) = @_;
+    recipe()->generate_files( $dir, %G, modules => ['claude'] );
+
+    my @lines = grep { m{/usr/local/bin|/etc/tmux} } split m/\n/, recipe()->render(%G);
+    foreach my $line (@lines) {
+        $line =~ s{/etc/tmux[.]conf[.]d}{$dir/conf.d}g;
+        $line =~ s{/etc/tmux[.]conf}{$dir/tmux.conf}g;
+        $line =~ s{/usr/local/bin}{$dir/bin}g;
+    }
+    File::Path::make_path("$dir/bin");
+    my ( $status, $err ) = run_sh( join "\n", "cd '$dir'", map { "$_ || exit 1" } @lines, @lines );
+    return ( $status, $err );
+}
+
+# A tmux server of its own, which reads $conf and nothing else.
+sub tmux_server {
+    my ($dir) = @_;
+    my @tmux = ( 'tmux', '-S', "$dir/tmux.sock", '-f', "$dir/tmux.conf" );
+    return sub {
+        local $ENV{TMUX};
+        delete $ENV{TMUX};
+        IPC::Run3::run3( [ @tmux, @_ ], \undef, \my $out, \my $err );
+        chomp $out;
+        return $out;
+    };
+}
+
+subtest 'each event of a session shows in its tmux window' => sub {
+    plan skip_all => 'no tmux here' unless File::Which::which('tmux');
+
+    my $dir = tempdir( CLEANUP => 1 );
+    my ( $status, $err ) = install_tmux_parts($dir);
+    is( $status, 0, 'the fragment installs the hook and the tmux configuration, twice' ) or diag $err;
+    my @sources = grep { index( $_, 'source-file' ) >= 0 } split m/\n/, do { local ( @ARGV, $/ ) = "$dir/tmux.conf"; <> }
+      // q{};
+    is( scalar @sources, 1, 'and /etc/tmux.conf sources the directory once' ) or diag "@sources";
+
+    my $tmux = tmux_server($dir);
+    $tmux->(qw{new-session -d -s test -x 120 -y 10 sleep 300});
+    my $window = sub { my ($format) = @_; return $tmux->( qw{display -p -t test:0}, $format ) };
+    my $sock   = $tmux->( qw{display -p}, '#{socket_path}' );
+    my $pane   = $window->(q{#{pane_id}});
+    ok( length $tmux->(qw{show -gv @claude_badge}), 'tmux reads the badge through /etc/tmux.conf' );
+
+    my $conf = Cpanel::JSON::XS::decode_json(
+        do { local ( @ARGV, $/ ) = "$dir/claude.settings.json"; <> }
+    );
+    my $send = sub {
+        my ( $event, $matcher ) = @_;
+        my ($entry) = grep { ( $_->{matcher} // q{} ) eq ( $matcher // q{} ) } @{ $conf->{hooks}{$event} // [] };
+        my $command = $entry ? $entry->{hooks}[0]{command} : "false no hook for $event";
+        $command =~ s{/usr/local/bin}{$dir/bin}g;
+        my ( $hook_status, $hook_err ) = run_sh("TMUX='$sock,0,0' TMUX_PANE='$pane' $command");
+        is( $hook_status, 0, "the hook of $event succeeds" ) or diag $hook_err;
+        return $tmux->(qw{show -wqv -t test:0 @claude_state});
+    };
+
+    is( $send->('SessionStart'),     'idle',    'a session starts idle' );
+    is( $send->('UserPromptSubmit'), 'working', 'a prompt makes it work' );
+    like( $window->(q{#{E:window-status-format}}), qr/colour196[]][ ]\x{e2}\x{97}\x{8f}[ ]/, 'which the window shows as a red dot' );
+    is( $send->( 'PostToolUse', q{*} ),             'working', 'a tool that finishes leaves a working session working' );
+    is( $send->( 'PreToolUse', 'AskUserQuestion' ), 'blocked', 'a question blocks it' );
+    is( $window->(q{#{window_bell_flag}}),          '1',       'and rings the bell' );
+    is( $send->( 'PostToolUse', q{*} ),             'working', 'the answer unblocks it' );
+    is( $send->('PermissionRequest'),               'blocked', 'a request for permission blocks it' );
+    is( $send->('Stop'),                            'done',    'the end of a turn that nobody watches is done' );
+    like( $window->(q{#{E:window-status-format}}), qr/colour226[]][ ]\x{e2}\x{9c}\x{93}[ ]/, 'which the window shows as a yellow check' );
+    is( $send->('SessionEnd'), q{}, 'the end of the session clears it' );
+    $tmux->('kill-server');
+};
+
+# The status line, as Claude Code runs it: JSON on standard input, outside any
+# git checkout.
+sub status_line {
+    my ( $input, %opts ) = @_;
+    my $dir = tempdir( CLEANUP => 1 );
+    recipe()->generate_files( $dir, %G, modules => ['claude'], %opts );
+    IPC::Run3::run3( [ 'sh', '-c', "cd '$dir' && TMPDIR='$dir' bash ./claude-statusline" ], \$input, \my $out, \my $err );
+    my $status = $? >> 8;
+    $out =~ s/\e\[[[:digit:];]*m//g;
+    return ( $status, $err, split m/\n/, $out );
+}
+
+subtest 'the status line' => sub {
+    my $session = Cpanel::JSON::XS::encode_json(
+        {
+            model          => { display_name    => 'Model Test' },
+            effort         => { level           => 'high' },
+            context_window => { used_percentage => 50,  current_usage     => { input_tokens => 1000, cache_read_input_tokens => 2000 } },
+            cost           => { total_cost_usd  => 1.5, total_duration_ms => 61_000 },
+        }
+    );
+    my %clocks = ( statusline_clocks => [ { zone => 'UTC', label => 'Zulu' } ] );
+
+    my ( $status, $err, @lines ) = status_line( $session, %clocks, compact_warn_at => 3000 );
+    is( $status, 0, 'runs' )                                                                                                                or diag $err;
+    like( $lines[0], qr/\AModel[ ]Test[ ]\[high\][ ].*[ ]Zulu[ ]\d\d:\d\d\z/, 'names the model and its effort, and the time in each zone' ) or diag $lines[0];
+    my $warning = qr/>>[ ]compact[ ]soon[ ]-[ ]you're[ ]at[ ]3k[ ]tokens[ ]<</;
+    my $metrics = qr/\S+[ ]50%[ ]\$1[.]50[ ]1m1s/;
+    like( $lines[1], qr/\A$warning[ ]$metrics/, 'warns to compact at the limit, then shows the context, the cost and the duration' )
+      or diag $lines[1];
+
+    ( $status, $err, @lines ) = status_line( $session, compact_warn_at => 3001 );
+    like( $lines[1], qr/\A\S+[ ]50%/, 'and gives no warning under it' ) or diag $lines[1];
+
+    ( $status, $err, @lines ) = status_line('{}');
+    is( $status, 0, 'runs on a session that says nothing' ) or diag $err;
+    is( scalar @lines, 2, 'and still prints two lines' ) or diag join "\n", @lines;
+
+    like( exception { recipe()->validated( %G, statusline_clocks => [ { zone => q{UTC'}, label => 'x' } ] ) }, qr/zone/, 'a zone that would need quoting is refused' );
+    like( exception { recipe()->validated( %G, statusline_clocks => [ { zone => "UTC\n", label => 'x' } ] ) }, qr/zone/, 'and so is one with a newline at its end' );
+    like( exception { recipe()->validated( %G, compact_warn_at   => -1 ) }, qr/compact_warn_at/, 'and so is a limit under 0' );
 };
 
 Test::NoWarnings::had_no_warnings();

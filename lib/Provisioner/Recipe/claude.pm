@@ -23,6 +23,13 @@ use Trog::Patterns();
         claude:
             rtk_version: "v0.49.0"
 
+    # Or with the time in two zones on the status line:
+    somedomain:
+        claude:
+            statusline_clocks:
+                - { zone: "America/Chicago", label: "Chicago" }
+                - { zone: "UTC",             label: "UTC" }
+
     # Or with a GitHub bot that the agent acts as, and the reviewer of its
     # pull requests:
     somedomain:
@@ -86,6 +93,60 @@ of tmux can scroll back through it.  C<fullscreen> draws on the alternate
 screen, as an editor does, and tmux sees none of it.  The build installs the
 settings file again each time, so a change made with C</tui> on the guest
 lasts until the next build.
+
+=head2 TMUX
+
+Each session of the agent tells the tmux window that it runs in what it is
+doing.  The settings send these events to F</usr/local/bin/claude-tmux-state>,
+which sets the window option C<@claude_state>:
+
+=over 4
+
+=item * C<SessionStart> sends C<idle>, and C<UserPromptSubmit> sends C<working>.
+
+=item * C<PermissionRequest>, and a C<PreToolUse> of C<AskUserQuestion>, send
+C<blocked>.  The next C<PostToolUse> of any tool sends C<resume>, which turns
+C<blocked> back into C<working> and leaves every other state alone.
+
+=item * C<Stop> sends C<done>, or C<idle> if the window is the one that an
+attached client is looking at.
+
+=item * C<SessionEnd> sends C<clear>, which removes the option.
+
+=back
+
+C<blocked> and C<done> also ring the bell in the pane.  Outside tmux the hook
+does nothing.
+
+F</etc/tmux.conf.d/claude.conf> draws the state after the name of the window:
+a red dot while working, a white C<!> on red while blocked, and a yellow check
+when done and not yet seen.  To look at a finished window marks it seen.  It
+also flags a window that rings the bell, and binds prefix C<O> to a list of
+every window with its state and the time that the state began.
+F</etc/tmux.conf> sources every file in F</etc/tmux.conf.d>.  tmux reads
+F<~/.tmux.conf> after it, so the dotfiles that
+L<Provisioner::Recipe::adminconfig> copies keep their bindings, and a setting
+in them wins over this file.  The recipe installs tmux.  The badges need tmux
+3.2 or later.
+
+The hook calls the tmux server of the pane through C<$TMUX>.  So it reaches
+only a server of the account that runs claude, which is the ordinary case of a
+pane where you run claude yourself.
+
+=head2 THE STATUS LINE
+
+F</usr/local/bin/claude-statusline> prints two lines under the prompt.  The
+first names the model, the effort when it is not medium, the directory, the
+branch with its staged and changed files, the worktree, the session or the
+agent, and the date with the time in each zone of C<statusline_clocks>.  The
+second shows how full the context is, the five hour and the seven day limits
+with the time to their reset, the cost, the duration and the share of input
+read from the cache.  When the context reaches C<compact_warn_at>, it starts
+with a warning to compact.  It asks git at most once in five seconds for each
+session.
+
+The restricted agent gets neither the hooks nor the status line.  Nobody
+watches it in tmux.
 
 =head2 THE CHECKOUTS OF ADMINCODE
 
@@ -188,6 +249,12 @@ round would work once and then be overwritten by the next build.
 
 =cut
 
+# A zone of the tz database, and the name that the status line shows for it.
+# Each goes into a quoted word of the status line script, which splits the two
+# at the =, so neither has a quote, a space or an =.
+my $TIME_ZONE   = qr/\A [[:alnum:]_+\/-]+ \z/;
+my $CLOCK_LABEL = qr/\A [[:alnum:]_.-]+ \z/;
+
 sub args {
     return (
         type       => 'object',
@@ -211,6 +278,26 @@ sub args {
                 enum        => [qw{default fullscreen}],
                 default     => 'default',
                 description => 'The interface of Claude Code on the guest.  default keeps the scrollback of the terminal, which the copy mode of tmux needs.  fullscreen draws on the alternate screen, so tmux sees none of the conversation.',
+            },
+
+            statusline_clocks => {
+                type        => 'array',
+                default     => [],
+                description => 'The time zones whose time the status line shows, in this order.  See THE STATUS LINE.',
+                items       => {
+                    type       => 'object',
+                    required   => [qw{zone label}],
+                    properties => {
+                        zone  => { type => 'string', pattern => "$TIME_ZONE",   description => 'A zone of the tz database, such as America/Chicago or UTC.' },
+                        label => { type => 'string', pattern => "$CLOCK_LABEL", description => 'The name that the status line shows before the time.' },
+                    },
+                },
+            },
+            compact_warn_at => {
+                type        => 'integer',
+                minimum     => 0,
+                default     => 700_000,
+                description => 'The status line warns to compact when the context reaches this many tokens.  0 never warns.',
             },
 
             restricted_user => {
@@ -297,7 +384,7 @@ Adds C<gh_config_dir>, the directory of C<bot_config_dir>, when the domain
 names a bot.  Dies when it names only some of C<github_user>, C<github_token>
 and C<git_email>.
 
-Adds C<plugins>, the list that L</plugins> returns, which the settings and the
+Adds C<plugins>, the list that the method C<plugins> returns, which the settings and the
 fragment both read, so that a plugin that is enabled is also installed.
 
 Adds C<restricted_home> when the domain names a C<restricted_user>.  Dies when
@@ -354,6 +441,9 @@ sub template_files {
     return (
         'claude.settings.json.tt'            => 'claude.settings.json',
         'claude.restricted.settings.json.tt' => 'claude.restricted.settings.json',
+        'claude.tmux-state.sh.tt'            => 'claude-tmux-state',
+        'claude.statusline.sh.tt'            => 'claude-statusline',
+        'claude.tmux.conf.tt'                => 'claude.tmux.conf',
     );
 }
 

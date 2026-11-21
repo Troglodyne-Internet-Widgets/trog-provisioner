@@ -32,6 +32,35 @@
     "GIT_CONFIG_VALUE_0": "git@github.com:"[% END %][% IF pr_assignee && !restricted %],
     "PERL_SLOP_ASSIGNEE": "[% pr_assignee %]"[% END %]
   },
+[% UNLESS restricted -%]
+[%# The state of each session goes into its tmux window.  See TMUX in
+    Provisioner::Recipe::claude for which event sends which state.  rtk init
+    adds its own PreToolUse entry after this one. -%]
+[% tmux_hooks = [
+    [ 'SessionStart',      '',                'idle' ],
+    [ 'UserPromptSubmit',  '',                'working' ],
+    [ 'PermissionRequest', '',                'blocked' ],
+    [ 'PreToolUse',        'AskUserQuestion', 'blocked' ],
+    [ 'PostToolUse',       '*',               'resume' ],
+    [ 'Stop',              '',                'done' ],
+    [ 'SessionEnd',        '',                'clear' ],
+] -%]
+  "hooks": {
+[% FOREACH hook IN tmux_hooks %]
+    "[% hook.0 %]": [
+      {[% IF hook.1 %]
+        "matcher": "[% hook.1 %]",[% END %]
+        "hooks": [ { "type": "command", "command": "/usr/local/bin/claude-tmux-state [% hook.2 %]" } ]
+      }
+    ][% UNLESS loop.last %],[% END %]
+[% END %]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "/usr/local/bin/claude-statusline",
+    "refreshInterval": 30
+  },
+[% END -%]
   "tui": "[% tui %]",
   "theme": "dark"
 }

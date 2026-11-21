@@ -121,6 +121,30 @@ SKIP: {
     is(scalar(grep { $_ eq '@OPERATOR.md' } @imports), 1, 'CLAUDE.md imports them once') or diag "imports: @imports";
     ok((grep { $_ eq '@RTK.md' } @imports), 'and still imports RTK.md') or diag "imports: @imports";
 }
+
+# The status line runs as Claude Code runs it, with JSON on standard input.
+# Two lines say that jq and bash are there and that the script parsed.
+{
+    my $out = qx{echo '{}' | /usr/local/bin/claude-statusline 2>&1};
+    is($? >> 8, 0, 'the status line runs') or diag $out;
+    is(scalar(() = $out =~ m/\n/g), 2, 'and prints two lines') or diag $out;
+}
+
+# A tmux server of its own reads /etc/tmux.conf, which sources the badge, and
+# the installed hook sets the state of its window.  The recipe installs tmux.
+{
+    my $sock = "/tmp/claude-recipe-test.$$";
+    my @tmux = ('tmux', '-S', $sock, '-f', '/etc/tmux.conf');
+    my $tmux = sub { my $cmd = join ' ', map { "'$_'" } @tmux, @_; my $out = qx{$cmd 2>&1}; chomp $out; return $out };
+
+    $tmux->(qw{new-session -d -s test sleep 60});
+    ok(length $tmux->(qw{show -gv @claude_badge}), 'tmux reads the badge through /etc/tmux.conf');
+    my $pane = $tmux->('display', '-p', '-t', 'test:0', '#{pane_id}');
+    system("TMUX='$sock,0,0' TMUX_PANE='$pane' /usr/local/bin/claude-tmux-state working");
+    is($? >> 8, 0, 'the hook runs');
+    is($tmux->(qw{show -wqv -t test:0 @claude_state}), 'working', 'and sets the state of its window');
+    $tmux->('kill-server');
+}
 [% IF github_user %]
 
 # The bot that each command of the agent acts as.  Asked of gh and git with the
