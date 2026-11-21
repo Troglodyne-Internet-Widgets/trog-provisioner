@@ -1,0 +1,48 @@
+server {
+    listen 443 ssl;
+[% IF ipv6 %]    listen [::]:443 ssl;
+[% END -%]
+    server_name element.matrix.[% domain %];
+[%# The listener for a proxy, when a public name names this vhost.  See
+    Provisioner::Recipe::nginx. -%]
+    include /etc/nginx/proxied/element.matrix.[% domain %].443.conf*;
+    server_tokens off;
+
+    ssl_certificate     /etc/ssl/certs/[% domain %].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain %].pem;
+
+    root [% install_dir %]/element.matrix.[% domain %]/;
+    index index.html;
+
+[%# The headers and the caching that apps/web/README.md of element-web asks
+    for.  An add_header in a location replaces those of the server, so the
+    location that turns caching off repeats them. -%]
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+[%# Asked again each time, so that a new release or configuration takes effect
+    on the next load.  The bundles have the hash of their content in the name. -%]
+    location ~ ^/($|index\.html$|version$|config(\.[^/]+)?\.json$|i18n/) {
+        add_header Cache-Control "no-cache" always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+server {
+    listen 80;
+[% IF ipv6 %]    listen [::]:80;
+[% END -%]
+    server_name element.matrix.[% domain %];
+    include /etc/nginx/proxied/element.matrix.[% domain %].80.conf*;
+    return 301 https://$host$request_uri;
+}
