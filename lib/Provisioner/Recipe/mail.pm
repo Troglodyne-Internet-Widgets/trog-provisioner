@@ -85,6 +85,14 @@ default, and an entry with a default name changes its target:
             mailbox_aliases:
                 Gesendet: Sent Items
 
+A name and a target cannot hold a quote, a backtick, a percent sign, an
+asterisk, a question mark, a dollar sign, a backslash, a slash, a dot, a hash
+sign or a line break.  They cannot start with
+a less-than sign, and they cannot start or end with white space.  The
+configuration of dovecot has the names without quotes, and dovecot reads a hash
+sign as the start of a comment, a leading less-than sign as the name of a file
+to include, and white space at the ends as nothing.
+
 The C<mailbox_alias> plugin of dovecot makes an alias a link to its target, and
 creates, renames and deletes the alias without touching the target.  A link made
 by hand is not safe, because dovecot keeps one index for each name, so the same
@@ -520,13 +528,18 @@ sub required_recipes {
 my $NO_COLON = qr/\A [^:\r\n]* \z/;
 
 # A folder name with no quote, backtick, percent sign, asterisk, question mark,
-# dollar sign, backslash, slash or dot: the name goes into a shell word, a make
-# recipe, the dovecot configuration and a Maildir++ directory name.  A space is
-# legal, so the templates put the name in single quotes.  Doveadm reads % and *
-# as wildcards in a mailbox mask, and * and ? as wildcards in the mailbox key of
-# a search query (doveadm-mailbox(1), doveadm-search-query(7)), so an alias with
-# one of them would move and delete the mail of every folder that matches.
-my $FOLDER_NAME = q{\A[^'"`%*?$\\\\/.\r\n]+\z};
+# dollar sign, backslash, slash, dot or hash, that does not start with a
+# less-than sign, and that has no white space at either end: the name goes into
+# a shell word, a make recipe, the dovecot configuration and a Maildir++
+# directory name.  A space inside the name is legal, so the templates put the
+# name in single quotes.  Doveadm reads % and * as wildcards in a mailbox mask,
+# and * and ? as wildcards in the mailbox key of a search query
+# (doveadm-mailbox(1), doveadm-search-query(7)), so an alias with one of them
+# would move and delete the mail of every folder that matches.  The dovecot
+# configuration parser reads an unquoted value, so it takes a hash as the start
+# of a comment, a leading less-than sign as the name of a file to include, and
+# it trims white space.
+my $FOLDER_NAME = q{\A(?![<\s])[^'"`%*?$\\\\/.#\r\n]+(?<!\s)\z};
 
 sub args {
     return (
@@ -584,9 +597,10 @@ sub args {
             # The default of each of the five is on the member, not on the map,
             # so that an operator who adds a translated name keeps the five.
             mailbox_aliases => {
-                type                 => 'object',
-                default              => {},
-                description          => 'Map from the name of a folder that a mail client makes to the folder that it reaches.  The mailbox_alias plugin of dovecot links the name to the folder, and the build moves the messages of a real folder under that name into the folder first.  A name that you add keeps the five that are there.',
+                type        => 'object',
+                default     => {},
+                description =>
+                  'Map from the name of a folder that a mail client makes to the folder that it reaches.  The mailbox_alias plugin of dovecot links the name to the folder, and the build moves the messages of a real folder under that name into the folder first.  A name that you add keeps the five that are there.  A name and a folder cannot hold a quote, a backtick, a percent sign, an asterisk, a question mark, a dollar sign, a backslash, a slash, a dot, a hash sign or a line break, cannot start with a less-than sign, and cannot start or end with white space.',
                 additionalProperties => { type    => 'string', pattern => $FOLDER_NAME },
                 propertyNames        => { pattern => $FOLDER_NAME },
                 properties           => {
