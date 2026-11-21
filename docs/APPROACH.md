@@ -95,6 +95,15 @@ So a recipe whose service belongs to the machine decides in `grants` which domai
 * A required field of a recipe you require is still the operator's to supply, and `required_recipes` is where you supply it if you can.  What you cannot is a secret: `grafana` requires an `admin_password` with no default, so a domain configuring `grafanasyslog` configures `grafana` alongside it.  Note that `bin/new_guest` does not presently look through `required_recipes` for such fields, so it reports nothing to fill in and `bin/new_config` is what refuses.
 * Never override `validate()`: it is the universal one, and a recipe that replaces it discards the schema it composes and its own `enrich()` with it.
 
+## A setting that names another guest
+
+A field whose value can be the name of another guest decides where the guest can be built.  `named_guests` in `Provisioner::Cookbook` reads every setting of a domain, and a value that is a domain of the installation names that guest.  `bin/new_config` then places the guest only on a hypervisor whose `network` reaches each guest that it names.  The rules are in "Networks" in [CONFIGURATION.md](CONFIGURATION.md#networks).  This applies to a recipe that `_base` names as well, so a field such as `logshipper.host` limits every guest of the installation.
+
+* Mark a field whose value has the name of a domain but is not a guest, such as a DNS zone, with `'x-not-guest' => 1`.  Otherwise it ties the guest to the network of that domain.
+* `'x-weak' => 1` does not free the guest from that network.  Weak says that the build can go on without the named guest, not that the guest reaches it from anywhere.
+* A recipe that brings the guest onto the network of another guest, such as a VPN client onto the network of its server, names that guest in `joins_network_of`.  The guests on that network then do not limit where the guest goes.  `openvpnclient` is the example.
+* Send to the address that the ip pool gives the named guest, not to a name that can resolve elsewhere.  `Provisioner::Utils::fleet_address` gives it from `ipmap`, as logshipper does.  If the named guest can be a VPN client, use `Provisioner::IPPool::reachable_address`, which gives its address in the tunnel, as mail does for its relay.  A VPN client reaches the addresses of the pool through the routes that its server pushes.
+
 ## Secrets in a fragment
 
 make prints each command before it runs it.  `ubuntu.setup.sh.tt` keeps that output in `/var/log/<domain>.setup.log` on the guest, and that log stays after the build.  The provisioning skill also copies it back to this machine.  So a secret on a command line is a secret in a log that more people and machines can read.
