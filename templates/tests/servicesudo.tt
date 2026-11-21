@@ -61,14 +61,16 @@ foreach my $command (@commands) {
 
 # A command nobody listed: sudo must refuse it.  This asks with -l and does
 # not run it.  A refused run makes sudo mail root a security warning, on every
-# build, and that noise hides a real attempt.
+# build, and that noise hides a real attempt.  sudo -l prints the path of a
+# command that it allows, and exits 1 for one that it refuses, silently when
+# the user has other rules that need no password.
 my %listed = map { ( split / /, $_ )[0] => 1 } @commands;
 my ($unlisted) = grep { !$listed{$_} } qw{/usr/bin/id /usr/bin/whoami /usr/bin/true};
 SKIP: {
     skip 'every candidate for an unlisted command is listed', 2 unless $unlisted;
     my ( $exit, $out ) = as_user( 'sudo', '-n', '-l', $unlisted );
-    isnt( $exit, 0, "$user may not run $unlisted with sudo" ) or diag $out;
-    like( $out, qr/password is required|not allowed|may not run/, 'and sudo says it refused' ) or diag $out;
+    is( $exit, 1, "$user may not run $unlisted with sudo" ) or diag $out;
+    unlike( $out, qr/^\Q$unlisted\E/m, 'and sudo does not name it, as it names a command that it allows' ) or diag $out;
 }
 
 # What sudo would let the user do at all.  Nothing that it may run as root may
