@@ -216,4 +216,15 @@ sub cache_classes {
     return $self->apt_repo_classes('archive.mariadb.org');
 }
 
+=head2 @units = $recipe->oom_protect()
+
+C<mariadb.service>.  InnoDB has a reputation for databases that do not
+recover after the kernel OOM killer kills it.
+
+=cut
+
+sub oom_protect {
+    return qw{mariadb.service};
+}
+
 1;

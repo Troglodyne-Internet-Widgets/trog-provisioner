@@ -1220,6 +1220,42 @@ sub jails {
     return ();
 }
 
+=head2 @units = $recipe->oom_protect()
+
+The systemd units of this recipe that the OOM killers pass over, by name with
+the type, such as C<mariadb.service>.  Empty by default.  It takes no
+configuration, because L<Provisioner::Recipe::zswap> calls it on the class.
+
+Name a unit here when a kill by the kernel OOM killer can do damage that a
+restart does not repair, such as to the files of a database.
+
+L<Provisioner::Recipe::zswap> reads this from each recipe on its guest.  It
+adds the units to its C<protect> list, see L<Provisioner::Recipe::zswap/What is
+protected>.  A guest without that recipe protects nothing, so a recipe that
+names a unit here does not bring zswap onto the guest.
+
+=cut
+
+sub oom_protect {
+    return ();
+}
+
+=head2 @units = $recipe->oomd_omit()
+
+The systemd units of this recipe that systemd-oomd skips, with no change to
+their kernel OOM score.  Empty by default, and it takes no configuration, as
+C<oom_protect> does.
+
+Name a unit here, and not in C<oom_protect>, when its children inherit its
+score and must not, such as the sessions of sshd.
+L<Provisioner::Recipe::zswap/What is protected> has the measurement.
+
+=cut
+
+sub oomd_omit {
+    return ();
+}
+
 =head3 forget_undefs($opts, $schema)
 
 Deletes each field of C<$opts> that is present but undef, where C<$schema>

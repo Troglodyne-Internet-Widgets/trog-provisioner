@@ -1,0 +1,29 @@
+# Set zswap at run time, so it is on now and grubconf keeps the kernel command
+# line.  Provisioner::Recipe::zswap says why.
+install -m 0644 -o root -g root zswap.tmpfiles.conf /etc/tmpfiles.d/zswap.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/zswap.conf
+# Before the unit starts, because the unit needs a file with a swap signature.
+[% script_dir %]/make_swapfile /swapfile '[% swap_size %]'
+install -m 0644 -o root -g root swapfile.swap /etc/systemd/system/swapfile.swap
+install -D -m 0644 -o root -g root zswap-oomd-swap.conf /etc/systemd/system/-.slice.d/60-zswap.conf
+[% FOR slice IN kill_on_pressure -%]
+install -D -m 0644 -o root -g root zswap-oomd-pressure.conf '/etc/systemd/system/[% slice %].d/60-zswap.conf'
+[% END -%]
+[% FOR unit IN protect -%]
+install -D -m 0644 -o root -g root zswap-protect.conf '/etc/systemd/system/[% unit %].d/60-zswap.conf'
+[% END -%]
+[% FOR unit IN oomd_omit -%]
+install -D -m 0644 -o root -g root zswap-oomd-omit.conf '/etc/systemd/system/[% unit %].d/60-zswap.conf'
+[% END -%]
+systemctl daemon-reload
+systemctl enable --now swapfile.swap
+# Restart, because the package started oomd before there was swap, and while
+# dbus reloaded its policy for the new systemd-oom user.  Such an oomd can
+# miss its bus name, and enable --now leaves a running unit alone.
+systemctl enable systemd-oomd.service
+systemctl restart systemd-oomd.service
+# A running process takes OOMScoreAdjust only when it starts, and a restart of
+# dbus breaks every session.  So set the score of each running process, after
+# the makefile, because a unit can start in a target that runs after this one.
+# The score is the one in zswap-protect.conf.
+[% script_dir %]/queue_postrun_task [% script_dir %]/oom_protect_running -900[% FOR unit IN protect %] '[% unit %]'[% END %]

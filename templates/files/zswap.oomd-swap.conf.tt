@@ -1,0 +1,4 @@
+# Written by the zswap recipe.  When swap is nearly full, systemd-oomd kills
+# the cgroup that uses the most of it.
+[Slice]
+ManagedOOMSwap=kill

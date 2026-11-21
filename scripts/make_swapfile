@@ -1,0 +1,40 @@
+#!/bin/bash
+# Make a swap file of the size asked for, or remake one of another size.
+# Provisioner::Recipe::zswap says how the size is given.
+set -eu
+
+FILE=${1:?usage: make_swapfile <path> <size>}
+SIZE=${2:?usage: make_swapfile <path> <size>}
+
+case "$SIZE" in
+    *%)
+        KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+        BYTES=$(( KB * 1024 * ${SIZE%\%} / 100 ))
+        ;;
+    *)
+        BYTES=$(numfmt --from=iec "$SIZE")
+        ;;
+esac
+
+# Whole pages, because mkswap ignores a partial page at the end.
+PAGE=$(getconf PAGESIZE)
+BYTES=$(( BYTES / PAGE * PAGE ))
+
+# A build that stopped between fallocate and mkswap leaves a file of the right
+# size with no signature, so the size alone does not say that it is done.
+if [ -f "$FILE" ] && [ "$(stat -c %s "$FILE")" = "$BYTES" ] \
+    && [ "$(blkid -p -s TYPE -o value "$FILE" 2>/dev/null)" = swap ]; then
+    exit 0
+fi
+
+# The kernel refuses to let go of a file that is in use as swap.
+if swapon --show=NAME --noheadings | grep -qxF "$FILE"; then
+    swapoff "$FILE"
+fi
+
+# fallocate keeps the blocks of a file that is already there, and a swap file
+# must have no holes, so start from nothing.
+truncate -s 0 "$FILE"
+fallocate -l "$BYTES" "$FILE"
+chmod 0600 "$FILE"
+mkswap "$FILE"

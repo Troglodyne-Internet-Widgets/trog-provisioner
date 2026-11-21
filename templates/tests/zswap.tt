@@ -1,0 +1,82 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+sub slurp { my ($file) = @_; local (@ARGV, $/) = $file; return eval { <> } // '' }
+sub param { my ($name) = @_; my $v = slurp("/sys/module/zswap/parameters/$name"); chomp $v; return $v }
+
+# The values that the running kernel uses, which tmpfiles wrote.  A file in
+# /etc/tmpfiles.d that did not apply leaves zswap off with nothing to say so.
+is(param('enabled'),          'Y',                       'zswap is on now, not only at the next boot');
+is(param('compressor'),       '[% compressor %]',        'it compresses with [% compressor %]');
+is(param('max_pool_percent'), '[% max_pool_percent %]',  'its pool takes at most [% max_pool_percent %]% of RAM');
+SKIP: {
+    skip 'this kernel has no zpool parameter', 1 unless -e '/sys/module/zswap/parameters/zpool';
+    is(param('zpool'), '[% zpool %]', 'its pool is [% zpool %]');
+}
+
+# zswap does nothing without a swap device behind it.
+my ($active) = grep { m{^/swapfile\s} } split m/\n/, slurp('/proc/swaps');
+ok($active, '/swapfile is in use as swap') or diag slurp('/proc/swaps');
+
+my $enabled = `systemctl is-enabled swapfile.swap 2>&1`;
+chomp $enabled;
+is($enabled, 'enabled', 'and its unit is enabled, so it survives a reboot') or diag $enabled;
+
+my $mode = (stat '/swapfile')[2] & 07777;
+is(sprintf('%04o', $mode), '0600', 'only root can read the swap file');
+
+my $bytes = -s '/swapfile' // 0;
+[% IF swap_size.match('%') %]
+my ($kb) = slurp('/proc/meminfo') =~ m/^MemTotal:\s+(\d+) kB/m;
+my $want = $kb ? int($kb * 1024 * [% swap_size.replace('%', '') %] / 100) : 0;
+ok($want && abs($bytes - $want) < 1024 * 1024, 'the swap file is [% swap_size %] of RAM')
+    or diag "got $bytes bytes, expected about $want";
+[% ELSE %]
+my $want = `numfmt --from=iec '[% swap_size %]'`;
+chomp $want;
+ok($want && abs($bytes - $want) < 1024 * 1024, 'the swap file is [% swap_size %]')
+    or diag "got $bytes bytes, expected about $want";
+[% END %]
+
+# systemd-oomd that runs but watches nothing kills nothing.
+my $oomd = `systemctl is-active systemd-oomd.service 2>&1`;
+chomp $oomd;
+is($oomd, 'active', 'systemd-oomd runs') or diag $oomd;
+
+my $dump = `oomctl 2>&1`;
+like($dump, qr{Swap Monitored CGroups:\s+Path:\s+/\s}, 'it watches swap use from the root slice') or diag $dump;
+[% FOR slice IN kill_on_pressure %]
+like($dump, qr{Memory Pressure Monitored CGroups:.*Path:\s+/\Q[% slice %]\E\s}s, 'it watches the memory pressure of [% slice %]')
+    or diag $dump;
+[% END %]
+
+[% FOR unit IN protect %]
+SKIP: {
+    my $show = `systemctl show -p OOMScoreAdjust -p ManagedOOMPreference '[% unit %]' 2>&1`;
+    like($show, qr/^OOMScoreAdjust=-900$/m,        '[% unit %] asks the kernel OOM killer to pass it over') or diag $show;
+    like($show, qr/^ManagedOOMPreference=omit$/m,  'and systemd-oomd to skip it') or diag $show;
+
+    # The fragment sets the score of the running process, which read its
+    # OOMScoreAdjust before the drop-in existed.
+    my $pid = `systemctl show -p MainPID --value '[% unit %]' 2>/dev/null`;
+    chomp $pid;
+    skip '[% unit %] is not running', 1 unless $pid && $pid =~ m/^\d+$/ && $pid > 0;
+    my $score = slurp("/proc/$pid/oom_score_adj");
+    chomp $score;
+    is($score, '-900', '[% unit %] runs with that score now, not only after a restart');
+}
+[% END %]
+
+[% FOR unit IN oomd_omit %]
+{
+    my $show = `systemctl show -p OOMScoreAdjust -p ManagedOOMPreference '[% unit %]' 2>&1`;
+    like($show, qr/^ManagedOOMPreference=omit$/m, 'systemd-oomd skips [% unit %]') or diag $show;
+
+    # Its children inherit this score, which is why the unit is not in protect.
+    unlike($show, qr/^OOMScoreAdjust=-900$/m, 'and [% unit %] keeps its own kernel OOM score') or diag $show;
+}
+[% END %]
+
+done_testing();
