@@ -392,6 +392,10 @@ subtest 'mailbox_aliases maps the names that other clients make to the flagged f
     foreach my $bad ( [ q{a.b} => 'Sent Items' ], [ 'Sent' => q{a'b} ], [ 'a/b' => 'Sent Items' ], [ 'Sent' => q{$x} ] ) {
         like( exception { $recipe->validate( %BASE, mailbox_aliases => { $bad->[0] => $bad->[1] } ) }, qr{mailbox_aliases}, "a name that a shell or a Maildir cannot hold is refused: $bad->[0] => $bad->[1]" );
     }
+
+    foreach my $bad ( [ 'Old*' => 'Sent Items' ], [ 'Old?' => 'Sent Items' ], [ 'Sent' => 'Sent*' ], [ 'Sent' => 'Sent?' ] ) {
+        like( exception { $recipe->validate( %BASE, mailbox_aliases => { $bad->[0] => $bad->[1] } ) }, qr{mailbox_aliases}, "a name that doveadm reads as a wildcard is refused: $bad->[0] => $bad->[1]" );
+    }
 };
 
 subtest 'the dovecot configuration declares the four folders and one alias pair for each alias' => sub {
