@@ -45,9 +45,12 @@
   <active-response/>
   <localfile/>
 
-  <!-- The agents do these.  The manager reads logs only. -->
+  <!-- The agents do these.  The manager reads logs only.  alert_new_files
+       is for the agents: analysisd raises an alert for a file that syscheck
+       sees for the first time only when it is on. -->
   <syscheck>
     <disabled>yes</disabled>
+    <alert_new_files>yes</alert_new_files>
   </syscheck>
   <rootcheck>
     <disabled>yes</disabled>

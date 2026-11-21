@@ -125,9 +125,16 @@ The agent also runs rootcheck in place of rkhunter, and one more rule mails
 what rootcheck finds.  The children of rule 510 in the package take the scan
 messages and the findings on Windows, so the rule gets the findings on Linux.
 Rule 510 matches a finding only the first time the manager sees it, so a
-finding that stays mails once.  The agent runs syscheck too, and no rule mails
-its alerts, because every upgrade of a package changes files that it watches.
-They go to the dashboard of L<Provisioner::Recipe::grafanaossec>.
+finding that stays mails once.
+
+The agent runs syscheck too.  Every upgrade of a package changes files that it
+watches, so most of its alerts go only to the dashboard of
+L<Provisioner::Recipe::grafanaossec>.  One more rule mails the alerts for the
+files that rkhunter recorded and no upgrade changes: the programs in
+F</usr/local/bin>, F</usr/local/sbin> and C<script_dir>, which no package
+owns, and the account files and the files of sudo.  A package that adds an
+account changes the account files, and that is rare enough to mail.  The
+manager turns on C<alert_new_files>, so a new program there mails too.
 
 =head2 The package comes from Atomicorp
 

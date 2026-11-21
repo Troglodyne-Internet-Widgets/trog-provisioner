@@ -95,7 +95,9 @@ package, configuration or job.
 
 changed_packaged_files stays.  It compares each file with the checksums of its
 package, so an upgrade does not set it off.  syscheck in the agent sees every
-change, an upgrade included, so its alerts go to the dashboard and not to mail.
+change, an upgrade included, so most of its alerts go to the dashboard and not
+to mail.  The manager mails the ones for the programs that no package owns and
+for the account files, which rkhunter also watched.
 
 The collector runs the manager and no agent, so it keeps rkhunter.  So does a
 guest that ships its logs nowhere, or somewhere outside this installation.
