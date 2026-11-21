@@ -340,16 +340,12 @@ program with nobody at its terminal cannot ask for the password of the store,
 so the message says to give it on standard input, or to log in through the ssh
 agent with C<guest_of_with_agent>.
 
-With C<< by_name => 1 >> the guest is reached at the C<internal_name> of
-C<$domain>, which L<Provisioner::Cookbook/internal_name> says, and not at its
-address.  The address is still asked, because it says that the guest is up.
-
 =cut
 
 sub guest_of {
-    my ( $class, $domain, %opts ) = @_;
+    my ( $class, $domain ) = @_;
 
-    my $where = $class->locate_guest( $domain, %opts ) or return;
+    my $where = $class->locate_guest($domain) or return;
     my $key   = Trog::Guest->key_path( $where->{name}, "$where->{dir}/key.rsa" )
       or die "No key for $where->{name}, in the store or at $where->{dir}/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n" . "If its admin trusts a key in your ssh agent, log in with the agent instead, as ask_guest --agent does.\n";
 
@@ -366,20 +362,20 @@ reach the guest.  Finding a guest on a hypervisor that needs a token, such as a
 cloud, still opens the store for that token.
 
 Returns undef when no hypervisor runs the guest.  Dies when C<SSH_AUTH_SOCK>
-is not set.  It takes C<< by_name => 1 >> as C<guest_of> does.
+is not set.
 
 =cut
 
 sub guest_of_with_agent {
-    my ( $class, $domain, %opts ) = @_;
+    my ( $class, $domain ) = @_;
 
     die "SSH_AUTH_SOCK is not set, so there is no ssh agent to log in to $domain with.\n" unless $ENV{SSH_AUTH_SOCK};
-    my $where = $class->locate_guest( $domain, %opts ) or return;
+    my $where = $class->locate_guest($domain) or return;
 
     return Trog::Guest->new( %{$where}{qw{name host user}} );
 }
 
-=head2 $where = Trog::Hypervisors->locate_guest( $domain, %opts )
+=head2 $where = Trog::Hypervisors->locate_guest($domain)
 
 Where the guest of C<$domain> is, for C<guest_of> and
 C<guest_of_with_agent>: a hash of C<name>, the machine, C<host>, its
@@ -389,13 +385,14 @@ an address.
 
 The guest of a domain in C<_shared> is the guest of its host, which
 L<Provisioner::Cookbook/host_of> names.  The admin user comes from the
-F<provision.conf> of the guest, and is C<root> without one.  With
-C<< by_name => 1 >>, C<host> is the C<internal_name> of C<$domain>.
+F<provision.conf> of the guest, and is C<root> without one.  The address is the
+guest itself, also for a domain behind a relay, whose public names reach the
+relay.
 
 =cut
 
 sub locate_guest {
-    my ( $class, $domain, %opts ) = @_;
+    my ( $class, $domain ) = @_;
 
     my $machine = Provisioner::Cookbook->machine_of($domain);
 
@@ -403,9 +400,7 @@ sub locate_guest {
     my $hv    = $fleet->configured ? $fleet->hosting($machine) : Trog::HV->new();
     return unless $hv;
 
-    # Still asked, with the name given, because it says that the guest is up.
     my $host = $hv->inspection_address($machine) or return;
-    $host = Provisioner::Cookbook->internal_name($domain) if $opts{by_name};
 
     # Config::Simple reads into $_ without a local of its own, and a caller
     # can be inside a map.  Trog::Hypervisors::Config has the same guard.

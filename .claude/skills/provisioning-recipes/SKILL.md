@@ -426,9 +426,10 @@ never asks the store for the key.  Without `SSH_AUTH_SOCK`, it is refused.  A gu
 a token, such as a cloud, still opens the store to find the guest, because only
 the API of the provider knows where the guest is.
 
-Both reach the guest at its `internal_name`, which the registrar publishes as an
-`A` record at the address of the guest itself.  When you `ssh` to a guest by
-hand, use that name, `internal.$domain` unless `_global` sets another.  Do not
+Both reach the guest at the address that its hypervisor reports, which is the
+guest itself, also for a domain behind a relay.  When you `ssh` to a guest by
+hand, use its `internal_name`, which the registrar publishes as an `A` record
+at that address: `internal.$domain` unless `_global` sets another.  Do not
 use the public name of a domain behind a relay: it reaches the relay, and the
 host key of the relay must not go into `known_hosts` under it.  See "The name of
 the guest itself" in `perldoc Provisioner::Recipe::registrar`.  On a guest that
