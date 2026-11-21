@@ -1,0 +1,5 @@
+# Written by the zswap recipe.  The kernel OOM killer picks almost anything
+# before this unit, and systemd-oomd never picks it.
+[Service]
+OOMScoreAdjust=-900
+ManagedOOMPreference=omit

@@ -1,0 +1,4 @@
+# Written by the zswap recipe.  When a cgroup under this slice waits on memory
+# for too long, systemd-oomd kills it.
+[Slice]
+ManagedOOMMemoryPressure=kill

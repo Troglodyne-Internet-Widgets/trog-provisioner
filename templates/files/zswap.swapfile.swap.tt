@@ -1,0 +1,10 @@
+# Written by the zswap recipe.  systemd requires the name of a swap unit to be
+# the path of what it swaps to, so /swapfile is swapfile.swap.
+[Unit]
+Description=Swap file behind zswap
+
+[Swap]
+What=/swapfile
+
+[Install]
+WantedBy=swap.target
