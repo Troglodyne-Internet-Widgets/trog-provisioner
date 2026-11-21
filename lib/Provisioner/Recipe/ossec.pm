@@ -300,10 +300,14 @@ F</var/lib/ossec-salvage>, because a salvage fetches a directory and not a
 file.  The copy stays on the collector, and only root reads it there.  In the
 domain directory, the service user could read it.  See L</The agents>.
 
+A guest that does not run the manager yet has no keys, so the command then
+does nothing, and creates no directory.  A directory that a failed command
+left behind makes F<bin/new_config> refuse the salvage.
+
 =cut
 
 sub remote_prepare {
-    return ('install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 /var/ossec/etc/client.keys /var/lib/ossec-salvage/client.keys');
+    return ('if [ -f /var/ossec/etc/client.keys ]; then install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 /var/ossec/etc/client.keys /var/lib/ossec-salvage/client.keys; fi');
 }
 
 =head2 %path_map = $recipe->remote_files()
