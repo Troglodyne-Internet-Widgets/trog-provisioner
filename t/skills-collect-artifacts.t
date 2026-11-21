@@ -192,9 +192,9 @@ subtest '--agent logs in through the ssh agent, and never asks the store for the
     $guest->redefine( new      => sub { ( undef, %built ) = @_; return bless {}, 'FakeLogin' } );
 
     my $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', agent => 1, user => 'admin' ) };
-    is( $err,             undef,              'the store is never asked for the key' ) or diag $err;
-    is( $built{key_path}, undef,              'and the guest has no key, so ssh offers the keys of the agent' );
-    is( $built{host},     'internal.vm.test', 'at the internal name, not the address from the hypervisor' );
+    is( $err,             undef,        'the store is never asked for the key' ) or diag $err;
+    is( $built{key_path}, undef,        'and the guest has no key, so ssh offers the keys of the agent' );
+    is( $built{host},     '192.0.2.10', 'at the address from the hypervisor' );
 
     delete local $ENV{SSH_AUTH_SOCK};
     like( exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', agent => 1, user => 'admin' ) }, qr/SSH_AUTH_SOCK \s+ is \s+ not \s+ set/, 'with no agent, --agent is refused' );
@@ -222,7 +222,7 @@ subtest 'a domain that shares the guest of another is collected from that guest'
     is( ( Trog::Skill::CollectArtifacts::artifacts('tenant.test.test') )[0], '/var/log/tenant.test.test.setup.log', 'and the setup log is still the log of the domain' );
 };
 
-subtest 'the guest is reached at its internal name, with the key of the store or with agent' => sub {
+subtest 'the guest is reached at its address, whatever its internal name, with the key of the store or with agent' => sub {
     File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    _global: {}\nrelayed.test.test:\n    _global:\n        internal_name: guest.relayed.test.test\n" );
     Provisioner::Cookbook->forget();
 
@@ -237,18 +237,18 @@ subtest 'the guest is reached at its internal name, with the key of the store or
     $guest->redefine( new => sub { my ( undef, %args ) = @_; push( @made, \%args ); return $answering } );
 
     capture_stderr { Trog::Skill::CollectArtifacts::connect_to( 'relayed.test.test', uri => 'qemu:///bogus', user => 'someadmin' ) };
-    is( $made[-1]{host},     'guest.relayed.test.test', 'an explicit internal name, and not an address' );
-    is( $made[-1]{key_path}, '/bogus/key.rsa',          'with the key of the store' );
+    is( $made[-1]{host},     '192.0.2.10',     'the address from the hypervisor, which needs no record in DNS' );
+    is( $made[-1]{key_path}, '/bogus/key.rsa', 'with the key of the store' );
 
     @keyed = ();
     local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
     capture_stderr { Trog::Skill::CollectArtifacts::connect_to( 'relayed.test.test', uri => 'qemu:///bogus', user => 'someadmin', agent => 1 ) };
-    is( $made[-1]{host}, 'guest.relayed.test.test', 'with agent, it is the internal name too' );
+    is( $made[-1]{host}, '192.0.2.10', 'with agent, it is the address too' );
     is_deeply( \@keyed, [], 'and the store is not asked for a key' );
     ok( !defined $made[-1]{key_path}, 'the guest is given none, so ssh uses the agent' );
 
     capture_stderr { Trog::Skill::CollectArtifacts::connect_to( 'other.test.test', uri => 'qemu:///bogus', user => 'someadmin', host => '192.0.2.77' ) };
-    is( $made[-1]{host}, '192.0.2.77', 'and --host still overrides the name' );
+    is( $made[-1]{host}, '192.0.2.77', 'and --host overrides it' );
 };
 
 done_testing();

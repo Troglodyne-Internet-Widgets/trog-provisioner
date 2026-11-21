@@ -1851,28 +1851,10 @@ sub global_schema {
                 type        => 'string',
                 format      => 'hostname',
                 description =>
-                  'The name that reaches the guest of this domain itself, and never a relay in front of it.  The registrar publishes it as an A record at the address of the guest, and ssh, collect_artifacts and ask_guest use it.  Per domain: a domain that shares the guest of another has its own.  The default is internal.$domain, which is in the zone of the domain.  Set it in the _global of a domain, not in _base, where it would name every guest alike.  See "The name of the guest itself" in Provisioner::Recipe::registrar.',
+                  'The name that reaches the guest of this domain itself, and never a relay in front of it.  The registrar publishes it as an A record at the address of the guest, for an operator to ssh to.  Per domain: a domain that shares the guest of another has its own.  The default is internal.$domain, which is in the zone of the domain.  Set it in the _global of a domain, not in _base, where it would name every guest alike.  See "The name of the guest itself" in Provisioner::Recipe::registrar.',
             },
         },
     );
-}
-
-=head2 internal_name($domain, $conf)
-
-The name that reaches the guest of C<$domain>, as C<global_schema> declares it:
-the C<internal_name> of its C<_global>, and otherwise C<internal.$domain>.  The
-default is here because a schema can say only a fixed default, and this one
-follows the domain.  C<globals> fills it in, so a build and a tool that reaches
-a guest get the same name from this one place.  C<$conf> is as in
-C<domain_config>.
-
-=cut
-
-my sub default_internal_name ($domain) { return "internal.$domain" }
-
-sub internal_name {
-    my ( $class, $domain, $conf ) = @_;
-    return $class->global_config( $domain, $conf )->{internal_name} // default_internal_name($domain);
 }
 
 # Keys of _global that a release took away, each with where the setting is now.
@@ -1912,7 +1894,10 @@ sub globals {
     my ( $class, $domain, $conf ) = @_;
     die "globals needs a domain.  base_globals returns the settings of _base alone.\n" unless defined $domain;
     my $said = validated_globals( $class, $class->global_config( $domain, $conf ), " for $domain" );
-    $said->{internal_name} //= default_internal_name($domain);
+
+    # Here, because a schema can say only a fixed default, and this one follows
+    # the domain.
+    $said->{internal_name} //= "internal.$domain";
     return $said;
 }
 

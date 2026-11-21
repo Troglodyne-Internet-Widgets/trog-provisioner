@@ -46,9 +46,8 @@ store goes on standard input.  With B<--agent>, it logs in with the keys of
 your ssh agent instead, and needs no store for the key.  The admin of a guest
 trusts the keys of F<admin_authorized_keys>.
 
-It reaches the guest at its C<internal_name>, and not at its address.  The
-guest of a domain behind a relay has that name for this: its public name
-reaches the relay.
+It reaches the guest at the address that its hypervisor reports, which is the
+guest itself, also for a domain behind a relay.
 
 =cut
 
@@ -64,9 +63,7 @@ sub main {
     die "Usage: ask_guest [--agent] DOMAIN COMMAND...\n" unless $domain && @command;
     Trog::Skill::Teardown::require_config();
 
-    # By its internal name: the public name of a guest behind a relay reaches
-    # the relay.  See internal_name in Provisioner::Cookbook.
-    my $guest = ( $agent ? Trog::Hypervisors->guest_of_with_agent( $domain, by_name => 1 ) : Trog::Hypervisors->guest_of( $domain, by_name => 1 ) )
+    my $guest = ( $agent ? Trog::Hypervisors->guest_of_with_agent($domain) : Trog::Hypervisors->guest_of($domain) )
       or die "No hypervisor in the fleet runs $domain at an address, so there is nothing to ask.\n";
 
     # The command is one argument of sh -c, so a command containing an awk

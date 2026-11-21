@@ -537,7 +537,7 @@ subtest 'guest_of_with_agent logs in to the guest of the host through the agent,
     like( exception { Trog::Hypervisors->guest_of_with_agent('tenant.example.test') }, qr/SSH_AUTH_SOCK[ ]is[ ]not[ ]set/, 'with no agent, it dies rather than reaching for a key' );
 };
 
-subtest 'guest_of by name reaches the internal name, with the key of the store or through the agent' => sub {
+subtest 'guest_of reaches the address from the hypervisor, with the key of the store or through the agent' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     mkdir("$dir/vm.example.test") or die "mkdir: $!";
     File::Slurper::Temp::write_text( "$dir/vm.example.test/provision.conf", "admin_user=someadmin\n" );
@@ -548,8 +548,7 @@ subtest 'guest_of by name reaches the internal name, with the key of the store o
     my $hv       = Test::MockModule->new('Trog::HV');
     my @keyed;
     $fleet->redefine( load => sub { return bless {}, 'GuestOfFleet' } );
-    $cookbook->redefine( machine_of    => sub { return $_[1] } );
-    $cookbook->redefine( internal_name => sub { return "internal.$_[1]" } );
+    $cookbook->redefine( machine_of => sub { return $_[1] } );
     $guest->redefine( key_path => sub { push( @keyed, $_[1] ); return '/bogus/key.rsa' } );
     $hv->redefine( new => sub { return bless {}, 'GuestOfHV' } );
     no warnings 'once';
@@ -558,17 +557,14 @@ subtest 'guest_of by name reaches the internal name, with the key of the store o
     local *GuestOfHV::domain_dir         = sub { $dir };
     use warnings;
 
-    my $by_address = Trog::Hypervisors->guest_of('vm.example.test');
-    is( $by_address->{host}, '192.0.2.7', 'without by_name, the guest is at its address' );
-
-    my $named = Trog::Hypervisors->guest_of( 'vm.example.test', by_name => 1 );
-    is( $named->{host},     'internal.vm.example.test', 'with by_name, it is at its internal name' );
-    is( $named->{key_path}, '/bogus/key.rsa',           'and has the key of the store' );
+    my $keyed = Trog::Hypervisors->guest_of('vm.example.test');
+    is( $keyed->{host},     '192.0.2.7',      'the guest is at its address' );
+    is( $keyed->{key_path}, '/bogus/key.rsa', 'and has the key of the store' );
 
     @keyed = ();
     local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
-    my $agent = Trog::Hypervisors->guest_of_with_agent( 'vm.example.test', by_name => 1 );
-    is( $agent->{host}, 'internal.vm.example.test', 'through the agent, it is at its internal name too' );
+    my $agent = Trog::Hypervisors->guest_of_with_agent('vm.example.test');
+    is( $agent->{host}, '192.0.2.7', 'through the agent, it is at its address too' );
     is_deeply( \@keyed, [], 'and the store is not asked' );
     ok( !defined $agent->{key_path}, 'the guest has no key, so ssh uses the agent' );
 };
