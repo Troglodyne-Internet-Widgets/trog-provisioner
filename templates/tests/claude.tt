@@ -131,10 +131,8 @@ SKIP: {
 }
 
 # A tmux server of its own reads /etc/tmux.conf, which sources the badge, and
-# the installed hook sets the state of its window.  tmux is the choice of the
-# admin, so a guest without it skips this.
-SKIP: {
-    skip 'this guest has no tmux', 3 unless qx{which tmux};
+# the installed hook sets the state of its window.  The recipe installs tmux.
+{
     my $sock = "/tmp/claude-recipe-test.$$";
     my @tmux = ('tmux', '-S', $sock, '-f', '/etc/tmux.conf');
     my $tmux = sub { my $cmd = join ' ', map { "'$_'" } @tmux, @_; my $out = qx{$cmd 2>&1}; chomp $out; return $out };

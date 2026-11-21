@@ -19,12 +19,14 @@ Provisioner::Recipe::Ubuntu::claude - Ubuntu's C<deps> for L<Provisioner::Recipe
 What npm needs, and what fetches the rtk release.  rtk itself is not here: it
 comes from its own C<.deb>, which no Ubuntu component publishes.  C<acl> gives the
 C<restricted_user> its way through the directory of the domain.  The status
-line reads what Claude Code tells it with C<jq>.
+line reads what Claude Code tells it with C<jq>.  C<tmux> is there because the
+recipe configures it, so an operator need not list it in the C<pkgs> of
+L<Provisioner::Recipe::adminconfig>.
 
 =cut
 
 sub deps {
-    return qw{nodejs npm curl ca-certificates acl jq};
+    return qw{nodejs npm curl ca-certificates acl jq tmux};
 }
 
 1;

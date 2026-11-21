@@ -126,7 +126,8 @@ every window with its state and the time that the state began.
 F</etc/tmux.conf> sources every file in F</etc/tmux.conf.d>.  tmux reads
 F<~/.tmux.conf> after it, so the dotfiles that
 L<Provisioner::Recipe::adminconfig> copies keep their bindings, and a setting
-in them wins over this file.  The badges need tmux 3.2 or later.
+in them wins over this file.  The recipe installs tmux.  The badges need tmux
+3.2 or later.
 
 The hook calls the tmux server of the pane through C<$TMUX>.  So it reaches
 only a server of the account that runs claude, which is the ordinary case of a
