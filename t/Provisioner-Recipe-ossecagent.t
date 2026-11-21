@@ -15,6 +15,7 @@ manager, and holds the key that its manager issues
 use Test::More;
 use Test::NoWarnings qw{had_no_warnings};
 use Test::Fatal      qw{exception};
+use Test::MockModule();
 
 use FindBin::libs;
 
@@ -36,12 +37,52 @@ subtest 'enrich' => sub {
 };
 
 subtest 'grants' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( configuration => sub { return { _shared => { 'guest.test.test' => ['tenant.test.test'] } } } );
+
     is_deeply(
         [ $recipe->grants( 'guest.test.test', manager => 'logs.test.test' ) ],
         [ { recipe => 'ossec', guest => 'logs.test.test', client => 'guest.test.test' } ],
         'the ossec recipe of the manager issues the key of the agent of this guest'
     );
-    is_deeply( [ $recipe->grants('guest.test.test') ], [], 'and no manager issues nothing' );
+    is_deeply( [ $recipe->grants('guest.test.test') ],                                 [], 'and a guest whose logs no manager reads holds nothing' );
+    is_deeply( [ $recipe->grants( 'tenant.test.test', manager => 'logs.test.test' ) ], [], 'nor for a tenant, whose machine holds the key of its one agent' );
+};
+
+# bin/destroy asks with the configuration as the file holds it, where
+# logshipper added this recipe and nothing names its manager.
+subtest 'revocations' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine(
+        configuration => sub {
+            return {
+                _base              => { logshipper        => { host => 'logs.test.test' } },
+                _shared            => { 'guest.test.test' => ['tenant.test.test'] },
+                'logs.test.test'   => { logcollector      => {} },
+                'guest.test.test'  => {},
+                'tenant.test.test' => {},
+            };
+        }
+    );
+
+    my @revoked = $recipe->revocations('guest.test.test');
+    is( scalar @revoked,      1,                                                    'the destruction of a guest revokes the key of its agent' );
+    is( $revoked[0]{guest},   'logs.test.test',                                     'on the collector whose manager reads its logs' );
+    is( $revoked[0]{command}, '/usr/local/sbin/ossec-agent-revoke guest.test.test', 'with the command that removes the agent' );
+    is_deeply( [ $recipe->revocations('tenant.test.test') ], [], 'and that of a tenant revokes nothing, because its machine keeps the agent' );
+};
+
+subtest 'enrich names the agent for the machine' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( configuration => sub { return { _shared => { 'guest.test.test' => ['tenant.test.test'] } } } );
+
+    my %base = ( manager => 'logs.test.test', ipmap => { 'logs.test.test' => '192.0.2.9' } );
+    is( { $recipe->enrich( %base, domain => 'tenant.test.test' ) }->{agent}, 'guest.test.test', 'a tenant runs the agent of its machine' );
+    is( { $recipe->enrich( %base, domain => 'guest.test.test' ) }->{agent},  'guest.test.test', 'and a machine its own' );
+};
+
+subtest 'machine_wide' => sub {
+    is_deeply( { $recipe->machine_wide( manager => 'logs.test.test' ) }, { manager => 'logs.test.test' }, 'the one agent of a machine sends to one manager' );
 };
 
 subtest 'required_recipes' => sub {

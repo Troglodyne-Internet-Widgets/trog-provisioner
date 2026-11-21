@@ -1,6 +1,6 @@
 package Provisioner::Recipe::ossec;
 
-#ABSTRACT: Run an OSSEC manager on the collector, over the stream of the fleet's logs, and draw its alerts.
+#ABSTRACT: Run an OSSEC manager on the collector, over the stream of the fleet's logs.
 
 use 5.041;
 
@@ -20,22 +20,18 @@ Provisioner::Recipe::ossec - intrusion detection over the logs that the collecto
 
     logs.example.test:
         logcollector: ~
-        grafana:
-            admin_password: secret:grafana/logs.example.test/password
-        grafanasyslog: ~
-        ossec: ~
 
-C<grafana> is configured next to it for the reason that
-L<Provisioner::Recipe::grafanasyslog> gives: this recipe does not choose an
-administrator password.
+Nobody needs to name this recipe.  L<Provisioner::Recipe::logcollector>
+requires it, so every collector runs the manager.  For dashboards over its
+alerts, see L<Provisioner::Recipe::grafanaossec>.
 
 =head1 DESCRIPTION
 
 OSSEC is a host intrusion detection system.  Its manager decodes log lines,
 matches them against rules, and raises an alert with a level from 0 to 15 for
 each match.  This recipe runs the manager on the collector and gives it every
-message of the fleet, with no agent on any guest.  The alerts go to the
-dashboards of L<Provisioner::Recipe::grafanasyslog>.
+message of the fleet.  It keeps each alert in F</var/ossec/logs/alerts>, and
+mails the alerts of the rules that replace the log watchers.
 
 =head2 The path of a message
 
@@ -50,22 +46,22 @@ RFC5424, the format of the other C<forward>.
 name of the guest from the line, so an alert names the guest and not the
 collector.
 
-=item 3. The manager sends each alert as JSON in a syslog message from the
-program C<ossec>, over UDP to C<127.0.0.1:alerts_port>.
-
-=item 4. A second syslog input of telegraf reads it, into the same
-measurement as the rest of the stream.  So the syslog dashboard shows the
-alerts under the appname C<ossec>.  A Starlark processor decodes the JSON,
-because InfluxQL cannot look into it, and makes the level, the rule, the rule
-groups and the guest into tags.  The OSSEC dashboard groups by those tags.
+=item 3. The manager writes each alert to its log of alerts, and mails the
+alerts that L</The rules that replace the log watchers> mark for mail.
 
 =back
 
 Every hop is on loopback, so nothing goes on the wire.
 
-The alerts do not go back through rsyslog.  If they did, the collector copies
-them to the manager like any other message, and the manager can raise an alert
-on its own alert.
+=head2 What another recipe can add
+
+This recipe sends its alerts nowhere else.  A recipe that consumes them adds
+its own fragment to F<ossec.conf.d>, as L</configd makes ossec.conf> says.  It
+can add an output there, such as C<syslog_output>, and turn on the daemon of
+the manager that serves it.  L<Provisioner::Recipe::grafanaossec> does that.
+Such an output must not go back through rsyslog.  If it did, the collector
+would copy each alert to the manager like any other message, and the manager
+could raise an alert on its own alert.
 
 =head2 The agents
 
@@ -170,30 +166,44 @@ sub is_multi_tenant { return 0 }
 =head2 $bool = Provisioner::Recipe::ossec->watches($domain)
 
 True when an OSSEC manager of this installation reads every log line of the
-machine of C<$domain>.  That is the case when the machine runs
-L<Provisioner::Recipe::logshipper> with the selector C<*.*>, and its C<host> is
-another domain of this installation whose configuration names this recipe.
-
-A selector that is not C<*.*> can leave out a facility that a rule needs, so
-it gives false.  So does a C<host> that is an address or a name outside this
-installation, because nothing here says what runs there.  The collector itself
-ships nowhere, so it is false for the collector too.
+machine of C<$domain>, as C<manager_of> decides.
 
 =cut
 
 sub watches {
     my ( $class, $domain ) = @_;
+    return defined( $class->manager_of($domain) ) ? 1 : 0;
+}
+
+=head2 $collector = Provisioner::Recipe::ossec->manager_of($domain)
+
+The collector whose OSSEC manager reads every log line of the machine of
+C<$domain>, or undef when there is none.  There is one when the machine runs
+L<Provisioner::Recipe::logshipper> with the selector C<*.*>, and its C<host> is
+another domain of this installation.  That domain runs
+L<Provisioner::Recipe::logcollector>, which requires this recipe, so it runs
+the manager.
+
+A selector that is not C<*.*> can leave out a facility that a rule needs, so
+it gives none.  So does a C<host> that is an address or a name outside this
+installation, because nothing here says what runs there.  The collector itself
+ships nowhere, so it has none either.
+
+=cut
+
+sub manager_of {
+    my ( $class, $domain ) = @_;
 
     my $machine = Provisioner::Cookbook->machine_of($domain);
     my $shipper = Provisioner::Cookbook->domain_config($machine)->{logshipper};
-    return 0 unless ref $shipper eq 'HASH' && defined $shipper->{host};
+    return unless ref $shipper eq 'HASH' && defined $shipper->{host};
 
     my %default = Provisioner::Cookbook->defaults('logshipper');
-    return 0 if ( $shipper->{selector} // $default{selector} ) ne '*.*';
+    return if ( $shipper->{selector} // $default{selector} ) ne '*.*';
 
     my $collector = $shipper->{host};
-    return 0 if $collector eq $machine || !Provisioner::Cookbook->configures($collector);
-    return exists( Provisioner::Cookbook->domain_config($collector)->{ossec} ) ? 1 : 0;
+    return if $collector eq $machine;
+    return Provisioner::Cookbook->configures($collector) ? $collector : undef;
 }
 
 =head2 %args = $recipe->args()
@@ -203,13 +213,11 @@ sub watches {
 =item * C<port>: the loopback TCP port where the manager reads the copy of the
 stream.  It is also the port that the collector sends to.
 
-=item * C<alerts_port>: the loopback UDP port where telegraf reads the alerts.
-
-=item * C<datasource>: the grafana datasource that the dashboard reads.  It
-must be the name that L<Provisioner::Recipe::grafana> gave it, which
-F<t/recipes.t> checks.
-
 =back
+
+C<alerts_port> and C<datasource> moved to L<Provisioner::Recipe::grafanaossec>.
+The schema here refuses them, so a configuration that still names them here
+names the recipe and the field.
 
 =cut
 
@@ -224,27 +232,15 @@ sub args {
                 maximum     => 65535,
                 description => 'Loopback TCP port the OSSEC manager reads the copy of the collector stream on, and the port logcollector is told to copy to.',
             },
-            alerts_port => {
-                type        => 'integer',
-                default     => 10516,
-                minimum     => 1024,
-                maximum     => 65535,
-                description => 'Loopback UDP port the manager sends its alerts to, and telegraf reads them on.',
-            },
-            datasource => {
-                type        => 'string',
-                default     => 'InfluxDB',
-                description => 'The grafana datasource the dashboard reads.  Must match the grafana recipe datasource_name, which t/recipes.t checks.',
-            },
         },
     );
 }
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<logcollector>, with the copy as text that the manager reads,
-C<grafanasyslog>, which installs telegraf and grafana and puts the stream in the
-measurement that the alerts join, and C<configd>, which makes F<ossec.conf>.
+C<logcollector>, with the copy as text that the manager reads, and
+C<configd>, which makes F<ossec.conf>.  logcollector requires this recipe too.
+See L<Provisioner::Cookbook/Recipes that require each other>.
 
 =cut
 
@@ -255,17 +251,15 @@ sub required_recipes {
     my $port = $opts{port} // 10514;
 
     return (
-        logcollector  => sub { ( forward_text => ["127.0.0.1:$port"] ) },
-        grafanasyslog => sub { () },
-        configd       => sub { ( languages => ['ossec'] ) },
+        logcollector => sub { ( forward_text => ["127.0.0.1:$port"] ) },
+        configd      => sub { ( languages    => ['ossec'] ) },
     );
 }
 
 =head2 @claims = $recipe->listens(%opts)
 
-The listener of the manager on C<port>, and the input of telegraf on
-C<alerts_port>, both on 127.0.0.1.  The listener of the agents on 1514/udp,
-on every address.
+The listener of the manager on C<port>, on 127.0.0.1, and the listener of
+the agents on 1514/udp, on every address.
 
 =cut
 
@@ -273,7 +267,7 @@ sub listens {
     my ( $self, %opts ) = @_;
 
     # Defaulted here as well as in args, as required_recipes does.
-    return ( '127.0.0.1:' . ( $opts{port} // 10514 ), '127.0.0.1:' . ( $opts{alerts_port} // 10516 ) . '/udp', '1514/udp' );
+    return ( '127.0.0.1:' . ( $opts{port} // 10514 ), '1514/udp' );
 }
 
 =head2 %files = $recipe->issue_grant($grant)
@@ -378,8 +372,8 @@ sub cache_classes {
 =head2 %files = $recipe->template_files()
 
 The configuration of the manager, its rules for the log watchers, the scripts
-that issue and revoke the keys of the agents, the firewall profile for the
-agents, the telegraf fragment, the Starlark processor and the dashboard.
+that issue and revoke the keys of the agents, and the firewall profile for the
+agents.
 
 =cut
 
@@ -390,9 +384,6 @@ sub template_files {
         'ossec.agent-key.tt'    => 'ossec-agent-key',
         'ossec.agent-revoke.tt' => 'ossec-agent-revoke',
         'ossec.ufw.conf.tt'     => 'ossec_ufw.conf',
-        'ossec.telegraf.tt'     => 'ossec_telegraf.conf',
-        'ossec.alerts.tt'       => 'ossec_alerts.star',
-        'ossec.dashboard.tt'    => 'ossec_dashboard.json',
     );
 }
 

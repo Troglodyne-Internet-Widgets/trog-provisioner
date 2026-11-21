@@ -1,0 +1,21 @@
+[%# One manager for the machine, so all of it is in the global half.
+    Provisioner::Recipe::grafanaossec has the path that an alert takes.
+
+    The targets of ossec, grafana and telegraf come below this one, because
+    this recipe requires them, so root owns these files, as in
+    grafanasyslog.global.tt.  configd adopts ossec.conf in its own target,
+    and merges this fragment into it then. -%]
+install -d -m 0750 -o root -g ossec /var/ossec/etc/ossec.conf.d
+install -m 0640 -o root -g ossec grafanaossec.conf /var/ossec/etc/ossec.conf.d/60-grafanaossec
+[%# ossec-control starts only the daemons in its process list, and the daemon
+    that sends the alerts is not in it until this line adds it. -%]
+/var/ossec/bin/ossec-control enable client-syslog
+[% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-csyslogd -t
+[% script_dir %]/queue_postrun_task systemctl restart ossec
+install -d -m 0755 /etc/telegraf/telegraf.d
+install -o root -g root -m 0644 grafanaossec_telegraf.conf /etc/telegraf/telegraf.d/61-ossec.conf
+install -o root -g root -m 0644 grafanaossec_alerts.star /etc/telegraf/ossec_alerts.star
+install -d -m 0755 /var/lib/grafana/dashboards
+install -o root -g root -m 0644 grafanaossec_dashboard.json /var/lib/grafana/dashboards/ossec.json
+[% script_dir %]/queue_postrun_task systemctl restart telegraf
+echo 'grafanaossec: the OSSEC manager sends its alerts to telegraf on 127.0.0.1:[% alerts_port %]/udp, and the OSSEC alerts dashboard draws them.'

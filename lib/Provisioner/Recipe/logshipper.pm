@@ -107,8 +107,8 @@ setting of Ubuntu.
 
 Everything that reaches rsyslog.  journald forwards the journal to rsyslog, so
 a service that logs to the journal arrives: sshd, postfix, dovecot, roundcube,
-garage, openvpn, and grafana and synapse, which log to the console as well as to
-their files.
+garage, openvpn, and synapse, which logs to the console as well as to its
+files.
 
 rsyslog does not read other files.  So a service that writes only to a file
 also sends its lines to syslog, where its recipe can make it: nginx with
@@ -143,15 +143,32 @@ L</The failure that the guest test makes visible>.
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  The machine has one rsyslog and one
-F</etc/rsyslog.d/10-logshipper.conf> that says where it forwards.  The
-destination, the selector and the port are arguments of one domain.  If two
-domains want different collectors, the first domain built decides where all
-logs go, including the logs of the second domain.
+True.  The machine has one rsyslog and one
+F</etc/rsyslog.d/10-logshipper.conf>, which the global half writes once, with
+the settings of the host.  It ships the logs of every domain on the machine.
+A tenant that names this recipe, as every tenant does when C<_base> names it,
+gets that shipping.  C<machine_wide> names the settings that a tenant must
+leave as its host has them.
 
 =cut
 
-sub is_multi_tenant { return 0 }
+sub is_multi_tenant { return 1 }
+
+=head2 %settings = $recipe->machine_wide(%opts)
+
+Every setting, with its default, because each of them goes into the one
+forwarder file of the machine.  So F<bin/new_config> refuses a tenant that
+asks for another destination, other logs or another queue than its host.  See
+L<Provisioner::Recipe/machine_wide>.
+
+=cut
+
+sub machine_wide {
+    my ( $self, %opts ) = @_;
+
+    my %default = Provisioner::Cookbook->defaults('logshipper');
+    return map { $_ => $opts{$_} // $default{$_} } qw{host port protocol selector retry queue_size};
+}
 
 =head2 %required = $recipe->required_recipes(%opts)
 

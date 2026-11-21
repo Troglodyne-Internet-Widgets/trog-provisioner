@@ -10,7 +10,7 @@ subtest 'the agent runs, with the key that the manager issued' => sub {
     }
 
     my $keys = do { local ( @ARGV, $/ ) = '/var/ossec/etc/client.keys'; <> } // q{};
-    like( $keys, qr/^\d+ \Q[% domain %]\E \S+ [[:xdigit:]]+$/m, 'its key is named for this guest' );
+    like( $keys, qr/^\d+ \Q[% agent %]\E \S+ [[:xdigit:]]+$/m, 'its key is named for the machine, [% agent %]' );
     my @stat = stat '/var/ossec/etc/client.keys';
     is( ( getgrgid( $stat[5] ) )[0], 'ossec', 'and the agent can read it' );
 };

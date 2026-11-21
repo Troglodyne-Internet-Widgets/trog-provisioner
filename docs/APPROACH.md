@@ -25,6 +25,61 @@ Several recipes write into `[% install_dir %]/[% domain %]`, and the last `chown
 * If another account must read the domain directory, change the mode and not the owner.  nginxproxy adds `o+x`, and nginxdirindex adds `o+rX` to everything that is not a dot entry.
 * Give each recipe a guest test for the owners that it depends on.
 
+## Several domains on one machine
+
+A domain can run on the guest of another domain.  The other domain is its host, and the domain is a tenant.  `Provisioner::Cookbook` has `host_of`, which names the host of a tenant, and `machine_of`, which names the domain whose guest runs a domain.  A recipe says how it behaves on a shared machine with the facilities below.  Each one answers a different question.
+
+| Facility | The question that it answers | Default |
+|---|---|---|
+| per-domain fragment, `<name>.tt` | What does the recipe do for one domain? | |
+| global half, `<name>.global.tt` | What does the machine need once, however many domains it holds? | none |
+| `is_multi_tenant` | Can two domains on one machine both have the recipe? | true |
+| `machine_wide` | Which settings must a tenant leave as its host has them? | none |
+| `exclusive_with`, `exclusive_on_machine_with` | Which other recipe collides with this one, on one domain or on one machine? | none |
+
+`perldoc Provisioner::Recipe` has the contract of each.  This section says why each one exists and when to use it.
+
+### The per-domain fragment
+
+The fragment runs once for each domain that names the recipe.  It writes what belongs to that domain: files under `install_dir`, a vhost, a fragment in a `conf.d`.  A recipe that does all of its work here serves any number of domains, and needs none of the other facilities.  So put the work here when you can.
+
+### The global half
+
+The global half runs once on the machine.  The makefile records it in `/etc/provisioner/state/global_<name>`, and every later build on the machine skips it.  A tenant builds on a guest that its host already built, so the global half usually runs with the configuration of the host.
+
+Put here what the machine has one of: a package, a service with one configuration file, a firewall profile.  If the service reads one file and has no `conf.d`, look at `Provisioner::Recipe::configd` first.  It gives the file a fragment directory, so each domain can write its own part from the per-domain fragment.
+
+For a tenant, the global half does nothing.  This is how most services of the machine are shared.  `_base` names the recipe, every tenant inherits it, and only the build of the host does the work.
+
+### is_multi_tenant
+
+Make it false only when two domains cannot both have the recipe.  One synapse has one `server_name`, so a second domain would replace the first.  `bin/new_config` then refuses the recipe for a tenant that is layered onto a host that has it.
+
+A global half alone is not a reason to make it false.  The refusal also stops `_base` from naming the recipe, because every tenant inherits `_base`.  logshipper was false for that reason, and so `_base` could not name it.  If the only problem is a tenant that asks for other settings, use `machine_wide`.
+
+### machine_wide
+
+The global half takes its settings from the configuration of one domain, usually the host.  A tenant whose settings differ gets those of the host, and the build ignores its own.  That was always so.  `machine_wide` changes only one thing: a difference now stops the build, where before it was ignored.
+
+The case for this rests on one question: is it better to die or to ignore?  It is better to die, because of a core goal of this software.  A hosting package must be fungible, which means that it can move between hosts and hypervisors and get the same result.  A tenant whose logshipper settings are ignored ships its logs to the collector of its host.  Move it to a machine of its own, and the same configuration ships them somewhere else.  Its configuration then does not say what the domain gets.  So if a domain cannot get the logshipper that it is configured with, its build must die.
+
+`machine_wide` names the settings that the global half applies to the whole machine.  `bin/new_config` refuses a tenant whose values for them differ from those of its host, and names each setting with both values.  A tenant that inherits the same values from `_base` passes.
+
+Name a setting here when the global half writes it into something that the machine has one of.  logshipper names all six of its settings, because each one goes into the one forwarder file of rsyslog.  ossecagent names `manager`, because the one agent of the machine sends to one manager.  A recipe that is not `is_multi_tenant` needs none, because its tenant is refused anyway.
+
+### Work outside the makefile
+
+The global half covers only what the makefile does on the guest.  `bin/provision` and `bin/destroy` do other work for each domain, from the configuration, and the global half does not reach it:
+
+* `bin/provision` asks another guest for each of the `grants` of a domain before the build.
+* `bin/destroy` revokes each of them when the domain goes away.
+
+So a recipe whose service belongs to the machine decides in `grants` which domain holds the grant.  The agent of ossecagent has one key for the machine.  Its `grants` returns nothing unless the domain is its own machine.  Otherwise the build of a tenant would ask for a second key, and the teardown of a tenant would revoke the key that every domain on the machine uses.
+
+### Collisions
+
+`exclusive_with` names a recipe that cannot be on one domain with this one, because both write the same thing, such as the vhost of the domain.  `exclusive_on_machine_with` names a recipe that cannot be on one machine with this one, because both own something of the machine, such as port 25.  The second one is checked between a tenant and its host as well.
+
 ## Waiting on things
 
 * Don't ever use static sleeps unless inside of a polling loop which checks that what you are waiting on is actually ready.  It's fine to write a standalone script to do this when necessary.
