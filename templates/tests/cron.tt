@@ -36,6 +36,9 @@ subtest '/etc/cron.d/[% name %]' => sub { check_recipe_file('/etc/cron.d/[% name
 my $status = `systemctl is-active cronie 2>/dev/null || systemctl is-active cron 2>/dev/null`;
 like($status, qr/active/, 'cron is running');
 
+[%# Where OSSEC watches the guest, its agent runs rootcheck, and the guest has
+    no rkhunter.  See Provisioner::Recipe::cron. -%]
+[% UNLESS ossec_watches -%]
 # A fresh guest is the baseline, so every warning here is a false positive that
 # would reach the admin each night.  --rwo prints the warnings and nothing else.
 # The makefile runs as an at job, and atd deletes the file of the job while it
@@ -54,6 +57,7 @@ my $hook = `apt-config dump DPkg::Post-Invoke 2>&1`;
 my @hooks = $hook =~ m/^DPkg::Post-Invoke:: "(.*)";$/mg;
 system( 'sh', '-c', $_ ) for grep { m/rkhunter/ } @hooks;
 cmp_ok( ( stat $db )[9] // 0, '>', 0, 'the apt hook of rkhunter records the file properties again' ) or diag $hook;
+[% END -%]
 
 subtest 'changed_packaged_files' => sub {
     my $script = '[% script_dir %]/changed_packaged_files';
@@ -66,7 +70,9 @@ subtest 'changed_packaged_files' => sub {
 
     require $script;
     my %expected = map { $_ => 1 } Trog::ChangedPackagedFiles::expected();
+[% UNLESS ossec_watches -%]
     ok($expected{'/var/lib/rkhunter/db/mirrors.dat'}, 'it expects the database of mirrors that rkhunter rewrites to change');
+[% END -%]
 
     # A file of the debsums package, which every guest with this recipe has,
     # and which nothing runs while this test changes it.

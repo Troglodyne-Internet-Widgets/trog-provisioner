@@ -20,10 +20,13 @@
     <frequency>300</frequency>
   </localfile>
 
+  <!-- In place of rkhunter, which the cron recipe leaves off this guest.  The
+       package names what each scans.  The manager mails what rootcheck finds,
+       and syscheck goes to the dashboard only. -->
   <syscheck>
-    <disabled>yes</disabled>
+    <disabled>no</disabled>
   </syscheck>
   <rootcheck>
-    <disabled>yes</disabled>
+    <disabled>no</disabled>
   </rootcheck>
 </ossec_config>

@@ -5,7 +5,7 @@ use Test::More;
 
 subtest 'the agent runs, with the key that the manager issued' => sub {
     my $status = `/var/ossec/bin/ossec-control status 2>&1`;
-    foreach my $daemon (qw{ossec-agentd ossec-logcollector}) {
+    foreach my $daemon (qw{ossec-agentd ossec-logcollector ossec-syscheckd}) {
         like( $status, qr/^\Q$daemon\E is running/m, "$daemon is running" ) or diag $status;
     }
 

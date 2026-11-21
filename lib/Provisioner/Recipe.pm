@@ -690,7 +690,8 @@ The system packages that this recipe needs installed.
 
 C<%recipe_config> is the configuration of this recipe for the domain, with
 C<distro_release> added: the release of the domain, such as C<noble>, which
-C<bin/new_config> gets from the distro recipe.  C<package_sources>,
+C<bin/new_config> gets from the distro recipe.  It also has C<domain>, except
+when a caller asks without one, as C<t/recipes.t> does.  C<package_sources>,
 C<package_answers> and C<dep_conflicts> get the same.
 
 Override this in the distro subclass, not in the recipe.  See L</Where the

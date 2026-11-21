@@ -1,9 +1,13 @@
 mv root.crontab /etc/cron.d/default
 chown root:root /etc/cron.d/default
 chmod 0644 /etc/cron.d/default
+[%# Where OSSEC watches the guest, its agent runs rootcheck in place of
+    rkhunter.  See Provisioner::Recipe::cron. -%]
+[% UNLESS ossec_watches -%]
 [%# rkhunter rewrites a file of its own package.  The list must be there before
     the first run of changed_packaged_files below. -%]
 install -D -o root -g root -m 0644 cron.changed_packaged_files /etc/changed_packaged_files.d/rkhunter
+[% END -%]
 [%# What changes_in_packaged_files.sh kept, which nothing reads now. -%]
 rm -f /root/bin/changes_in_packaged_files.sh /root/debcheck.log.old /root/debdiffs.log /root/rpmcheck.log.old /root/rpmdiffs.log
 # Run each log watcher once, so that it records the entries already in the logs.
@@ -20,6 +24,7 @@ rm -f /root/bin/changes_in_packaged_files.sh /root/debcheck.log.old /root/debdif
 /root/bin/changed_packaged_files; /bin/true
 # The crontab command of cronie keeps a backup of the old crontab in ~/.cache.
 mkdir /root/.cache; /bin/true
+[% UNLESS ossec_watches -%]
 # Install the rkhunter configuration, and record the file properties after the makefile is done.
 mv rkhunter.conf /etc/rkhunter.conf
 install -o root -g root -m 0644 rkhunter.default /etc/default/rkhunter
@@ -29,3 +34,4 @@ install -o root -g root -m 0644 rkhunter.default /etc/default/rkhunter
     These two tests refresh them, so the first nightly scan does not report
     each account that the build made.  They exit 1 when they report one. -%]
 [% script_dir %]/queue_postrun_task "rkhunter --check --enable passwd_changes,group_changes --sk --nocolors --rwo >/dev/null; true"
+[% END -%]

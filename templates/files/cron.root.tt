@@ -8,9 +8,13 @@ MAILFROM="[% from %]"
 # SAR
 0,10,20,30,40,50 * * * * root command gather_sar.sh
 
+[%# Where OSSEC watches the guest, its agent runs rootcheck in place of
+    rkhunter.  See Provisioner::Recipe::cron. -%]
+[% UNLESS ossec_watches -%]
 # Security scans
 0    0 * * *  root command rkhunter --update >/dev/null 2>&1
 5    0 * * *  root command rkhunter --rwo --nomow -l /root/rkhunter.log --check
+[% END -%]
 [%# Provisioner::Recipe::ossec has the rules that do the jobs of these five.
     Its agent runs root_access. -%]
 [% UNLESS ossec_watches -%]

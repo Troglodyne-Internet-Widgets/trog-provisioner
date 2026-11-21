@@ -52,4 +52,13 @@
     <description>A user who is not an admin, or a host that is not trusted, got in to root.</description>
   </rule>
 
+  <!-- rkhunter, which rootcheck in the agent replaces.  The children of 510 in
+       the package take its scan messages and the findings on Windows, so what
+       reaches this rule is a finding on the guest. -->
+  <rule id="100106" level="7">
+    <if_sid>510</if_sid>
+    <options>alert_by_email</options>
+    <description>rootcheck found a sign of a rootkit, or a file that one changed.</description>
+  </rule>
+
 </group>
