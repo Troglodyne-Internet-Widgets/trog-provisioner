@@ -228,6 +228,14 @@ What remains ought done by:
       unless List::Util::any { $_ eq 'nginxproxy' } @{$opts{modules}};
   ```
 
+### Several Domains on One Machine
+- **Per-domain fragment first**: a recipe that does its work per domain serves any number of domains
+- **Global half**: runs once on the machine, with the settings of the host, and does nothing for a tenant
+- **`is_multi_tenant` false**: only when two domains cannot both have the recipe, not because it has a global half
+- **`machine_wide`**: the settings of the global half that a tenant must leave as its host has them
+- **Grants**: `bin/provision` and `bin/destroy` handle them per domain, outside the global half
+- See "Several domains on one machine" in docs/APPROACH.md
+
 ## Debugging Tips
 
 1. Check generated makefile in target directory
