@@ -34,7 +34,7 @@ use Provisioner::Cookbook();
 =head2 DESCRIPTION
 
 Installs and configures a Matrix Synapse homeserver behind nginx, with the
-ketesa admin web interface.
+ketesa admin web interface and Element Web, a client in the browser.
 
 C<server_name> is the identity of the homeserver.  Every account is
 C<@user:$server_name>, every room alias ends in C<:$server_name>, and other
@@ -48,8 +48,7 @@ domain answers for those, and the homeserver has a vhost of its own.
 
 =over 4
 
-=item * The domain and its aliases serve a page that says how to connect: the
-homeserver, its server name, how to register, and the suggested channels.
+=item * The domain and its aliases serve a page with a link to Element.
 C<nginxproxy> serves it from F<www/index.html> in the domain directory, and
 sends the rest to synapse.
 
@@ -61,12 +60,16 @@ use: C</.well-known/matrix/server> says C<$server_name:8448>, and
 C</.well-known/matrix/client> says C<https://$server_name:8448>, which is the
 C<public_baseurl> of synapse.
 
-=item * C<admin.matrix.$domain> serves the admin interface.
+=item * C<admin.matrix.$domain> serves the admin interface, and
+C<element.matrix.$domain> serves Element, which starts at the homeserver,
+C<https://$server_name:8448>.  Both are downloaded from their GitHub releases
+on every provision.
 
 =back
 
-The certificate of the domain covers C<matrix.$domain> and
-C<admin.matrix.$domain>, because they are the C<subdomains> of this recipe.
+The certificate of the domain covers C<matrix.$domain>,
+C<admin.matrix.$domain> and C<element.matrix.$domain>, because they are the
+C<subdomains> of this recipe.
 C<server_name> is on it when it is in the zone of the domain, or in a zone that
 an account of L<Provisioner::Recipe::registrar> lists.
 
@@ -74,10 +77,11 @@ an account of L<Provisioner::Recipe::registrar> lists.
 
 When the C<nginx> of the domain names a C<relay>, this recipe hands C<nginx>
 these C<public_names>: the domain and each of its aliases, for the page,
-C<admin.matrix.$domain>, for the admin interface, and C<server_name>, for the
-vhost of the homeserver.  The admin interface is public as the admin API that
-it calls is, through C<server_name> on 8448.  The relay passes them through
-on 443.  C<server_name> also has the port 8448, mapped to 8449, so the relay
+C<server_name>, for the vhost of the homeserver, and C<admin.matrix.$domain>
+and C<element.matrix.$domain>, each for its own vhost.  The admin interface is
+public as the admin API that it calls is, through C<server_name> on 8448.  The
+relay passes them through on 443.  C<server_name> also has the port 8448,
+mapped to 8449, so the relay
 passes it alone through on 8448 to 8449 of the guest.  The vhost of the
 homeserver listens there, with the PROXY protocol.  See
 L<Provisioner::Recipe::nginx/Ports of its own>.
@@ -161,8 +165,9 @@ our $PASSTHROUGH_PORT = 8449;
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<nginx>, with C<matrix.$domain> and C<admin.matrix.$domain> in C<sites>, and
-the C<public_names> of L</Behind a relay> when the domain has a relay.
+C<nginx>, with C<matrix.$domain>, C<admin.matrix.$domain> and
+C<element.matrix.$domain> in C<sites>, and the C<public_names> of
+L</Behind a relay> when the domain has a relay.
 
 C<nginxproxy>, with a vhost on port 80 that redirects to SSL, and a vhost on
 port 443 that serves the page from F<www> and proxies the rest to synapse on
@@ -185,7 +190,7 @@ sub required_recipes {
                 sites        => [@sites],
                 public_names => {
                     ( map { $_ => { vhost => $domain } } $domain, @aliases ),
-                    "admin.matrix.$domain" => { vhost => "admin.matrix.$domain" },
+                    ( map { $_ => { vhost => $_ } } "admin.matrix.$domain", "element.matrix.$domain" ),
                     ( defined $opts{server_name} ? ( $opts{server_name} => { vhost => "matrix.$domain", ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT } } ) : () ),
                 },
             );
@@ -245,13 +250,13 @@ sub is_multi_tenant { return 0 }
 
 =head2 @names = $recipe->subdomains()
 
-C<matrix>, which synapse is reached at, and C<admin.matrix>, which its admin
-vhost answers for.
+C<matrix>, which synapse is reached at, and C<admin.matrix> and
+C<element.matrix>, which the admin interface and Element are reached at.
 
 =cut
 
 sub subdomains {
-    return qw{matrix admin.matrix};
+    return qw{matrix admin.matrix element.matrix};
 }
 
 =head2 %args = $recipe->args()
@@ -285,14 +290,14 @@ sub args {
                 },
             },
 
-            # Listed on the index page of the guest.
             channels => {
-                type    => 'array',
-                default => [],
-                items   => {
+                type        => 'array',
+                default     => ['general'],
+                description => 'The rooms that each new account joins.  synapse makes a room that does not exist yet.',
+                items       => {
                     type        => 'string',
                     pattern     => '^[^#:]+$',
-                    description => 'The local part of a room alias, such as general.  The page adds the # and the server name.',
+                    description => 'The local part of a room alias, such as general.  The recipe adds the # and the server name.',
                 },
             },
             admin_user                 => { type => 'string', default    => 'admin' },
@@ -356,14 +361,16 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'matrix.register_admin.sh.tt' => 'matrix_register_admin.sh',
-        'matrix.homeserver.yaml.tt'   => 'homeserver.yaml',
-        'matrix.log.yaml.tt'          => 'log.yaml',
-        'matrix.admin.nginx.tt'       => 'matrix-admin.nginx.conf',
-        'matrix.nginx.tt'             => 'matrix.nginx.conf',
-        'matrix.ufw.conf.tt'          => 'matrix_ufw.conf',
-        'matrix.synapse.service.tt'   => 'matrix-synapse.service',
-        'matrix.index.html.tt'        => 'matrix.index.html',
+        'matrix.register_admin.sh.tt'   => 'matrix_register_admin.sh',
+        'matrix.homeserver.yaml.tt'     => 'homeserver.yaml',
+        'matrix.log.yaml.tt'            => 'log.yaml',
+        'matrix.admin.nginx.tt'         => 'matrix-admin.nginx.conf',
+        'matrix.element.nginx.tt'       => 'matrix-element.nginx.conf',
+        'matrix.element.config.json.tt' => 'element.config.json',
+        'matrix.nginx.tt'               => 'matrix.nginx.conf',
+        'matrix.ufw.conf.tt'            => 'matrix_ufw.conf',
+        'matrix.synapse.service.tt'     => 'matrix-synapse.service',
+        'matrix.index.html.tt'          => 'matrix.index.html',
     );
 }
 

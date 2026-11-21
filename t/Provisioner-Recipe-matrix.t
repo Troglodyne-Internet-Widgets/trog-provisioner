@@ -63,7 +63,7 @@ sub rendered (%more) {
     my $dir = tempdir( CLEANUP => 1 );
     recipe()->generate_files( $dir, %CONFIG, %more );
     my %text;
-    foreach my $name (qw{homeserver.yaml matrix.index.html matrix.nginx.conf matrix_register_admin.sh}) {
+    foreach my $name (qw{homeserver.yaml matrix.index.html matrix.nginx.conf matrix-admin.nginx.conf matrix-element.nginx.conf element.config.json matrix_register_admin.sh}) {
         $text{$name} = do { local ( @ARGV, $/ ) = "$dir/$name"; <> }
           // q{};
     }
@@ -84,9 +84,16 @@ subtest 'synapse is the server that server_name names' => sub {
     my %text = rendered();
     my $hs   = YAML::XS::Load( $text{'homeserver.yaml'} );
     is( $hs->{server_name}, 'hs.test.test', 'homeserver.yaml names the server server_name, not matrix.<domain>' );
-    is_deeply( $hs->{auto_join_rooms}, ['#general:hs.test.test'], 'and new accounts join a room on this server' );
+    is_deeply( $hs->{auto_join_rooms}, [ '#general:hs.test.test', '#random:hs.test.test' ], 'and new accounts join each of the channels, as rooms on this server' );
     is( $hs->{public_baseurl}, 'https://hs.test.test:8448/', 'clients reach it at server_name, on 8448, where clients of an existing server already do' );
     ok( !exists $hs->{federation_domain_whitelist}, 'and it federates with any server, not only with itself' );
+};
+
+subtest 'new accounts join #general unless the domain names other channels' => sub {
+    %domain = ();
+    my $joins = sub { YAML::XS::Load( { rendered(@_) }->{'homeserver.yaml'} )->{auto_join_rooms} };
+    is_deeply( $joins->( channels => undef ), ['#general:hs.test.test'], 'with no channels, the default' ) or diag explain $joins->( channels => undef );
+    is_deeply( $joins->( channels => [] ),    [],                        'and an empty list joins none' );
 };
 
 subtest 'the vhost of the homeserver says where it is' => sub {
@@ -96,30 +103,33 @@ subtest 'the vhost of the homeserver says where it is' => sub {
     is_deeply( well_known( $conf, '/.well-known/matrix/client' ), { 'm.homeserver' => { base_url => 'https://hs.test.test:8448' } }, 'and clients find the public_baseurl, with no slash at the end' );
 };
 
-subtest 'the page of the domain says how to connect' => sub {
+subtest 'the page of the domain links to Element, which starts at the homeserver' => sub {
     %domain = ();
-    my $index = { rendered() }->{'matrix.index.html'};
-    like( $index, qr{<code>https://hs\.test\.test:8448</code>}, 'the homeserver at its public URL' );
-    like( $index, qr{<code>\#general:hs\.test\.test</code>},    'and the channels as room aliases on the server, #room:server_name' );
-    like( $index, qr{<code>\#random:hs\.test\.test</code>},     'every one of them' );
-    like( $index, qr{needs[ ]an[ ]email[ ]address},             'and that registration needs an email address, as registrations_require_3pid says' );
-    unlike( $index, qr{<img}, 'with no pictures' );
+    my %text = rendered();
+    like( $text{'matrix.index.html'}, qr{href="https://element\.matrix\.chat\.test\.test/"}, 'the page links to the vhost of Element' );
+    my $config = Cpanel::JSON::XS->new->decode( $text{'element.config.json'} );
+    is_deeply(
+        $config->{default_server_config}{'m.homeserver'},
+        { base_url => 'https://hs.test.test:8448', server_name => 'hs.test.test' },
+        'and Element starts at the public_baseurl of the homeserver'
+    );
 };
 
 subtest 'the names that the relay passes to the guest' => sub {
     %domain = ( _global => { aliases => [qw{chat.other.test matrix.chat.test.test}] }, nginx => { relay => 'relay.test.test' } );
     my %required = recipe()->required_recipes(%CONFIG);
     my %asked    = $required{nginx}->();
-    is_deeply( $asked{sites}, [qw{matrix.chat.test.test admin.matrix.chat.test.test}], 'the vhosts of the homeserver and of the admin interface' );
+    is_deeply( $asked{sites}, [qw{matrix.chat.test.test admin.matrix.chat.test.test element.matrix.chat.test.test}], 'the vhosts of the homeserver, of the admin interface and of Element' );
     is_deeply(
         $asked{public_names},
         {
-            'chat.test.test'              => { vhost => 'chat.test.test' },
-            'chat.other.test'             => { vhost => 'chat.test.test' },
-            'admin.matrix.chat.test.test' => { vhost => 'admin.matrix.chat.test.test' },
-            'hs.test.test'                => { vhost => 'matrix.chat.test.test', ports => { 8448 => 8449 } },
+            'chat.test.test'                => { vhost => 'chat.test.test' },
+            'chat.other.test'               => { vhost => 'chat.test.test' },
+            'hs.test.test'                  => { vhost => 'matrix.chat.test.test', ports => { 8448 => 8449 } },
+            'admin.matrix.chat.test.test'   => { vhost => 'admin.matrix.chat.test.test' },
+            'element.matrix.chat.test.test' => { vhost => 'element.matrix.chat.test.test' },
         },
-        'the domain and its alias go to the page, the admin interface to its own vhost, server_name to the vhost of the homeserver, which the relay alone passes through on 8448, to 8449 of the guest, and an alias that the recipe serves itself stays off'
+        'the domain and its alias go to the page, server_name to the vhost of the homeserver, which the relay alone passes through on 8448, to 8449 of the guest, the admin interface and Element each under its own name, and an alias that the recipe serves itself stays off'
     );
     my %limits = recipe()->rate_limits(%CONFIG);
     is_deeply( [ sort keys %limits ], [ 8448, 8449 ], 'the guest opens 8448, and the port where the relay passes 8448 through' );
@@ -182,8 +192,8 @@ subtest 'notices come from smtp_from, whatever the login is' => sub {
     like( exception { recipe()->validate( %good, smtp_from => 'notify' ) }, qr{/smtp_from:}, 'but a From that is not an address is refused' );
 };
 
-# The page writes each channel as #name:server_name, so a name that already has
-# the # or the server name comes out with two of it.
+# The recipe writes each channel as #name:server_name, so a name that already
+# has the # or the server name comes out with two of it.
 subtest 'a channel is the local part of a room alias' => sub {
     my %good = ( domain => 'chat.test.test', server_name => 'matrix.test.test', admin_password => 'p', smtp_host => 'mail.test.test', smtp_user => 'notify', smtp_pass => 'p', smtp_from => 'notify@test.test' );
     ok( !exception { recipe()->validate( %good, channels => ['general'] ) }, 'a bare name is fine' );
