@@ -52,4 +52,25 @@
     <description>A user who is not an admin, or a host that is not trusted, got in to root.</description>
   </rule>
 
+  <!-- rkhunter, which rootcheck in the agent replaces.  The children of 510 in
+       the package take its scan messages and the findings on Windows, so what
+       reaches this rule is a finding on the guest. -->
+  <rule id="100106" level="7">
+    <if_sid>510</if_sid>
+    <options>alert_by_email</options>
+    <description>rootcheck found a sign of a rootkit, or a file that one changed.</description>
+  </rule>
+
+  <!-- rkhunter also recorded the programs that no package owns, and the
+       account files.  No upgrade changes the programs, and one changes the
+       account files only when a package adds an account, so a change there
+       is worth a mail.  Rules 550 to 554 of the package raise the alerts of
+       syscheck, and each names the file in quotes. -->
+  <rule id="100107" level="10">
+    <if_sid>550,551,552,553,554</if_sid>
+    <pcre2>'(?:/usr/local/s?bin/|[% script_dir %]/|/etc/sudoers\.d/)[^']*'|'/etc/(?:passwd|shadow|group|gshadow|sudoers)'</pcre2>
+    <options>alert_by_email</options>
+    <description>A program that no package owns, or an account file, changed.</description>
+  </rule>
+
 </group>

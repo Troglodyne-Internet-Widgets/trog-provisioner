@@ -62,7 +62,7 @@ as one named after the domain.  cronie runs it.
 The cron jobs of root run:
 
     * SAR gathering
-    * rkhunter
+    * rkhunter, where OSSEC does not watch the guest
     * Log watchers (OOMs, SEGVs, root access, new users, rsyslog drops,
       outgoing ufw blocks).  The watchers of OOMs, SEGVs, root access, new
       users and rsyslog drops do not run where an OSSEC manager reads the logs
@@ -76,6 +76,31 @@ A recipe that changes a file of a package on purpose lists it in a file of
 F</etc/changed_packaged_files.d>, named for the recipe, so that the scan does
 not report it.  This recipe lists the database of mirrors that rkhunter
 rewrites.  L<Provisioner::Recipe::lexicon> lists the files that it patches.
+
+=head2 Where OSSEC watches the guest
+
+Where an OSSEC manager reads the logs of the guest, as C<ossec_watches> says,
+the agent of OSSEC does the jobs of some of these.  See
+L<Provisioner::Recipe::ossecagent>.  There:
+
+=over
+
+=item * rules on the manager replace the watchers of OOMs, SEGVs, new users and
+rsyslog drops, and the agent runs root_access;
+
+=item * rootcheck in the agent replaces rkhunter, so the guest has no rkhunter
+package, configuration or job.
+
+=back
+
+changed_packaged_files stays.  It compares each file with the checksums of its
+package, so an upgrade does not set it off.  syscheck in the agent sees every
+change, an upgrade included, so most of its alerts go to the dashboard and not
+to mail.  The manager mails the ones for the programs that no package owns and
+for the account files, which rkhunter also watched.
+
+The collector runs the manager and no agent, so it keeps rkhunter.  So does a
+guest that ships its logs nowhere, or somewhere outside this installation.
 
 They also run each configured C<root_scripts> entry, from a PATH that starts
 with C<script_dir>.  The service user runs each C<user_scripts> entry, from a
@@ -107,7 +132,7 @@ sub enrich {
 
     my $certified = List::Util::any { $_ eq 'letsencrypt' } @{ $opts{modules} // [] };
     $opts{renews_certificate} = ( $certified && !Provisioner::Cookbook->load('registrar')->unmanaged( $opts{domain} ) ) ? 1 : 0;
-    $opts{ossec_watches}      = Provisioner::Cookbook->load('ossec')->watches( $opts{domain} );
+    $opts{ossec_watches}      = $self->ossec_watches( $opts{domain} );
 
     foreach my $key (qw{root_scripts user_scripts}) {
         next unless ref $opts{$key} eq 'ARRAY';
@@ -129,6 +154,19 @@ sub enrich {
     }
 
     return %opts;
+}
+
+=head3 $bool = $recipe->ossec_watches($domain)
+
+True where an OSSEC manager reads the logs of C<$domain>, as
+L<Provisioner::Recipe::ossec/watches> decides.  See L</Where OSSEC watches the
+guest>.
+
+=cut
+
+sub ossec_watches {
+    my ( $self, $domain ) = @_;
+    return Provisioner::Cookbook->load('ossec')->watches($domain);
 }
 
 # The name of a job, which names its file in cron.d.

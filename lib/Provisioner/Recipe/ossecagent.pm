@@ -38,7 +38,14 @@ watchers>.
 
 The agent reads no log file, because the manager already has every line from
 the stream.  If it read them too, the manager would raise each alert twice.
-syscheck and rootcheck are off.
+
+The agent runs rootcheck in place of rkhunter, which
+L<Provisioner::Recipe::cron> leaves off the guest, and syscheck.  Each scans
+what the configuration of the package names.  The manager mails what rootcheck
+finds.  syscheck also watches the programs that no package owns, in
+F</usr/local/bin>, F</usr/local/sbin> and C<script_dir>, and the manager
+mails a change to those or to the account files.  The other alerts of syscheck
+go to the dashboard only.  See L<Provisioner::Recipe::ossec/The rules that replace the log watchers>.
 
 The agent sends to the manager on 1514/udp, at the address that the ip pool
 assigns the manager.  When the pool assigns it none, the build looks up the

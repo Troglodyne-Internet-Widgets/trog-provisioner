@@ -20,10 +20,16 @@
     <frequency>300</frequency>
   </localfile>
 
+  <!-- In place of rkhunter, which the cron recipe leaves off this guest.  The
+       package names what each scans, and syscheck also watches the programs
+       that no package owns, as rkhunter did.  The manager mails what rootcheck
+       finds, and the changes that syscheck sees there and in the account
+       files.  The rest of syscheck goes to the dashboard only. -->
   <syscheck>
-    <disabled>yes</disabled>
+    <disabled>no</disabled>
+    <directories check_all="yes">/usr/local/bin,/usr/local/sbin,[% script_dir %]</directories>
   </syscheck>
   <rootcheck>
-    <disabled>yes</disabled>
+    <disabled>no</disabled>
   </rootcheck>
 </ossec_config>

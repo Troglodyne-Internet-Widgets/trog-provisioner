@@ -5,7 +5,7 @@ use Test::More;
 
 subtest 'the agent runs, with the key that the manager issued' => sub {
     my $status = `/var/ossec/bin/ossec-control status 2>&1`;
-    foreach my $daemon (qw{ossec-agentd ossec-logcollector}) {
+    foreach my $daemon (qw{ossec-agentd ossec-logcollector ossec-syscheckd}) {
         like( $status, qr/^\Q$daemon\E is running/m, "$daemon is running" ) or diag $status;
     }
 
@@ -34,6 +34,7 @@ subtest 'the agent runs root_access, and reads no log file' => sub {
     my @files = $xml =~ m{<location>([^<]+)</location>}g;
     is_deeply( \@files, [], 'the manager has every log line from the stream, so the agent reads none' );
     like( $xml, qr{<command>\Q[% script_dir %]/root_access [% admin_user %]\E</command>}, 'and it runs root_access for the admin' );
+    like( $xml, qr{<directories[^>]*>[^<]*\Q[% script_dir %]\E[^<]*</directories>}, 'and syscheck watches the programs of root, which no package owns' );
 };
 
 done_testing();

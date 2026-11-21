@@ -101,7 +101,8 @@ Active response is off.  fail2ban stays, and the manager blocks nothing.
 The manager mails only the alerts of the rules that do the jobs of the log
 watchers.  See L</The rules that replace the log watchers>.
 
-syscheck and rootcheck are off on the manager and on the agents.
+syscheck and rootcheck are off on the manager.  The collector keeps rkhunter,
+as L<Provisioner::Recipe::cron/Where OSSEC watches the guest> says.
 
 =head2 The rules that replace the log watchers
 
@@ -111,7 +112,7 @@ killer, new users, and messages that rsyslog dropped.  F<watchers_rules.xml>
 has a rule for each.  The configuration adds it after the rule files of the
 package, because each rule is a child of rules in those files.  Each rule mails its alert, as the script mailed its finding, to the
 C<admin_email> of the collector, through the mail server on loopback port 25.
-No other alert sends mail.
+No alert sends mail but those of these rules.
 
 A guest does not run the four scripts when C<watches> is true for it.
 
@@ -119,6 +120,21 @@ The fifth, F<root_access>, needs facts that only the guest has: the uid of its
 admin, and the addresses that the keys of root accept.  So the agent runs it,
 and the rule raises an alert on what it prints.  When C<watches> is true, cron
 does not run it either.
+
+The agent also runs rootcheck in place of rkhunter, and one more rule mails
+what rootcheck finds.  The children of rule 510 in the package take the scan
+messages and the findings on Windows, so the rule gets the findings on Linux.
+Rule 510 matches a finding only the first time the manager sees it, so a
+finding that stays mails once.
+
+The agent runs syscheck too.  Every upgrade of a package changes files that it
+watches, so most of its alerts go only to the dashboard of
+L<Provisioner::Recipe::grafanaossec>.  One more rule mails the alerts for the
+files that rkhunter recorded and no upgrade changes: the programs in
+F</usr/local/bin>, F</usr/local/sbin> and C<script_dir>, which no package
+owns, and the account files and the files of sudo.  A package that adds an
+account changes the account files, and that is rare enough to mail.  The
+manager turns on C<alert_new_files>, so a new program there mails too.
 
 =head2 The package comes from Atomicorp
 

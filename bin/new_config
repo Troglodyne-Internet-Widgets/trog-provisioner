@@ -1294,11 +1294,12 @@ sub handle_domain {
             push( @{ $targets_of{$module} }, "/etc/provisioner/state/$fqdn/$module" );
         }
 
-        # The release goes to each, so that a vendor archive names its suite.
-        push( @pkgs,      ( $builder->deps( %$pconf, distro_release => $release ) ) );
-        push( @conflicts, ( $builder->dep_conflicts( %$pconf, distro_release => $release ) ) );
-        push( @sources,   ( $builder->package_sources( %$pconf, distro_release => $release ) ) );
-        push( @answers,   ( $builder->package_answers( %$pconf, distro_release => $release ) ) );
+        # The release goes to each, so that a vendor archive names its suite, and the
+        # domain, so that a recipe can ask what else the installation runs for it.
+        push( @pkgs,      ( $builder->deps( %$pconf, domain => $fqdn, distro_release => $release ) ) );
+        push( @conflicts, ( $builder->dep_conflicts( %$pconf, domain => $fqdn, distro_release => $release ) ) );
+        push( @sources,   ( $builder->package_sources( %$pconf, domain => $fqdn, distro_release => $release ) ) );
+        push( @answers,   ( $builder->package_answers( %$pconf, domain => $fqdn, distro_release => $release ) ) );
 
         my %t_vars = $builder->makefile_vars();
         %mf_vars = ( %mf_vars, %t_vars ) if %t_vars;
