@@ -17,6 +17,10 @@ use Test::More;
 use Test::NoWarnings qw{had_no_warnings};
 use Test::MockModule();
 use Test::Fatal qw{exception};
+use File::Temp();
+use File::Path    qw{make_path};
+use File::Slurper qw{read_text};
+use File::Slurper::Temp();
 
 use FindBin::libs;
 
@@ -43,11 +47,24 @@ subtest 'remote_prepare, remote_files and restores' => sub {
     my ($prepare) = $recipe->remote_prepare();
     my %salvage   = $recipe->remote_files();
     my %restores  = $recipe->restores( install_dir => '/bogus', domain => 'logs.test.test' );
-    is(
-        $prepare,
-        'install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 /var/ossec/etc/client.keys /var/lib/ossec-salvage/client.keys',
-        'a rebuild of the collector copies the keys of the agents for root alone'
-    );
+
+    # The command, run with its two paths moved into a directory of the test.
+    my $prepare_in = sub ($root) {
+        ( my $command = $prepare ) =~ s{(?=/var/(?:ossec/etc/client[.]keys|lib/ossec-salvage))}{$root}g;
+        return system( '/bin/sh', '-c', $command );
+    };
+
+    my $fresh = File::Temp->newdir();
+    is( $prepare_in->($fresh), 0, 'a collector that does not run the manager yet has nothing to copy, and that is no failure' );
+    ok( !-e "$fresh/var/lib/ossec-salvage", 'and it makes no directory for the salvage, which a failure would leave half made' );
+
+    my $built = File::Temp->newdir();
+    make_path("$built/var/ossec/etc");
+    File::Slurper::Temp::write_text( "$built/var/ossec/etc/client.keys", "001 web.test.test any bogus\n" );
+    is( $prepare_in->($built),                                                 0,                               'a collector that runs the manager copies its keys' );
+    is( read_text("$built/var/lib/ossec-salvage/client.keys"),                 "001 web.test.test any bogus\n", 'all of them' );
+    is( ( stat "$built/var/lib/ossec-salvage" )[2] & oct('07777'),             oct('0700'),                     'into a directory that only root opens' );
+    is( ( stat "$built/var/lib/ossec-salvage/client.keys" )[2] & oct('07777'), oct('0600'),                     'as a file that only root reads' );
     is_deeply( \%salvage, { '/var/lib/ossec-salvage/' => 'ossec-salvage/' }, 'and salvages the copy' );
     is_deeply(
         \%restores,
