@@ -17,12 +17,16 @@
   "env": {
 [%# A guest is used over ssh, and has no clipboard for a copy that Claude
     Code makes, so the terminal keeps the mouse to select text. -%]
+[%# mark_raw on git_email, because Xslate escapes for HTML, and an address can
+    hold an &, which would reach this file as &amp;.  The pattern of git_email
+    refuses a quote, a backslash, white space and a control character, so the
+    address cannot end the JSON string or break it. -%]
     "CLAUDE_CODE_DISABLE_MOUSE": "1"[% IF github_user && !restricted %],
     "GH_CONFIG_DIR": "[% gh_config_dir %]",
     "GIT_AUTHOR_NAME": "[% github_user %]",
-    "GIT_AUTHOR_EMAIL": "[% git_email %]",
+    "GIT_AUTHOR_EMAIL": "[% git_email | mark_raw %]",
     "GIT_COMMITTER_NAME": "[% github_user %]",
-    "GIT_COMMITTER_EMAIL": "[% git_email %]",
+    "GIT_COMMITTER_EMAIL": "[% git_email | mark_raw %]",
     "GIT_CONFIG_COUNT": "1",
     "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
     "GIT_CONFIG_VALUE_0": "git@github.com:"[% END %][% IF pr_assignee && !restricted %],

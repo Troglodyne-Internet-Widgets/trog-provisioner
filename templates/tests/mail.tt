@@ -397,8 +397,11 @@ SKIP: {
 {
     my $user    = 'catchall@[% domain %]';
     my %aliases = (
+[%# mark_raw, because Xslate escapes for HTML, and a folder named Spam & Ham
+    would reach this script as Spam &amp; Ham.  The schema of mailbox_aliases
+    refuses a quote and a backslash, so neither ends the string. -%]
 [% FOR old IN mailbox_aliases.keys().sort() -%]
-        '[% old %]' => '[% mailbox_aliases.$old %]',
+        '[% old | mark_raw %]' => '[% mailbox_aliases.$old | mark_raw %]',
 [% END -%]
     );
 

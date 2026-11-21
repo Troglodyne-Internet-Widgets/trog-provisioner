@@ -137,7 +137,9 @@ SKIP: {
     ok(length $token, 'and gh finds a token there for [% user %], who runs the agent');
 
     # In variables first, because an @ in an address interpolates in a regex.
-    my ($bot, $email) = ('[% github_user %]', '[% git_email %]');
+    # mark_raw, because Xslate escapes for HTML, and an address can hold an &.
+    # The pattern of git_email refuses a quote and a backslash.
+    my ($bot, $email) = ('[% github_user %]', '[% git_email | mark_raw %]');
     local @ENV{ keys %env } = values %env;
     my $ident = qx{git var GIT_AUTHOR_IDENT 2>&1};
     like($ident, qr/^\Q$bot\E[ ]<\Q$email\E>[ ]/x, 'and git commits as the bot') or diag $ident;
