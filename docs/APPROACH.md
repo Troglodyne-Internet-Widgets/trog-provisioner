@@ -80,6 +80,28 @@ So a recipe whose service belongs to the machine decides in `grants` which domai
 
 `exclusive_with` names a recipe that cannot be on one domain with this one, because both write the same thing, such as the vhost of the domain.  `exclusive_on_machine_with` names a recipe that cannot be on one machine with this one, because both own something of the machine, such as port 25.  The second one is checked between a tenant and its host as well.
 
+## State that survives a rebuild
+
+A guest is rebuilt, not repaired.  A domain also moves to another host or hypervisor by a rebuild, and its configuration must give the same result there.  So everything a guest needs is either in the configuration, in the secret store, or in the salvage.  The salvage is what `bin/new_config` fetches from the running guest before a rebuild, and puts back when the guest is built again.  If you run `bin/new_config` from cron and keep what it fetches, the salvage is also a backup.  See [BACKUPS.md](BACKUPS.md).
+
+Salvage the state that the guest made and that nothing can make again.  Ask what a person, or another guest, must do again after a rebuild.  If the answer is anything, the recipe must keep it.
+
+* Salvage data that the service wrote: a database dump, a spool, keys that somebody accepted.
+* Salvage what this guest issued to other guests.  Those guests are not rebuilt with it, so nothing issues it again.  The registrations and the ban keys of a relay are this kind, and so is the `client.keys` of an OSSEC manager.
+* Salvage the state in force that another guest sent once.  The bans of a relay are this kind: a guest sends a ban only when it bans, so a relay that loses its bans lets the address back in.
+* Do not salvage what another guest issued to this one.  That is a grant, and `bin/provision` asks for it again before each build.  See `grants` in `perldoc Provisioner::Recipe`.
+* Do not salvage what the configuration or the recipe makes, such as a configuration file.  The build makes it again, so the salvage only carries it to the data directory and back.
+* A secret that must stay the same across a rebuild, such as a host key that other guests pin, goes in the secret store through `guest_secrets`, not in the salvage.  The salvage can end up in an archive.
+
+How a recipe does it:
+
+* `remote_files` names each directory to fetch.  Each path is a directory, because the fetch copies a directory tree.  To keep one file, copy it into a directory of its own in `remote_prepare`, and salvage that directory.  `Provisioner::Recipe::ossec` does this with `client.keys`.
+* `remote_prepare` runs on the guest just before the fetch.  Use it when the state on disk can be older than the state in force: dump the database, or save a set that lives in memory.  A command that fails gives a warning, and the older copy comes down.
+* `restores` puts the salvage back where the service reads it, if that is not under `install_dir`.  The `data` target does it before every other target, and does nothing where the destination already holds state.  Keep state under `install_dir` when the software allows it, and no `restores` is needed.
+* `remote_skip` keeps a part of a salvaged directory on the guest, when that part must stay on the machine that made it.
+
+`perldoc Provisioner::Recipe` has the contract of each method.
+
 ## Waiting on things
 
 * Don't ever use static sleeps unless inside of a polling loop which checks that what you are waiting on is actually ready.  It's fine to write a standalone script to do this when necessary.

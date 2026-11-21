@@ -6,7 +6,7 @@
 
 SET=[% ban_set %]
 CHAIN=trog-[% ban_set %]
-SAVED=/var/lib/[% ban_set %]/saved
+SAVED=[% ban_dir %]/saved
 PORTS_IN=trog-[% relay_name %]-in
 PORTS_OUT=trog-[% relay_name %]-out
 PORTS_DIR=[% relay_dir %]/ports
@@ -74,7 +74,13 @@ stop() {
     iptables -F "$PORTS_OUT" 2>/dev/null
     iptables -X "$PORTS_OUT" 2>/dev/null
 
-    # The time that each ban has left goes with it, through a reboot as well.
+    save
+}
+
+# The time that each ban has left goes with it, through a reboot, and through
+# a rebuild, because the relay salvages [% ban_dir %].  bin/new_config runs
+# this with save before the salvage, so that it holds the bans in force now.
+save() {
     ipset list -n "$SET" >/dev/null 2>&1 || return 0
     ipset save "$SET" > "$SAVED.new" && mv "$SAVED.new" "$SAVED"
 }
@@ -83,4 +89,5 @@ case "$1" in
 start) start ;;
 ports) ports ;;
 stop | flush-all) stop ;;
+save) save ;;
 esac

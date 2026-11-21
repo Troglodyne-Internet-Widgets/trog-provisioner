@@ -4,23 +4,24 @@ We use a standardized approach to handling data persistence and backups across d
 
 ## How It Works
 
-Each recipe that needs to persist data between deployments implements a `remote_files` subroutine that returns a hash mapping source paths on the remote server to local storage paths in the provisioner's data directory.
+Each recipe that needs to persist data between deployments implements a `remote_files` subroutine that returns a hash mapping directories on the remote server to directories in the provisioner's data directory.
 
 Example:
 
 ```perl
 sub remote_files {
     return (
-        '/path/on/remote/server/file.db'     => 'local/data/file.db',
-        '/path/on/remote/server/config.yaml' => 'local/config/config.yaml',
-        '/path/on/remote/server/data/'       => 'local/datadir/'
+        '/var/lib/myservice/'    => 'myservice/',
+        '/var/lib/myservice-db/' => 'myservice-db/',
     );
 }
 ```
 
-You can back up either files or directories via this mechanism.
-Each time you run `bin/new_config`, they will be fetched from the running host so you don't have to start from scratch.
-The recipe can then move these backed-up items from the `install_dir` into wherever they ought to be on the guest.
+Each path is a directory, because the fetch copies a directory tree with rsync.
+To keep one file, copy it into a directory of its own in `remote_prepare`, which runs on the guest just before the fetch, and salvage that directory.
+Each time you run `bin/new_config` against a running guest, the directories are fetched from it, so you do not have to start from scratch.
+`restores` puts what came down back where the service reads it on the new guest.
+[APPROACH.md](APPROACH.md#state-that-survives-a-rebuild) says what to salvage, and why.
 
 # What ought to be backed up
 

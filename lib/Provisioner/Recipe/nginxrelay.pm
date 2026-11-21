@@ -283,29 +283,6 @@ sub rate_limits {
     return ( tls_port(%opts) => 1024 );
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
-
-F</etc/nginx/nginxrelay.d>, which holds the registrations.  Without it, a
-rebuilt relay proxies nothing until each guest behind it is built again.
-
-=cut
-
-sub remote_files {
-    return ( '/etc/nginx/nginxrelay.d/' => 'nginxrelay.d/' );
-}
-
-=head2 %restores = $recipe->restores(%opts)
-
-The salvage of F</etc/nginx/nginxrelay.d> goes back there.
-
-=cut
-
-sub restores {
-    my ( $self,        %opts )   = @_;
-    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
-    return ( '/etc/nginx/nginxrelay.d' => { from => "$install_dir/$domain/nginxrelay.d", owner => 'root:root' } );
-}
-
 =head2 $dir = $recipe->relay_dir()
 
 F</etc/nginx/nginxrelay.d>, which holds the registrations and the ban keys.

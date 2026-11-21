@@ -142,6 +142,16 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
     is( scalar @jumps, 1, 'INPUT enters the chain once after a reload' );
     ok( banned($abuser), 'and the ban is still there' );
 
+    # After the reload, which saved the set when ufw unloaded, so only the
+    # save that the salvage asks for writes this ban.
+    my $late = '192.0.2.78';
+    ( $rc, $said ) = as_guest("ban $late 600");
+    is( $rc, 0, 'a guest bans another address' ) or diag $said;
+    is( system('[% ban_hook %] save'), 0, 'the hook saves the set when the salvage asks' );
+    my $saved = do { local ( @ARGV, $/ ) = ('[% ban_dir %]/saved'); <> } // '';
+    like( $saved, qr/^add [% ban_set %] \Q$late\E timeout \d+$/m, 'with the ban made since ufw unloaded, and the time that it has left' ) or diag $saved;
+    as_guest("unban $late");
+
     ( $rc, $said ) = as_guest("check $abuser");
     is( $rc, 0, 'a guest can ask whether an address is banned' ) or diag $said;
 

@@ -1832,6 +1832,10 @@ sub restores {
 What to salvage off a guest that already runs this recipe.  Returns a map from
 the path on the guest to where it lands in the data directory.
 
+Each path is a directory, because the fetch copies a directory tree, see
+C<get_dir> in L<Trog::Machine>.  To salvage one file, copy it into a directory
+of its own in C<remote_prepare>, and salvage that directory.
+
 This is how a recipe survives a rebuild of the guest.  State that the guest
 generated, not configured, comes back down into the data directory.  Examples
 are a database dump, keys that somebody accepted, or a spool.  It goes back up
