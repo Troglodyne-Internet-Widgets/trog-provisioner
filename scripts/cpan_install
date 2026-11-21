@@ -116,11 +116,18 @@ C<--mirror-only>.
 =head3 Whose checkout
 
 A C<dzil> directory is a checkout that a recipe made and gave to its service
-user.  This script runs as root.  When dzil plugins run git to answer
-C<listdeps>, git refuses the checkout because another user owns it.  The script
-trusts that directory as a C<safe.directory> only for the dzil commands it
-runs there.  It sets this in the command-scope configuration of git, through
-C<GIT_CONFIG_COUNT> and its pairs.  It does not write to any F<.gitconfig>.
+user.  This script runs as root, but it asks C<dzil authordeps> and C<dzil
+listdeps> as the account that owns F<dist.ini>, with the home of that account
+as C<HOME>.  It installs what they print as root.
+
+C<listdeps> runs every C<BeforeBuild> plugin of the distribution, and such a
+plugin can run anything, such as C<npm i> or a C<git clone>.  What it writes
+then belongs to the owner, as it does when that user runs C<dzil> in a shell.
+git also trusts a checkout of its own user, so its plugins need no
+C<safe.directory>.
+
+A plugin that needs root, such as one that installs system packages, then
+works only for an owner who can use sudo without a password.
 
 =cut
 
@@ -173,9 +180,9 @@ sub main {
         my ($dir) = @rest;
 
         # See "Whose checkout" above.
-        local @ENV{qw{GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0}} = ( 1, 'safe.directory', $dir );
+        my @as = as_user( owner_of("$dir/dist.ini") );
         foreach my $which (qw{authordeps listdeps}) {
-            my ( $failed, @said ) = capture_in( $dir, "$bin/dzil", $which, '--missing' );
+            my ( $failed, @said ) = capture_in( $dir, @as, "$bin/dzil", $which, '--missing' );
             if ($failed) {
                 print {*STDERR} "cpan_install: dzil $which --missing exited $failed in $dir, so what it needs is not known\n";
                 return $failed;
@@ -334,6 +341,22 @@ sub as_user {
     my $home = ( getpwnam $name )[7];
     die "cpan_install: no account is named $name, so nothing can run as it\n" unless defined $home;
     return ( 'runuser', '-u', $name, '--', 'env', "HOME=$home" );
+}
+
+=head2 $name = owner_of($path)
+
+The name of the account that owns C<$path>.  Dies when C<$path> cannot be
+read, or when no account has the uid that owns it.
+
+=cut
+
+sub owner_of {
+    my ($path) = @_;
+    my $uid = ( stat $path )[4];
+    die "cpan_install: cannot read $path: $!\n" unless defined $uid;
+    my $name = getpwuid $uid;
+    die "cpan_install: no account has uid $uid, which owns $path, so nothing can run as its owner\n" unless defined $name;
+    return $name;
 }
 
 sub usage {

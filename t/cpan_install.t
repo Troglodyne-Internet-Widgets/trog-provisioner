@@ -43,10 +43,13 @@ for my $tool (qw{cpanm cpm dzil}) {
 }
 my $CPANM = "$PERL/bin/cpanm";
 
-# The dzil step tells a checkout that builds with Dist::Zilla by its dist.ini.
-# The perl above is real files, so the mock is not strict.
-my $dist_ini    = Test::MockFile->file( '/bogus/checkout/dist.ini', q{} );
+# The dzil step tells a checkout that builds with Dist::Zilla by its dist.ini,
+# and asks dzil as the account that owns it.  root, because it is the one
+# account that every host has.  The perl above is real files, so the mock is
+# not strict.
+my $dist_ini    = Test::MockFile->file( '/bogus/checkout/dist.ini', q{}, { uid => 0 } );
 my $no_dist_ini = Test::MockFile->file('/bogus/old-checkout/dist.ini');
+my @AS_OWNER    = ( qw{runuser -u root -- env}, 'HOME=' . ( getpwnam 'root' )[7] );
 
 # cpm, run by that perl, resolving from the index of the mirror alone, and
 # without the specs.  --test is added when the suites run.
@@ -54,14 +57,14 @@ my @CPM = ( "$PERL/bin/perl", "$PERL/bin/cpm", qw{install --global --final-insta
 
 # One run of cpan_install, with every command it would have run written down
 # rather than run.  %capture says what a captured command prints and
-# %capture_exit what it exits with, both by its first two words; git_config is
-# the git command-scope configuration each captured command was run under.
+# %capture_exit what it exits with, both by its first two words after any
+# change of account.
 sub install {
     my (%case) = @_;
 
     local $Trog::Script::CpanInstall::PERL_ROOT = $case{perl_root} // $PERL_ROOT;
 
-    my ( @ran, @git_config, @path );
+    my ( @ran, @path );
 
     # no_auto: it was loaded from its path above, so there is no module file to load.
     my $cpan_install = Test::MockModule->new( 'Trog::Script::CpanInstall', no_auto => 1 );
@@ -69,9 +72,9 @@ sub install {
     $cpan_install->redefine(
         capture_in => sub {
             my ( $dir, @cmd ) = @_;
-            push @ran,        [ $dir, @cmd ];
-            push @git_config, [ @ENV{qw{GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0}} ];
-            return ( $case{capture_exit}{"@cmd[0,1]"} // 0, @{ $case{capture}{"@cmd[0,1]"} // [] } );
+            push @ran, [ $dir, @cmd ];
+            my @words = $cmd[0] eq 'runuser' ? @cmd[ scalar(@AS_OWNER) .. $#cmd ] : @cmd;
+            return ( $case{capture_exit}{"@words[0,1]"} // 0, @{ $case{capture}{"@words[0,1]"} // [] } );
         }
     );
 
@@ -81,7 +84,7 @@ sub install {
         $died = $@;
     };
     $err .= $died if $died;
-    return { rc => $rc, ran => \@ran, out => $out, err => $err, git_config => \@git_config, path => \@path };
+    return { rc => $rc, ran => \@ran, out => $out, err => $err, path => \@path };
 }
 
 subtest 'install: into the newest perl the recipe built' => sub {
@@ -119,19 +122,19 @@ subtest 'installdeps and dzil' => sub {
     );
     is_deeply(
         $r->{ran},
-        [ [ '/bogus/checkout', "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, @CPM, '--test', 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, @CPM, '--test', 'Moo' ], ],
-        'the plugins dist.ini names, then what they say the distribution needs, asked in the checkout'
+        [ [ '/bogus/checkout', @AS_OWNER, "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, @CPM, '--test', 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', @AS_OWNER, "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, @CPM, '--test', 'Moo' ], ],
+        'the plugins dist.ini names, then what they say the distribution needs, asked in the checkout as its owner, and installed as root'
     );
 
     $r = install( args => [qw{dzil /bogus/checkout}] );
-    is( scalar( grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
+    is( scalar( grep { $_->[1] ne 'runuser' } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
 
     # What a plugin prints while dzil builds, as TidyAll and Test2 do.
     $r = install(
         args    => [qw{dzil /bogus/checkout}],
         capture => { "$PERL/bin/dzil listdeps" => [ "[tidied]  lib/Bogus.pm\n", "# Seeded srand with seed '20261120' from local date.\n", "Moo\n" ] },
     );
-    is_deeply( [ grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ], [ [ undef, @CPM, '--test', 'Moo' ] ], 'a line that names no module is not installed' );
+    is_deeply( [ grep { $_->[1] ne 'runuser' } @{ $r->{ran} } ], [ [ undef, @CPM, '--test', 'Moo' ] ], 'a line that names no module is not installed' );
     ok( index( $r->{err}, q{'[tidied]  lib/Bogus.pm', which names no module} ) >= 0, 'and the log says which line it left out' ) or diag $r->{err};
 
     $r = install( args => [qw{--notest dzil /bogus/old-checkout}] );
@@ -139,21 +142,13 @@ subtest 'installdeps and dzil' => sub {
     like( $r->{err}, qr{/bogus/old-checkout[ ]has[ ]no[ ]dist[.]ini}, 'and the log says why dzil was not asked' );
 };
 
-subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => sub {
+subtest 'dzil: an owner with no account, and a dzil that fails says so' => sub {
 
-    # A git config of its own in the environment, as the shell of an agent can
-    # have, which the step must leave as it found it.
-    my @keys   = qw{GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0};
-    my %before = ( GIT_CONFIG_COUNT => 1, GIT_CONFIG_KEY_0 => 'bogus.key', GIT_CONFIG_VALUE_0 => 'bogus value' );
-    local @ENV{@keys} = @before{@keys};
-
-    my $r = install( args => [qw{dzil /bogus/checkout}] );
-    is_deeply(
-        $r->{git_config},
-        [ ( [ 1, 'safe.directory', '/bogus/checkout' ] ) x 2 ],
-        'git trusts the checkout for both dzil commands, which it would otherwise refuse as owned by the service user'
-    );
-    is_deeply( { map { $_ => $ENV{$_} } @keys }, \%before, 'and for nothing after them' );
+    # A uid that no account has, as a checkout copied from another host can be.
+    my $orphan = Test::MockFile->file( '/bogus/orphan/dist.ini', q{}, { uid => 4_000_000_000 } );
+    my $r      = install( args => [qw{dzil /bogus/orphan}] );
+    ok( index( $r->{err}, 'no account has uid 4000000000, which owns /bogus/orphan/dist.ini' ) >= 0, 'a dist.ini that no account owns stops the step, naming the uid and the file' ) or diag $r->{err};
+    is_deeply( $r->{ran}, [], 'before dzil runs as anyone, root included' );
 
     $r = install(
         args         => [qw{dzil /bogus/checkout}],
@@ -169,7 +164,7 @@ subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => s
         capture_exit => { "$PERL/bin/dzil authordeps" => 2 },
     );
     is( $r->{rc}, 2, 'authordeps failing fails it too' );
-    is_deeply( [ map { $_->[2] } @{ $r->{ran} } ], ['authordeps'], 'before installing what it printed, or asking listdeps' );
+    is_deeply( [ map { $_->[-2] } @{ $r->{ran} } ], ['authordeps'], 'before installing what it printed, or asking listdeps' );
 };
 
 subtest 'pin: the version pkg-config reports, asked when it runs' => sub {
