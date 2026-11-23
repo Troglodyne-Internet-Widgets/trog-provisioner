@@ -17,7 +17,8 @@ use Test::NoWarnings qw{had_no_warnings};
 use Test::MockModule;
 use File::Temp qw{tempdir};
 use File::Slurper::Temp();
-use Capture::Tiny qw{capture};
+use Capture::Tiny qw{capture capture_stderr};
+use File::Which();
 
 use FindBin;
 
@@ -93,6 +94,8 @@ subtest 'granted' => sub {
 };
 
 subtest 'service_grants' => sub {
+    plan skip_all => 'no cvtsudoers here, and the grants are what cvtsudoers reads' unless File::Which::which('cvtsudoers');
+
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text(
         "$dir/servicesudo-svc",
@@ -102,21 +105,30 @@ subtest 'service_grants' => sub {
             'Defaults:svc !mail_badpass, !mail_no_perms',
             'svc ALL=(root) NOPASSWD: /bogus/sbin/install-packages',
             'svc ALL=(root) NOPASSWD: /usr/bin/uptime ""',
+            'svc ALL=(root) /bogus/sbin/with-password',
+            'svc ALL=(nobody) NOPASSWD: /bogus/sbin/as-another',
             'ghost ALL=(root) NOPASSWD: /bogus/sbin/anything',
         )
     );
-    File::Slurper::Temp::write_text( "$dir/admins", "svc ALL=(root) NOPASSWD: ALL\n" );
+    File::Slurper::Temp::write_text( "$dir/admins",              "svc ALL=(root) NOPASSWD: ALL\n" );
+    File::Slurper::Temp::write_text( "$dir/servicesudo-garbled", "svc ALL=(root NOPASSWD /bogus\n" );
 
     no warnings qw{once};
     local $Trog::RootAccess::SUDOERS_DIR = $dir;
     my $mock = Test::MockModule->new( 'Trog::RootAccess', no_auto => 1 );
     $mock->redefine( uid_of => sub { return $_[0] eq 'svc' ? $stranger : undef } );
 
+    my @warned;
+    my ( undef, $grants ) = capture_stderr {
+        local $SIG{__WARN__} = sub { push @warned, @_ };
+        Trog::RootAccess::service_grants();
+    };
     is_deeply(
-        Trog::RootAccess::service_grants(),
+        $grants,
         { $stranger => [ '/bogus/sbin/install-packages', '/usr/bin/uptime ""' ] },
-        'each rule of a servicesudo file, by the uid of its user, and not a rule in another file, a Defaults line, or a user who has no account'
+        'each rule of a servicesudo file as root with no password, by the uid of its user, and not a rule with a password, as another user, in another file, or of a user who has no account'
     );
+    is( scalar( grep { m/no[ ]grant[ ]is[ ]read[ ]from[ ]\S*servicesudo-garbled/ } @warned ), 1, 'and a file that cvtsudoers cannot read grants nothing, with a warning' ) or diag @warned;
 };
 
 subtest 'untrusted_login' => sub {
@@ -177,11 +189,9 @@ subtest 'main' => sub {
     local $Trog::RootAccess::AUTHLOG        = "$dir/auth.log";
     local $Trog::RootAccess::ADMIN_NETWORKS = "$dir/admin_networks";
 
-    local $Trog::RootAccess::SUDOERS_DIR = $dir;
-    File::Slurper::Temp::write_text( "$dir/servicesudo-svc", "svc ALL=(root) NOPASSWD: /bogus/sbin/install-packages\n" );
-
     my $mock = Test::MockModule->new( 'Trog::RootAccess', no_auto => 1 );
     $mock->redefine( authorized_keys_files => sub { () } );
+    $mock->redefine( service_grants        => sub { return { $stranger => ['/bogus/sbin/install-packages'] } } );
     $mock->redefine( uid_of                => sub { return $_[0] eq 'svc' ? $stranger : undef } );
 
     my $run = sub {

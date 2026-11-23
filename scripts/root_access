@@ -14,6 +14,10 @@ use IPC::Open3     ();
 use List::Util     ();
 use Socket         ();
 
+# check_sudoers_grant is installed beside this script, and has the reading of a
+# sudoers file through cvtsudoers.
+require( File::Basename::dirname(__FILE__) . '/check_sudoers_grant' );
+
 =head1 NAME
 
 root_access - report a new way in to root: a user who is not an admin, or a
@@ -186,15 +190,41 @@ sub allows {
 
 =head2 \%grants = service_grants()
 
-The commands that each service user may run as root, by uid, from the files
-F</etc/sudoers.d/servicesudo-*> that L<Provisioner::Recipe::servicesudo>
-writes, one rule on each line.  A user that no account has gets nothing.
+The commands that each service user may run as root with no password, by uid,
+from the files F</etc/sudoers.d/servicesudo-*> that
+L<Provisioner::Recipe::servicesudo> writes.  C<cvtsudoers> reads each file as
+sudo does, through F<check_sudoers_grant>.  A user that no account has gets
+nothing, and a file that C<cvtsudoers> cannot read gets a warning and grants
+nothing, so that its sessions are reported.
 
 =cut
 
 sub service_grants {
-    my ( %grants, @files );
-    return \%grants unless -d $SUDOERS_DIR;
+    my %grants;
+    foreach my $file ( servicesudo_files() ) {
+        my $parsed = eval { Trog::CheckSudoersGrant::cvtsudoers($file) };
+        if ( !$parsed ) {
+            warn "root_access: no grant is read from $file: $@";
+            next;
+        }
+        foreach my $rule ( Trog::CheckSudoersGrant::rules($parsed) ) {
+            next unless $rule->{nopasswd} && "@{ $rule->{runas} }" eq 'root' && @{ $rule->{users} } == 1;
+            my $uid = uid_of( $rule->{users}[0] ) // next;
+            push @{ $grants{$uid} }, grep { !m/\A!/ } @{ $rule->{commands} };
+        }
+    }
+    return \%grants;
+}
+
+=head2 @files = servicesudo_files()
+
+The files F</etc/sudoers.d/servicesudo-*>.
+
+=cut
+
+sub servicesudo_files {
+    my @files;
+    return @files unless -d $SUDOERS_DIR;
     File::Find::find(
         {
             no_chdir => 1,
@@ -205,18 +235,7 @@ sub service_grants {
         },
         $SUDOERS_DIR
     );
-
-    foreach my $file (@files) {
-        open my $in, '<', $file or next;
-        while ( my $line = <$in> ) {
-            chomp $line;
-            my ( $user, $command ) = $line =~ m/\A (\S+) \s+ ALL=\(root\) \s+ NOPASSWD: \s+ (\S.*) \z/x or next;
-            my $uid = uid_of($user) // next;
-            push @{ $grants{$uid} }, $command;
-        }
-        close $in or die "Cannot close $file: $!\n";
-    }
-    return \%grants;
+    return @files;
 }
 
 =head2 $uid = uid_of($name)
