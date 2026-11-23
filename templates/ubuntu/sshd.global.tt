@@ -1,6 +1,7 @@
 [%# bin/provision placed the private key from the secret store before this
-    ran.  The public key that cloud-init wrote belongs to the key that it
-    replaced, so derive it again.  100-security.conf is where the makefile kept
+    ran.  On a guest that did not boot from a seed with that key, the public
+    key that cloud-init wrote belongs to the key that it replaced, so derive it
+    again.  100-security.conf is where the makefile kept
     the policy before this recipe, on a guest provisioned in place.
     Provisioner::Recipe::sshd has the whole account. -%]
 ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub

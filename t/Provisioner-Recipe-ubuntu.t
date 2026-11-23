@@ -55,6 +55,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Provisioner::Cookbook();
+use Trog::Secrets();
 
 my $DOMAIN    = 'vm.test.test';
 my $GECOS     = q{Sean O'Brien & Co: boss};
@@ -144,6 +145,30 @@ subtest 'the domain key joins the administrator keys rather than replacing them'
     ok( ( grep { m/\Assh-rsa[ ]/ } @keys ), 'and the domain key was added beside them' )
       or diag explain \@keys;
     is( scalar @keys, 2, 'both, and nothing invented' );
+};
+
+# sshd starts before bin/provision places the host key from the store.  If the
+# seed does not carry the key, sshd offers keys that cloud-init made up for its
+# first minutes, and whatever connects then pins a key that goes away.
+subtest 'the seed gives cloud-init the host key from the store, and no other' => sub {
+    my $key = Provisioner::Utils::new_ssh_private_key( Ed25519 => 256, 'root@vm.test.test' );
+
+    my ( $dir, $user_data );
+    {
+        # What bin/new_config read out of the store before it renders.
+        local %Trog::Secrets::HELD = ( Provisioner::Cookbook->load('sshd')->host_key_ref($DOMAIN) => $key );
+        ( $dir, undef ) = generated();
+        $user_data = loaded( $dir, 'user-data' );
+    }
+
+    is_deeply( [ keys %{ $user_data->{ssh_keys} // {} } ], ['ed25519_private'], 'the private half only, from which cloud-init derives the public one' );
+    is( $user_data->{ssh_keys}{ed25519_private}, "$key\n", 'the key the store holds, ending in the newline that ssh-keygen needs' );
+    ok( $user_data->{ssh_deletekeys}, 'the keys in the image are deleted' );
+    is_deeply( $user_data->{ssh_genkeytypes}, [], 'and cloud-init makes none of its own' );
+
+    ( $dir, undef ) = generated();
+    $user_data = loaded( $dir, 'user-data' );
+    ok( !exists $user_data->{$_}, "with no key in the store, the seed has no $_" ) for qw{ssh_keys ssh_deletekeys ssh_genkeytypes};
 };
 
 subtest 'a guest a service made has no interfaces of ours to match on' => sub {

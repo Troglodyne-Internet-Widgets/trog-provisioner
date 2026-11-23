@@ -1492,6 +1492,11 @@ path.  C<%files> maps each NoCloud file name to its contents: C<user-data>,
 C<meta-data> and C<network-config>.  Dies if a file cannot be written or the ISO
 cannot be made.
 
+The user-data holds the private keys of the guest.  So the work directory in
+F</tmp> is closed to every other user before a file goes into it, and this dies
+if it cannot be closed, as when another user made it first.  The ISO stays in
+the pool only until cloud-init has read it: see C<release_seed>.
+
 =cut
 
 sub cloudinit_iso {
@@ -1502,6 +1507,8 @@ sub cloudinit_iso {
     my $path    = $self->pool_path . "/$name";
 
     $self->mkpath($workdir) or die "Could not make $workdir on " . $self->describe . "\n";
+    $self->run_cmd( qw{chmod 0700}, $workdir ) == 0
+      or die "Could not close $workdir on " . $self->describe . " to other users, so the seed of $domain is not written there\n";
     foreach my $file ( sort keys %files ) {
         $self->write_text( "$workdir/$file", $files{$file} )
           or die "Could not write $file for $domain on " . $self->describe . "\n";
@@ -3081,6 +3088,11 @@ sub libvirtd_may_run_shim ($self) {
 
 Removes the cloud-init ISO from the guest.  See
 L</eject_cdrom($domain, $target)>, which also says why this waits for cloud-init.
+Then deletes the ISO from the pool, because it holds the private keys of the
+guest, and nothing reads it again.  Each provision writes a new one.  Returns
+1, or 0 when the eject failed.  Then the ISO stays, because a domain that names
+a file that is gone does not start.  A delete that fails warns, as
+C<delete_volume> does, and C<clear_guest> tries again on the next build.
 
 =head2 guest_volumes($domain)
 
@@ -3089,7 +3101,11 @@ exist.
 
 =cut
 
-sub release_seed ( $self, $domain ) { return $self->eject_cdrom($domain) }
+sub release_seed ( $self, $domain ) {
+    $self->eject_cdrom($domain) or return 0;
+    $self->delete_volume("$domain-cloudinit.iso");
+    return 1;
+}
 
 sub guest_volumes {
     my ( $self, $domain ) = @_;

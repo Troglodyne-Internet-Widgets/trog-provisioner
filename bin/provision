@@ -1163,6 +1163,10 @@ cloud-init runs once and remembers that it ran.  A module that you name runs
 again anyway.  That applies the new configuration to a guest that booted from
 an older one.
 
+The F<user-data> holds the private keys of the guest, so the copy on the guest
+is root's alone, and goes once the last module has read it.  None of these
+modules is the ssh module, so a rerun does not touch the host key.
+
 =cut
 
 sub refresh_cloud_init {
@@ -1170,11 +1174,13 @@ sub refresh_cloud_init {
 
     print "Installing Updated cloud-init and forcing re-run...\n";
     my $init = "$domain_dir/$domain/user-data";
-    $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
+    $guest->put_file( $init, 'cloud-config.txt', sudo => 1, mode => '0600' ) or die "Could not ship the cloud-init config to $domain";
 
     foreach my $module ( Provisioner::Cookbook->load( $distro // 'ubuntu' )->rerun_modules() ) {
         print $guest->capture_sudo( qw{cloud-init single --name}, $module, qw{-f cloud-config.txt} ) . "\n";
     }
+
+    $guest->run_sudo(qw{rm -f cloud-config.txt}) == 0 or warn "Could not remove cloud-config.txt from $domain, which holds its private keys\n";
 
     return 1;
 }

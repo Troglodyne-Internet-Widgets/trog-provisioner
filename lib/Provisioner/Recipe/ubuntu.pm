@@ -21,10 +21,12 @@ use File::Slurper();
 use HTTP::Tiny();
 use List::Util qw{any uniq};
 use Net::IP();
+use Provisioner::Cookbook();
 use Provisioner::IPPool();
 use Provisioner::Packager();
 use Provisioner::Utils();
 use Text::Xslate();
+use Trog::Secrets();
 use YAML::XS();
 
 =head1 NAME
@@ -421,6 +423,13 @@ makes it for a new kernel or C library but not for a new systemd.  Without the
 reboot, rkhunter reports C<systemd-logind> as a process that uses a deleted
 file every night.
 
+C<ssh_host_key> is the private host key of the guest, which
+L<Provisioner::Recipe::sshd/host_key_ref> names, as C<held> in
+L<Trog::Secrets> has it after F<bin/new_config> read the store.  The seed gives
+it to cloud-init, so that sshd offers that key from its first start, and not a
+key that cloud-init made up for the minutes before F<bin/provision> places it.
+It is undef in a run that read no store, and the seed then names no host key.
+
 Dies if C<ips> is set without C<gateway>, or with no static adapter to put it
 on, or if C<contact_email> is not set.
 
@@ -500,7 +509,8 @@ sub enrich {
     die "MUST SET contact_email in provision.conf for $opts{domain}\n"
       unless $opts{contact_email};
 
-    $opts{guest_key} = $self->guest_keypair(%opts);
+    $opts{guest_key}    = $self->guest_keypair(%opts);
+    $opts{ssh_host_key} = Trog::Secrets->held( Provisioner::Cookbook->load('sshd')->host_key_ref( $opts{domain} ) );
 
     $opts{users} = Provisioner::Utils::coerce_arrayref( $opts{users} );
     if ( defined $opts{admin_user} ) {
