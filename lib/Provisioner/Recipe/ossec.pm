@@ -147,6 +147,12 @@ owns, and the account files and the files of sudo.  A package that adds an
 account changes the account files, and that is rare enough to mail.  The
 manager turns on C<alert_new_files>, so a new program there mails too.
 
+The first scan of an agent finds every file, and each is new to the manager.
+So F<ossec-agent-key> starts each new agent in the FIM maintenance of the
+package, which takes a change without an alert, and marks it to end when that
+scan completes.  The manager then raises alerts from the second scan on.
+F<ossec-agent-revoke> removes the marker of an agent that never scanned.
+
 =head2 The package comes from Atomicorp
 
 OSSEC is not in the Ubuntu archive.  Atomicorp, who maintain OSSEC, publish

@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use File::Basename ();
+use File::Find     ();
 use File::Temp     ();
 use IPC::Open3     ();
 use List::Util     ();
@@ -34,6 +35,15 @@ sudo or su, when that user is not one of the C<ADMIN>s.  A session that cron
 or atd opens is the job of root, and a session that root opens is not an
 escalation.  The log names the user who escalates by uid, so each C<ADMIN> is
 resolved to a uid.  A name that no account has exempts nobody.
+
+A sudo session that runs a command of the grant of the user is not reported
+either.  L<Provisioner::Recipe::servicesudo> writes that grant for a service
+user, in F</etc/sudoers.d/servicesudo-$user>, and that user runs those commands
+by design.  sudo logs the command on the line before the session, and the
+session is exempt when that command is one that the grant names.  A grant of a
+program alone allows any arguments, as it does in sudo.  Any other grant must
+match the logged command exactly, so a command that sudo logs in another form
+is reported.
 
 =item * An ssh login as root from an address outside the trusted networks.
 
@@ -62,6 +72,7 @@ the log or write its state.
 our $STATE_DIR      = '/root';
 our $AUTHLOG        = -e '/var/log/auth.log' ? '/var/log/auth.log' : '/var/log/secure';
 our $ADMIN_NETWORKS = '/etc/ufw/admin_networks';
+our $SUDOERS_DIR    = '/etc/sudoers.d';
 
 # The start of a syslog line, up to the name of the program: an ISO 8601 or a
 # classic BSD time stamp, then the host.
@@ -73,6 +84,11 @@ my $PAM_SESSION = qr/\S+ \s+ pam_unix\( ([^:]+) :session\): \s+ session \s+ open
 my $FOR_ROOT    = qr/for \s+ user \s+ root (?:\(uid=0\))? \s+/x;
 my $BY_UID      = qr/by \s+ \S*? \(uid=(\d+)\) \s* \z/x;
 
+# What sudo writes when it runs a command as root: the user who asked, then the
+# command, which ends the line.
+my $SUDO_BY      = qr/sudo(?:\[\d+\])?: \s+ (\S+) \s+ :/x;
+my $SUDO_COMMAND = qr/\s+ .*? ; \s+ USER=root \s+ ; \s+ COMMAND=(.+) \z/x;
+
 # What sshd writes when it accepts a login as root, up to the address.
 my $SSHD_ACCEPTED = qr/sshd(?:-session)?\[\d+\]: \s+ Accepted \s+ \S+ \s+ for \s+ root \s+/x;
 
@@ -81,14 +97,21 @@ sub main {
 
     my %admin_uid = map { $_ => 1 } grep { defined } map { scalar getpwnam($_) } @admins;
     my @trusted   = ( qw{127.0.0.0/8 ::1/128}, admin_networks(), key_sources() );
+    my $grants    = service_grants();
 
     open my $log, '<', $AUTHLOG or die "Cannot read $AUTHLOG: $!\n";
-    my %now;
-    while ( my $line = <$log> ) {
-        chomp $line;
-        $now{$line} = 1 if escalation( $line, \%admin_uid ) || untrusted_login( $line, \@trusted );
-    }
+    chomp( my @lines = <$log> );
     close $log or die "Cannot close $AUTHLOG: $!\n";
+
+    my ( %now, %command_of );
+    foreach my $line (@lines) {
+        if ( my ( $user, $command ) = $line =~ m/$PREFIX $SUDO_BY $SUDO_COMMAND/x ) {
+            my $uid = uid_of($user);
+            $command_of{$uid} = $command if defined $uid;
+            next;
+        }
+        $now{$line} = 1 if ( escalation( $line, \%admin_uid ) && !granted( $line, \%command_of, $grants ) ) || untrusted_login( $line, \@trusted );
+    }
 
     my $state = "$STATE_DIR/root_access.log";
     my %seen;
@@ -122,6 +145,89 @@ sub escalation {
     return 0 if $uid == 0 || $admin_uid->{$uid};
     return 0 if List::Util::any { $_ eq $service } qw{cron atd};
     return 1;
+}
+
+=head2 $bool = granted($line, \%command_of, \%grants)
+
+Whether C<$line> is a sudo session as root that runs a command of the grant of
+the user who asked.  C<%command_of> holds, by uid, the last command that sudo
+logged for that user, and this takes it, so that the command exempts one
+session only.  C<%grants> holds the commands of each grant by uid, as
+C<service_grants> returns them.
+
+=cut
+
+sub granted {
+    my ( $line, $command_of, $grants ) = @_;
+
+    my ( $service, $uid ) = $line =~ m/$PREFIX $PAM_SESSION $FOR_ROOT $BY_UID/x
+      or return 0;
+    return 0 if $service ne 'sudo';
+    my $command = delete $command_of->{$uid} // return 0;
+    return ( List::Util::any { allows( $_, $command ) } @{ $grants->{$uid} // [] } ) ? 1 : 0;
+}
+
+=head2 $bool = allows($grant, $command)
+
+Whether the command C<$grant> of a grant allows C<$command>, as sudo logs it.
+A program alone allows it with any arguments, and a program followed by C<"">
+allows it with none.  Any other grant allows only itself.
+
+=cut
+
+sub allows {
+    my ( $grant, $command ) = @_;
+
+    my ( $program, $args ) = split( ' ', $grant, 2 );
+    return ( $command eq $program || index( $command, "$program " ) == 0 ) ? 1 : 0 if !defined $args;
+    return ( $command eq $program )                                        ? 1 : 0 if $args eq q{""};
+    return ( $command eq $grant )                                          ? 1 : 0;
+}
+
+=head2 \%grants = service_grants()
+
+The commands that each service user may run as root, by uid, from the files
+F</etc/sudoers.d/servicesudo-*> that L<Provisioner::Recipe::servicesudo>
+writes, one rule on each line.  A user that no account has gets nothing.
+
+=cut
+
+sub service_grants {
+    my ( %grants, @files );
+    return \%grants unless -d $SUDOERS_DIR;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                $File::Find::prune = 1 if -d && $_ ne $SUDOERS_DIR;
+                push @files, $_ if !-d && File::Basename::basename($_) =~ m/\A servicesudo- /x;
+            },
+        },
+        $SUDOERS_DIR
+    );
+
+    foreach my $file (@files) {
+        open my $in, '<', $file or next;
+        while ( my $line = <$in> ) {
+            chomp $line;
+            my ( $user, $command ) = $line =~ m/\A (\S+) \s+ ALL=\(root\) \s+ NOPASSWD: \s+ (\S.*) \z/x or next;
+            my $uid = uid_of($user) // next;
+            push @{ $grants{$uid} }, $command;
+        }
+        close $in or die "Cannot close $file: $!\n";
+    }
+    return \%grants;
+}
+
+=head2 $uid = uid_of($name)
+
+The uid of the account C<$name>, or undef when no account has that name.
+
+=cut
+
+sub uid_of {
+    my ($name) = @_;
+    return scalar getpwnam($name);
 }
 
 =head2 $bool = untrusted_login($line, \@trusted)

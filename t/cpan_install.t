@@ -51,9 +51,11 @@ my $dist_ini    = Test::MockFile->file( '/bogus/checkout/dist.ini', q{}, { uid =
 my $no_dist_ini = Test::MockFile->file('/bogus/old-checkout/dist.ini');
 my @AS_OWNER    = ( qw{runuser -u root -- env}, 'HOME=' . ( getpwnam 'root' )[7] );
 
-# cpm, run by that perl, resolving from the index of the mirror alone, and
-# without the specs.  --test is added when the suites run.
-my @CPM = ( "$PERL/bin/perl", "$PERL/bin/cpm", qw{install --global --final-install all --no-color --progress plain --show-build-log-on-failure --resolver}, '02packages,https://www.cpan.org', '--no-default-resolvers' );
+# cpm, run by that perl, resolving from the index of the mirror alone, working
+# in the directory of the run, and without the specs.  --test is added when the
+# suites run.
+my $CPM_HOME = '/bogus/cpm-home';
+my @CPM      = ( "$PERL/bin/perl", "$PERL/bin/cpm", qw{install --global --final-install all --no-color --progress plain --show-build-log-on-failure --resolver}, '02packages,https://www.cpan.org', qw{--no-default-resolvers --home}, $CPM_HOME );
 
 # One run of cpan_install, with every command it would have run written down
 # rather than run.  %capture says what a captured command prints and
@@ -68,7 +70,8 @@ sub install {
 
     # no_auto: it was loaded from its path above, so there is no module file to load.
     my $cpan_install = Test::MockModule->new( 'Trog::Script::CpanInstall', no_auto => 1 );
-    $cpan_install->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; push @path, $ENV{PATH}; return $case{fails} && "@cmd" =~ $case{fails} ? 1 : 0 } );
+    $cpan_install->redefine( cpm_home => sub { return $CPM_HOME } );
+    $cpan_install->redefine( run_in   => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; push @path, $ENV{PATH}; return $case{fails} && "@cmd" =~ $case{fails} ? 1 : 0 } );
     $cpan_install->redefine(
         capture_in => sub {
             my ( $dir, @cmd ) = @_;
@@ -305,6 +308,18 @@ subtest 'it has to be told what to do, and have a perl to do it in' => sub {
 
     my $r = install( args => [qw{install Moo}], perl_root => tempdir( CLEANUP => 1 ) );
     like( $r->{err}, qr/nothing[ ]is[ ]built[ ]under/, 'and no built perl is said plainly, naming where it looked' );
+};
+
+subtest 'cpm_home: a directory for the run, gone after it' => sub {
+    my $path;
+    {
+        my $home = Trog::Script::CpanInstall::cpm_home();
+        $path = "$home";
+        ok( -d $path, 'cpm gets a directory to work in' );
+        unlike( $path, qr{/[.]perl-cpm\z}, 'which is not the one in the home of root, where cpm leaves every build' );
+        make_path("$path/work/Bogus-Dist-0.01");
+    }
+    ok( !-e $path, 'and it is removed with everything in it when the run is over' );
 };
 
 done_testing();

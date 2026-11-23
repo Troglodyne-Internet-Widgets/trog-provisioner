@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use Cwd             ();
+use File::Temp      ();
 use Getopt::Long    ();
 use Module::Runtime ();
 
@@ -152,6 +153,7 @@ sub main {
     return usage() if defined $opt{as} && $verb ne 'test';
 
     my $bin = perl_bin();
+    $opt{cpm_home} = cpm_home();
 
     # See "Which perl".
     local $ENV{PATH} = join ':', $bin, $ENV{PATH} // ();
@@ -302,16 +304,32 @@ The cpm command that installs into the perl in C<$bin>, without the specs.
 Tests run unless C<$opt{notest}>, because cpm skips them unless asked.  The log
 of a build that fails goes to the output, where the setup log keeps it.  cpm
 installs every distribution that it built, not only the runtime dependencies of
-what was asked for, so that a fallback to cpanm finds them installed.
+what was asked for, so that a fallback to cpanm finds them installed.  cpm
+works in C<$opt{cpm_home}>, which C<cpm_home> makes.
 
 =cut
 
 sub cpm {
     my ( $bin, $opt ) = @_;
     return (
-        "$bin/perl",          "$bin/cpm", qw{install --global --final-install all --no-color --progress plain --show-build-log-on-failure --resolver},
-        "02packages,$MIRROR", '--no-default-resolvers', ( $opt->{notest} ? () : '--test' ),
+        "$bin/perl", "$bin/cpm", qw{install --global --final-install all --no-color --progress plain --show-build-log-on-failure --resolver},
+        "02packages,$MIRROR", '--no-default-resolvers', '--home', "$opt->{cpm_home}", ( $opt->{notest} ? () : '--test' ),
     );
+}
+
+=head2 $dir = cpm_home()
+
+A new directory for cpm to work in, which is removed when the returned object
+goes away, also when the run dies.  cpm otherwise keeps every source and build
+under F<~/.perl-cpm>.  On a guest that is more than a gigabyte under
+F</root>, and a tarball that unpacks files that anybody can write leaves them
+there for rootcheck to report.  A run gets nothing from the work of an earlier
+one, because cpm skips what is installed already.
+
+=cut
+
+sub cpm_home {
+    return File::Temp->newdir( 'cpan_install-cpm-XXXXXX', TMPDIR => 1 );
 }
 
 =head2 $rc = ensure_cpm($bin)
