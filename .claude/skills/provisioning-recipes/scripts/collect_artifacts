@@ -13,7 +13,6 @@ use re '/aasx';
 use FindBin::libs;
 
 use Cwd();
-use Config::Simple();
 use File::Basename();
 use File::Path qw{make_path};
 use File::Slurper::Temp();
@@ -23,9 +22,7 @@ use Pod::Usage   qw{pod2usage};
 
 use Trog::Config();
 use Trog::Guest();
-use Trog::HV();
 use Trog::Hypervisors();
-use Provisioner::Cookbook();
 
 # For the marker of a scratch configuration and the check of the configuration
 # in play, which teardown owns.  At compile time, so that the name of the
@@ -126,7 +123,10 @@ See L</"$dir = artifacts_dir($domain)">.
 
 Override what would otherwise come from the configuration and the hypervisor.
 The host is the address that the hypervisor reports, which is the guest
-itself, also for a domain behind a relay.
+itself, also for a domain behind a relay.  When no hypervisor can say it, the
+host is the address that the name of the guest resolves to, with a warning
+that says why.  The user is the C<admin_user> of the F<provision.conf> of the
+guest, and C<root> without one.
 Without B<--key> or B<--agent>, the key of the guest comes out of the store,
 so the password of the store goes on standard input.
 
@@ -293,12 +293,11 @@ sub connect_to {
     die "--agent and --key are two ways to log in.  Pass one of them.\n"           if $opts{agent} && defined $opts{key};
     die "--agent logs in through an ssh agent, and SSH_AUTH_SOCK is not set.\n" if $opts{agent} && !$ENV{SSH_AUTH_SOCK};
 
-    # A domain in _shared runs on the guest of its host, and has none of its own.
-    my $machine = Provisioner::Cookbook->host_of($domain) // $domain;
-
-    my $hv         = hypervisor( $machine, $opts{hypervisor}, $opts{hvconf} );
-    my $domain_dir = $hv->domain_dir;
-    my $cfg_dir    = "$domain_dir/$machine";
+    # A domain in _shared runs on the guest of its host, and has none of its
+    # own, so the machine, its directory and its address are of the host.
+    my $where = Trog::Hypervisors->locate_guest( $domain, fall_back_to_name => 1, %opts{qw{host hypervisor hvconf}} )
+      or die "Could not find an address for the guest of $domain, from a hypervisor or from its name, so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n";
+    my ( $machine, $cfg_dir, $host ) = @{$where}{qw{name dir host}};
 
     my $key = $opts{agent} ? undef : $opts{key} // Trog::Guest->key_path( $machine, "$cfg_dir/key.rsa" );
 
@@ -314,10 +313,7 @@ sub connect_to {
       . "    collect_artifacts --agent $domain\n"
       unless $opts{agent} || defined $key;
 
-    my $user = $opts{user} // admin_user("$cfg_dir/provision.conf");
-
-    my $host = $opts{host} // $hv->inspection_address($machine);
-    die "Could not find an address for $machine on " . $hv->describe . ", so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
+    my $user = $opts{user} // $where->{user};
 
     print {*STDERR} "Collecting from $machine at $user\@$host\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT carries the artifact directory alone
 
@@ -333,35 +329,11 @@ sub connect_to {
     die "Could not get a shell on $user\@$host for $machine.\n"
       . '  key:  '
       . ( $opts{agent} ? 'the keys of the ssh agent' : $key ) . "\n"
-      . "  host: $host (from the hypervisor; --host overrides)\n"
+      . "  host: $host (from the hypervisor, or else from its name; --host overrides)\n"
       . "Try it by hand: ssh $identity$user\@$host\n"
       if !defined $whoami || $whoami eq q{};
 
     return $guest;
-}
-
-# Which machine is holding this guest.  The same question bin/destroy asks, and
-# the same answer: whichever one in the fleet actually has it.
-sub hypervisor {
-    my ( $domain, $hv_name, $hvconf ) = @_;
-
-    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
-    return $fleet->hypervisor($hv_name)->activate() if defined $hv_name;
-    return Trog::HV->new() unless $fleet->configured;
-
-    my $hv = $fleet->hosting($domain)
-      or die "No hypervisor in the fleet has $domain.\n" . "Pass --hypervisor if it is somewhere the fleet does not look.\n";
-
-    return $hv;
-}
-
-sub admin_user {
-    my ($path) = @_;
-
-    my $config = eval { Config::Simple->new($path) }
-      or die "No provision.conf at $path to read the admin user out of.\n" . "Pass --user, or point --domaindir somewhere that has one.\n";
-
-    return $config->param('admin_user') // 'root';
 }
 
 # sudo throughout: two of these are root's, and the setup log is written by a

@@ -170,7 +170,7 @@ subtest 'a key the store never gave up is said so, rather than handed to ssh as 
     my $guest = Test::MockModule->new('Trog::Guest');
     $guest->redefine( key_path => sub { return undef } );
 
-    # A uri, so hypervisor() takes its first branch and asks Trog::HV directly.
+    # No fleet, so locate_guest asks Trog::HV directly.
     my $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', uri => 'qemu:///bogus' ) };
 
     # \s+ rather than spaces: this file is under re '/aasx', so a literal space
@@ -249,6 +249,41 @@ subtest 'the guest is reached at its address, whatever its internal name, with t
 
     capture_stderr { Trog::Skill::CollectArtifacts::connect_to( 'other.test.test', uri => 'qemu:///bogus', user => 'someadmin', host => '192.0.2.77' ) };
     is( $made[-1]{host}, '192.0.2.77', 'and --host overrides it' );
+};
+
+# A getaddrinfo that knows the names of %$known.
+sub resolver {
+    my ($known) = @_;
+    return sub {
+        my $ip = $known->{ $_[0] } or return ('Name or service not known');
+        return ( q{}, { family => Socket::AF_INET(), socktype => Socket::SOCK_STREAM(), protocol => 0, addr => Socket::pack_sockaddr_in( 0, Socket::inet_aton($ip) ), canonname => undef } );
+    };
+}
+
+subtest 'a guest that no hypervisor can say the address of is reached at the address of its name, or not at all' => sub {
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( new => sub { return bless {}, 'FakeHV' } );
+    my $unasked = Test::MockModule->new( 'FakeHV', no_auto => 1 );
+    $unasked->redefine( inspection_address => sub { die "Nothing was typed for the store\n" } );
+    my $socket = Test::MockModule->new('Socket');
+    $socket->redefine( getaddrinfo => resolver( { 'vm.test.test' => '192.0.2.12' } ) );
+
+    my @made;
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( new => sub { my ( undef, %args ) = @_; push( @made, \%args ); return bless {}, 'FakeAnswer' } );
+
+    my $said = capture_stderr { Trog::Skill::CollectArtifacts::connect_to( 'vm.test.test', user => 'someadmin', agent => 1 ) };
+    is( $made[-1]{host}, '192.0.2.12', 'the address that its name resolves to' );
+    like( $said, qr/Nothing \s+ was \s+ typed/,                                 'and it says why the hypervisor could not say' );
+    like( $said, qr/vm[.]test[.]test \s+ resolves \s+ to \s+ 192[.]0[.]2[.]12/, 'and where it went instead' );
+
+    my $err;
+    capture_stderr {
+        $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'gone.test.test', user => 'someadmin', agent => 1 ) }
+    };
+    like( $err, qr/nothing \s+ to \s+ connect \s+ to/, 'a name that does not resolve either is nothing to connect to' );
+    like( $err, qr/--host/,                            'and it says how to give the address' );
 };
 
 done_testing();

@@ -569,6 +569,78 @@ subtest 'guest_of reaches the address from the hypervisor, with the key of the s
     ok( !defined $agent->{key_path}, 'the guest has no key, so ssh uses the agent' );
 };
 
+# --- locate_guest with fall_back_to_name --------------------------------------
+# A getaddrinfo that knows the names of %$known, and records each name asked.
+sub resolver {
+    my ( $known, $asked ) = @_;
+    return sub {
+        my ($name) = @_;
+        push( @$asked, $name );
+        my $ip = $known->{$name} or return ('Name or service not known');
+        return ( q{}, { family => Socket::AF_INET(), socktype => Socket::SOCK_STREAM(), protocol => 0, addr => Socket::pack_sockaddr_in( 0, Socket::inet_aton($ip) ), canonname => undef } );
+    };
+}
+
+subtest 'locate_guest falls back to the name in DNS only when asked to, and only when no hypervisor says an address' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my ( @asked, @hosting, $hosting, $address );
+
+    my $fleet    = Test::MockModule->new('Trog::Hypervisors');
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $hv       = Test::MockModule->new('Trog::HV');
+    my $socket   = Test::MockModule->new('Socket');
+    $fleet->redefine( load => sub { return bless {}, 'LocateFleet' } );
+    $cookbook->redefine( machine_of => sub { return $_[1] eq 'tenant.test.test' ? 'host.test.test' : $_[1] } );
+    $hv->redefine( default_domain_dir => sub { return $dir } );
+    $socket->redefine( getaddrinfo => resolver( { 'vm.test.test' => '192.0.2.9', 'host.test.test' => '192.0.2.8' }, \@asked ) );
+    no warnings 'once';
+    local *LocateFleet::configured      = sub { 1 };
+    local *LocateFleet::hosting         = sub { push( @hosting, $_[1] ); return $hosting };
+    local *LocateHV::inspection_address = sub { return $address->() };
+    local *LocateHV::domain_dir         = sub { return "$dir/hv" };
+    local *LocateHV::describe           = sub { return 'a test hypervisor' };
+    use warnings;
+
+    my @warned;
+    local $SIG{__WARN__} = sub { push( @warned, @_ ) };
+
+    ( $hosting, $address ) = ( bless( {}, 'LocateHV' ), sub { '192.0.2.7' } );
+    my $where = Trog::Hypervisors->locate_guest( 'vm.test.test', fall_back_to_name => 1 );
+    is( $where->{host}, '192.0.2.7', 'a hypervisor that says an address is believed' );
+    is_deeply( \@asked, [], 'and DNS is not asked' );
+
+    $hosting = undef;
+    ok( !defined Trog::Hypervisors->locate_guest('vm.test.test'), 'none has it, and without fall_back_to_name there is no guest' );
+    is_deeply( \@asked, [], 'and DNS is not asked, so a guest that is gone stays gone' );
+
+    @warned = ();
+    $where  = Trog::Hypervisors->locate_guest( 'vm.test.test', fall_back_to_name => 1 );
+    is( $where->{host}, '192.0.2.9',         'none has it, and with fall_back_to_name the guest is at the address of its name' );
+    is( $where->{dir},  "$dir/vm.test.test", 'its directory is in the default domain directory, as no hypervisor has one for it' );
+    is( $where->{user}, 'root',              'and the admin is root, as it has no provision.conf' );
+    like( "@warned", qr/vm\.test\.test[ ]resolves/, 'and it says why it went to DNS' );
+
+    ( $hosting, $address ) = ( bless( {}, 'LocateHV' ), sub { die "Nothing was typed for the store\n" } );
+    @warned = ();
+    $where  = Trog::Hypervisors->locate_guest( 'vm.test.test', fall_back_to_name => 1 );
+    is( $where->{host}, '192.0.2.9',            'a hypervisor that throws when asked the address falls back to the name' );
+    is( $where->{dir},  "$dir/hv/vm.test.test", 'in the directory of that hypervisor' );
+    like( "@warned",                                                     qr/Nothing[ ]was[ ]typed/, 'and says what the hypervisor said' );
+    like( exception { Trog::Hypervisors->locate_guest('vm.test.test') }, qr/Nothing[ ]was[ ]typed/, 'without fall_back_to_name, that still dies' );
+
+    $hosting = undef;
+    @asked   = ();
+    $where   = Trog::Hypervisors->locate_guest( 'tenant.test.test', fall_back_to_name => 1 );
+    is_deeply( \@asked, ['host.test.test'], 'a domain in _shared resolves the name of its host' );
+    is( $where->{host}, '192.0.2.8',      'and is at the address of the host' );
+    is( $where->{name}, 'host.test.test', 'as the host' );
+
+    ok( !defined Trog::Hypervisors->locate_guest( 'gone.test.test', fall_back_to_name => 1 ), 'no hypervisor and no name in DNS is no guest' );
+
+    $where = Trog::Hypervisors->locate_guest( 'gone.test.test', host => '192.0.2.77' );
+    is( $where->{host}, '192.0.2.77', 'an address given is used, and nobody is asked for one' );
+};
+
 # --- choose -------------------------------------------------------------------
 subtest 'choose' => sub {
     my $path = fleet_file();

@@ -85,11 +85,41 @@ subtest '--agent logs in through the ssh agent, and never asks the store for the
     like( exception { Trog::Skill::AskGuest::main(qw{--agent vm.test true}) }, qr/SSH_AUTH_SOCK \s+ is \s+ not \s+ set/, 'with no agent, --agent is refused' );
 };
 
-subtest 'a guest that nothing runs at an address is said so' => sub {
+# A getaddrinfo that knows the names of %$known.
+sub resolver {
+    my ($known) = @_;
+    return sub {
+        my $ip = $known->{ $_[0] } or return ('Name or service not known');
+        return ( q{}, { family => Socket::AF_INET(), socktype => Socket::SOCK_STREAM(), protocol => 0, addr => Socket::pack_sockaddr_in( 0, Socket::inet_aton($ip) ), canonname => undef } );
+    };
+}
+
+subtest 'a guest that nothing runs at an address, and whose name does not resolve, is said so' => sub {
     my $nowhere = Test::MockModule->new( 'FakeHV', no_auto => 1 );
     $nowhere->redefine( inspection_address => sub { return } );
+    my $socket = Test::MockModule->new('Socket');
+    $socket->redefine( getaddrinfo => resolver( {} ) );
 
     like( exception { Trog::Skill::AskGuest::main( 'vm.test', 'true' ) }, qr/nothing[ ]to[ ]ask/, 'rather than ssh being handed no host' );
+};
+
+subtest 'a guest that no hypervisor can say the address of is asked at the address of its name' => sub {
+    local $ENV{SSH_AUTH_SOCK} = '/bogus/agent.sock';
+    my $unasked = Test::MockModule->new( 'FakeHV', no_auto => 1 );
+    $unasked->redefine( inspection_address => sub { die "Nothing was typed for the store\n" } );
+    my $socket = Test::MockModule->new('Socket');
+    $socket->redefine( getaddrinfo => resolver( { 'vm.test' => '192.0.2.11' } ) );
+    my ( $sent, %built ) = ( bless {}, 'FakeGuest' );
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( new => sub { ( undef, %built ) = @_; return $sent } );
+
+    my $warned = q{};
+    local $SIG{__WARN__} = sub { $warned .= $_[0] };
+    capture_stdout { Trog::Skill::AskGuest::main(qw{--agent vm.test true}) };
+    is( $built{host}, '192.0.2.11', 'the address that its name resolves to' );
+    is_deeply( $sent->{sent}, [qw{sh -c true}], 'and the command reaches it' );
+    like( $warned, qr/Nothing \s+ was \s+ typed/,                          'and it says why the hypervisor could not say' );
+    like( $warned, qr/vm[.]test \s+ resolves \s+ to \s+ 192[.]0[.]2[.]11/, 'and where it went instead' );
 };
 
 subtest 'the command reaches the guest whole, quotes and all' => sub {
