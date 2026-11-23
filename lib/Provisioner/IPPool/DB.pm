@@ -271,55 +271,13 @@ sub release ( $db, $args ) {
     return \%held;
 }
 
-# Makes the reservations of the clients that $via, the server of the bin $bin,
-# lists match %$clients, in the transaction of the caller.  %$in_bin holds the
-# addresses of the bin.  $for is a domain that is about to get its address,
-# which the server may already list.
-my sub note_clients ( $db, $bin, $via, $in_bin, $clients, $for = undef ) {
-    $db->do( "DELETE FROM ips WHERE kind = 'reserved' AND bin = ? AND domain LIKE 'vpnclient:%'", undef, $bin );
-    my %holder = map { $_->[0] => $_->[1] } @{ $db->selectall_arrayref( 'SELECT ip, domain FROM ips WHERE bin = ?', undef, $bin ) };
-    my %has    = reverse %holder;
-
-    foreach my $name ( sort keys %$clients ) {
-        my $address = $clients->{$name};
-        next unless $in_bin->{$address};
-
-        my $holder = $holder{$address};
-        next if defined $holder && $holder eq $name;
-        die "$via gives $address to its VPN client $name, but ips.db gives $address to $holder.  Revoke one of them on $via, or release it.\n"
-          if defined $holder;
-        die "$via gives $address to its VPN client $name, but ips.db gives $name the address $has{$name}.  Revoke $name on $via, and build it again.\n"
-          if defined $has{$name};
-        next if defined $for && $name eq $for;
-
-        $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'reserved', ?)", undef, $address, "vpnclient:$name", $bin );
-    }
-    return;
-}
-
-=head2 refresh_clients
-
-Makes the C<vpnclient:> reservations of C<bin> match C<clients>, each name of a
-client to its address, as C<via>, the server of the bin, listed them.
-C<candidates> are the addresses of the bin.  Returns the number of clients.
-
-=cut
-
-sub refresh_clients ( $db, $args ) {
-    my %in_bin = map { $_ => 1 } @{ $args->{candidates} // [] };
-    Trog::SQLite::transaction( $db, sub { note_clients( $db, $args->{bin}, $args->{via}, \%in_bin, $args->{clients} // {} ) } );
-    return scalar keys %{ $args->{clients} // {} };
-}
-
 =head2 assign
 
 The address of C<domain> in C<bin>, on the bridge C<nic>, out of C<candidates>,
 the addresses of that bin in order.  C<guest> is true for the C<guests> bin,
 and C<main> says whether C<nic> gives the address of the guest.  A domain that
 has an address keeps it.  Otherwise it gets the first candidate that nothing
-holds, and with C<ask>, it first makes the reservations of the clients of
-C<via> match C<clients>, and gets the address that C<clients> gives it, if
-there is one.  See L<Provisioner::IPPool/assign($domain, $pool, $bin, $nic)>.
+holds.  See L<Provisioner::IPPool/assign($domain, $pool, $bin, $nic)>.
 
 All of it is one transaction, which takes the write lock before it reads: see
 L<Trog::SQLite/transaction>, and C<sqlite_use_immediate_transaction> of
@@ -331,7 +289,6 @@ address twice.
 sub assign ( $db, $args ) {
     my ( $domain, $bin, $nic, $main, $guest ) = @{$args}{qw{domain bin nic main guest}};
     my @candidates = @{ $args->{candidates} // [] };
-    my %clients    = %{ $args->{clients}    // {} };
     my %in_bin     = map { $_ => 1 } @candidates;
     $nic //= q{};
 
@@ -358,11 +315,8 @@ sub assign ( $db, $args ) {
                 return;
             }
 
-            note_clients( $db, $bin, $args->{via}, \%in_bin, \%clients, $domain ) if $args->{ask};
-
             my $taken = taken( $db, {} );
-            my $own   = $clients{$domain};
-            my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @candidates;
+            my $free  = first { !$taken->{$_} } @candidates;
             die "IP pool exhausted: no IPs available for $domain" . ( $nic ne q{} ? " on $nic" : q{} ) . "\n" unless $free;
 
             $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin ) if $guest && $main;
@@ -541,7 +495,6 @@ my %OPS = (
     reserve            => \&reserve,
     record             => \&record,
     release            => \&release,
-    refresh_clients    => \&refresh_clients,
     assign             => \&assign,
     forget_seeding     => \&forget_seeding,
     clear_reservations => \&clear_reservations,

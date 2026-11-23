@@ -58,7 +58,7 @@ that guests already use.
 
 C<check>, C<init>, C<assignments>, C<taken>, C<bridges>, C<held_by>,
 C<main_addresses>, C<nic_addresses>, C<reserve>, C<record>, C<release>,
-C<refresh_clients>, C<assign>, C<forget_seeding>, C<clear_reservations>,
+C<assign>, C<forget_seeding>, C<clear_reservations>,
 C<seeded>, C<seed>, C<reseed> and C<migrate>.  L<Provisioner::IPPool::DB>
 describes each one and its arguments.
 

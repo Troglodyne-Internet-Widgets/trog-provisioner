@@ -18,7 +18,7 @@ use Pod::Usage   qw{pod2usage};
 use Trog::Config();
 use Trog::Hypervisors();
 use Cpanel::JSON::XS;
-use List::Util qw{any};
+use List::Util qw{any uniq};
 
 use Provisioner::IPPool;
 
@@ -36,10 +36,11 @@ the blocks of the hypervisors in F<hypervisors.conf> on that network name.  It
 shows as C<guests:>, the bridge, and the names of those blocks, for example
 C<guests:br0:hv1,hv2>.
 
-For a bin with C<via>, it first asks that server which addresses it gave to its
-clients, because a client can get one by hand.  That needs the key of the
-server, so it can ask for the password of the store.  If the server cannot be
-asked, it warns and shows that bin as the database has it.
+For a bin with C<via>, it asks that server which addresses it gave to its
+clients, because the server is the only record of them: see
+L<Provisioner::IPPool/BINS>.  That needs the key of the server, so it can ask
+for the password of the store.  It dies when the server cannot be asked,
+because then nothing can say which addresses of that bin are free.
 
 =head2 Where the pool is written
 
@@ -68,8 +69,8 @@ with the same two keys:
             vpnclients:
               cidr: 10.8.0.128/25
 
-The assigned IPs come from the address database of L<Provisioner::IPPool>.  An
-IP in the pool that is not in the database is available for a new guest.
+The assigned IPs come from the address databases of L<Provisioner::IPPool>, and for a bin with C<via> from its server.  An
+IP in the pool that neither holds is available.
 
 =cut
 
@@ -133,11 +134,13 @@ GUIDANCE
     # call fills it from the hypervisors, so an empty database does not show
     # every IP as available.
     Provisioner::IPPool::ensure_seeded();
-    foreach my $bin ( grep { defined $bins{$_}{via} } sort keys %bins ) {
-        eval { Provisioner::IPPool::refresh_via( $pool, $bin ); 1 }
-          or warn "The bin $bin shows only what ips.db knows, which misses any address that its server gave out by hand: $@";
-    }
     my %taken = %{ Provisioner::IPPool::taken() };
+
+    # The server of a bin with via is the record of its addresses.
+    foreach my $via ( uniq map { $bins{$_}{via} } grep { defined $bins{$_}{via} } sort keys %bins ) {
+        my %clients = Provisioner::IPPool::via_clients($via);
+        $taken{ $clients{$_} } = $_ foreach keys %clients;
+    }
 
     my %out;
     foreach my $bin ( sort keys %ips ) {

@@ -57,7 +57,8 @@ L<DBD::SQLite>, L<File::Slurper> and L<JSON::PP>.  On Debian and Ubuntu:
     sudo apt install libdbd-sqlite3-perl libfile-slurper-perl
 
 L<Trog::SQLite> and L<Sub::Retry> come in the kit.  The C<ip_perl> of the block
-of the hypervisor names another perl.  The C<check> operation of F<bin/ippool>
+of the hypervisor names another perl, such as one that
+F<scripts/build_latest_perl.sh> built there, with DBD::SQLite.  The C<check> operation of F<bin/ippool>
 says what runs there.
 
 =head2 The operation

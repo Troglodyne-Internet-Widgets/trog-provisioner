@@ -32,7 +32,9 @@ C<--bin> names the bin of the pool, which is C<guests> unless you say
 otherwise.  L<Provisioner::IPPool/BINS> says what a bin is.  The C<guests> bin
 is on the network of a hypervisor, so C<--hypervisor> names the block of
 F<hypervisors.conf> whose pool the address comes from.  It is required for
-that bin, and refused for the others, which belong to no hypervisor.
+that bin, and refused for the others, which belong to no hypervisor.  A bin
+with C<via> is refused, because its server gives out its addresses: see
+L<Provisioner::IPPool/BINS>.
 
 C<--nic> names the bridge of the static adapter, one of the C<static_nics> of
 that block, and each has a pool of its own.  It defaults to the first, whose

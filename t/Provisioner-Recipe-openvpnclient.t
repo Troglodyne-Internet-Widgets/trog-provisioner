@@ -171,33 +171,24 @@ subtest 'the fragment splits the issued configuration into the four files' => su
     is( sprintf( '%04o', Fcntl::S_IMODE( ( stat "$dir/client.key" )[2] ) ), '0600',                 'which nobody else can read from the start' );
 };
 
-subtest 'granted_secrets asks the server for the configuration, with an address from the bin' => sub {
+subtest 'granted_secrets asks the server for the configuration, and the server chooses the address' => sub {
     my $pool = Test::MockModule->new('Provisioner::IPPool');
-    my $cook = Test::MockModule->new('Provisioner::Cookbook');
-    my @asked;
-    $pool->redefine( assign        => sub { push @asked, [@_]; return '10.8.0.129' } );
-    $cook->redefine( global_config => sub { return {%POOL} } );
+    $pool->redefine( assign => sub { die "assign was asked for the address of a client of the VPN\n" } );
 
     my %secrets = fresh()->granted_secrets( 'first.test', %ISSUED );
-    is_deeply( \@asked, [ [ 'first.test', $POOL{ip_pool}, 'vpnclients' ] ], 'the address comes from the bin that names the server' );
     is_deeply(
         \%secrets,
         {
             '/etc/openvpn/client/first.test/issued.ovpn.b64' => {
-                issue => { guest => 'vpn.test.test', command => '/usr/local/sbin/openvpn-client-config --address 10.8.0.129 first.test vpn.test.test | base64 -w0' },
+                issue => { guest => 'vpn.test.test', command => '/usr/local/sbin/openvpn-client-config --address auto first.test vpn.test.test | base64 -w0' },
                 owner => 'root:root',
                 mode  => '0600',
             }
         },
-        'and the server issues the configuration with that address, on one line'
+        'the server issues the configuration with the address that it chooses, on one line, and no address database is asked'
     );
 
     is_deeply( { fresh()->granted_secrets( 'first.test', %BASE ) }, {}, 'a domain with a cert_dir asks for nothing' );
-
-    # Config::Simple, under the assign of a real pool, reads a file into $_.
-    $pool->redefine( assign => sub { $_ = '        distro=ubuntu'; return '10.8.0.129' } );
-    %secrets = fresh()->granted_secrets( 'first.test', %ISSUED );
-    is( $secrets{'/etc/openvpn/client/first.test/issued.ovpn.b64'}{issue}{guest}, 'vpn.test.test', 'and the grant survives an address that is found by code that writes $_' );
 };
 
 subtest 'bin/destroy knows where to revoke' => sub {
