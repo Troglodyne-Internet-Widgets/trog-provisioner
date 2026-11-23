@@ -37,6 +37,13 @@ it fetches its files from this machine.  The default denies outgoing traffic,
 and the OpenSSH profile allows only port 22, so a hypervisor that names another
 port, such as one forwarded to this machine, needs the rule.
 
+Refuses a connection to each address in C<metadata_addresses> from every
+account but root.  The metadata service of a cloud serves the user-data of the
+guest, which holds its private host keys, to any process that asks.  cloud-init
+runs as root, so it still reads the service.  A guest on libvirt has no
+metadata service, and the rule costs it nothing.  See
+F<scripts/setup-ufw-metadata>.
+
 Forwards the ports in C<port_forwards>, if you give any.
 
 Refuses a configuration in which two recipes bind one address on one port,
@@ -163,6 +170,17 @@ sub args {
                     anyOf                => [ { maxProperties => 1 }, { not => { anyOf => [ { required => [q{::}] }, { required => ['0.0.0.0'] } ] } } ],
                     additionalProperties => { type => 'object', maxProperties => 1 },
                 },
+            },
+
+            # setup-ufw-metadata refuses each of these to every account but
+            # root, and says why.  The default is on the list, because only an
+            # operator supplies it, and an operator who names a list means the
+            # whole list.
+            metadata_addresses => {
+                type        => 'array',
+                description => 'The addresses of the metadata service of a cloud.  Only root may connect to them.',
+                items       => { anyOf => [ { type => 'string', format => 'ipv4' }, { type => 'string', format => 'ipv6' } ] },
+                default     => [ '169.254.169.254', 'fd00:a9fe:a9fe::1' ],
             },
 
             # Networks that are exempt from rate_limits.  enrich adds every

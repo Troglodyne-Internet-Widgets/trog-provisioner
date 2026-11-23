@@ -8,6 +8,7 @@ chown root:root /etc/ufw/applications.d/*
 [%# No admin_networks here, because setup-ufw-rules limits nothing.  They go
     to setup-ufw-ratelimits below, which writes the limits. -%]
 [% script_dir %]/setup-ufw-rules
+[% script_dir %]/setup-ufw-metadata[% FOR address IN metadata_addresses %] '[% address %]'[% END %]
 [%# The guest fetches from this machine on transfer_port after ufw is up,
     and only the OpenSSH profile allows 22.  See Provisioner::Recipe::ufw. -%]
 ufw allow out proto tcp to [% transfer_ip %] port [% transfer_port %]

@@ -1,0 +1,70 @@
+#!/bin/bash
+# Refuse a connection to the metadata service of a cloud from every account but
+# root.
+#
+# Each argument is an address of the service.  An address with a colon is IPv6
+# and goes in before6.rules.  Any other address goes in before.rules.
+#
+# The service answers every process on the guest, and its user-data holds the
+# private host keys of the guest.  The HTTP profile allows tcp/80 out to every
+# address, so the default deny of outgoing traffic does not stop a request.
+# cloud-init runs as root and reads the service at boot, so root keeps it.
+#
+# REJECT, not DROP.  The sender is a process on this guest, so there is nobody
+# to hide the rule from.  A refused connect fails at once, and a dropped one
+# waits for its timeout.
+#
+# The rules go in ufw-before-output, after the accepts of loopback and
+# established traffic.  That chain jumps to the allow rules of ufw-user-output
+# after its last rule, so the refusal comes before them.  The owner match works
+# only in OUTPUT, which calls ufw-before-output.
+#
+# UFW_RULES_DIR names another directory than /etc/ufw, for a test.
+set -eu
+
+DIR=${UFW_RULES_DIR:-/etc/ufw}
+BEGIN='# BEGIN trog-provisioner metadata service'
+END='# END trog-provisioner metadata service'
+
+# write_block FILE CHAIN ADDRESS...
+write_block() {
+    local rules=$1 chain=$2 addr block
+    shift 2
+
+    [ -f "$rules" ] || { echo "setup-ufw-metadata: no $rules" >&2; exit 1; }
+
+    # Remove every block that an earlier run wrote.
+    sed -i "\|^$BEGIN\$|,\|^$END\$|d" "$rules"
+
+    if [ "$#" -eq 0 ]; then
+        return 0
+    fi
+
+    block="$BEGIN\n"
+    for addr in "$@"; do
+        echo "Refusing every account but root a connection to $addr"
+        block="$block-A $chain -d $addr -m owner ! --uid-owner 0 -j REJECT\n"
+    done
+    block="$block$END"
+
+    # At the end of the filter table, after the accepts of loopback and
+    # established traffic.  A nat table before it has a COMMIT of its own.
+    awk -v b="$block" '
+        /^\*filter/                  { infilter = 1 }
+        infilter && /^COMMIT/        { print b; infilter = 0 }
+                                     { print }
+    ' "$rules" > "$rules.new"
+    mv "$rules.new" "$rules"
+}
+
+v4=()
+v6=()
+for addr in "$@"; do
+    case "$addr" in
+        *:*) v6+=("$addr") ;;
+        *) v4+=("$addr") ;;
+    esac
+done
+
+write_block "$DIR/before.rules" ufw-before-output "${v4[@]}"
+write_block "$DIR/before6.rules" ufw6-before-output "${v6[@]}"
