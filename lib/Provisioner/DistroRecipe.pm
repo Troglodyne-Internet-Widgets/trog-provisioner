@@ -440,8 +440,8 @@ sub template_files {
 
 =head2 %required = $distro->required_recipes(%opts)
 
-Returns C<vm>, which gets the same C<%opts>, and L<Provisioner::Recipe::sshd>,
-which gets nothing.
+Returns C<vm>, which gets the same C<%opts>, and L<Provisioner::Recipe::sshd>
+and L<Provisioner::Recipe::hardening>, which get nothing.
 
 A guest is a distribution that runs on a machine.  Those are two questions with
 different answers, so they are two recipes.  This method makes the second
@@ -449,15 +449,17 @@ follow from the first.
 
 Every guest runs sshd, and every guest is built from a distribution.  So the
 distribution requires C<sshd>, and every guest keeps its host key across a
-rebuild.
+rebuild.  For the same reason it requires C<hardening>, so every guest gets
+the same kernel settings.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
     return (
-        vm   => sub { return %opts },
-        sshd => sub { return () },
+        vm        => sub { return %opts },
+        sshd      => sub { return () },
+        hardening => sub { return () },
     );
 }
 

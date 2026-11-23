@@ -1,0 +1,4 @@
+[%# Provisioner::Recipe::hardening has the whole account. -%]
+install -o root -g root -m 0644 hardening_sysctl.conf /etc/sysctl.d/60-hardening.conf
+sysctl -p /etc/sysctl.d/60-hardening.conf
+install -o root -g root -m 0644 hardening_modprobe.conf /etc/modprobe.d/hardening.conf

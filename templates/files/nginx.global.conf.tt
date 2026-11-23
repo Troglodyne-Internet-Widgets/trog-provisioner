@@ -5,6 +5,9 @@
 #   could not build server_names_hash, you should increase
 #   server_names_hash_bucket_size: 64
 server_names_hash_bucket_size [% server_names_hash_bucket_size %];
+# TLS 1.2 and 1.3 only.  The nginx.conf of the package also names TLS 1.0 and
+# 1.1, which OpenSSL refuses anyway, and the fragment comments that line out.
+ssl_protocols TLSv1.2 TLSv1.3;
 
 # WebSocket upgrades.  Every proxy vhost uses $connection_upgrade.
 map $http_upgrade $connection_upgrade {
