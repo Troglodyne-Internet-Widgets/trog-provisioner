@@ -44,7 +44,9 @@ The summary has the priority C<user.notice>, each warning C<user.warning>, and
 each suggestion C<user.info>.  On a guest with
 L<Provisioner::Recipe::logshipper>, the lines go to the collector, and the
 syslog dashboard of L<Provisioner::Recipe::grafanasyslog> shows them under the
-appname C<lynis>.
+appname C<lynis>.  L<Provisioner::Recipe::grafanalynis> reads the numbers and
+the tests out of these lines, and draws the audits of the fleet on a dashboard
+of their own.  So a change to the form of a line is a change to that recipe.
 
 The audit is of the machine, not of a domain, so all of the work is in the
 global half.
