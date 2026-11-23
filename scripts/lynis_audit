@@ -2,6 +2,9 @@
 # Run a Lynis audit, and send the hardening index, the warnings and the
 # suggestions to syslog with the tag lynis.  The full report stays in
 # /var/log/lynis-report.dat.
+#
+# The processor of Provisioner::Recipe::grafanalynis parses these lines on the
+# collector, so a change to their form needs a change there.
 set -eu
 
 report=/var/log/lynis-report.dat

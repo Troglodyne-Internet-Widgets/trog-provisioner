@@ -1,0 +1,10 @@
+[%# The points come from the syslog input of grafanasyslog.  This adds no input.
+    InfluxQL cannot take the numbers out of a message, so this processor does,
+    for the points with the appname lynis.  Provisioner::Recipe::grafanalynis
+    has the fields and tags that it adds. -%]
+[[processors.starlark]]
+  namepass = ["syslog"]
+  script = "/etc/telegraf/lynis_findings.star"
+[%# Last, because every key below a table header belongs to that table. -%]
+  [processors.starlark.tagpass]
+    appname = ["lynis"]

@@ -1,0 +1,121 @@
+[%# The Lynis audits of the fleet.  They are points of the syslog measurement
+    with the appname lynis, and the Starlark processor of this recipe gives
+    them the lynis_* fields and tags that the panels read.
+    Provisioner::Recipe::grafanalynis has the full account.
+
+    The table of guests reads the last 30 days and not the time picker, so that
+    a guest whose audit stopped stays in it, in red.  It has several selectors,
+    so InfluxQL gives its rows the time 0, which the table hides.  The time of
+    the report is lynis_reported, and the age is that subtracted from the end
+    of the time range, which is the present time unless somebody moves it.
+
+    The tables of findings read the last stale_after_hours, one row for each
+    guest and test, because InfluxQL cannot select the newest run of each
+    guest. -%]
+{
+  "uid": "lynis-audits",
+  "title": "Lynis audits",
+  "description": "The newest Lynis audit of each guest that ships its logs to this collector, and its findings.",
+  "editable": false,
+  "schemaVersion": 39,
+  "time": { "from": "now-30d", "to": "now" },
+  "refresh": "5m",
+  "tags": ["lynis", "security"],
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "label": "Guest",
+        "type": "query",
+        "datasource": "[% datasource %]",
+        "query": "SHOW TAG VALUES FROM \"syslog\" WITH KEY = \"hostname\" WHERE \"appname\" = 'lynis'",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Newest audit of each guest",
+      "description": "A red age means that the guest sent no Lynis report for [% stale_after_hours %] hours, so its audit has stopped or fails.",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "Hours since report", "desc": true } ] },
+      "fieldConfig": {
+        "defaults": { "decimals": 0 },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Reported" },
+            "properties": [ { "id": "unit", "value": "dateTimeAsIso" } ] },
+          { "matcher": { "id": "byName", "options": "Hours since report" },
+            "properties": [
+              { "id": "decimals", "value": 1 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": [% stale_after_hours %] }
+              ] } }
+            ] }
+        ]
+      },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "table",
+          "query": "SELECT last(\"lynis_hardening_index\") AS \"Hardening index\", last(\"lynis_warnings\") AS \"Warnings\", last(\"lynis_suggestions\") AS \"Suggestions\", last(\"lynis_reported\") * 1000 AS \"Reported\", (${__to:date:seconds} - last(\"lynis_reported\")) / 3600 AS \"Hours since report\" FROM \"syslog\" WHERE \"appname\" = 'lynis' AND \"hostname\" =~ /^$host$/ AND time > now() - 30d GROUP BY \"hostname\"" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "hostname": "Guest" } } }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Current warnings",
+      "description": "The warnings of the last [% stale_after_hours %] hours, one row for each guest and test.",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 10 },
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "Guest", "desc": false } ] },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "table",
+          "query": "SELECT last(\"lynis_text\") AS \"Warning\" FROM \"syslog\" WHERE \"appname\" = 'lynis' AND \"lynis_finding\" = 'warning' AND \"hostname\" =~ /^$host$/ AND time > now() - [% stale_after_hours %]h GROUP BY \"hostname\", \"lynis_test\"" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "Time": "Seen", "hostname": "Guest", "lynis_test": "Test" } } }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Hardening index",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
+      "interval": "1h",
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 100, "custom": { "spanNulls": true, "showPoints": "always" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "time_series", "alias": "[[tag_hostname]]",
+          "query": "SELECT last(\"lynis_hardening_index\") FROM \"syslog\" WHERE $timeFilter AND \"appname\" = 'lynis' AND \"hostname\" =~ /^$host$/ GROUP BY time($__interval), \"hostname\" fill(none)" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Current suggestions",
+      "description": "The suggestions of the last [% stale_after_hours %] hours, one row for each guest and test.",
+      "datasource": "[% datasource %]",
+      "gridPos": { "x": 0, "y": 29, "w": 24, "h": 12 },
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "Guest", "desc": false } ] },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "rawQuery": true, "resultFormat": "table",
+          "query": "SELECT last(\"lynis_text\") AS \"Suggestion\" FROM \"syslog\" WHERE \"appname\" = 'lynis' AND \"lynis_finding\" = 'suggestion' AND \"hostname\" =~ /^$host$/ AND time > now() - [% stale_after_hours %]h GROUP BY \"hostname\", \"lynis_test\"" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "Time": "Seen", "hostname": "Guest", "lynis_test": "Test" } } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+use strict;
+use warnings;
+
+use Test::More;
+use JSON::PP;
+use POSIX qw{strftime};
+
+my $datasource = '[% datasource %]';
+my $stale      = '[% stale_after_hours %]';
+my $influx     = 'http://127.0.0.1:8086';
+my $file       = '/var/lib/grafana/dashboards/lynis.json';
+
+subtest 'the dashboard is in place, and names the datasource that exists' => sub {
+    my $body = slurp($file);
+    my $json = eval { JSON::PP->new->decode($body) };
+    ok( $json, "$file is JSON that grafana can read" ) or return diag $@;
+    is( $json->{uid}, 'lynis-audits', 'it is the Lynis dashboard' );
+    like( $body, qr/\Q"$datasource"\E/, "and it names the $datasource datasource" );
+};
+
+# The full path: lines like the ones lynis_audit logs go to the port of the
+# collector, are forwarded to telegraf, get their fields from the Starlark
+# processor, and land in influxdb.  Then the queries of the dashboard itself
+# run against them.
+subtest 'an audit that a guest reports reaches the panels of the dashboard' => sub {
+    my $conf = slurp( glob('/etc/rsyslog.d/*logcollector.conf') );
+    my ($cport) = $conf =~ m/input\(type="imtcp"\s+port="(\d+)"/;
+    ok( $cport, 'the collector says which TCP port it listens on' ) or return;
+
+    my $dbs = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
+    my @dbs = grep { $_ ne '_internal' } $dbs =~ m/\["([^"]+)"\]/g;
+    ok( scalar @dbs, 'influxdb has a database to look in' ) or return diag $dbs;
+
+    # Names that no real guest has, so the rows can only be these.  The second
+    # guest reported two days ago, so the table must show it as stale.
+    my $fresh = "lynis-selftest-$$-" . time() . '.test.test';
+    my $old   = "lynis-stale-$$-" . time() . '.test.test';
+    my $now   = strftime( '%b %e %H:%M:%S', localtime );
+    my $then  = strftime( '%b %e %H:%M:%S', localtime( time() - 2 * 86400 ) );
+    send_lines(
+        $cport,
+        "<13>$now $fresh lynis: hardening_index=71 warnings=1 suggestions=2",
+        "<12>$now $fresh lynis: warning SELF-0001: The test of the Lynis dashboard",
+        "<14>$now $fresh lynis: suggestion SELF-0002: Another line: with a colon",
+        "<13>$then $old lynis: hardening_index=50 warnings=0 suggestions=0",
+    );
+
+    my ( $db, $out ) = ( q{}, q{} );
+    foreach ( 1 .. 24 ) {
+        foreach my $candidate (@dbs) {
+            # InfluxQL returns a tag only when the query selects it, so hostname
+            # is selected for the check below to find.
+            $out = query( $candidate, qq{SELECT "lynis_hardening_index", "hostname" FROM "syslog" WHERE "appname" = 'lynis' AND "hostname" = '$fresh' AND time > now() - 10m} );
+            next unless index( $out, $fresh ) >= 0;
+            $db = $candidate;
+            last;
+        }
+        last if $db;
+        sleep 5;
+    }
+    ok( $db, 'the summary arrived in influxdb with its hardening index as a field' )
+      or return diag "Nothing for $fresh after two minutes.\n" . `journalctl -u telegraf --no-pager -n 20 2>&1`;
+
+    my %panel = map { $_->{title} => $_->{targets}[0]{query} } @{ JSON::PP->new->decode( slurp($file) )->{panels} };
+
+    my %guests = rows( $db, $panel{'Newest audit of each guest'}, 'hostname' );
+    my $row    = $guests{$fresh} // {};
+    is( $row->{'Hardening index'}, 71, 'the table of guests shows the hardening index of the guest' ) or diag explain \%guests;
+    is( $row->{Warnings},          1,  'and its warnings' );
+    is( $row->{Suggestions},       2,  'and its suggestions' );
+    cmp_ok( $row->{'Hours since report'} // 99, '<', 1, 'and that it reported just now' );
+    cmp_ok( abs( ( $row->{Reported} // 0 ) / 1000 - time() ), '<', 600, 'at a time that the table can show as a date' );
+
+    my $old_row = $guests{$old} // {};
+    cmp_ok( $old_row->{'Hours since report'} // 0, '>', $stale, "and a guest that reported two days ago is older than $stale hours, so its cell is red" )
+      or diag explain \%guests;
+
+    my %warnings = rows( $db, $panel{'Current warnings'}, 'hostname', 'lynis_test' );
+    is( $warnings{"$fresh SELF-0001"}{Warning}, 'The test of the Lynis dashboard', 'the table of warnings shows the warning, by guest and test' )
+      or diag explain \%warnings;
+    ok( !exists $warnings{"$fresh SELF-0002"}, 'and not the suggestion' );
+
+    my %suggestions = rows( $db, $panel{'Current suggestions'}, 'hostname', 'lynis_test' );
+    is( $suggestions{"$fresh SELF-0002"}{Suggestion}, 'Another line: with a colon', 'the table of suggestions keeps the text after the first colon whole' )
+      or diag explain \%suggestions;
+
+    my %series = rows( $db, $panel{'Hardening index'}, 'hostname' );
+    ok( exists $series{$fresh}, 'and the graph has a line for the guest' ) or diag explain \%series;
+};
+
+# Each message as the collector receives it from a shipper, one per line.
+sub send_lines {
+    my ( $port, @lines ) = @_;
+    open( my $nc, '|-', 'nc', '-q1', '127.0.0.1', $port ) or return fail("nc: $!");
+    print {$nc} map { "$_\n" } @lines;
+    close($nc);
+    return;
+}
+
+sub query {
+    my ( $db, $q ) = @_;
+    open( my $curl, '-|', 'curl', '-fsS', '-G', "$influx/query", '--data-urlencode', "db=$db", '--data-urlencode', "q=$q" ) or die "curl: $!";
+    local $/;
+    return <$curl> // q{};
+}
+
+# Runs a query of the dashboard with the variables that grafana would put in
+# it, and returns its rows keyed by the tags named, each row a hash keyed by
+# column.
+sub rows {
+    my ( $db, $q, @keys ) = @_;
+    my $to = time();
+    $q =~ s/\$\{__to:date:seconds\}/$to/g;
+    $q =~ s/\$timeFilter/time > now() - 30d/g;
+    $q =~ s/\$__interval/1h/g;
+    $q =~ s/\$host/.*/g;
+    my $res = eval { JSON::PP->new->decode( query( $db, $q ) ) } // {};
+    diag "$q: $res->{results}[0]{error}" if $res->{results}[0]{error};
+
+    my %rows;
+    foreach my $series ( @{ $res->{results}[0]{series} // [] } ) {
+        my $key = join( q{ }, map { $series->{tags}{$_} // q{} } @keys );
+        foreach my $values ( @{ $series->{values} } ) {
+            my %row;
+            @row{ @{ $series->{columns} } } = @$values;
+            $rows{$key} = \%row;
+        }
+    }
+    return %rows;
+}
+
+sub slurp { my ($f) = @_; return do { local ( @ARGV, $/ ) = $f; <> } // q{} }
+
+done_testing();

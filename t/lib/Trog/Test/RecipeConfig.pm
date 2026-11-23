@@ -83,6 +83,7 @@ sub required_config {
         grafanaotel   => { modules        => ['grafana'] },
         grafanasyslog => { modules        => ['grafana'] },
         grafanaossec  => { modules        => ['grafana'] },
+        grafanalynis  => { modules        => ['grafana'] },
         grubconf      => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
         ldap          => { admin_password => 's3cr3t' },
 
