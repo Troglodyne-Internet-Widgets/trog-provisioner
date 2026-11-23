@@ -244,6 +244,20 @@ ok(-x '/usr/local/sbin/openvpn-stage-pki', 'the script that stages the pki is in
     isnt($refused, 0, 'and so is an address that is not one');
     is(scalar `$env /usr/local/sbin/openvpn-list-clients --static 2>&1`, "$client\t192.0.2.250\n", 'openvpn-list-clients --static lists the client with its address, which the provisioner reads');
 
+[% IF static_ranges -%]
+    # The server chooses the address, as for a guest built with issue_from.
+    my ($first) = '[% static_ranges.0 %]' =~ m/^(\d+)-/;
+    my @want    = map { join '.', unpack 'C4', pack 'N', $_ } $first, $first + 1;
+    my $auto    = "OPENVPN_EASYRSA_DIR='$copy' OPENVPN_CCD_DIR='$copy/ccd-auto'";
+    $said = `$auto /usr/local/sbin/openvpn-client-config --address auto $client 2>&1 >/dev/null`;
+    is($?, 0, 'openvpn-client-config --address auto gives the client an address') or diag $said;
+    is(slurp("$copy/ccd-auto/$client"), "ifconfig-push $want[0] [% netmask %]\n", 'the first one of the static bins');
+    `$auto /usr/local/sbin/openvpn-client-config --address auto $client 2>/dev/null`;
+    is(slurp("$copy/ccd-auto/$client"), "ifconfig-push $want[0] [% netmask %]\n", 'and the same one again when it is issued again');
+    $said = `$auto /usr/local/sbin/openvpn-client-config --address auto provisioner-auto 2>&1 >/dev/null`;
+    is(slurp("$copy/ccd-auto/provisioner-auto"), "ifconfig-push $want[1] [% netmask %]\n", 'and another client gets the next one') or diag $said;
+[% END -%]
+
     my $listed = `OPENVPN_EASYRSA_DIR='$copy' /usr/local/sbin/openvpn-list-clients 2>&1`;
     like($listed, qr/^\Q$client\E\s+valid\s+\d{4}-\d\d-\d\d /m, 'openvpn-list-clients lists the new client as valid, with its expiry') or diag $listed;
     unlike($listed, qr/^server\s/m, 'and leaves out the certificate of the server');
