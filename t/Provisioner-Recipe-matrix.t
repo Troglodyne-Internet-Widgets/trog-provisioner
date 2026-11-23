@@ -126,10 +126,11 @@ subtest 'the names that the relay passes to the guest' => sub {
             'chat.test.test'                => { vhost => 'chat.test.test' },
             'chat.other.test'               => { vhost => 'chat.test.test' },
             'hs.test.test'                  => { vhost => 'matrix.chat.test.test', ports => { 8448 => 8449 } },
+            'matrix.chat.test.test'         => { vhost => 'matrix.chat.test.test' },
             'admin.matrix.chat.test.test'   => { vhost => 'admin.matrix.chat.test.test' },
             'element.matrix.chat.test.test' => { vhost => 'element.matrix.chat.test.test' },
         },
-        'the domain and its alias go to the page, server_name to the vhost of the homeserver, which the relay alone passes through on 8448, to 8449 of the guest, the admin interface and Element each under its own name, and an alias that the recipe serves itself stays off'
+        'the domain and its alias go to the page, server_name to the vhost of the homeserver, which the relay alone passes through on 8448, to 8449 of the guest, each subdomain to its own vhost, and an alias that the recipe serves itself goes to that vhost and not to the page'
     );
     my %limits = recipe()->rate_limits(%CONFIG);
     is_deeply( [ sort keys %limits ], [ 8448, 8449 ], 'the guest opens 8448, and the port where the relay passes 8448 through' );

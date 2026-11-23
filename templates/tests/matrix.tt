@@ -70,6 +70,8 @@ my $relayed = eval { JSON::PP::decode_json( fetch( 'https://[% server_name %]:[%
 is( ( $relayed->{server} // {} )->{name}, 'Synapse', 'synapse answers federation on [% passthrough_port %], where the relay passes [% federation_port %] through' );
 
 # The relay passes 443 to 8443, with the PROXY protocol, for each public name.
+my $versions = eval { JSON::PP::decode_json( fetch( 'https://matrix.[% domain %]:8443/_matrix/client/versions', '--haproxy-protocol' ) ) } // {};
+ok( @{ $versions->{versions} // [] }, 'synapse answers clients where the relay passes matrix.[% domain %]' );
 like( fetch( 'https://admin.matrix.[% domain %]:8443/',   '--haproxy-protocol' ), qr/<html/i, 'the admin interface answers where the relay passes admin.matrix.[% domain %]' );
 like( fetch( 'https://element.matrix.[% domain %]:8443/', '--haproxy-protocol' ), qr/<html/i, 'and Element where the relay passes element.matrix.[% domain %]' );
 [% END %]
