@@ -77,8 +77,9 @@ an account of L<Provisioner::Recipe::registrar> lists.
 
 When the C<nginx> of the domain names a C<relay>, this recipe hands C<nginx>
 these C<public_names>: the domain and each of its aliases, for the page,
-C<server_name>, for the vhost of the homeserver, and C<admin.matrix.$domain>
-and C<element.matrix.$domain>, each for its own vhost.  The admin interface is
+C<server_name>, for the vhost of the homeserver, and each of the
+C<subdomains>, for its own vhost.  So C<matrix.$domain> reaches the homeserver
+through the relay as it does without one.  The admin interface is
 public as the admin API that it calls is, through C<server_name> on 8448.  The
 relay passes them through on 443.  C<server_name> also has the port 8448,
 mapped to 8449, so the relay
@@ -190,7 +191,7 @@ sub required_recipes {
                 sites        => [@sites],
                 public_names => {
                     ( map { $_ => { vhost => $domain } } $domain, @aliases ),
-                    ( map { $_ => { vhost => $_ } } "admin.matrix.$domain", "element.matrix.$domain" ),
+                    ( map { $_ => { vhost => $_ } } @sites ),
                     ( defined $opts{server_name} ? ( $opts{server_name} => { vhost => "matrix.$domain", ports => { $FEDERATION_PORT => $PASSTHROUGH_PORT } } ) : () ),
                 },
             );
