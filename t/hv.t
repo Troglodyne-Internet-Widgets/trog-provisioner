@@ -22,6 +22,7 @@ use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stdout};
 use File::Temp    qw{tempdir};
 use List::Util    qw{any};
+use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Which();
@@ -1565,6 +1566,43 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
 
     is( scalar( grep { m{/user-data\z} } keys %written ), 1, 'the files were written out first' );
     ok( ( grep { $_->[0] eq 'rm' } @ran ), 'and the workdir cleaned up after' );
+
+    # The user-data holds private keys, and the workdir is in /tmp.
+    my ($workdir) = map { File::Basename::dirname($_) } grep { m{/user-data\z} } keys %written;
+    is_deeply( $ran[0], [ qw{chmod 0700}, $workdir ], 'the workdir is closed to every other user before anything is written into it' );
+
+    @ran = ();
+    $mock->redefine( run_cmd => sub { my ( $s, @c ) = @_; push @ran, [@c]; return $c[0] eq 'chmod' ? 1 : 0 } );
+    %written = ();
+    like(
+        exception {
+            quietly( sub { $hv->cloudinit_iso( 'vm.test.test', 'user-data' => "#cloud-config\n" ) } )
+        },
+        qr/Could[ ]not[ ]close/,
+        'a workdir that cannot be closed, as one that another user made first, stops the build'
+    );
+    is_deeply( \%written, {}, 'before the seed is written into it' );
+};
+
+# The seed holds the private keys of the guest, and libvirt does not need it
+# once cloud-init has read it.  A domain that still names a file that is gone
+# does not start, so the file goes only after the eject.
+subtest 'the seed leaves the pool once it is ejected' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my ( @did, $ejects );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( eject_cdrom   => sub { push @did, [ eject_cdrom   => $_[1] ]; return $ejects } );
+    $mock->redefine( delete_volume => sub { push @did, [ delete_volume => $_[1] ]; return 1 } );
+
+    $ejects = 1;
+    is( $hv->release_seed('vm.test.test'), 1, 'released' );
+    is_deeply( \@did, [ [ eject_cdrom => 'vm.test.test' ], [ delete_volume => 'vm.test.test-cloudinit.iso' ] ], 'ejected, and then deleted' );
+
+    @did    = ();
+    $ejects = 0;
+    is( $hv->release_seed('vm.test.test'), 0, 'a seed that did not come out is not released' );
+    is_deeply( \@did, [ [ eject_cdrom => 'vm.test.test' ] ], 'and stays in the pool, so the domain can still start' );
 };
 
 subtest 'the base image is fetched once' => sub {

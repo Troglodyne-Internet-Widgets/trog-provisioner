@@ -1107,6 +1107,9 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     $hv_mock->redefine( pool_path   => sub { "$dir/disks" } );
     $hv_mock->redefine( eject_cdrom => sub { push @order, 'eject'; 1 } );
 
+    # release_seed deletes the ISO after the eject, which would ask a libvirt.
+    $hv_mock->redefine( delete_volume => sub { 1 } );
+
     my $guest_mock = Test::MockModule->new('Trog::Guest');
     $guest_mock->redefine( wait_for_ssh        => sub { push @order, 'ssh';       $_[0] } );
     $guest_mock->redefine( wait_for_cloud_init => sub { push @order, 'cloudinit'; 1 } );
@@ -1383,10 +1386,11 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
 # cloud-init runs a module as it is told, whatever it needs.  The archives, the
 # cache and the answers must be there before the package install asks for them.
 subtest 'refresh_cloud_init gives the package install what first boot had' => sub {
-    my @ran;
+    my ( @ran, @shipped, @removed );
     my $guest = Test::MockModule->new('Trog::Guest');
-    $guest->redefine( put_file    => sub { 1 } );
-    $guest->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; push( @ran, join( q{ }, @argv ) ); q{} } );
+    $guest->redefine( put_file    => sub { my ( undef, @how )  = @_; push( @shipped, \@how );                   1 } );
+    $guest->redefine( capture_cmd => sub { my ( undef, @argv ) = @_; push( @ran,     join( q{ }, @argv ) );     q{} } );
+    $guest->redefine( run_sudo    => sub { my ( undef, @argv ) = @_; push( @removed, [ scalar(@ran), @argv ] ); 0 } );
 
     my $fake = bless {}, 'Trog::Guest';
     quietly( sub { Trog::Bin::Provisioner::refresh_cloud_init( $fake, qw{/bogus/domains layered.test ubuntu} ) } );
@@ -1394,6 +1398,11 @@ subtest 'refresh_cloud_init gives the package install what first boot had' => su
 
     is_deeply( \@modules, [qw{cc_bootcmd cc_write_files cc_apt_configure cc_package_update_upgrade_install cc_users_groups}], 'the cache, the archives and the answers, then the packages' );
     is( scalar( grep { m/-f[ ]cloud-config[.]txt/ } @ran ), scalar @ran, 'each from the user-data of the domain' );
+
+    # The user-data holds the private keys of the guest.
+    is_deeply( \@shipped, [ [ '/bogus/domains/layered.test/user-data', 'cloud-config.txt', sudo => 1, mode => '0600' ] ], 'which only root can read on the guest' );
+    is_deeply( \@removed, [ [ scalar(@ran), qw{rm -f cloud-config.txt} ] ], 'and which is gone once the last module has read it' );
+    @ran = @shipped = @removed = ();
 
     # The modules are the distro recipe's to name, so a distribution of another
     # family changes them without a change here.

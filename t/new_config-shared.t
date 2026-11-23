@@ -35,6 +35,7 @@ use YAML::XS();
 
 use Provisioner::Cookbook();
 use Trog::Config();
+use Trog::Secrets();
 use Trog::Test::Store();
 
 Trog::Test::Store::throwaway();
@@ -209,6 +210,22 @@ subtest 'the key of the host reaches the modules of its tenant, and the tenant h
     $has->( "$domains/$HOST/rsyncd.d/$HOST.conf",   "[payload.$HOST]\npath = $domains/$HOST\n",     'its own part serves its payload' );
     $has->( "$domains/$HOST/rsyncd.d/$TENANT.conf", "[payload.$TENANT]\npath = $domains/$TENANT\n", 'and the part of the tenant, beside it, serves the payload of the tenant' );
     ok( !-e "$domains/$TENANT/rsyncd.conf", 'the tenant gets no file of its own, because no key of its own fetches anything' );
+};
+
+# sshd offers the key in the seed before bin/provision places the one that the
+# store holds.  So the two must be the same key.  Which entry a domain names is
+# t/Provisioner-Recipe-sshd.t's business.
+subtest 'the seed carries the host key that the store holds' => sub {
+    my ( $err, $domains ) = generate();
+    is( $err, undef, 'the generation runs to the end' ) or return diag $err;
+
+    foreach my $domain ( $HOST, $TENANT ) {
+        my %held = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), 'throwaway', key => Provisioner::Cookbook->load('sshd')->host_key_ref($domain) );
+        like( $held{key} // q{}, qr/OPENSSH[ ]PRIVATE[ ]KEY/, "the store made a host key for $domain" );
+
+        my $user_data = YAML::XS::LoadFile("$domains/$domain/user-data");
+        ok( defined $held{key} && ( $user_data->{ssh_keys}{ed25519_private} // q{} ) eq "$held{key}\n", "and the seed of $domain gives cloud-init that key" );
+    }
 };
 
 # The fragment of a recipe fetches its module by name, so two modules of one

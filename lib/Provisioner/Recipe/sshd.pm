@@ -62,18 +62,32 @@ C<StrictHostKeyChecking=yes>, so its bans stop.
 
 So the ed25519 host key comes from the secret store.  C<guest_secrets> names
 it, the store makes it once, and F<bin/provision> places it before the makefile
-runs.  The global fragment then does three things:
+runs.
+
+sshd starts minutes before that placement.  So the seed also gives the key to
+cloud-init, in the C<ssh_keys> of the user-data that
+L<Provisioner::Recipe::ubuntu> writes.  cloud-init writes it before sshd
+starts, deletes the keys of the image, and makes no key of another type.  So
+sshd offers the key from the store from its first start, and whatever connects
+in those minutes, such as F<bin/provision> itself, sees the key that the guest
+keeps.
+
+The placement still matters.  cloud-init writes the keys of the seed on the
+first boot of an instance only.  A guest that was built before the seed carried
+the key, and a guest that is provisioned in place, get the key only from the
+placement.  The global fragment then does three things:
 
 =over 4
 
 =item * It derives F</etc/ssh/ssh_host_ed25519_key.pub> from the private key
-that was placed.  The public key that cloud-init wrote belongs to the key that
-the placement replaced.
+that was placed.  On a guest that did not boot from a seed with the key, the
+public key that cloud-init wrote belongs to the key that the placement
+replaced.
 
 =item * The drop-in names that key as the only C<HostKey>.  sshd adds up
 C<HostKey> lines, so the order of the drop-ins does not matter for this
-option.  cloud-init still makes RSA and ECDSA keys,
-and they are new on each build.  With a C<HostKey> line, sshd loads only the
+option.  On such a guest, cloud-init also made RSA and ECDSA keys, which are
+new on each build.  With a C<HostKey> line, sshd loads only the
 keys that the configuration names, so a client never sees a key that changed.
 The fast lane sshd of L<Provisioner::Recipe::sshfastlane> includes the main
 configuration, so it offers the same key.
