@@ -7,10 +7,13 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use File::pushd  qw{pushd};
-use Getopt::Long qw{GetOptionsFromArray};
-use JSON::PP     ();
-use List::Util   ();
+use File::Basename ();
+use File::Copy     ();
+use File::Find     ();
+use File::pushd    qw{pushd};
+use Getopt::Long   qw{GetOptionsFromArray};
+use JSON::PP       ();
+use List::Util     ();
 use Pithub;
 
 my $USAGE = "usage: repos_for [--reset] API_URL ENTITY [ENTITY ...] < token_file\n";
@@ -91,7 +94,9 @@ sub main {
     foreach my $entity (@entities) {
         my $repos = $cache->{$api_url}{$entity} // {};
         foreach my $repo ( sort keys %$repos ) {
-            $failures += clone( $repo, $repos->{$repo} );
+            my $failed = clone( $repo, $repos->{$repo} );
+            $failures += $failed;
+            install_hooks($repo) unless $failed;
         }
     }
 
@@ -183,6 +188,61 @@ sub clone {
     # clone over ssh already has the ssh origin.
     print "Retrying $repo over ssh...\n";
     return run( qw{git clone --}, $robj->{ssh_url}, $repo ) ? 0 : 1;
+}
+
+=head2 @installed = install_hooks($repo)
+
+Copies each file of the F<git-hooks> or F<githooks> directory of the clone
+C<$repo> into its F<.git/hooks>, mode 0755, and returns the names that it
+copied.  git runs the hooks in F<.git/hooks>, unless C<core.hooksPath> names
+another directory, and it never runs the hooks that a repository carries.  It
+runs for a clone that was there already too.
+
+A hook of the same name that is there already is left alone, because it can be
+an edit that somebody made by hand.  So a hook that changes in the repository
+is not updated: remove the copy, and the next run installs the new one.  A
+clone whose F<.git> is not a directory, such as a worktree, gets nothing.  A
+directory named F<hooks> is not read, because some repositories keep the hooks
+of other programs there.
+
+Does not die.  A file that cannot be copied is a warning.
+
+=cut
+
+sub install_hooks {
+    my ($repo) = @_;
+
+    my ($from) = grep { -d "$repo/$_" } qw{git-hooks githooks};
+    my $to = "$repo/.git/hooks";
+    return () unless $from && -d $to;
+
+    my @names;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                return if $_ eq "$repo/$from";
+
+                # A hook is a file at the top of the directory.
+                $File::Find::prune = 1;
+                my $name = File::Basename::basename($_);
+                ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether it is a file to copy, not an access check
+                push( @names, $name ) if -f $_ && !-e "$to/$name";
+            },
+        },
+        "$repo/$from"
+    );
+
+    my @installed;
+    foreach my $name ( sort @names ) {
+        unless ( File::Copy::copy( "$repo/$from/$name", "$to/$name" ) && chmod( 0755, "$to/$name" ) ) {
+            warn "Cannot install the hook $name in $repo: $!\n";
+            next;
+        }
+        push @installed, $name;
+    }
+    print "Installed the hooks of $repo: @installed\n" if @installed;
+    return @installed;
 }
 
 =head2 $ok = run(@cmd)

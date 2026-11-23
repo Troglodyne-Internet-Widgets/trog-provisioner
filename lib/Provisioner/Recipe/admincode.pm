@@ -50,6 +50,9 @@ points to them.  If the link name exists already, the recipe leaves it alone.
 L<Pithub> talks to the server, so gogs or any other server with a compatible
 API also works.  F<scripts/repos_for> clones each repository as the admin user
 over https.  Then it sets the origin to the ssh URL, so the admin can push.
+A repository with a F<git-hooks> or F<githooks> directory gets those hooks in
+F<.git/hooks>, so its commit checks run from the first commit.  A hook already
+there stays as it is.
 
 The purpose is to set up a developer or an agent with all of their repositories
 in one step.  Supply the global git configuration of the admin through the

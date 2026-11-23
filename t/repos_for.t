@@ -17,11 +17,13 @@ what it clones
 =cut
 
 use Test::More;
-use Capture::Tiny    qw{capture};
-use Test::MockModule qw{strict};
-use File::Temp       qw{tempdir};
-use Cwd              qw{getcwd};
-use Cpanel::JSON::XS ();
+use Capture::Tiny       qw{capture};
+use Test::MockModule    qw{strict};
+use File::Temp          qw{tempdir};
+use Cwd                 qw{getcwd};
+use Cpanel::JSON::XS    ();
+use File::Slurper       ();
+use File::Slurper::Temp ();
 
 use FindBin;
 use FindBin::libs;
@@ -304,6 +306,65 @@ subtest 'an api that refuses the token stops the run and names the status' => su
 
     ( $died, $paths ) = $refused->( '/users/gina' => { code => 200, content => { type => 'User' } }, '/users/gina/repos' => { code => 401 } );
     like( $died, qr{would [ ] not [ ] list .* gina .* 401 [ ] Unauthorized}x, 'and when asked for the repositories' ) or diag explain $paths;
+};
+
+# A clone with a directory of hooks and a .git/hooks, as git makes one, under
+# the current directory.  Each file is name => content.
+sub checkout {
+    my ( $name, $dir, %hooks ) = @_;
+    mkdir $_ or die "Cannot make $_: $!" for $name, "$name/$dir", "$name/.git", "$name/.git/hooks";
+    foreach my $hook ( keys %hooks ) {
+        File::Slurper::Temp::write_text( "$name/$dir/$hook", $hooks{$hook} );
+        chmod 0644, "$name/$dir/$hook";
+    }
+    return;
+}
+
+subtest 'the hooks that a repository keeps go where git runs them' => sub {
+    checkout( qw{india git-hooks}, 'pre-commit' => "#!/bin/sh\nexit 0\n", 'refresh-coverage' => "#!/bin/sh\n" );
+    my @installed;
+    capture { @installed = Trog::repogetter::install_hooks('india') };
+    is_deeply( \@installed, [qw{pre-commit refresh-coverage}], 'each file of git-hooks is installed, a helper that a hook calls as well' );
+    is( File::Slurper::read_text('india/.git/hooks/pre-commit'), "#!/bin/sh\nexit 0\n", 'as it is in the repository' );
+    is( ( stat 'india/.git/hooks/pre-commit' )[2] & oct(7777),   oct(755),              'and executable, although the repository has it 0644' );
+
+    checkout( qw{juliet githooks}, 'pre-push' => "#!/bin/sh\n" );
+    capture { @installed = Trog::repogetter::install_hooks('juliet') };
+    is_deeply( \@installed, ['pre-push'], 'a directory named githooks counts too' );
+};
+
+subtest 'a hook that is there already is left alone' => sub {
+    checkout( qw{kilo git-hooks}, 'pre-commit' => "new\n", 'post-commit' => "new\n" );
+    File::Slurper::Temp::write_text( 'kilo/.git/hooks/pre-commit', "edited by hand\n" );
+
+    my @installed;
+    capture { @installed = Trog::repogetter::install_hooks('kilo') };
+    is_deeply( \@installed, ['post-commit'], 'only the hook that is missing is installed' );
+    is( File::Slurper::read_text('kilo/.git/hooks/pre-commit'), "edited by hand\n", 'and the one that is there keeps its content' );
+};
+
+subtest 'nothing is installed where git would not run it' => sub {
+    checkout( qw{lima hooks}, 'pre-commit' => "#!/bin/sh\n" );
+    my @installed;
+    capture { @installed = Trog::repogetter::install_hooks('lima') };
+    is_deeply( \@installed, [], 'a directory named hooks belongs to some other program' );
+
+    mkdir $_ or die "Cannot make $_: $!" for qw{mike mike/git-hooks};
+    File::Slurper::Temp::write_text( 'mike/.git', "gitdir: /bogus\n" );
+    capture { @installed = Trog::repogetter::install_hooks('mike') };
+    is_deeply( \@installed, [], 'and a worktree, whose .git is a file, gets nothing' );
+};
+
+subtest 'every clone gets its hooks, a clone that was there already too' => sub {
+    checkout( qw{november git-hooks}, 'pre-commit' => "#!/bin/sh\n" );
+    my $run = repos_for(
+        args  => [qw{--reset https://api.test/ oscar}],
+        repos => { oscar => [ row(qw{oscar november}) ] },
+    );
+    is( $run->{rc}, 0, 'the run reports nothing wrong' ) or diag $run->{err};
+    ok( !cloned( $run, 'november' ), 'the clone that was there is not cloned again' );
+    my $mode = ( stat 'november/.git/hooks/pre-commit' )[2] // 0;
+    is( $mode & oct(111), oct(111), 'and it has its hook, which git can run' ) or diag $run->{out};
 };
 
 chdir $was or diag "Could not return to $was: $!";
