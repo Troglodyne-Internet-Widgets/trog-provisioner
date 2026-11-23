@@ -8,18 +8,19 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use Cwd();
-use File::Basename();
-use List::Util qw{first};
+use DBI();
+use DBD::SQLite::Constants qw{SQLITE_OPEN_READONLY};
+use List::Util             qw{all first uniq};
 use Net::CIDR();
 use Net::IP();
 use Socket();
 
 use Provisioner::Cookbook();
+use Provisioner::IPPool::DB();
+use Provisioner::IPPool::Remote();
 use Provisioner::Utils();
 
 use Trog::Config();
-use Trog::SQLite();
 use Trog::Hypervisors();
 use Trog::Utils();
 
@@ -102,6 +103,86 @@ you cannot connect to one of them.
 So the assignments are in SQLite, and each assignment is one transaction.  The
 row goes in, or the address is already taken and C<assign> tries the next one.
 The configuration still gives the range of the pool.
+
+=head1 ONE DATABASE FOR EACH HYPERVISOR
+
+SQLite keeps two writers apart through a file that each one maps into memory,
+and that works only on one machine, not between two runners that mount the
+configuration directory of their hypervisor.  So each libvirt hypervisor keeps its own
+database, at the C<ip_db> of its block, see L<Trog::HV::Libvirt/ip_db>, and
+only processes on that hypervisor open it.  Every operation runs there, in one
+process, through F<bin/ippool>: in this process when the hypervisor is this
+machine, and otherwise over ssh, see L<Provisioner::IPPool::Remote>.  The SQL
+is in L<Provisioner::IPPool::DB>.
+
+The subs below keep the interface that they had.  Which database each one
+asks:
+
+=over 4
+
+=item * An address of the C<guests> bin is kept by the hypervisor whose pool of
+that bridge it is in: the pool of the bridge, as C<pool_of> gives it, names
+the network, and the network names the hypervisor.  Two hypervisors that name
+one network, the same blocks on a bridge of the same name, share its
+addresses, so the one whose name sorts first keeps them for both.  A pool that
+names no network of the fleet goes to the only database, and is refused when
+there is more than one.
+
+=item * An address of another bin without C<via> belongs to no hypervisor, so
+it goes to the only database, and is refused when there is more than one.
+
+=item * An address of a bin with C<via>, such as C<vpnclients>, is kept by the
+hypervisor that runs the guest C<via>.  C<assign> and C<refresh_via> die when
+no hypervisor that keeps a database runs it, or one cannot be asked.
+
+=item * A read of the whole fleet, such as C<taken> or C<assignments>, asks
+every hypervisor that keeps a database, and merges what they say.  It dies,
+naming the hypervisor, when one does not answer, or when two disagree about
+one address.  It never returns part of the fleet.  C<release> and C<reseed>
+also go to each of them.
+
+=item * Without F<hypervisors.conf>, the database is the F<ips.db> of the
+configuration directory of this machine, as it was before.
+
+=back
+
+=head1 MIGRATION
+
+To move from the one F<ips.db> of the configuration directory to a database
+for each hypervisor, with nothing provisioning anywhere:
+
+=over 4
+
+=item 1. Install what the kit needs on each libvirt hypervisor that has a pool,
+L<Provisioner::IPPool::Remote/What the far side needs>, and see that it runs:
+
+    bin/ippool --hypervisor=hv1 check
+
+=item 2. Choose a path for its database on that hypervisor, which only the
+hypervisor writes, and which each account that provisions there can write.
+Name it as C<ip_db> in the block of the hypervisor in F<hypervisors.conf>.
+
+=item 3. Make the database:
+
+    bin/ippool --hypervisor=hv1 init
+
+=item 4. Copy the rows that belong to it out of the old database, first as a
+dry run.  Name with C<--bin> each bin with C<via> whose guest runs there, unless
+the fleet has one hypervisor that keeps a database:
+
+    bin/ippool --hypervisor=hv1 migrate --from=/etc/trog-provisioner/ips.db --dryrun
+    bin/ippool --hypervisor=hv1 migrate --from=/etc/trog-provisioner/ips.db
+
+=item 5. Ask the hypervisors what runs, which fills in what the old database
+missed and makes the reservations again:
+
+    bin/reseed_ips --dryrun
+    bin/reseed_ips
+
+=item 6. Move the old F<ips.db> and its F<-wal> and F<-shm> out of the
+configuration directory, so that nothing opens it again.
+
+=back
 
 =head1 SUBROUTINES
 
@@ -192,52 +273,143 @@ sub int_to_address {
 
 =head2 db_path()
 
-Returns the path of the database.  This is F<ips.db>, in the same directory as
-the rest of the configuration.
+Returns the path of the database of this machine: F<ips.db>, in the same
+directory as the rest of the configuration.  It is the database when no fleet
+is configured, and the one of a hypervisor that is this machine and names no
+C<ip_db>.  The callers name it in a message about a missing address.
 
 =cut
 
 sub db_path { return Trog::Config->path('ips.db') }
 
-=head2 schema_path()
+=head2 $databases = databases($fleet)
 
-Returns the absolute path of F<schema/ips.sql> in this checkout.  The path is
-relative to this file, as C<bin/new_config> finds its scripts.
+Where the addresses of the L<Trog::Hypervisors> C<$fleet> are kept, by default
+the fleet of F<hypervisors.conf>.  A hash reference of:
+
+=over 4
+
+=item * C<list>: each database, once, in the order of the blocks.  A database
+is a hash reference of C<name>, the block of the hypervisor, C<hv>, the
+hypervisor, C<path>, the path of F<ips.db> there, and C<create>, true for the
+database of the configuration directory of this machine, which the first use
+makes.  Without a fleet, the one database is that one, with no C<hv>.
+
+=item * C<of>: the database of each hypervisor that keeps one, by name.  Two
+blocks for one machine and one path share it.
+
+=item * C<owner>: the database that keeps the addresses of the network of
+each bridge of each hypervisor, by the name of the block, a tab and the
+bridge.  See L</ONE DATABASE FOR EACH HYPERVISOR>.
+
+=item * C<network>: the same databases, by the bridge, a tab and the network
+of its pool, as C<network_of> gives it.
+
+=item * C<hypervisors>: each hypervisor of C<of>, by name.
+
+=item * C<configured>: whether there is a fleet.
+
+=back
+
+A libvirt hypervisor keeps a database when its block names C<ip_db>, or when it
+is this machine.  Dies when a remote one has a pool for a static adapter and
+names no C<ip_db>, because its guests then have nowhere to get an address, and
+as C<guest_pools> does.  It builds the hypervisors, and connects to none.
 
 =cut
 
-sub schema_path {
-    return Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../schema/ips.sql' );
+sub databases ( $fleet = undef ) {
+    $fleet //= Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    return { configured => 0, list => [ { name => 'local', path => db_path(), create => 1 } ], of => {}, owner => {}, network => {}, hypervisors => {} } unless $fleet->configured;
+
+    my %pools = guest_pools($fleet);
+    my ( @list, %of, %at, %hv_of );
+    foreach my $name ( $fleet->names ) {
+        my $hv = $fleet->hypervisor($name);
+        next if $hv->manages_addresses;
+
+        my $path   = $hv->ip_db;
+        my $create = !defined $path;
+        $path //= db_path() if $hv->is_local;
+        unless ( defined $path ) {
+            next unless $pools{$name};
+            die "[$name] in hypervisors.conf has a pool for its static adapters, and no ip_db.  Each hypervisor keeps its own address database, at the ip_db of its block.\n" . "See MIGRATION in Provisioner::IPPool.\n";
+        }
+
+        my $where = $hv->is_local ? "here:$path" : $hv->describe . ":$path";
+        $of{$name} = $at{$where} //= do {
+            push @list, { name => $name, hv => $hv, path => $path, create => $create };
+            $list[-1];
+        };
+        $hv_of{$name} = $hv;
+    }
+
+    # The first block by name that names a network keeps its addresses.
+    my ( %owner, %first );
+    foreach my $name ( sort keys %pools ) {
+        my $db = $of{$name} // next;
+        foreach my $nic ( sort keys %{ $pools{$name} } ) {
+            $owner{"$name\t$nic"} = $first{ "$nic\t" . network_of( $pools{$name}{$nic} ) } //= $db;
+        }
+    }
+
+    return { configured => 1, list => \@list, of => \%of, owner => \%owner, network => \%first, hypervisors => \%hv_of };
 }
 
-=head2 dbh()
+=head2 $result = call($database, $op, $args)
 
-Returns a handle on the database at C<db_path>, with the schema and its updates
-applied.  F<schema/ips.v1.update.sql> adds bins, and puts every row of a
-database from before them in the C<guests> bin.  F<schema/ips.v2.update.sql>
-adds the bridge of each address, and marks the address of each guest.  A row
-from before it has no bridge, and is the address of its guest.  C<assign> gives
-it the bridge whose pool holds it, the first time that its domain asks for an
-address on that bridge, so a guest keeps its address.
-
-F<schema/ips.v3.update.sql> puts the rows in the table C<addresses>, with the
-kind, the bin and the bridge of each as the id of a name in C<address_kinds>,
-C<address_bins> and C<address_nics>, and makes C<ips> a view with the columns
-that it had, which takes writes too.  C<noted> is C<assigned_at> there.  A kind
-other than C<domain> and C<reserved> is refused.  A write through the view
-reports no rows, so where the number matters, count the rows of C<addresses>
-with C<do_with_update_hook> of L<Trog::SQLite>.
+Runs the operation C<$op> of L<Provisioner::IPPool::DB> with the hash
+reference C<$args> on C<$database>, one of the C<list> of C<databases>, and
+returns its result.  It runs in this process when the hypervisor is this
+machine, and otherwise on the hypervisor, through
+L<Provisioner::IPPool::Remote/call($machine, $path, $op, $args, %opts)>.
+Dies as the operation does, or when the hypervisor cannot be asked.
 
 =cut
 
-sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
+sub call ( $database, $op, $args = {} ) {
+    my $hv = $database->{hv};
+    return Provisioner::IPPool::DB::run( $database->{path}, $op, $args, create => $database->{create} ) if !$hv || $hv->is_local;
+    return Provisioner::IPPool::Remote::call( $hv, $database->{path}, $op, $args, create => $database->{create} );
+}
 
-# The number of rows of addresses that $sql, a write to the view ips with
-# @bind, writes, which do cannot count.
-my sub rows_written ( $sql, @bind ) {
-    my $rows = 0;
-    Trog::SQLite::do_with_update_hook( dbh(), sub ( $action, $database, $table, $rowid ) { $rows++ if $table eq 'addresses' }, $sql, @bind );
-    return $rows;
+=head2 $result = on_hypervisor($name, $op, $args)
+
+C<call> on the database of the hypervisor C<$name>, for F<bin/ippool>.  Dies
+when that hypervisor keeps none.
+
+=cut
+
+# The database of the hypervisor $name in $databases, or the only database
+# when $name is undef.
+my sub database_of ( $databases, $name ) {
+    if ( defined $name ) {
+        return $databases->{of}{$name} // die "$name keeps no address database: it is not a libvirt hypervisor in hypervisors.conf with an ip_db, or this machine.\n";
+    }
+    return $databases->{list}[0] if @{ $databases->{list} } == 1;
+    die 'More than one hypervisor keeps addresses (' . join( ', ', map { $_->{name} } @{ $databases->{list} } ) . "), so name the one that this is for.\n";
+}
+
+sub on_hypervisor ( $name, $op, $args = {} ) {
+    return call( database_of( databases(), $name ), $op, $args );
+}
+
+# What each database says $op is for $args, merged into one hash reference.
+# Dies when two databases give one key two values, because then one address
+# has two holders, or one domain two addresses.
+my sub merged ( $op, $args = {} ) {
+    my ( %all, %from );
+    foreach my $database ( @{ databases()->{list} } ) {
+        my $said = call( $database, $op, $args );
+        foreach my $key ( sort keys %$said ) {
+            my $value = $said->{$key} // q{};
+            die "The address databases disagree: $from{$key} says that $key is $all{$key}, and $database->{name} says $value.\n"
+              if exists $all{$key} && $all{$key} ne $value;
+            $all{$key}  = $value;
+            $from{$key} = $database->{name};
+        }
+    }
+    return \%all;
 }
 
 =head2 assignments()
@@ -250,10 +422,7 @@ domain rather than a file, and the pdns zone makes its records from it.
 
 =cut
 
-sub assignments {
-    my $rows = dbh()->selectall_arrayref( "SELECT domain, ip FROM ips WHERE kind = 'domain' AND bin = ? AND main = 1", { Slice => {} }, $GUESTS );
-    return { map { $_->{domain} => $_->{ip} } @$rows };
-}
+sub assignments { return merged('assignments') }
 
 =head2 ($guest, $address) = guest_address($domain)
 
@@ -277,22 +446,7 @@ it.  Reservations are in it, because a reserved address is not free.
 
 =cut
 
-sub taken {
-    my $rows = dbh()->selectall_arrayref( 'SELECT ip, domain FROM ips', { Slice => {} } );
-    return { map { $_->{ip} => $_->{domain} } @$rows };
-}
-
-=head2 bridges()
-
-Returns a hash reference of each address of a guest in the C<guests> bin to its
-bridge, which is empty for a row from before the database recorded bridges.
-
-=cut
-
-sub bridges {
-    my $rows = dbh()->selectall_arrayref( "SELECT ip, nic FROM ips WHERE kind = 'domain' AND bin = ?", { Slice => {} }, $GUESTS );
-    return { map { $_->{ip} => $_->{nic} } @$rows };
-}
+sub taken { return merged('taken') }
 
 =head2 held_by($domain, $bin, $nic)
 
@@ -303,15 +457,17 @@ or without C<$nic> the address of the guest.
 It looks at guests only.  A reservation is not a domain, and C<release> must
 never report that it gave back the gateway.
 
+It asks every database, and dies when two of them give the domain an address
+in the bin.
+
 =cut
 
 sub held_by {
     my ( $domain, $bin, $nic ) = @_;
-    my $row =
-      defined $nic
-      ? dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?", undef, $domain, $bin // $GUESTS, $nic )
-      : dbh()->selectrow_arrayref( "SELECT ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND main = 1", undef, $domain, $bin // $GUESTS );
-    return $row ? $row->[0] : undef;
+    my %args = ( domain => $domain, bin => $bin // $GUESTS, ( defined $nic ? ( nic => $nic ) : () ) );
+    my @held = uniq grep { defined } map { call( $_, 'held_by', \%args ) } @{ databases()->{list} };
+    die "The address databases give $domain more than one address in the bin $args{bin}: @held\n" if @held > 1;
+    return $held[0];
 }
 
 =head2 main_addresses($domain)
@@ -326,8 +482,7 @@ at reservations.
 
 sub main_addresses {
     my ($domain) = @_;
-    my $rows = dbh()->selectall_arrayref( "SELECT bin, ip FROM ips WHERE domain = ? AND kind = 'domain' AND main = 1", { Slice => {} }, $domain );
-    return { map { $_->{bin} => $_->{ip} } @$rows };
+    return merged( 'main_addresses', { domain => $domain } );
 }
 
 =head2 nic_addresses($domain)
@@ -341,8 +496,7 @@ bridge.
 
 sub nic_addresses {
     my ($domain) = @_;
-    my $rows = dbh()->selectall_arrayref( "SELECT nic, ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic != ''", { Slice => {} }, $domain, $GUESTS );
-    return { map { $_->{nic} => $_->{ip} } @$rows };
+    return merged( 'nic_addresses', { domain => $domain } );
 }
 
 =head2 reachable_address($domain)
@@ -389,45 +543,6 @@ sub reached_through {
     return $bins{$tunnel} ? $bins{$tunnel}{via} : undef;
 }
 
-=head2 reserve($ip, $name, $nic)
-
-Records C<$ip> as an address that no guest gets, for example a hypervisor or a
-gateway, on the bridge C<$nic>.  C<$name> says what holds it.  Returns true if
-this call wrote the row.
-
-An address that is already in the database is not an error.  Seeding runs on
-every start, and it records the same addresses each time.
-
-=cut
-
-sub reserve {
-    my ( $ip, $name, $nic ) = @_;
-    return rows_written( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", $ip, $name, $nic // q{} ) ? 1 : 0;
-}
-
-=head2 record($ip, $domain, $nic, $main)
-
-Records C<$ip> as the address of the guest C<$domain> on the bridge C<$nic>.
-C<$main> is true when that bridge is the first of C<static_nics>, so that it is
-the address of the guest, and defaults to true.  This is for an address that a hypervisor reports,
-not one that C<assign> gave out.  Returns true if this call wrote the row.
-
-If C<$domain> already holds C<$ip> in a row from before the database recorded
-bridges, this gives that row C<$nic>, as C<assign> does, and leaves the rest of
-it alone.  So a reseed fills in the bridges of the old rows.  It leaves a row
-alone when C<$domain> already has another address on C<$nic>.
-
-=cut
-
-sub record {
-    my ( $ip, $domain, $nic, $main ) = @_;
-    $nic //= q{};
-    return 1
-      if $nic ne q{}
-      && rows_written( "UPDATE OR IGNORE ips SET nic = ? WHERE ip = ? AND domain = ? AND kind = 'domain' AND bin = ? AND nic = ''", $nic, $ip, $domain, $GUESTS );
-    return rows_written( "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", $ip, $domain, $nic, ( $main // 1 ) ? 1 : 0 ) ? 1 : 0;
-}
-
 =head2 release($domain)
 
 Gives back every address of C<$domain>, in every bin and on every bridge.
@@ -438,17 +553,14 @@ that is not the address of the guest.
 C<bin/destroy> calls this, and C<bin/reseed_ips> calls it for a domain that no
 hypervisor runs.  A domain that you provision again keeps its address.
 
+It gives them back in every database, one after another.  A hypervisor that
+cannot be asked stops it there, and a second run gives back the rest.
+
 =cut
 
 sub release {
     my ($domain) = @_;
-
-    my $db   = dbh();
-    my $held = main_addresses($domain);
-    my $rows = $db->selectall_arrayref( "SELECT nic, ip FROM ips WHERE domain = ? AND kind = 'domain' AND bin = ? AND main = 0", { Slice => {} }, $domain, $GUESTS );
-    $db->do( "DELETE FROM ips WHERE domain = ? AND kind = 'domain'", undef, $domain );
-
-    return { %$held, map { ( "$GUESTS on $_->{nic}" => $_->{ip} ) } @$rows };
+    return merged( 'release', { domain => $domain } );
 }
 
 =head2 @items = pool_items($said)
@@ -661,42 +773,29 @@ sub via_clients {
     return %clients;
 }
 
-# Makes the reservations of the clients that the via of the bin $bin, as $conf,
-# lists match what it said, in the transaction of the caller.  $for is a domain
-# that is about to get its address, which the server may already list.
-my sub note_clients {
-    my ( $db, $bin, $conf, $clients, $for ) = @_;
-    my $via    = $conf->{via};
-    my %in_bin = map { $_ => 1 } pool_ips($conf);
+# The database that keeps the addresses of the bin of $via: the database of the
+# hypervisor that runs the guest $via.  Without a fleet, the one database.
+my sub via_database ( $databases, $via ) {
+    return $databases->{list}[0] unless $databases->{configured};
 
-    $db->do( "DELETE FROM ips WHERE kind = 'reserved' AND bin = ? AND domain LIKE 'vpnclient:%'", undef, $bin );
-    my %holder = map { $_->[0] => $_->[1] } @{ $db->selectall_arrayref( 'SELECT ip, domain FROM ips WHERE bin = ?', undef, $bin ) };
-    my %has    = reverse %holder;
-
-    foreach my $name ( sort keys %$clients ) {
-        my $address = $clients->{$name};
-        next unless $in_bin{$address};
-
-        my $holder = $holder{$address};
-        next if defined $holder && $holder eq $name;
-        die "$via gives $address to its VPN client $name, but ips.db gives $address to $holder.  Revoke one of them on $via, or release it.\n"
-          if defined $holder;
-        die "$via gives $address to its VPN client $name, but ips.db gives $name the address $has{$name}.  Revoke $name on $via, and build it again.\n"
-          if defined $has{$name};
-        next if defined $for && $name eq $for;
-
-        $db->do( "INSERT INTO ips (ip, domain, kind, bin) VALUES (?, ?, 'reserved', ?)", undef, $address, "vpnclient:$name", $bin );
+    my $machine = Provisioner::Cookbook->machine_of($via);
+    foreach my $name ( sort keys %{ $databases->{of} } ) {
+        my $has = eval { $databases->{hypervisors}{$name}->domain_exists($machine) };
+        die "Could not ask $name whether it runs $via, and the hypervisor that runs $via keeps the addresses of the bin that $via serves: $@"
+          unless defined $has;
+        return $databases->{of}{$name} if $has;
     }
-    return;
+    die "No hypervisor that keeps an address database runs $via.  The addresses of a bin with via are kept by the hypervisor that runs the guest of via, so build $via on a libvirt hypervisor first.\n";
 }
 
 =head2 refresh_via($pool, $bin)
 
 Asks the C<via> of C<$bin> which addresses its clients have, with
 C<via_clients>, and makes the C<vpnclient:> reservations of the bin match what
-it said.  C<bin/list_ip_pool> runs it, so that the list shows the addresses
-that were given out by hand.  Returns the number of clients that the server
-listed, or 0 when the bin has no C<via>.
+it said, in the database of the hypervisor that runs C<via>.
+C<bin/list_ip_pool> runs it, so that the list shows the addresses that were
+given out by hand.  Returns the number of clients that the server listed, or 0
+when the bin has no C<via>.
 
 Dies as C<via_clients> does, or if what the server says disagrees with the
 database: an address of a domain that the server gives to another client, or a
@@ -708,13 +807,11 @@ sub refresh_via {
     my ( $pool, $bin ) = @_;
 
     my %bins    = bins($pool);
-    my $via     = ( $bins{$bin} // {} )->{via} // return 0;
+    my $conf    = $bins{$bin}  // {};
+    my $via     = $conf->{via} // return 0;
     my %clients = via_clients($via);
 
-    my $db = dbh();
-    Trog::SQLite::transaction( $db, sub { note_clients( $db, $bin, $bins{$bin}, \%clients ) } );
-
-    return scalar keys %clients;
+    return call( via_database( databases(), $via ), 'refresh_clients', { bin => $bin, via => $via, candidates => [ pool_ips($conf) ], clients => \%clients } );
 }
 
 =head2 $bool = offers($pool, $bin)
@@ -761,15 +858,16 @@ address in the bin, the domain gets that one.  A domain that has an address
 gets it without the question, so the rebuild of a client does not need the
 server.
 
-Dies if the bin has no addresses, or if no address in it is free.  For a bin
-with C<via>, it also dies as C<refresh_via> does.
+The address is chosen and written in the database that keeps the bin, see
+L</ONE DATABASE FOR EACH HYPERVISOR>, by one operation of F<bin/ippool> on
+that hypervisor, in one transaction: see
+L<Provisioner::IPPool::DB/assign>.  The transaction takes the write lock
+before it looks for a free address, so if two provisions run at the same time,
+the second waits, searches again, and finds the address taken.
 
-Choosing the address and writing it are one transaction, from
-C<transaction> of L<Trog::SQLite>.  It begins with C<BEGIN IMMEDIATE>, because
-C<sqlite_use_immediate_transaction> of L<DBD::SQLite> is on by default, so the
-transaction takes the write lock before the search for a free address.  So if
-two provisions run at the same time, the second waits, searches again, and
-finds the address taken.
+Dies if the bin has no addresses, or if no address in it is free.  For a bin
+with C<via>, it also dies as C<refresh_via> does, and when no hypervisor that
+keeps a database runs C<via>.
 
 =cut
 
@@ -788,86 +886,36 @@ sub assign {
     die "No [ip_pool] section or no IPs found in the $bin bin of the pool" . ( $nic ne q{} ? " on $nic" : q{} ) . ": cannot auto-assign IP for $domain\n"
       unless @pool_ips;
 
-    # The server is asked before the lock, because ssh can take seconds and
-    # every other provision waits on the lock.
-    my $via     = $conf->{via};
-    my $ask     = defined $via && !held_by( $domain, $bin );
+    # A pool that names no network of the fleet, such as one that a test or a
+    # script makes, goes to the only database.
+    my $via       = $conf->{via};
+    my $databases = databases();
+    my $database  = defined $via ? via_database( $databases, $via ) : $databases->{network}{ "$nic\t" . network_of($conf) } // database_of( $databases, undef );
+
+    # The server is asked before the operation, because ssh can take seconds and
+    # every other provision waits on the lock that the operation takes.
+    my $ask     = defined $via && !defined call( $database, 'held_by', { domain => $domain, bin => $bin } );
     my %clients = $ask ? via_clients($via) : ();
-    my %in_bin  = map { $_ => 1 } @pool_ips;
 
-    my $db = dbh();
-    my $address;
-    Trog::SQLite::transaction(
-        $db,
-        sub {
-            my $held = held_by( $domain, $bin, $nic );
-
-            # An address from before the database recorded bridges, in the pool of
-            # this one, is the address that the guest has on it.
-            my $old = !defined $held && $nic ne q{} ? held_by( $domain, $bin, q{} ) : undef;
-            if ( defined $old && $in_bin{$old} ) {
-                $db->do( "UPDATE ips SET nic = ? WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ''", undef, $nic, $domain, $bin );
-                $held = $old;
-            }
-
-            if ($held) {
-                if ($guest) {
-                    $db->do( "UPDATE ips SET main = CASE WHEN nic = ? THEN 1 ELSE 0 END WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $nic,    $domain, $bin ) if $main;
-                    $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ? AND nic = ?",                       undef, $domain, $bin,    $nic ) unless $main;
-                }
-                $address = $held;
-                return;
-            }
-
-            note_clients( $db, $bin, $conf, \%clients, $domain ) if $ask;
-
-            my $taken = taken();
-            my $own   = $clients{$domain};
-            my $free  = defined $own && $in_bin{$own} && !$taken->{$own} ? $own : first { !$taken->{$_} } @pool_ips;
-            die "IP pool exhausted: no IPs available for $domain" . ( $nic ne q{} ? " on $nic" : q{} ) . "\n" unless $free;
-
-            $db->do( "UPDATE ips SET main = 0 WHERE domain = ? AND kind = 'domain' AND bin = ?", undef, $domain, $bin ) if $guest && $main;
-            $db->do( "INSERT INTO ips (ip, domain, kind, bin, nic, main) VALUES (?, ?, 'domain', ?, ?, ?)", undef, $free, $domain, $bin, $nic, $main );
-            $address = $free;
-            return;
+    return call(
+        $database, 'assign',
+        {
+            domain     => $domain,
+            bin        => $bin,
+            nic        => $nic,
+            main       => $main,
+            guest      => $guest ? 1 : 0,
+            candidates => \@pool_ips,
+            via        => $via,
+            ask        => $ask ? 1 : 0,
+            clients    => \%clients,
         }
     );
-    return $address;
-}
-
-=head2 forget_seeding()
-
-Deletes the record of which hypervisors were seeded, so the next seed asks each
-of them again.  Returns the number of records it deleted.
-
-=cut
-
-sub forget_seeding {
-    my $rows = dbh()->do('DELETE FROM seeded');
-    return $rows && $rows ne '0E0' ? $rows : 0;
-}
-
-=head2 clear_reservations()
-
-Deletes each reservation: the hypervisors, the gateways, and the other machines
-that answered on the network.  Returns the number it deleted.
-
-A reservation records what a seed found, not a decision.  So a reseed makes them
-again from the start, and an address that no longer answers becomes free.
-
-This does not delete assignments, and it must not.  An assignment is a decision:
-a guest uses that address, or a provision is about to.  A machine that is off
-during a sweep does not make its address free.
-
-=cut
-
-sub clear_reservations {
-    return rows_written("DELETE FROM ips WHERE kind = 'reserved'");
 }
 
 =head2 ensure_seeded()
 
-Fills the database from the addresses that are already in use, once for each
+Fills the databases from the addresses that are already in use, once for each
 hypervisor.  Returns what C<seed> returns.
 
 Each entry point can call this.  It skips each hypervisor that it seeded before,
@@ -883,6 +931,135 @@ sub ensure_seeded {
     return seed();
 }
 
+# What the hypervisor $hv, the block $name, uses on the bridges of $nics, its
+# pools by bridge, as the rows of a seed of Provisioner::IPPool::DB: its
+# gateways, and with $sweep, its guests, itself and the other machines that
+# answer.  It asks the hypervisor, and writes nothing.
+my sub discover ( $hv, $name, $nics, $sweep ) {
+
+    # The bridge whose pool holds each address.  The pools of one hypervisor
+    # do not overlap: see guest_pools.
+    my %nic_of;
+    foreach my $nic ( sort keys %$nics ) {
+        $nic_of{$_} = $nic foreach pool_ips( $nics->{$nic} );
+    }
+    my $first = $hv->address_nic;
+    my @rows;
+
+    # Each gateway goes first, so that its row names it as the gateway and
+    # not as one more machine that answered.
+    foreach my $nic ( sort keys %$nics ) {
+        my $gateway = $hv->nic_gateway($nic);
+        push @rows, [ 'reserve', $gateway, "gateway:$gateway", $nic ] if defined $gateway && ( $nic_of{$gateway} // q{} ) eq $nic;
+    }
+
+    # Once per hypervisor.  The marker is written only after the hypervisor
+    # answers everything, so a failure is retried.
+    return @rows unless $sweep;
+
+    # The sweep goes first, because it fills the neighbor table.  libvirt
+    # knows the bridged address of a guest only if the host spoke to it
+    # lately.  It runs on the hypervisor, because this machine can be on a
+    # different network.
+    my $swept = q{};
+    foreach my $nic ( sort keys %$nics ) {
+
+        # An answer to the ping is the main signal.  A REACHABLE entry in
+        # the table is a second one, and the table also gives the hardware
+        # address.  REACHABLE alone is not reliable: an entry can decay to
+        # STALE before the read.
+        #
+        # Do not quote each address.  They are numbers, and a quote inside
+        # the script closes the quoting of the sh -c around it.
+        #
+        # No sudo.  Any user may ping and read the neighbor table, and the
+        # account of a runner has no grant for either.
+        my @mine   = grep { $nic_of{$_} eq $nic } sort keys %nic_of;
+        my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } @mine;
+        $script .= " wait; ip -4 neigh show dev $nic";
+        $swept  .= ( $hv->capture_cmd( qw{sh -c}, $script ) // q{} ) . "\n";
+    }
+
+    # STALE is not a signal.  It outlives the machine, so reserving it
+    # leaks the pool.
+    my %mac  = $swept =~ m/^(\d+(?:[.]\d+){3})\h+lladdr\h+(\S+)/mg;
+    my %live = map { $_ => 1 } ( $swept =~ m/^LIVE\h+(\d+(?:[.]\d+){3})$/mg ), ( $swept =~ m/^(\d+(?:[.]\d+){3})\h+lladdr\h+\S+\N*\bREACHABLE\b/mg );
+
+    # The address of each guest comes from its provision.conf.  libvirt
+    # knows that a guest exists, but not the address it was built with,
+    # and the neighbor table misses a quiet guest and keeps the address of
+    # a destroyed one.  No eval, on purpose: see ensure_seeded.
+    my @names = %nic_of ? map { $_->get_name() } $hv->vmm->list_all_domains() : ();
+    if (@names) {
+        my $dir    = $hv->domain_dir;
+        my $script = join "\n", map {
+            my ( $q, $conf ) = map { Trog::Utils::shell_quote($_) } $_, "$dir/$_/provision.conf";
+            "printf '%s\\t%s\\n' $q \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' $conf 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
+        } @names;
+
+        # Also ask libvirt for the address of each guest.  This finds a
+        # guest whose provision.conf is missing or cannot be read, and the
+        # addresses of its other static adapters.
+        #
+        # This runs virsh on the hypervisor, not Sys::Virt from here.  The
+        # ARP source reads the neighbor table of the client.  This machine
+        # is not on the bridge of the guests, so from here it reports only
+        # the NAT address.
+        #
+        # virsh asks the daemon that list_all_domains asked, by -c, because
+        # without it the login user asks its own session; see local_uri.
+        my $virsh = join q{ }, 'virsh', map { Trog::Utils::shell_quote($_) } $hv->local_connect;
+        $script .= "\n" . join "\n", map {
+            my $q = Trog::Utils::shell_quote($_);
+            "$virsh domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
+        } @names;
+
+        # No sudo.  A provision.conf belongs to the user that ran
+        # new_config, who is usually the login user.  A file that the login
+        # user cannot read is the case above, which virsh covers.  virsh
+        # needs only the access that list_all_domains has.
+        my $said = $hv->capture_cmd( qw{sh -c}, $script ) // q{};
+
+        # A guest also answers on the NAT bridge, and libvirt gives out
+        # those addresses, not this pool.
+        my @found = $said =~ m/^([^\t\n]+)\t(\d+(?:[.]\d+){3})$/mg;
+        while ( my ( $domain, $ip ) = splice( @found, 0, 2 ) ) {
+            my $nic = $nic_of{$ip} // next;
+            push @rows, [ 'record', $ip, $domain, $nic, $nic eq ( $first // q{} ) ? 1 : 0 ];
+        }
+    }
+
+    # The hypervisor goes before the machines that answered, so that its row
+    # names it.  Its address comes from the host part of its libvirt URI.
+    # If that name does not resolve, nothing is reserved for it.
+    my $host   = eval { $hv->ssh_host };
+    my $packed = $host   && Socket::inet_aton($host);
+    my $ip     = $packed && Socket::inet_ntoa($packed);
+    push @rows, [ 'reserve', $ip, "hv:$name", $nic_of{$ip} ] if $ip && $nic_of{$ip};
+
+    # Other machines that answer, for example a printer or a router.  An
+    # address in a pool that answers and that no guest holds belongs to
+    # some other machine, so it is reserved.  The database ignores the
+    # reservation of an address that a guest holds.
+    push @rows, map { [ 'reserve', $_, 'insitu:' . ( $mac{$_} // 'unknown' ), $nic_of{$_} ] } grep { $nic_of{$_} } sort keys %live;
+
+    return @rows;
+}
+
+# The databases that keep the addresses of the bridges of $nics of the
+# hypervisor $name, each once.
+my sub owners ( $databases, $name, $nics ) {
+    return uniq map { $databases->{owner}{"$name\t$_"} } sort keys %$nics;
+}
+
+# @rows, rows of a seed of the hypervisor $name, by the name of the database
+# that keeps the address of each, which is the database of its bridge.
+my sub by_database ( $databases, $name, @rows ) {
+    my %by;
+    push @{ $by{ $databases->{owner}{"$name\t$_->[3]"}{name} } }, $_ foreach @rows;
+    return %by;
+}
+
 =head2 seed()
 
 Records the address of each guest on each hypervisor.  It also reserves the
@@ -890,7 +1067,8 @@ addresses of the hypervisors, their gateways, and other machines that answer.
 Returns the number of addresses it recorded.  The pool and the gateway of each
 static adapter come from the block of its hypervisor, see C<guest_pools> and
 L<Trog::HV/nic_gateway($nic)>, and it dies as C<guest_pools> does.  Each row
-records the bridge whose pool holds the address.
+records the bridge whose pool holds the address, and goes into the database
+that keeps that pool.
 
 The list of guests comes from the hypervisors, not from the configuration.  A
 hypervisor reports what it runs, but somebody can edit a file.  The address
@@ -909,134 +1087,128 @@ C<unknown> if the table has none.  An entry that is out of date reserves an
 address that is free.  That is the safe error, because the other error gives
 out an address that is in use.  Each bridge of C<static_nics> is swept.
 
+What it found on one hypervisor goes into each database in one operation, so
+a hypervisor that does not answer, or a database that cannot be written, leaves
+that hypervisor unmarked, and the next seed asks it again.  A hypervisor is
+seeded when each database that keeps one of its pools marks it.
+
 =cut
 
 sub seed {
-    my $recorded = 0;
-    my $db       = dbh();
-    my %done     = map { $_->[0] => 1 } @{ $db->selectall_arrayref('SELECT source FROM seeded') };
-    my $fleet    = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
-    my %pools    = guest_pools($fleet);
+    my $fleet     = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $databases = databases($fleet);
+    my %pools     = guest_pools($fleet);
 
+    my ( $recorded, %seeded ) = (0);
     foreach my $name ( $fleet->configured ? $fleet->names : () ) {
         my $hv = $fleet->hypervisor($name);
 
         # A hypervisor that gives its guests their own addresses uses none from
         # this pool.  It is usually a cloud, which has no libvirt domain list.
         next if $hv->manages_addresses;
+        my $nics = $pools{$name} // next;
 
-        # The bridge whose pool holds each address.  The pools of one hypervisor
-        # do not overlap: see guest_pools.
-        my $nics = $pools{$name} // {};
-        my %nic_of;
-        foreach my $nic ( sort keys %$nics ) {
-            $nic_of{$_} = $nic foreach pool_ips( $nics->{$nic} );
-        }
-        my $first = $hv->address_nic;
+        my @owners = owners( $databases, $name, $nics );
+        my $done   = all {
+            ( $seeded{ $_->{name} } //= { map { $_ => 1 } @{ call( $_, 'seeded' ) } } )->{"hv:$name"}
+        } @owners;
+        my %rows = by_database( $databases, $name, discover( $hv, $name, $nics, !$done ) );
 
-        # Each gateway goes first, so that its row names it as the gateway and
-        # not as one more machine that answered.
-        foreach my $nic ( sort keys %$nics ) {
-            my $gateway = $hv->nic_gateway($nic);
-            $recorded += reserve( $gateway, "gateway:$gateway", $nic ) if defined $gateway && ( $nic_of{$gateway} // q{} ) eq $nic;
-        }
-
-        # Once per hypervisor.  The marker at the end of this loop is written
-        # only after the hypervisor answers everything, so a failure is retried.
-        next if $done{"hv:$name"};
-
-        # The sweep goes first, because it fills the neighbor table.  libvirt
-        # knows the bridged address of a guest only if the host spoke to it
-        # lately.  It runs on the hypervisor, because this machine can be on a
-        # different network.
-        my $swept = q{};
-        foreach my $nic ( sort keys %$nics ) {
-
-            # An answer to the ping is the main signal.  A REACHABLE entry in
-            # the table is a second one, and the table also gives the hardware
-            # address.  REACHABLE alone is not reliable: an entry can decay to
-            # STALE before the read.
-            #
-            # Do not quote each address.  They are numbers, and a quote inside
-            # the script closes the quoting of the sh -c around it.
-            #
-            # No sudo.  Any user may ping and read the neighbor table, and the
-            # account of a runner has no grant for either.
-            my @mine   = grep { $nic_of{$_} eq $nic } sort keys %nic_of;
-            my $script = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } grep { m/\A\d+(?:[.]\d+){3}\z/ } @mine;
-            $script .= " wait; ip -4 neigh show dev $nic";
-            $swept  .= ( $hv->capture_cmd( qw{sh -c}, $script ) // q{} ) . "\n";
-        }
-
-        # STALE is not a signal.  It outlives the machine, so reserving it
-        # leaks the pool.
-        my %mac  = $swept =~ m/^(\d+(?:[.]\d+){3})\h+lladdr\h+(\S+)/mg;
-        my %live = map { $_ => 1 } ( $swept =~ m/^LIVE\h+(\d+(?:[.]\d+){3})$/mg ), ( $swept =~ m/^(\d+(?:[.]\d+){3})\h+lladdr\h+\S+\N*\bREACHABLE\b/mg );
-
-        # The address of each guest comes from its provision.conf.  libvirt
-        # knows that a guest exists, but not the address it was built with,
-        # and the neighbor table misses a quiet guest and keeps the address of
-        # a destroyed one.  No eval, on purpose: see ensure_seeded.
-        my @names = %nic_of ? map { $_->get_name() } $hv->vmm->list_all_domains() : ();
-        if (@names) {
-            my $dir    = $hv->domain_dir;
-            my $script = join "\n", map {
-                my ( $q, $conf ) = map { Trog::Utils::shell_quote($_) } $_, "$dir/$_/provision.conf";
-                "printf '%s\\t%s\\n' $q \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' $conf 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
-            } @names;
-
-            # Also ask libvirt for the address of each guest.  This finds a
-            # guest whose provision.conf is missing or cannot be read, and the
-            # addresses of its other static adapters.
-            #
-            # This runs virsh on the hypervisor, not Sys::Virt from here.  The
-            # ARP source reads the neighbor table of the client.  This machine
-            # is not on the bridge of the guests, so from here it reports only
-            # the NAT address.
-            #
-            # virsh asks the daemon that list_all_domains asked, by -c, because
-            # without it the login user asks its own session; see local_uri.
-            my $virsh = join q{ }, 'virsh', map { Trog::Utils::shell_quote($_) } $hv->local_connect;
-            $script .= "\n" . join "\n", map {
-                my $q = Trog::Utils::shell_quote($_);
-                "$virsh domifaddr $q --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$_\t|\"";
-            } @names;
-
-            # No sudo.  A provision.conf belongs to the user that ran
-            # new_config, who is usually the login user.  A file that the login
-            # user cannot read is the case above, which virsh covers.  virsh
-            # needs only the access that list_all_domains has.
-            my $said = $hv->capture_cmd( qw{sh -c}, $script ) // q{};
-
-            # A guest also answers on the NAT bridge, and libvirt gives out
-            # those addresses, not this pool.
-            my @found = $said =~ m/^([^\t\n]+)\t(\d+(?:[.]\d+){3})$/mg;
-            while ( my ( $domain, $ip ) = splice( @found, 0, 2 ) ) {
-                my $nic = $nic_of{$ip} // next;
-                $recorded += record( $ip, $domain, $nic, $nic eq ( $first // q{} ) );
-            }
-        }
-
-        # The hypervisor goes before the machines that answered, so that its row
-        # names it.  Its address comes from the host part of its libvirt URI.
-        # If that name does not resolve, nothing is reserved for it.
-        my $host   = eval { $hv->ssh_host };
-        my $packed = $host   && Socket::inet_aton($host);
-        my $ip     = $packed && Socket::inet_ntoa($packed);
-        $recorded += reserve( $ip, "hv:$name", $nic_of{$ip} ) if $ip && $nic_of{$ip};
-
-        # Other machines that answer, for example a printer or a router.  An
-        # address in a pool that answers and that no guest holds belongs to
-        # some other machine, so it is reserved.
-        my $already = taken();
-        foreach my $found ( grep { $nic_of{$_} && !$already->{$_} } sort keys %live ) {
-            $recorded += reserve( $found, 'insitu:' . ( $mac{$found} // 'unknown' ), $nic_of{$found} );
-        }
-
-        $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, "hv:$name" );
+        $recorded += call( $_, 'seed', { rows => $rows{ $_->{name} } // [], mark => $done ? [] : ["hv:$name"] } ) foreach @owners;
     }
 
     return $recorded;
+}
+
+=head2 $result = reseed(%opts)
+
+What F<bin/reseed_ips> does: asks each hypervisor what it uses, and then, in
+one transaction in each database, forgets which hypervisors were seeded,
+deletes each reservation and writes what the hypervisors said.  With
+C<prune>, it also releases each domain that no hypervisor of the fleet runs.
+With C<dryrun>, each database rolls its transaction back.
+
+Every hypervisor is asked before any database is written, so a hypervisor that
+does not answer changes nothing.  A database that fails leaves the ones before
+it reseeded.
+
+Returns a hash reference of C<before> and C<after>, what C<taken> says before
+and after, C<on> and C<on_after>, each address of a guest to its bridge, before
+and after, and C<pruned>, the
+number of domains released.  Dies with C<prune> and no fleet, because then
+nothing can say which guests run, and every assignment would go.
+
+=cut
+
+sub reseed (%opts) {
+    my $fleet     = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $databases = databases($fleet);
+    my %pools     = guest_pools($fleet);
+
+    my @running;
+    if ( $opts{prune} ) {
+        die "--prune needs hypervisors.conf: with no fleet, nothing can say which guests are running, and every assignment would be released.\n"
+          unless $fleet->configured;
+        @running = uniq sort map { $fleet->hypervisor($_)->guest_names } $fleet->names;
+    }
+
+    my %seeds;
+    foreach my $name ( $fleet->configured ? $fleet->names : () ) {
+        my $hv = $fleet->hypervisor($name);
+        next if $hv->manages_addresses;
+        my $nics = $pools{$name} // next;
+
+        my %rows = by_database( $databases, $name, discover( $hv, $name, $nics, 1 ) );
+        push @{ $seeds{ $_->{name} } }, { rows => $rows{ $_->{name} } // [], mark => ["hv:$name"] } foreach owners( $databases, $name, $nics );
+    }
+
+    my %out = ( ( map { $_ => {} } qw{before after on on_after} ), pruned => 0 );
+    foreach my $database ( @{ $databases->{list} } ) {
+        my $said = call( $database, 'reseed', { seeds => $seeds{ $database->{name} } // [], ( $opts{prune} ? ( prune => \@running ) : () ), dryrun => $opts{dryrun} ? 1 : 0 } );
+        $out{$_} = { %{ $out{$_} }, %{ $said->{$_} } } foreach qw{before after on on_after};
+        $out{pruned} += $said->{pruned};
+    }
+    return \%out;
+}
+
+=head2 $result = migrate($name, $from, %opts)
+
+Copies the rows that belong to the hypervisor C<$name> out of the database at
+C<$from> on this machine, the one F<ips.db> from before each hypervisor kept
+its own, into the database of C<$name>, with the C<migrate> of
+L<Provisioner::IPPool::DB>.  It opens C<$from> read only.
+
+A row belongs to C<$name> when it is in the C<guests> bin, an address or a
+reservation, on a network whose addresses C<$name> keeps, or when its bin is
+one of the array reference C<bins> in C<%opts>, the bins with C<via> whose
+guest runs on C<$name>.  When only one hypervisor keeps a database, every row
+belongs to it.  It does not copy which hypervisors were seeded, so the next
+seed asks each one again.  With C<dryrun>, it writes nothing.
+
+Returns C<added>, C<kept> and C<skipped>, the numbers of rows written, already
+there, and left for another hypervisor.  Dies as that operation does, and when
+C<$from> cannot be read.
+
+=cut
+
+sub migrate ( $name, $from, %opts ) {
+    my $fleet     = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $databases = databases($fleet);
+    my $database  = database_of( $databases, $name );
+    my %pools     = $databases->{configured} ? guest_pools($fleet) : ();
+
+    my @blocks = map { my ( $hv, $nic ) = split m/\t/, $_, 2; blocks( $pools{$hv}{$nic} ) } grep { $databases->{owner}{$_} == $database } sort keys %{ $databases->{owner} };
+    my %bins   = map { $_ => 1 } @{ $opts{bins} // [] };
+    my $every  = @{ $databases->{list} } == 1;
+
+    my $rows = eval {
+        my $old = DBI->connect( "dbi:SQLite:dbname=$from", q{}, q{}, { RaiseError => 1, PrintError => 0, sqlite_open_flags => SQLITE_OPEN_READONLY } );
+        $old->selectall_arrayref( 'SELECT ip, domain, kind, bin, nic, main, assigned_at FROM ips ORDER BY ip', { Slice => {} } );
+    } or die "Could not read the addresses of $from: $@";
+
+    my @mine = grep { $every || $bins{ $_->{bin} } || ( $_->{bin} eq $GUESTS && @blocks && Net::CIDR::cidrlookup( $_->{ip}, @blocks ) ) } @$rows;
+    my $said = call( $database, 'migrate', { rows => \@mine, dryrun => $opts{dryrun} ? 1 : 0 } );
+    return { %$said, skipped => @$rows - @mine };
 }
 
 1;

@@ -39,6 +39,17 @@ ip_pool_br0    = 192.0.2.64/26
 gateway_br0    = 192.0.2.1
 prefix_br0     = 24
 
+; The address database of this hypervisor, as a path on the hypervisor.  Each
+; hypervisor keeps its own, and only processes on it open it: bin/ippool runs
+; there, over ssh, for a runner on another machine.  A remote hypervisor with a
+; pool needs it.  Do not name a file that another machine mounts and writes,
+; such as a configuration directory that a runner shares, because SQLite cannot
+; keep the writers of two machines apart.  bin/ippool runs on ip_perl, which is
+; the perl on the PATH by default, and needs DBI and DBD::SQLite there.  See
+; MIGRATION in perldoc Provisioner::IPPool.
+ip_db          = /var/lib/trog-provisioner/ips.db
+;ip_perl        = /usr/bin/perl
+
 ;
 ; Where the storage pool lives on that machine, and what it is called.  The
 ; defaults are tf_disks at /opt/terraform/disks -- historical, from when

@@ -58,8 +58,11 @@ machine that the provisioner does not build.
 
 =head2 WHERE ASSIGNMENTS ARE KEPT
 
-Assignments are in F<ips.db> in the configuration directory.  Two runs at the
-same time cannot choose the same address.  L<Provisioner::IPPool> tells how.
+Assignments are in the F<ips.db> of the hypervisor that keeps the bin, at the
+C<ip_db> of its block, and only that hypervisor opens it.  Without
+F<hypervisors.conf>, they are in the F<ips.db> of the configuration directory.
+Two runs at the same time cannot choose the same address.
+L<Provisioner::IPPool/ONE DATABASE FOR EACH HYPERVISOR> tells how.
 
 =cut
 

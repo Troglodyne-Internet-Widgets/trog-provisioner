@@ -1,0 +1,137 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::ippool;
+
+#ABSTRACT: Read or write the address database of a hypervisor, on that hypervisor.
+
+# 5.036 and not 5.041: a copy of this runs on the system perl of each
+# hypervisor that keeps an address database.  See Provisioner::IPPool::Remote.
+use 5.036;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+# The copy on a hypervisor runs with -I to the lib of its kit, and that
+# hypervisor need not have FindBin::libs.
+use if eval { require FindBin::libs; 1 }, 'FindBin::libs';
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+# JSON::PP is the one JSON module of the system perl of a hypervisor.
+use JSON::PP();    ## no critic (PreferredModules)
+
+=head1 USAGE
+
+    ippool --hypervisor=NAME OPERATION [JSON]
+    ippool --hypervisor=NAME migrate --from=OLD_DB [--bin=BIN ...] [--dryrun]
+    ippool --db=PATH [--create] OPERATION [JSON]
+
+Run one operation on the address database of a hypervisor, and print its
+result as JSON.  C<JSON> is the object of its arguments, and defaults to the
+standard input, or to C<{}> when that is empty.
+
+Each libvirt hypervisor keeps its own F<ips.db>, and only processes on that
+hypervisor open it.  L<Provisioner::IPPool::DB> says why.  So everything that
+touches the database comes here.  L<Provisioner::IPPool> calls the same code,
+and the rest of the tree calls L<Provisioner::IPPool>.
+
+=head2 --hypervisor
+
+Names the block of F<hypervisors.conf> whose database to use.  The database is
+at the C<ip_db> of the block.  When the hypervisor is this machine, the
+operation runs here.  Otherwise it runs on the hypervisor, over the connection
+of L<Trog::HV>, in a copy of this script and what it loads, which
+L<Provisioner::IPPool::Remote> puts there when the hypervisor does not have the
+copy of this checkout.
+
+=head2 --db
+
+Runs the operation here, on the database at C<PATH>.  This is what the copy on
+the hypervisor runs.  It prints C<{"result": ...}>, or C<{"error": "..."}> and
+exits 1.  It refuses a database that is not there unless C<--create> is given,
+or the operation is C<init>, because an empty database gives out addresses
+that guests already use.
+
+=head2 OPERATIONS
+
+C<check>, C<init>, C<assignments>, C<taken>, C<bridges>, C<held_by>,
+C<main_addresses>, C<nic_addresses>, C<reserve>, C<record>, C<release>,
+C<refresh_clients>, C<assign>, C<forget_seeding>, C<clear_reservations>,
+C<seeded>, C<seed>, C<reseed> and C<migrate>.  L<Provisioner::IPPool::DB>
+describes each one and its arguments.
+
+C<check> says which perl and which SQLite run there, and works before there is
+a database.  C<init> makes an empty database.
+
+=head2 migrate
+
+With C<--from>, C<migrate> copies the rows that belong to the hypervisor out
+of the database C<OLD_DB> on this machine, which it opens read only: each
+address of the C<guests> bin, and each reservation, on a network whose
+addresses this hypervisor keeps, and each address of the bins named with
+C<--bin>.  When the fleet has one hypervisor that keeps addresses, every bin
+is its.  It does not copy which hypervisors were seeded, so the next run asks
+each one again.  With C<--dryrun>, it writes nothing.
+L<Provisioner::IPPool/MIGRATION> has the steps.
+
+=cut
+
+my sub said ( $json, $out ) {
+    print $json->encode($out) . "\n";
+    return defined $out->{error} ? 1 : 0;
+}
+
+# The arguments of the operation: the first of @args, or else standard input.
+my sub arguments ( $json, @args ) {
+    my $text = @args ? $args[0] : do { local $/ = undef; <STDIN> // q{} };    ## no critic (InputOutput::ProhibitExplicitStdin) -- what the caller sends, not a prompt: see Provisioner::IPPool::Remote
+    return $text =~ m/\S/ ? $json->decode($text) : {};
+}
+
+sub main (@args) {
+    my ( $db, $create, $hypervisor, $from, @bins, $dryrun, $help );
+    GetOptionsFromArray(
+        \@args,
+        'db=s'         => \$db,
+        'create'       => \$create,       ## no critic (ValuesAndExpressions::PreventSQLInjection) -- the name of an option, not SQL
+        'hypervisor=s' => \$hypervisor,
+        'from=s'       => \$from,
+        'bin=s'        => \@bins,
+        'dryrun'       => \$dryrun,
+        'help'         => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    my $op = shift @args;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Name an operation' ) unless defined $op;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'Name one of --db and --hypervisor' )
+      unless defined $db xor defined $hypervisor;
+
+    my $json = JSON::PP->new->canonical->allow_nonref;
+
+    # Here, the copy on a hypervisor answers in JSON whatever happens, so that
+    # the caller can tell a refusal from a hypervisor that did not answer.  The
+    # module loads here and not at the top, so that a missing DBD::SQLite is
+    # an answer too.
+    if ( defined $db ) {
+        my $result;
+        my $ok = eval {
+            require Provisioner::IPPool::DB;
+            $result = Provisioner::IPPool::DB::run( $db, $op, arguments( $json, @args ), create => $create );
+            1;
+        };
+        return said( $json, $ok ? { result => $result } : { error => $@ || "The $op of bin/ippool failed\n" } );
+    }
+
+    require Provisioner::IPPool;
+    my $result =
+      $op eq 'migrate' && defined $from
+      ? Provisioner::IPPool::migrate( $hypervisor, $from, bins => \@bins, dryrun => $dryrun )
+      : Provisioner::IPPool::on_hypervisor( $hypervisor, $op, arguments( $json, @args ) );
+    return said( $json, { result => $result } );
+}
+
+exit main(@ARGV) unless caller;
+
+1;

@@ -64,7 +64,8 @@ In the `_global` of `_base` in `recipes.yaml`:
   when the guest has no address yet to route to.
 
 `bin/assign_ip` prints or assigns the static address of a domain.  Assignments
-are kept in `ips.db`: see `perldoc Provisioner::IPPool`.
+are kept in `ips.db`, one for each hypervisor at the `ip_db` of its block, which
+only that hypervisor opens: see `perldoc Provisioner::IPPool`, and `bin/ippool`.
 
 ## Static addresses for VPN clients
 

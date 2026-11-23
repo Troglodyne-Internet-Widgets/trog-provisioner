@@ -33,6 +33,13 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use_ok('Provisioner::IPPool');
 
+# The database of this machine, which is the database without a fleet, and an
+# operation of Provisioner::IPPool::DB on it.
+sub local_db () { return Provisioner::IPPool::DB::dbh( Provisioner::IPPool::db_path(), create => 1 ) }
+sub local_op ( $op, %args ) { return Provisioner::IPPool::DB::run( Provisioner::IPPool::db_path(), $op, \%args, create => 1 ) }
+sub reserve  ( $ip, $name, $nic   = undef ) { return local_op( 'reserve', ip => $ip, name => $name, nic => $nic ) }
+sub record   ( $ip, $domain, $nic = undef, $is_main = 1 ) { return local_op( 'record', ip => $ip, domain => $domain, nic => $nic, main => $is_main ) }
+
 subtest 'pool_ips: explicit addresses' => sub {
     my @ips = Provisioner::IPPool::pool_ips( { addresses => '10.0.0.1 10.0.0.2 10.0.0.3' } );
     is_deeply \@ips, [qw{10.0.0.1 10.0.0.2 10.0.0.3}], 'parses space-separated addresses';
@@ -156,8 +163,8 @@ subtest 'assign: reservations are not handed out' => sub {
 
     # The hypervisor and the gateway live in here so that nothing is ever given
     # an address something else is already answering on.
-    is( Provisioner::IPPool::reserve( '10.9.9.10', 'gateway:10.9.9.10' ), 1, 'reserved' );
-    is( Provisioner::IPPool::reserve( '10.9.9.10', 'gateway:10.9.9.10' ), 0, 'and saying so twice changes nothing' );
+    is( reserve( '10.9.9.10', 'gateway:10.9.9.10' ), 1, 'reserved' );
+    is( reserve( '10.9.9.10', 'gateway:10.9.9.10' ), 0, 'and saying so twice changes nothing' );
 
     is( Provisioner::IPPool::assign( 'a.test', $pool ), '10.9.9.11', 'the reserved one is skipped' );
 };
@@ -198,7 +205,7 @@ subtest 'release: gives it back, and only for a guest' => sub {
 
     # A reservation is not a guest, and bin/destroy must not be able to hand the
     # gateway out by being pointed at it.
-    Provisioner::IPPool::reserve( '10.9.9.11', 'gateway:10.9.9.11' );
+    reserve( '10.9.9.11', 'gateway:10.9.9.11' );
     is_deeply( Provisioner::IPPool::release('gateway:10.9.9.11'), {}, 'and a reservation is not released' );
     is( Provisioner::IPPool::taken()->{'10.9.9.11'}, 'gateway:10.9.9.11', 'it is still spoken for' );
 };
@@ -208,7 +215,7 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
     my $pool = { addresses => '10.9.9.10 10.9.9.11' };
 
     Provisioner::IPPool::assign( 'a.test', $pool );
-    Provisioner::IPPool::reserve( '10.9.9.11', 'hv:somewhere' );
+    reserve( '10.9.9.11', 'hv:somewhere' );
 
     is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '10.9.9.10' }, 'the reservation is not a domain' );
     is_deeply(
@@ -256,7 +263,7 @@ subtest 'assign: an address from before the database knew bridges is kept' => su
     fresh_db();
 
     # What schema/ips.v2.update.sql leaves of a row from before it.
-    Provisioner::IPPool::record( '192.0.2.11', 'old.test', q{}, 1 );
+    record( '192.0.2.11', 'old.test', q{}, 1 );
     is_deeply( Provisioner::IPPool::assignments(), { 'old.test' => '192.0.2.11' }, 'it is still the address of its guest' );
 
     is( Provisioner::IPPool::assign( 'old.test', two_bridges('br0') ), '192.0.2.11', 'and the bridge whose pool holds it gets it' );
@@ -266,26 +273,26 @@ subtest 'assign: an address from before the database knew bridges is kept' => su
 
 subtest 'record: a reseed gives an address from before bridges its bridge' => sub {
     fresh_db();
-    my $db = Provisioner::IPPool::dbh();
+    my $db = local_db();
 
-    Provisioner::IPPool::record( '192.0.2.11', 'old.test', q{}, 1 );
-    is( Provisioner::IPPool::record(qw{192.0.2.11 old.test br0 1}), 1, 'the hypervisor reporting it on br0 counts as a write' );
+    record( '192.0.2.11', 'old.test', q{}, 1 );
+    is( record(qw{192.0.2.11 old.test br0 1}), 1, 'the hypervisor reporting it on br0 counts as a write' );
     is_deeply( Provisioner::IPPool::nic_addresses('old.test'), { br0        => '192.0.2.11' }, 'and the row records the bridge now' );
     is_deeply( Provisioner::IPPool::assignments(),             { 'old.test' => '192.0.2.11' }, 'and is still the address of its guest' );
-    is( Provisioner::IPPool::record(qw{192.0.2.11 old.test br0 1}), 0, 'a second report writes nothing' );
+    is( record(qw{192.0.2.11 old.test br0 1}), 0, 'a second report writes nothing' );
 
-    Provisioner::IPPool::record( '192.0.2.12', 'other.test', q{}, 1 );
-    is( Provisioner::IPPool::record(qw{192.0.2.12 moved.test br0 1}),         0,   'another domain at that address gets nothing' );
+    record( '192.0.2.12', 'other.test', q{}, 1 );
+    is( record(qw{192.0.2.12 moved.test br0 1}),                              0,   'another domain at that address gets nothing' );
     is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '192.0.2.12'}), q{}, 'and the row of the first keeps no bridge' );
 
-    Provisioner::IPPool::record( '192.0.2.13', 'two.test', q{}, 1 );
-    Provisioner::IPPool::record(qw{192.0.2.14 two.test br0 0});
-    is( Provisioner::IPPool::record(qw{192.0.2.13 two.test br0 1}),           0,   'a domain that has an address on br0 already gets nothing' );
+    record( '192.0.2.13', 'two.test', q{}, 1 );
+    record(qw{192.0.2.14 two.test br0 0});
+    is( record(qw{192.0.2.13 two.test br0 1}),                                0,   'a domain that has an address on br0 already gets nothing' );
     is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '192.0.2.13'}), q{}, 'and the old row keeps no bridge, rather than break the one address per bridge' );
 
-    Provisioner::IPPool::reserve(qw{192.0.2.1 gateway:192.0.2.1 br0});
+    reserve(qw{192.0.2.1 gateway:192.0.2.1 br0});
     is_deeply(
-        Provisioner::IPPool::bridges(),
+        local_op('bridges'),
         { '192.0.2.11' => 'br0', '192.0.2.12' => q{}, '192.0.2.13' => q{}, '192.0.2.14' => 'br0' },
         'bridges gives each address of a guest its bridge, empty where there is none, and leaves out a reservation'
     );
@@ -298,7 +305,7 @@ subtest 'dbh: a database from before bridges opens, and keeps its rows' => sub {
     # them, with one guest and one reservation.
     require DBI;
     my $old        = DBI->connect( 'dbi:SQLite:dbname=' . Provisioner::IPPool::db_path(), q{}, q{}, { RaiseError => 1 } );
-    my $dir        = File::Basename::dirname( Provisioner::IPPool::schema_path() );
+    my $dir        = File::Basename::dirname( Provisioner::IPPool::DB::schema_path() );
     my @statements = map { split m/;\s*$/m, File::Slurper::read_text("$dir/$_") } qw{ips.sql ips.v1.update.sql};
     $old->do($_) foreach grep { m/\S/ } @statements;
     $old->do('PRAGMA user_version = 1');
@@ -307,8 +314,8 @@ subtest 'dbh: a database from before bridges opens, and keeps its rows' => sub {
     Trog::SQLite::forget();
 
     is_deeply( Provisioner::IPPool::assignments(), { 'old.test' => '192.0.2.11' }, 'the guest is still in ipmap' );
-    is( Provisioner::IPPool::taken()->{'192.0.2.1'},                                                   'gateway:192.0.2.1', 'and the reservation still holds its address' );
-    is( Provisioner::IPPool::dbh()->selectrow_array(q{SELECT nic FROM ips WHERE domain = 'old.test'}), q{},                 'with no bridge, until the guest asks for its address' );
+    is( Provisioner::IPPool::taken()->{'192.0.2.1'},                                   'gateway:192.0.2.1', 'and the reservation still holds its address' );
+    is( local_db()->selectrow_array(q{SELECT nic FROM ips WHERE domain = 'old.test'}), q{},                 'with no bridge, until the guest asks for its address' );
 };
 
 # --- Bins ----------------------------------------------------------------------
@@ -493,7 +500,7 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     # The schema as version 2 left it: the files up to v2 in a directory of
     # their own, which Trog::SQLite takes as the whole of the schema.
     my $schema = File::Temp::tempdir( CLEANUP => 1 );
-    my $source = File::Basename::dirname( Provisioner::IPPool::schema_path() );
+    my $source = File::Basename::dirname( Provisioner::IPPool::DB::schema_path() );
     File::Slurper::Temp::write_text( "$schema/$_", File::Slurper::read_text("$source/$_") ) for qw{ips.sql ips.v1.update.sql ips.v2.update.sql};
     my $old = Trog::SQLite::dbh( "$schema/ips.sql", Provisioner::IPPool::db_path() );
     $old->do( q{INSERT INTO ips (ip, domain, kind, bin, nic, main, noted) VALUES (?, ?, ?, ?, ?, ?, ?)}, undef, @$_ )
@@ -505,7 +512,7 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
       );
     Trog::SQLite::forget();
 
-    my $db   = Provisioner::IPPool::dbh();
+    my $db   = local_db();
     my $rows = $db->selectall_arrayref('SELECT ip, domain, kind, bin, nic, main, assigned_at FROM ips ORDER BY assigned_at');
     is_deeply(
         $rows,
@@ -521,15 +528,15 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     is_deeply( $db->selectcol_arrayref('SELECT name FROM address_bins ORDER BY name'), [qw{guests vpnclients}], 'each bin is stored once' );
     is_deeply( $db->selectcol_arrayref('SELECT name FROM address_nics ORDER BY name'), [ q{}, qw{br0 virbr1} ], 'and each bridge' );
 
-    is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br0}),                   1, 'a write through the view counts its row' );
-    is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br0}),                   0, 'and one that it ignores counts none' );
-    is( Provisioner::IPPool::reserve(qw{10.9.9.2 hv:somewhere br7}),                   0, 'also when the write it ignored added the name of a new bridge' );
+    is( reserve(qw{10.9.9.2 hv:somewhere br0}),                                        1, 'a write through the view counts its row' );
+    is( reserve(qw{10.9.9.2 hv:somewhere br0}),                                        0, 'and one that it ignores counts none' );
+    is( reserve(qw{10.9.9.2 hv:somewhere br7}),                                        0, 'also when the write it ignored added the name of a new bridge' );
     is( $db->selectrow_array(q{SELECT count(*) FROM address_nics WHERE name = 'br0'}), 1, 'without a second row for the bridge' );
-    Provisioner::IPPool::record(qw{10.9.9.20 b.test br9});
+    record(qw{10.9.9.20 b.test br9});
     is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '10.9.9.20'}), 'br9', 'a bridge that it has not seen is added' );
     $db->do(q{UPDATE ips SET nic = 'br0' WHERE ip = '10.9.9.20'});
     is( $db->selectrow_array(q{SELECT nic FROM ips WHERE ip = '10.9.9.20'}), 'br0', 'an update through the view changes the row' );
-    is( Provisioner::IPPool::clear_reservations(),                           2,     'and a delete through it counts what it took away' );
+    is( local_op('clear_reservations'),                                      2,     'and a delete through it counts what it took away' );
 
     like( exception { $db->do(q{INSERT INTO ips (ip, domain, kind) VALUES ('10.9.9.30', 'c.test', 'borrowed')}) }, qr/ips:[ ]no[ ]such[ ]kind/, 'a kind that is not in the list is refused' );
 
@@ -539,14 +546,14 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     # The handle is shared, so a hook that somebody else set must survive the count.
     my $theirs = sub { return };
     $db->sqlite_update_hook($theirs);
-    Provisioner::IPPool::reserve(qw{10.9.9.3 hv:elsewhere br0});
+    reserve(qw{10.9.9.3 hv:elsewhere br0});
     is( $db->sqlite_update_hook(undef), $theirs, 'the update hook that was there before a count is there after it' );
 
     # Without its trigger, a write to the view fails, which is the last thing
     # that this database is asked.
     $db->do('DROP TRIGGER ips_insert');
     $db->sqlite_update_hook($theirs);
-    like( exception { Provisioner::IPPool::reserve(qw{10.9.9.4 hv:elsewhere br0}) }, qr/view/, 'a write that fails dies' );
+    like( exception { reserve(qw{10.9.9.4 hv:elsewhere br0}) }, qr/view/, 'a write that fails dies' );
     is( $db->sqlite_update_hook(undef), $theirs, 'and puts the hook back too' );
 };
 
@@ -556,6 +563,19 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     package FakeHV;
     sub new               ( $class, %said ) { return bless {%said}, $class }
     sub manages_addresses ($self)           { return $self->{cloud} // 0 }
+
+    # This machine, with the database of the configuration directory, unless
+    # it is remote, and then it keeps the database at its ip_db.
+    sub is_local ($self) { return $self->{remote} ? 0 : 1 }
+    sub ip_db    ($self) { return $self->{ip_db} }
+    sub name     ($self) { return $self->{name} }
+    sub describe ($self) { return 'the hypervisor at qemu+ssh://' . ( $self->{name} // 'nowhere' ) . '.test/system' }
+
+    # The guests that it runs, or the error of a hypervisor that cannot be asked.
+    sub domain_exists ( $self, $domain ) {
+        die $self->{down} if $self->{down};
+        return ( grep { $_ eq $domain } @{ $self->{runs} // [] } ) ? 1 : 0;
+    }
 
     # The pool of each static adapter: pools by bridge, or one pool on br0.
     sub static_pools ($self) {
@@ -657,7 +677,7 @@ SAID
     ok( !exists $taken->{'192.0.2.61'}, 'nor is one that never completed' );
 
     is( $recorded, scalar keys %$taken, 'and it counts each row it wrote' );
-    is_deeply( Provisioner::IPPool::dbh()->selectall_arrayref('SELECT source FROM seeded'), [ ['hv:hv1'] ], 'the hypervisor is marked as seeded' );
+    is_deeply( local_db()->selectall_arrayref('SELECT source FROM seeded'), [ ['hv:hv1'] ], 'the hypervisor is marked as seeded' );
 };
 
 subtest 'seed: each hypervisor is seeded from its own pool, with its own gateway' => sub {
@@ -741,7 +761,7 @@ subtest 'seed: each bridge is swept, and each address recorded on the bridge of 
     my @swept = map { m/neigh[ ]show[ ]dev[ ]([\w.-]+)/ ? $1 : () } @{ $hv->{asked} };
     is_deeply( [ sort @swept ], [qw{br0 virbr1}], 'the neighbours of each bridge are asked' );
 
-    my $rows = Provisioner::IPPool::dbh()->selectall_hashref( 'SELECT ip, domain, nic, main FROM ips', 'ip' );
+    my $rows = local_db()->selectall_hashref( 'SELECT ip, domain, nic, main FROM ips', 'ip' );
     is_deeply(
         { map { $_ => [ @{ $rows->{$_} }{qw{domain nic main}} ] } keys %$rows },
         {
@@ -813,8 +833,8 @@ subtest 'a seed that could not finish is retried, not remembered' => sub {
     # reached, and the database was left holding a single reservation.  Asking
     # "are there any rows at all" then said it was seeded, so every guest on the
     # fleet stayed missing and no later run went looking again.
-    my $db = Provisioner::IPPool::dbh();
-    Provisioner::IPPool::reserve( '10.9.9.10', 'hv:somewhere' );
+    my $db = local_db();
+    reserve( '10.9.9.10', 'hv:somewhere' );
 
     my $done = $db->selectall_arrayref('SELECT source FROM seeded');
     is_deeply( $done, [], 'a row is not a finished seed' );
@@ -925,6 +945,148 @@ subtest 'address_to_int and int_to_address: an address and its integer' => sub {
         my $shown = $bad // 'undef';
         like( exception { Provisioner::IPPool::int_to_address($bad) }, qr/is[ ]not[ ]an[ ]IPv4[ ]address[ ]as[ ]an[ ]integer/, "$shown is refused" );
     }
+};
+
+# --- One database for each hypervisor ------------------------------------------
+#
+# Each hypervisor keeps its own ips.db, and only processes on it open it.  The
+# far side is played by a Remote::call that runs the operation on a database
+# of this directory for each hypervisor, and notes who was asked what.
+
+# A fleet of %hvs, each a FakeHV by name, and a Remote::call that answers for
+# the remote ones.  Returns the mocks, and the list of [hypervisor, operation]
+# that went to the far side.
+sub with_fleet (%hvs) {
+    fresh_db();
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    my @asked;
+    my $hypervisors = Test::MockModule->new('Trog::Hypervisors');
+    $hypervisors->redefine( load => sub { return FakeFleet->new(%hvs) } );
+    my $remote = Test::MockModule->new('Provisioner::IPPool::Remote');
+    $remote->redefine(
+        call => sub ( $hv, $path, $op, $args, %opts ) {
+            push @asked, [ $hv->name, $op ];
+            die "Could not ask " . $hv->name . " for the addresses that it keeps: $hv->{unreachable}" if $hv->{unreachable};
+            return Provisioner::IPPool::DB::run( $dir . ( $path =~ s{/}{_}gr ), $op, $args, create => 1 );
+        }
+    );
+    $hvs{$_}{name} = $_ for keys %hvs;
+    return { mocks => [ $hypervisors, $remote ], asked => \@asked };
+}
+
+subtest 'assign runs where the database of the pool is: here for this machine, and there for a remote one' => sub {
+    my $faked = with_fleet(
+        hv1 => FakeHV->new( pool => { addresses => '192.0.2.10' } ),
+        hv2 => FakeHV->new( pool => { addresses => '198.51.100.10' }, remote => 1, ip_db => '/bogus/hv2/ips.db' ),
+    );
+    my $fleet = Trog::Hypervisors->load('/bogus');
+
+    is( Provisioner::IPPool::assign( 'a.test.test', Provisioner::IPPool::pool_of( $fleet->hypervisor('hv1'), {} ) ), '192.0.2.10', 'an address of this machine' );
+    is_deeply( $faked->{asked}, [], 'is chosen here' );
+    is( Provisioner::IPPool::held_by('a.test.test'), '192.0.2.10', 'in the database of the configuration directory' );
+
+    @{ $faked->{asked} } = ();
+    is( Provisioner::IPPool::assign( 'b.test.test', Provisioner::IPPool::pool_of( $fleet->hypervisor('hv2'), {} ) ), '198.51.100.10', 'and an address of the remote one' );
+    is_deeply( $faked->{asked}, [ [qw{hv2 assign}] ], 'there, in one operation' );
+    ok( !local_db()->selectrow_array(q{SELECT ip FROM ips WHERE domain = 'b.test.test'}), 'and not here' );
+};
+
+subtest 'a read of the fleet asks every database, and dies naming one that does not answer' => sub {
+    my $faked = with_fleet(
+        hv1 => FakeHV->new( pool => { addresses => '192.0.2.10' },    remote => 1, ip_db => '/bogus/hv1/ips.db' ),
+        hv2 => FakeHV->new( pool => { addresses => '198.51.100.10' }, remote => 1, ip_db => '/bogus/hv2/ips.db' ),
+    );
+    my $fleet = Trog::Hypervisors->load('/bogus');
+    Provisioner::IPPool::assign( 'a.test.test', Provisioner::IPPool::pool_of( $fleet->hypervisor('hv1'), {} ) );
+    Provisioner::IPPool::assign( 'b.test.test', Provisioner::IPPool::pool_of( $fleet->hypervisor('hv2'), {} ) );
+
+    is_deeply( Provisioner::IPPool::assignments(),                 { 'a.test.test' => '192.0.2.10', 'b.test.test' => '198.51.100.10' }, 'the addresses of both' );
+    is_deeply( Provisioner::IPPool::main_addresses('b.test.test'), { guests        => '198.51.100.10' },                                'and of one domain, wherever it is' );
+
+    $fleet->hypervisor('hv2')->{unreachable} = "no route\n";
+    like( exception { Provisioner::IPPool::taken() },       qr/Could[ ]not[ ]ask[ ]hv2/, 'one that cannot be asked stops the read, and is named' );
+    like( exception { Provisioner::IPPool::assignments() }, qr/Could[ ]not[ ]ask[ ]hv2/, 'rather than a fleet with a hole in it' );
+    delete $fleet->hypervisor('hv2')->{unreachable};
+
+    Provisioner::IPPool::on_hypervisor( 'hv2', 'reserve', { ip => '192.0.2.10', name => 'hv:elsewhere', nic => 'br0' } );
+    like( exception { Provisioner::IPPool::taken() },                                                                   qr/disagree:[ ]hv1[ ]says.*hv2[ ]says[ ]hv:elsewhere/, 'and two that disagree about an address stop it too' );
+    like( exception { Provisioner::IPPool::on_hypervisor( undef, 'reserve', { ip => '192.0.2.11', name => 'hv:x' } ) }, qr/More[ ]than[ ]one[ ]hypervisor/,                    'a write with no hypervisor to go to is refused' );
+};
+
+subtest 'a remote hypervisor with a pool keeps its database at its ip_db, and has to name one' => sub {
+    my $faked = with_fleet(
+        hv1 => FakeHV->new( pool   => { addresses => '192.0.2.10' }, remote => 1 ),
+        hv2 => FakeHV->new( remote => 1 ),
+    );
+    like( exception { Provisioner::IPPool::taken() }, qr/\A\[hv1\][ ].*no[ ]ip_db/, 'one with a pool and no ip_db is refused, by name' );
+
+    $faked = with_fleet( hv2 => FakeHV->new( remote => 1 ) );
+    is_deeply( Provisioner::IPPool::databases()->{list}, [], 'and one without a pool keeps none' );
+};
+
+subtest 'two hypervisors on one network: the first by name keeps its addresses for both' => sub {
+    my %lan   = ( addresses => '192.0.2.10 192.0.2.11' );
+    my $faked = with_fleet(
+        hv1 => FakeHV->new( pool => {%lan}, remote => 1, ip_db => '/bogus/hv1/ips.db' ),
+        hv2 => FakeHV->new( pool => {%lan}, remote => 1, ip_db => '/bogus/hv2/ips.db' ),
+    );
+    my $fleet = Trog::Hypervisors->load('/bogus');
+
+    is( Provisioner::IPPool::assign( 'a.test.test', Provisioner::IPPool::pool_of( $fleet->hypervisor('hv1'), {} ) ), '192.0.2.10', 'a guest of the first' );
+    is( Provisioner::IPPool::assign( 'b.test.test', Provisioner::IPPool::pool_of( $fleet->hypervisor('hv2'), {} ) ), '192.0.2.11', 'and a guest of the second does not get the same address' );
+    is_deeply( [ grep { $_->[1] eq 'assign' } @{ $faked->{asked} } ], [ [qw{hv1 assign}], [qw{hv1 assign}] ], 'because both went to the database of the first' );
+};
+
+subtest 'the vpnclients bin is kept by the hypervisor that runs its via' => sub {
+    my $said = "END\n";
+    my @ran;
+    my $guest_of = Test::MockModule->new('Provisioner::Cookbook');
+    $guest_of->redefine( machine_of => sub ( $, $domain ) { return $domain } );
+    my $faked = with_fleet(
+        hv1 => FakeHV->new( pool => { addresses => '192.0.2.10' },    remote => 1, ip_db => '/bogus/hv1/ips.db' ),
+        hv2 => FakeHV->new( pool => { addresses => '198.51.100.10' }, remote => 1, ip_db => '/bogus/hv2/ips.db', runs => ['vpn.test.test'] ),
+    );
+    $faked->{mocks}[0]->redefine( guest_of => via_server( \$said, \@ran ) );
+    local *ViaProbe::capture_sudo = sub { return $said };
+    my $fleet = Trog::Hypervisors->load('/bogus');
+    my $pool  = Provisioner::IPPool::pool_of( $fleet->hypervisor('hv1'), { bins => { vpnclients => { cidr => '10.8.0.128/29', via => 'vpn.test.test' } } } );
+
+    is( Provisioner::IPPool::assign( 'laptop.test.test', $pool, 'vpnclients' ), '10.8.0.129', 'a client of a guest of hv1 gets its address' );
+    is_deeply( [ grep { $_->[1] eq 'assign' } @{ $faked->{asked} } ], [ [qw{hv2 assign}] ], 'from the database of hv2, which runs the server' );
+    is( Provisioner::IPPool::held_by( 'laptop.test.test', 'vpnclients' ), '10.8.0.129', 'and every guest can find it' );
+
+    $fleet->hypervisor('hv2')->{runs} = [];
+    like( exception { Provisioner::IPPool::assign( 'phone.test.test', $pool, 'vpnclients' ) }, qr/No[ ]hypervisor[ ].*runs[ ]vpn[.]test[.]test/, 'a server that runs nowhere has nowhere to keep them' );
+
+    $fleet->hypervisor('hv1')->{down} = "connection refused\n";
+    like( exception { Provisioner::IPPool::assign( 'phone.test.test', $pool, 'vpnclients' ) }, qr/Could[ ]not[ ]ask[ ]hv1[ ]whether/, 'and one that cannot be asked is not taken to lack it' );
+};
+
+subtest 'migrate: each hypervisor takes the rows of its own networks out of the old database' => sub {
+
+    # The old database, as one ips.db of the configuration directory had it.
+    fresh_db();
+    my $old = Provisioner::IPPool::db_path();
+    Provisioner::IPPool::assign( 'a.test.test', { addresses => '192.0.2.10' } );
+    Provisioner::IPPool::assign( 'b.test.test', { addresses => '198.51.100.10' } );
+    Provisioner::IPPool::assign( 'a.test.test', { bins      => { vpnclients => { cidr => '10.8.0.128/29' } } }, 'vpnclients' );
+    reserve( '192.0.2.1', 'gateway:192.0.2.1' );
+
+    my $faked = with_fleet(
+        hv1 => FakeHV->new( pool => { cidr => '192.0.2.0/24' },    remote => 1, ip_db => '/bogus/hv1/ips.db' ),
+        hv2 => FakeHV->new( pool => { cidr => '198.51.100.0/24' }, remote => 1, ip_db => '/bogus/hv2/ips.db' ),
+    );
+    is_deeply( Provisioner::IPPool::migrate( 'hv1', $old, dryrun => 1 ), { added => 2, kept => 0, skipped => 2 }, 'a dry run counts the address and the reservation of its network' );
+    is_deeply( Provisioner::IPPool::taken(),                             {},                                      'and writes nothing' );
+
+    is_deeply( Provisioner::IPPool::migrate( 'hv1', $old ), { added => 2, kept => 0, skipped => 2 }, 'hv1 takes its own' );
+    is_deeply( Provisioner::IPPool::migrate( 'hv2', $old, bins => ['vpnclients'] ), { added => 2, kept => 0, skipped => 2 }, 'and hv2 its own, and the bin whose server it runs' );
+    is_deeply(
+        Provisioner::IPPool::taken(),
+        { '192.0.2.10' => 'a.test.test', '192.0.2.1' => 'gateway:192.0.2.1', '198.51.100.10' => 'b.test.test', '10.8.0.129' => 'a.test.test' },
+        'so the fleet holds each row once'
+    );
+    like( exception { Provisioner::IPPool::migrate( 'hv1', '/bogus/ips.db' ) }, qr{Could[ ]not[ ]read[ ].*/bogus/ips[.]db}, 'and an old database that is not there is named' );
 };
 
 done_testing;

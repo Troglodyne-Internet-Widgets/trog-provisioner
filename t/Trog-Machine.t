@@ -630,6 +630,22 @@ subtest 'capture_quiet on this machine: standard error goes, and standard output
     is_deeply( [ $out, $quiet ], [ "said\n", q{} ], 'capture_quiet throws it away, with no shell redirect' );
 };
 
+subtest 'capture_with_input: the input on standard input, here and over ssh' => sub {
+    require Trog::Local;
+    my $big = 'x' x 200_000;
+    is_deeply( [ Trog::Local->new->capture_with_input( $big, qw{sh -c}, 'wc -c; echo said >&2' ) ], [ "200000\n", "said\n" ], 'here, more than an argument can hold, with standard error apart' );
+
+    my @sent;
+    my $far = Test::MockModule->new( 'Trog::Machine::FarSide', no_auto => 1 );
+    $far->define( capture2 => sub ( $, $opts, @command ) { push @sent, [ $opts, @command ]; return ( "out\n", "err\n" ) } );
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( ssh => sub { return bless {}, 'Trog::Machine::FarSide' } );
+
+    is_deeply( [ remote()->capture_with_input( '{"a":1}', 'perl', '/bogus/ippool' ) ], [ "out\n", "err\n" ],                                                         'over ssh, both streams come back' );
+    is_deeply( \@sent,                                                                 [ [ { timeout => 120, stdin_data => '{"a":1}' }, 'perl', '/bogus/ippool' ] ], 'and the input goes as stdin_data of a command with no terminal' );
+    like( exception { remote()->capture_with_input( q{}, qw{sudo true} ) }, qr/Refusing[ ]to[ ]send/, 'and a sudo that can ask is refused' );
+};
+
 subtest 'capture_sudo: sudo -n, and never a sudo that asks' => sub {
     my @asked;
     my $mock = Test::MockModule->new('Trog::Machine');
