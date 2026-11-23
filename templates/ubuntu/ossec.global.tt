@@ -20,6 +20,11 @@ install -m 0700 -o root -g root ossec-agent-revoke /usr/local/sbin/ossec-agent-r
 grep -q ' manager-placeholder ' /var/ossec/etc/client.keys 2>/dev/null || /var/ossec/bin/manage_agents -a any -n manager-placeholder >/dev/null
 install -o root -g root -m 0644 ossec_ufw.conf /etc/ufw/applications.d/ossec-agents
 systemctl stop ossec
+[%# The agents take a message of the manager only when its count is higher than
+    the last one that they took.  The count that the data target restored is
+    minutes old, so the manager starts one global count above it.  See The
+    agents in Provisioner::Recipe::ossec. -%]
+F=/var/ossec/queue/rids/sender_counter; if [ -s $$F ]; then G=$$(cut -d: -f1 $$F); printf '%u:0:' $$((G + 1)) > $$F; fi
 [%# Each daemon checks the configuration that configd made, so a mistake
     stops the build and not the manager later. -%]
 [% script_dir %]/queue_postrun_task /var/ossec/bin/ossec-analysisd -t

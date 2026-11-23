@@ -21,8 +21,10 @@ use File::Temp();
 use File::Path    qw{make_path};
 use File::Slurper qw{read_text};
 use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin::libs;
+use Provisioner::Cookbook();
 
 use_ok('Provisioner::Recipe::ossec') or BAIL_OUT('Provisioner::Recipe::ossec does not load');
 
@@ -44,33 +46,69 @@ subtest 'listens' => sub {
 };
 
 subtest 'remote_prepare, remote_files and restores' => sub {
-    my ($prepare) = $recipe->remote_prepare();
-    my %salvage   = $recipe->remote_files();
-    my %restores  = $recipe->restores( install_dir => '/bogus', domain => 'logs.test.test' );
+    my @prepare  = $recipe->remote_prepare();
+    my %salvage  = $recipe->remote_files();
+    my %restores = $recipe->restores( install_dir => '/bogus', domain => 'logs.test.test' );
 
-    # The command, run with its two paths moved into a directory of the test.
+    # The commands, run with every path under /var moved into a directory of the test.
     my $prepare_in = sub ($root) {
-        ( my $command = $prepare ) =~ s{(?=/var/(?:ossec/etc/client[.]keys|lib/ossec-salvage))}{$root}g;
-        return system( '/bin/sh', '-c', $command );
+        my @exits = map {
+            ( my $command = $_ ) =~ s{(?=/var/)}{$root}g;
+            IPC::Run3::run3( [ '/bin/sh', '-c', $command ], \undef, \my $out, \my $err );
+            $? >> 8;
+        } @prepare;
+        return join( q{,}, @exits );
     };
 
     my $fresh = File::Temp->newdir();
-    is( $prepare_in->($fresh), 0, 'a collector that does not run the manager yet has nothing to copy, and that is no failure' );
+    is( $prepare_in->($fresh), '0,0', 'a collector that does not run the manager yet has nothing to copy, and that is no failure' );
     ok( !-e "$fresh/var/lib/ossec-salvage", 'and it makes no directory for the salvage, which a failure would leave half made' );
 
     my $built = File::Temp->newdir();
-    make_path("$built/var/ossec/etc");
-    File::Slurper::Temp::write_text( "$built/var/ossec/etc/client.keys", "001 web.test.test any bogus\n" );
-    is( $prepare_in->($built),                                                 0,                               'a collector that runs the manager copies its keys' );
-    is( read_text("$built/var/lib/ossec-salvage/client.keys"),                 "001 web.test.test any bogus\n", 'all of them' );
+    make_path( "$built/var/ossec/etc", "$built/var/ossec/queue/rids" );
+    File::Slurper::Temp::write_text( "$built/var/ossec/etc/client.keys",           "001 web.test.test any bogus\n" );
+    File::Slurper::Temp::write_text( "$built/var/ossec/queue/rids/sender_counter", '0:3136:' );
+    is( $prepare_in->($built),                                                 '0,0',                           'a collector that runs the manager copies its keys and its count' );
+    is( read_text("$built/var/lib/ossec-salvage/client.keys"),                 "001 web.test.test any bogus\n", 'all of the keys' );
+    is( read_text("$built/var/lib/ossec-salvage/sender_counter"),              '0:3136:',                       'and the count of the messages of the manager' );
     is( ( stat "$built/var/lib/ossec-salvage" )[2] & oct('07777'),             oct('0700'),                     'into a directory that only root opens' );
-    is( ( stat "$built/var/lib/ossec-salvage/client.keys" )[2] & oct('07777'), oct('0600'),                     'as a file that only root reads' );
-    is_deeply( \%salvage, { '/var/lib/ossec-salvage/' => 'ossec-salvage/' }, 'and salvages the copy' );
+    is( ( stat "$built/var/lib/ossec-salvage/client.keys" )[2] & oct('07777'), oct('0600'),                     'as files that only root reads' );
+    is_deeply( \%salvage, { '/var/lib/ossec-salvage/' => 'ossec-salvage/' }, 'and salvages the copies' );
     is_deeply(
         \%restores,
-        { '/var/ossec/etc/client.keys' => { from => '/bogus/logs.test.test/ossec-salvage/client.keys', owner => 'root:ossec', mode => '0440' } },
-        'and puts them back from where the salvage lands, for the manager alone'
+        {
+            '/var/ossec/etc/client.keys'           => { from => '/bogus/logs.test.test/ossec-salvage/client.keys',    owner => 'root:ossec',   mode => '0440' },
+            '/var/ossec/queue/rids/sender_counter' => { from => '/bogus/logs.test.test/ossec-salvage/sender_counter', owner => 'ossecr:ossec', mode => '0644' },
+        },
+        'and puts them back from where the salvage lands, the keys for the manager alone and the count for remoted'
     );
+};
+
+subtest 'the manager sends above the count that it restored' => sub {
+    my $ubuntu   = Provisioner::Cookbook->load( 'ossec', distro => 'ubuntu' )->new( output_dir => '/bogus', libdir => '.', target_packager => 'deb', template_dirs => Provisioner::Cookbook->template_dirs('ubuntu') );
+    my $fragment = $ubuntu->render_global( domain => 'logs.test.test', admin_email => 'root@test.test', script_dir => '/bogus/bin' );
+    my @raise    = grep { index( $_, '/var/ossec/queue/rids/sender_counter' ) >= 0 } Provisioner::Recipe->fragment_commands($fragment);
+    is( scalar @raise, 1, 'one command of the fragment sets the count' ) or return;
+
+    # The command runs under make, as on the guest, with its path moved into a directory of the test.
+    my $run_in = sub ($root) {
+        ( my $command = $raise[0] ) =~ s{(?=/var/ossec/queue/rids/)}{$root}g;
+        File::Slurper::Temp::write_text( "$root/Makefile", "all:\n\t$command" );
+        IPC::Run3::run3( [ qw{make -s -C}, $root ], \undef, \my $out, \my $err );
+        diag($err) if $?;
+        return $? >> 8;
+    };
+
+    my $restored = File::Temp->newdir();
+    make_path("$restored/var/ossec/queue/rids");
+    File::Slurper::Temp::write_text( "$restored/var/ossec/queue/rids/sender_counter", '4:3136:' );
+    is( $run_in->($restored),                                       0,      'the command succeeds on a restored count' );
+    is( read_text("$restored/var/ossec/queue/rids/sender_counter"), '5:0:', 'and the manager starts at the next global count, above every message that the old manager sent' );
+
+    my $fresh = File::Temp->newdir();
+    make_path("$fresh/var/ossec/queue/rids");
+    is( $run_in->($fresh), 0, 'a manager that never sent a message has no count, and that is no failure' );
+    ok( !-e "$fresh/var/ossec/queue/rids/sender_counter", 'and it gets none, so remoted starts its own' );
 };
 
 subtest 'issue_grant and revoke_grant' => sub {

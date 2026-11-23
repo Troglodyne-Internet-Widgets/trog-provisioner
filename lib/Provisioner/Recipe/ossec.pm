@@ -85,7 +85,18 @@ The keys are in F</var/ossec/etc/client.keys>, which C<remote_prepare> and
 C<remote_files> salvage when the collector is built again, and C<restores> puts
 back.  Without the salvage, a new collector knows no agent until each guest is
 built again.  The agents keep their counts, which are higher than any that the
-new manager has seen, so it takes their messages.  The salvage is in the data
+new manager has seen, so it takes their messages.
+
+The check goes the other way too.  Each agent refuses a message of the manager
+whose count is not higher than the last one that it took, and reports the
+refusal as a wrong key.  So the salvage also keeps
+F</var/ossec/queue/rids/sender_counter>, the count of the manager.  The old
+manager sends more messages after the salvage, so the build starts the new one
+at the next global count, which is higher than any count that the old one
+sent.  The agents then take its messages.  A global count goes up once in
+9997 messages.
+
+The salvage is in the data
 directory of the domain, as the keys of L<Provisioner::Recipe::letsencrypt>
 are.  A key there lets its holder send events to the manager in the name of
 that one guest.
@@ -311,19 +322,21 @@ sub issue_grant {
 
 =head2 @commands = $recipe->remote_prepare()
 
-A copy of F</var/ossec/etc/client.keys>, the keys of the agents, in
-F</var/lib/ossec-salvage>, because a salvage fetches a directory and not a
-file.  The copy stays on the collector, and only root reads it there.  In the
-domain directory, the service user could read it.  See L</The agents>.
+Copies of F</var/ossec/etc/client.keys>, the keys of the agents, and of
+F</var/ossec/queue/rids/sender_counter>, the count of the messages of the
+manager, in F</var/lib/ossec-salvage>, because a salvage fetches a directory
+and not a file.  The copies stay on the collector, and only root reads them
+there.  In the domain directory, the service user could read them.  See
+L</The agents>.
 
-A guest that does not run the manager yet has no keys, so the command then
-does nothing, and creates no directory.  A directory that a failed command
+A guest that does not run the manager yet has neither file, so each command
+then does nothing, and creates no directory.  A directory that a failed command
 left behind makes F<bin/new_config> refuse the salvage.
 
 =cut
 
 sub remote_prepare {
-    return ('if [ -f /var/ossec/etc/client.keys ]; then install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 /var/ossec/etc/client.keys /var/lib/ossec-salvage/client.keys; fi');
+    return map { "if [ -f $_->[0] ]; then install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 $_->[0] /var/lib/ossec-salvage/$_->[1]; fi" } ( [ '/var/ossec/etc/client.keys', 'client.keys' ], [ '/var/ossec/queue/rids/sender_counter', 'sender_counter' ] );
 }
 
 =head2 %path_map = $recipe->remote_files()
@@ -339,7 +352,8 @@ sub remote_files {
 =head2 %restores = $recipe->restores(%opts)
 
 The keys of the agents, back where the manager reads them, readable by the
-manager and nobody else.
+manager and nobody else.  The count of the messages of the manager, back where
+remoted writes it, owned by the account that remoted runs as.
 
 =cut
 
@@ -347,7 +361,10 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    return ( '/var/ossec/etc/client.keys' => { from => "$install_dir/$domain/ossec-salvage/client.keys", owner => 'root:ossec', mode => '0440' } );
+    return (
+        '/var/ossec/etc/client.keys'           => { from => "$install_dir/$domain/ossec-salvage/client.keys",    owner => 'root:ossec',   mode => '0440' },
+        '/var/ossec/queue/rids/sender_counter' => { from => "$install_dir/$domain/ossec-salvage/sender_counter", owner => 'ossecr:ossec', mode => '0644' },
+    );
 }
 
 =head2 %revocation = $recipe->revoke_grant($grant)
