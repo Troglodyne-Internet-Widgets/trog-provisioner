@@ -60,6 +60,28 @@ subtest 'template_files: the timesyncd of the image gets 123/udp out unless ntp 
     ok( !exists $with{'ufw.timesyncd.tt'}, 'and a guest with ntp gets only the profile of chrony' );
 };
 
+subtest 'only root reaches the metadata service of a cloud' => sub {
+    my $ufw = recipe('ufw');
+
+    # On every guest.  A guest on libvirt has no metadata service, so the rule
+    # costs it nothing, and the configuration does not say where a guest runs.
+    my %bare = $ufw->validate(%G);
+    is_deeply( $bare{metadata_addresses}, [ '169.254.169.254', 'fd00:a9fe:a9fe::1' ], 'the IPv4 address of the clouds and the IPv6 address of Linode by default' );
+
+    my $fragment = $ufw->render( %G, %bare, transfer_ip => '192.0.2.1', transfer_port => 22 );
+    my ($call) = $fragment =~ m{^(/root/bin/setup-ufw-metadata\N*)$}m;
+    is( $call, q{/root/bin/setup-ufw-metadata '169.254.169.254' 'fd00:a9fe:a9fe::1'}, 'the fragment hands each address to setup-ufw-metadata' );
+
+    # setup-ufw-rules starts with `ufw reset`, which restores before.rules.
+    like( $fragment, qr{setup-ufw-rules.*setup-ufw-metadata}s, 'after the reset, which would remove the rules again' );
+
+    # A recipe validates once and renders from that, so a second configuration needs a second recipe.
+    my $none = recipe('ufw');
+    like( $none->render( %G, metadata_addresses => [], transfer_ip => '192.0.2.1', transfer_port => 22 ), qr{^/root/bin/setup-ufw-metadata$}m, 'an operator can name none, and the old rules are removed' );
+
+    like( exception { $ufw->validate( %G, metadata_addresses => ['metadata.test.test'] ) }, qr{/metadata_addresses/0}, 'and an address that is not an IP address is refused before it reaches iptables' );
+};
+
 subtest 'an address that two recipes claim is refused, and names them' => sub {
     my $ufw = recipe('ufw');
 

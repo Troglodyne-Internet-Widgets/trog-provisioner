@@ -121,6 +121,50 @@ like($chain, qr/^ACCEPT\s+\S+\s+--\s+0\.0\.0\.0\/0\s+0\.0\.0\.0\/0\s*$/m,
 my $loopback = system('timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/22" 2>/dev/null');
 is($loopback, 0, 'a loopback connection to an open port is not dropped');
 
+# Only root may connect to the metadata service of a cloud.
+# setup-ufw-metadata says why.
+my @metadata_addresses = ([% FOR address IN metadata_addresses %]'[% address %]', [% END %]);
+foreach my $address (@metadata_addresses) {
+    my ($iptables, $chain) = $address =~ m/:/ ? ('ip6tables', 'ufw6-before-output') : ('iptables', 'ufw-before-output');
+    my $match = qr{^-A[ ]\Q$chain\E[ ]-d[ ]\Q$address\E/(?:32|128)[ ]-m[ ]owner[ ]![ ]--uid-owner[ ]0}xm;
+    my $rule  = qr{$match[ ]-j[ ]REJECT\b}xm;
+
+    # Ask iptables, because on a guest without a metadata service no connection
+    # can tell the rule from the absence of the service.
+    my $rules = `$iptables -S $chain 2>&1`;
+    like($rules, $rule, "$iptables refuses $address to every account but root") or diag $rules;
+
+    # The connections themselves, where there is a route.  With none, the
+    # kernel refuses them before the firewall sees them, and nothing leaks.
+    if (system("ip route get $address >/dev/null 2>&1") != 0) {
+        note "No route to $address, so only the rule is tested";
+        next;
+    }
+
+    # The packets that the rule refused, which -v prints between the match
+    # and the target.  This tells a refusal by the rule from a refusal by
+    # something else on the way.
+    my $refusals = sub {
+        my ($count) = `$iptables -v -S $chain 2>/dev/null` =~ m/$match[ ]-c[ ](\d+)[ ]\d+[ ]-j[ ]REJECT\b/xm;
+        return $count;
+    };
+    my $before = $refusals->();
+    ok(defined $before, "$iptables counts the connections to $address that it refuses") or next;
+
+    my $nobody = `runuser -u nobody -- timeout 5 bash -c 'exec 3<>/dev/tcp/$address/80' 2>&1`;
+    like($nobody, qr/Connection[ ]refused/x, "nobody is refused by $address on port 80") or diag $nobody;
+    cmp_ok($refusals->(), '>', $before, 'and by that rule');
+
+    $before = $refusals->();
+    my $root = system("timeout 5 bash -c 'exec 3<>/dev/tcp/$address/80' 2>/dev/null");
+    is($refusals->(), $before, "root is not refused by the rule for $address");
+
+    # Only where the service answers, as on a cloud.  The path does not
+    # matter, and / reads no user-data.
+    next if $root;
+    my $status = `timeout 5 bash -c 'exec 3<>/dev/tcp/$address/80; printf "GET / HTTP/1.0\\r\\n\\r\\n" >&3; head -1 <&3' 2>&1`;
+    like($status, qr{^HTTP/1\.[01][ ]\d{3}}x, "and root gets an answer from the service at $address") or diag $status;
+}
 
 # The guest fetches its files from this machine after ufw is up.  The default
 # denies outgoing traffic, so a port other than 22 needs a rule of its own.
