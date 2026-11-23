@@ -11,5 +11,8 @@ flock 9
 
 id=$(awk -v name="$name" '$2 == name { print $1 }' "$keys" 2>/dev/null)
 if [ -n "$id" ]; then
+    # ossec-agent-key put the agent in FIM maintenance, which its first scan
+    # ends.  An agent that never scanned leaves the marker behind.
+    /var/ossec/bin/agent_control -u "$id" -M disable >/dev/null || true
     /var/ossec/bin/manage_agents -r "$id" >/dev/null
 fi

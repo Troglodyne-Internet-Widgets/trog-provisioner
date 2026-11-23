@@ -79,6 +79,10 @@ subtest 'the manager listens for agents, and issues and revokes their keys' => s
     my ($new_id) = $second =~ $line;
     isnt( $new_id, $old_id, 'with a new agent, whose count of messages starts again' );
 
+    my $maint = `/var/ossec/bin/agent_control -j -u $new_id -M status 2>&1`;
+    like( $maint, qr/"fimMaintenance":"Maint\(pending-end\)"/, 'the new agent is in FIM maintenance until its first scan completes, so that scan raises no alert for each file' )
+      or diag $maint;
+
     my $keys = do { local ( @ARGV, $/ ) = '/var/ossec/etc/client.keys'; <> } // q{};
     my @live = grep { m/^\d+ \Q$agent\E / } split m/\n/, $keys;
     is( scalar @live, 1, 'and the agent of the last build is the only one of that name' ) or diag $keys;
@@ -87,6 +91,7 @@ subtest 'the manager listens for agents, and issues and revokes their keys' => s
     is( $?, 0, 'ossec-agent-revoke succeeds' );
     $keys = do { local ( @ARGV, $/ ) = '/var/ossec/etc/client.keys'; <> } // q{};
     unlike( $keys, qr/^\d+ \Q$agent\E /m, 'and removes the agent' ) or diag $keys;
+    ok( !-e "/var/ossec/queue/syscheck/.($agent) any.maint", 'and its FIM maintenance, which a scan never ended' );
 };
 
 # What segfaults.sh mailed: the line of a guest goes through the collector to

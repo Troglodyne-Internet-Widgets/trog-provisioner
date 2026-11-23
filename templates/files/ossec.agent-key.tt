@@ -30,5 +30,19 @@ if [ -z "$new" ]; then
     echo "ossec-agent-key: manage_agents did not add $name to $keys" >&2
     exit 1
 fi
+
+# The first scan of a new agent reports every file as new, because the manager
+# raises an alert on a new file.  So the agent starts in the FIM maintenance of
+# the package, which takes each change without an alert, and pending_end makes
+# analysisd end it when that scan completes.  agent_control -M end sets both,
+# but refuses an agent that is not connected yet.  A failure here costs alerts
+# and not the build, so it only warns.
+marker="/var/ossec/queue/syscheck/.($name) any.maint"
+if /var/ossec/bin/agent_control -u "$new" -M enable >/dev/null && sed -i 's/^pending_end=0$/pending_end=1/' "$marker" && grep -qx 'pending_end=1' "$marker"; then
+    chown ossec:ossec "$marker"
+else
+    echo "ossec-agent-key: $name is not in FIM maintenance, so its first scan raises an alert for every file" >&2
+fi
+
 awk -v id="$new" '$1 == id' "$keys" | base64 -w0
 echo
