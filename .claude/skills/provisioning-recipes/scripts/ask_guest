@@ -47,7 +47,11 @@ your ssh agent instead, and needs no store for the key.  The admin of a guest
 trusts the keys of F<admin_authorized_keys>.
 
 It reaches the guest at the address that its hypervisor reports, which is the
-guest itself, also for a domain behind a relay.
+guest itself, also for a domain behind a relay.  When no hypervisor can say
+the address, because none has the guest or the one that might wants a token
+from the store, it warns and reaches the guest at the address that its name
+resolves to, as C<ssh> would.  See
+L<Trog::Hypervisors/$where = Trog::Hypervisors-E<gt>locate_guest($domain, %opts)>.
 
 =cut
 
@@ -63,8 +67,9 @@ sub main {
     die "Usage: ask_guest [--agent] DOMAIN COMMAND...\n" unless $domain && @command;
     Trog::Skill::Teardown::require_config();
 
-    my $guest = ( $agent ? Trog::Hypervisors->guest_of_with_agent($domain) : Trog::Hypervisors->guest_of($domain) )
-      or die "No hypervisor in the fleet runs $domain at an address, so there is nothing to ask.\n";
+    my %how = ( fall_back_to_name => 1 );
+    my $guest = ( $agent ? Trog::Hypervisors->guest_of_with_agent( $domain, %how ) : Trog::Hypervisors->guest_of( $domain, %how ) )
+      or die "No hypervisor in the fleet runs $domain at an address, and its name does not resolve, so there is nothing to ask.\n";
 
     # The command is one argument of sh -c, so a command containing an awk
     # program reaches the guest as it was typed.

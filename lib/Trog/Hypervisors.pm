@@ -9,6 +9,7 @@ use re '/aasx';
 use parent 'Trog::Hypervisors::Config';
 use List::Util qw{any reduce};
 use Config::Simple();
+use Socket();
 use Trog::Guest();
 use Trog::HV();
 use Trog::Utils();
@@ -340,12 +341,14 @@ program with nobody at its terminal cannot ask for the password of the store,
 so the message says to give it on standard input, or to log in through the ssh
 agent with C<guest_of_with_agent>.
 
+It takes the options of C<locate_guest>.
+
 =cut
 
 sub guest_of {
-    my ( $class, $domain ) = @_;
+    my ( $class, $domain, %opts ) = @_;
 
-    my $where = $class->locate_guest($domain) or return;
+    my $where = $class->locate_guest( $domain, %opts ) or return;
     my $key   = Trog::Guest->key_path( $where->{name}, "$where->{dir}/key.rsa" )
       or die "No key for $where->{name}, in the store or at $where->{dir}/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision.\n" . "If its admin trusts a key in your ssh agent, log in with the agent instead, as ask_guest --agent does.\n";
 
@@ -362,26 +365,25 @@ reach the guest.  Finding a guest on a hypervisor that needs a token, such as a
 cloud, still opens the store for that token.
 
 Returns undef when no hypervisor runs the guest.  Dies when C<SSH_AUTH_SOCK>
-is not set.
+is not set.  It takes the options of C<locate_guest>.
 
 =cut
 
 sub guest_of_with_agent {
-    my ( $class, $domain ) = @_;
+    my ( $class, $domain, %opts ) = @_;
 
     die "SSH_AUTH_SOCK is not set, so there is no ssh agent to log in to $domain with.\n" unless $ENV{SSH_AUTH_SOCK};
-    my $where = $class->locate_guest($domain) or return;
+    my $where = $class->locate_guest( $domain, %opts ) or return;
 
     return Trog::Guest->new( %{$where}{qw{name host user}} );
 }
 
-=head2 $where = Trog::Hypervisors->locate_guest($domain)
+=head2 $where = Trog::Hypervisors->locate_guest($domain, %opts)
 
 Where the guest of C<$domain> is, for C<guest_of> and
 C<guest_of_with_agent>: a hash of C<name>, the machine, C<host>, its
 address, C<user>, its admin user, and C<dir>, the directory of its
-configuration on the hypervisor.  Returns undef when no hypervisor runs it at
-an address.
+configuration.  Returns undef when no hypervisor runs it at an address.
 
 The guest of a domain in C<_shared> is the guest of its host, which
 L<Provisioner::Cookbook/host_of> names.  The admin user comes from the
@@ -389,23 +391,78 @@ F<provision.conf> of the guest, and is C<root> without one.  The address is the
 guest itself, also for a domain behind a relay, whose public names reach the
 relay.
 
+It takes these options:
+
+=over 4
+
+=item C<< fall_back_to_name => 1 >>
+
+When no hypervisor says an address for the guest, because none has it or
+because the one that might could not be asked, the address is the one that
+the name of the machine resolves to, as for C<ssh $machine>.  It warns that it
+did so, and why.  It returns undef only when the name does not resolve either.
+A hypervisor that dies when it is asked for the address is then a warning, not
+an error.
+
+This is for an operator who asks a guest a question, such as C<ask_guest> and
+C<collect_artifacts>.  A hypervisor that wants a token from the store cannot
+be asked with nobody at the terminal, and C<--agent> wants no store at all.
+It is off by default, because the other callers take undef to mean that the
+guest is not up: C<bin/destroy> then skips the guest, and must not run a
+command as root on whatever machine a stale name still reaches.  The name can
+also reach a relay in front of the guest, and not the guest.
+
+=item C<< host => $address >>
+
+The address of the guest, so that nobody is asked for one.  The hypervisor is
+still found, for the directory of the guest.
+
+=item C<< hypervisor => $name >>, C<< hvconf => $file >>
+
+The hypervisor of the fleet to ask, rather than whichever has the guest, and
+the file of the fleet, rather than C<default_path>.
+
+=back
+
+Without a hypervisor that has the guest, the directory is under
+L<Trog::HV/default_domain_dir>.
+
 =cut
 
 sub locate_guest {
-    my ( $class, $domain ) = @_;
+    my ( $class, $domain, %opts ) = @_;
 
     my $machine = Provisioner::Cookbook->machine_of($domain);
 
-    my $fleet = $class->load( $class->default_path() );
-    my $hv    = $fleet->configured ? $fleet->hosting($machine) : Trog::HV->new();
-    return unless $hv;
+    my $fleet = $class->load( $opts{hvconf} // $class->default_path() );
+    my $hv =
+        defined $opts{hypervisor} ? $fleet->hypervisor( $opts{hypervisor} )->activate()
+      : $fleet->configured        ? $fleet->hosting($machine)
+      :                             Trog::HV->new();
 
-    my $host = $hv->inspection_address($machine) or return;
+    my $host = $opts{host};
+    if ( !defined $host && $hv ) {
+        $host = eval { $hv->inspection_address($machine) };
+        if ( my $why = $@ ) {
+            die $why unless $opts{fall_back_to_name};
+            warn 'Could not ask ' . $hv->describe . " where $machine is: $why";
+        }
+    }
+    if ( !$host && $opts{fall_back_to_name} ) {
+
+        # The first address that getaddrinfo gives is the one ssh tries first.
+        my ( $unresolved, $found ) = Socket::getaddrinfo( $machine, undef, { socktype => Socket::SOCK_STREAM() } );
+        return if $unresolved || !$found;
+        ( my $unnamed, $host ) = Socket::getnameinfo( $found->{addr}, Socket::NI_NUMERICHOST(), Socket::NIx_NOSERV() );
+        return if $unnamed;
+        warn "No hypervisor said where $machine is, but $machine resolves to $host, so it is reached there.\n";
+    }
+    return unless $host;
 
     # Config::Simple reads into $_ without a local of its own, and a caller
     # can be inside a map.  Trog::Hypervisors::Config has the same guard.
     local $_;
-    my $dir    = $hv->domain_dir . "/$machine";
+    my $dir    = ( $hv ? $hv->domain_dir : Trog::HV->default_domain_dir ) . "/$machine";
     my $config = eval { Config::Simple->new("$dir/provision.conf") };
 
     return { name => $machine, host => $host, user => ( $config ? $config->param('admin_user') : undef ) // 'root', dir => $dir };

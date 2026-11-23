@@ -423,11 +423,16 @@ agent, give both scripts `--agent`, and pipe nothing in:
 
 You choose `--agent`.  A missing key never switches to the agent, and `--agent`
 never asks the store for the key.  Without `SSH_AUTH_SOCK`, it is refused.  A guest on a hypervisor that needs
-a token, such as a cloud, still opens the store to find the guest, because only
+a token, such as a cloud, still tries the store to find the guest, because only
 the API of the provider knows where the guest is.
 
 Both reach the guest at the address that its hypervisor reports, which is the
-guest itself, also for a domain behind a relay.  When you `ssh` to a guest by
+guest itself, also for a domain behind a relay.  When no hypervisor can say
+it, because none has the guest or the one that might could not open the store,
+both warn and use the address that the name of the guest resolves to, as `ssh`
+would.  For a guest whose own name reaches a relay, pass `--host` to
+`collect_artifacts`, or give `ask_guest` the password of the store, so that the
+hypervisor answers.  When you `ssh` to a guest by
 hand, use its `internal_name`, which the registrar publishes as an `A` record
 at that address: `internal.$domain` unless `_global` sets another.  Do not
 use the public name of a domain behind a relay: it reaches the relay, and the
