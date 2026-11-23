@@ -1,0 +1,24 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# What the kernel enforces and what modprobe does, not what the files say.
+# Provisioner::Recipe::hardening has the whole account.
+[% FOR key IN sysctl.keys().sort() -%]
+{
+    my $running = `sysctl -n [% key %] 2>&1`;
+    chomp $running;
+    is( $running, '[% sysctl.$key %]', 'the kernel runs with [% key %] = [% sysctl.$key %]' );
+}
+[% END -%]
+
+[% FOR module IN blocked_modules -%]
+{
+    # --show-depends prints what modprobe would do, and loads nothing.
+    my $plan = `modprobe --show-depends [% module %] 2>&1`;
+    like( $plan, qr{^install /bin/false}m, 'modprobe refuses to load [% module %]' ) or diag $plan;
+}
+[% END -%]
+
+done_testing();

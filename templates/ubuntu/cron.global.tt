@@ -22,6 +22,11 @@ rm -f /root/bin/changes_in_packaged_files.sh /root/debcheck.log.old /root/debdif
 /root/bin/logdrops.sh; /bin/true
 [% END -%]
 /root/bin/changed_packaged_files; /bin/true
+[%# cronie conflicts with cron, so apt removed cron when it installed cronie and
+    kept the configuration files of cron.  cronie has its own, and /etc/crontab
+    belongs to cron-daemon-common.  This removes the files only: the package is
+    already gone, so the packager has nothing to do here. -%]
+dpkg-query -W -f='$${db:Status-Abbrev}' cron 2>/dev/null | grep -q '^rc' && dpkg --purge cron; /bin/true
 # The crontab command of cronie keeps a backup of the old crontab in ~/.cache.
 mkdir /root/.cache; /bin/true
 [% UNLESS ossec_watches -%]

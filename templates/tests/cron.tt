@@ -102,6 +102,10 @@ subtest 'changed_packaged_files' => sub {
     unlike($state, qr/^\Q$file\E$/m, 'which drops it from the state');
 };
 
+my $leftover = `dpkg-query -W -f='\${db:Status-Abbrev}' cron 2>/dev/null`;
+unlike($leftover, qr/^rc/, 'cron, which cronie replaced, left no configuration files') or diag $leftover;
+ok(-f '/etc/crontab', 'and /etc/crontab, which cronie reads, is still there');
+
 done_testing();
 
 # What this recipe adds to each file that another recipe gave it: the two mail

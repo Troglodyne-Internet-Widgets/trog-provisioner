@@ -18,6 +18,9 @@ is_deeply( \@hostkeys, ['/etc/ssh/ssh_host_ed25519_key'], 'sshd loads that key a
 # sshd prints prohibit-password by its older name.
 like( $effective, qr/^passwordauthentication no$/m,               'sshd takes no password' )            or diag $effective;
 like( $effective, qr/^permitrootlogin without-password$/m,        'and lets root in with a key only' ) or diag $effective;
+like( $effective, qr/^maxauthtries 3$/m,                          'and allows three keys a connection' ) or diag $effective;
+like( $effective, qr/^loglevel VERBOSE$/m,                        'and logs the key of each login' )     or diag $effective;
+like( $effective, qr/^x11forwarding no$/m,                        'and forwards no X11' )                or diag $effective;
 ok( !-e '/etc/ssh/sshd_config.d/100-security.conf', 'and the policy has one copy, in the drop-in of the sshd recipe' );
 my $main = do { local ( @ARGV, $/ ) = '/etc/ssh/sshd_config'; <> } // '';
 unlike( $main, qr/^\s*PermitRootLogin\s/mi, 'and the main sshd_config, which rkhunter reads, does not contradict it' );

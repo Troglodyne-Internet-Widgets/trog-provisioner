@@ -772,4 +772,7 @@ subtest 'the resolver that SpamAssassin uses is one that URIBL answers' => sub {
     like( $answer, qr/\b127[.]0[.]0[.]14\b/, "$server answers the test point of URIBL with 127.0.0.14" ) or diag $answer;
     unlike( $answer, qr/\b127[.]0[.]0[.]1\b(?![.]?\d)/, 'and not with 127.0.0.1, which says that the resolver is blocked' ) or diag $answer;
 };
+
+[% INCLUDE "files/postfix.greeting.test.tt" %]
+
 done_testing();

@@ -16,6 +16,13 @@ my $status = `systemctl is-active nginx 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'and nginx is running');
 
+# What php reads, for the command line and for php-fpm, outside the pool.
+my $cli = `php -r 'echo ini_get("allow_url_fopen") ? "on" : "off";' 2>&1`;
+is($cli, 'off', 'php on the command line opens no URL as a file');
+my ($fpm) = glob '/usr/sbin/php-fpm*';
+my $info = $fpm ? `$fpm -i 2>&1` : '';
+like($info, qr/^allow_url_fopen => Off => Off$/m, 'and neither does php-fpm, outside the pool of roundcube') or diag "php-fpm: " . ($fpm // 'none');
+
 # php-fpm serves roundcube through the socket that the vhost names.  php-fpm.conf
 # includes only pool.d/*.conf, so the pool must be a .conf.
 my $pool = `ls /etc/php/*/fpm/pool.d/roundcube-[% domain %].conf 2>/dev/null`;

@@ -13,3 +13,11 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 # the users.yaml of the data directory.  root logs in with a key only.
 PermitRootLogin prohibit-password
 PasswordAuthentication no
+# Three keys a connection.  A client that offers more than three keys before
+# the right one is refused: set IdentitiesOnly for that host.
+MaxAuthTries 3
+# VERBOSE logs the fingerprint of the key of each login, so a log says which
+# key got in, and not only which account.
+LogLevel VERBOSE
+# No guest serves X11 programs.  The main sshd_config of Ubuntu says yes.
+X11Forwarding no

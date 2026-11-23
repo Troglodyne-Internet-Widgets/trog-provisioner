@@ -142,4 +142,11 @@ subtest 'the relay fetches each name that it serves here, on a certificate of th
 [% INCLUDE "files/relay.client_test.tt" WITH recipe = 'nginx' %]
 [% END -%]
 
+{
+    # What nginx loaded, after every include.  One line, or nginx would not start.
+    my $loaded = `nginx -T 2>/dev/null`;
+    my @protocols = $loaded =~ m/^\s*ssl_protocols\s+([^;]+);/mg;
+    is_deeply( \@protocols, ['TLSv1.2 TLSv1.3'], 'nginx speaks TLS 1.2 and 1.3, and nothing older' ) or diag explain \@protocols;
+}
+
 done_testing();

@@ -194,4 +194,6 @@ subtest 'a mail client goes by its SNI name to its guest, with the PROXY protoco
 
 [% INCLUDE "files/reboot_check.test.tt" WITH name = "mailrelay-" _ domain, reason = "^this guest reboots only by hand$" %]
 
+[% INCLUDE "files/postfix.greeting.test.tt" %]
+
 done_testing();

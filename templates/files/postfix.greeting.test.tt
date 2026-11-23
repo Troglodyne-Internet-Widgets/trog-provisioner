@@ -1,0 +1,23 @@
+[%# The part of a guest test that asks port 25 what it tells a client, from
+    files/postfix.smtpd_restrictions.tt.  A mail guest and a mail relay both
+    include it. -%]
+subtest 'port 25 names no software, and does not say which addresses exist' => sub {
+    require IO::Socket::IP;
+    my $sock = IO::Socket::IP->new( PeerHost => '127.0.0.1', PeerPort => 25, Timeout => 10 );
+    ok( $sock, 'postfix answers on 25' ) or return diag "connect: $@";
+    $sock->autoflush(1);
+    my $read = sub {
+        my $reply = q{};
+        while ( defined( my $line = <$sock> ) ) {
+            $reply .= $line;
+            last if $line =~ m/^\d{3} /;
+        }
+        return $reply;
+    };
+    my $greeting = $read->();
+    like( $greeting, qr/^220 \S+ ESMTP\r?\n\z/, 'the greeting is the host name and ESMTP' ) or diag $greeting;
+    print {$sock} "VRFY postmaster\r\n";
+    my $vrfy = $read->();
+    like( $vrfy, qr/^502 /, 'and VRFY is off' ) or diag $vrfy;
+    print {$sock} "QUIT\r\n";
+};

@@ -1,6 +1,7 @@
 [%# The checks of a client that delivers mail from the internet, which a mail
     guest makes on its port 25, and a mail relay on its own before it relays
-    the mail to the guest.  One file, so that the two cannot drift apart. -%]
+    the mail to the guest, and what port 25 tells that client.  One file, so
+    that the two cannot drift apart. -%]
 # The restriction lists.  configd does not join these across fragments,
 # because their order is their meaning.  A permit_ before a check that must run
 # first makes an open relay.  They are the policy of the guest, and of a mail
@@ -25,4 +26,10 @@ smtpd_sender_restrictions = permit_mynetworks, reject_authenticated_sender_login
 # SPF policy service judges the client after the destination is known to be
 # ours, and records what it found.
 smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination,[% IF spf_policy %] check_policy_service unix:private/policyd-spf,[% END %] reject_non_fqdn_recipient, reject_unknown_recipient_domain, permit
+
+# The greeting names the host and no software.  The package adds
+# "$mail_name (Ubuntu)", which tells a client what to attack.
+smtpd_banner = $myhostname ESMTP
+# VRFY tells a client whether an address exists, with no message sent.
+disable_vrfy_command = yes
 

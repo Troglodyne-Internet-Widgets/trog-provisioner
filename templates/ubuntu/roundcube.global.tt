@@ -1,0 +1,5 @@
+[%# The pool of each domain already turns allow_url_fopen off.  The php.ini of
+    the package turns it on for every other pool and for the command line, and
+    roundcube needs it in neither.  The target of each domain queues the restart
+    of php-fpm. -%]
+sed -i -E 's/^allow_url_fopen\s*=.*/allow_url_fopen = Off/' /etc/php/$(PHP_VER)/fpm/php.ini /etc/php/$(PHP_VER)/cli/php.ini
