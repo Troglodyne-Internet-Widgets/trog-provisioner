@@ -70,6 +70,12 @@ subtest 'an audit that a guest reports reaches the panels of the dashboard' => s
     ok( $db, 'the summary arrived in influxdb with its hardening index as a field' )
       or return diag "Nothing for $fresh after two minutes.\n" . `journalctl -u telegraf --no-pager -n 20 2>&1`;
 
+    # The shipper sends "lynis: text".  The space after the colon is not part of
+    # the message, so a query anchored with ^ must find the message.
+    my $stored = eval { JSON::PP->new->decode( query( $db, qq{SELECT "message" FROM "syslog" WHERE "appname" = 'lynis' AND "hostname" = '$fresh' AND "message" =~ /^hardening_index=71 / AND time > now() - 10m} ) ) } // {};
+    is( $stored->{results}[0]{series}[0]{values}[0][1], 'hardening_index=71 warnings=1 suggestions=2', 'the message is stored from its first character, with no space in front' )
+      or diag explain $stored;
+
     my %panel = map { $_->{title} => $_->{targets}[0]{query} } @{ JSON::PP->new->decode( slurp($file) )->{panels} };
 
     my %guests = rows( $db, $panel{'Newest audit of each guest'}, 'hostname' );
