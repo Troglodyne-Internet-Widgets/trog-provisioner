@@ -122,7 +122,9 @@ F</etc/tmux.conf.d/claude.conf> draws the state after the name of the window:
 a red dot while working, a white C<!> on red while blocked, and a yellow check
 when done and not yet seen.  To look at a finished window marks it seen.  It
 also flags a window that rings the bell, and binds prefix C<O> to a list of
-every window with its state and the time that the state began.
+every window with its state and the time that the state began.  Its
+C<window-status-format> also draws the badge of a build, which
+L<Provisioner::Recipe::trogrunner/TMUX> defines.
 F</etc/tmux.conf> sources every file in F</etc/tmux.conf.d>.  tmux reads
 F<~/.tmux.conf> after it, so the dotfiles that
 L<Provisioner::Recipe::adminconfig> copies keep their bindings, and a setting

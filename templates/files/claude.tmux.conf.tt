@@ -14,11 +14,16 @@ setw -g window-status-bell-style 'fg=black,bg=yellow,bold'
 # 256-colour codes, because terminal themes remap the named ANSI colours.  The
 # dot and the check are \u escapes, which tmux reads only in double quotes.
 set -g @claude_badge "#{?#{==:#{@claude_state},working},#[fg=colour196] \u25CF #[default],#{?#{==:#{@claude_state},blocked},#[fg=colour231#,bg=colour196#,bold] ! #[default],#{?#{==:#{@claude_state},done},#[fg=colour226] \u2713 #[default],}}}"
-setw -g window-status-format '#I:#W#{?window_flags,#{window_flags}, }#{E:@claude_badge}'
-setw -g window-status-current-format '#I:#W#{?window_flags,#{window_flags}, }#{E:@claude_badge}'
 
-# Looking at a finished window marks it seen.
-set-hook -g session-window-changed 'if -F "#{==:#{@claude_state},done}" "set -w @claude_state idle"'
+# The badge of bin/provision too, which provision.conf of
+# Provisioner::Recipe::trogrunner sets the same, so that either file draws
+# both.  A badge that nothing defines draws nothing.
+setw -g window-status-format '#I:#W#{?window_flags,#{window_flags}, }#{E:@claude_badge}#{E:@provision_badge}'
+setw -g window-status-current-format '#I:#W#{?window_flags,#{window_flags}, }#{E:@claude_badge}#{E:@provision_badge}'
+
+# Looking at a finished window marks it seen.  Index 0, because a hook set
+# without an index replaces every index, and provision.conf sets index 1.
+set-hook -g 'session-window-changed[0]' 'if -F "#{==:#{@claude_state},done}" "set -w @claude_state idle"'
 
 # prefix+O: every window with its Claude state and since when.  Enter jumps.
 bind O choose-tree -Zw -F '#{?window_format,#{p8:#{?@claude_state,#{@claude_state},-}} #{p6:#{@claude_since}} #{pane_title},}'

@@ -1597,4 +1597,58 @@ subtest 'a failed build offers to go back to its snapshot' => sub {
     is_deeply( [ Trog::Bin::Provisioner::with_rollback( 'web.test', 'keep', sub { ( 1, 2 ) } ) ], [ 1, 2 ],                   'and a build that works returns what it returned' );
 };
 
+subtest 'a run in the foreground of a tmux pane shows its state on the window' => sub {
+    my @states;
+    my $tmux = Test::MockModule->new('Trog::Tmux');
+    $tmux->redefine( tmux    => sub { my ( $self, @args ) = @_; push @states, $args[5] if ( $args[4] // q{} ) eq '@provision_state'; return } );
+    $tmux->redefine( watched => sub { return 0 } );
+    $tmux->redefine( bell    => sub { return 1 } );
+    my $badge;
+    $tmux->redefine( badge => sub { return $badge } );
+
+    # A tripwire in the first thing main does after the badge.
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my %seen;
+    $cookbook->redefine( configuration => sub { %seen = ( int => $SIG{INT}, term => $SIG{TERM} ); die "far enough\n" } );
+
+    local $Trog::Bin::Provisioner::BADGE;
+    $badge = bless { name => 'provision', pane => '%7' }, 'Trog::Tmux';
+    local $Trog::Tmux::CURRENT = $badge;
+    my $int_before = $SIG{INT};
+    like( exception { Trog::Bin::Provisioner::main('web.test') }, qr/\Afar[ ]enough$/m, 'main got as far as the build' );
+    is_deeply( \@states, ['building'], 'the badge says building before anything is built' );
+    is( ref $seen{int},  'CODE',      'an interrupt exits, so that END says how the run ended' );
+    is( ref $seen{term}, 'CODE',      'and so does SIGTERM' );
+    is( $SIG{INT},       $int_before, 'and the handlers are put back after main' );
+
+    @states = ();
+
+    # What $? holds for a run that exited 7, and one that exited 255.
+    my ( $exited_7, $exited_255 ) = ( 1792, 65_280 );
+    local $? = $exited_7;
+    Trog::Bin::Provisioner::finish_badge($exited_255);
+    is_deeply( \@states, ['failed'], 'a run that exits with a failure ends as failed' );
+    is( $?, $exited_7, 'and the exit status that END sees is left as it was' );
+    @states = ();
+    Trog::Bin::Provisioner::finish_badge(0);
+    is_deeply( \@states, ['ok'], 'a run that exits with 0 ends as ok' );
+
+    my $tty = tempdir( CLEANUP => 1 ) . '/tty';
+    File::Slurper::Temp::write_text( $tty, "n\n" );
+    local $Trog::Bin::Provisioner::TERMINAL = $tty;
+    $badge->{state} = 'building';
+    @states = ();
+    is( Trog::Bin::Provisioner::ask_rollback( 'web.test', 'before-reprovision-1' ), 'keep', 'the question of the rollback is answered' );
+    is_deeply( \@states, [qw{asking building}], 'and the badge said asking while it waited' );
+
+    # Without a badge: no handlers, and nothing at the end.
+    $badge = undef;
+    local $Trog::Bin::Provisioner::BADGE;
+    @states = ();
+    like( exception { Trog::Bin::Provisioner::main('web.test') }, qr/\Afar[ ]enough$/m, 'a run with no badge gets as far' );
+    is( $seen{int},                                        $int_before, 'and an interrupt stops it as it always did' );
+    is( Trog::Bin::Provisioner::finish_badge($exited_255), undef,       'its end sets nothing' );
+    is_deeply( \@states, [], 'and tmux hears nothing' );
+};
+
 done_testing;

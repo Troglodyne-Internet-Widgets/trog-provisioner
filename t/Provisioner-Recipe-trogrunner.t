@@ -22,6 +22,7 @@ use File::Path();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
+use File::Which();
 use IPC::Run3();
 use FindBin();
 use FindBin::libs;
@@ -858,6 +859,63 @@ subtest 'an account that cannot be made is refused when the configuration is wri
     local $SIG{__WARN__} = sub { push @warned, @_ };
     built( hypervisor_access => 'least' );
     like( "@warned", qr/no[ ]hypervisor[ ]is[ ]named/, 'access with no hypervisor to give it gets a warning' );
+};
+
+subtest 'a build shows on its tmux window, beside the badge of Claude Code' => sub {
+    my ( $dir, $recipe, $vars ) = built();
+
+    # The window-status-format of both files names both badges, so either one
+    # draws both, and the one that tmux reads last must not drop the other.
+    my $claude = File::Slurper::read_text("$FindBin::Bin/../templates/files/claude.tmux.conf.tt");
+    my @ours   = grep { m/\Asetw[ ]-g[ ]window-status(?:-current)?-format[ ]/ } split m/\n/, slurp( $dir, 'trogrunner.tmux.conf' );
+    my @theirs = grep { m/\Asetw[ ]-g[ ]window-status(?:-current)?-format[ ]/ } split m/\n/, $claude;
+    is( scalar @ours, 2, 'the file sets both formats of a window' );
+    is_deeply( \@ours, \@theirs, 'the same as claude.conf' );
+    like( $ours[0], qr/[{]E:\@claude_badge[}][#][{]E:\@provision_badge[}]/, 'and they draw both badges' );
+
+    plan skip_all => 'no tmux here' unless File::Which::which('tmux');
+
+    # The fragment lines that put the file in place, run twice in $dir with
+    # /etc under it, so that tmux reads what the guest gets.
+    my @lines = grep { index( $_, q{/etc/tmux} ) >= 0 } split m/\n/, $recipe->render(%$vars);
+    foreach my $line (@lines) {
+        $line =~ s{/etc/tmux[.]conf[.]d}{$dir/conf.d}g;
+        $line =~ s{/etc/tmux[.]conf}{$dir/tmux.conf}g;
+    }
+    IPC::Run3::run3( [ '/bin/sh', '-c', join "\n", "cd '$dir'", map { "$_ || exit 1" } @lines, @lines ], \undef, \my $out, \my $err );
+    is( $?, 0, 'the fragment installs the tmux configuration, twice' ) or diag $err;
+    my @sources = grep { index( $_, 'source-file' ) >= 0 } split m/\n/, slurp( $dir, 'tmux.conf' );
+    is( scalar @sources, 1, 'and /etc/tmux.conf sources the directory once' );
+    File::Slurper::Temp::write_text( "$dir/conf.d/claude.conf", $claude );
+
+    my @tmux = ( 'tmux', '-S', "$dir/tmux.sock", '-f', "$dir/tmux.conf" );
+    my $tmux = sub {
+        local $ENV{TMUX};
+        delete $ENV{TMUX};
+        IPC::Run3::run3( [ @tmux, @_ ], \undef, \my $said, \my $ignored );
+        chomp $said;
+        return $said;
+    };
+    $tmux->(qw{new-session -d -s test -x 120 -y 10 sleep 300});
+    $tmux->(qw{new-window -t test sleep 300});
+    my $drawn = sub { my ($state) = @_; $tmux->( qw{set -w -t test:0 @provision_state}, $state ); return $tmux->( qw{display -p -t test:0}, '#{E:window-status-format}' ) };
+
+    like( $drawn->('building'), qr/colour39[]][ ]\x{e2}\x{9a}\x{99}[ ]/,       'a build that is going is a blue gear' );
+    like( $drawn->('asking'),   qr/colour231,bg=colour196,bold[]][ ][?][ ]/,   'one that asks is a white ? on red' );
+    like( $drawn->('ok'),       qr/colour46[]][ ]\x{e2}\x{9c}\x{93}[ ]/,       'one that ended well is a green check' );
+    like( $drawn->('failed'),   qr/colour196,bold[]][ ]\x{e2}\x{9c}\x{97}[ ]/, 'and one that failed is a red cross' );
+    $tmux->(qw{set -w -t test:0 @claude_state working});
+    my $dot   = qr/\x{e2}\x{97}\x{8f}/;
+    my $cross = qr/\x{e2}\x{9c}\x{97}/;
+    like( $drawn->('failed'), qr/$dot[ ][#][[]default[]][#][[]fg=colour196,bold[]][ ]$cross/, 'beside the badge of Claude Code' );
+
+    my @hooks = split m/\n/, $tmux->(qw{show-hooks -g session-window-changed});
+    is( scalar @hooks, 2, 'both files keep their hook for a window that is looked at' ) or diag "@hooks";
+
+    $tmux->(qw{select-window -t test:1});
+    $tmux->(qw{select-window -t test:0});
+    is( $tmux->(qw{show -wqv -t test:0 @provision_state}), q{}, 'and to look at the window of a build that ended marks it seen' );
+    $tmux->('kill-server');
 };
 
 Test::NoWarnings::had_no_warnings();

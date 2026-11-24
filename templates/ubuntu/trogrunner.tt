@@ -118,3 +118,7 @@ install -o root -g root -m 0644 trogrunner.completion.bash /etc/bash_completion.
 [%# Holds a reboot while bin/provision builds a guest.  See Reboot checks in
     Provisioner::Recipe. -%]
 install -D -o root -g root -m 0755 trogrunner-reboot-check /etc/provisioner/reboot-checks.d/trogrunner-[% domain %]
+[%# The badge of a build on its tmux window.  See TMUX in
+    Provisioner::Recipe::trogrunner. -%]
+install -m 0644 -D trogrunner.tmux.conf /etc/tmux.conf.d/provision.conf
+grep -qxF "source-file -q '/etc/tmux.conf.d/*.conf'" /etc/tmux.conf 2>/dev/null || echo "source-file -q '/etc/tmux.conf.d/*.conf'" >> /etc/tmux.conf

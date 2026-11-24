@@ -24,6 +24,7 @@ use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
 use Trog::Steps();
+use Trog::Tmux();
 use YAML::XS();
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
@@ -210,6 +211,16 @@ connects to it, runs the new cloud-init of DOMAIN again, and runs the makefile
 of DOMAIN.  When the guest is not up, provision builds it first.  To rebuild it,
 provision that domain itself.
 See L<Trog::HV> for what "the hypervisor" means when it is not this machine.
+
+=head2 The tmux window
+
+Run in the foreground of a tmux pane, provision shows on the window of the
+pane whether the build is going, waits for an answer, or ended, and how.  It
+sets the window option C<@provision_state> to C<building>, C<asking>, C<ok> or
+C<failed>, through L<Trog::Tmux>.  The state at the end follows the exit
+status, also when the run dies, or stops on an interrupt or C<SIGTERM>.
+L<Provisioner::Recipe::trogrunner> installs the tmux configuration that draws
+it.  A run in the background, or one with no terminal, sets nothing.
 
 =head2 Upstream guests
 
@@ -442,6 +453,27 @@ our %ON_FAILURE = map { $_ => 1 } qw{rollback keep ask};
 # Where offer_rollback asks, which a test points at a file.
 our $TERMINAL = '/dev/tty';
 
+# The badge of this run on its tmux window, from main.  See The tmux window.
+our $BADGE;
+
+END { finish_badge($?) }
+
+=head2 finish_badge($status)
+
+Sets the badge of the run to how it ended, from C<$status>, the exit status
+that the run is about to exit with.  It runs from C<END>, so a run that dies
+or is interrupted ends as C<failed> too.  It leaves C<$?> as it was.  Without a
+badge it does nothing.
+
+=cut
+
+sub finish_badge {
+    my ($status) = @_;
+    return unless $BADGE;
+    local $?;
+    return $BADGE->finish($status);
+}
+
 our %NONREUSABLE = (
     ask     => 0,
     clone   => 1,
@@ -503,6 +535,12 @@ sub main {
       unless $domain;
 
     $domain =~ s/\///g;
+
+    # An interrupt exits, so that END sets the state of the end.  Only with a
+    # badge, so a run that shows none stops as it always did.
+    $BADGE = Trog::Tmux->badge('provision');
+    local @SIG{qw{INT TERM}} = ( sub { exit 130 }, sub { exit 143 } ) if $BADGE;
+    $BADGE->set('building') if $BADGE;
 
     my %build = (
         hypervisor  => $hv_name,
@@ -874,7 +912,7 @@ sub ask_rollback {
     close($out) or warn "Could not close $TERMINAL: $!\n";
 
     open( my $in, '<', $TERMINAL ) or do { print $no_terminal; return 'keep' };
-    my $said = <$in> // q{};
+    my $said = Trog::Tmux->asking( sub { scalar <$in> } ) // q{};
     close($in) or warn "Could not close $TERMINAL: $!\n";
 
     return $said =~ m/\A\s*y/i ? 'rollback' : 'keep';
