@@ -174,7 +174,7 @@ sub main {
         -message => 'Pick one of --console --fetch --hold --shot --vnc --keys --restore --cat --ls --single'
     ) unless $action;
 
-    my $hv = hypervisor( $domain, $opt{hypervisor}, $opt{hvconf} );
+    my $hv = hypervisor( $domain, @opt{qw(hypervisor hvconf)} );
     refuse_unsupported( $hv, $action );
 
     return console( $hv, $domain, \%opt )           if $action eq 'console';

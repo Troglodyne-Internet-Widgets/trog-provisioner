@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -57,7 +58,7 @@ use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Provisioner::Cookbook();
 use Trog::Secrets();
 
-my $DOMAIN    = 'vm.test.test';
+my $DOMAIN    = 'vm.test.test';                 ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $GECOS     = q{Sean O'Brien & Co: boss};
 my $EMAIL     = q{o'brien&sons@test.test};
 my $RESOLVERS = [ '192.0.2.253', '8.8.8.8' ];
@@ -168,7 +169,7 @@ subtest 'the seed gives cloud-init the host key from the store, and no other' =>
 
     ( $dir, undef ) = generated();
     $user_data = loaded( $dir, 'user-data' );
-    ok( !exists $user_data->{$_}, "with no key in the store, the seed has no $_" ) for qw{ssh_keys ssh_deletekeys ssh_genkeytypes};
+    for my $item (qw{ssh_keys ssh_deletekeys ssh_genkeytypes}) { ok( !exists $user_data->{$item}, "with no key in the store, the seed has no $item" ); }
 };
 
 subtest 'a guest a service made has no interfaces of ours to match on' => sub {
@@ -224,7 +225,7 @@ subtest 'the four files are written, and the three YAML ones are YAML' => sub {
 # with its limit cut to a few seconds and its logs moved into a temporary dir.
 subtest 'setup.sh waits for the secrets of a domain that has any' => sub {
     my $tmp    = tempdir( CLEANUP => 1 );
-    my $marker = "$tmp/guest-secrets-marker";
+    my $marker = "$tmp/guest-secrets-marker";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     my ( $plain_dir, undef ) = generated();
     unlike( File::Slurper::read_text("$plain_dir/setup.sh"), qr/waited=/, 'a domain with no secrets starts make at once' );
@@ -414,7 +415,7 @@ CONF
                     owner       => 'root:root',
                     permissions => '0644',
                     defer       => bool(0),
-                    content     => all( re(qr/\ADPkg::Post-Invoke[ ]/), re(qr/needrestart/), re(qr{touch[ ]/run/reboot-required}) ),
+                    content     => Test::Deep::all( re(qr/\ADPkg::Post-Invoke[ ]/), re(qr/needrestart/), re(qr{touch[ ]/run/reboot-required}) ),
                 },
             ],
 
@@ -761,7 +762,7 @@ subtest 'a mirror named as a URL is used as written' => sub {
         [ { arches => ['default'], uri => 'mirror+file:/etc/apt/mirrorlist' } ],
         'apt is redirected at the mirrorlist'
     );
-    cmp_deeply( $user_data->{apt}{security}, $user_data->{apt}{primary}, 'for security too' );
+    cmp_deeply( @{ $user_data->{apt} }{qw(security primary)}, 'for security too' );
     like( $user_data->{apt}{conf}, qr/AllowInsecureRepositories:[ ]true;/, 'and unverified repositories are allowed, as they have always been with a mirror' );
 
     my ($mirrorlist) = grep { $_->{path} eq '/etc/apt/mirrorlist' } @{ $user_data->{write_files} };
@@ -854,8 +855,8 @@ subtest 'the vendor archives and their answers are there before the packages' =>
 };
 
 subtest 'first boot installs through the fetch cache' => sub {
-    my $script = "#!/bin/bash\necho 'the script'\n";
-    my $cert   = "-----BEGIN CERTIFICATE-----\nbogus\n-----END CERTIFICATE-----";
+    my $script = "#!/bin/bash\necho 'the script'\n";                                 ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+    my $cert   = "-----BEGIN CERTIFICATE-----\nbogus\n-----END CERTIFICATE-----";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my ( $dir, undef ) = generated( fetch_cache => { address => '192.0.2.50', authority => $cert, hosts => [qw{apt.one.test apt.two.test}], script => $script } );
     my $user_data = loaded( $dir, 'user-data' );
 

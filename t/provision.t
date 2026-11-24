@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -250,12 +251,15 @@ subtest 'a dry run of a guest that is not there yet' => sub {
     Trog::HV->new( cloud => 'testcloud', domain_dir => $dir );
 
     my $config = Config::Simple->new( syntax => 'simple' );
-    $config->param( $_->[0], $_->[1] )
-      for (
-        [ domain        => 'vm.test' ],   [ contact_email => 'nobody@vm.test' ],
-        [ admin_user    => 'someadmin' ], [ transfer_ip   => '192.0.2.49' ],
-        [ transfer_user => 'someadmin' ], [ transfer_port => 22 ],
-      );
+    for my $item (
+        (
+            [ domain        => 'vm.test' ],   [ contact_email => 'nobody@vm.test' ],
+            [ admin_user    => 'someadmin' ], [ transfer_ip   => '192.0.2.49' ],
+            [ transfer_user => 'someadmin' ], [ transfer_port => 22 ],
+        )
+    ) {
+        $config->param( @{$item}[ 0, 1 ] );
+    }
 
     my ($user) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
@@ -305,14 +309,17 @@ subtest 'a dry run applies nothing' => sub {
     File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     my $config = Config::Simple->new( syntax => 'simple' );
-    $config->param( $_->[0], $_->[1] )
-      for (
-        [ domain      => 'vm.test' ],     [ contact_email => 'nobody@vm.test' ],
-        [ ips         => '192.0.2.9' ],   [ gateway       => '192.0.2.254' ],
-        [ resolvers   => '192.0.2.254' ], [ admin_user    => 'someadmin' ],
-        [ size        => 21474836480 ],   [ cpus          => 2 ],           [ memory        => 4096 ],
-        [ transfer_ip => '192.0.2.49' ],  [ transfer_user => 'someadmin' ], [ transfer_port => 22 ],
-      );
+    for my $item (
+        (
+            [ domain      => 'vm.test' ],     [ contact_email => 'nobody@vm.test' ],
+            [ ips         => '192.0.2.9' ],   [ gateway       => '192.0.2.254' ],
+            [ resolvers   => '192.0.2.254' ], [ admin_user    => 'someadmin' ],
+            [ size        => 21474836480 ],   [ cpus          => 2 ],           [ memory        => 4096 ],
+            [ transfer_ip => '192.0.2.49' ],  [ transfer_user => 'someadmin' ], [ transfer_port => 22 ],
+        )
+    ) {
+        $config->param( @{$item}[ 0, 1 ] );
+    }
 
     quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
@@ -384,7 +391,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
         'key.rsa.pub'    => "ssh-rsa AAAA nobody\n",
         'rsyncd.conf'    => "list = no\n",
     );
-    File::Slurper::Temp::write_text( "$dir/vm.test/$_", $wrote{$_} ) for keys %wrote;
+    for my $key ( keys %wrote ) { File::Slurper::Temp::write_text( "$dir/vm.test/$key", $wrote{$key} ); }
 
     my $config = Config::Simple->new(
         conf(
@@ -461,8 +468,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
     mkdir "$dir/vm.test";
-    File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
-      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ];
+    for my $item ( [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ] ) { File::Slurper::Temp::write_text( "$dir/vm.test/$item->[0]", $item->[1] ); }
 
     my $config = Config::Simple->new(
         conf(
@@ -560,8 +566,7 @@ sub rebuild_answering {
     my $dir = tempdir( CLEANUP => 1 );
     $hv->redefine( domain_dir => sub { $dir } );
     mkdir "$dir/vm.test";
-    File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
-      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ];
+    for my $item ( [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ], [ 'rsyncd.conf', "list = no\n" ] ) { File::Slurper::Temp::write_text( "$dir/vm.test/$item->[0]", $item->[1] ); }
 
     my $config = Config::Simple->new(
         conf(
@@ -823,7 +828,7 @@ my sub layered (%params) {
     $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
 
     my $config = Config::Simple->new( conf( domain => $domain, admin_user => 'someadmin' ) );
-    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'someadmin', depends => $depends ) } );
+    ( @seen{qw(user returned)} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'someadmin', depends => $depends ) } );
 
     return %seen;
 }
@@ -1048,7 +1053,9 @@ sub quietly {
 # directory and the key.
 sub fetchable {
     my ( $loc, $authorized ) = @_;
-    $loc->redefine( $_                  => sub { undef } ) for qw{sandbox_program_error sandbox_error guest_keys_error};
+    for my $item (qw{sandbox_program_error sandbox_error guest_keys_error}) {
+        $loc->redefine( $item => sub { undef } );
+    }
     $loc->redefine( authorize_guest_key => sub { push( @$authorized, [ @_[ 1 .. 3 ] ] ); 1 } );
     return;
 }
@@ -1459,7 +1466,7 @@ subtest 'upstream guests are built first, in order, in this run' => sub {
     my $said = capture_stdout { Trog::Bin::Provisioner::main( '--recipes', $recipes, 'web.test' ) };
     like( $said, qr/web[.]test[ ]names[ ]logs[.]test[ ]in[ ]logshipper[.]host/,   'it says which setting makes a guest needed' );
     like( $said, qr/logs[.]test[ ]names[ ]mirror[.]test[ ]in[ ]_global[.]mirror/, 'for the guests needed in turn too' );
-    my $weak = 'in _global.mirror, so it is built after that guest when it can be';
+    my $weak = 'in _global.mirror, so it is built after that guest when it can be';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $said, qr/\Q$weak\E/, 'and that it can build without a guest that a weak setting names' );
 
     %up = ( 'mirror.test' => 'hv9' );

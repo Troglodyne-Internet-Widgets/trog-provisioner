@@ -63,7 +63,7 @@ $hv_network->redefine(
     }
 );
 
-my $DOMAIN = 'testdeps.test';
+my $DOMAIN = 'testdeps.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # The makefile generated for one domain whose recipes' testdeps are @testdeps.
 sub testdeps_target {

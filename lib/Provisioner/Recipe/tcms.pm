@@ -234,7 +234,7 @@ sub args {
                 type             => 'string',
                 default          => $DEFAULT_REPO,
                 pattern          => "$GIT_REMOTE",
-                'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },
+                'x-errorMessage' => { pattern => 'is not a git remote: an https, ssh, git or file URL, or user@host:path' },                                  ## no critic (RegularExpressions::ProhibitRegexInStrings) -- the message for the pattern keyword, not a pattern
                 description      => 'The git repository to clone tCMS from, and to fast-forward a kept checkout from, which declares its system packages.',
             },
             repo_branch => { type => 'string',  default => 'master',   pattern     => "$BRANCH", description => 'The branch of repo_url that a new guest clones, that a kept checkout on it fast-forwards to, and whose metamerge.yml names the system packages.' },

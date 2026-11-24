@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -307,7 +308,9 @@ subtest 'dbh: a database from before bridges opens, and keeps its rows' => sub {
     my $old        = DBI->connect( 'dbi:SQLite:dbname=' . Provisioner::IPPool::db_path(), q{}, q{}, { RaiseError => 1 } );
     my $dir        = File::Basename::dirname( Provisioner::IPPool::DB::schema_path() );
     my @statements = map { split m/;\s*$/m, File::Slurper::read_text("$dir/$_") } qw{ips.sql ips.v1.update.sql};
-    $old->do($_) foreach grep { m/\S/ } @statements;
+    for my $statement ( grep { m/\S/ } @statements ) {
+        $old->do($statement);
+    }
     $old->do('PRAGMA user_version = 1');
     $old->do(q{INSERT INTO ips (ip, domain, kind, bin) VALUES ('192.0.2.11', 'old.test', 'domain', 'guests'), ('192.0.2.1', 'gateway:192.0.2.1', 'reserved', 'guests')});
     $old->disconnect;
@@ -457,8 +460,8 @@ subtest 'client_addresses: the address of a client of the VPN comes from its ser
     is_deeply( Provisioner::IPPool::client_addresses('far.test'), {}, 'an address of the server outside the bin is not the business of the pool' );
 
     @ran = ();
-    is_deeply( Provisioner::IPPool::client_addresses($_), {}, "$_ has none" ) foreach qw{plain.test file.test};
-    is_deeply( \@ran,                                     [], 'and nobody is asked for a domain that is no client of a server of the pool' );
+    for my $item (qw{plain.test file.test}) { is_deeply( Provisioner::IPPool::client_addresses($item), {}, "$item has none" ); }
+    is_deeply( \@ran, [], 'and nobody is asked for a domain that is no client of a server of the pool' );
 
     $said = undef;
     like( exception { Provisioner::IPPool::main_addresses('laptop.test') }, qr/vpn[.]test[.]test[ ]is[ ]not[ ]up/, 'a server that cannot be asked stops the question, by name' );
@@ -486,15 +489,18 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     # their own, which Trog::SQLite takes as the whole of the schema.
     my $schema = File::Temp::tempdir( CLEANUP => 1 );
     my $source = File::Basename::dirname( Provisioner::IPPool::DB::schema_path() );
-    File::Slurper::Temp::write_text( "$schema/$_", File::Slurper::read_text("$source/$_") ) for qw{ips.sql ips.v1.update.sql ips.v2.update.sql};
+    for my $item (qw{ips.sql ips.v1.update.sql ips.v2.update.sql}) { File::Slurper::Temp::write_text( "$schema/$item", File::Slurper::read_text("$source/$item") ); }
     my $old = Trog::SQLite::dbh( "$schema/ips.sql", Provisioner::IPPool::db_path() );
-    $old->do( q{INSERT INTO ips (ip, domain, kind, bin, nic, main, noted) VALUES (?, ?, ?, ?, ?, ?, ?)}, undef, @$_ )
-      for (
-        [ qw{10.9.9.10 a.test domain guests br0},            1,   '2026-01-02 03:04:05' ],
-        [ qw{10.0.0.10 a.test domain guests virbr1},         0,   '2026-01-02 03:04:06' ],
-        [ qw{10.8.0.130 a.test domain vpnclients},           q{}, 1, '2026-01-02 03:04:07' ],
-        [ qw{10.9.9.1 gateway:10.9.9.1 reserved guests br0}, 1,   '2026-01-02 03:04:08' ],
-      );
+    for my $item (
+        (
+            [ qw{10.9.9.10 a.test domain guests br0},            1,   '2026-01-02 03:04:05' ],
+            [ qw{10.0.0.10 a.test domain guests virbr1},         0,   '2026-01-02 03:04:06' ],
+            [ qw{10.8.0.130 a.test domain vpnclients},           q{}, 1, '2026-01-02 03:04:07' ],
+            [ qw{10.9.9.1 gateway:10.9.9.1 reserved guests br0}, 1,   '2026-01-02 03:04:08' ],
+        )
+    ) {
+        $old->do( q{INSERT INTO ips (ip, domain, kind, bin, nic, main, noted) VALUES (?, ?, ?, ?, ?, ?, ?)}, undef, @$item );
+    }
     Trog::SQLite::forget();
 
     my $db   = local_db();
@@ -586,7 +592,7 @@ subtest 'a database of version 2 keeps every row, behind the view ips' => sub {
     }
 
     sub list_all_domains ($self) {
-        return map { FakeDomain->new($_) } @{ $self->{names} };
+        return map { local ($_) = $_; FakeDomain->new($_) } @{ $self->{names} };
     }
     sub domain_dir ($self) { return $self->{domain_dir} // '/bogus' }
     sub ssh_host   ($self) { return $self->{host} }
@@ -703,7 +709,7 @@ subtest 'pool_of: the pool of a guest is the pool of its hypervisor and the bins
 
 subtest 'guest_pools: no two pools share an address, not even two hypervisors on one network' => sub {
     my $fleet = sub (%pools) {
-        return FakeFleet->new( map { $_ => FakeHV->new( pool => $pools{$_} ) } keys %pools );
+        return FakeFleet->new( map { local ($_) = $_; $_ => FakeHV->new( pool => $pools{$_} ) } keys %pools );
     };
 
     my %one = ( cidr => ['192.0.2.0/28'] );

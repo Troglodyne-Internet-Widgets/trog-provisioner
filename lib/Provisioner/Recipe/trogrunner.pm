@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -326,6 +327,8 @@ my $NIC_KEY = qr/\A (?:ip_pool|ip_addresses|gateway|prefix) _ ./;
 
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
+my $GUEST_KEYS = qr/(?: \A \z | $Trog::Patterns::SSHD_PATH )/;
+
 =head3 required_recipes
 
 The C<perl> recipe, with what goes into it from CPAN as its C<cpan_deps>.  The
@@ -432,7 +435,7 @@ sub args {
                     transfer_user => { type => 'string', default => q{} },
                     transfer_ip   => { type => 'string', default => q{} },
                     transfer_port => { type => 'string', default => q{} },
-                    guest_keys    => { type => 'string', default => q{}, pattern => "(?:\\A\\z|$Trog::Patterns::SSHD_PATH)" },
+                    guest_keys    => { type => 'string', default => q{}, pattern => "$GUEST_KEYS" },
                 },
             },
 
@@ -616,7 +619,7 @@ sub enrich {
         return scalar keys %$value if ref $value eq 'HASH';
         return $value ne q{};
     };
-    my %global = map { $_ => $config->{$_} } grep { $said->($_) } keys %$config;
+    my %global = map { $_ => $config->{$_} } grep { local ($_) = $_; $said->($_) } keys %$config;
     $opts{recipes}{_base}{_global} = { %global, %{ $opts{recipes}{_base}{_global} // {} } };
 
     $opts{provision_user} //= $opts{user};
@@ -915,10 +918,10 @@ sub outside_steps {
                 machine => { hypervisor => $name },
                 when    => 'secrets',
                 apply   => sub ( $hv, %context ) {
-                    return map { $hv->runner_network_steps($_) } @{ $adapters->($hv)->{networks} };
+                    return map { local ($_) = $_; $hv->runner_network_steps($_) } @{ $adapters->($hv)->{networks} };
                 },
                 revert => sub ( $hv, %context ) {
-                    return map { $hv->runner_network_removal_steps( $_, $user ) } @{ $adapters->($hv)->{networks} };
+                    return map { local ($_) = $_; $hv->runner_network_removal_steps( $_, $user ) } @{ $adapters->($hv)->{networks} };
                 },
               },
               {

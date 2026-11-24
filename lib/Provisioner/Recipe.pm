@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use List::Util qw{any uniq};
 use Text::Xslate;
@@ -863,9 +864,9 @@ GitHub changes it.
 
 sub github_release_classes {
     return (
-        { class => 'index',     pattern => '[^/]+/[^/]+/[^/]+/releases/latest(?:/|$)' },
-        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/releases/download/' },
-        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)' },
+        { class => 'index',     pattern => '[^/]+/[^/]+/[^/]+/releases/latest(?:/|$)' },                 ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/releases/download/' },                     ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)' },    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
     );
 }
 
@@ -890,8 +891,8 @@ sub apt_repo_classes {
 
     my $h = quotemeta $host;
     return (
-        { class => 'aptindex',  pattern => "$h/(?:[^/]+/)*dists/(?!.*/by-hash/)" },
-        { class => 'immutable', pattern => "$h/(?:[^/]+/)*(?:pool|by-hash)/" },
+        { class => 'aptindex',  pattern => "$h/(?:[^/]+/)*dists/(?!.*/by-hash/)" },    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
+        { class => 'immutable', pattern => "$h/(?:[^/]+/)*(?:pool|by-hash)/" },        ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
     );
 }
 
@@ -1560,6 +1561,7 @@ sub granted_secrets {
 
     # A lexical, because grant_terms can reach code that writes $_.
     return map {
+        local ($_) = $_;
         my $grant = $_;
         Provisioner::Cookbook->load( $grant->{recipe} )->issue_grant( $grant, $self->grant_terms( $grant, %opts ) )
     } $self->grants( $domain, %opts );
@@ -1578,7 +1580,7 @@ sub revocations {
     my ( $self, $domain ) = @_;
 
     my %opts = %{ Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} };
-    return map { +{ guest => $_->{guest}, Provisioner::Cookbook->load( $_->{recipe} )->revoke_grant($_) } } $self->grants( $domain, %opts );
+    return map { local ($_) = $_; +{ guest => $_->{guest}, Provisioner::Cookbook->load( $_->{recipe} )->revoke_grant($_) } } $self->grants( $domain, %opts );
 }
 
 =head3 @steps = $recipe->outside_steps($domain, %opts)

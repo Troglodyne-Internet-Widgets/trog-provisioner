@@ -210,7 +210,7 @@ subtest 'a followed redirect is kept under the URL the guest asked for, and goes
 
     my @guards = $vhost =~ m/if[ ]\(\$fetchcache_location[ ]~[ ]"\^https:\/\/\(\(\?:([^)]*)\)\)\/"\)[ ]\{\n\s+set[ ]\$fetchcache_next[ ]\$1;\n\s+\}\n\s+if[ ]\(\$fetchcache_next[ ]=[ ]""\)[ ]\{\n\s+return[ ]502;/g;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     ok( scalar @guards, 'a redirect is checked before it is followed' ) or return;
-    is_deeply( alternatives($_), allowed($vhost), 'against the hosts it answers to, and only over https' ) for @guards;
+    for my $guard (@guards) { is_deeply( alternatives($guard), allowed($vhost), 'against the hosts it answers to, and only over https' ); }
 
     # Measured on a guest: cpan.metacpan.org/src/5.0/, which perlbrew lists
     # what perls there are from, redirects to www.cpan.org, which adds the
@@ -318,7 +318,7 @@ subtest 'the certificate names every host it answers to, and the authority signe
     is( ( stat("$dir/fetchcache.key") )[2] & 0777, 0600, 'its key readable by nobody else' );
     ## use critic
 
-    IO::Socket::SSL::Utils::CERT_free($_) for $leaf, $issuer;
+    for my $item ( $leaf, $issuer ) { IO::Socket::SSL::Utils::CERT_free($item); }
 };
 
 subtest 'the authority is made once, kept in the configuration directory, and its key kept close' => sub {
@@ -353,7 +353,7 @@ subtest 'trusted_authority reads the certificate alone, and makes nothing' => su
     like( $error, qr/There[ ]is[ ]no[ ]\S+fetchcache-ca\.crt/, 'with none, it dies' );
     like( $error, qr/Only[ ]the[ ]certificate/,                'and says to copy the certificate only' );
 
-    File::Slurper::Temp::write_text( $paths->{$_}, $held{$_} ) for qw{cert key};
+    for my $item (qw{cert key}) { File::Slurper::Temp::write_text( $paths->{$item}, $held{$item} ); }
     chmod oct('0600'), $paths->{key} or die "chmod: $!";
 };
 

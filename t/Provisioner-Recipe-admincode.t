@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -130,7 +131,7 @@ subtest 'claude gets --add-dir for every clone that has skills, on a guest that 
     };
 
     my @one = map { ( '--add-dir', "$root/code.test.test/src/$_" ) } qw{one .github};
-    is_deeply( [ sort @{ $run->( $sources[0], $sources[0] ) } ], [ sort @one, q{--resume} ], q{each clone of the basedir with skills, dotted ones too, once each however often .bashrc runs, and the arguments of the caller, but no clone without skills and no skills outside a clone} ) or diag explain $run->( $sources[0], $sources[0] );
+    is_deeply( [ sort @{ $run->( @sources[ 0, 0 ] ) } ], [ sort @one, q{--resume} ], q{each clone of the basedir with skills, dotted ones too, once each however often .bashrc runs, and the arguments of the caller, but no clone without skills and no skills outside a clone} ) or diag explain $run->( @sources[ 0, 0 ] );
     is_deeply( [ sort @{ $run->(@sources) } ], [ sort @one, '--add-dir', "$root/other.test.test/src/two", '--resume' ], 'and the clones of a second domain on the machine as well as the first' );
 
     my $alone = tempdir( CLEANUP => 1 );

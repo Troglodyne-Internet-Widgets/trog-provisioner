@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -106,8 +107,8 @@ _base:
 RECIPES
 
     # Setup fake files/dirs
-    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
-    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => oct('755') } );
+    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => oct('755') } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
     # Read out of the configuration directory rather than fetched by cloud-init,
@@ -160,8 +161,8 @@ testdomain.test.local:
   adminconfig: {}
 RECIPES
 
-    my $td_mock     = Test::MockFile->new_dir( $loopdir,             { mode => 0755 } );
-    my $tdd_mock    = Test::MockFile->new_dir( "$loopdir/recipes.d", { mode => 0755 } );
+    my $td_mock     = Test::MockFile->new_dir( $loopdir,             { mode => oct('755') } );
+    my $tdd_mock    = Test::MockFile->new_dir( "$loopdir/recipes.d", { mode => oct('755') } );
     my $recipe_mock = Test::MockFile->file( "$loopdir/recipes.yaml", $recipe );
 
     my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
@@ -210,8 +211,8 @@ _base:
       - vim
 RECIPES
 
-    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
-    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => oct('755') } );
+    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => oct('755') } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
     # Read out of the configuration directory rather than fetched by cloud-init,
@@ -342,7 +343,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     print {$fh} "state\n";
     close($fh) or die "Could not close $landed/dump.rdb: $!";
 
-    my $empty = "$salvage_root/empty";
+    my $empty = "$salvage_root/empty";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     mkdir $empty or die "Could not create $empty: $!";
 
     my %args = (

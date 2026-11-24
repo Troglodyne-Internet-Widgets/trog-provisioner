@@ -24,7 +24,7 @@ use File::Find ();
 
 use FindBin;
 
-my $root = "$FindBin::Bin/..";
+my $root = "$FindBin::Bin/..";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 my @files;
 File::Find::find( sub { push @files, $File::Find::name if !-d && ( /\.pm\z/ || $File::Find::dir =~ m{/bin\z} ) }, "$root/lib", "$root/bin" );

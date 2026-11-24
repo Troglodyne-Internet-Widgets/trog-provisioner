@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -232,8 +233,8 @@ sub run {
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- each is a file that this run just made, in a directory that nothing else can see
     my $ddir = "$tmpdir/domains/$recipe.$TLD";
-    ok( -f "$ddir/$_", "$_ generated" )            for qw{Makefile data.tar.gz provision.conf users.yaml};
-    ok( -f "$ddir/$_", "$_ generated in datadir" ) for values %files;
+    for my $item  (qw{Makefile data.tar.gz provision.conf users.yaml}) { ok( -f "$ddir/$item",  "$item generated" ); }
+    for my $value ( values %files )                                    { ok( -f "$ddir/$value", "$value generated in datadir" ); }
 
     foreach my $test (@tests) {
         my $tname = $test =~ s/tt\z/t/r;

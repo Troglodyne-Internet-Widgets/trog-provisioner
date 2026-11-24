@@ -155,7 +155,8 @@ subtest 'the packages are those that tCMS declares, and never none' => sub {
 
     is_deeply( [ $deps->("x_system_packages:\n  File::LibMagic:\n    deb: libmagic-dev\n  Gpp:\n    deb: g++\n    rpm: gcc-c++\n") ], [qw{git libmagic-dev g++}], 'git, which the recipe clones with, and the deb package of each dependency, on Ubuntu' );
     is( $asked[-1], 'b1 of https://github.com/Troglodyne-Internet-Widgets/tCMS.git', 'read from the branch of the repository' );
-    $recipe->deps( repo_branch => 'b1' ) for 1 .. 2;
+    $recipe->deps( repo_branch => 'b1' );
+    $recipe->deps( repo_branch => 'b1' );
     is( scalar @asked, 1, 'once for each branch' );
     $recipe->deps( repo_branch => 'b1', repo_url => 'https://git.test.test/test-org/tCMS-fork' );
     is( $asked[-1], 'b1 of https://git.test.test/test-org/tCMS-fork', 'and of each repository, on any host' );

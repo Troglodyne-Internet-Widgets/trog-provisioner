@@ -127,7 +127,7 @@ subtest 'a commit is refreshed' => sub {
 
 subtest 'a rebase refreshes nothing while it applies its commits' => sub {
     $git->(qw{switch -q -c topic});
-    $commit->( "t$_", "$_\n" ) for 1 .. 3;
+    for my $item ( 1 .. 3 ) { $commit->( "t$item", "$item\n" ); }
     $refreshed->();
 
     $git->(qw{switch -q master});

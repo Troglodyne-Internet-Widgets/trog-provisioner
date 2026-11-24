@@ -31,7 +31,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 my $script = "$FindBin::Bin/../bin/check_delegation";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-my $ZONE = 'customer.test';
+my $ZONE = 'customer.test';                                                                          ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 my $rfile = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 File::Slurper::Temp::write_text(
@@ -64,7 +64,7 @@ sub check_against {
             my ($server) = $self->nameservers;
             my $said     = ( $servers{$server} // {} )->{"$name $type"} // return;
             my $packet   = Net::DNS::Packet->new( $name, $type );
-            $packet->push( answer => map { Net::DNS::RR->new($_) } @{ $said->{answer} } );
+            $packet->push( answer => map { local ($_) = $_; Net::DNS::RR->new($_) } @{ $said->{answer} } );
             $packet->header->aa( $said->{aa} ? 1 : 0 );
             return $packet;
         }

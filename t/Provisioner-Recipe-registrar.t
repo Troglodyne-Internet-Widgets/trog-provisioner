@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -129,9 +130,9 @@ subtest 'a domain that names an authority reaches it with a token of its own' =>
     is_deeply( { fresh('registrar')->granted_secrets('web.example.net') }, {}, 'and a domain that names no authority needs none' );
 
     my $out        = fresh('lexicon')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
-    my $token_line = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat /etc/lexicon/$name.token)"};
+    my $token_line = qq{export LEXICON_POWERDNS_AUTH_TOKEN="\$(cat /etc/lexicon/$name.token)"};                                                              ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $out, qr{^\Q$token_line\E$}m, 'the shortcut reads the token from the file' );
-    my $server_line = 'export LEXICON_POWERDNS_PDNS_SERVER="https://dnsapi.ns.example.net"';
+    my $server_line = 'export LEXICON_POWERDNS_PDNS_SERVER="https://dnsapi.ns.example.net"';                                                                 ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $out, qr{^\Q$server_line\E$}m, 'at the proxy of that guest' );
 
     my $hook = fresh('letsencrypt')->render_file( 'files/ssl.dehydrated.hook.tt', domain => $name, install_dir => '/bogus', admin_user => 'someadmin' );
@@ -141,7 +142,7 @@ subtest 'a domain that names an authority reaches it with a token of its own' =>
 };
 
 subtest 'what a guest that names an authority sets up' => sub {
-    my $name = 'web.lab.example.net';
+    my $name = 'web.lab.example.net';                                                                                                                        ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
     authority_conf( $conf, $name, 'ns.example.net' );
     my %common = ( domain => $name, install_dir => '/bogus', admin_user => 'someadmin', script_dir => '/bogus/bin', main_ip => '192.0.2.6', ipmap => { 'ns.example.net' => '192.0.2.53' } );
@@ -154,7 +155,7 @@ subtest 'what a guest that names an authority sets up' => sub {
     ok( !$opts{fleet_anchor}, 'and an authority under a public name needs no anchor' );
 
     my $fragment = fresh('registrar')->render( %common, authority => 'ns.example.net', type => 'easydns' );
-    my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns.example.net";
+    my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns.example.net";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     is_deeply( { fresh('registrar')->resolver_files( %common, authority => 'ns.example.net', type => 'easydns' ) }, { 'registrar-resolved.conf' => 'trog-authority.conf' }, 'the resolver target routes those names to the authority' );
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'and delegates its zone to the authority first in the postrun, before the fetcher of letsencrypt' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, "publish_dns_records $name" ), 'before it publishes its records there' );
@@ -175,7 +176,7 @@ subtest 'what a guest that names an authority sets up' => sub {
 };
 
 subtest 'a guest that holds its own zone is delegated as one under another guest is' => sub {
-    my $name = 'web.lab.example.net';
+    my $name = 'web.lab.example.net';                            ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $conf = Test::MockModule->new('Provisioner::Cookbook');
     $conf->redefine( domain_config => sub { my ( undef, $domain ) = @_; return $domain eq $name ? { pdns => {} } : {} } );
     $conf->redefine( host_of       => sub { return } );
@@ -188,9 +189,9 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     is_deeply( { fresh('registrar')->resolver_files(%common) }, {}, 'and gives the resolver target no drop-in' );
 
     my $fragment = fresh('registrar')->render(%common);
-    my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";
+    my $delegate = "publish_dns_records --delegate --shortcut /opt/lexicon/upstream/$name $name ns1.$name 192.0.2.6";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $fragment, qr{^POSTRUN_SLOT=0[ ]\S+queue_postrun_task[ ]\S+\Q$delegate\E$}m, 'the zone above names its ns1 first in the postrun, with the address of ns1 as glue, because ns1 is inside the zone' );
-    my $records = "publish_dns_records --addressed ns1.$name $name 192.0.2.6";
+    my $records = "publish_dns_records --addressed ns1.$name $name 192.0.2.6";                                           ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $fragment, qr{\Q$records\E$}m, 'its own records include ns1, at the address of the domain' );
     ok( index( $fragment, '--delegate' ) < index( $fragment, $records ), 'and go up after the delegation' );
 
@@ -198,7 +199,7 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     # resolver follows to its nameserver must give that one.
     my $natted = fresh('registrar')->render( %common, address => '198.51.100.6' );
     like( $natted, qr{\Q$name\E[ ]ns1[.]\Q$name\E[ ]198[.]51[.]100[.]6$}m, 'the glue is the address that its A record publishes' );
-    my $own_ns1 = "--addressed ns1.$name $name 198.51.100.6";
+    my $own_ns1 = "--addressed ns1.$name $name 198.51.100.6";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $natted, qr{\Q$own_ns1\E$}m, 'and so is the record of ns1 in its own zone' );
 
     my %untyped = %common;
@@ -212,7 +213,7 @@ subtest 'a guest that holds its own zone is delegated as one under another guest
     like( exception { fresh('registrar')->validate( %common, main_ip => undef ) }, qr/inside[ ]its[ ]zone/, 'and so is one with no address for its ns1' );
 
     # An authority whose name is inside the zone that it holds needs glue too.
-    my $inside = "ns.$name";
+    my $inside = "ns.$name";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     authority_conf( $conf, $name, $inside );
     like(
         fresh('registrar')->render( %common, authority => $inside, ipmap => { $inside => '192.0.2.53' } ),
@@ -267,7 +268,7 @@ subtest 'a domain whose authority is under a reserved TLD trusts the authority o
     is( File::Slurper::read_text("$out/registrar-anchor.crt"), "the authority\n", 'which is the fleet authority' );
     is( File::Slurper::read_text("$config/fetchcache-ca.crt"), "the authority\n", 'and the installation keeps the certificate that it had' );
     is_deeply( [ map { s{\A.*/}{}r } glob("$config/*") ], ['fetchcache-ca.crt'], 'and makes no authority of its own beside it' );
-    my $install = 'install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt';
+    my $install = 'install -o root -g root -m 0644 registrar-anchor.crt /usr/local/share/ca-certificates/trog-acmeca.crt';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( fresh('registrar')->render(%common), qr{^\Q$install\E$}m, 'and the fragment installs it where acmeca installs the same one' );
     unlike( fresh('registrar')->render(%common), qr{--delegate}, 'and under a reserved TLD there is no zone above to delegate from' );
 };
@@ -504,7 +505,7 @@ sub publishing {
     return ( { $recipe->validate( %common, %opts ) }, fresh($name)->render( %common, %opts ) );
 }
 
-my $PUBLIC    = 'pub.example.net';
+my $PUBLIC    = 'pub.example.net';                                                                                                         ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $REGISTRAR = { registrar => { type => 'easydns' } };
 my %ON_PUBLIC = ( domain => $PUBLIC, main_ip => '192.0.2.50', aliases => { $PUBLIC => ["alt.$PUBLIC"] }, hostnames => ["www.$PUBLIC"] );
 
@@ -528,7 +529,7 @@ subtest 'the registrar publishes the records of the domain' => sub {
 };
 
 subtest 'the internal name is an A record at the address of the guest, and not of the relay' => sub {
-    my $relay = '192.0.2.99';
+    my $relay = '192.0.2.99';                                                             ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my %given = ( %ON_PUBLIC, address => $relay, internal_name => "internal.$PUBLIC" );
     my ( $opts, $fragment ) = publishing( 'registrar', $REGISTRAR, %given );
 
@@ -650,13 +651,13 @@ subtest 'the guest test finds a record at the apex, however the provider spells 
         return { type => $type, name => ( $name eq $PUBLIC ? "$apex$PUBLIC" : $name ), content => $content, id => "$type $name $content" };
     };
     my @names = (
-        ( map { [ 'A',        $_,         $opts->{address} ] } $PUBLIC, @{ $opts->{address_names} } ),
-        ( map { [ 'CNAME',    $_,         $PUBLIC ] } @{ $opts->{domain_aliases} } ),
-        ( map { [ $_->{type}, $_->{name}, $_->{content} ] } @{ $opts->{zone_records} } ),
+        ( map { [ 'A',     $_, $opts->{address} ] } $PUBLIC, @{ $opts->{address_names} } ),
+        ( map { [ 'CNAME', $_, $PUBLIC ] } @{ $opts->{domain_aliases} } ),
+        ( map { [ @{$_}{qw(type name content)} ] } @{ $opts->{zone_records} } ),
     );
 
     foreach my $apex ( q{.}, '@.' ) {
-        my $tap = guest_test_against( $opts, map { $row->( $apex, @$_ ) } @names );
+        my $tap = guest_test_against( $opts, map { local ($_) = $_; $row->( $apex, @$_ ) } @names );
         unlike( $tap, qr/^\s*not[ ]ok/m, "every check passes, with the apex listed as ${apex}DOMAIN" ) or diag $tap;
         like( $tap, qr/^\s*ok[ ]\d+[ ]-[ ]MX[ ]\Q$PUBLIC\E[ ]holds[ ]10[ ]mail/m, 'the MX of the apex among them' );
     }
@@ -664,7 +665,7 @@ subtest 'the guest test finds a record at the apex, however the provider spells 
     # As the zone was after a build that could not find the apex in the list:
     # its own records beside those of an older server.
     my @older  = ( $row->( '@.', 'A', $PUBLIC, '198.51.100.9' ), $row->( '@.', 'TXT', $PUBLIC, 'v=spf1 +mx ~all' ) );
-    my $tap    = guest_test_against( $opts, @older, map { $row->( q{.}, @$_ ) } @names );
+    my $tap    = guest_test_against( $opts, @older, map { local ($_) = $_; $row->( q{.}, @$_ ) } @names );
     my $failed = qr/^\s*not[ ]ok[ ]\d+[ ]-[ ]and[ ]no[ ]other[ ]/m;
     like( $tap, qr/${failed}address/,                           'a second address of the domain fails' );
     like( $tap, qr/${failed}TXT[ ]at[ ]\Q$PUBLIC\E[ ].*v=spf1/, 'and so does a second SPF' );
@@ -694,7 +695,7 @@ subtest 'the zone of a name, among the zones of the registrar' => sub {
         "www.$PUBLIC"          => undef,
         $PUBLIC                => undef,
     );
-    is( $registrar->zone_of( $_, $PUBLIC, \%zones ), $of{$_}, "$_: " . ( $of{$_} // 'none' ) ) foreach sort keys %of;
+    for my $key ( sort keys %of ) { is( $registrar->zone_of( $key, $PUBLIC, \%zones ), $of{$key}, "$key: " . ( $of{$key} // 'none' ) ); }
 };
 
 subtest 'a domain in a zone of an account writes its own zone with that account' => sub {

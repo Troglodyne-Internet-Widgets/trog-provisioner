@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Data::Validate::Domain();
 use File::Slurper();
@@ -203,7 +204,9 @@ in C<$text>.
 =cut
 
 sub add_line ( $text, $line ) {
-    my ($address) = $line =~ m/\A([^:]+):/ or die "Not a passwd-file line: $line\n";
+    my $colon = index( $line, ':' );
+    die "Not a passwd-file line: $line\n" if $colon < 1;
+    my $address = substr( $line, 0, $colon );
     die "$address is already in the passwd-file.\n" if has_address( $text, $address );
 
     $text .= "\n" if length($text) > 0 && $text !~ m/\n\z/;
@@ -324,7 +327,7 @@ sub add_table_line ( $text, $line, $domain ) {
         die "$key is already in the table, with another value.\n";
     }
 
-    my $catchall = "\@$domain";
+    my $catchall = "\@$domain";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     return $text if $text =~ s/^(?=\Q$catchall\E\s)/$line\n/m;
 
     $text .= "\n" if length($text) > 0 && $text !~ m/\n\z/;

@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use File::Basename();
 
@@ -358,8 +359,8 @@ sub enrich {
     $opts{relay_dir}       = $self->relay_dir;
     $opts{port_rate_limit} = $self->port_rate_limit;
 
-    my @relays = grep { $_->isa(__PACKAGE__) } map { Provisioner::Cookbook->load($_) } grep { $_ ne $self->recipe_name } @{ $opts{modules} // [] };
-    $opts{relay_dirs} = [ sort map { $_->relay_dir } $self, @relays ];
+    my @relays = grep { $_->isa(__PACKAGE__) } map { local ($_) = $_; Provisioner::Cookbook->load($_) } grep { local ($_) = $_; $_ ne $self->recipe_name } @{ $opts{modules} // [] };
+    $opts{relay_dirs} = [ sort map { local ($_) = $_; $_->relay_dir } $self, @relays ];
     return %opts;
 }
 

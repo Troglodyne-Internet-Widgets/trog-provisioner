@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use DBI();
 use DBD::SQLite::Constants qw{SQLITE_OPEN_READONLY};
@@ -338,7 +339,7 @@ sub databases ( $fleet = undef ) {
             push @list, { name => $name, hv => $hv, path => $path, create => $create };
             $list[-1];
         };
-        $network{ "$_\t" . network_of( $pools{$name}{$_} ) } = $of{$name} foreach keys %{ $pools{$name} // {} };
+        for my $key ( keys %{ $pools{$name} // {} } ) { $network{ "$key\t" . network_of( $pools{$name}{$key} ) } = $of{$name}; }
     }
 
     return { configured => 1, list => \@list, of => \%of, network => \%network, pools => \%pools };
@@ -494,7 +495,7 @@ sub client_addresses {
 
     my %clients = via_clients($via);
     my $address = $clients{$domain} // return {};
-    my ($bin)   = grep { Net::CIDR::cidrlookup( $address, blocks( $bins{$_} ) ) } sort keys %bins;
+    my ($bin)   = grep { local ($_) = $_; Net::CIDR::cidrlookup( $address, blocks( $bins{$_} ) ) } sort keys %bins;
     return defined $bin ? { $bin => $address } : {};
 }
 
@@ -618,7 +619,7 @@ sub bins {
         foreach my $block ( blocks( $check{$name} ) ) {
             Net::IP->new($block)
               or die "Invalid CIDR '$block' in the bin $name of ip_pool: " . Net::IP::Error() . "\n";
-            my $other = first { $_->{bin} ne $name && Net::CIDR::cidrlookup( $block, $_->{block} ) } @seen;
+            my ($other) = grep { local ($_) = $_; $_->{bin} ne $name && Net::CIDR::cidrlookup( $block, $_->{block} ) } @seen;
             die "ip_pool has $block in the bin $name and $other->{block} in the bin $other->{bin}, which overlap, and an address can belong to one bin only\n"
               if $other;
             push @seen, { bin => $name, block => $block };
@@ -704,7 +705,7 @@ sub guest_pools {
         next if $hv->manages_addresses;
         my $nics = $hv->static_pools;
         foreach my $nic ( sort keys %$nics ) {
-            Net::IP->new($_) // die "Invalid CIDR '$_' in ip_pool_$nic of $name in hypervisors.conf: " . Net::IP::Error() . "\n" foreach blocks( $nics->{$nic} );
+            for my $item ( blocks( $nics->{$nic} ) ) { Net::IP->new($item) // die "Invalid CIDR '$item' in ip_pool_$nic of $name in hypervisors.conf: " . Net::IP::Error() . "\n"; }
         }
         $pools{$name} = $nics if %$nics;
     }
@@ -717,7 +718,7 @@ sub guest_pools {
         }
     }
     foreach my $claim (@claims) {
-        my $other = first { $_->{names} ne $claim->{names} && Net::CIDR::cidrlookup( $claim->{block}, $_->{block} ) } @claims or next;
+        my ($other) = grep { local ($_) = $_; $_->{names} ne $claim->{names} && Net::CIDR::cidrlookup( $claim->{block}, $_->{block} ) } @claims or next;
         die "The pool of $claim->{names} in hypervisors.conf has $claim->{block} and the pool of $other->{names} has $other->{block}, which overlap.\n" . "Each hypervisor keeps the addresses of its pools in its own database, so no two pools may overlap, not even the same blocks on two hypervisors.\n";
     }
 
@@ -937,7 +938,7 @@ my sub discover ( $hv, $name, $nics, $sweep ) {
     # knows that a guest exists, but not the address it was built with,
     # and the neighbor table misses a quiet guest and keeps the address of
     # a destroyed one.  No eval, on purpose: see ensure_seeded.
-    my @names = %nic_of ? map { $_->get_name() } $hv->vmm->list_all_domains() : ();
+    my @names = %nic_of ? map { local ($_) = $_; $_->get_name() } $hv->vmm->list_all_domains() : ();
     if (@names) {
         my $dir    = $hv->domain_dir;
         my $script = join "\n", map {
@@ -1072,7 +1073,7 @@ sub reseed (%opts) {
     if ( $opts{prune} ) {
         die "--prune needs hypervisors.conf: with no fleet, nothing can say which guests are running, and every assignment would be released.\n"
           unless $fleet->configured;
-        @running = uniq sort map { $fleet->hypervisor($_)->guest_names } $fleet->names;
+        @running = uniq sort map { local ($_) = $_; $fleet->hypervisor($_)->guest_names } $fleet->names;
     }
 
     my %seeds;
@@ -1130,7 +1131,7 @@ sub migrate ( $name, $from, %opts ) {
         $old->selectall_arrayref( 'SELECT ip, domain, kind, bin, nic, main, assigned_at FROM ips ORDER BY ip', { Slice => {} } );
     } or die "Could not read the addresses of $from: $@";
 
-    my @mine = grep { !defined( ( $served{ $_->{bin} } // {} )->{via} ) && ( $every || $named{ $_->{bin} } || ( $_->{bin} eq $GUESTS && @blocks && Net::CIDR::cidrlookup( $_->{ip}, @blocks ) ) ) } @$rows;
+    my @mine = grep { local ($_) = $_; !defined( ( $served{ $_->{bin} } // {} )->{via} ) && ( $every || $named{ $_->{bin} } || ( $_->{bin} eq $GUESTS && @blocks && Net::CIDR::cidrlookup( $_->{ip}, @blocks ) ) ) } @$rows;
     my $said = call( $database, 'migrate', { rows => \@mine, dryrun => $opts{dryrun} ? 1 : 0 } );
     return { %$said, skipped => @$rows - @mine };
 }

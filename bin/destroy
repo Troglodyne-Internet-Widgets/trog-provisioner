@@ -148,7 +148,7 @@ storage pool.
 sub main {
     my @args = @_;
 
-    umask 0022;
+    umask oct('022');
 
     my ( $purge, $purge_data, $orphans, $backups, $dryrun, $hv_name, $domain_dir, $hvconf, $credentials, $help );
     GetOptionsFromArray(
@@ -387,7 +387,7 @@ nothing.
 sub remove_rsync_modules {
     my ( $domain, $dryrun ) = @_;
 
-    foreach my $part ( map { File::Glob::bsd_glob( Trog::HV->new()->domain_dir . "/*/rsyncd.d/$domain.$_" ) } qw{conf binds} ) {
+    foreach my $part ( map { local ($_) = $_; File::Glob::bsd_glob( Trog::HV->new()->domain_dir . "/*/rsyncd.d/$domain.$_" ) } qw{conf binds} ) {
         print( ( $dryrun ? "Would remove" : "Removing" ) . " the rsync modules of $domain in $part\n" );
         unlink $part or die "Could not remove $part: $!\n" unless $dryrun;
     }
@@ -418,7 +418,7 @@ sub revoke_grants {
         my @revocations = eval { Provisioner::Cookbook->load($name)->revocations($domain) };
         warn "$name could not say what other guests granted $domain, so none of it is taken back: $@" if $@;
         foreach my $revocation (@revocations) {
-            $revoked += as_root_on( $revocation->{guest}, $revocation->{command}, dryrun => $dryrun, map { $_ => $revocation->{$_} } qw{doing done stays} );
+            $revoked += as_root_on( @{$revocation}{qw(guest command)}, dryrun => $dryrun, map { $_ => $revocation->{$_} } qw{doing done stays} );
         }
     }
     return $revoked;
@@ -581,7 +581,7 @@ sub sweep_backups {
     my $count = sum( map { scalar @{ $found{$_} } } @copies );
     print "$count " . ( $count == 1 ? 'disk' : 'disks' ) . " copied aside, and nothing has taken them away:\n";
     foreach my $name (@copies) {
-        print "  $name (" . join( ', ', map { $_->is_local ? 'here' : ( $_->name // $_->describe ) } @{ $found{$name} } ) . ")\n";
+        print "  $name (" . join( ', ', map { local ($_) = $_; $_->is_local ? 'here' : ( $_->name // $_->describe ) } @{ $found{$name} } ) . ")\n";
     }
 
     if ($dryrun) {
@@ -593,7 +593,7 @@ sub sweep_backups {
     # count the volumes that went.
     my $removed = 0;
     foreach my $name (@copies) {
-        $removed++ for grep { $_ } map { $_->delete_volume($name) } @{ $found{$name} };
+        $removed++ for grep { $_ } map { local ($_) = $_; $_->delete_volume($name) } @{ $found{$name} };
     }
 
     print "Removed $removed of $count copies.\n";
@@ -630,11 +630,13 @@ sub sweep_orphans {
     # name => its copies, as [ machine, path ] pairs.
     my %found;
     foreach my $root (@roots) {
-        push @{ $found{ File::Basename::basename($_) } }, [ $here, $_ ] for grep { -d $_ } glob "$root/*.test";
+        for my $item ( grep { -d $_ } glob "$root/*.test" ) {
+            push @{ $found{ File::Basename::basename($item) } }, [ $here, $item ];
+        }
 
         foreach my $hv (@hvs) {
             next if $hv->is_local;
-            push @{ $found{$_} }, [ $hv, "$root/$_" ] for grep { substr( $_, -length '.test' ) eq '.test' } $hv->list_dir($root);
+            push @{ $found{$_} }, [ $hv, "$root/$_" ] for grep { local ($_) = $_; substr( $_, -length '.test' ) eq '.test' } $hv->list_dir($root);
         }
     }
 
@@ -655,7 +657,7 @@ sub sweep_orphans {
     }
 
     foreach my $name (@orphans) {
-        $_->[0]->remove_tree( $_->[1] ) for @{ $found{$name} };
+        for my $item ( @{ $found{$name} } ) { $item->[0]->remove_tree( $item->[1] ); }
     }
 
     print 'Removed ' . scalar(@orphans) . " directories.\n";
@@ -683,7 +685,7 @@ sub sweep_roots {
     warn 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so only the domain directories are swept.\n"
       unless $data;
 
-    my @roots = uniq( grep { $_ } $data, map { $_->domain_dir } @hvs );
+    my @roots = uniq( grep { $_ } $data, map { local ($_) = $_; $_->domain_dir } @hvs );
     warn "And there is no fleet to ask for a domain directory either, so there is nothing to sweep.\n" unless @roots;
 
     return @roots;
@@ -699,7 +701,7 @@ many directories it had.
 
 sub where_they_are {
     my ($copies) = @_;
-    return uniq( map { $_->[0]->is_local ? 'here' : ( $_->[0]->name // $_->[0]->describe ) } @$copies );
+    return uniq( map { local ($_) = $_; $_->[0]->is_local ? 'here' : ( $_->[0]->name // $_->[0]->describe ) } @$copies );
 }
 
 exit main(@ARGV) unless caller;

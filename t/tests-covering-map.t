@@ -33,7 +33,7 @@ subtest 'every template stands for something' => sub {
     File::Find::find( { no_chdir => 1, wanted => sub { push @templates, $File::Find::name unless -d $File::Find::name } }, 'templates' );
     ok( scalar @templates, 'there are templates to ask about' );
 
-    my @unplaced = grep { !$map->($_) } @templates;
+    my @unplaced = grep { local ($_) = $_; !$map->($_) } @templates;
     is( "@unplaced", '', 'each one stands for a file' ) or diag "no recipe names: @unplaced";
 };
 

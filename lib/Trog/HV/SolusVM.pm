@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
@@ -552,7 +553,7 @@ sub guest_network_of {
     Socket::inet_pton( Socket::AF_INET(), $address // q{} ) or return;
 
     foreach my $issued ( map { @{ $_->{ip_addresses}{ipv4} // [] } } $self->servers ) {
-        my $network = eval { Net::CIDR::addrandmask2cidr( $issued->{ip}, $issued->{netmask} ) } or next;
+        my $network = eval { Net::CIDR::addrandmask2cidr( @{$issued}{qw(ip netmask)} ) } or next;
         next if $network =~ m{/0\z};
 
         return $network if Net::CIDR::cidrlookup( $address, $network );

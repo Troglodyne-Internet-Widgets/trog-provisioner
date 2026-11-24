@@ -136,7 +136,7 @@ sub ns_of {
     my ( $resolver, $zone ) = @_;
 
     my $reply = $resolver->send( $zone, 'NS' ) // return;
-    my @found = sort( uniq( map { Provisioner::Utils::dns_name( $_->nsdname ) } grep { $_->type eq 'NS' } $reply->answer ) );
+    my @found = sort( uniq( map { local ($_) = $_; Provisioner::Utils::dns_name( $_->nsdname ) } grep { local ($_) = $_; $_->type eq 'NS' } $reply->answer ) );
     return @found;
 }
 
@@ -152,13 +152,14 @@ sub answers_for {
     my ( $resolver, $ns, $zone ) = @_;
 
     my $reply = $resolver->send( $ns, 'A' );
-    my ($address) = map { $_->address } grep { $_->type eq 'A' } ( $reply ? $reply->answer : () );
+    my ($address) = map { local ($_) = $_; $_->address } grep { local ($_) = $_; $_->type eq 'A' } ( $reply ? $reply->answer : () );
     return "$ns has no address, so nobody can ask it" unless defined $address;
 
     my $asked = Net::DNS::Resolver->new( nameservers => [$address], recurse => 0 );
     $reply = $asked->send( $zone, 'SOA' );
-    return "$ns at $address did not answer: " . ( $asked->errorstring || 'no reply' )          unless $reply;
-    return "$ns at $address answered " . $reply->header->rcode . ", not with the SOA of $zone" unless any { $_->type eq 'SOA' } $reply->answer;
+    return "$ns at $address did not answer: " . ( $asked->errorstring || 'no reply' ) unless $reply;
+    my ($soa) = grep { local ($_) = $_; $_->type eq 'SOA' } $reply->answer;
+    return "$ns at $address answered " . $reply->header->rcode . ", not with the SOA of $zone" unless $soa;
     return "$ns at $address answered, but without authority, so it does not hold $zone"        unless $reply->header->aa;
     return;
 }

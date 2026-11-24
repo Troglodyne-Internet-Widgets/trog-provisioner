@@ -30,14 +30,14 @@ use FindBin::libs;
 my $script = "$FindBin::Bin/../scripts/publish_dns_records";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-my $DOMAIN  = 'guest.test.test';
-my $ADDRESS = '192.0.2.50';
+my $DOMAIN  = 'guest.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $ADDRESS = '192.0.2.50';         ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # A real executable, because the script refuses to run without one: the shortcut
 # is what carries the credential, and its absence is a configuration fault
 # rather than something to paper over.
 my $dir      = tempdir( CLEANUP => 1 );
-my $shortcut = "$dir/$DOMAIN";
+my $shortcut = "$dir/$DOMAIN";            ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 open my $fh, '>', $shortcut or BAIL_OUT("Cannot write $shortcut: $!");
 print {$fh} "#!/bin/sh\n";
 close $fh or BAIL_OUT("Cannot close $shortcut: $!");
@@ -358,8 +358,8 @@ subtest 'a dry run says what it would send and sends none of it' => sub {
 };
 
 subtest 'a delegation goes to the zone above, through the shortcut it is given' => sub {
-    my $zone = "lab.$DOMAIN";
-    my $ns   = "ns.$zone";
+    my $zone = "lab.$DOMAIN";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+    my $ns   = "ns.$zone";       ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     against(
         holding(),

@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -130,7 +131,7 @@ subtest 'the fragment does only what it was asked for' => sub {
 };
 
 subtest 'a login in a directory of its own' => sub {
-    my $dir   = '/opt/domains/bot.test.test/.claude/gh';
+    my $dir   = '/opt/domains/bot.test.test/.claude/gh';                                                     ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $login = recipe()->render( %G, github_user => 'bot', github_token => 'ghp_x', config_dir => $dir );
 
     like( $login, qr/install[ ]-d[^\n]*'\Q$dir\E'/,                                'the directory is made' );

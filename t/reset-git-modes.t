@@ -50,7 +50,7 @@ sub mode_of {
 # A checkout with one executable and two plain files, committed.
 sub checkout {
     my $dir = tempdir( CLEANUP => 1 );
-    File::Slurper::Temp::write_text( "$dir/$_", "$_\n" ) for qw{tool plain edited};
+    for my $item (qw{tool plain edited}) { File::Slurper::Temp::write_text( "$dir/$item", "$item\n" ); }
     chmod 0755, "$dir/tool";
     chmod 0644, "$dir/plain", "$dir/edited";
     run_in( 'git', '-C', $dir, 'init', '-q' );

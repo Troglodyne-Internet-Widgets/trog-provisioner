@@ -349,8 +349,8 @@ says which release is current, and C<latest_version> reads it every build.
 
 sub cache_classes {
     return (
-        { class => 'immutable', pattern => 'garagehq\\.deuxfleurs\\.fr/_releases/' },
-        { class => 'index',     pattern => 'api\\.github\\.com/' },
+        { class => 'immutable', pattern => 'garagehq\\.deuxfleurs\\.fr/_releases/' },    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
+        { class => 'index',     pattern => 'api\\.github\\.com/' },                      ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
     );
 }
 

@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -136,7 +137,7 @@ $FAKE->log->level('fatal');
         return;
     };
     my $find = sub ($c) {
-        return ( grep { $_->{id} == $c->param('id') } @{ $STATE{linodes} } )[0];
+        return ( grep { local ($_) = $_; $_->{id} == $c->param('id') } @{ $STATE{linodes} } )[0];
     };
 
     $r->get('/v4/profile')->to( cb => sub ($c) { $asked->($c); $c->render( json => { username => 'test' } ) } );
@@ -163,7 +164,7 @@ $FAKE->log->level('fatal');
     $r->get('/v4/images/*imageId')->to(
         cb => sub ($c) {
             $asked->($c);
-            my ($image) = grep { $_->{id} eq $c->param('imageId') } @{ $STATE{images} };
+            my ($image) = grep { local ($_) = $_; $_->{id} eq $c->param('imageId') } @{ $STATE{images} };
             return $c->render( status => 404, json => { errors => [ { reason => 'Not found' } ] } ) unless $image;
 
             my $shown = {%$image};
@@ -525,7 +526,7 @@ subtest 'check_user_data' => sub {
 
     # Two different keys, because gzip stores a second copy of the same bytes as a reference to the first.
     my $bytes   = incompressible(18000);
-    my @keys    = map { MIME::Base64::encode_base64($_) } substr( $bytes, 0, 9000 ), substr( $bytes, 9000 );
+    my @keys    = map { local ($_) = $_; MIME::Base64::encode_base64($_) } substr( $bytes, 0, 9000 ), substr( $bytes, 9000 );
     my $too_big = "#cloud-config\nwrite_files:\n";
     $too_big .= "  - path: /bogus/$_->[0]\n    content: |\n" . join( q{}, map { "      $_\n" } split m/\n/, $_->[1] ) for [ 'small', 'tiny' ], [ 'key-one.gpg', $keys[0] . 'x' ], [ 'key-two.gpg', $keys[1] ], [ 'medium', 'x' x 300 ];
     my $refused = exception { $hv->check_user_data($too_big) };

@@ -289,7 +289,9 @@ subtest 'rsync is the one thing both ends have to have' => sub {
 subtest 'a machine where bubblewrap cannot make a sandbox is one that no guest can fetch from' => sub {
     my $local = Test::MockModule->new('Trog::Local');
 
-    $local->redefine( $_ => sub { undef } ) for qw{sandbox_error sandbox_program_error guest_keys_error};
+    for my $item (qw{sandbox_error sandbox_program_error guest_keys_error}) {
+        $local->redefine( $item => sub { undef } );
+    }
     my $keys = $Trog::Utils::GUEST_KEYS;
     $local->redefine( guest_keys => sub { return $keys } );
     my ($result) = quietly( sub { Trog::HV->new()->check_sandbox } );
@@ -617,7 +619,9 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
 
     # The count is of the failures above, whether or not this machine has bwrap.
     my $local = Test::MockModule->new('Trog::Local');
-    $local->redefine( $_ => sub { undef } ) for qw{sandbox_error sandbox_program_error guest_keys_error};
+    for my $item (qw{sandbox_error sandbox_program_error guest_keys_error}) {
+        $local->redefine( $item => sub { undef } );
+    }
 
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
@@ -864,7 +868,7 @@ subtest 'a secret written into the configuration in the clear is worth saying' =
     mkdir "$dir/recipes.d";
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
 
-    my $secret = 'hunter2-in-the-clear';
+    my $secret = 'hunter2-in-the-clear';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     File::Slurper::Temp::write_text(
         "$dir/recipes.yaml",
         "---\nweb.test.test:\n" . "    mail:\n        names:\n            someuser:\n                password: $secret\n                gecos: A\n" . "    pdns:\n        api_key: secret:dns/pdns/password\n" . "    backup:\n        key_file: backup.rsa\n" . "    mariadb:\n        root_pw: $secret\n"
@@ -1065,7 +1069,7 @@ subtest 'the pool quota note asks the hypervisor, and advises for its filesystem
     ok( $note->( 'zfs', "/bogus/pool\n 209584128 tp/limited /bogus/pool\n209584128\n1878851584\n" )->{ok}, 'a dataset with a quota is not' );
 
     $result = $note->( 'xfs', "/srv/pool\n 2006650880 /dev/sda2 /srv\n2006650880\n" );
-    my $project = q{xfs_quota -x -c 'project -s -p /srv/pool 42' /srv};
+    my $project = q{xfs_quota -x -c 'project -s -p /srv/pool 42' /srv};    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $result->{fix}, qr/\Q$project\E/,       'XFS gets a project quota on the pool as it is' );
     like( $result->{fix}, qr/rootflags=prjquota/, 'and is told that a remount does not turn it on' );
     unlike( $result->{fix}, qr/pool_path/, 'and the pool does not move' );

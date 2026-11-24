@@ -92,17 +92,21 @@ subtest 'nginx keeps free space on the disk of the caches' => sub {
 
     my @paths = $paths->();
     is( scalar @paths, 2, 'the media and the page caches each have a path' );
-    like( $_, qr/[ ]min_free=2g[ ]/, "and leave 2g free by default: $_" ) for @paths;
+    for my $path (@paths) { like( $path, qr/[ ]min_free=2g[ ]/, "and leave 2g free by default: $path" ); }
 
-    like( $_, qr/[ ]min_free=5g[ ]/, "or what cache_min_free says: $_" ) for $paths->( cache_min_free => '5g' );
-    unlike( $_, qr/min_free=/, "and 0 turns it off: $_" )                for $paths->( cache_min_free => '0' );
+    for my $item ( $paths->( cache_min_free => '5g' ) ) { like( $item, qr/[ ]min_free=5g[ ]/, "or what cache_min_free says: $item" ); }
+    for my $item ( $paths->( cache_min_free => '0' ) )  { unlike( $item, qr/min_free=/, "and 0 turns it off: $item" ); }
 
     my ($media) = $paths->( media_cache_size => '15g' );
     like( $media, qr/[ ]max_size=15g[ ]/, 'the media cache is as large as media_cache_size says' );
 
     my $validate = sub ($size) { $relay->new( output_dir => '/bogus', libdir => '.' )->validate( cache_min_free => $size ) };
-    is( exception { $validate->($_) }, undef, "$_ is a size that nginx takes" )               for qw{2g 0};
-    isnt( exception { $validate->($_) }, undef, "$_ has no unit of nginx, so it is refused" ) for qw{2 2x -1g};
+    for my $item (qw{2g 0}) {
+        is( exception { $validate->($item) }, undef, "$item is a size that nginx takes" );
+    }
+    for my $item (qw{2 2x -1g}) {
+        isnt( exception { $validate->($item) }, undef, "$item has no unit of nginx, so it is refused" );
+    }
 };
 
 Test::NoWarnings::had_no_warnings();

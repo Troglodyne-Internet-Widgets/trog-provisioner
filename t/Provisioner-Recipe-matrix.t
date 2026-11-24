@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -26,7 +27,7 @@ use FindBin::libs;
 
 use Provisioner::Cookbook();
 
-my $PASSWORD = 's3cr3t-admin-pw';
+my $PASSWORD = 's3cr3t-admin-pw';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 my %CONFIG = (
     domain         => 'chat.test.test',

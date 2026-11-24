@@ -100,7 +100,7 @@ subtest 'tearing one guest down keeps the configuration the others are built fro
     my $scratch = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $scratch;
     make_path("$scratch/recipes.d");
-    File::Slurper::Temp::write_text( "$scratch/recipes.d/$_.yaml", "$_:\n    ntp:\n" ) for qw{cache.test consumer.test};
+    for my $item (qw{cache.test consumer.test}) { File::Slurper::Temp::write_text( "$scratch/recipes.d/$item.yaml", "$item:\n    ntp:\n" ); }
 
     # Not a scratch configuration: nothing in it is touched, whatever it holds.
     my ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'cache.test', 0 ) } );
@@ -128,9 +128,9 @@ subtest 'data kept with --keep-data keeps the configuration that it is in' => su
     my $scratch = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $scratch;
     make_path( "$scratch/recipes.d", "$scratch/data/one.test", "$scratch/data/two.test" );
-    File::Slurper::Temp::write_text( "$scratch/recipes.yaml",      "_base:\n    _global:\n        data_source: $scratch/data\n" );
-    File::Slurper::Temp::write_text( "$scratch/recipes.d/$_.yaml", "$_:\n    ntp:\n" ) for qw{one.test two.test};
-    File::Slurper::Temp::write_text( "$scratch/data/$_/state",     "kept\n" )          for qw{one.test two.test};
+    File::Slurper::Temp::write_text( "$scratch/recipes.yaml", "_base:\n    _global:\n        data_source: $scratch/data\n" );
+    for my $item (qw{one.test two.test}) { File::Slurper::Temp::write_text( "$scratch/recipes.d/$item.yaml", "$item:\n    ntp:\n" ); }
+    for my $item (qw{one.test two.test}) { File::Slurper::Temp::write_text( "$scratch/data/$item/state",     "kept\n" ); }
     scratch_marker(1);
 
     # Both torn down with --keep-data: bin/destroy left their data directories.

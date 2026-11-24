@@ -33,7 +33,7 @@ sub scratch_config {
     make_path("$dir/recipes.d");
     no warnings 'once';
     File::Slurper::Temp::write_text( "$dir/$Trog::Skill::CleanScratch::MARKER", "Built by scratch_config; safe to remove.\n" );
-    File::Slurper::Temp::write_text( "$dir/recipes.d/$_.yaml",                  "---\n" ) for @domains;
+    for my $domain (@domains) { File::Slurper::Temp::write_text( "$dir/recipes.d/$domain.yaml", "---\n" ); }
     return;
 }
 

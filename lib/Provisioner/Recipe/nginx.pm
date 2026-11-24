@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
@@ -708,7 +709,7 @@ sub enrich {
         if ( defined $opts{relay} ) {
             my $nginxrelay = Provisioner::Cookbook->load('nginxrelay');
             $opts{relay_address} = Provisioner::IPPool::reachable_address( $opts{relay} );
-            $opts{ban_relay}     = $nginxrelay->ban_client( $opts{domain}, $opts{relay_address} );
+            $opts{ban_relay}     = $nginxrelay->ban_client( @opts{qw(domain relay_address)} );
             $opts{relay_jails}   = [ sort { $a cmp $b } List::Util::uniq( keys %{ { $self->jails(%opts) } }, @{ $opts{proxied_jails} // [] } ) ];
             my @own = sort map { @$_ } values %media, values %cached;
             $opts{relay_cert} = {

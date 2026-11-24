@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::Machine';
 
 use File::Slurper();

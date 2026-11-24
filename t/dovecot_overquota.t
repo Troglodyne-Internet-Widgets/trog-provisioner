@@ -39,7 +39,7 @@ sub deliver {
 }
 
 subtest 'a recipient is delivered to as one argument' => sub {
-    my $to = 'bogus user@test.test';
+    my $to = 'bogus user@test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     is( deliver($to), 0, 'it exits clean' );
 
     my @args = split( m/\n/, File::Slurper::read_text("$dir/args") );

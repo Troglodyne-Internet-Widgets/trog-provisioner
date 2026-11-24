@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -401,6 +402,7 @@ sub classes {
     # Sorted and unique, so that the rendered vhost does not change with the
     # order in which the recipes load.
     my @classes = map {
+        local ($_) = $_;
         my @patterns = List::Util::uniq( sort @{ $pattern{ $_->{name} } // [] } );
         @patterns ? { %$_, pattern => join( '|', @patterns ) } : ();
     } @CLASS_ORDER;
@@ -506,7 +508,7 @@ sub enrich {
 
     # is_domain also checks the top-level domain, so it refuses a host under a
     # made-up TLD.
-    my @bad = grep { !Data::Validate::Domain::is_domain($_) } @allow;
+    my @bad = grep { local ($_) = $_; !Data::Validate::Domain::is_domain($_) } @allow;
     die "fetchcache upstreams must be plain host names; these are not: @bad\n" if @bad;
 
     $opts{allow}       = \@allow;
@@ -553,7 +555,7 @@ sub authority {
     die "There is $paths{cert}, but no $paths{key} to sign with.\n" . "This installation trusts the authority of the installation that configures the\n" . "fetch cache, and only that one can sign.  To make a new authority here, remove\n" . "$paths{cert}, and copy the new one to each installation that trusts it.\n"
       if -f $paths{cert};
 
-    Provisioner::Utils::write_authority( $paths{cert}, $paths{key}, 'trog-provisioner fetch cache authority', $AUTHORITY_DAYS );
+    Provisioner::Utils::write_authority( @paths{qw(cert key)}, 'trog-provisioner fetch cache authority', $AUTHORITY_DAYS );
 
     return \%paths;
 }
@@ -608,8 +610,8 @@ sub certify {
     Trog::Utils::write_binary_mode( "$output_dir/fetchcache.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert) . File::Slurper::read_text( $authority->{cert} ), oct('0644') );
     ## use critic
 
-    IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;
-    IO::Socket::SSL::Utils::KEY_free($_)  for $key,  $ca_key;
+    for my $item ( $cert, $ca_cert ) { IO::Socket::SSL::Utils::CERT_free($item); }
+    for my $item ( $key,  $ca_key )  { IO::Socket::SSL::Utils::KEY_free($item); }
 
     return qw{fetchcache.crt fetchcache.key};
 }

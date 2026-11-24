@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+my $TEST_ID = qr/\A [[:upper:]\d]+ - \d+ (?: : [\w.-]+ )? \z/;
+
 =head1 NAME
 
 Provisioner::Recipe::lynis - audit the guest with Lynis, and send the findings to syslog.
@@ -68,7 +70,7 @@ sub args {
                 type        => 'array',
                 default     => [],
                 uniqueItems => 1,
-                items       => { type => 'string', pattern => '^[A-Z0-9]+-[0-9]+(:[A-Za-z0-9_.-]+)?$' },
+                items       => { type => 'string', pattern => "$TEST_ID" },
                 description => 'The ids of the Lynis tests that the audit leaves out, such as SSH-7408.  A test that checks several keys takes one key after a colon, such as KRNL-6000:net.ipv4.ip_forward, and still checks the others.  Use it for a finding that this fleet accepts on purpose.',
             },
         },

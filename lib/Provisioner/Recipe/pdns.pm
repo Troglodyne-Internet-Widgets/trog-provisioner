@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -374,7 +375,7 @@ sub issue_grant {
         $commands{$zone} = join( q{ }, "$Provisioner::Vars::SCRIPT_DIR/pdns_client grant", $zone, $client, @names );
     }
 
-    return map { $self->token_path($_) => { issue => { guest => $guest, command => $commands{$_} }, owner => 'root:root', mode => '0600' } } keys %commands;
+    return map { local ($_) = $_; $self->token_path($_) => { issue => { guest => $guest, command => $commands{$_} }, owner => 'root:root', mode => '0600' } } keys %commands;
 }
 
 =head2 %revocation = $recipe->revoke_grant($grant)

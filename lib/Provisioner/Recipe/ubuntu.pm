@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::DistroRecipe};
 
@@ -468,9 +469,10 @@ sub enrich {
         my @static     = $hv->static_nics;
         my %ip_of      = %{ $opts{nic_ips} // {} };
         my $dhcp_count = defined $address ? $address : scalar @names;
-        $opts{other_dhcp}   = [ map { +{ name => $names[$_], mac => $mac->($_) } } 1 .. $dhcp_count - 1 ];
+        $opts{other_dhcp}   = [ map { local ($_) = $_; +{ name => $names[$_], mac => $mac->($_) } } 1 .. $dhcp_count - 1 ];
         $opts{other_static} = [
             map {
+                local ($_) = $_;
                 my $nic = $static[ $_ - $address ];
                 +{ name => $names[$_], mac => $mac->($_), addresses => [ map { index( $_, q{/} ) < 0 ? "$_/24" : $_ } grep { defined } $ip_of{$nic} ] }
             } defined $address ? ( $address + 1 .. $#names ) : ()

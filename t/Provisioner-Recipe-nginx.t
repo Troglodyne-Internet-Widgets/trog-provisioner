@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -91,7 +92,7 @@ subtest 'the vhost of the domain answers for every alias that no other vhost lis
 };
 
 subtest 'a name that nginx would give to only one vhost stops the build' => sub {
-    my $invalid = qr/\Anginx:[ ]invalid[ ]configuration:[ ]/m;
+    my $invalid = qr/\Anginx:[ ]invalid[ ]configuration:[ ]/;
     my $refusal = qr/${invalid}multiple[ ]recipes[ ]configured[ ]to[ ]serve[ ]/m;
     like(
         exception { domain_names( sites => [qw{x.web.test.test x.web.test.test}] ) },
@@ -131,7 +132,7 @@ subtest 'a public name has a vhost, and can have ports of its own from 1024, eac
     like( exception { $ported->( ports => { 65536  => 8449 } ) }, $at,          'and above 65535' );
     like( exception { $ported->( ports => { matrix => 8449 } ) }, $at,          'and a port that is no number' );
     like( exception { $ported->( ports => { 8448   => 0 } ) },    qr{$at/8448}, 'and so is a port of the guest that is no port' );
-    my $refusal = '/public_names/web.test.test: is a map of vhost: NAME';
+    my $refusal = '/public_names/web.test.test: is a map of vhost: NAME';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like(
         exception { enriched( %VPN, sites => ['web.test.test'], public_names => { 'web.test.test' => 'web.test.test' } ) },
         qr{\Q$refusal\E},
@@ -256,7 +257,8 @@ subtest 'a proxy routes every public name, and public.VHOST beside a name outsid
 subtest 'the ports of the proxy get the limits of the ports that it fronts' => sub {
     my %limits = 'Provisioner::Recipe::nginx'->rate_limits( public_names => publics( 'web.test.test' => 'web.test.test' ) );
     is_deeply( [ sort { $a <=> $b } keys %limits ], [ 80, 443, 8080, 8443 ], 'with public names' );
-    is( $limits{8443}, $limits{443}, 'at the same limit' );
+    my ( $alternate, $standard ) = @limits{qw(8443 443)};
+    is( $alternate, $standard, 'at the same limit' );
 };
 
 subtest 'the jails of a domain with a relay ban through it' => sub {
@@ -388,8 +390,8 @@ sub deployed {
     $name //= $certdir;
     my $dir = tempdir( CLEANUP => 1 );
     mkdir "$dir/$certdir" or die "Cannot make $dir/$certdir: $!";
-    File::Slurper::Temp::write_text( "$dir/$certdir/$_", "PEM\n" ) foreach qw{privkey.pem fullchain.pem};
-    File::Slurper::Temp::write_text( "$dir/ssh",         qq{#!$^X\nmy \$pem = do { local \$/; <STDIN> };\nopen( my \$fh, '>', '$dir/asked' ) or die;\nprint {\$fh} "\$ARGV[-2] \$ARGV[-1]";\n} );
+    for my $item (qw{privkey.pem fullchain.pem}) { File::Slurper::Temp::write_text( "$dir/$certdir/$item", "PEM\n" ); }
+    File::Slurper::Temp::write_text( "$dir/ssh", qq{#!$^X\nmy \$pem = do { local \$/; <STDIN> };\nopen( my \$fh, '>', '$dir/asked' ) or die;\nprint {\$fh} "\$ARGV[-2] \$ARGV[-1]";\n} );
     chmod 0755, "$dir/ssh", $script;
     local $ENV{PATH} = "$dir:$ENV{PATH}";
     IPC::Run3::run3( [ 'bash', $script, $name, "$dir/$certdir/privkey.pem", "$dir/$certdir/fullchain.pem" ], \undef, \my $out, \my $err );

@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -45,7 +46,7 @@ subtest 'swap_size' => sub {
         return $opts{swap_size};
     };
 
-    is( $size->($_), $_, "$_ is a size that make_swapfile reads" ) for qw{50% 100% 2G 512M 1048576};
+    for my $item (qw{50% 100% 2G 512M 1048576}) { is( $size->($item), $item, "$item is a size that make_swapfile reads" ); }
 
     # numfmt --from=iec refuses a suffix in lower case, so the schema refuses it
     # before a guest is built.

@@ -96,7 +96,7 @@ subtest 'a window past midnight' => sub {
 
 subtest 'a window whose ends are equal' => sub {
     my %w = ( reboot_window => { from => 3, to => 3 } );
-    is( ( ask( $_, %w ) )[0], 0, "hour $_ is inside" ) for 0, 3, 23;
+    for my $item ( 0, 3, 23 ) { is( ( ask( $item, %w ) )[0], 0, "hour $item is inside" ); }
 };
 
 subtest 'the switch and the window together' => sub {

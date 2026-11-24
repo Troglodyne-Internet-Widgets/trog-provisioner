@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::HV::Cloud';
 
 use List::Util qw{any sum0};
@@ -297,7 +298,7 @@ sub monthly_spend {
 
     return sum0 map {
         my $linode = $_;
-        price( $self, $linode->{type}, $linode->{region} ) + ( $linode->{backups}{enabled} ? price( $self, $linode->{type}, $linode->{region}, 'backups' ) : 0 )
+        price( $self, @{$linode}{qw(type region)} ) + ( $linode->{backups}{enabled} ? price( $self, @{$linode}{qw(type region)}, 'backups' ) : 0 )
     } linodes($self);
 }
 
@@ -352,7 +353,7 @@ sub cheapest_for {
     # A type Linode prices by the hour alone has only a ceiling for a month, so
     # the offer says the hourly rate too.
     my $cheapest = $priced[0];
-    my ($local)  = grep { $_->{id} eq $self->region } @{ $cheapest->{region_prices} // [] };
+    my ($local)  = grep { local ($_) = $_; $_->{id} eq $self->region } @{ $cheapest->{region_prices} // [] };
     my $monthly  = defined( ( $local // $cheapest->{price} // {} )->{monthly} );
 
     return {
@@ -923,7 +924,7 @@ FIX
 
     my @types = Provisioner::Cookbook->globals_in_use( $self->size_key );
 
-    my @images = map { $self->image_for_distro(@$_) } Provisioner::Cookbook->distros_in_use;
+    my @images = map { local ($_) = $_; $self->image_for_distro(@$_) } Provisioner::Cookbook->distros_in_use;
 
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };
@@ -966,7 +967,7 @@ sub check_linode_budget {
 
     # Per type rather than per guest: what a guest costs is the type it names,
     # and the configuration names as many as its guests do.
-    my @each = map { "$_ at " . sprintf( '%.2f', $self->monthly_cost( $self->size_key => $_ ) ) } grep {
+    my @each = map { local ($_) = $_; "$_ at " . sprintf( '%.2f', $self->monthly_cost( $self->size_key => $_ ) ) } grep {
         eval { $self->monthly_cost( $self->size_key => $_ ); 1 }
     } Provisioner::Cookbook->globals_in_use( $self->size_key );
     my $now = sprintf( 'The account costs %.2f a month', $spend ) . ( @each ? ', and a guest more: ' . join( ', ', @each ) : q{} );

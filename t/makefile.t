@@ -47,7 +47,7 @@ my $tt = Text::Xslate->new(
     },
 );
 
-my $STATE = '/etc/provisioner/state/guest.test.test';
+my $STATE = '/etc/provisioner/state/guest.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # bin/new_config works out the order, and the template writes it.
 require_ok("$FindBin::Bin/../bin/new_config") or BAIL_OUT('bin/new_config does not load');

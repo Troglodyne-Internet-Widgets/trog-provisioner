@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::HV';
 
 use Digest::SHA();
@@ -35,7 +36,7 @@ use Trog::Patterns();
 my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
 # The suffix that clone_guest_disk gives a copy, and that backup_volumes finds.
-my $BACKUP_SUFFIX = '.bak-qcow2';
+my $BACKUP_SUFFIX = '.bak-qcow2';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # Where distributions put the libvirt lease helper, which release_dhcp_lease
 # runs as root.  At the top for the reason $PRISTINE_SNAPSHOT is.
@@ -235,7 +236,7 @@ sub build {
         next unless @bare;
 
         my $network = Net::IP->new( $self->nic_network($nic) );
-        my @outside = grep { my $how = Net::IP->new($_)->overlaps($network) // 0; $how != $Net::IP::IP_A_IN_B_OVERLAP && $how != $Net::IP::IP_IDENTICAL } @bare;
+        my @outside = grep { local ($_) = $_; my $how = Net::IP->new($_)->overlaps($network) // 0; $how != $Net::IP::IP_A_IN_B_OVERLAP && $how != $Net::IP::IP_IDENTICAL } @bare;
         die "The pool of $nic for $who has " . join( ', ', @outside ) . ' outside ' . $self->nic_network($nic) . ", the network of $nic, so a guest with one of those addresses could not reach anything on it\n"
           if @outside;
     }
@@ -565,7 +566,7 @@ The names of all domains that libvirt has here, running or not.
 
 sub guest_names {
     my ($self) = @_;
-    return map { $_->get_name } $self->vmm->list_all_domains();
+    return map { local ($_) = $_; $_->get_name } $self->vmm->list_all_domains();
 }
 
 =head2 domain_exists($name)
@@ -917,7 +918,10 @@ none.  Distributions put it in one of two places.
 
 sub lease_helper {
     my ($self) = @_;
-    return List::Util::first { $self->file_exists($_) } @LEASE_HELPERS;
+    foreach my $helper (@LEASE_HELPERS) {
+        return $helper if $self->file_exists($helper);
+    }
+    return;
 }
 
 =head2 eject_cdrom($domain, $target)
@@ -1785,6 +1789,7 @@ sub snapshot_names {
     # <creationTime> is seconds since the epoch.  A snapshot without one sorts
     # first, as the oldest.
     my @dated = map {
+        local ($_) = $_;
         my $xml = eval { $_->get_xml_description() } // q{};
         my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
         +{ name => $_->get_name(), created => $created // 0 };
@@ -2313,7 +2318,7 @@ sub backup_volumes {
     # No eval, also around the volume names.  An empty list after EPERM makes a
     # caller remove fewer copies than exist.  list_all_volumes, not list_volumes,
     # which makes one RPC for each volume.
-    my @names = sort grep { m/\Q$BACKUP_SUFFIX\E \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
+    my @names = sort grep { m/\Q$BACKUP_SUFFIX\E \z/ } map { local ($_) = $_; $_->get_name() } $self->pool->list_all_volumes();
 
     return @names;
 }
@@ -2514,6 +2519,7 @@ my $NETWORK_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]{0,49} \z/;
 my sub outside_of ( $cidr, $pool ) {
     my $network = Net::IP->new($cidr);
     return grep {
+        local ($_) = $_;
         my $item = Net::IP->new($_);
         my $how  = $item ? $item->overlaps($network) // 0 : 0;
         $how != $Net::IP::IP_A_IN_B_OVERLAP && $how != $Net::IP::IP_IDENTICAL;
@@ -2548,10 +2554,10 @@ my sub network_facts ($xml) {
     my ($ip) = grep { ( $_->{family} // 'ipv4' ) eq 'ipv4' && defined $_->{address} } map { attributes($_) } $xml =~ m{(<ip\b[^>]*>)}g;
     if ($ip) {
         $facts{address} = $ip->{address};
-        $facts{cidr}    = defined $ip->{prefix} ? Trog::HV::network_of( $ip->{address}, $ip->{prefix} ) : eval { Net::CIDR::addrandmask2cidr( $ip->{address}, $ip->{netmask} ) };
+        $facts{cidr}    = defined $ip->{prefix} ? Trog::HV::network_of( @{$ip}{qw(address prefix)} ) : eval { Net::CIDR::addrandmask2cidr( @{$ip}{qw(address netmask)} ) };
     }
 
-    $facts{leases} = [ map { Net::CIDR::range2cidr("$_->{start}-$_->{end}") } grep { defined $_->{start} && defined $_->{end} } map { attributes($_) } $xml =~ m{(<range\b[^>]*>)}g ];
+    $facts{leases} = [ map { local ($_) = $_; Net::CIDR::range2cidr("$_->{start}-$_->{end}") } grep { defined $_->{start} && defined $_->{end} } map { attributes($_) } $xml =~ m{(<range\b[^>]*>)}g ];
     return \%facts;
 }
 
@@ -2611,7 +2617,7 @@ sub guest_network_plan ( $, %args ) {
     die "The address of the hypervisor on a guest network is an IPv4 address, and '$plan{address}' is not\n" unless $ip && $ip->version == 4 && $ip->size == 1;
     die "The prefix of a guest network is a number from 8 to 30, and '$plan{prefix}' is not\n"               unless Trog::HV::is_prefix_length( $plan{prefix} );
 
-    $plan{cidr} = Trog::HV::network_of( $plan{address}, $plan{prefix} );
+    $plan{cidr} = Trog::HV::network_of( @plan{qw(address prefix)} );
     die "$plan{address} is the address of the block $plan{cidr} itself, which no host on it can have\n" if index( $plan{cidr}, "$plan{address}/" ) == 0;
 
     my @outside = outside_of( $plan{cidr}, $args{pool} // {} );
@@ -2748,6 +2754,7 @@ sub runner_adapters ( $hv, $block, $user ) {
     my @dhcp     = $runner->setting_list('dhcp_nics');
     my @static   = $runner->static_nics;
     my @networks = map {
+        local ($_) = $_;
         $class->guest_network_plan(
             name    => "$user-$_",
             bridge  => $_,
@@ -3129,7 +3136,7 @@ sub release_seed ( $self, $domain ) {
 
 sub guest_volumes {
     my ( $self, $domain ) = @_;
-    return grep { $self->volume($_) } ( "$domain-qcow2", "$domain-cloudinit.iso" );
+    return grep { local ($_) = $_; $self->volume($_) } ( "$domain-qcow2", "$domain-cloudinit.iso" );
 }
 
 =head2 guest_ssh_ip($config, $lease_ip)
@@ -3178,7 +3185,7 @@ sub on_nat_network {
     my ($self) = @_;
     return 1 if $self->is_local;
 
-    $self->{on_nat_network} //= ( List::Util::any { Trog::Local->holds_address($_) } $self->lease_ips('default') ) ? 1 : 0;
+    $self->{on_nat_network} //= ( grep { local ($_) = $_; Trog::Local->holds_address($_) } $self->lease_ips('default') ) ? 1 : 0;
     return $self->{on_nat_network};
 }
 
@@ -3598,7 +3605,7 @@ sub check_guest_bridges ($self) {
     my ( $failed, @bridges ) = bridges_or_verdict($self);
     return $failed if $failed;
 
-    my @absent = grep { $self->run_cmd( qw{test -d}, "/sys/class/net/$_/bridge" ) != 0 } @bridges;
+    my @absent = grep { local ($_) = $_; $self->run_cmd( qw{test -d}, "/sys/class/net/$_/bridge" ) != 0 } @bridges;
     return $self->verdict( 1, 'The guests join ' . join( ', ', @bridges ), q{} ) unless @absent;
 
     return $self->verdict( 0, 'No bridge ' . join( ', ', @absent ) . ' on ' . $self->describe, guest_network_fix( $self, $absent[0] ) . <<'FIX' );
@@ -3631,7 +3638,7 @@ sub check_guest_networks ($self) {
     # network_vmm.
     my $virsh = join q{ }, 'virsh', map { Trog::Utils::shell_quote($_) } $self->local_connect( $self->local_uri =~ s{/session\z}{/system}r );
 
-    my ($lease) = grep { $_->get_name eq 'default' } @networks;
+    my ($lease) = grep { local ($_) = $_; $_->get_name eq 'default' } @networks;
     return $self->verdict( 0, "$bridges[0], the first of dhcp_nics, is not the bridge of the default network", <<"FIX" ) unless $lease && $lease->get_bridge_name eq $bridges[0];
 This machine finds a guest by its lease on the default network of libvirt, and
 the first adapter of dhcp_nics is the one that takes that lease.  Name the
@@ -3640,10 +3647,10 @@ bridge of the default network first in dhcp_nics:
     $virsh net-info default
 FIX
 
-    my @down = grep { !( $_->is_active && $_->get_autostart ) } @networks;
+    my @down = grep { local ($_) = $_; !( $_->is_active && $_->get_autostart ) } @networks;
     return $self->verdict( 1, 'Each network of a bridge of the guests runs, and starts with the host', q{} ) unless @down;
 
-    my @names = map { $_->get_name } @down;
+    my @names = map { local ($_) = $_; $_->get_name } @down;
     return $self->verdict( 0, 'The network ' . join( ', ', @names ) . ' does not run, or does not start with the host', guest_network_fix($self) . <<"FIX" );
 
 For the default network, or any other one, on the hypervisor:
@@ -3740,7 +3747,7 @@ sub check_guest_pool ($self) {
             ( $facts->{cidr} ne $said                           ? "$name is $facts->{cidr}, and the block puts $nic in $said, which the guests would take the prefix of" : () ),
             ( defined $gateway && $gateway ne $facts->{address} ? "gateway_$nic is $gateway, and the address of the host on $name is $facts->{address}"                  : () ),
             ( map { "$_ of ip_pool_$nic is outside $facts->{cidr}, the network $name" } outside_of( $facts->{cidr}, $pool ) ),
-            ( map { "$_ of ip_pool_$nic is in a DHCP range of $name" } grep { Net::CIDR::cidrlookup( $_, @{ $facts->{leases} } ) } @pool ),
+            ( map { "$_ of ip_pool_$nic is in a DHCP range of $name" } grep { local ($_) = $_; Net::CIDR::cidrlookup( $_, @{ $facts->{leases} } ) } @pool ),
         );
         return ( "$facts->{cidr}, the network $name", @wrong );
     };
@@ -3785,7 +3792,7 @@ appliance of C<guestfs_env> must be there too.
 sub note_libguestfs {
     my ($self) = @_;
 
-    my ($found) = grep { $self->run_cmd( qw{sh -c}, 'command -v "$1" >/dev/null 2>&1', 'sh', $_ ) == 0 } qw{virt-cat virt-ls virt-edit};
+    my ($found) = grep { local ($_) = $_; $self->run_cmd( qw{sh -c}, 'command -v "$1" >/dev/null 2>&1', 'sh', $_ ) == 0 } qw{virt-cat virt-ls virt-edit};
 
     return { ok => 1 } if $found && ( !$self->is_session || has_appliance($self) );
 
@@ -4210,7 +4217,7 @@ sub clear_guest {
     # The seed goes in both cases, because each provision writes a new one.
     $self->delete_volume("$domain-cloudinit.iso");
 
-    $self->release_dhcp_lease($_) for $self->lease_ips( 'default', mac => $self->guest_mac( $domain, 0 ) );
+    for my $item ( $self->lease_ips( 'default', mac => $self->guest_mac( $domain, 0 ) ) ) { $self->release_dhcp_lease($item); }
 
     return 1;
 }
@@ -4267,11 +4274,11 @@ sub provision_guest {
     print "Looking up the address for $domain...";
     my $nat_mac = $self->guest_mac( $domain, 0 );
     my $address = q{};
-    for ( 1 .. 30 ) {
+    for my $try ( 1 .. 30 ) {
         $address = $self->lease_ip( 'default', mac => $nat_mac );
         last if $address;
         print q{.};
-        sleep 1;
+        sleep 1 if $try < 30;
     }
     die "\n$domain never asked for a lease!\n" unless $address;
 
