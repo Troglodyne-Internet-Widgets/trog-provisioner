@@ -3,3 +3,8 @@
     modes of the top of skel, and the StrictModes of sshd refuses a key in a
     home that other accounts can write. -%]
 rsync -av --chown=[% admin_user %]:[% admin_user %] --chmod=go-w,o-rwx -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]::skel.[% domain %]/ [% admin_home %]/
+[%# The --chmod above leaves the group able to read, and ssh refuses a config
+    or a private key that the group can read.  The data target closes the
+    .ssh of the domain directory, but this can run after it.  The guest tests
+    of data and of adminconfig check it. -%]
+test ! -d '[% admin_home %]/.ssh' || chmod -R go= '[% admin_home %]/.ssh'
