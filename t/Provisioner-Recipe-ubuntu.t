@@ -36,6 +36,7 @@ use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
+use File::Which();
 use Test::MockModule qw{strict};
 use YAML::XS();
 use IPC::Run3();
@@ -120,6 +121,18 @@ sub loaded {
     return YAML::XS::Load( File::Slurper::read_binary("$dir/$file") );
 }
 
+# A guest runs a user-data that fails the schema, but reports its boot as
+# degraded, which hides the next real warning.  Only a cloud-init can say what
+# its schema accepts, so the check is skipped where none is installed.
+sub schema_ok ( $dir, $what ) {
+  SKIP: {
+        my $cloud_init = File::Which::which('cloud-init') or skip( 'no cloud-init here to check the schema', 1 );
+        IPC::Run3::run3( [ $cloud_init, qw{schema --config-file}, "$dir/user-data" ], \undef, \my $out, \my $err );
+        is( $?, 0, "cloud-init accepts the user-data $what" ) or diag $out, $err;
+    }
+    return;
+}
+
 # bin/new_config hands the admin user the keys out of admin_authorized_keys, and
 # enrich adds the guest's own to the same list.  Whichever of the two went in
 # first, losing the other is silent: the operator locked out of a guest that
@@ -165,11 +178,13 @@ subtest 'the seed gives cloud-init the host key from the store, and no other' =>
     is_deeply( [ keys %{ $user_data->{ssh_keys} // {} } ], ['ed25519_private'], 'the private half only, from which cloud-init derives the public one' );
     is( $user_data->{ssh_keys}{ed25519_private}, "$key\n", 'the key the store holds, ending in the newline that ssh-keygen needs' );
     ok( $user_data->{ssh_deletekeys}, 'the keys in the image are deleted' );
-    is_deeply( $user_data->{ssh_genkeytypes}, [], 'and cloud-init makes none of its own' );
+    is_deeply( $user_data->{ssh_genkeytypes}, ['ed25519'], 'and cloud-init may make only the type that the seed wrote, so it makes none' );
+    schema_ok( $dir, 'with the key' );
 
     ( $dir, undef ) = generated();
     $user_data = loaded( $dir, 'user-data' );
     for my $item (qw{ssh_keys ssh_deletekeys ssh_genkeytypes}) { ok( !exists $user_data->{$item}, "with no key in the store, the seed has no $item" ); }
+    schema_ok( $dir, 'without the key' );
 };
 
 subtest 'a guest a service made has no interfaces of ours to match on' => sub {

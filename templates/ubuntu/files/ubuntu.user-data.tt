@@ -88,12 +88,14 @@ users:
 [%# The host key from the secret store, so that sshd offers it from its first
     start, before bin/provision places the same key.  With ssh_keys, cloud-init
     writes the key, derives its public half, and makes no key of another type.
-    cloud-init 26 reads ssh_genkeytypes only when there are no ssh_keys, so the
-    empty list holds only if a release reads the two apart.  ssh_deletekeys
-    removes the keys of the image first.
+    cloud-init 26 reads ssh_genkeytypes only when there are no ssh_keys, and
+    its schema refuses an empty list.  So the list names only the type that
+    ssh_keys writes, and holds if a release reads the two apart: cloud-init
+    makes a key only when its file is not there.  ssh_deletekeys removes the
+    keys of the image first.
     Provisioner::Recipe::sshd has the whole account. -%]
 ssh_deletekeys: true
-ssh_genkeytypes: []
+ssh_genkeytypes: [ed25519]
 ssh_keys:
   ed25519_private: |
 [% ssh_host_key | indent %]
