@@ -196,4 +196,6 @@ subtest 'a mail client goes by its SNI name to its guest, with the PROXY protoco
 
 [% INCLUDE "files/postfix.greeting.test.tt" %]
 
+[% INCLUDE "files/postfix.trusted_clients.test.tt" %]
+
 done_testing();

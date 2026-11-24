@@ -493,4 +493,28 @@ subtest 'mailboxes takes the rule of a folder name' => sub {
     like( $fragment, qr/$status.*$create/m, 'and the template quotes the name, so the space stays one word' );
 };
 
+subtest 'trusted_clients skip the checks of the client and the sender, and nothing else' => sub {
+    foreach my $bad (qw{192.0.2.0/24 999.0.2.7 mail.test.test}) {
+        like( exception { $recipe->validate( %BASE, trusted_clients => [$bad] ) }, qr{trusted_clients}, "an entry that is not one address is refused: $bad" );
+    }
+    like( exception { $recipe->validate( %BASE, trusted_clients => [qw{192.0.2.7 192.0.2.7}] ) }, qr{trusted_clients}, 'and so is an address named twice' );
+
+    # A recipe remembers the options it validated, so each render needs its own.
+    my %lists;
+    foreach my $case ( [ none => [] ], [ trusted => [qw{192.0.2.7 2001:db8::7}] ] ) {
+        my ( $name, $clients ) = @{$case};
+        my $main = Provisioner::Cookbook->load( 'mail', distro => 'ubuntu' )->new( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => '/nonexistent', distro => 'ubuntu' )->render_file( 'files/postfix.smtpd_restrictions.tt', %BASE, trusted_clients => $clients );
+        $lists{$name} = { map { m/^(smtpd_\w+_restrictions)[ ]=[ ](.*)$/ ? ( $1 => $2 ) : () } split /\n/, $main };
+    }
+
+    my $ask = 'check_client_access inline:{192.0.2.7=OK, 2001:db8::7=OK},';
+    is( $lists{trusted}{smtpd_client_restrictions},    $lists{none}{smtpd_client_restrictions} =~ s/^permit_mynetworks,/permit_mynetworks, $ask/r,                'the client list lets both addresses past every check after permit_mynetworks' );
+    is( $lists{trusted}{smtpd_sender_restrictions},    $lists{none}{smtpd_sender_restrictions} =~ s/permit_sasl_authenticated,/permit_sasl_authenticated, $ask/r, 'the sender list does the same after the check of an authenticated sender' );
+    is( $lists{trusted}{smtpd_recipient_restrictions}, $lists{none}{smtpd_recipient_restrictions}, 'and the recipient list is unchanged, so a trusted client cannot relay' );
+    unlike( $lists{none}{smtpd_client_restrictions}, qr/check_client_access/, 'with none, nothing is asked' );
+
+    is_deeply( { $recipe->machine_wide( trusted_clients => [qw{198.51.100.7 192.0.2.7}] ) }, { trusted_clients => '192.0.2.7,198.51.100.7' }, 'every domain on a machine must name the same list, in any order' );
+    is_deeply( { $recipe->machine_wide() },                                                  { trusted_clients => q{} },                      'and a domain that names none compares as empty' );
+};
+
 done_testing();

@@ -69,7 +69,9 @@ recipient there.  Mail for any other domain is refused.
 The relay makes the checks that a mail guest makes of a client: reverse DNS,
 RBLs and C<HELO>, from F<templates/files/postfix.smtpd_restrictions.tt>, which
 both include.  The guest then trusts the address of the relay, because only the
-relay knows who the client was.  fail2ban bans here an address that fails too
+relay knows who the client was.  C<trusted_clients> names servers that skip
+the checks of the client, as L<Provisioner::Recipe::mail/Trusted clients>
+says.  fail2ban bans here an address that fails too
 often.  The reverse DNS of the public address of this guest must name it, or
 the receivers of what it sends will refuse it.
 
@@ -145,6 +147,7 @@ sub args {
                 default     => 2587,
                 description => 'The port of the relay that the guests behind this one send their mail through.  See "Mail out".',
             },
+            trusted_clients => { Provisioner::Cookbook->load('mail')->trusted_clients_arg() },
         },
     );
 }
