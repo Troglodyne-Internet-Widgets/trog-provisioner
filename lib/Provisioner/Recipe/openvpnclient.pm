@@ -13,7 +13,6 @@ use parent qw{Provisioner::Recipe};
 use Digest::SHA();
 use List::Util();
 
-use Provisioner::Cookbook();
 use Provisioner::IPPool();
 
 =head1 Provisioner::Recipe::openvpnclient
@@ -62,11 +61,13 @@ C<ssl.get_cert> waits in the same way for the server that answers its challenge.
             issue_from: vpn.test.test
 
 C<issue_from> names the guest that runs L<Provisioner::Recipe::openvpn>.  A bin
-of the C<ip_pool> must name that guest in C<via>.  C<bin/new_config> gives this
-domain an address from that bin, and C<bin/provision> asks the server for a
-configuration with C<openvpn-client-config --address>, before the makefile
-starts.  The server must be up first.  So this domain always connects with that
-address, and the guests reach it there.  See
+of the C<ip_pool> must name that guest in C<via>.  C<bin/provision> asks the
+server for a configuration with C<openvpn-client-config --address auto>,
+before the makefile starts, and the server gives this domain the address that
+it has in that bin, or else the first free one.  The server must be up first.
+So this domain always connects with that address, and the guests reach it
+there.  The server is the only record of the address: no F<ips.db> holds it,
+and a guest that needs it asks the server.  See
 L<Provisioner::Recipe::openvpn/Static addresses>.
 
 The configuration arrives in base64 on one line, because a secret that another
@@ -183,15 +184,6 @@ sub args {
     );
 }
 
-# The name and the block of the one bin of $pool that routes through $issuer.
-my sub bin_of ( $pool, $issuer ) {
-    my %via   = Provisioner::IPPool::bins_via( $pool // {}, $issuer );
-    my @names = sort keys %via;
-    die "openvpnclient takes its address from the bin of ip_pool whose via is $issuer, and ip_pool has " . ( @names ? 'several: ' . join( ', ', @names ) : 'none' ) . "\n"
-      unless @names == 1;
-    return ( $names[0], $via{ $names[0] } );
-}
-
 =head2 %opts = $recipe->enrich(%opts)
 
 Takes the options of the recipe and returns them with C<device> set.  If the
@@ -228,9 +220,12 @@ sub enrich {
 
     $opts{device} //= 'tun-' . substr( Digest::SHA::sha256_hex( $opts{domain} // q{} ), 0, 8 );
 
-    if ( defined $opts{issue_from} ) {
-        my ( undef, $bin ) = bin_of( $opts{ip_pool}, $opts{issue_from} );
-        $opts{address_blocks} = [ Provisioner::IPPool::blocks($bin) ];
+    if ( defined( my $issuer = $opts{issue_from} ) ) {
+        my %via   = Provisioner::IPPool::bins_via( $opts{ip_pool} // {}, $issuer );
+        my @names = sort keys %via;
+        die "openvpnclient takes its address from the bin of ip_pool whose via is $issuer, and ip_pool has " . ( @names ? 'several: ' . join( ', ', @names ) : 'none' ) . "\n"
+          unless @names == 1;
+        $opts{address_blocks} = [ Provisioner::IPPool::blocks( $via{ $names[0] } ) ];
     }
 
     my %peer = map { $_ => 1 } @{ $opts{network_peers} // [] };
@@ -277,19 +272,15 @@ sub joins_network_of {
 
 The static address of the client of C<$grant> and the C<server> block that it
 connects to, as L<Provisioner::Recipe::openvpn/issue_grant> takes them.  The
-address comes from the bin of the C<ip_pool> of this installation whose C<via>
-is the server.  This assigns it, as C<bin/new_config> assigns the address of a
-guest: a domain that has one keeps it.
+address is C<auto>: the server chooses it out of the bin of the C<ip_pool>
+whose C<via> it is, and a client that has one there keeps it.  No address
+database holds it.  See L<Provisioner::Recipe::openvpn/Static addresses>.
 
 =cut
 
 sub grant_terms {
     my ( $self, $grant, %opts ) = @_;
-    my $domain = $grant->{client};
-
-    my $pool = Provisioner::Cookbook->global_config($domain)->{ip_pool};
-    my ($bin) = bin_of( $pool, $grant->{guest} );
-    return ( address => Provisioner::IPPool::assign( $domain, $pool, $bin ), server => $opts{server} );
+    return ( address => 'auto', server => $opts{server} );
 }
 
 sub template_files {

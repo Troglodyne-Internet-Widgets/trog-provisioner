@@ -64,7 +64,8 @@ In the `_global` of `_base` in `recipes.yaml`:
   when the guest has no address yet to route to.
 
 `bin/assign_ip` prints or assigns the static address of a domain.  Assignments
-are kept in `ips.db`: see `perldoc Provisioner::IPPool`.
+are kept in `ips.db`, one for each hypervisor at the `ip_db` of its block, which
+only that hypervisor opens: see `perldoc Provisioner::IPPool`, and `bin/ippool`.
 
 ## Static addresses for VPN clients
 
@@ -83,17 +84,18 @@ Here `10.8.0.0/24` is the tunnel subnet of the openvpn
 server, its default `subnet` and `netmask`, and the bin is its top half.
 
 A domain whose `openvpnclient` names `issue_from: vpn.$domain` gets an address
-from that bin when it is built, and the server gives that address to it at
+from that bin when it is built: `vpn.$domain` gives it the address that it
+already has there, or else the first free one, and gives it that address at
 each connect.  Each guest gets a route to the bin through `vpn.$domain` at
 first boot.  So the guests reach the client at its address, and see that
 address when the client connects to them.
 
 The server can also give an address from the bin to a client by hand, for
-example to a laptop.  So the provisioner asks `vpn.$domain` which addresses its
-clients have.  It asks before it gives a domain a new address from the bin.  It
-reserves each address that `ips.db` does not know.  If `vpn.$domain` is not up,
-the build of that domain stops.  `bin/list_ip_pool` also asks.  If it cannot
-ask, it warns.
+example to a laptop, with `openvpn-client-config --address`.  The server is
+the only record of the addresses of the bin: no `ips.db` holds them.  So
+whatever needs the address of a client, such as a recipe that lets the
+client in, or `bin/list_ip_pool`, asks `vpn.$domain`, and stops when it cannot
+ask.
 
 These must be true:
 

@@ -652,8 +652,8 @@ each name that C<zone_of> places in a zone of an account, and less each name
 of C<zone_address_names>, which holds an C<A> record.
 
 Each writer of the zone of the domain asks this, so that none of them writes
-such a name there: C<publication>, the zone file of
-L<Provisioner::Recipe::pdns>, and F<bin/ipmap2zones>.  pdns refuses a zone file
+such a name there: C<publication>, and the zone file of
+L<Provisioner::Recipe::pdns>.  pdns refuses a zone file
 with a record outside its zone as invalid, so one such name breaks the whole
 zone.
 

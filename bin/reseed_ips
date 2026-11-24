@@ -15,8 +15,6 @@ use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
-use List::Util qw{uniq};
-
 use Provisioner::IPPool();
 
 =head1 USAGE
@@ -72,10 +70,19 @@ A domain that has a configuration but no build also has no hypervisor that
 runs it.  This command cannot tell the two apart.  If you assigned addresses
 before you provisioned, C<--prune> removes those assignments.
 
+
 =head2 --dryrun
 
-Do all the work inside a transaction, print what changes, and then roll the
-transaction back.  The command asks the hypervisors, but it writes nothing.
+Ask the hypervisors, do all the work inside a transaction in each database,
+print what changes, and then roll the transaction back.  It writes nothing.
+
+=head2 WHERE IT RUNS
+
+Each hypervisor keeps its own F<ips.db>, see
+L<Provisioner::IPPool/ONE DATABASE FOR EACH HYPERVISOR>.  This command asks
+every hypervisor first, and then reseeds each database in one transaction of
+its own, on its hypervisor, with C<reseed> of L<Provisioner::IPPool>.  A
+hypervisor that does not answer stops the command before it writes anything.
 
 =cut
 
@@ -92,75 +99,9 @@ sub main {
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
-    my $db     = Provisioner::IPPool::dbh();
-    my %before = %{ Provisioner::IPPool::taken() };
-    my %on     = %{ Provisioner::IPPool::bridges() };
-
-    # All of it or none of it.  A reseed that stops halfway leaves no
-    # reservations, and then the database says that the gateway is free.
-    $db->do('BEGIN IMMEDIATE');
-
-    my $ok = eval {
-        Provisioner::IPPool::forget_seeding();
-        Provisioner::IPPool::clear_reservations();
-        Provisioner::IPPool::ensure_seeded();
-        prune_absent( \%before ) if $prune;
-        1;
-    };
-
-    unless ($ok) {
-        my $err = $@ || "reseed failed\n";
-        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- the failure worth reporting is $err, not a rollback of it that could not run
-        die $err;
-    }
-
-    my %after    = %{ Provisioner::IPPool::taken() };
-    my %on_after = %{ Provisioner::IPPool::bridges() };
-
-    # Read the result before the rollback, because the rollback removes it.
-    $db->do( $dryrun ? 'ROLLBACK' : 'COMMIT' );
-
-    report( \%before, \%after, $dryrun, \%on, \%on_after );
+    my $said = Provisioner::IPPool::reseed( dryrun => $dryrun, prune => $prune );
+    report( @{$said}{qw{before after}}, $dryrun, @{$said}{qw{on on_after}} );
     return 0;
-}
-
-=head2 prune_absent($before)
-
-Releases the address of each domain in C<$before> that no hypervisor runs.
-C<$before> is the hashref that C<Provisioner::IPPool::taken> returns.  It skips
-the C<hv:>, C<gateway:> and C<insitu:> reservations.  A domain loses its
-address in every bin.  Returns how many domains it released.
-
-Dies when no hypervisors are configured, because then nothing can say which
-guests run, and every assignment would go.
-
-=cut
-
-sub prune_absent {
-    my ($before) = @_;
-
-    require Trog::Hypervisors;
-    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
-    die "--prune needs hypervisors.conf: with no fleet, nothing can say which guests are running, and every assignment would be released.\n"
-      unless $fleet->configured;
-
-    my %running;
-    foreach my $name ( $fleet->names ) {
-        $running{$_} = 1 for $fleet->hypervisor($name)->guest_names;
-    }
-
-    my $gone = 0;
-
-    # A domain with an address in two bins is one domain.
-    foreach my $domain ( uniq sort values %$before ) {
-        next if $domain =~ m/\A(?:hv|gateway|insitu):/;
-        next if $running{$domain};
-
-        Provisioner::IPPool::release($domain);
-        $gone++;
-    }
-
-    return $gone;
 }
 
 =head2 report($before, $after, $dryrun, $on, $on_after)

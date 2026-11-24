@@ -272,8 +272,8 @@ sub recipe_name {
 =head3 %cache = $class->xslate_cache(%opts)
 
 The renderer options that say where it keeps compiled templates, as a list to
-put into the arguments of C<< Text::Xslate->new >>.  C<bin/new_config> and
-C<bin/ipmap2zones> use it too, so all three agree.
+put into the arguments of C<< Text::Xslate->new >>.  C<bin/new_config> uses it
+too, so both agree.
 
 Xslate decides that a compiled template is stale only from the modification
 time of the file, at one-second granularity.  With its default directory in

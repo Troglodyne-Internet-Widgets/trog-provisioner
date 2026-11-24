@@ -25,6 +25,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Test::More;
 use Test::MockModule qw{strict};
 use Capture::Tiny    qw{capture};
+use Test::Fatal      qw{exception};
 use File::Slurper::Temp();
 use YAML::XS();
 
@@ -61,24 +62,25 @@ subtest 'each pool of a bridge has a guests bin, named for the bridge and the hy
     like( $out, qr/^Bin[ ]vpnclients:/m,                      'beside the bins of _global' );
 };
 
-subtest 'the server of a bin with via is asked what it gave out' => sub {
+subtest 'the server of a bin with via is asked what it gave out, and nothing else is' => sub {
     my @asked;
     $pool->redefine( via_clients => sub { push( @asked, $_[0] ); return ( 'laptop.test' => '10.8.0.129' ) } );
 
     my ( $out, $err, $rc ) = capture { Provisioner::Bin::list_ip_pool::main() };
     is( $rc, 0, 'it exits 0' ) or diag $err;
     is_deeply( \@asked, ['vpn.test.test'], 'the server of the bin is asked, and nobody for the guests' );
-    like( $out, qr/^[ ]+10[.]8[.]0[.]129[ ]+vpnclient:laptop[.]test$/m, 'and the address it gave out by hand shows as taken' ) or diag $out;
+    like( $out, qr/^[ ]+10[.]8[.]0[.]129[ ]+laptop[.]test$/m, 'and the address it gave out shows as taken by its client' ) or diag $out;
 };
 
-subtest 'a server that cannot be asked is a warning, not a stop' => sub {
+subtest 'a server that cannot be asked stops the list, because nothing else knows its addresses' => sub {
     $pool->redefine( via_clients => sub { die "vpn.test.test is not up\n" } );
-
-    my ( $out, $err, $rc ) = capture { Provisioner::Bin::list_ip_pool::main() };
-    is( $rc, 0, 'it exits 0' );
-    like( $err, qr/bin[ ]vpnclients[ ]shows[ ]only/,   'it says which bin is incomplete' );
-    like( $err, qr/vpn[.]test[.]test[ ]is[ ]not[ ]up/, 'and why' );
-    like( $out, qr/^Bin[ ]vpnclients:/m,               'and still lists the bin' );
+    like(
+        exception {
+            capture { Provisioner::Bin::list_ip_pool::main() }
+        },
+        qr/vpn[.]test[.]test[ ]is[ ]not[ ]up/,
+        'it dies with why'
+    );
 };
 
 done_testing;

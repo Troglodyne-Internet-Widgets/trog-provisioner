@@ -69,8 +69,13 @@ pool, so it cannot be handed one that is already spoken for.
 
 B<Not> copied.  A link to the database of the installation, so that a scratch
 guest and a real one take their addresses in one transaction, and neither gets
-an address that the other holds.  A scratch guest has a row in the database of
-the installation until its teardown releases it.  If a run ends without a teardown,
+an address that the other holds.  The link matters only when the hypervisor is
+this machine and its block names no C<ip_db>.  A hypervisor whose block names
+one keeps the addresses of its guests in its own database, see
+L<Provisioner::IPPool/ONE DATABASE FOR EACH HYPERVISOR>, and the copy of
+F<hypervisors.conf> below names the same database, which then serves a scratch
+guest and a real one in the same way.  A scratch guest has a row in the
+database of the installation until its teardown releases it.  If a run ends without a teardown,
 C<bin/reseed_ips --prune> releases the row of a guest that no hypervisor runs.
 
 The recipes of that C<_base> are left behind, which is the next item.

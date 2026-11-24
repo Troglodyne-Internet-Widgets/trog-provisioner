@@ -125,7 +125,7 @@ sub client_module { return 'Sys::Virt' }
 sub config_keys {
     return (
         uri => 'libvirt_uri',
-        map { $_ => $_ } qw{pool_path pool_name domain_dir dhcp_nics static_nics partition max_memory},
+        map { $_ => $_ } qw{pool_path pool_name domain_dir dhcp_nics static_nics partition max_memory ip_db ip_perl},
     );
 }
 
@@ -391,6 +391,24 @@ C<MemoryMax> on the slice kills a guest and does not refuse the next one.
 L</build(%given)> refuses it without a partition, because C<reserve_memory> already
 caps the memory of the whole host.
 
+=head2 ip_db
+
+The path of the address database of this hypervisor, F<ips.db>, on the
+hypervisor itself, from C<ip_db> in its block, or undef.  Each hypervisor keeps
+its own, and only processes on it open it: see L<Provisioner::IPPool::DB>.  A
+remote hypervisor whose block has a pool for a static adapter needs it.  A
+hypervisor that is this machine uses the F<ips.db> of the configuration
+directory without it.  Do not name a file on a filesystem that another machine
+mounts and writes, such as a configuration directory that a runner shares with
+its hypervisor, because then the processes of two machines open it.
+
+=head2 ip_perl
+
+The perl that runs F<bin/ippool> on this hypervisor, from C<ip_perl> in its
+block.  The default is C<perl>, the first on the C<PATH> of the login user,
+which is usually the system perl.  See L<Provisioner::IPPool::Remote/What the
+far side needs>.
+
 =head2 $unit = Trog::HV::Libvirt::partition_slice($partition)
 
 The systemd unit of the slice that libvirt makes for C<$partition>: the path
@@ -410,6 +428,8 @@ C<$unit> is not the name of a slice, because it goes into a shell command.
 sub pool_name  ($self) { return $self->setting('pool_name') // 'tf_disks' }
 sub partition  ($self) { return $self->setting('partition') }
 sub max_memory ($self) { return $self->setting('max_memory') // 0 }
+sub ip_db      ($self) { return $self->setting('ip_db') }
+sub ip_perl    ($self) { return $self->setting('ip_perl') // 'perl' }
 
 sub partition_slice ($partition) { return ( $partition =~ s{\A/}{}r =~ tr{/}{-}r ) . '.slice' }
 

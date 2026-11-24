@@ -447,9 +447,9 @@ my sub names_by_vhost ( $vhosts, %opts ) {
     return %by_vhost;
 }
 
-# Each public name, mapped to the name of its vhost.  bin/ipmap2zones reads the
-# configuration before it is validated, so a value of the older form, a bare
-# name, is refused here too.
+# Each public name, mapped to the name of its vhost.  required_recipes asks
+# served_names with the configuration before it is validated, so a value of the
+# older form, a bare name, is refused here too.
 my sub public_vhosts (%opts) {
     my $names = $opts{public_names} // {};
     my @bare  = grep { ref $names->{$_} ne 'HASH' } sort keys %$names;

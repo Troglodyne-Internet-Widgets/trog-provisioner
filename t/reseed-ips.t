@@ -30,6 +30,12 @@ use Provisioner::IPPool();
 
 require_ok("$FindBin::Bin/../bin/reseed_ips") or die "could not require SUT: $@";
 
+# The database of this machine, which is the database without a fleet, and an
+# operation of Provisioner::IPPool::DB on it.
+sub local_db () { return Provisioner::IPPool::DB::dbh( Provisioner::IPPool::db_path(), create => 1 ) }
+sub local_op ( $op, %args )               { return Provisioner::IPPool::DB::run( Provisioner::IPPool::db_path(), $op, \%args, create => 1 ) }
+sub reserve  ( $ip, $name, $nic = undef ) { return local_op( 'reserve', ip => $ip, name => $name, nic => $nic ) }
+
 sub fresh_db {
     Trog::SQLite::forget();
     $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- set for the subtest that called this, after it returns
@@ -41,11 +47,11 @@ subtest 'reservations are rebuilt, assignments are not' => sub {
     my $pool = { addresses => '10.9.9.10 10.9.9.11 10.9.9.12' };
 
     Provisioner::IPPool::assign( 'keeper.test', $pool );
-    Provisioner::IPPool::reserve( '10.9.9.11', 'insitu:de:ad:be:ef:00:01' );
+    reserve( '10.9.9.11', 'insitu:de:ad:be:ef:00:01' );
 
     # A reservation is a note of what was seen, so a reseed drops it and looks
     # again -- an address that has gone quiet has to come back to the pool.
-    is( Provisioner::IPPool::clear_reservations(), 1, 'the reservation went' );
+    is( local_op('clear_reservations'), 1, 'the reservation went' );
 
     # An assignment is a decision.  Something has been told it lives there, and
     # a machine being switched off during a sweep is not evidence otherwise.
@@ -55,17 +61,17 @@ subtest 'reservations are rebuilt, assignments are not' => sub {
 
 subtest 'forgetting the markers is what makes a hypervisor be asked again' => sub {
     fresh_db();
-    my $db = Provisioner::IPPool::dbh();
+    my $db = local_db();
 
     $db->do("INSERT INTO seeded (source) VALUES ('hv:one')");
     $db->do("INSERT INTO seeded (source) VALUES ('hv:two')");
 
-    is( Provisioner::IPPool::forget_seeding(), 2, 'both were forgotten' );
+    is( local_op('forget_seeding'), 2, 'both were forgotten' );
     is_deeply( $db->selectall_arrayref('SELECT source FROM seeded'), [], 'so the next seed asks them all' );
 
     # Forgetting nothing is not an error: a reseed of a database that never
     # finished one has markers to clear and should not say so.
-    is( Provisioner::IPPool::forget_seeding(), 0, 'and doing it twice is quiet' );
+    is( local_op('forget_seeding'), 0, 'and doing it twice is quiet' );
 };
 
 subtest 'the report says which way each address went' => sub {
@@ -101,7 +107,8 @@ subtest 'a dry run says would, and a real one does not' => sub {
 };
 
 # A fleet of fake hypervisors, each answering guest_names with the names it is
-# given, and a release that records rather than writes.
+# given.  hv1 is this machine, with no pool, so its database is the one of the
+# configuration directory; the others are clouds, which keep none.
 sub with_fleet {
     my (%guests) = @_;
 
@@ -114,37 +121,42 @@ sub with_fleet {
     return $fleet;
 }
 
-sub released_by_prune {
-    my (%before) = @_;
-
-    my @released;
-    my $pool = Test::MockModule->new('Provisioner::IPPool');
-    $pool->redefine( release => sub { push @released, $_[0]; return 1 } );
-
-    my $err = exception { Provisioner::Bin::reseed_ips::prune_absent( \%before ) };
-    return ( $err, [ sort @released ] );
-}
-
 subtest 'prune releases only what no hypervisor is running' => sub {
-    my $fleet = with_fleet( hv1 => ['running.test'], hv2 => ['cloudy.test'] );
+    fresh_db();
+    my $pool = { addresses => '10.0.0.1 10.0.0.2 10.0.0.3', bins => { vpnclients => { cidr => '10.8.0.128/29' } } };
+    Provisioner::IPPool::assign( $_, $pool ) foreach qw{running.test cloudy.test gone.test};
+    Provisioner::IPPool::assign( 'gone.test', $pool, 'vpnclients' );
+    reserve( '10.0.0.4', 'gateway:10.0.0.4' );
 
-    my ( $err, $released ) = released_by_prune(
-        '10.0.0.1'   => 'running.test',
-        '10.0.0.2'   => 'cloudy.test',
-        '10.0.0.3'   => 'gone.test',
-        '10.0.0.4'   => 'gateway:10.0.0.4',
-        '10.8.0.130' => 'gone.test',
+    my $fleet = with_fleet( hv1 => ['running.test'], hv2 => ['cloudy.test'] );
+    my $said  = capture_stdout { is( Provisioner::Bin::reseed_ips::main('--prune'), 0, 'it runs' ) };
+
+    like( $said, qr/10[.]0[.]0[.]3\s+freed[ ][(]was[ ]gone[.]test[)]/, 'the domain that no hypervisor runs is freed' );
+    is( Provisioner::IPPool::held_by( 'gone.test', 'vpnclients' ), undef, 'in every bin' );
+    is_deeply(
+        [ map { Provisioner::IPPool::held_by($_) } qw{running.test cloudy.test} ],
+        [qw{10.0.0.1 10.0.0.2}],
+        'while a guest on either hypervisor keeps its address'
     );
-    is( $err, undef, 'it runs' );
-    is_deeply( $released, ['gone.test'], 'a guest on either hypervisor keeps its address, a gateway is never released, and the rest go, once each however many bins they hold' );
+};
+
+subtest 'a dry run of prune writes nothing' => sub {
+    fresh_db();
+    Provisioner::IPPool::assign( 'gone.test', { addresses => '10.0.0.3' } );
+
+    my $fleet = with_fleet( hv1 => [] );
+    my $said  = capture_stdout { Provisioner::Bin::reseed_ips::main( '--prune', '--dryrun' ) };
+    like( $said, qr/would[ ]be[ ]freed/, 'it says what it would free' );
+    is( Provisioner::IPPool::held_by('gone.test'), '10.0.0.3', 'and frees nothing' );
 };
 
 subtest 'prune refuses when there is no fleet to ask' => sub {
-    my $fleet = with_fleet();
+    fresh_db();
+    Provisioner::IPPool::assign( 'running.test', { addresses => '10.0.0.1' } );
 
-    my ( $err, $released ) = released_by_prune( '10.0.0.1' => 'running.test' );
-    like( $err, qr/hypervisors[.]conf/, 'it says what it needs' );
-    is_deeply( $released, [], 'and releases nothing' );
+    my $fleet = with_fleet();
+    like( exception { Provisioner::Bin::reseed_ips::main('--prune') }, qr/hypervisors[.]conf/, 'it says what it needs' );
+    is( Provisioner::IPPool::held_by('running.test'), '10.0.0.1', 'and releases nothing' );
 };
 
 {
@@ -155,13 +167,17 @@ subtest 'prune refuses when there is no fleet to ask' => sub {
     sub names      ($self) { my @names = sort keys %{ $self->{guests} }; return @names }
 
     sub hypervisor ( $self, $name ) {
-        return bless { names => $self->{guests}{$name} }, 'Test::FakeHV';
+        return bless { name => $name, names => $self->{guests}{$name} }, 'Test::FakeHV';
     }
 
     package Test::FakeHV;
 
     # guest_names, and not the libvirt handle: a cloud has no vmm.
-    sub guest_names ($self) { return @{ $self->{names} } }
+    sub guest_names       ($self) { return @{ $self->{names} } }
+    sub manages_addresses ($self) { return $self->{name} eq 'hv1' ? 0 : 1 }
+    sub is_local ($)     { return 1 }
+    sub ip_db ($)        { return undef }
+    sub static_pools ($) { return {} }
 }
 
 done_testing();

@@ -10,7 +10,10 @@
 #
 # --address gives NAME that address in the VPN at each connect, through a file
 # in the client-config-dir.  It refuses an address that another client has.
-# Provisioner::Recipe::openvpn says where the address comes from.
+# --address auto keeps the address that NAME has in the static bins of this
+# server, or else takes the first one there that no client has.  The files of
+# the client-config-dir are the only record of these addresses.
+# Provisioner::Recipe::openvpn says more.
 #
 # The output holds a private key.  Send it to its client the way that you send
 # a password.
@@ -34,8 +37,60 @@ CCD="${OPENVPN_CCD_DIR:-/etc/openvpn/server/ccd}"
 PKI="$EASYRSA_DIR/pki"
 
 if [ -z "$NAME" ] || [ $# -gt 2 ]; then
-    echo "usage: $0 [--address ADDRESS] NAME [REMOTE] > NAME.ovpn" >&2
+    echo "usage: $0 [--address ADDRESS|auto] NAME [REMOTE] > NAME.ovpn" >&2
     exit 2
+fi
+
+# The addresses of the static bins, as runs of integers FIRST-LAST.
+STATIC_RANGES='[% IF static_ranges %][% static_ranges.join(' ') %][% END %]'
+
+to_int() {
+    local IFS=.
+    set -- $1
+    echo $(( ($1 << 24) + ($2 << 16) + ($3 << 8) + $4 ))
+}
+
+to_address() {
+    echo "$(( ($1 >> 24) & 255 )).$(( ($1 >> 16) & 255 )).$(( ($1 >> 8) & 255 )).$(( $1 & 255 ))"
+}
+
+in_static() {
+    local n range
+    n=$(to_int "$1")
+    for range in $STATIC_RANGES; do
+        [ "$n" -ge "${range%-*}" ] && [ "$n" -le "${range#*-}" ] && return 0
+    done
+    return 1
+}
+
+if [ -n "$ADDRESS" ]; then
+    # One run at a time chooses an address and writes it.
+    mkdir -p "$CCD"
+    exec 9>"$CCD.lock"
+    flock 9
+fi
+
+if [ "$ADDRESS" = auto ]; then
+    ADDRESS=
+    HAVE=$(sed -n '1s/^ifconfig-push \([0-9.]*\) .*/\1/p' "$CCD/$NAME" 2>/dev/null || true)
+    if [ -n "$HAVE" ] && in_static "$HAVE"; then
+        ADDRESS=$HAVE
+    else
+        TAKEN=$(sed -n 's/^ifconfig-push \([0-9.]*\) .*/\1/p' "$CCD"/* 2>/dev/null || true)
+        for range in $STATIC_RANGES; do
+            for ((n = ${range%-*}; n <= ${range#*-}; n++)); do
+                candidate=$(to_address "$n")
+                if ! grep -qxF "$candidate" <<<"$TAKEN"; then
+                    ADDRESS=$candidate
+                    break 2
+                fi
+            done
+        done
+    fi
+    if [ -z "$ADDRESS" ]; then
+        echo "$0: no address is free in the static bins of this server" >&2
+        exit 1
+    fi
 fi
 
 if [ -n "$ADDRESS" ] && ! [[ "$ADDRESS" =~ ^[0-9]{1,3}([.][0-9]{1,3}){3}$ ]]; then

@@ -176,13 +176,22 @@ rest of C<subnet> to the clients without an address of their own.  No other bin
 can have an address in C<subnet>.  So two openvpn servers with bins need two
 different values of C<subnet>, because the default is the same for both.
 
+    openvpn-client-config --address auto NAME [REMOTE] > NAME.ovpn
     openvpn-client-config --address 10.8.0.129 NAME [REMOTE] > NAME.ovpn
 
 This writes F</etc/openvpn/server/ccd/NAME>, which gives C<NAME> that address
-at each connect.  It refuses an address that another client already has.  A
-guest that runs L<Provisioner::Recipe::openvpnclient> with C<issue_from> gets
-its address and its configuration this way when it is built.  C<bin/destroy>
-revokes it, which removes the file.
+at each connect.  With C<auto>, the address is the one that C<NAME> already
+has in the bin, or else the first address of the bin that no client has.  It
+refuses an address that another client already has.  One run at a time
+chooses and writes, under a lock beside the directory.  A guest that runs
+L<Provisioner::Recipe::openvpnclient> with C<issue_from> gets its address and
+its configuration this way, with C<auto>, when it is built, so a rebuilt client
+keeps its address.  C<bin/destroy> revokes it, which removes the file.
+
+The files of that directory are the only record of these addresses: no
+F<ips.db> holds them.  L<Provisioner::IPPool> asks this server with
+C<openvpn-list-clients --static> when a guest needs the address of a client,
+and dies when this server cannot be asked.
 
 Traffic from a static address to C<routes> is not masqueraded, so a guest sees
 the address of the client.  Each guest has a route to the bin through this
@@ -196,12 +205,8 @@ The salvage keeps F</etc/openvpn/server/ccd> with the PKI, so a rebuild of the
 server keeps the address of each client.
 
 An operator can also give an address to a client that is not a guest of this
-installation, such as a laptop, with C<--address>.  Before
-L<Provisioner::IPPool> hands out an address from the bin, it asks this server
-for C<openvpn-list-clients --static>.  It reserves each address that the
-server gives to a client that the database does not know, so that no guest
-gets that address too.  A build that needs a new address from the bin dies
-when this server cannot be asked.
+installation, such as a laptop, with C<--address>.  It goes into the same
+directory, so C<auto> does not give it to anybody else.
 
 =head3 Taking a client away
 
@@ -453,7 +458,9 @@ Dies if a route is not an IPv4 CIDR block.
 
 For the bins of C<ip_pool> whose C<via> is this domain, adds C<static_blocks>,
 their networks, and C<ifconfig_pool>, the C<start> and C<end> of what is left of
-C<subnet> for a client without an address of its own.  Dies if such a bin is
+C<subnet> for a client without an address of its own, and C<static_ranges>,
+the addresses of those bins as runs of integers, C<FIRST-LAST>, which
+C<openvpn-client-config --address auto> chooses from.  Dies if such a bin is
 not inside C<subnet>, or leaves nothing of it, or leaves two ranges.  See
 L</Static addresses>.
 
@@ -527,6 +534,23 @@ sub enrich {
         my @blocks = map { Provisioner::IPPool::blocks($_) } @static{ sort keys %static };
         $opts{static_blocks} = \@blocks;
         $opts{ifconfig_pool} = dynamic_pool( $opts{subnet}, $opts{cidr}, @blocks );
+
+        # The addresses that openvpn-client-config --address auto chooses from,
+        # as runs of integers, which bash counts through.
+        my @runs;
+        foreach my $int (
+            map {
+                map { Provisioner::IPPool::address_to_int($_) }
+                  Provisioner::IPPool::pool_ips($_)
+            } @static{ sort keys %static }
+        ) {
+            if ( @runs && $runs[-1][1] + 1 == $int ) {
+                $runs[-1][1] = $int;
+                next;
+            }
+            push @runs, [ $int, $int ];
+        }
+        $opts{static_ranges} = [ map { "$_->[0]-$_->[1]" } @runs ];
     }
 
     $opts{pushes} = [
@@ -542,7 +566,9 @@ sub enrich {
 =head2 %files = $recipe->issue_grant($grant, address => $address, server => $name)
 
 The configuration that the server of C<$grant> issues for its client, at the
-static C<$address>, as C<issue_grant> in L<Provisioner::Recipe> says.  C<$name>
+static C<$address>, as C<issue_grant> in L<Provisioner::Recipe> says.
+C<$address> is an address, or C<auto> for the one that this server chooses:
+see L</Static addresses>.  C<$name>
 is the server block that the client connects to, as C<openvpn-client-config>
 takes it.  The file lands at F</etc/openvpn/client/CLIENT/issued.ovpn.b64>, in
 base64, because an issued secret is one line.
@@ -610,8 +636,8 @@ sub template_files {
 
 The shell command that root runs on this server to list each client with a
 static address.  It prints the name of the client, a tab, and the address, one
-client to a line.  L<Provisioner::IPPool> runs it before it hands out an address
-from a bin whose C<via> is this server.
+client to a line.  L<Provisioner::IPPool> runs it to learn the address of a
+client, because this server is the only record of it.
 
 =cut
 

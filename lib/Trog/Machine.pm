@@ -305,6 +305,15 @@ fail at once where it would ask for a password, so this never asks, and a
 caller cannot leave the C<-n> out.  It returns standard output.
 L</run_sudo(@argv)> returns the exit code, and it can ask.
 
+=head2 ($out, $err) = capture_with_input($input, @argv)
+
+Runs the argv list C<@argv> with C<$input> on its standard input, and returns
+its standard output and its standard error.  The input can be as large as the
+command reads: an argument has a limit of 128 KiB on Linux, and standard input
+has none.  Over ssh, the command gets no terminal, because a terminal would
+echo the input and break it into lines.  It runs under the alarm of the other
+commands, and a C<sudo> that can ask is refused, as for C<capture_cmd>.
+
 =head2 run_cmd(@argv)
 
 Takes an argv list and returns the exit code.  This module escapes the
@@ -448,6 +457,17 @@ sub capture_cmd ( $self, @argv ) { return capture( $self, 0, @argv ) }
 sub capture_quiet ( $self, @argv ) { return capture( $self, 1, @argv ) }
 
 sub capture_sudo ( $self, @argv ) { return $self->capture_cmd( qw{sudo -n}, @argv ) }
+
+sub capture_with_input ( $self, $input, @argv ) {
+    if ( $self->is_local ) {
+        IPC::Run3::run3( \@argv, \$input, \my $out, \my $err );
+        return ( $out // q{}, $err // q{} );
+    }
+
+    my $what = join( ' ', @argv );
+    refuse_asking_sudo( $self, $what );
+    return unhang( $self, $what, sub { $self->ssh->capture2( { timeout => $TIMEOUT, stdin_data => $input }, @argv ) } );
+}
 
 sub run_cmd {
     my ( $self, @argv ) = @_;
