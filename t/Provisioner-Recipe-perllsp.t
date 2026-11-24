@@ -68,17 +68,17 @@ subtest 'what it will not take' => sub {
 
 subtest 'the fragment fetches each pinned tarball into an emptied directory' => sub {
     my $out   = rendered();
-    my $start = '/home/admin/.vim/pack/lsp/start';
+    my $start = '/home/admin/.vim/pack/lsp/start';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
-    my $ref = '2082d13bb195f3203d41a308b89417426a7deca1';
+    my $ref = '2082d13bb195f3203d41a308b89417426a7deca1';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     # The four lines for one plugin, from its fetch on.
     my @lines = split( m/\n/, $out );
     my ($at)  = grep { index( $lines[$_], q{/async.vim/tar.gz/} ) >= 0 } 0 .. $#lines;
     my @async = @lines[ $at .. $at + 3 ];
-    like( $async[0], qr{^curl[ ]-fsSL[ ]--retry[ ]3[ ]--retry-all-errors[ ]-o[ ]'perllsp\.async\.tar\.gz'[ ]'https://codeload\.github\.com/prabirshrestha/async\.vim/tar\.gz/$ref'$}, 'fetched as the pinned commit' );                                            ## no critic (RegularExpressions::ProhibitComplexRegexes)
-    like( $async[1], qr{^rm[ ]-rf[ ]'\Q$start\E/async'$},                                                                                                                             'into a directory emptied first, so a re-provision does not fail on it' );
-    like( $async[3], qr{^tar[ ]-xzf[ ]'perllsp\.async\.tar\.gz'[ ]--strip-components=1[ ]-C[ ]'\Q$start\E/async'$},                                                                   'unpacked without the directory codeload wraps it in' );                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $async[0], qr{^curl[ ]-fsSL[ ]--retry[ ]3[ ]--retry-all-errors[ ]-o[ ]'perllsp\.async\.tar\.gz'[ ]'https://codeload\.github\.com/prabirshrestha/async\.vim/tar\.gz/\Q$ref\E'$}, 'fetched as the pinned commit' );                                            ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $async[1], qr{^rm[ ]-rf[ ]'\Q$start\E/async'$},                                                                                                                                 'into a directory emptied first, so a re-provision does not fail on it' );
+    like( $async[3], qr{^tar[ ]-xzf[ ]'perllsp\.async\.tar\.gz'[ ]--strip-components=1[ ]-C[ ]'\Q$start\E/async'$},                                                                       'unpacked without the directory codeload wraps it in' );                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # Make eats a single dollar before the shell sees it.
     unlike( $out, qr/(?<!\$)\$(?!\$)/, 'and nothing in it is a make variable by accident' );

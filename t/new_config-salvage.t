@@ -90,14 +90,16 @@ subtest 'one connection per guest, however many times a run asks for one' => sub
     refresh_on('10.0.0.1/24');
     refresh_on('10.0.0.1/24');
 
-    is( scalar @built,     1,          'asking twice opens one connection' );
-    is( $asked[1],         $asked[0],  'and the second ask goes to the one already open' );
+    is( scalar @built, 1, 'asking twice opens one connection' );
+    my ( $second, $first ) = @asked[ 1, 0 ];
+    is( $second,           $first,     'and the second ask goes to the one already open' );
     is( $built[0]->{host}, '10.0.0.1', 'the address it connects to is not the cidr it was given' );
 
     # A run configures several domains, and each of them is a different guest.
     refresh_on('10.0.0.2/24');
     is( scalar @built, 2, 'a different guest is a different connection' );
-    isnt( $asked[2], $asked[0], 'rather than the last one answered for it' );
+    my ( $third, $opened ) = @asked[ 2, 0 ];
+    isnt( $third, $opened, 'rather than the last one answered for it' );
 };
 
 subtest 'a refresh that worked says nothing' => sub {

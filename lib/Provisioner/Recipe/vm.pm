@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -576,7 +577,7 @@ sub enrich {
     # Whether the machine gives the guest a PCIe topology.  A q35 of any
     # version does; i440fx does not.  The template puts the interfaces on the
     # bus that the machine has.
-    $opts{pcie} = ( $opts{machine} // q{} ) =~ m/q35/ ? 1 : 0;
+    $opts{pcie} = index( $opts{machine} // q{}, 'q35' ) >= 0 ? 1 : 0;
 
     # Each adapter by its index.  The PCI slots are as libvirt writes them.  On
     # i440fx the hypervisor decides them, because the interface names on the
@@ -585,6 +586,7 @@ sub enrich {
     my @slots   = $hv->nic_slots;
     $opts{interfaces} = [
         map {
+            local ($_) = $_;
             +{
                 nat    => $_ == 0 ? 1 : 0,
                 mac    => $hv->guest_mac( $opts{domain}, $_ ),

@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -231,9 +232,10 @@ C<deps> is in L<Provisioner::Recipe::Ubuntu::clod>.
 
 # A word that goes into clod.conf between single quotes, and into a quoted
 # string of the guest test, and the GitHub logins and repositories, which fit it.
-my %NAME  = ( type => 'string', pattern => "" . qr/\A [[:alnum:]_.-]+ \z/ );
-my %LOGIN = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_LOGIN" );
-my %REPO  = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_REPO" );
+my $NAME_RE = qr/\A [[:alnum:]_.-]+ \z/;
+my %NAME    = ( type => 'string', pattern => "$NAME_RE" );
+my %LOGIN   = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_LOGIN" );
+my %REPO    = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_REPO" );
 
 # A permission rule of Claude Code: a tool, or a tool and what it may do.
 # perl_string quotes it, so this only holds it to that shape, on one line.

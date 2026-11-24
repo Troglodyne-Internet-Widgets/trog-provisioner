@@ -35,7 +35,9 @@ sub checkout {
 
     make_path("$base/$name");
     make_path("$base/$name/t") unless any { $_ eq 'no-t' } @files;
-    File::Slurper::Temp::write_text( "$base/$name/$_", "# bogus\n" ) for grep { $_ ne 'no-t' } @files;
+    for my $file ( grep { $_ ne 'no-t' } @files ) {
+        File::Slurper::Temp::write_text( "$base/$name/$file", "# bogus\n" );
+    }
     return;
 }
 
@@ -205,7 +207,7 @@ subtest 'the tests run as the owner of the checkout' => sub {
 subtest 'what root leaves in a checkout goes back to its owner' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     make_path("$dir/.git");
-    File::Slurper::Temp::write_text( "$dir/$_", "# bogus\n" ) for qw{Makefile .git/index};
+    for my $item (qw{Makefile .git/index}) { File::Slurper::Temp::write_text( "$dir/$item", "# bogus\n" ); }
     symlink( "$dir/Makefile", "$dir/link" ) or die "Cannot make the symlink: $!";
 
     my $mock = Test::MockModule->new( 'Trog::Script::SmokePerlModules', no_auto => 1 );

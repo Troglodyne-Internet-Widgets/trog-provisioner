@@ -51,7 +51,7 @@ my $CONF = $Trog::HV::Libvirt::BridgeHelper::CONF;
     sub run_sudo_or_die { return 1 }
 
     sub rewrite_lines ( $self, $path, %how ) {
-        my @lines = ( ( grep { $how{keep}->($_) } split m/\n/, $self->root_text($path) ), @{ $how{add} // [] } );
+        my @lines = ( ( grep { local ($_) = $_; $how{keep}->($_) } split m/\n/, $self->root_text($path) ), @{ $how{add} // [] } );
         $FILES{$path} = join q{}, map { "$_\n" } @lines;
         return 1;
     }

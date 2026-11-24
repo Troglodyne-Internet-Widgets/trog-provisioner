@@ -5,6 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -124,7 +125,7 @@ sub with_fleet {
 subtest 'prune releases only what no hypervisor is running' => sub {
     fresh_db();
     my $pool = { addresses => '10.0.0.1 10.0.0.2 10.0.0.3', bins => { vpnclients => { cidr => '10.8.0.128/29' } } };
-    Provisioner::IPPool::assign( $_, $pool ) foreach qw{running.test cloudy.test gone.test};
+    for my $item (qw{running.test cloudy.test gone.test}) { Provisioner::IPPool::assign( $item, $pool ); }
     Provisioner::IPPool::assign( 'gone.test', $pool, 'vpnclients' );
     reserve( '10.0.0.4', 'gateway:10.0.0.4' );
 

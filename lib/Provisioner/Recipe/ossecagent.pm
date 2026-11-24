@@ -201,7 +201,7 @@ The archive, as an apt repository.
 sub cache_classes {
     my ($class) = @_;
 
-    return map { $class->apt_repo_classes($_) } $class->fetch_hosts();
+    return map { local ($_) = $_; $class->apt_repo_classes($_) } $class->fetch_hosts();
 }
 
 =head2 %files = $recipe->template_files()

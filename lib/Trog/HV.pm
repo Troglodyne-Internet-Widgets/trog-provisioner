@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::Machine';
 
 use Trog::Config();
@@ -298,9 +299,9 @@ sub backend_for {
     # has a token.  A configuration that names two cannot be satisfied, so do
     # not choose one of them.
     my @backends = $class->backends;
-    my @named    = grep { $opts{ $_->marker } } @backends;
+    my @named    = grep { local ($_) = $_; $opts{ $_->marker } } @backends;
 
-    die 'A hypervisor is one of ' . join( ', ', map { $_->marker_key } @backends ) . ', and this has ' . join( ' and ', map { $_->marker_key } @named ) . ".\n"
+    die 'A hypervisor is one of ' . join( ', ', map { local ($_) = $_; $_->marker_key } @backends ) . ', and this has ' . join( ' and ', map { local ($_) = $_; $_->marker_key } @named ) . ".\n"
       if @named > 1;
 
     return $named[0] // __PACKAGE__ . '::Libvirt';
@@ -451,14 +452,14 @@ sub from_config {
 
     # The keys of every backend, because what a configuration contains decides
     # which backend it describes.
-    my %key = map { $_->config_keys } $class->backends;
+    my %key = map { local ($_) = $_; $_->config_keys } $class->backends;
 
-    my %said     = map { $_ => $class->config_value( $config, $_ ) } $class->config_keys_of($config);
+    my %said     = map { local ($_) = $_; $_ => $class->config_value( $config, $_ ) } $class->config_keys_of($config);
     my %replaced = $class->replaced_keys( \%said );
     die 'The configuration names ' . join( ', ', map { "$_, which is now $replaced{$_}" } sort keys %replaced ) . ".  See The adapters of a guest in docs/CONFIGURATION.md.\n" if %replaced;
 
     $key{$_} = $_ for grep { m/$NIC_KEY/ } keys %said;
-    return $class->new( map { $_ => ( $override{$_} || $class->config_value( $config, $key{$_} ) ) } keys %key );
+    return $class->new( map { local ($_) = $_; $_ => ( $override{$_} || $class->config_value( $config, $key{$_} ) ) } keys %key );
 }
 
 =head2 @keys = Trog::HV->config_keys_of($config)
@@ -670,7 +671,7 @@ sub nic_pool ( $self, $nic ) {
 }
 
 sub static_pools ($self) {
-    return { map { $_ => $self->nic_pool($_) } $self->static_nics };
+    return { map { local ($_) = $_; $_ => $self->nic_pool($_) } $self->static_nics };
 }
 
 =head2 nic_gateway($nic)
@@ -1203,8 +1204,7 @@ sub shortfalls {
     my $budgeted = $host && defined $host->{memory_free};
     push @reasons, sprintf(
         'needs %dMB of memory, %dMB free in the partition %s (%dMB for it, %dMB committed there)',
-        $needs{memory_mb},  $have->{memory_free}, $have->{partition},
-        $have->{memory_mb}, $have->{memory_committed}
+        $needs{memory_mb}, @{$have}{qw(memory_free partition memory_mb memory_committed)}
     ) if $budgeted && ( $needs{memory_mb} // 0 ) > $have->{memory_free};
 
     # An undefined free is no limit rather than no room.  A quota can be
@@ -1213,13 +1213,13 @@ sub shortfalls {
     my $memory = $budgeted ? $host : $have;
     push @reasons, sprintf(
         'needs %dMB of memory, %dMB free%s (%dMB physical, %dMB committed, %dMB reserved)',
-        $needs{memory_mb},    $memory->{memory_free}, ( $host ? ' on the host' : q{} ),
-        $memory->{memory_mb}, $memory->{memory_committed}, $self->reserve_memory
+        $needs{memory_mb},                          $memory->{memory_free}, ( $host ? ' on the host' : q{} ),
+        @{$memory}{qw(memory_mb memory_committed)}, $self->reserve_memory
     ) if defined $memory->{memory_free} && ( $needs{memory_mb} // 0 ) > $memory->{memory_free};
 
     push @reasons, sprintf(
         'needs %d vCPUs, %d free in the partition %s (%s CPUs for it x%d overcommit, %d committed there)',
-        $needs{cpus},  $have->{cpus_free},    $have->{partition},
+        $needs{cpus},  @{$have}{qw(cpus_free partition)},
         $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}
     ) if $host && defined $have->{cpus_free} && ( $needs{cpus} // 0 ) > $have->{cpus_free};
 
@@ -1267,13 +1267,13 @@ sub headroom {
     my $have = $self->capacity(%needs);
     my @fractions;
 
-    push @fractions, fraction( $have->{memory_free}, $have->{memory_mb},                                                                    $needs{memory_mb} );
-    push @fractions, fraction( $have->{cpus_free},   $have->{cpus_allocatable},                                                             $needs{cpus} );
-    push @fractions, fraction( $have->{disk_free},   defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
+    push @fractions, fraction( @{$have}{qw(memory_free memory_mb)},      $needs{memory_mb} );
+    push @fractions, fraction( @{$have}{qw(cpus_free cpus_allocatable)}, $needs{cpus} );
+    push @fractions, fraction( $have->{disk_free},                       defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
 
     # A partition is as roomy as the host that it is on, at most.
-    push @fractions, fraction( $have->{host}{cpus_free},   $have->{host}{cpus_allocatable}, $needs{cpus} )      if $have->{host};
-    push @fractions, fraction( $have->{host}{memory_free}, $have->{host}{memory_mb},        $needs{memory_mb} ) if $have->{host} && defined $have->{host}{memory_free};
+    push @fractions, fraction( @{ $have->{host} }{qw(cpus_free cpus_allocatable)}, $needs{cpus} )      if $have->{host};
+    push @fractions, fraction( @{ $have->{host} }{qw(memory_free memory_mb)},      $needs{memory_mb} ) if $have->{host} && defined $have->{host}{memory_free};
 
     my ($tightest) = sort { $a <=> $b } @fractions;
     return $tightest;
@@ -1681,7 +1681,7 @@ sub check_config {
         my $said = eval {
             my $conf = Provisioner::Cookbook->configuration();
             Provisioner::Cookbook->base_globals($conf);
-            Provisioner::Cookbook->globals( $_, $conf ) foreach ( Provisioner::Cookbook->domains($conf) );
+            for my $item ( ( Provisioner::Cookbook->domains($conf) ) ) { Provisioner::Cookbook->globals( $item, $conf ); }
             1;
         };
         return $self->verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;
@@ -1874,7 +1874,7 @@ sub note_plaintext_secrets {
                 # A reference is not a secret.  Neither is a placeholder from
                 # bin/new_guest, because new_config refuses to build from one.
                 $found{"$top.$name.$_->[0]"} = 1
-                  for grep { $_->[1] !~ m/\Asecret:/ && $_->[1] ne Provisioner::Cookbook->PLACEHOLDER } $class->secrets_in( $recipes->{$name} );
+                  for grep { local ($_) = $_; $_->[1] !~ m/\Asecret:/ && $_->[1] ne Provisioner::Cookbook->PLACEHOLDER } $class->secrets_in( $recipes->{$name} );
             }
         }
 

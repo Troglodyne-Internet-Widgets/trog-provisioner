@@ -866,7 +866,7 @@ sub list_dir {
     my ( $self, $path ) = @_;
     if ( $self->is_local ) {
         return () unless -d $path;
-        my @names = sort map { $_->basename } Path::Tiny::path($path)->children(qr/\A[^.]/);
+        my @names = sort map { local ($_) = $_; $_->basename } Path::Tiny::path($path)->children(qr/\A[^.]/);
         return @names;
     }
 
@@ -1081,7 +1081,7 @@ sub rewrite_lines ( $self, $path, %opts ) {
     die "Could not read $path on " . $self->describe . "; refusing to rewrite it blind\n"
       if $text eq q{} && $self->run_cmd( qw{sudo -n test -s}, $path ) == 0;
 
-    my @lines = ( ( grep { $keep->($_) } split m/\n/, $text ), @{ $opts{add} // [] } );
+    my @lines = ( ( grep { local ($_) = $_; $keep->($_) } split m/\n/, $text ), @{ $opts{add} // [] } );
     $self->write_text( $path, join( q{}, map { "$_\n" } @lines ), sudo => 1, mode => $opts{mode} // '0644' )
       or die "Could not write $path on " . $self->describe . "\n";
     return 1;

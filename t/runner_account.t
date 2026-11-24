@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -53,8 +54,8 @@ my @remove = ( '--hvconf', $hvconf, qw{--hypervisor hv1 --user runner --pool-nam
 
 # Where the steps put the limits of the user slice, the bridges and the hook.
 my $DROPIN   = '/etc/systemd/system/user-1001.slice.d/50-trog-runner.conf';
-my $HELPER   = '/usr/lib/qemu/qemu-bridge-helper';
-my $ACL      = '/etc/qemu/trog-runner-runner.conf';
+my $HELPER   = '/usr/lib/qemu/qemu-bridge-helper';                            ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $ACL      = '/etc/qemu/trog-runner-runner.conf';                           ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $BRIDGES  = '/etc/qemu/bridge.conf';
 my $APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
 my $LINGER   = '/var/lib/systemd/linger/runner';
@@ -243,7 +244,7 @@ sub with_hypervisor ( $state, $code ) {
     sub undefine ($self)              { delete $self->{state}{pools}{ $self->{name} }; return 1 }
 
     sub list_all_volumes ($self) {
-        return map { Test::FakeVolume->new($_) } @{ $self->{state}{pools}{ $self->{name} }{volumes} };
+        return map { local ($_) = $_; Test::FakeVolume->new($_) } @{ $self->{state}{pools}{ $self->{name} }{volumes} };
     }
 
     package Test::FakeVolume;
@@ -316,7 +317,7 @@ subtest 'without libguestfs there is no appliance to build' => sub {
     my ($rc) = run_tool( $state, @create );
     is( $rc, 0, 'the account is still made' );
     ok( !exists $state->{files}{$FIXED}, 'with no appliance' );
-    is( ( grep { m/guestfs/ } @{ $state->{root} } ), 0, 'and nothing of libguestfs ran as root' );
+    is( ( grep { index( $_, 'guestfs' ) >= 0 } @{ $state->{root} } ), 0, 'and nothing of libguestfs ran as root' );
 };
 
 subtest 'a dry run asks, says, and changes nothing' => sub {
@@ -513,7 +514,7 @@ subtest 'the key of a runner replaces its old line, and comes out again' => sub 
     my $state = fresh_state();
     run_tool( $state, @create );
 
-    my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIRunnerRunnerRunnerRunnerRunnerRunnerRunner';
+    my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIRunnerRunnerRunnerRunnerRunnerRunnerRunner';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $file     = '/home/runner/.ssh/authorized_keys';
 
     # The fake keeps a file without its last newline, as write_text gets it.
@@ -534,7 +535,12 @@ subtest 'the key of a runner replaces its old line, and comes out again' => sub 
     is_deeply( \@lines, [$line], 'one line with the key, the new one, because sshd takes the first that matches' );
     like( $state->{files}{$file}, qr/operator\@test[.]test/, 'and the other keys stay' );
 
-    with_hypervisor( $state, sub { $_->{do}->() for $hv->runner_key_removal_steps( 'runner', $material ) } );
+    with_hypervisor(
+        $state,
+        sub {
+            for my $item ( $hv->runner_key_removal_steps( 'runner', $material ) ) { $item->{do}->(); }
+        }
+    );
     unlike( $state->{files}{$file}, qr/\Q$material\E/, 'the removal takes it out' );
     like( $state->{files}{$file}, qr/operator\@test[.]test/, 'and only it' );
 
@@ -545,7 +551,12 @@ subtest 'the key of a runner replaces its old line, and comes out again' => sub 
     $state->{unreadable}{$file} = 1;
     like(
         exception {
-            with_hypervisor( $state, sub { $_->{do}->() for $hv->runner_key_steps( 'runner', $line ) } )
+            with_hypervisor(
+                $state,
+                sub {
+                    for my $item ( $hv->runner_key_steps( 'runner', $line ) ) { $item->{do}->(); }
+                }
+            )
         },
         qr/refusing[ ]to[ ]rewrite[ ]it[ ]blind/,
         'a file that could not be read is not rewritten'

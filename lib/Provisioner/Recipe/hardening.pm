@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+my $MODULE_NAME = qr/\A [\w-]+ \z/;
+
 =head1 NAME
 
 Provisioner::Recipe::hardening - the sysctl values and the blocked kernel
@@ -120,7 +122,7 @@ sub args {
                 type        => 'array',
                 default     => [qw{dccp sctp rds tipc usb-storage}],
                 uniqueItems => 1,
-                items       => { type => 'string', pattern => '^[A-Za-z0-9_-]+$' },
+                items       => { type => 'string', pattern => "$MODULE_NAME" },
                 description => 'The kernel modules that the guest never loads.',
             },
         },

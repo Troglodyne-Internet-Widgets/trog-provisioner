@@ -107,7 +107,7 @@ sub default_targets {
     foreach my $module ( @{ $opts{modules} } ) {
         require "Provisioner/Recipe/$module.pm";    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
         my $recipe = "Provisioner::Recipe::$module";
-        my %files  = $recipe->remote_files( $opts{install_dir}, $opts{domain} );
+        my %files  = $recipe->remote_files( @opts{qw(install_dir domain)} );
         my $skip   = join( ' ', $recipe->remote_skip() );
         my @paths  = sort keys %files;
         push( @targets, map { { name => $module . ( $_ + 1 ), path => $paths[$_], skip => $skip } } 0 .. $#paths );

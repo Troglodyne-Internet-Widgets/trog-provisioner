@@ -144,7 +144,7 @@ subtest 'and nothing else of this machine' => sub {
 # daemon would be.
 subtest 'code in the daemon reaches what the guest may fetch, and nothing else' => sub {
     my $sandbox = Path::Tiny::path($sandbox_program)->slurp_utf8;
-    my $daemon  = 'rsync --server --daemon --config="$dir/rsyncd.conf" .';
+    my $daemon  = 'rsync --server --daemon --config="$dir/rsyncd.conf" .';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     is( scalar( () = $sandbox =~ m/\Q$daemon\E/g ), 1, 'the daemon is the one command that the sandbox runs' );
 
     # In the script, because the sandbox clears the environment.
@@ -178,7 +178,7 @@ subtest 'code in the daemon reaches what the guest may fetch, and nothing else' 
     ok( !-e "$root/data/host.test/planted", 'and nothing arrived' );
 
     ( $status, $out ) = $ask->('cat /proc/net/dev');
-    is( scalar( () = $out =~ m/:/g ), 1, 'and it has no network but loopback' ) or diag $out;
+    is( ( $out =~ tr/:// ), 1, 'and it has no network but loopback' ) or diag $out;
 };
 
 # The transfer account is another account than the one that wrote them, in its

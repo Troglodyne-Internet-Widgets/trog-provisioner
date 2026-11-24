@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Net::CIDR();
 use Net::IP qw{$IP_A_IN_B_OVERLAP $IP_IDENTICAL $IP_NO_OVERLAP};
@@ -387,7 +388,7 @@ my sub range ($block) {
 # How the CIDR block $block lies against the CIDR block $net, as one of the
 # overlap constants of Net::IP.
 my sub overlap ( $block, $net ) {
-    my ( $inner, $outer ) = map { Net::IP->new($_) // die "'$_' is not an IPv4 CIDR block: " . Net::IP::Error() . "\n" } $block, $net;
+    my ( $inner, $outer ) = map { local ($_) = $_; Net::IP->new($_) // die "'$_' is not an IPv4 CIDR block: " . Net::IP::Error() . "\n" } $block, $net;
     return $inner->overlaps($outer) // $IP_NO_OVERLAP;
 }
 
@@ -487,7 +488,7 @@ sub required_recipes {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $vpn = eval { Net::CIDR::addrandmask2cidr( $opts{subnet}, $opts{netmask} ) } // die "The netmask $opts{netmask} of the VPN subnet is not a run of ones and then zeros\n";
+    my $vpn = eval { Net::CIDR::addrandmask2cidr( @opts{qw(subnet netmask)} ) } // die "The netmask $opts{netmask} of the VPN subnet is not a run of ones and then zeros\n";
     ( undef, $opts{cidr} ) = split m{/}, $vpn;
 
     my %bins   = Provisioner::IPPool::bins( $opts{ip_pool} // {} );
@@ -506,7 +507,7 @@ sub enrich {
 
     # The pattern in args() gives only the shape of a route.  This is where
     # 999.0.2.0/24 and a prefix of /99 are refused.
-    network($_) for @{ $opts{routes} // [] };
+    for my $route ( @{ $opts{routes} // [] } ) { network($route); }
 
     unless ( $opts{routes} ) {
         my @routes;
@@ -521,7 +522,9 @@ sub enrich {
             my $base = Provisioner::IPPool::address_to_int($address);
             push @routes, map { Provisioner::IPPool::int_to_address( $base + $_ * $half ) . '/' . ( $prefix + 1 ) } 0, 1;
         }
-        push @routes, map { "$_/32" } Provisioner::IPPool::addresses_of($_) for @bins{ sort keys %bins };
+        for my $bin ( @bins{ sort keys %bins } ) {
+            push @routes, map { "$_/32" } Provisioner::IPPool::addresses_of($bin);
+        }
 
         # A bin inside the VPN subnet holds the clients themselves, which the
         # tunnel already reaches.
@@ -533,7 +536,7 @@ sub enrich {
     if (%static) {
         my @blocks = map { Provisioner::IPPool::blocks($_) } @static{ sort keys %static };
         $opts{static_blocks} = \@blocks;
-        $opts{ifconfig_pool} = dynamic_pool( $opts{subnet}, $opts{cidr}, @blocks );
+        $opts{ifconfig_pool} = dynamic_pool( @opts{qw(subnet cidr)}, @blocks );
 
         # The addresses that openvpn-client-config --address auto chooses from,
         # as runs of integers, which bash counts through.

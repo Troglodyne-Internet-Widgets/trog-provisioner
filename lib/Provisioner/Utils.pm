@@ -208,7 +208,7 @@ sub dovecot_password_hash {
     my $hash = Crypt::KeyDerivation::argon2_pbkdf( 'argon2id', $password, $salt, $time, $memory, $lanes, 32 );
 
     # The PHC string format: base64 with no padding.
-    my ( $b64_salt, $b64_hash ) = map { encode_base64( $_, q{} ) =~ s/=+\z//r } $salt, $hash;
+    my ( $b64_salt, $b64_hash ) = map { local ($_) = $_; encode_base64( $_, q{} ) =~ s/=+\z//r } $salt, $hash;
     return "{ARGON2ID}\$argon2id\$v=19\$m=$memory,t=$time,p=$lanes\$$b64_salt\$$b64_hash";
 }
 

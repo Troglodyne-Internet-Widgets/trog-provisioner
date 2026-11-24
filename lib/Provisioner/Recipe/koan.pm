@@ -388,7 +388,7 @@ sub enrich {
 
         if ( $opts{matrix_e2ee} && !$opts{matrix_pickle_key} ) {
             $opts{matrix_pickle_key} = join '',
-              map { ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand(16) ] } 1 .. 64;
+              map { local ($_) = $_; ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand(16) ] } 1 .. 64;
         }
     }
 

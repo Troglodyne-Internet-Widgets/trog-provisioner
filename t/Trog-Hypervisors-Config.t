@@ -41,7 +41,7 @@ subtest 'load' => sub {
     # Measured on a dry run of bin/provision, which asked for the fleet inside
     # a loop over two constants and was told that there was none.
     my $path = fleet_of("[a]\nlibvirt_uri = qemu:///system\n");
-    my @read = map { [ Trog::Hypervisors::Config->load($path)->names ] } qw{secrets built};
+    my @read = map { local ($_) = $_; [ Trog::Hypervisors::Config->load($path)->names ] } qw{secrets built};
     is_deeply( \@read, [ ['a'], ['a'] ], 'a fleet loaded where $_ is a constant is still the fleet' );
 
     like(

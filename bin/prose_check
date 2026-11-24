@@ -164,13 +164,13 @@ sub private_names ( $conf, $fleet ) {
     $add->( $DOMAIN,                                       @own );
     $add->( 'the parent of a domain of the configuration', map { parents($_) } @own );
 
-    foreach my $global ( Provisioner::Cookbook->base_global($conf), map { Provisioner::Cookbook->global_config( $_, $conf ) } @domains ) {
+    foreach my $global ( Provisioner::Cookbook->base_global($conf), map { local ($_) = $_; Provisioner::Cookbook->global_config( $_, $conf ) } @domains ) {
         $add->( 'an account of the configuration', grep { defined && !ref } @{$global}{qw{user admin_user}} );
         $add->( 'the name of a person',            grep { defined && !ref } $global->{admin_gecos} );
     }
 
     $add->( 'a hypervisor of the fleet', $fleet->names );
-    foreach my $string ( strings_in( $conf, map { $fleet->block($_) } $fleet->names ) ) {
+    foreach my $string ( strings_in( $conf, map { local ($_) = $_; $fleet->block($_) } $fleet->names ) ) {
         $add->( 'a mail address that the configuration names', $string =~ m/$EMAIL_RX/g );
         $add->( 'a host that the configuration names',         $string =~ m/$HOST_RX/g );
         push @ranges, $string =~ m/$CIDR_RX/g;
@@ -251,8 +251,9 @@ sub findings ( $names, $ranges, $prose ) {
     my ( @found, $line );
     foreach my $text ( split m/\n/, $prose ) {
         $line++;
-        my @kinds = map { $names->{ lc $_ } } $text =~ m/$rx/g;
-        push @kinds, 'an address of the fleet' if @$ranges && any { valid_ipv4($_) && Net::CIDR::cidrlookup( $_, @$ranges ) } $text =~ m/$IPV4_RX/g;
+        my @kinds = map             { $names->{ lc $_ } } $text                                                        =~ m/$rx/g;
+        my @fleet = @$ranges ? grep { local ($_) = $_; valid_ipv4($_) && Net::CIDR::cidrlookup( $_, @$ranges ) } $text =~ m/$IPV4_RX/g : ();
+        push @kinds, 'an address of the fleet' if @fleet;
         push @found, map { "line $line: $_" } uniq @kinds;
     }
     return @found;

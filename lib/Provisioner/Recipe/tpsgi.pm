@@ -95,7 +95,7 @@ C<1Foo::Bar>, because tPSGI loads each one by name.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my @bad = grep { !Module::Runtime::is_module_name($_) } @{ $opts{loggers} // [] };
+    my @bad = grep { local ($_) = $_; !Module::Runtime::is_module_name($_) } @{ $opts{loggers} // [] };
     die "loggers must be names of Perl modules, and these are not: @bad\n" if @bad;
 
     return %opts;

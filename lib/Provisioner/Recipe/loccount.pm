@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+my $RELEASE = qr/\A \d+ [.] \d+ (?: [.] \d+ )? \z/;
+
 =head1 Provisioner::Recipe::loccount
 
 =head2 SYNOPSIS
@@ -55,7 +57,7 @@ sub args {
         properties => {
             version => {
                 type        => 'string',
-                pattern     => '^\d+[.]\d+(?:[.]\d+)?$',
+                pattern     => "$RELEASE",
                 default     => '2.28',
                 description => 'The tag of loccount to build, which is its version, such as 2.28.',
             },

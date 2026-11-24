@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -44,8 +45,8 @@ use Trog::Hypervisors();
 # anything but an interpolated value is usually an accident.
 ## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
 
-my $DOMAIN  = 'runner.test.test';
-my $INSTALL = '/opt/domains';
+my $DOMAIN  = 'runner.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $INSTALL = '/opt/domains';        ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 sub built {
     my (%extra) = @_;
@@ -532,7 +533,7 @@ subtest 'the fragment seeds the configuration, and leaves what is there alone' =
     is( File::Slurper::read_text("$conf/secrets.kdbx"),      "bogus store\n",                                               'and the store of the domain' );
     is( File::Slurper::read_text("$conf/fetchcache-ca.crt"), File::Slurper::read_text("$dir/trogrunner.fetchcache-ca.crt"), 'and the certificate of the cache' );
 
-    File::Slurper::Temp::write_text( "$conf/$_", "the operator's $_\n" ) for qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx fetchcache-ca.crt};
+    for my $item (qw{recipes.yaml hypervisors.conf admin_authorized_keys secrets.kdbx fetchcache-ca.crt}) { File::Slurper::Temp::write_text( "$conf/$item", "the operator's $item\n" ); }
     ( $rc, $said ) = $seed->();
     is( $rc, 0, 'a directory that has the configuration is seeded too' ) or diag $said;
     is_deeply(
@@ -545,7 +546,7 @@ subtest 'the fragment seeds the configuration, and leaves what is there alone' =
 subtest 'a salvaged checkout is fast-forwarded, and keeps its work' => sub {
     my $guest    = tempdir( CLEANUP => 1 );
     my $upstream = tempdir( CLEANUP => 1 );
-    my $checkout = "$guest/$DOMAIN/trog-provisioner";
+    my $checkout = "$guest/$DOMAIN/trog-provisioner";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     File::Path::make_path("$guest/$DOMAIN");
 
     local $ENV{GIT_AUTHOR_NAME}     = 'test';
@@ -669,7 +670,7 @@ subtest 'a runner with access and no key stops the postrun, which fails the buil
     my ( $status, $said, $asked ) = run_owner_script( 0, provision_user => 'agent', hypervisor_access => 'least', hypervisors => { hv1 => {%SESSION} } );
     isnt( $status, 0, 'the script fails' );
     like( $said, qr{no[ ]hypervisor[ ]key[ ]was[ ]placed}, 'and says which key is missing' );
-    unlike( $asked, qr{\Aln[ ]}m, 'and links nothing to a key that is not there' );
+    unlike( $asked, qr{\Aln[ ]}, 'and links nothing to a key that is not there' );
 };
 
 # --- What a runner needs on its hypervisors -----------------------------------
@@ -807,7 +808,7 @@ subtest 'a runner with an account has it made, and its key put in as root' => su
     is_deeply( [ map { $_->{machine} } @steps ], [ ( { hypervisor => 'hv1' } ) x 3 ],                                     'each as the account of the block of that name in hypervisors.conf, and not as the runner' );
 
     my $admin = Test::FakeAdmin->new();
-    $_->{apply}->( $admin, %context ) for @steps;
+    for my $step (@steps) { $step->{apply}->( $admin, %context ); }
     my %asked;
     push @{ $asked{ $_->[0] } }, $_ for @{ $admin->{asked} };
     my ( $adapters, $network, $plan, $account, $key ) = map { $asked{$_}[0] } qw{adapters network plan account key};
@@ -825,7 +826,7 @@ subtest 'a runner with an account has it made, and its key put in as root' => su
     is( "$type $comment", "ssh-ed25519 trog-provisioner runner $DOMAIN", 'and it is the key of the runner' );
 
     $admin = Test::FakeAdmin->new();
-    $_->{revert}->( $admin, %context, secrets => {} ) for reverse @steps;
+    for my $step ( reverse @steps ) { $step->{revert}->( $admin, %context, secrets => {} ); }
     is_deeply( [ map { $_->[0] } @{ $admin->{asked} } ], [qw{unkey plan remove adapters unnet}], 'the revert takes the key away, then the account, and then the networks' );
 };
 

@@ -9,6 +9,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use FindBin::libs;
 
@@ -276,8 +277,8 @@ sub check_media {
     my $label = "the edge caches $path of $name, and serves no private file";
 
     my @answers;
-    foreach ( 1 .. 2 ) {
-        my $socket = tls_to( $address, $name ) or return [ 0, $label, "No verified TLS connection to $address for $name: " . ( IO::Socket::SSL::errstr() // $! ) ];
+    foreach my $request ( 1 .. 2 ) {
+        my $socket = tls_to( $address, $name ) or return [ 0, $label, "No verified TLS connection to $address for $name, on request $request: " . ( IO::Socket::SSL::errstr() // $! ) ];
         push( @answers, [ http_answer( $socket, $name, $path ) ] );
     }
     my ( $first, $second ) = @answers;
@@ -402,7 +403,7 @@ behind.
 sub check_ban {
     my ( $guest, $edge, $guest_domain ) = @_;
     my $label  = 'a ban in a jail of the guest reaches the edge, and the unban leaves it';
-    my $action = "nginxrelay-$guest_domain";
+    my $action = "nginxrelay-$guest_domain";                                                 ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     my ($status) = as_root( $guest, 'fail2ban-client status' );
     my ($list)   = $status =~ m/Jail\s+list:\s*(\N*)/;

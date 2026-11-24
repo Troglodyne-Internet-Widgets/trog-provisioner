@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -665,7 +666,7 @@ Otherwise this reads it for the domain from L<Provisioner::Cookbook>.
 sub zone_aliases ( $self, %opts ) {
     my $zones     = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
     my %addressed = map { $_ => 1 } $self->zone_address_names( %opts, zones => $zones );
-    return grep { !$addressed{$_} && !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
+    return grep { local ($_) = $_; !$addressed{$_} && !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
 }
 
 =head2 @names = $recipe->zone_address_names(%opts)
@@ -682,8 +683,8 @@ C<$opts{zones}> is as C<zone_aliases> says.
 
 sub zone_address_names ( $self, %opts ) {
     my $zones = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
-    my @names = map { Provisioner::Cookbook->load($_)->addressed_names( domain => $opts{domain} ) } @{ $opts{modules} // [] };
-    return grep { !defined $self->zone_of( $_, $opts{domain}, $zones ) } sort( uniq(@names) );
+    my @names = map { local ($_) = $_; Provisioner::Cookbook->load($_)->addressed_names( domain => $opts{domain} ) } @{ $opts{modules} // [] };
+    return grep { local ($_) = $_; !defined $self->zone_of( $_, $opts{domain}, $zones ) } sort( uniq(@names) );
 }
 
 =head2 @records = $recipe->zone_records(%opts)
@@ -700,9 +701,9 @@ C<$opts{zones}> is as C<zone_aliases> says.
 
 sub zone_records ( $self, %opts ) {
     my $zones   = $opts{zones} // { $self->configured_zones( $opts{domain} ) };
-    my @records = map { Provisioner::Cookbook->load($_)->dns_records( domain => $opts{domain} ) } @{ $opts{modules} // [] };
+    my @records = map { local ($_) = $_; Provisioner::Cookbook->load($_)->dns_records( domain => $opts{domain} ) } @{ $opts{modules} // [] };
     my %seen;
-    my @ours   = grep { !$seen{"$_->{type} $_->{name} $_->{content}"}++ && !defined $self->zone_of( $_->{name}, $opts{domain}, $zones ) } @records;
+    my @ours   = grep { local ($_) = $_; !$seen{"$_->{type} $_->{name} $_->{content}"}++ && !defined $self->zone_of( $_->{name}, $opts{domain}, $zones ) } @records;
     my @sorted = sort { $a->{type} cmp $b->{type} || $a->{name} cmp $b->{name} || $a->{content} cmp $b->{content} } @ours;
     return @sorted;
 }
@@ -735,7 +736,7 @@ sub authority_of {
     my ( $self, $domain ) = @_;
 
     my $server = Provisioner::Cookbook->machine_of($domain);
-    my @where  = map { Provisioner::Cookbook->domain_config($_) } uniq( $domain, $server );
+    my @where  = map { local ($_) = $_; Provisioner::Cookbook->domain_config($_) } uniq( $domain, $server );
 
     foreach my $conf (@where) {
         my $authority = ( $conf->{ $self->recipe_name } // {} )->{authority};
@@ -780,7 +781,8 @@ sub zone_server_for {
 
     my @named = uniq( @$recipes, grep { !m/\A_/ } keys %{ $walk{base} // {} } );
     return if List::Util::any { $_ eq 'pdns' } @named;
-    return unless List::Util::any { $_ eq $self->recipe_name } Provisioner::Cookbook->recipes_with( \@named, %walk, domain => $domain );
+    my $own = $self->recipe_name;
+    return unless List::Util::any { $_ eq $own } Provisioner::Cookbook->recipes_with( \@named, %walk, domain => $domain );
     return unless $self->serves_itself($domain);
     return 'pdns';
 }
@@ -923,7 +925,7 @@ sub publication {
         if ( lc $name eq lc $zone ) { $zone_apexes{$zone} = 1 }
         else                        { push( @{ $zone_cnames{$zone} }, $name ) }
     }
-    my %zone_access = map { $_ => { $self->zone_credentials( $_, $zones->{$_} ) } } keys %zone_cnames, keys %zone_apexes;
+    my %zone_access = map { local ($_) = $_; $_ => { $self->zone_credentials( $_, $zones->{$_} ) } } keys %zone_cnames, keys %zone_apexes;
 
     # At the address of the guest, which is main_ip.  The address above is what
     # the public names of the domain get, and a relay can hold it.
@@ -1022,7 +1024,7 @@ sub enrich {
       if $in_zone && !$glue;
 
     $opts{upstream}   = { $self->parent_credentials( %opts, domain => $domain ) };
-    $opts{parent}     = $domain =~ s/\A[^.]+[.]//r;
+    $opts{parent}     = ( split m/[.]/, $domain, 2 )[1] // $domain;
     $opts{nameserver} = $nameserver;
     $opts{glue}       = $in_zone ? $glue : undef;
 

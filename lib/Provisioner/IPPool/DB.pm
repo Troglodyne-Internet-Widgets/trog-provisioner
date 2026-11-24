@@ -9,6 +9,7 @@ use 5.036;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Cwd();
 use File::Basename();
@@ -229,7 +230,7 @@ Returns 1 when this wrote the row, and 0 when the address was already there.
 =cut
 
 sub reserve ( $db, $args ) {
-    return rows_written( $db, "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", $args->{ip}, $args->{name}, $args->{nic} // q{} ) ? 1 : 0;
+    return rows_written( $db, "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", @{$args}{qw(ip name)}, $args->{nic} // q{} ) ? 1 : 0;
 }
 
 =head2 record
@@ -369,7 +370,7 @@ my sub apply_seed ( $db, $seed ) {
         $written += record( $db, { ip => $values[0], domain => $values[1], nic => $values[2], main => $values[3] } ) if $what eq 'record';
         die "A seed has no rows of the kind '$what', only reserve and record\n" unless $what eq 'reserve' || $what eq 'record';
     }
-    $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, $_ ) foreach @{ $seed->{mark} // [] };
+    for my $item ( @{ $seed->{mark} // [] } ) { $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, $item ); }
     return $written;
 }
 
@@ -410,7 +411,7 @@ sub reseed ( $db, $args ) {
         $out{on}     = bridges( $db, {} );
         forget_seeding( $db, {} );
         clear_reservations( $db, {} );
-        apply_seed( $db, $_ ) foreach @{ $args->{seeds} // [] };
+        for my $seed ( @{ $args->{seeds} // [] } ) { apply_seed( $db, $seed ); }
 
         $out{pruned} = 0;
         if ( $args->{prune} ) {
@@ -465,7 +466,7 @@ sub migrate ( $db, $args ) {
                     $db->do( 'INSERT INTO ips (ip, domain, kind, bin, nic, main, assigned_at) VALUES (?, ?, ?, ?, ?, ?, coalesce(?, datetime(\'now\')))', undef, @{$row}{qw{ip domain kind bin nic main assigned_at}} );
                     $out{added}++;
                 }
-                $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, $_ ) foreach @{ $args->{seeded} // [] };
+                for my $item ( @{ $args->{seeded} // [] } ) { $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, $item ); }
                 die "Nothing was migrated, because these addresses disagree:\n" . join( q{}, map { "  $_\n" } @conflicts ) if @conflicts;
                 die "__DRYRUN__\n"                                                                                         if $args->{dryrun};
             }

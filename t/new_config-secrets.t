@@ -167,7 +167,7 @@ subtest 'the guest test lists each file that guest_secrets names, and only those
     is( $written, "$dir/t/guest_secrets.t", 'a test is written into t/' );
 
     my $text  = File::Slurper::read_binary($written);
-    my $key   = q{/opt/domains/matrix.vm.test/homeserver.signing.key};
+    my $key   = q{/opt/domains/matrix.vm.test/homeserver.signing.key};      ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $entry = qr{q\{\Q$key\E\},\s+q\{matrix-synapse:matrix-synapse\},};
     like( $text, qr{$entry\s+q\{0600\}},                                   "it lists a path with its declared owner and mode" );
     like( $text, qr{q\{/etc/plain[.]key\},\s+q\{root:root\},\s+q\{0600\}}, 'and the defaults for an entry that declares none' );
@@ -194,7 +194,7 @@ subtest 'a configuration that fails names no secret in its trace' => sub {
         output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
         distro        => 'ubuntu',
     );
-    my $secret = 'resolved-from-the-store';
+    my $secret = 'resolved-from-the-store';                                                                                   ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $died   = exception { $recipe->validated( domain => 'bot.test.test', bot => 'test-bot', github_token => $secret ) };
     like( $died, qr/is[ ]not[ ]valid.*[ ]called[ ]at[ ]/, 'the recipe refuses it, with a trace' );
     unlike( $died, qr/\Q$secret\E/, 'and the trace does not hold the token' ) or diag $died;

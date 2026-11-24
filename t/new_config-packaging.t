@@ -50,7 +50,7 @@ subtest "the helper scripts ride along in the tarball" => sub {
 
     ok( scalar @packed, 'something got packed' );
     is_deeply( [ sort @packed ], [@packed], 'in a stable order, so the tarball is reproducible' );
-    like( $_, qr{\Ascripts/}, "$_ is stored under scripts/" ) for $packed[0];
+    for my $item ( $packed[0] ) { like( $item, qr{\Ascripts/}, "$item is stored under scripts/" ); }
 
     my @source = grep { !m/\A[.]/ } Provisioner::Utils::files_in("$checkout/scripts");
     is( scalar @packed, scalar @source, 'all of them, not some of them' );

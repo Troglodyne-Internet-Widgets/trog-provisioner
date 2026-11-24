@@ -100,7 +100,7 @@ subtest 'the command line reaches the choice' => sub {
     # main runs once for each call in bin/provision, and a later call must not
     # keep the options of an earlier one.
     $vm = choices( main_with('vm.test.test') )->{'vm.test.test'};
-    ok( !defined $vm->{$_}, "and a second run without it does not keep $_" ) for qw{hvconf uri domain_dir};
+    for my $item (qw{hvconf uri domain_dir}) { ok( !defined $vm->{$item}, "and a second run without it does not keep $item" ); }
 };
 
 subtest 'a tenant is chosen for by its host' => sub {

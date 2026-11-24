@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 # A -f in here is asserting on a file this test just made, in a temporary
 # directory nothing else can see.  There is no window for it to be wrong in.

@@ -106,8 +106,8 @@ subtest 'a check that says no holds the reboot' => sub {
 
     check( 'relay-d.test', 'echo "this guest reboots only by hand"; exit 3' );
     ( $did, $logged ) = run_once();
-    my $relay = 'relay-d.test: this guest reboots only by hand';
-    my $tcms  = 'tcms-d.test: 2 Minion jobs running';
+    my $relay = 'relay-d.test: this guest reboots only by hand';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+    my $tcms  = 'tcms-d.test: 2 Minion jobs running';               ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $logged, qr/held:\ \Q$relay\E;\ \Q$tcms\E$/m, 'every check runs, and the log names each that holds it' );
 
     unlink "$checks/relay-d.test", "$checks/tcms-d.test";

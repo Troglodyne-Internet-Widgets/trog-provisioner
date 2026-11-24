@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -170,7 +171,9 @@ subtest 'files: a key is fetched once' => sub {
         'https://apt.once.test/key'                    => $ARMORED,
         'https://apt.once.test/dists/stable/InRelease' => q{},
     );
-    Provisioner::Packager::Deb->files( source( name => 'once', uri => 'https://apt.once.test', key => 'https://apt.once.test/key' ) ) for 1 .. 2;
+    my $once = source( name => 'once', uri => 'https://apt.once.test', key => 'https://apt.once.test/key' );
+    Provisioner::Packager::Deb->files($once);
+    Provisioner::Packager::Deb->files($once);
     is( $asked{'GET https://apt.once.test/key'},                     1, 'for two domains that name it' );
     is( $asked{'HEAD https://apt.once.test/dists/stable/InRelease'}, 1, 'and so is each suite' );
 };
@@ -189,7 +192,7 @@ subtest 'files: a key that must have its fingerprint' => sub {
     };
     $run->( qw{--passphrase}, q{}, '--quick-gen-key', 'one <one@test.test>', qw{rsa2048 sign never} );
     $run->( qw{--passphrase}, q{}, '--quick-gen-key', 'two <two@test.test>', qw{ed25519 sign never} );
-    my %fpr = map { ( $_ => ( $run->( qw{--with-colons --list-keys}, "$_\@test.test" ) =~ m/^fpr:+([[:xdigit:]]{40}):/m )[0] ) } qw{one two};
+    my %fpr = map { local ($_) = $_; ( $_ => ( $run->( qw{--with-colons --list-keys}, "$_\@test.test" ) =~ m/^fpr:+([[:xdigit:]]{40}):/m )[0] ) } qw{one two};
     $run->( '--passphrase', q{}, '--quick-add-key', $fpr{one}, qw{rsa2048 encr never} );
 
     my $armored = $run->( qw{--armor --export}, 'one@test.test' );
@@ -253,7 +256,7 @@ subtest 'trim_key: only what apt needs to check a signature' => sub {
     $run->( q{}, qw{--passphrase}, q{}, '--quick-gen-key', 'vendor <vendor@test.test>', qw{rsa2048 cert never} );
     my $vendor = $fpr_of->('vendor@test.test');
     my @usages = do { no warnings 'qw'; qw{encr sign,encr sign} };
-    $run->( q{}, '--passphrase', q{}, '--quick-add-key', $vendor, 'rsa2048', $_, 'never' ) for @usages;
+    for my $usage (@usages) { $run->( q{}, '--passphrase', q{}, '--quick-add-key', $vendor, 'rsa2048', $usage, 'never' ); }
     my $armored = $run->( q{}, qw{--armor --export}, 'vendor@test.test' );
     is_deeply( $shown->($armored)->{subkeys}, [qw{e es s}], 'a key that can encrypt, sign and do both' );
 

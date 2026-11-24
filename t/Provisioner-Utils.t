@@ -73,7 +73,7 @@ subtest 'tld_of is the last label, and nothing when there is none' => sub {
 };
 
 subtest 'reserved_tld is the TLD only where RFC 2606 or RFC 6761 reserves it' => sub {
-    is( Provisioner::Utils::reserved_tld($_), ( $_ =~ s/\A.*[.]//r ), "$_ is under a reserved TLD" ) for qw{a.test a.example a.invalid a.localhost};
+    for my $item (qw{a.test a.example a.invalid a.localhost}) { is( Provisioner::Utils::reserved_tld($item), ( $item =~ s/\A.*[.]//r ), "$item is under a reserved TLD" ); }
     is_deeply( [ Provisioner::Utils::reserved_tld('host.example.net') ], [], 'a public name is not' );
     is_deeply( [ Provisioner::Utils::reserved_tld('test.example.net') ], [], 'nor is one that only starts with a reserved label' );
     is_deeply( [ Provisioner::Utils::reserved_tld('localhost') ],        [], 'nor a single label, which names no TLD' );
@@ -126,7 +126,7 @@ subtest 'dovecot_password_hash makes the Argon2id hash that dovecot reads' => su
 
     # Decoded independently of the encoder: the digest is the Argon2id of the
     # password with the salt that the string carries.
-    my ( $raw_salt, $raw_digest ) = map { MIME::Base64::decode_base64( $_ . '=' x ( -length($_) % 4 ) ) } $salt, $digest;
+    my ( $raw_salt, $raw_digest ) = map { local ($_) = $_; MIME::Base64::decode_base64( $_ . '=' x ( -length($_) % 4 ) ) } $salt, $digest;
     is( length $raw_salt, 16,                                                                                     'a salt of 16 bytes' );
     is( $raw_digest,      Crypt::KeyDerivation::argon2_pbkdf( 'argon2id', 's3cret', $raw_salt, 3, 65536, 1, 32 ), 'whose digest is of that password' );
     isnt( Crypt::KeyDerivation::argon2_pbkdf( 'argon2id', 'wrong', $raw_salt, 3, 65536, 1, 32 ), $raw_digest, 'and of no other' );

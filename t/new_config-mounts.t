@@ -63,7 +63,7 @@ $hv_network->redefine(
     }
 );
 
-my $DOMAIN = 'mounts.test';
+my $DOMAIN = 'mounts.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 subtest 'mounts runs after the global targets, and before every recipe' => sub {
     my $tmpdir = tempdir( CLEANUP => 1 );
@@ -93,7 +93,7 @@ subtest 'mounts runs after the global targets, and before every recipe' => sub {
 
     my $makefile = "$tmpdir/domains/$DOMAIN/Makefile";
     my $text     = -e $makefile ? File::Slurper::read_text($makefile) : q{};
-    my $S        = "/etc/provisioner/state/$DOMAIN";
+    my $S        = "/etc/provisioner/state/$DOMAIN";                           ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     my @rules = $text =~ m{^\Q$S\E/mounts:\n}mg;
     is( scalar @rules, 1, 'the makefile has one mounts target, and not a second among the recipes' );

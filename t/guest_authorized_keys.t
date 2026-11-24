@@ -29,7 +29,7 @@ my $KEY = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ+/x==';
 sub lines_for {
     my (%files) = @_;
     my $dir = tempdir( CLEANUP => 1 );
-    File::Slurper::Temp::write_text( "$dir/$_", $files{$_} ) for keys %files;
+    for my $key ( keys %files ) { File::Slurper::Temp::write_text( "$dir/$key", $files{$key} ); }
 
     my ( $out, $err );
     IPC::Run3::run3( [ $^X, $script, $dir, 'fetcher' ], \undef, \$out, \$err );

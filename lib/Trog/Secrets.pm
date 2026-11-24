@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use File::KeePass::KDBX();
 use Scalar::Util qw{looks_like_number};

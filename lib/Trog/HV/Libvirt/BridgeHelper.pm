@@ -143,7 +143,10 @@ C<($hv)>.  The first of C<@HELPERS> that the hypervisor C<$hv> has, or undef.
 =cut
 
 sub helper ($hv) {
-    return List::Util::first { $hv->file_exists($_) } @HELPERS;
+    foreach my $helper (@HELPERS) {
+        return $helper if $hv->file_exists($helper);
+    }
+    return;
 }
 
 =head2 rules
@@ -189,7 +192,7 @@ sub refused ( $rules, @bridges ) {
     my $says = sub ( $verb, $bridge ) {
         List::Util::any { $_->[0] eq $verb && ( $_->[1] eq 'all' || $_->[1] eq $bridge ) } @$rules;
     };
-    return grep { !$says->( 'allow', $_ ) || $says->( 'deny', $_ ) } @bridges;
+    return grep { local ($_) = $_; !$says->( 'allow', $_ ) || $says->( 'deny', $_ ) } @bridges;
 }
 
 =head2 grant_steps
@@ -393,6 +396,7 @@ sub allowed_by_others ( $hv, $bridge, $user ) {
     my $own   = File::Basename::basename( acl_file($user) );
     my $dir   = File::Basename::dirname( acl_file($user) );
     my @files = sort grep {
+        local ($_) = $_;
         my $file = $_;
         $file =~ m/\Atrog-runner-.+[.]conf\z/ && $file ne $own && List::Util::any { $_ eq "allow $bridge" } split m/\n/, $hv->root_text("$dir/$file");
     } $hv->list_dir($dir);

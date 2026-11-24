@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
@@ -659,6 +660,7 @@ sub guest_ssh_ip {
     # world can route to a network is kept, because guest_ssh_ip is asked again
     # and again while a guest starts.
     my $reachable = first {
+        local ($_) = $_;
         my $on = $_->{network};
         $self->{_external}{$on} //= do {
             my ($network) = grep { ref $_ && ( $_->{name} // q{} ) eq $on } $self->api->networks();

@@ -286,11 +286,11 @@ that is in C<protect>, because two drop-ins for one unit would disagree.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my @recipes = map { Provisioner::Cookbook->load($_) } @{ $opts{modules} // [] };
-    $opts{protect} = [ sort( uniq( @{ $opts{protect} }, map { $_->oom_protect() } @recipes ) ) ];
+    my @recipes = map { local ($_) = $_; Provisioner::Cookbook->load($_) } @{ $opts{modules} // [] };
+    $opts{protect} = [ sort( uniq( @{ $opts{protect} }, map { local ($_) = $_; $_->oom_protect() } @recipes ) ) ];
 
     my %protected = map { $_ => 1 } @{ $opts{protect} };
-    $opts{oomd_omit} = [ sort grep { !$protected{$_} } uniq( @{ $opts{oomd_omit} }, map { $_->oomd_omit() } @recipes ) ];
+    $opts{oomd_omit} = [ sort grep { !$protected{$_} } uniq( @{ $opts{oomd_omit} }, map { local ($_) = $_; $_->oomd_omit() } @recipes ) ];
 
     return %opts;
 }

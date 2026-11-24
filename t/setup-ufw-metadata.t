@@ -49,7 +49,7 @@ RULES
 );
 
 my $dir = tempdir( CLEANUP => 1 );
-File::Slurper::Temp::write_text( "$dir/$_", $packaged{$_} ) for keys %packaged;
+for my $key ( keys %packaged ) { File::Slurper::Temp::write_text( "$dir/$key", $packaged{$key} ); }
 
 # Runs the script on the rules in $dir, and returns them.
 sub run_on {
@@ -67,8 +67,8 @@ sub filter_table {
     return $table // q{};
 }
 
-my $v4 = '-A ufw-before-output -d 192.0.2.254 -m owner ! --uid-owner 0 -j REJECT';
-my $v6 = '-A ufw6-before-output -d 2001:db8::254 -m owner ! --uid-owner 0 -j REJECT';
+my $v4 = '-A ufw-before-output -d 192.0.2.254 -m owner ! --uid-owner 0 -j REJECT';       ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $v6 = '-A ufw6-before-output -d 2001:db8::254 -m owner ! --uid-owner 0 -j REJECT';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 subtest 'each address goes to the rules of its own IP version' => sub {
     my %rules = run_on( '192.0.2.254', '2001:db8::254' );

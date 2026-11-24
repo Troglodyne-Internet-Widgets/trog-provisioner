@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -28,7 +29,7 @@ use FindBin::libs;
 my $script = "$FindBin::Bin/../scripts/relay_client";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-my $DOMAIN = 'web.test.test';
+my $DOMAIN = 'web.test.test';                              ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my @NAMES  = qw{public.web.test.test www.customer.test};
 
 # Where the guest of $DOMAIN takes IMAP, submission and POP3 over TLS.
@@ -253,11 +254,11 @@ subtest 'nginx register: it refuses what it cannot put in a file of nginx' => su
         'a port with no names'                         => '8448=8449',
         'a port with a colon too many'                 => '8448=8449:public.web.test.test:x',
     );
-    my $form = 'PORT=GUEST_PORT:NAME,..., with PORT from 1024';
+    my $form = 'PORT=GUEST_PORT:NAME,..., with PORT from 1024';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     foreach my $case ( sort keys %bad_port ) {
         like( exception { Trog::RelayClient::main( 'nginx', 'register', $DOMAIN, '192.0.2.10:8443', '192.0.2.10:8080', @NAMES, '--port', $bad_port{$case} ) }, qr/\Q$form\E/, $case );
     }
-    my $unlisted = 'which is not among the NAMEs';
+    my $unlisted = 'which is not among the NAMEs';                 ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my %bad_name = (
         'a name that the command does not pass through' => [ qw{--media media.web.test.test --port 8448=8449:media.web.test.test}, qr/'media[.]web[.]test[.]test',[ ]\Q$unlisted\E/ ],
         'an empty name'                                 => [ @NAMES, '--port', '8448=8449:public.web.test.test,', qr/names[ ]'',[ ]\Q$unlisted\E/ ],
@@ -271,7 +272,7 @@ subtest 'nginx register: it refuses what it cannot put in a file of nginx' => su
     is_deeply( \@ran, [], 'and none of them ran anything' );
 };
 
-my $MEDIA = 'media.web.test.test';
+my $MEDIA = 'media.web.test.test';                                                                                                                                                                          ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $PEM   = "-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nCHAIN\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n";
 
 # What cert says for $request on $pem, as client says for its arguments.
@@ -371,7 +372,7 @@ subtest 'nginx release: a release takes the media names, their certificates and 
     is( File::Slurper::read_text("$relay/authorized_keys.root"), q{}, 'and root takes neither key' );
 };
 
-my $PAGE = 'web.test.test';
+my $PAGE = 'web.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 subtest 'nginx register: a page name goes to the page server of the relay, which fetches it from the guest' => sub {
     my $relay = fresh_relay('nginx');
@@ -451,7 +452,7 @@ subtest 'mail register: a domain registers a login for the relay, and releases i
 
     client(qw{mail register other.test.test 192.0.2.11});
     my ($second) = client( 'mail', 'register', $DOMAIN, '192.0.2.12' );
-    my @logins   = map { m/\A([^:]+):/ } split m/\n/, File::Slurper::read_text("$relay/mail.passwd");
+    my @logins   = map { ( split m/:/, $_, 2 )[0] } split m/\n/, File::Slurper::read_text("$relay/mail.passwd");
     is_deeply( \@logins, [ 'other.test.test', $DOMAIN ], 'a second registration replaces the login of the domain, beside the others' );
     isnt( $second, $out, 'with a new password' );
 
@@ -494,8 +495,8 @@ subtest 'mail register-clients: a domain registers the names of its mail clients
     $nginx_ok = 1;
     ( undef, undef, $exit ) = client( 'mail', 'release', $DOMAIN );
     is( $exit, 0, 'a release exits 0' );
-    ok( !-e "$dir/$DOMAIN.port-$_.map", "and takes away the map of $_" )                          foreach qw{993 465 995};
-    ok( !-e "$dir/ports/$_.conf",       "and nginx stops listening on $_, which no domain uses" ) foreach qw{993 465 995};
+    for my $item (qw{993 465 995}) { ok( !-e "$dir/$DOMAIN.port-$item.map", "and takes away the map of $item" ); }
+    for my $item (qw{993 465 995}) { ok( !-e "$dir/ports/$item.conf",       "and nginx stops listening on $item, which no domain uses" ); }
     is( File::Slurper::read_text("$dir/authorized_keys.root"), q{}, 'and the ban key' );
 };
 
@@ -510,8 +511,8 @@ subtest 'upgrade: the mail relay moves the routes that an older relay kept by se
     is( File::Slurper::read_text("$older/$DOMAIN.port-993.map"), "$DOMAIN 192.0.2.10:10993;\n", 'the routes of IMAP go to the map of 993' );
     is( File::Slurper::read_text("$older/$DOMAIN.port-465.map"), "$DOMAIN 192.0.2.10:10465;\n", 'of submission to 465' );
     is( File::Slurper::read_text("$older/$DOMAIN.port-995.map"), "$DOMAIN 192.0.2.10:10995;\n", 'of POP3 to 995' );
-    ok( !-e "$older/$DOMAIN.$_.map", "and the map of $_ is gone" ) foreach qw{imaps submissions pop3s};
-    ok( -e "$older/ports/$_.conf",   "nginx listens on $_ again" ) foreach qw{993 465 995};
+    for my $item (qw{imaps submissions pop3s}) { ok( !-e "$older/$DOMAIN.$item.map", "and the map of $item is gone" ); }
+    for my $item (qw{993 465 995})             { ok( -e "$older/ports/$item.conf",   "nginx listens on $item again" ); }
     my ( undef, $refused ) = client( qw{mail register-clients other.test.test 192.0.2.11}, $DOMAIN, client_ports($DOMAIN) );
     like( $refused, qr/is[ ]registered[ ]to[ ]\Q$DOMAIN\E/, 'and the names stay taken' );
 

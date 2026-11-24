@@ -26,7 +26,7 @@ use Test::More;
 use Cpanel::JSON::XS();
 use FindBin;
 
-my $root = "$FindBin::Bin/..";
+my $root = "$FindBin::Bin/..";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 open( my $fh, '<', "$root/clod.json" ) or die "Cannot read clod.json: $!";
 my $declared = Cpanel::JSON::XS::decode_json( do { local $/; <$fh> } );

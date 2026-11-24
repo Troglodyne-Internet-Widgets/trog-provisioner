@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 use Trog::Patterns();
@@ -175,7 +176,7 @@ A tarball that codeload serves for a full commit SHA never changes.
 =cut
 
 sub cache_classes {
-    return ( { class => 'immutable', pattern => 'codeload\.github\.com/[^/]+/[^/]+/[^/]+/[0-9a-f]{40}$' } );
+    return ( { class => 'immutable', pattern => 'codeload\.github\.com/[^/]+/[^/]+/[^/]+/[0-9a-f]{40}$' } );    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
 }
 
 1;

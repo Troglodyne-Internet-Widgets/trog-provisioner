@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use FindBin();
 use FindBin::libs;
 use Config::Simple();
@@ -484,7 +485,7 @@ our %NONREUSABLE = (
 sub main {
     my @args = @_;
 
-    umask 0022;
+    umask oct('022');
 
     my ( $reuse,                $hv_name,                $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $salvage_from, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
@@ -570,7 +571,7 @@ sub main {
             $left{$upstream} = $there;
         }
     }
-    foreach my $named ( grep { !$left{ $_->{domain} } } map { Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
+    foreach my $named ( grep { !$left{ $_->{domain} } } map { local ($_) = $_; Provisioner::Cookbook->named_guests( $_, $conf ) } $domain, @upstream ) {
         print $named->{weak}
           ? "$named->{by} names $named->{domain} in $named->{setting}, so it is built after that guest when it can be, and uses it once it is up.\n"
           : "$named->{by} names $named->{domain} in $named->{setting}, so it needs that guest up first.\n";
@@ -1084,8 +1085,9 @@ sub provision_domain (%args) {
     # line, and provision.conf has none.
     my %vars     = $config->vars();
     my %settings = map { (s/\Adefault[.]//r) => $vars{$_} } keys %vars;
-    $settings{$_} = Provisioner::Utils::coerce_arrayref( $settings{$_} )
-      for grep { exists $settings{$_} } keys %LIST_SETTING;
+    for my $item ( grep { exists $settings{$_} } keys %LIST_SETTING ) {
+        $settings{$item} = Provisioner::Utils::coerce_arrayref( $settings{$item} );
+    }
 
     if ( $hv->rebuild_destroys_guest( $domain, capacity => $settings{size} ) ) {
         my $behavior = $nonreusable // $NONREUSABLE{ask};
@@ -1259,7 +1261,7 @@ sub merge_guest_addresses (%args) {
     my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
 
     my $num_ips = scalar @$addresses;
-    @$addresses = uniq( @$addresses, map { "$_/" . $hv->address_prefix( $hv->address_nic, $_ ) } @$ips );
+    @$addresses = uniq( @$addresses, map { local ($_) = $_; "$_/" . $hv->address_prefix( $hv->address_nic, $_ ) } @$ips );
     return 1 if $num_ips == scalar @$addresses;
 
     my $new_config = "$domain_dir/$domain/network-config-merged.yaml";

@@ -144,7 +144,7 @@ sub main {
     my @recipes = unique(@args);
 
     # Report every unknown name before anything is written, not only the first.
-    my @unknown = grep { !Provisioner::Cookbook->has($_) } @recipes;
+    my @unknown = grep { local ($_) = $_; !Provisioner::Cookbook->has($_) } @recipes;
     die "No recipe named " . join( ', ', map { "'$_'" } @unknown ) . ".\n" . "Try `bin/recipes` for the ones there are.\n" if @unknown;
 
     $hostname //= default_hostname();

@@ -124,7 +124,7 @@ sub listens {
 
     my @claims;
     foreach my $address ( map { s{\A-}{}r } split( q{ }, $opts{bind} // '127.0.0.1' ) ) {
-        push( @claims, $address =~ m{\A(?:::)?\*\z} ? $port : $address =~ m{:} ? "[$address]:$port" : "$address:$port" );
+        push( @claims, $address =~ m{\A(?:::)?\*\z} ? $port : index( $address, ':' ) >= 0 ? "[$address]:$port" : "$address:$port" );
     }
 
     return @claims;

@@ -118,7 +118,7 @@ sub of {
     my $config = eval { Provisioner::Cookbook->domain_config($domain) } // {};
 
     my ( %seen, @steps );
-    foreach my $name ( sort grep { Provisioner::Cookbook->has($_) } keys %$config ) {
+    foreach my $name ( sort grep { local ($_) = $_; Provisioner::Cookbook->has($_) } keys %$config ) {
         my %opts   = ref $config->{$name} eq 'HASH' ? %{ $config->{$name} } : ();
         my $recipe = Provisioner::Cookbook->load($name);
         my @own    = ( $recipe->outside_steps( $domain, %opts ), $recipe->sends_mail ? $class->reverse_dns_step($domain) : () );
@@ -223,7 +223,7 @@ sub preview {
     return 0 unless List::Util::any { $_->{apply} } $class->of($domain);
 
     print "What $domain needs on other machines:\n";
-    return List::Util::sum0( map { $class->apply( $domain, %opts, when => $_, dryrun => 1 ) } @WHEN );
+    return List::Util::sum0( map { local ($_) = $_; $class->apply( $domain, %opts, when => $_, dryrun => 1 ) } @WHEN );
 }
 
 =head2 $count = Trog::Steps->revert($domain, %opts)

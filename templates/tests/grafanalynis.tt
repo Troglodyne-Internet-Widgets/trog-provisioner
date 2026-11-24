@@ -10,6 +10,14 @@ my $stale      = '[% stale_after_hours %]';
 my $influx     = 'http://127.0.0.1:8086';
 my $file       = '/var/lib/grafana/dashboards/lynis.json';
 
+# The hosts that this test makes up.  The collector is a live one whose
+# database the backup keeps, so they go when the test ends, however it ends.
+my @fake_hosts;
+END {
+    local $?;
+    forget_hosts(@fake_hosts);
+}
+
 subtest 'the dashboard is in place, and names the datasource that exists' => sub {
     my $body = slurp($file);
     my $json = eval { JSON::PP->new->decode($body) };
@@ -35,6 +43,7 @@ subtest 'an audit that a guest reports reaches the panels of the dashboard' => s
     # guest reported two days ago, so the table must show it as stale.
     my $fresh = "lynis-selftest-$$-" . time() . '.test.test';
     my $old   = "lynis-stale-$$-" . time() . '.test.test';
+    push @fake_hosts, $fresh, $old;
     my $now   = strftime( '%b %e %H:%M:%S', localtime );
     my $then  = strftime( '%b %e %H:%M:%S', localtime( time() - 2 * 86400 ) );
     send_lines(
@@ -127,6 +136,23 @@ sub rows {
         }
     }
     return %rows;
+}
+
+# Deletes the series of each host from every database, and the log file that
+# the collector keeps for it.  DROP needs a POST.
+sub forget_hosts {
+    my @hosts = @_;
+    my $dbs   = eval { JSON::PP->new->decode(`curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>/dev/null`)->{results}[0]{series}[0]{values} } // [];
+    foreach my $db ( grep { $_ ne '_internal' } map { $_->[0] } @$dbs ) {
+        foreach my $host (@hosts) {
+            my $q = qq{DROP SERIES WHERE "hostname" = '$host'};
+            open( my $curl, '-|', 'curl', '-sS', '-XPOST', "$influx/query", '--data-urlencode', "db=$db", '--data-urlencode', "q=$q" ) or die "curl: $!";
+            my $res = do { local $/; <$curl> } // q{};
+            warn "$db: $q: $res\n" if $res =~ m/"error"/ || !close($curl);
+        }
+    }
+    unlink map { "/var/log/hosts/$_.log" } @hosts;
+    return;
 }
 
 sub slurp { my ($f) = @_; return do { local ( @ARGV, $/ ) = $f; <> } // q{} }

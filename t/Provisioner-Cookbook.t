@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -381,7 +382,7 @@ subtest 'abstract() reads the file rather than loading it' => sub {
     like( Provisioner::Cookbook->abstract('ntp'), qr/\S/, 'ntp says what it is for' );
     is( Provisioner::Cookbook->abstract('nosuchrecipe'), undef, 'and a missing one says nothing' );
 
-    my @missing = grep { !defined Provisioner::Cookbook->abstract($_) } Provisioner::Cookbook->names();
+    my @missing = grep { local ($_) = $_; !defined Provisioner::Cookbook->abstract($_) } Provisioner::Cookbook->names();
     is_deeply( \@missing, [], 'every recipe has an ABSTRACT line' ) or diag "no abstract: @missing";
 };
 
@@ -807,7 +808,7 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     is_deeply( $required_by->{t_deep}, ['t_dep'],      'one level at a time' );
     ok( !exists $required_by->{t_requirer}, 'and a recipe nothing required has no entry' );
     foreach my $dep ( sort keys %$required_by ) {
-        cmp_ok( $at{$_}, '<', $at{$dep}, "$_ comes before $dep in the list as well" ) for @{ $required_by->{$dep} };
+        for my $item ( @{ $required_by->{$dep} } ) { cmp_ok( $at{$item}, '<', $at{$dep}, "$item comes before $dep in the list as well" ); }
     }
 };
 
@@ -1551,13 +1552,13 @@ subtest 'distros_in_use: each distribution with each release a domain builds on'
         }
     );
     is_deeply(
-        [ map { [ $_->[0], $_->[1] ] } Provisioner::Cookbook->distros_in_use ],
+        [ map { [ @{$_}[ 0, 1 ] ] } Provisioner::Cookbook->distros_in_use ],
         [ [ $ubuntu, $pinned ], [ $ubuntu, 'resolute' ] ],
         'the pinned release for a domain that names none, and each release that one names, once'
     );
 
     $cookbook->redefine( configuration => sub { return { _base => {} } } );
-    is_deeply( [ map { [ $_->[0], $_->[1] ] } Provisioner::Cookbook->distros_in_use ], [ [ $ubuntu, $pinned ] ], 'and the pinned release of ubuntu for a configuration with no domains' );
+    is_deeply( [ map { [ @{$_}[ 0, 1 ] ] } Provisioner::Cookbook->distros_in_use ], [ [ $ubuntu, $pinned ] ], 'and the pinned release of ubuntu for a configuration with no domains' );
 };
 
 done_testing();

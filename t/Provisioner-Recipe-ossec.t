@@ -53,6 +53,7 @@ subtest 'remote_prepare, remote_files and restores' => sub {
     # The commands, run with every path under /var moved into a directory of the test.
     my $prepare_in = sub ($root) {
         my @exits = map {
+            local ($_) = $_;
             ( my $command = $_ ) =~ s{(?=/var/)}{$root}g;
             IPC::Run3::run3( [ '/bin/sh', '-c', $command ], \undef, \my $out, \my $err );
             $? >> 8;

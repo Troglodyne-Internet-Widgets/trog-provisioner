@@ -10,6 +10,9 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+my $RELEASE = qr/\A \d+ [.] \d+ (?: [.] \d+ )? \z/;
+my $SHA256  = qr/\A [\da-f]{64} \z/;
+
 =head1 Provisioner::Recipe::go
 
 =head2 SYNOPSIS
@@ -61,13 +64,13 @@ sub args {
         properties => {
             version => {
                 type        => 'string',
-                pattern     => '^\d+[.]\d+(?:[.]\d+)?$',
+                pattern     => "$RELEASE",
                 default     => '1.27.4',
                 description => 'The release of Go, as go.dev names it without the go in front, such as 1.27.4.',
             },
             sha256 => {
                 type        => 'string',
-                pattern     => '^[0-9a-f]{64}$',
+                pattern     => "$SHA256",
                 default     => '7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840',
                 description => 'The SHA-256 of go<version>.linux-amd64.tar.gz, as https://go.dev/dl/?mode=json lists it.  The default is that of the default version, so a configuration that names a version names this too.',
             },

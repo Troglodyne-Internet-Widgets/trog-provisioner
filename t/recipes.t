@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -54,7 +55,7 @@ use Text::Xslate();
 # anything but an interpolated value is usually an accident.
 ## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
 
-my $template_dir = "$FindBin::Bin/../templates";
+my $template_dir = "$FindBin::Bin/../templates";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # garage turns a version of latest into a release by asking for the tag list,
 # and every render here goes through its enrich.  Rendering is what is tested
@@ -426,7 +427,7 @@ subtest 'a field named like a secret is marked x-secret' => sub {
         my @unmarked;
         push( @unmarked, $path ) if defined $field && $field !~ m/_(?:file|path)\z/ && $field =~ m/pass(?!through)|secret|token|credential|(?:\A|_)(?:key|pw)\z/ && !$schema->{'x-secret'};
 
-        push( @unmarked, $walk->( $schema->{properties}{$_},       $path eq q{} ? $_ : "$path.$_" ) ) for sort keys %{ $schema->{properties} // {} };
+        for my $key ( sort keys %{ $schema->{properties} // {} } ) { push( @unmarked, $walk->( $schema->{properties}{$key}, $path eq q{} ? $key : "$path.$key" ) ); }
         push( @unmarked, $walk->( $schema->{additionalProperties}, "$path.*" ) )  if ref $schema->{additionalProperties} eq 'HASH';
         push( @unmarked, $walk->( $schema->{items},                "$path\[]" ) ) if ref $schema->{items} eq 'HASH';
         return @unmarked;
@@ -454,7 +455,7 @@ subtest 'only a field that holds names is marked x-weak' => sub {
             push( @containers, $path ) if $items->{items} || any { $_->{properties} || ref $_->{additionalProperties} eq 'HASH' } $schema, $items;
         }
 
-        push( @containers, $walk->( $schema->{properties}{$_},       $path eq q{} ? $_ : "$path.$_" ) ) for sort keys %{ $schema->{properties} // {} };
+        for my $key ( sort keys %{ $schema->{properties} // {} } ) { push( @containers, $walk->( $schema->{properties}{$key}, $path eq q{} ? $key : "$path.$key" ) ); }
         push( @containers, $walk->( $schema->{additionalProperties}, "$path.*" ) )  if ref $schema->{additionalProperties} eq 'HASH';
         push( @containers, $walk->( $schema->{items},                "$path\[]" ) ) if ref $schema->{items} eq 'HASH';
         return @containers;
@@ -555,7 +556,7 @@ subtest 'only data sets the owner of the domain directory' => sub {
 # as modified.  A capital X sets the bit only where one is already.
 subtest 'the data target does not make every file executable' => sub {
     my $data = Provisioner::Cookbook->load( 'data', distro => $DISTRO )->new(%PROV)->render(%G);
-    my $dir  = "$G{install_dir}/$G{domain}";
+    my $dir  = "$G{install_dir}/$G{domain}";                                                       ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     like( $data, qr{^chmod[ ]-R[ ]u=rwX,g=rX,o=[ ]\Q$dir\E$}m, 'the domain directory is opened by the X form' );
     unlike( $data, qr{^chmod[ ]-R[ ]0750}m, 'and no recursive chmod gives every file 0750' );
@@ -566,7 +567,7 @@ subtest 'the data target does not make every file executable' => sub {
 # script itself.
 subtest 'the data target puts back the tracked modes of every checkout' => sub {
     my $data = Provisioner::Cookbook->load( 'data', distro => $DISTRO )->new(%PROV)->render(%G);
-    my $dir  = "$G{install_dir}/$G{domain}";
+    my $dir  = "$G{install_dir}/$G{domain}";                                                       ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     like( $data, qr{^\S*/reset_git_modes[ ]'\Q$dir\E'$}m, 'reset_git_modes runs over the domain directory' );
     cmp_ok( index( $data, 'reset_git_modes' ), '>', index( $data, 'chmod -R' ), 'and after the chmod, which keeps an execute bit that a salvage brought' );
@@ -705,7 +706,7 @@ subtest 'openvpn pushes redirect-gateway only when the domain asks' => sub {
     # Unset takes OpenVPN's historical net30, a /30 per client, which upstream
     # has deprecated.  Both configurations say so, since it is not the client's
     # to choose.
-    like( $_, qr/^topology[ ]subnet$/m, 'and either way the server names its topology' ) for ( $on, $off );
+    for my $item ( ( $on, $off ) ) { like( $item, qr/^topology[ ]subnet$/m, 'and either way the server names its topology' ); }
 };
 
 subtest 'openvpn routes clients to the pool, in halves, unless told otherwise' => sub {
@@ -1873,7 +1874,7 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # `make | tee` exits with tee's status, which is always 0, so the guest
     # records make's own and bin/provision reads that rather than guessing.
     like( $setup, qr{^rm[ ]-f[ ]/var/log/vm[.]example[.]test[.]setup[.]status$}m, 'a result from a previous build is cleared first' );
-    my $records = '{ make -j"$(nproc)" -Otarget 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
+    my $records = '{ make -j"$(nproc)" -Otarget 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $setup, qr/\Q$records\E/, "and make's own exit code is what gets recorded" );
 
     # at(1) runs this script, and at(1) runs jobs under /bin/sh -- dash on
@@ -1986,9 +1987,9 @@ subtest 'iouring defers group membership past the makefile' => sub {
 
     # In that order: postrun tasks run in the order they were queued, and a
     # restart ahead of the usermod would restart it back out of the group.
-    my ($usermod) = $out =~ m/\A(.*?)usermod[ ]-aG/;
-    my ($restart) = $out =~ m/\A(.*?)try-restart/;
-    ok( length($usermod) < length($restart), 'with the membership queued first' );
+    my $usermod = index( $out, 'usermod -aG' );
+    my $restart = index( $out, 'try-restart' );
+    ok( $usermod >= 0 && $usermod < $restart, 'with the membership queued first' );
 
     # A gid is only knowable on the guest, and the sysctl takes the number.
     like( $out, qr/%IO_URING_GID%/, 'the gid is substituted on the guest' );
@@ -2080,9 +2081,9 @@ subtest 'the installer configures the server before anything uses it' => sub {
     # The password is in that file, so it does not survive the SQL failing.
     # Including on the run that skips securing, since the file holds root_pw
     # whether or not anything reads it.
-    my ($trap) = $script =~ m/\A(.*?)trap[ ]'rm[ ]-f[ ]"\$SECURE_SQL"'[ ]EXIT/;
-    ok( defined $trap,           'the secure-installation sql is removed on the way out' ) or return;
-    ok( length($trap) < $secure, 'from before the run that would use it, not inside it' );
+    my $trap = index( $script, q{trap 'rm -f "$SECURE_SQL"' EXIT} );
+    ok( $trap >= 0,      'the secure-installation sql is removed on the way out' ) or return;
+    ok( $trap < $secure, 'from before the run that would use it, not inside it' );
 };
 
 subtest 'install_mariadb.sh keeps the version it was handed' => sub {
@@ -2155,7 +2156,7 @@ subtest 'a value with an ampersand reaches a file that is not HTML as it is' => 
         like( $files{$what}, qr/--spam-folder[ ]'Spam[ ]&[ ]Ham'/, "the training line in $what names the folder as it is" );
     }
 
-    my $email = 'a&b@test.test';
+    my $email = 'a&b@test.test';                                                                                                                                    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my %bot   = ( bot_email => $email );
     my $clod  = Provisioner::Cookbook->load( 'clod', distro => $DISTRO )->new(%PROV)->render_file( 'files/clod.conf.tt', %G, %{ $required_config{clod} }, %bot );
     like( $clod, qr/bot_email\s+=>\s+'\Q$email\E'/, 'bot_email is in the configuration of clod as it is' );
@@ -2459,8 +2460,8 @@ subtest 'the admin checkout symlink survives a second domain on the machine' => 
     # with it, the way useradd did in the service_user target.
     my $fragment = File::Slurper::read_text( fragment_file("admincode.tt") );
 
-    like( $fragment, qr{^test[ ]-e[ ]\Q[% admin_home %]/[% basedir %]\E[ ]\|\|[ ]}m,  'the link is only made when the name is free' );
-    like( $fragment, qr{ln[ ]-s[ ]\Q[% install_dir %]/[% domain %]/[% basedir %]\E}m, 'and still points at this domain own checkout' );
+    like( $fragment, qr{^test[ ]-e[ ]\Q[% admin_home %]/[% basedir %]\E[ ]\|\|[ ]}m, 'the link is only made when the name is free' );
+    like( $fragment, qr{ln[ ]-s[ ]\Q[% install_dir %]/[% domain %]/[% basedir %]\E}, 'and still points at this domain own checkout' );
 };
 
 subtest 'the ufw target runs after every recipe that installs a profile' => sub {
@@ -2642,7 +2643,7 @@ subtest 'every archive a recipe names is one its packager can use, and no fragme
 # release has to follow it, or the guest gets the archive of another release.
 subtest 'an archive that names the release follows the release of the domain' => sub {
     my $pinned      = Provisioner::Cookbook->load('ubuntu')->release;
-    my $other       = 'resolute';
+    my $other       = 'resolute';                                                                                       ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $followed    = 0;
     my %provisioner = ( %PROV, distro => 'ubuntu', template_dirs => Provisioner::Cookbook->template_dirs('ubuntu') );
     foreach my $recipe ( sort @available ) {

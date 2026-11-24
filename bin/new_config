@@ -11,6 +11,7 @@ use warnings FATAL => 'all';
 
 no warnings qw{experimental};
 use re '/aasx';
+no autovivification;
 
 use FindBin::libs;
 
@@ -478,7 +479,7 @@ sub joined_peers {
 
     my $config = Provisioner::Cookbook->domain_config( $domain, $rconf );
     my %how;
-    foreach my $recipe ( sort grep { Provisioner::Cookbook->has($_) } keys %$config ) {
+    foreach my $recipe ( sort grep { local ($_) = $_; Provisioner::Cookbook->has($_) } keys %$config ) {
         foreach my $peer ( Provisioner::Cookbook->load($recipe)->joins_network_of( %{ $config->{$recipe} // {} } ) ) {
             $how{$peer} //= "$recipe connects it to $peer";
         }
@@ -605,7 +606,7 @@ sub recipes_needing_address {
 
     my $conf    = Provisioner::Cookbook->domain_config( $domain, $rconf );
     my @all     = Provisioner::Cookbook->recipes_with( [ sort keys %$conf ], base => $conf, global_config => $global_config, domain => $domain );
-    my @needing = sort grep { Provisioner::Cookbook->load($_)->needs_address( domain => $domain ) } @all;
+    my @needing = sort grep { local ($_) = $_; Provisioner::Cookbook->load($_)->needs_address( domain => $domain ) } @all;
     return @needing;
 }
 
@@ -1029,7 +1030,7 @@ sub handle_domain {
         ],
     };
 
-    my $cfg_dir = "$basedir/$fqdn";
+    my $cfg_dir = "$basedir/$fqdn";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     if ( !-d $cfg_dir ) {
         mkdir $cfg_dir or die "could not create $cfg_dir";
     }
@@ -1193,16 +1194,16 @@ sub handle_domain {
 
     # Not the distro and vm recipes, which direct the build, because every
     # template gets `modules` as the list of what is on the guest.
-    @modules = grep { $builders{$_}->is_module } @modules;
+    @modules = grep { local ($_) = $_; $builders{$_}->is_module } @modules;
 
     # A recipe that cannot serve a second domain replaces the first, and two
     # recipes that cannot share a machine collide, so refuse both here.  This
     # compares a tenant with its host only, not with the other tenants.
     $MACHINE_MODULES{$domain} = [@modules];
-    $MACHINE_WIDE{$domain}    = { map { $_ => { $builders{$_}->machine_wide( %{ $rconf->{$domain}{$_} // {} } ) } } @modules };
+    $MACHINE_WIDE{$domain}    = { map { local ($_) = $_; $_ => { $builders{$_}->machine_wide( %{ $rconf->{$domain}{$_} // {} } ) } } @modules };
     if ($depends_on) {
         my %on_host = map  { $_ => 1 } @{ $MACHINE_MODULES{$depends_on} // [] };
-        my @cannot  = grep { $on_host{$_} && !$builders{$_}->is_multi_tenant } @modules;
+        my @cannot  = grep { local ($_) = $_; $on_host{$_} && !$builders{$_}->is_multi_tenant } @modules;
 
         die "$domain is provisioned onto $depends_on, and both are configured with: " . join( ', ', @cannot ) . "\n" . "There is one of that on a guest, and it cannot be told about a second domain -- so this\n" . "would replace what $depends_on configured rather than add to it.  Configure it on one of\n" . "the two, or give $domain a machine of its own.\n"
           if @cannot;
@@ -1263,7 +1264,7 @@ sub handle_domain {
     }
     write_guest_secrets( $cfg_dir, $fqdn, \%guest_secrets, $sfile, $keepass );
 
-    my @remote_mounts = map { $builders{$_}->remote_mountpoints( $builders{$_}->takes(%$global_config), %{ $rconf->{$domain}{$_} // {} }, modules => \@modules ) } @modules;
+    my @remote_mounts = map { local ($_) = $_; $builders{$_}->remote_mountpoints( $builders{$_}->takes(%$global_config), %{ $rconf->{$domain}{$_} // {} }, modules => \@modules ) } @modules;
 
     foreach my $module (@modules) {
         my $builder = $builders{$module};
@@ -1414,7 +1415,7 @@ sub handle_domain {
     # repo_url or api_url names the host that the recipe really uses.
     my @fetch_hosts =
       $global_config->{cache_ip}
-      ? uniq( sort map { $builders{$_}->fetch_hosts( %$global_config, %{ $rconf->{$domain}{$_} // {} } ) } @modules )
+      ? uniq( sort map { local ($_) = $_; $builders{$_}->fetch_hosts( %$global_config, %{ $rconf->{$domain}{$_} // {} } ) } @modules )
       : ();
     if (@fetch_hosts) {
         copy( Provisioner::Cookbook->load('fetchcache')->trusted_authority(), "$cfg_dir/fetchcache-ca.crt" )
@@ -1497,8 +1498,8 @@ sub handle_domain {
         package_answers   => \@answers,
         package_conflicts => \@conflicts,
         %fetch_cache,
-        ips           => [ map { "$_/" . $hv->address_prefix( $first_nic, $_ ) } grep { defined } $static_ip ],
-        nic_ips       => { map { $_ => "$nic_ips{$_}/" . $hv->address_prefix( $_, $nic_ips{$_} ) } keys %nic_ips },
+        ips           => [ map { local ($_) = $_; "$_/" . $hv->address_prefix( $first_nic, $_ ) } grep { defined } $static_ip ],
+        nic_ips       => { map { local ($_) = $_; $_ => "$nic_ips{$_}/" . $hv->address_prefix( $_, $nic_ips{$_} ) } keys %nic_ips },
         gateway       => $gateway,
         contact_email => $admin_email,
         ( defined $dryrun ? ( dryrun         => $dryrun )                            : () ),
@@ -1956,8 +1957,7 @@ sub salvage_path (%args) {
     # The result is ignored, because the destination tells more, and part of
     # the state is better than none.
     $args{guest}->get_dir(
-        $args{remote},
-        $args{destination},
+        @args{qw(remote destination)},
 
         # Left on the live guest, not fetched and then deleted.
         exclude => $args{exclude} // [],

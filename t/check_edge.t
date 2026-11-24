@@ -111,7 +111,7 @@ subtest 'check_resolvers: the edge resolves a name through its own resolvers, an
 };
 
 subtest 'check_client_address: the request in the log of the guest, from the client' => sub {
-    my $token = 'check-edge-abc';
+    my $token = 'check-edge-abc';                                                                                                                                                     ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $line  = sub { my ($from) = @_; return machine( [ qr/journalctl/ => [ qq{$from - - [28/Oct/2026:19:00:00 +0000] "GET /$token HTTP/1.1" 404 0 "-" "check_edge"\n}, 0 ] ] ) };
 
     is( Provisioner::Bin::check_edge::check_client_address( $line->('203.0.113.7'), $token, '203.0.113.7', '198.51.100.9' )->[0], 1, 'passes when the guest logs the address of the client' );
@@ -168,7 +168,7 @@ subtest 'http_status: the status of the answer' => sub {
     my $ask = sub {
         my ($answer) = @_;
         socketpair( my $near, my $far, Socket::AF_UNIX(), Socket::SOCK_STREAM(), Socket::PF_UNSPEC() ) or die "socketpair: $!";
-        $_->autoflush(1) for $near, $far;
+        for my $item ( $near, $far ) { $item->autoflush(1); }
         print {$far} $answer;
         shutdown( $far, 1 );
         my $status = Provisioner::Bin::check_edge::http_status( $near, 'name.test', '/x' );
@@ -185,7 +185,7 @@ subtest 'http_status: the status of the answer' => sub {
 
 subtest 'http_answer: the status and the headers of the answer' => sub {
     socketpair( my $near, my $far, Socket::AF_UNIX(), Socket::SOCK_STREAM(), Socket::PF_UNSPEC() ) or die "socketpair: $!";
-    $_->autoflush(1) for $near, $far;
+    for my $item ( $near, $far ) { $item->autoflush(1); }
     print {$far} "HTTP/1.1 200 OK\r\nX-Relay-Cache: HIT\r\nContent-Length: 2\r\n\r\nok";
     shutdown( $far, 1 );
     my ( $status, $headers ) = Provisioner::Bin::check_edge::http_answer( $near, 'name.test', '/x' );

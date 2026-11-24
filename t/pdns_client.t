@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 # The script is loaded when the test runs rather than when it compiles, so perl
 # sees each of its package variables named once here and calls that a typo.
@@ -54,8 +55,8 @@ sub write_file {
     return;
 }
 
-my $NAME = 'web.lab.test.test';
-my $NS   = 'ns.test.test';
+my $NAME = 'web.lab.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $NS   = 'ns.test.test';         ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # Runs the script with every command answered by $answer, which gets the
 # command and its input.  Returns what it ran, and what main returned or died
@@ -192,8 +193,8 @@ subtest 'the files it writes are 644, whatever the umask and whatever was there'
     is_deeply( [ lines_in($file) ], [ 'own.test=127.0.0.1:2500', "$NAME=127.0.0.1:2500" ], 'and the file holds what it held and the forward' );
 };
 
-my $ZONE   = 'customer.test';
-my $CLIENT = 'web.lab.test.test';
+my $ZONE   = 'customer.test';        ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $CLIENT = 'web.lab.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # A guest that holds $ZONE, and makes any token that it is asked for.
 my $holds_zone = sub {

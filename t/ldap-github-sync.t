@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -134,7 +135,7 @@ subtest 'plan' => sub {
 sub records {
     my ($ldif) = @_;
     return map {
-        [ map { m/\A([^:]+):(:?)[ ](.*)\z/ ? [ $1, $2 ? decode_base64($3) : $3 ] : () } split m/\n/ ]
+        [ map { local ($_) = $_; m/\A([^:]+):(:?)[ ](.*)\z/ ? [ $1, $2 ? decode_base64($3) : $3 ] : () } split m/\n/ ]
     } split m/\n\n/, $ldif;
 }
 

@@ -39,7 +39,7 @@ use Provisioner::Recipe::pdns();
 # that would otherwise need escaping one at a time.
 ## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
 
-my $DOMAIN = 'zone.test';
+my $DOMAIN = 'zone.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # What bin/new_config hands the zone template.  Aliases arrive fully qualified:
 # new_config appends www and mail to the domain itself, and whatever a domain
@@ -131,7 +131,7 @@ subtest 'a TXT record longer than one string is split, and reads back whole' => 
 
     my $text   = zone( modules => ['mail'] );
     my @rr     = Net::DNS::ZoneFile->parse( \$text );
-    my ($dkim) = grep { $_->type eq 'TXT' && lc( $_->owner ) eq "default._domainkey.$DOMAIN" } @rr;
+    my ($dkim) = grep { local ($_) = $_; $_->type eq 'TXT' && lc( $_->owner ) eq "default._domainkey.$DOMAIN" } @rr;
     ok( $dkim, 'a DNS parser finds the DKIM record in the zone' ) or diag $text;
 
     my @strings = $dkim ? $dkim->txtdata : ();
@@ -157,7 +157,7 @@ subtest 'a domain with no address gets no A record with no address in it' => sub
 
     my $without = zone( modules => ['mail'], ipmap => {} );
     unlike( $without, qr/\bIN\s+A[ \t]*$/m, 'without one, no A record is written empty' ) or diag $without;
-    is( scalar( grep { $_->type eq 'A' } Net::DNS::ZoneFile->parse( \$without ) ), 0, 'and a DNS parser finds no A record at all' );
+    is( scalar( grep { local ($_) = $_; $_->type eq 'A' } Net::DNS::ZoneFile->parse( \$without ) ), 0, 'and a DNS parser finds no A record at all' );
 };
 
 subtest 'the submission SRV records name the ports postfix listens on' => sub {

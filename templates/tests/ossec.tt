@@ -2,10 +2,20 @@ use strict;
 use warnings;
 
 use Test::More;
+use JSON::PP;
 use MIME::Base64();
 use POSIX qw{strftime};
 
 my $port = '[% port %]';
+my $influx = 'http://127.0.0.1:8086';
+
+# The hosts that this test makes up.  The collector is a live one, so they go
+# when the test ends, however it ends.
+my @fake_hosts;
+END {
+    local $?;
+    forget_hosts(@fake_hosts);
+}
 
 subtest 'the manager runs the daemons that read the stream and send the mail of the alerts' => sub {
     my $status = `/var/ossec/bin/ossec-control status 2>&1`;
@@ -103,6 +113,7 @@ subtest 'a segfault on a guest is an alert that goes to the admin by mail' => su
     ok( $cport, 'the collector says which TCP port it listens on' ) or return;
 
     my $guest = "ossec-segfault-$$-" . time() . '.test.test';
+    push @fake_hosts, $guest;
     my $stamp = strftime( '%b %e %H:%M:%S', localtime );
     my $line  = "<4>$stamp $guest kernel: bogus[4242]: segfault at 0 ip 00005555d00d sp 00007ffd00d0 error 4 in bogus[555500000000+1000]\n";
     open( my $nc, '|-', 'nc', '-q1', '127.0.0.1', $cport ) or return fail("nc: $!");
@@ -124,5 +135,25 @@ subtest 'a segfault on a guest is an alert that goes to the admin by mail' => su
     like( $mail, qr/nrcpts?=1/, 'and the mail server takes its mail' )
       or diag $mail . `tail -n 5 /var/ossec/logs/ossec.log 2>&1` . `tail -n 5 /var/log/mail.log 2>&1`;
 };
+
+# Deletes the series of each host from every database of influxdb, when the
+# collector has one, as the sender of a line and as the host of an alert.  Then
+# deletes the log file that the collector keeps for it.  DROP needs a POST.
+sub forget_hosts {
+    my @hosts = @_;
+    my $dbs   = eval { JSON::PP->new->decode(`curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>/dev/null`)->{results}[0]{series}[0]{values} } // [];
+    foreach my $db ( grep { $_ ne '_internal' } map { $_->[0] } @$dbs ) {
+        foreach my $host (@hosts) {
+            foreach my $tag (qw{hostname ossec_host}) {
+                my $q = qq{DROP SERIES WHERE "$tag" = '$host'};
+                open( my $curl, '-|', 'curl', '-sS', '-XPOST', "$influx/query", '--data-urlencode', "db=$db", '--data-urlencode', "q=$q" ) or die "curl: $!";
+                my $res = do { local $/; <$curl> } // q{};
+                warn "$db: $q: $res\n" if $res =~ m/"error"/ || !close($curl);
+            }
+        }
+    }
+    unlink map { "/var/log/hosts/$_.log" } @hosts;
+    return;
+}
 
 done_testing();

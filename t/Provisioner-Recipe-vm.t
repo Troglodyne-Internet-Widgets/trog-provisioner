@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -541,7 +542,7 @@ subtest 'a guest sees one socket with each vCPU as a core' => sub {
 
         my $topology = $dom->at('domain > cpu > topology');
         ok( $topology, "a guest of $cpus vCPUs has a topology under its cpu" ) or do { diag $xml; next };
-        my %t = map { $_ => $topology->attr($_) // 1 } qw{sockets dies cores threads};
+        my %t = map { local ($_) = $_; $_ => $topology->attr($_) // 1 } qw{sockets dies cores threads};
 
         is( $t{sockets},                                      1,                               "$cpus vCPUs: one socket" );
         is( $t{cores},                                        $cpus,                           "$cpus vCPUs: a core for each vCPU" );
