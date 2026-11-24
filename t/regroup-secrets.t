@@ -42,8 +42,8 @@ File::Slurper::Temp::write_text(
 Provisioner::Cookbook->forget();
 Trog::Credentials->remember( 'keepass', 'pw' );
 
-my $GUEST = 'secret:guests/example.test/password';
-my $NOTE  = 'secret:mine/thing/password';
+my $GUEST = 'secret:guests/example.test/password';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $NOTE  = 'secret:mine/thing/password';             ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # A store as the older code wrote one: the groups are there, and every entry
 # it wrote is in the root group whatever its reference said.
@@ -53,9 +53,9 @@ sub store_of_its_time {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     my $kdbx = File::KeePass::KDBX->new;
     $kdbx->add_group( { title => 'Root' } );
-    $kdbx->add_group( { title => $_ } ) for qw{guests mine};
+    for my $item (qw{guests mine}) { $kdbx->add_group( { title => $item } ); }
 
-    $kdbx->add_entry( { title => $_, password => $entry_by_title{$_} } ) for sort keys %entry_by_title;
+    for my $key ( sort keys %entry_by_title ) { $kdbx->add_entry( { title => $key, password => $entry_by_title{$key} } ); }
 
     $kdbx->save_db( $file, 'pw' );
     return $file;

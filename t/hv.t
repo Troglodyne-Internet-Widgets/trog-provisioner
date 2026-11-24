@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -199,10 +200,10 @@ subtest 'a cloud backend that leaves a call to its service out is told what' => 
 
 subtest 'what a guest names to be sized on a backend is a setting the schema declares' => sub {
     my %schema   = Provisioner::Cookbook->global_schema;
-    my @backends = grep { defined $_->size_key } Trog::HV->backends;
+    my @backends = grep { local ($_) = $_; defined $_->size_key } Trog::HV->backends;
 
-    ok scalar @backends,                           'there are backends that size a guest by a key of their own, so this checks something';
-    ok exists $schema{properties}{ $_->size_key }, "$_ sizes a guest by " . $_->size_key . ', which _global accepts' foreach @backends;
+    ok scalar @backends, 'there are backends that size a guest by a key of their own, so this checks something';
+    for my $backend (@backends) { ok exists $schema{properties}{ $backend->size_key }, "$backend sizes a guest by " . $backend->size_key . ', which _global accepts'; }
 };
 
 subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
@@ -379,9 +380,9 @@ subtest 'guest_ssh_ip' => sub {
 
 subtest 'address_report names each address of a new guest, and what it is' => sub {
     my $both = Trog::HV::Libvirt::address_report(qw{web.test 192.168.122.50 203.0.113.10});
-    like( $both, qr/NAT[ ]lease:\s+192[.]168[.]122[.]50,/m,    'the lease, as the NAT lease' );
-    like( $both, qr/only[ ]the[ ]hypervisor[ ]and[ ]its/m,     'which only the hypervisor and its guests reach' );
-    like( $both, qr/static[ ]address:\s+203[.]0[.]113[.]10,/m, 'and the address from ips, as the static one' );
+    like( $both, qr/NAT[ ]lease:\s+192[.]168[.]122[.]50,/,    'the lease, as the NAT lease' );
+    like( $both, qr/only[ ]the[ ]hypervisor[ ]and[ ]its/,     'which only the hypervisor and its guests reach' );
+    like( $both, qr/static[ ]address:\s+203[.]0[.]113[.]10,/, 'and the address from ips, as the static one' );
 
     my $lease_only = Trog::HV::Libvirt::address_report( 'web.test', '192.168.122.50' );
     unlike( $lease_only, qr/static/, 'a guest with no ips has only its lease' );
@@ -1223,7 +1224,7 @@ subtest 'the rollback point is a disk-only snapshot, or is not taken at all' => 
     my @asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( rollback_possible => sub { 1 } );
-    $mock->redefine( create_snapshot   => sub { my ( undef, undef, $snapname, %o ) = @_; push @asked, [ $snapname, $o{disk_only}, $o{leave_down} ]; return 1 } );
+    $mock->redefine( create_snapshot   => sub { my ( undef, undef, $snapname, %o ) = @_; push @asked, [ $snapname, @o{qw(disk_only leave_down)} ]; return 1 } );
 
     my $name = $hv->snapshot_before_rebuild( 'vm.test', capacity => 42949672960 );
 
@@ -1497,7 +1498,7 @@ subtest 'a disk is snapshotted the moment it is made, while it is still empty' =
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path   => sub { undef } );
     $mock->redefine( pool          => sub { FakeBuildPool->new( \@created ) } );
-    $mock->redefine( snapshot_disk => sub { push @snapped, [ $_[1], $_[2] ]; return 1 } );
+    $mock->redefine( snapshot_disk => sub { push @snapped, [ @_[ 1, 2 ] ]; return 1 } );
 
     quietly( sub { $hv->create_disk( 'vm.test-qcow2', backing => '/base', capacity => 42949672960 ) } );
 
@@ -1568,7 +1569,7 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
     ok( ( grep { $_->[0] eq 'rm' } @ran ), 'and the workdir cleaned up after' );
 
     # The user-data holds private keys, and the workdir is in /tmp.
-    my ($workdir) = map { File::Basename::dirname($_) } grep { m{/user-data\z} } keys %written;
+    my ($workdir) = map { local ($_) = $_; File::Basename::dirname($_) } grep { m{/user-data\z} } keys %written;
     is_deeply( $ran[0], [ qw{chmod 0700}, $workdir ], 'the workdir is closed to every other user before anything is written into it' );
 
     @ran = ();
@@ -1660,7 +1661,7 @@ subtest 'the base image is fetched once' => sub {
 # image of the day that the pool first fetched it, for as long as the pool lived.
 subtest 'base_image: a build that has moved on is fetched to a volume of its own' => sub {
     my $hv     = fresh();
-    my $url    = 'https://example.test/noble/current/noble.img';
+    my $url    = 'https://example.test/noble/current/noble.img';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $family = Trog::HV::Libvirt::image_volume_name($url);
 
     my $old_sum = 'a' x 64;
@@ -1850,7 +1851,7 @@ subtest 'file_checksum asks the hypervisor, and base_volumes lists the builds ne
 
     my $family = 'baseimage-noble.img-0123456789ab';
     my @names  = ( 'baseimage-qcow2', 'vm.test-qcow2', $family, "$family-aaaaaaaaaaaa", "$family-bbbbbbbbbbbb", 'baseimage-other.img-ba9876543210' );
-    my $pool   = bless { volumes => [ map { FakeBaseVolume->new( name => $_, path => "/pool/$_" ) } @names ] }, 'FakeBaseVolumes';
+    my $pool   = bless { volumes => [ map { local ($_) = $_; FakeBaseVolume->new( name => $_, path => "/pool/$_" ) } @names ] }, 'FakeBaseVolumes';
     $mock->redefine( pool => sub { $pool } );
 
     @cmds = ();
@@ -1895,7 +1896,7 @@ subtest 'prune_base_images removes what no disk is backed by, and never the newe
     );
 
     my ( %backing, @deleted, @asked );
-    my $pool = bless { volumes => [ ( map { FakeBaseVolume->new( name => $_->{name}, path => $_->{path} ) } @bases ), map { FakeBaseVolume->new( name => $_, path => "/pool/$_" ) } qw{one-qcow2 two-qcow2 one-cloudinit.iso} ] }, 'FakeBaseVolumes';
+    my $pool = bless { volumes => [ ( map { local ($_) = $_; FakeBaseVolume->new( name => $_->{name}, path => $_->{path} ) } @bases ), map { local ($_) = $_; FakeBaseVolume->new( name => $_, path => "/pool/$_" ) } qw{one-qcow2 two-qcow2 one-cloudinit.iso} ] }, 'FakeBaseVolumes';
 
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( base_volumes    => sub { @bases } );
@@ -1923,7 +1924,7 @@ subtest 'prune_base_images removes what no disk is backed by, and never the newe
 
     # Nothing is on any of them: the newest still stays.
     @deleted = ();
-    %backing = map { $_ => $json->(undef) } keys %backing;
+    %backing = map { local ($_) = $_; $_ => $json->(undef) } keys %backing;
     quietly( sub { $hv->prune_base_images } );
     ok( !( grep { $_ eq $newest } @deleted ), 'the newest volume of the image stays, though no disk is backed by it' );
 
@@ -1940,7 +1941,7 @@ subtest 'prune_base_images removes what no disk is backed by, and never the newe
 
     # The newest is not known without dates.
     @deleted         = ();
-    %backing         = map { $_ => $json->(undef) } keys %backing;
+    %backing         = map { local ($_) = $_; $_ => $json->(undef) } keys %backing;
     $bases[1]{mtime} = 0;
     $warned          = '';
     {
@@ -2231,7 +2232,9 @@ subtest 'setting: a block may hold a secret: reference, as recipes.yaml may' => 
     is( scalar @opened, 1,                                     'the store was opened once' );
     is_deeply( $opened[0], { pool_name => 'secret:pool/name/password' }, 'for the one value that needed it' );
 
-    $hv->pool_name for 1 .. 3;
+    $hv->pool_name;
+    $hv->pool_name;
+    $hv->pool_name;
     is( scalar @opened, 1, 'and not again for a value already resolved' );
 
     fresh( uri => 'qemu:///system' )->pool_name;

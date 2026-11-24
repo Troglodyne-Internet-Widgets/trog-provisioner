@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 
@@ -527,6 +528,10 @@ sub required_recipes {
 # A value with no colon and no line break in it.
 my $NO_COLON = qr/\A [^:\r\n]* \z/;
 
+# A folder name for spam training, which only has to be free of a quote, a
+# percent sign and a line break.
+my $SPAM_FOLDER = qr/\A [^'%\r\n]+ \z/;
+
 # A folder name with no quote, backtick, percent sign, asterisk, question mark,
 # dollar sign, backslash, slash, dot or hash, that does not start with a
 # less-than sign, and that has no white space at either end: the name goes into
@@ -581,7 +586,7 @@ sub args {
                         spam_folders => {
                             type        => 'array',
                             default     => [],
-                            items       => { type => 'string', pattern => q{\A[^'%\r\n]+\z} },
+                            items       => { type => 'string', pattern => "$SPAM_FOLDER" },
                             description => 'Folders of this account, besides Junk Email, the one with the \Junk special use, that hold spam, for example INBOX.$spam.  The nightly training learns each as spam.  Every other folder of the account is learned as ham, but INBOX, Deleted Items, Drafts and Sent Items, which have the \Trash, \Drafts and \Sent special uses.',
                         },
                     },
@@ -920,7 +925,7 @@ sub enrich {
 
     # The schema cannot say what a key of names may be.  Ask here, because the
     # template engine only warns when passwd_line dies, and renders no line.
-    Provisioner::MailAccount::check_name($_) for keys %{ $opts{names} // {} };
+    for my $key ( keys %{ $opts{names} // {} } ) { Provisioner::MailAccount::check_name($key); }
 
     # Every address that an authenticated user of this domain can put in MAIL
     # FROM, and the login that owns it.  See "Who can send as whom" in the POD.

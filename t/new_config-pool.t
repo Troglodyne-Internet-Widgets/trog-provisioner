@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 # The generator is loaded when the test runs rather than when it compiles, so
 # perl sees each of its package variables named once here and calls that a typo.

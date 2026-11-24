@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -101,7 +102,7 @@ subtest 'remove_guest_key stops only the key of the domain fetching' => sub {
     my $keys  = tempdir( CLEANUP => 1 );
     my $local = Test::MockModule->new('Trog::Local');
     $local->redefine( guest_keys => sub { return $keys } );
-    File::Slurper::Temp::write_text( "$keys/$_", "/bogus/$_\nssh-rsa AAAA $_\n" ) for qw{gone.test.test kept.test.test};
+    for my $item (qw{gone.test.test kept.test.test}) { File::Slurper::Temp::write_text( "$keys/$item", "/bogus/$item\nssh-rsa AAAA $item\n" ); }
 
     my $said = capture_stdout { Trog::Bin::Destroy::remove_guest_key( 'gone.test.test', 1 ) };
     ok( -e "$keys/gone.test.test", 'a dry run leaves the key' );
@@ -131,16 +132,16 @@ subtest 'remove_rsync_modules takes the part of the domain out of every guest th
     }
 
     Trog::Bin::Destroy::remove_rsync_modules( $domain, 1 );
-    ok( -e $part{$_}, "a dry run removes nothing: $_" ) for sort keys %part;
+    for my $key ( sort keys %part ) { ok( -e $part{$key}, "a dry run removes nothing: $key" ); }
 
     Trog::Bin::Destroy::remove_rsync_modules( $domain, 0 );
-    ok( !-e $part{$_}, "the part in $_ is gone" )                for sort keys %part;
-    ok( -e $_,         'and the part of the host itself stays' ) for @kept;
+    for my $key  ( sort keys %part ) { ok( !-e $part{$key}, "the part in $key is gone" ); }
+    for my $item (@kept)             { ok( -e $item,        'and the part of the host itself stays' ); }
 };
 
 # --- revoke_grants: the authority ---
 subtest 'the zone and the token of a domain come off the guest that its registrar names' => sub {
-    my $domain   = 'web.lab.test.test';
+    my $domain   = 'web.lab.test.test';                              ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? { registrar => { authority => 'NS.test.test.' } } : {} } );
     $cookbook->redefine( host_of       => sub { return } );
@@ -178,7 +179,7 @@ subtest 'the zone and the token of a domain come off the guest that its registra
 
 # --- revoke_grants: the zone tokens ---
 subtest 'the zone tokens of a domain come off each pdns guest that an account names, and the zones stay' => sub {
-    my $domain   = 'web.lab.test.test';
+    my $domain   = 'web.lab.test.test';                              ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( host_of => sub { return } );
     $cookbook->redefine(
@@ -217,7 +218,7 @@ subtest 'the zone tokens of a domain come off each pdns guest that an account na
 
 # --- revoke_grants: a configuration that a recipe refuses ---
 subtest 'a recipe that dies on the configuration is named, and the rest are still asked' => sub {
-    my $domain   = 'web.test.test';
+    my $domain   = 'web.test.test';                                  ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( host_of => sub { return } );
     $cookbook->redefine(
@@ -256,7 +257,7 @@ subtest 'a recipe that dies on the configuration is named, and the rest are stil
 
 # --- revoke_grants: the VPN ---
 subtest 'a VPN client is revoked on the server that issued it, which frees its address there' => sub {
-    my $domain   = 'relay.test.test';
+    my $domain   = 'relay.test.test';                                ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? { openvpnclient => { issue_from => 'vpn.test.test' } } : {} } );
 
@@ -289,7 +290,7 @@ subtest 'a VPN client is revoked on the server that issued it, which frees its a
 
 # --- revoke_grants: the web relay ---
 subtest 'the public names of a domain are released on its relay, which would send them to a freed address' => sub {
-    my $domain   = 'web.test.test';
+    my $domain   = 'web.test.test';                                                                                             ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my %config   = ( nginx => { relay => 'relay.test.test', public_names => { 'shop.test.test' => { vhost => $domain } } } );
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { my ( undef, $asked ) = @_; return $asked eq $domain ? {%config} : {} } );
@@ -379,7 +380,7 @@ subtest 'the key material goes, however the line around it was written' => sub {
     # bin/provision writes changed between two provisions.  Matching the whole
     # line takes one of them and leaves the other standing for a guest that no
     # longer exists.
-    my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIJtNOTAREALKEYbutlongenough';
+    my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIJtNOTAREALKEYbutlongenough';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "ssh-ed25519 $material trog-provisioner runner $domain\n" );
 
     # The default hypervisor_access of none, as if the configuration changed
@@ -551,7 +552,7 @@ sub says {
 
 subtest 'purge_data_dir takes the domain data directory, and dryrun does not' => sub {
     write_config( map { $_ => 1 } qw{gone.test kept.test never-was.test} );
-    make_path("$data/$_") for qw{gone.test kept.test};
+    for my $item (qw{gone.test kept.test}) { make_path("$data/$item"); }
 
     says( sub { Trog::Bin::Destroy::purge_data_dir( 'kept.test', undef, 1 ) } );
     ok( -d "$data/kept.test", 'a dry run leaves it where it is' );
@@ -670,7 +671,7 @@ subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
     # would be an orphan by definition and the sweep would be right to take it.
     # (.example is reserved by RFC 2606 just as .test is, so it resolves
     # nowhere either.)
-    make_path("$data/$_") for qw{orphan.test named.test real.example};
+    for my $item (qw{orphan.test named.test real.example}) { make_path("$data/$item"); }
 
     my ($said) = says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 1 ) } );
     like( $said, qr/orphan\.test/, 'the dry run names the orphan' );
@@ -684,15 +685,15 @@ subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
     # Every real domain's data lives in the same directory, and the whole reason
     # this is safe to run is that it is only ever looking at .test.
     ok( -d "$data/real.example", 'and does not so much as consider a real domain' );
-    File::Path::remove_tree("$data/$_") for qw{named.test real.example};
+    for my $item (qw{named.test real.example}) { File::Path::remove_tree("$data/$item"); }
 };
 
 subtest 'the sweep covers the domain directory as well as the data source' => sub {
     my $fleet   = one_hypervisor();
     my $domains = tempdir( CLEANUP => 1 );
     write_config( 'named.test' => 1 );
-    make_path("$data/$_")    for qw{orphan.test live.test};
-    make_path("$domains/$_") for qw{orphan.test live.test named.test};
+    for my $item (qw{orphan.test live.test})            { make_path("$data/$item"); }
+    for my $item (qw{orphan.test live.test named.test}) { make_path("$domains/$item"); }
 
     # A hypervisor to have a domain directory and a list of guests.  Both of the
     # sweep's exclusions come from somewhere real: the configuration above, and
@@ -794,7 +795,9 @@ subtest '--purge-data is asked for, and never implied by --purge' => sub {
 
     my @purged;
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_             => sub { 1 } ) for qw{remove_guest_key purge_domain_dir release_ip};
+    for my $item (qw{remove_guest_key purge_domain_dir release_ip}) {
+        $bin->redefine( $item => sub { 1 } );
+    }
     $bin->redefine( purge_data_dir => sub { push @purged, [@_]; 1 } );
 
     Trog::HV->forget();
@@ -825,7 +828,9 @@ subtest 'a guest that will not stop still gives its address back' => sub {
 
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
     $bin->redefine( destroy_vm => sub { die "Could not undefine tenant.test: still running\n" } );
-    $bin->redefine( $_         => sub { 1 } ) for qw{destroy_disks remove_guest_key purge_domain_dir};
+    for my $item (qw{destroy_disks remove_guest_key purge_domain_dir}) {
+        $bin->redefine( $item => sub { 1 } );
+    }
 
     my $released;
     my $pool = Test::MockModule->new('Provisioner::IPPool');
@@ -888,8 +893,12 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
 
     my ( @asked, @order );
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
-    $bin->redefine( $_ => sub { 1 } ) for qw{remove_guest_key};
-    $bin->redefine( $_ => sub { push( @asked, $_[0] ); 1 } ) for qw{destroy_vm destroy_disks};
+    for my $item (qw{remove_guest_key}) {
+        $bin->redefine( $item => sub { 1 } );
+    }
+    for my $item (qw{destroy_vm destroy_disks}) {
+        $bin->redefine( $item => sub { push( @asked, $_[0] ); 1 } );
+    }
     $bin->redefine( revoke_grants => sub { push( @order, 'revoke' ); 1 } );
 
     my $released;

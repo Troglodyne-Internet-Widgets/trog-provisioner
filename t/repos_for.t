@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 # The script is loaded when the test runs rather than when it compiles, so perl
 # sees each of its package variables named once here and calls that a typo.
@@ -187,7 +188,7 @@ subtest 'any other name is a directory name' => sub {
         repos => { org => [ row( 'org', '.github' ), row( 'org', '..hidden' ), row( 'org', '-oops' ) ] },
     );
     is( $named->{rc}, 0, 'the run succeeds' ) or diag $named->{err};
-    ok( cloned( $named, $_ ), "$_ is cloned" ) for qw{.github ..hidden -oops};
+    for my $item (qw{.github ..hidden -oops}) { ok( cloned( $named, $item ), "$item is cloned" ); }
 
     # A leading dash is safe only because git reads nothing after -- as an option.
     my @clones = grep { $_->[1] eq 'clone' } @{ $named->{ran} };

@@ -5,6 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -35,7 +36,7 @@ use Provisioner::MailAccount();
 use Trog::Credentials();
 use Trog::Secrets();
 
-my $DOMAIN = 'mail.test.test';
+my $DOMAIN = 'mail.test.test';                ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $CONFIG = $ENV{TROG_PROVISIONER_CONFIG};
 
 require_ok("$FindBin::Bin/../bin/add_mail_user")       or die "could not require add_mail_user: $@";
@@ -114,7 +115,7 @@ my %TABLE = (
 );
 
 # The passwd-file of the guest, the store, and the configuration.
-my $OLD_HASH = '{ARGON2ID}$argon2id$v=19$m=65536,t=3,p=1$b2xkc2FsdA$b2xkaGFzaA';
+my $OLD_HASH = '{ARGON2ID}$argon2id$v=19$m=65536,t=3,p=1$b2xkc2FsdA$b2xkaGFzaA';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $PASSWD   = <<"END";
 # Mail passwd for $DOMAIN
 old\@$DOMAIN:$OLD_HASH:5000:5000:Old:/mail/$DOMAIN/old:/usr/sbin/noshell
@@ -519,7 +520,7 @@ subtest 'a removed account is in neither table, and postmap ran' => sub {
     is( table_of( $root, 'sender_login' ),    $TABLE{sender_login}    =~ s/^old\N*\n//mr, 'the sender table lost its line' );
     is( table_of( $root, 'virtual_maps' ),    $TABLE{virtual_maps}    =~ s/^old\N*\n//mr, 'and so did the mailbox table, which keeps the others and the catchall' );
     is( table_of( $root, 'virtual_aliases' ), $TABLE{virtual_aliases} =~ s/^old\N*\n//mr, 'and the alias table, which keeps the wildcard line' );
-    unlike( table_of( $root, $_ ), qr/^old\@/m, "no line for it in $_" ) for qw{sender_login virtual_aliases virtual_maps};
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { unlike( table_of( $root, $item ), qr/^old\@/m, "no line for it in $item" ); }
     is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps}], 'postmap ran on each table' );
 };
 
@@ -537,7 +538,7 @@ subtest 'an added account can be removed, and the tables are as they were' => su
         local $ENV{POSTMAP_LOG}                       = "$root/postmap.log";
         is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'newbie' ), 0, 'it reports success' );
     }
-    is( table_of( $root, $_ ), $TABLE{$_}, "$_ is byte for byte as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { is( table_of( $root, $item ), $TABLE{$item}, "$item is byte for byte as it was" ); }
     is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps sender_login virtual_aliases virtual_maps}], 'and postmap ran after each change' );
 };
 
@@ -545,7 +546,7 @@ subtest 'an account with no lines in the tables is removed, and the tables stay'
     my ( $guest, $root, $kdbx ) = world();
 
     # An account that a tool without the tables made: it has a passwd line only.
-    File::Slurper::Temp::write_text( "$root/postfix/$DOMAIN/$_", $TABLE{$_} =~ s/^(?:old|ghost)\N*\n//mgr ) for qw{sender_login virtual_aliases virtual_maps};
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { File::Slurper::Temp::write_text( "$root/postfix/$DOMAIN/$item", $TABLE{$item} =~ s/^(?:old|ghost)\N*\n//mgr ); }
     my %before = map { $_ => table_of( $root, $_ ) } qw{sender_login virtual_aliases virtual_maps};
 
     my $mock = Test::MockModule->new('Trog::Hypervisors');
@@ -559,15 +560,15 @@ subtest 'an account with no lines in the tables is removed, and the tables stay'
         is( Provisioner::Bin::remove_mail_user::main( '--secrets', $kdbx, $DOMAIN, 'old' ), 0, 'it reports success' );
     }
     unlike( passwd_of($root), qr/^old\@/m, 'the passwd line is gone' );
-    is( table_of( $root, $_ ), $before{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { is( table_of( $root, $item ), $before{$item}, "$item is as it was" ); }
     is_deeply( [ postmapped($root) ], [], 'and postmap did not run' );
 };
 
 subtest 'a reset does not touch the tables' => sub {
     my ( $guest, $root, $kdbx ) = world();
 
-    is( run_tool( 'reset_mail_password', $guest, $root, 'again', '--secrets', $kdbx, $DOMAIN, 'old' ), 0,          'the reset succeeds' );
-    is( table_of( $root, $_ ),                                                                         $TABLE{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    is( run_tool( 'reset_mail_password', $guest, $root, 'again', '--secrets', $kdbx, $DOMAIN, 'old' ), 0, 'the reset succeeds' );
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { is( table_of( $root, $item ), $TABLE{$item}, "$item is as it was" ); }
     is_deeply( [ postmapped($root) ], [], 'and postmap did not run' );
     unlike( join( "\n", @{ $guest->{log} } ), qr{postfix}, 'the guest was not asked about postfix at all' );
 };
@@ -577,7 +578,7 @@ subtest 'a passwd-file that cannot be written puts both tables back' => sub {
     my $before = own_file();
 
     like( exception { run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ) }, qr/Could[ ]not[ ]write/, 'it stops, and says so' );
-    is( table_of( $root, $_ ), $TABLE{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { is( table_of( $root, $item ), $TABLE{$item}, "$item is as it was" ); }
     is_deeply( [ postmapped($root) ], [qw{sender_login virtual_aliases virtual_maps virtual_maps virtual_aliases sender_login}], 'postmap ran after the write and again after the restore, in the opposite order' );
     is( passwd_of($root), $PASSWD, 'the passwd-file is whole' );
     is( own_file(),       $before, 'and the configuration does not name the account' );
@@ -594,8 +595,8 @@ subtest 'a postmap that fails puts the tables back too' => sub {
     local $ENV{POSTMAP_EXIT} = 1;
 
     like( exception { run_tool( 'add_mail_user', $guest, $root, 'x', '--secrets', $kdbx, $DOMAIN, 'newbie' ) }, qr/postmap[ ]failed/, 'it stops, and says so' );
-    is( table_of( $root, $_ ), $TABLE{$_}, "$_ is as it was" ) for qw{sender_login virtual_aliases virtual_maps};
-    is( passwd_of($root),      $PASSWD,    'and the passwd-file was never written' );
+    for my $item (qw{sender_login virtual_aliases virtual_maps}) { is( table_of( $root, $item ), $TABLE{$item}, "$item is as it was" ); }
+    is( passwd_of($root), $PASSWD, 'and the passwd-file was never written' );
 };
 
 subtest 'a guest with no tables is refused before anything changes' => sub {

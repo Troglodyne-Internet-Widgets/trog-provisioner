@@ -49,7 +49,7 @@ subtest 'without github' => sub {
     is_deeply( { $req{cron}->() },                                                 { files => { 'ldap-export' => 'ldap-export.cron' } }, 'cron installs the export and no sync' );
     is_deeply( { recipe()->guest_secrets( '/opt/domains', 'dir.test.test', %G ) }, {},                                                   'no token is asked for' );
     unlike( recipe()->render_global( %G, users => [] ), qr/ldap-github-sync/, 'and the fragment runs no sync' );
-    is_deeply( [ grep { m/perl/ } recipe()->deps(%G) ], [], 'nor installs perl for one' );
+    is_deeply( [ grep { index( $_, 'perl' ) >= 0 } recipe()->deps(%G) ], [], 'nor installs perl for one' );
 };
 
 subtest 'with github' => sub {
@@ -61,7 +61,7 @@ subtest 'with github' => sub {
     my %secrets = recipe()->guest_secrets( '/opt/domains', 'dir.test.test', %opts );
     my $token   = $secrets{'/etc/ldap/github-sync.token'};
     is( $token->{ref}, 'secret:ldap/dir.test.test-github-token/password', 'the token comes from the store, per domain' );
-    my $add = 'bin/add_secret --group ldap --title dir.test.test-github-token';
+    my $add = 'bin/add_secret --group ldap --title dir.test.test-github-token';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( exception { $token->{generate}->() }, qr/\Q$add\E/, 'and a store without one says how to add it, since none can be made' );
 
     my $conf = Cpanel::JSON::XS->new->decode( recipe()->render_file( 'files/ldap.github-sync.json.tt', %opts, users => [] ) );

@@ -75,7 +75,7 @@ After that, the copy in the cache is the only copy left.
 =cut
 
 sub cache_classes {
-    return ( { class => 'immutable', pattern => 'download\\.imagemagick\\.org/archive/releases/' } );
+    return ( { class => 'immutable', pattern => 'download\\.imagemagick\\.org/archive/releases/' } );    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
 }
 
 1;

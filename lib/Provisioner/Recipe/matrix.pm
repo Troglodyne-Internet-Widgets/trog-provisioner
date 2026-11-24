@@ -16,6 +16,10 @@ use MIME::Base64();
 
 use Provisioner::Cookbook();
 
+my $ED25519_KEY_ID = qr/\A ed25519: \w+ \z/;
+my $KEY_BASE64     = qr{\A [[:alnum:]+/]{43} \z};
+my $ROOM_ALIAS     = qr/\A [^#:]+ \z/;
+
 =head1 Provisioner::Recipe::matrix
 
 =head2 SYNOPSIS
@@ -280,13 +284,13 @@ sub args {
                 type                 => 'object',
                 default              => {},
                 description          => 'The keys that the homeserver signed with before its current one, by key ID.  See Taking over a homeserver.',
-                propertyNames        => { pattern => '\Aed25519:[A-Za-z0-9_]+\z' },
+                propertyNames        => { pattern => "$ED25519_KEY_ID" },
                 additionalProperties => {
                     type       => 'object',
                     required   => [qw{public expired_ts}],
                     properties => {
-                        public     => { type => 'string',  pattern => '\A[A-Za-z0-9+/]{43}\z', description => 'The public half of the key, in base64 without padding, as /_matrix/key/v2/server published it.' },
-                        expired_ts => { type => 'integer', minimum => 0,                       description => 'When the key stopped signing, in milliseconds since the epoch.' },
+                        public     => { type => 'string',  pattern => "$KEY_BASE64", description => 'The public half of the key, in base64 without padding, as /_matrix/key/v2/server published it.' },
+                        expired_ts => { type => 'integer', minimum => 0,             description => 'When the key stopped signing, in milliseconds since the epoch.' },
                     },
                 },
             },
@@ -297,7 +301,7 @@ sub args {
                 description => 'The rooms that each new account joins.  synapse makes a room that does not exist yet.',
                 items       => {
                     type        => 'string',
-                    pattern     => '^[^#:]+$',
+                    pattern     => "$ROOM_ALIAS",
                     description => 'The local part of a room alias, such as general.  The recipe adds the # and the server name.',
                 },
             },
@@ -410,7 +414,7 @@ sub guest_secrets {
         "/etc/matrix-synapse/homeserver.signing.key" => {
             ref      => "secret:matrix/$domain-signing-key/password",
             generate => sub {
-                my $version = 'a_' . join( '', map { ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
+                my $version = 'a_' . join( '', map { local ($_) = $_; ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
                 my $seed    = MIME::Base64::encode_base64( Crypt::PRNG::random_bytes(32), '' );
                 $seed =~ s/=+\z//;
 

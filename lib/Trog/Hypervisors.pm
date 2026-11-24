@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use parent 'Trog::Hypervisors::Config';
 use List::Util qw{any reduce};
 use Config::Simple();
@@ -205,7 +206,7 @@ sub choose {
       if defined Trog::HV->config_value( $opts{config}, 'libvirt_uri' );
 
     my %network = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{network network_why};
-    my $hv      = defined $opts{host} ? $fleet->select_for( $opts{host}, $opts{host_config}, %network ) : $fleet->select_for( $domain, $opts{config}, %network );
+    my $hv      = defined $opts{host} ? $fleet->select_for( @opts{qw(host host_config)}, %network ) : $fleet->select_for( $domain, $opts{config}, %network );
 
     $hv->{$_} = $paths{$_} for keys %paths;
     return $hv;
@@ -256,7 +257,7 @@ sub backend_of {
 
     # A block with no backend's key otherwise gets the default libvirt
     # connection, which is this machine.
-    my @markers = map  { $_->marker_key } Trog::HV->backends;
+    my @markers = map  { local ($_) = $_; $_->marker_key } Trog::HV->backends;
     my @has     = grep { $block->{$_} } @markers;
 
     die "[$name] in " . $self->{path} . ' has ' . join( ' and ', @has ) . "; it can only be one hypervisor.\n"
@@ -279,7 +280,7 @@ Returns every hypervisor in the fleet, built but not made current.
 
 sub hypervisors {
     my ($self) = @_;
-    return map { $self->hypervisor($_) } $self->names;
+    return map { local ($_) = $_; $self->hypervisor($_) } $self->names;
 }
 
 # An error on one line, to go into a list of them.
@@ -500,7 +501,7 @@ sub place {
         }
 
         if (@reasons) {
-            push @why_not, map { '  ' . $hv->name . ": $_" } @reasons;
+            push @why_not, map { local ($_) = $_; '  ' . $hv->name . ": $_" } @reasons;
             next;
         }
 
@@ -640,14 +641,14 @@ sub offer {
         my $hv    = $_;
         my $offer = eval { $hv->cheapest_for(%needs) };
         $offer ? { %$offer, hv => $hv } : undef
-      } grep { !defined $network || $_->network eq $network } $self->hypervisors;
+      } grep { local ($_) = $_; !defined $network || $_->network eq $network } $self->hypervisors;
 
     die $why unless @offers;
 
     my $best = $offers[0];
     my $line = "$best->{key}: $best->{value}";
     my $rate = $best->{hourly} ? sprintf( ', billed at %s an hour, with no monthly price to cap it', $best->{hourly} ) : q{};
-    my $what = sprintf( "Nothing in %s has room for %s.\n%s would build it as a %s, at %.2f a month%s.\n", $self->{path}, $domain, $best->{hv}->name, $best->{value}, $best->{monthly_cost}, $rate );
+    my $what = sprintf( "Nothing in %s has room for %s.\n%s would build it as a %s, at %.2f a month%s.\n", $self->{path}, $domain, $best->{hv}->name, @{$best}{qw(value monthly_cost)}, $rate );
 
     die $why . "\n" . $what . "To build it there, put this in the _global of $domain:\n\n    $line\n"
       unless Trog::Utils::interactive();
@@ -662,7 +663,7 @@ sub offer {
     die $why . "\n" . $best->{hv}->name . " offered a $best->{value}, and then would not take it:\n" . join( q{}, map { "  $_\n" } @still )
       if @still;
 
-    my $path = Provisioner::Cookbook->record_global( $domain, $best->{key}, $best->{value} );
+    my $path = Provisioner::Cookbook->record_global( $domain, @{$best}{qw(key value)} );
     print "Wrote $line to $path, so the next run does not ask.\n";
 
     # And into what this run is generating from, which was read before the file

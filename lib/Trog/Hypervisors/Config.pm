@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 use Config::Simple();
 use File::Slurper();
 use List::Util qw{uniq};
@@ -63,7 +64,8 @@ sub load {
     my %vars = $config->vars();
     my %in_file;
     foreach my $key ( keys %vars ) {
-        my ($block) = $key =~ m/\A([^.]+)\./ or next;
+        my ( $block, $name ) = split m/[.]/, $key, 2;
+        next if !defined $name || $block eq q{};
         $in_file{$block} = 1;
     }
 

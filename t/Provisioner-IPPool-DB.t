@@ -137,7 +137,7 @@ subtest 'seed and reseed: one transaction each, and a dry run writes nothing' =>
     is( Provisioner::IPPool::DB::run( $path, 'taken' )->{'192.0.2.2'}, undef, 'before anything of it is written' );
 
     my $dry = Provisioner::IPPool::DB::run( $path, 'reseed', { seeds => [], prune => [], dryrun => 1 } );
-    is_deeply( [ $dry->{after}, $dry->{pruned} ], [ {}, 1 ], 'a dry reseed that prunes everything says so' );
+    is_deeply( [ @{$dry}{qw(after pruned)} ], [ {}, 1 ], 'a dry reseed that prunes everything says so' );
     is( Provisioner::IPPool::DB::run( $path, 'held_by', { domain => 'a.test.test' } ), '192.0.2.10', 'and rolls it back' );
     is_deeply( Provisioner::IPPool::DB::run( $path, 'seeded' ), ['hv:hv1'], 'markers too' );
 

@@ -113,7 +113,7 @@ sub kit_files {
         'lib/Trog/SQLite.pm'           => $INC{'Trog/SQLite.pm'},
         'lib/Sub/Retry.pm'             => $INC{'Sub/Retry.pm'},
         'schema/ips.sql'               => $schema,
-        map { ( 'schema/' . File::Basename::basename( $_->[1] ) => $_->[1] ) } Trog::SQLite::updates($schema),
+        map { local ($_) = $_; ( 'schema/' . File::Basename::basename( $_->[1] ) => $_->[1] ) } Trog::SQLite::updates($schema),
     );
 }
 
@@ -161,7 +161,7 @@ sub ensure_kit ($machine) {
         # A directory of its own for each copy, so that two runners that put the
         # same kit at once do not write into one directory.
         my $stage = "$dir.part." . Sys::Hostname::hostname() . ".$$";
-        my %dirs  = map { ( "$stage/" . File::Basename::dirname($_) => 1 ) } keys %files;
+        my %dirs  = map { local ($_) = $_; ( "$stage/" . File::Basename::dirname($_) => 1 ) } keys %files;
         $machine->mkpath( sort keys %dirs ) or die 'Could not make ' . $stage . ' on ' . $machine->describe . " for the kit of bin/ippool\n";
         foreach my $path ( sort keys %files ) {
             $machine->put_file( $files{$path}, "$stage/$path" ) or die "Could not put $path of the kit of bin/ippool on " . $machine->describe . "\n";

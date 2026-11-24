@@ -65,7 +65,7 @@ INI
 # repository of its own, whose one tracked file makes two names public.
 my $repo = File::Temp::tempdir( CLEANUP => 1 );
 File::Slurper::Temp::write_text( "$repo/README", "Guests are test.test names, and files belong to root.\n" );
-IPC::Run3::run3( [ qw{git -C}, $repo, @$_ ], \undef, \my $out, \my $err ) for [qw{init -q}], [qw{add README}];
+for my $item ( [qw{init -q}], [qw{add README}] ) { IPC::Run3::run3( [ qw{git -C}, $repo, @$item ], \undef, \my $out, \my $err ); }
 chdir($repo) or die "Cannot change to $repo: $!\n";
 
 my sub check ($prose) {

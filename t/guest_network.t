@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -41,8 +42,8 @@ use Sys::Virt();                                                                
 my $script = "$FindBin::Bin/../bin/guest_network";
 require_ok($script) or BAIL_OUT("$script does not load");
 
-my $ACL     = '/etc/qemu/trog-runner-runner.conf';
-my $BRIDGES = '/etc/qemu/bridge.conf';
+my $ACL     = '/etc/qemu/trog-runner-runner.conf';                                                   ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $BRIDGES = '/etc/qemu/bridge.conf';                                                               ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 sub hvconf (%clod) {
     my %block = (
@@ -103,7 +104,7 @@ sub fresh_state {
     sub new ( $class, $state ) { return bless { state => $state }, $class }
 
     sub list_all_networks ($self) {
-        return map { Test::FakeNetwork->new( $self->{state}, $_ ) } sort keys %{ $self->{state}{networks} };
+        return map { local ($_) = $_; Test::FakeNetwork->new( $self->{state}, $_ ) } sort keys %{ $self->{state}{networks} };
     }
 
     sub get_network_by_name ( $self, $name ) {

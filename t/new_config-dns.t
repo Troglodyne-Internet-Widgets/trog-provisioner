@@ -197,7 +197,7 @@ subtest 'a reserved name is held by the server on the guest' => sub {
     # No public registrar holds a zone under a TLD RFC 2606 reserves.  Nothing
     # adds pdns to the guest, as nothing adds it to an authority elsewhere.
     my ($err) = generate( $LOCAL, letsencrypt => undef );
-    my $refusal = "$LOCAL is the authority of its registrar, but runs no pdns.  Add pdns to $LOCAL.";
+    my $refusal = "$LOCAL is the authority of its registrar, but runs no pdns.  Add pdns to $LOCAL.";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     like( $err // q{}, qr/\A\Q$refusal\E/, 'a guest that does not list pdns is refused, and told to add it' );
 
     ( $err, my $makefile, my $dir ) = generate( $LOCAL, letsencrypt => undef, pdns => undef );

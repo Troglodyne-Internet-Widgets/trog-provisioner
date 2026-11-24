@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -74,8 +75,8 @@ $hv_network->redefine(
     }
 );
 
-my $HOST   = 'host.test.test';
-my $TENANT = 'tenant.test.test';
+my $HOST   = 'host.test.test';      ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
+my $TENANT = 'tenant.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # A guest with two domains on it, generated the way bin/provision generates one:
 # naming the tenant expands the list to include its host, and the host is done
@@ -287,9 +288,11 @@ subtest 'two recipes on one guest cannot claim one port, from two domains either
 
     # Two recipes that need nothing, made to bind a port.  A domain resolves its
     # recipes alone, so only the guest's claims so far can show ufw the other.
-    Provisioner::Cookbook->load($_) for qw{tmpfs};
-    my %mock = map { $_ => Test::MockModule->new("Provisioner::Recipe::$_") } qw{nosnap tmpfs};
-    $mock{$_}->redefine( listens => sub { return 3000 } ) for keys %mock;
+    for my $item (qw{tmpfs}) { Provisioner::Cookbook->load($item); }
+    my %mock = map { local ($_) = $_; $_ => Test::MockModule->new("Provisioner::Recipe::$_") } qw{nosnap tmpfs};
+    for my $key ( keys %mock ) {
+        $mock{$key}->redefine( listens => sub { return 3000 } );
+    }
 
     my ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
     ok( $err, 'the generation stops' ) or return;
@@ -319,7 +322,7 @@ subtest 'two recipes on one guest cannot claim one port, from two domains either
 };
 
 subtest 'two recipes that cannot share a machine are refused on a host and its tenant' => sub {
-    Provisioner::Cookbook->load($_) for qw{tmpfs};
+    for my $item (qw{tmpfs}) { Provisioner::Cookbook->load($item); }
     my $tmpfs = Test::MockModule->new('Provisioner::Recipe::tmpfs');
     $tmpfs->redefine( exclusive_on_machine_with => sub { return qw{nosnap} } );
 

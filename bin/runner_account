@@ -174,7 +174,7 @@ sub main {
     my @steps =
         $opt{remove}
       ? $hv->runner_removal_steps($plan)
-      : ( $hv->runner_account_steps($plan), map { $hv->runner_key_steps( $plan->{user}, $_ ) } @keys );
+      : ( $hv->runner_account_steps($plan), map { local ($_) = $_; $hv->runner_key_steps( $plan->{user}, $_ ) } @keys );
     my $changed = Trog::Steps::run( \@steps, $opt{dryrun} );
 
     print $opt{dryrun} ? "Nothing changed: $changed step(s) would run.\n" : "Done: $changed step(s) ran.\n";

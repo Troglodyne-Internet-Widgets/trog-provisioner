@@ -378,7 +378,7 @@ sub issuing_authority {
       if -f $own{cert};
     return Provisioner::Cookbook->load('fetchcache')->authority() if !-f $cache{cert} || -f $cache{key};
 
-    Provisioner::Utils::write_authority( $own{cert}, $own{key}, 'trog-provisioner acme authority', $AUTHORITY_DAYS );
+    Provisioner::Utils::write_authority( @own{qw(cert key)}, 'trog-provisioner acme authority', $AUTHORITY_DAYS );
     return \%own;
 }
 
@@ -437,8 +437,8 @@ sub intermediate {
     Trog::Utils::write_binary_mode( "$output_dir/acmeca-intermediate.key", IO::Socket::SSL::Utils::PEM_key2string($key),   oct('0600') );
     Trog::Utils::write_binary_mode( "$output_dir/acmeca-intermediate.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert), oct('0644') );
 
-    IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;
-    IO::Socket::SSL::Utils::KEY_free($_)  for $key,  $ca_key;
+    for my $item ( $cert, $ca_cert ) { IO::Socket::SSL::Utils::CERT_free($item); }
+    for my $item ( $key,  $ca_key )  { IO::Socket::SSL::Utils::KEY_free($item); }
 
     File::Copy::copy( $authority->{cert}, "$output_dir/acmeca-root.crt" )
       or die "Could not give the guest the authority to chain to: $!\n";

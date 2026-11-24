@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -476,7 +477,7 @@ subtest 'a backtick in a folder name is refused, and the shell never expands a n
     my $fragment = $recipe->render_raw( 'ubuntu/mail.tt', $recipe->enrich( $recipe->validate( %BASE, %names ) ) );
     my @echoes   = $fragment =~ m/&&[ ]echo[ ](.*?);[ ]fi$/mg;
     ok( scalar @echoes, 'the build says which folders it merged' );
-    unlike( $_, qr/\A"/, 'and the message is not in double quotes, where a backtick runs' ) for @echoes;
+    for my $echo (@echoes) { unlike( $echo, qr/\A"/, 'and the message is not in double quotes, where a backtick runs' ); }
 };
 
 subtest 'mailboxes takes the rule of a folder name' => sub {

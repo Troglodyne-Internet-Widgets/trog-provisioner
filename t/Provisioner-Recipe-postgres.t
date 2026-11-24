@@ -115,7 +115,7 @@ subtest 'the backup keeps the seven newest finished dumps' => sub {
     my ( $status, undef, $said ) = run_script( 'postgres-backup.sh', $base );
     is( $status, 0, 'the backup finishes' ) or diag $said;
 
-    my @left = sort map { basename($_) } glob("$base/[0-9]*");
+    my @left = sort map { local ($_) = $_; basename($_) } glob("$base/[0-9]*");
 
     my @newest = grep { -e "$base/$_/complete" && !m/\A2000/ } @left;
     is( scalar @newest, 1, 'the dump this run made is there' );
@@ -161,7 +161,8 @@ subtest 'the version it installs' => sub {
     ok( ( grep { $_ eq 'postgresql-18' } recipe()->deps() ), 'the newest server in the index' );
     like( $asked[-1], qr{/dists/noble-pgdg/main/binary-amd64/Packages[.]gz\z}, 'which is the main index of this release' );
 
-    recipe()->deps() for 1 .. 2;
+    recipe()->deps();
+    recipe()->deps();
     is( scalar @asked, 2, 'asked once, however many times the packages are' );
 
     # A domain that names another release gets the index of that release, and

@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+my $ABSOLUTE_PATH = qr{\A / [^'\s]+ \z};
+
 =head1 Provisioner::Recipe::autoupdate
 
 =head2 SYNOPSIS
@@ -52,7 +54,7 @@ sub args {
             # that says "not now", and quotes it in single quotes.
             autorestart => {
                 type        => 'string',
-                pattern     => '^/[^\'\\s]+$',
+                pattern     => "$ABSOLUTE_PATH",
                 description => 'Reboot after an update that asks for one, unless this path exists on the guest.  Unset installs no reboot cron, so the guest never restarts itself.',
             },
             reboot_window => {

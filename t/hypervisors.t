@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -500,7 +501,7 @@ subtest 'guest_of leaves $_ to its caller' => sub {
     use warnings;
 
     # As in a map over grants, where $_ is the grant.
-    my @said = map { my $found = Trog::Hypervisors->guest_of('vm.example.test'); [ $_, $found->{user} ] } ('the grant');
+    my @said = map { local ($_) = $_; my $found = Trog::Hypervisors->guest_of('vm.example.test'); [ $_, $found->{user} ] } ('the grant');
     is( $said[0][0], 'the grant', 'the caller still has its $_ after the provision.conf is read' );
     is( $said[0][1], 'someadmin', 'and the guest gets the admin of the provision.conf' );
 };
@@ -1094,7 +1095,7 @@ subtest 'the documented example is a file that loads' => sub {
     my $fleet = Trog::Hypervisors->load($example);
     ok $fleet->configured, 'the example describes a fleet';
 
-    my %backend = map { $_ => ref $fleet->hypervisor($_) } $fleet->names;
+    my %backend = map { local ($_) = $_; $_ => ref $fleet->hypervisor($_) } $fleet->names;
 
     is $backend{hv1},     'Trog::HV::Libvirt',   'its machine blocks build machines';
     is $backend{cloud1},  'Trog::HV::OpenStack', 'and its cloud block builds a cloud';

@@ -5,6 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -40,12 +41,12 @@ use Provisioner::Recipe::letsencrypt();
 # anything but an interpolated value is usually an accident.
 ## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
 
-my $DOMAIN = 'letsencrypt.test.test';
+my $DOMAIN = 'letsencrypt.test.test';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # A name a public CA could actually issue for.  .test, .example, .invalid and
 # .localhost are all reserved, and reserved is precisely the case that routes
 # away from the public CA -- so the public path cannot be tested under one.
-my $PUBLIC = 'letsencrypt.example.net';
+my $PUBLIC = 'letsencrypt.example.net';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 sub generated {
     my (%extra) = @_;
@@ -188,7 +189,7 @@ subtest 'a reserved TLD is served locally whatever reached the module list' => s
 };
 
 subtest 'a domain can name one of the fleet own instead' => sub {
-    my $url = 'https://localhost:9000/acme/trog/directory';
+    my $url = 'https://localhost:9000/acme/trog/directory';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my ( $recipe, undef, $slurp ) = generated( ca => $url );
 
     like( $slurp->('dehydrated.conf'),   qr/^\QCA="$url"\E$/m, 'the guest-wide config asks it' );
@@ -213,7 +214,7 @@ subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
     # zones/<guest>.test.test.  Every challenge 404'd, on every guest.
     my @calls = grep { m/^\s+lexicon\s/ } split( m/\n/, $hook );
     is( scalar @calls, 2, 'the hook deploys a record and cleans it up' );
-    like( $_, qr/--resolve-zone-name/, 'and asks lexicon to find the zone itself' ) for @calls;
+    for my $call (@calls) { like( $call, qr/--resolve-zone-name/, 'and asks lexicon to find the zone itself' ); }
 
     like( $hook, qr{LEXICON_POWERDNS_PDNS_SERVER="\Q$Provisioner::Recipe::pdns::PROXY_SOCKET\E"}, 'and the socket of the proxy is named for the provider' );
 };
@@ -442,11 +443,11 @@ subtest 'a domain whose zone nothing here writes keeps its self-signed certifica
 
     {
         my $managed = with_registrar();
-        like( $built->($_), $sign{$_}, "$what{$_} is set up where a provider holds the zone" ) foreach qw{letsencrypt lexicon cron};
+        for my $item (qw{letsencrypt lexicon cron}) { like( $built->($item), $sign{$item}, "$what{$item} is set up where a provider holds the zone" ); }
     }
 
     my $unmanaged = with_registrar( registrar => { unmanaged => 1 } );
-    unlike( $built->($_), $sign{$_}, "$what{$_} is left out where nothing here writes the zone" ) foreach qw{letsencrypt lexicon cron};
+    for my $item (qw{letsencrypt lexicon cron}) { unlike( $built->($item), $sign{$item}, "$what{$item} is left out where nothing here writes the zone" ); }
     my %opts = fresh()->enrich(%on);
     is_deeply( $opts{lexicon}, {}, 'and the hook gets no credential' );
 };

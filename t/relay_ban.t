@@ -23,7 +23,7 @@ use FindBin::libs;
 my $script = "$FindBin::Bin/../scripts/relay_ban";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-my $DOMAIN = 'web.test.test';
+my $DOMAIN = 'web.test.test';     ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 my $SET    = 'nginxrelay-bans';
 
 # Every command answered with what $ok says.  Answers the commands that ran.

@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use parent qw{Provisioner::Recipe};
 use Trog::Patterns();
@@ -106,7 +107,8 @@ If a step fails, the makefile stops, the same as when the perl fails to build.
 =cut
 
 # A word that reaches cpan_install whole, single-quoted in a makefile line.
-my %WORD = ( type => 'string', pattern => "" . qr/\A [^'"\$`\\\n]+ \z/ );
+my $WORD_RE = qr/\A [^'"\$`\\\n]+ \z/;
+my %WORD    = ( type => 'string', pattern => "$WORD_RE" );
 
 my %STEP = (
     type                 => 'object',
@@ -217,9 +219,9 @@ changes.
 
 sub cache_classes {
     return (
-        { class => 'index',     pattern => 'fastapi\.metacpan\.org/' },
-        { class => 'index',     pattern => '[^/]+/modules/' },
-        { class => 'immutable', pattern => '[^/]+/authors/id/(?!.*/CHECKSUMS$)' },
+        { class => 'index',     pattern => 'fastapi\.metacpan\.org/' },               ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
+        { class => 'index',     pattern => '[^/]+/modules/' },                        ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
+        { class => 'immutable', pattern => '[^/]+/authors/id/(?!.*/CHECKSUMS$)' },    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a pattern for nginx, which fetchcache.nginx.conf.tt writes into its configuration; a qr// would write (?^aa:...) there
     );
 }
 

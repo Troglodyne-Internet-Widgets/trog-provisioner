@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -63,7 +64,7 @@ subtest 'the service user owns .claude' => sub {
 # agent.  This runs the line that hands it over, against a fake home.
 subtest 'what npm and rtk leave in the home goes to the service user' => sub {
     my $home   = tempdir( CLEANUP => 1 );
-    my ($line) = grep { m/\Afor[ ]p[ ]in[ ]/ } map { s/\A.*?&&[ ]//r } split m/\n/, recipe()->render(%G);
+    my ($line) = grep { m/\Afor[ ]p[ ]in[ ]/ } map { ( split m/&&[ ]/, $_, 2 )[-1] } split m/\n/, recipe()->render(%G);
     ok( $line, 'the fragment hands over the home' ) or return;
     File::Path::make_path( "$home/.claude", "$home/.config/rtk", "$home/.local/share/rtk" );
     open( my $state, '>', "$home/.claude.json" ) or die "Cannot write the fake .claude.json: $!";
@@ -272,7 +273,7 @@ subtest 'each enabled plugin is installed in each home' => sub {
         is_deeply( [ sort @got ], \@wanted, "on $what, into the home of the agent, from the marketplace of each" );
     }
 
-    my $home = '/opt/domains/agent.test.test/agents/test-agent';
+    my $home = '/opt/domains/agent.test.test/agents/test-agent';                                                       ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my @got  = grep { m/\A\Q$home\E[ ]/ } plugin_installs( modules => ['claude'], restricted_user => 'test-agent' );
     is_deeply(
         [ sort map { ( split m/[ ]/ )[3] } @got ],
@@ -314,7 +315,7 @@ subtest 'only the memories are staged for the salvage' => sub {
     my ( $rc, $err ) = run_sh( $commands[0] );
     is( $rc, 0, 'which succeeds' ) or diag "$commands[0]\n$err";
 
-    my $staged = "$home/.claude-memory-salvage";
+    my $staged = "$home/.claude-memory-salvage";    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my @got;
     File::Find::find( { no_chdir => 1, wanted => sub { push @got, $File::Find::name =~ s{\A\Q$staged\E/}{}r unless -d } }, $staged );
     is_deeply(
@@ -521,7 +522,7 @@ subtest 'a restricted agent' => sub {
     is_deeply( $restricted->{env},            { CLAUDE_CODE_DISABLE_MOUSE => '1' },          'but none of the environment that makes that agent the bot' );
 
     my $said    = recipe()->render( %G, restricted_user => 'test-agent' );
-    my $home    = '/opt/domains/agent.test.test/agents/test-agent';
+    my $home    = '/opt/domains/agent.test.test/agents/test-agent';          ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
     my $useradd = qr{useradd[ ]--system[ ]--user-group};
     my $nologin = qr{-s[ ]/usr/sbin/nologin};
     like( $said, qr{$useradd[ ]$nologin[ ]-d[ ]'\Q$home\E'[ ]'test-agent'}, 'the account is made, with that home, and cannot log in' );

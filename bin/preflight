@@ -103,11 +103,11 @@ sub main {
 
     # Every check runs, also after one fails, so one run reports all the fixes.
     # The backend lists the checks.  See the PREFLIGHT section of Trog::HV.
-    my @failed = grep { !$_->{ok} } map { report( %{ $hv->$_ } ) } $hv->preflight_checks;
+    my @failed = grep { !$_->{ok} } map { local ($_) = $_; report( %{ $hv->$_ } ) } $hv->preflight_checks;
 
     push( @failed, rest_of_fleet( $fleet, $hv ) );
 
-    my @notes = grep { !$_->{ok} } map { $hv->$_ } $hv->preflight_notes;
+    my @notes = grep { !$_->{ok} } map { local ($_) = $_; $hv->$_ } $hv->preflight_notes;
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -230,6 +230,7 @@ sub block_verdicts {
       or return { ok => 0, what => "[$name] cannot be built from its block", fix => $@ };
 
     return map {
+        local ($_) = $_;
         my $verdict = $hv->$_;
         +{ %$verdict, what => "[$name] " . $verdict->{what} };
     } $hv->preflight_block_checks;

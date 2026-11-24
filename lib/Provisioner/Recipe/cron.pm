@@ -128,7 +128,7 @@ script with no C<mailto> sends its output to the admin.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{from} = Provisioner::Utils::qualify_address( $opts{from}, $opts{domain} );
+    $opts{from} = Provisioner::Utils::qualify_address( @opts{qw(from domain)} );
 
     my $certified = List::Util::any { $_ eq 'letsencrypt' } @{ $opts{modules} // [] };
     $opts{renews_certificate} = ( $certified && !Provisioner::Cookbook->load('registrar')->unmanaged( $opts{domain} ) ) ? 1 : 0;

@@ -50,7 +50,7 @@ UPDATE
 chmod( 0755, "$bin/curl", "$bin/update-ca-certificates" );
 
 my $HOSTS = "127.0.0.1\tlocalhost\n192.0.2.5\tguest.test.test guest\n";
-my $CACHE = '192.0.2.9';
+my $CACHE = '192.0.2.9';                                                  ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 # A guest's /etc/hosts and an authority to hand it, in a directory of their own.
 sub guest {

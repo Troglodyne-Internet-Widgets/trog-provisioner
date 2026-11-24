@@ -29,7 +29,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Provisioner::Cookbook();
 
-my $DOMAIN = 'aptmirror.test.test';
+my $DOMAIN = 'aptmirror.test.test';                                                                  ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
 sub generated {
     my (%extra) = @_;

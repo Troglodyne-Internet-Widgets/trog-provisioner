@@ -4,6 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 =head1 NAME
 
@@ -231,7 +232,7 @@ subtest 'the local lib that the bot upgrades its modules in' => sub {
     my $r   = recipe($dir);
     my %got = $r->validated( $r->takes( %GLOBALS, user => 'svc' ), %BASE );
     $r->generate_files( $dir, %got );
-    my $lib = '/bogus/bot.test.test/perl5';
+    my $lib = '/bogus/bot.test.test/perl5';    ## no critic (RegularExpressions::ProhibitRegexInStrings) -- a literal, which every match that uses it quotes with \Q
 
     my $conf = do "$dir/clod.conf";
     is( $conf->{local_lib}, $lib, 'App::Clod keeps its modules in the local lib' ) or diag $@;
@@ -392,7 +393,7 @@ subtest 'the share leaves what App::Clod sealed sealed' => sub {
         "$ws/work/1/test-org/one/file"        => '0640',
         "$guest/outside"                      => '0600',
     );
-    File::Slurper::Temp::write_text( $_, "bogus\n" ) for keys %file, "$home/clod-agent.token";
+    for my $key ( keys %file, "$home/clod-agent.token" ) { File::Slurper::Temp::write_text( $key, "bogus\n" ); }
     chmod oct( $mode{$_} ), $_ or die "chmod $_: $!" for keys %mode;
     chmod oct( $file{$_} ), $_ or die "chmod $_: $!" for keys %file;
     symlink "$guest/outside", "$ws/outside" or die "symlink: $!";
@@ -528,7 +529,7 @@ subtest 'the installer adds a source whose key has its fingerprint, and refuses 
         my ( $sources, @names ) = @_;
         unlink glob "$bin/*.argv";
         my $file = "$bin/sources.jsonl";
-        File::Slurper::Temp::write_text( $file, join q{}, map { ref $_ ? Cpanel::JSON::XS->new->canonical->encode($_) . "\n" : $_ } @$sources );
+        File::Slurper::Temp::write_text( $file, join q{}, map { local ($_) = $_; ref $_ ? Cpanel::JSON::XS->new->canonical->encode($_) . "\n" : $_ } @$sources );
         my $shim = q{
             my ( $f, $conf ) = splice @ARGV, 0, 2;
             do $f or die $@ || $!;
@@ -595,7 +596,7 @@ subtest 'the installer adds a source whose key has its fingerprint, and refuses 
     $deb->redefine( fetch => sub { return { success => 1, status => 200, content => $good } } );
     my %plain = %source;
     delete $plain{fingerprint};
-    my %first_boot = map { ( $_->{path} => ( ( $_->{encoding} // q{} ) eq 'b64' ? MIME::Base64::decode_base64( $_->{content} ) : $_->{content} ) ) } Provisioner::Packager::Deb->files( \%plain );
+    my %first_boot = map { local ($_) = $_; ( $_->{path} => ( ( $_->{encoding} // q{} ) eq 'b64' ? MIME::Base64::decode_base64( $_->{content} ) : $_->{content} ) ) } Provisioner::Packager::Deb->files( \%plain );
     is_deeply( { $written->() }, \%first_boot, 'with the files that first boot writes for it, the key trimmed alike' );
     is( sprintf( '%04o', ( stat "$apt/sources.list.d/vendor.sources" )[2] & oct 7777 ), '0644', 'which every account may read' );
     is_deeply( $ran->{update},  ["$apt/sources.list.d/vendor.sources"], 'then it updates that source, which {sources} in the command stands for' ) or diag explain $ran;

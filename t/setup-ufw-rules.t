@@ -54,7 +54,7 @@ subtest '--dry-run' => sub {
 
 subtest 'without --dry-run' => sub {
     my $calls = calls();
-    is_deeply( [ grep { m/--dry-run/ } @$calls ], [], 'no command is a dry run' );
+    is_deeply( [ grep { index( $_, '--dry-run' ) >= 0 } @$calls ], [], 'no command is a dry run' );
     ok( ( grep { $_ eq 'allow in OpenSSH' } @$calls ), 'and each profile is allowed' );
 };
 

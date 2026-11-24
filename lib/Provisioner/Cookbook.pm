@@ -7,6 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
+no autovivification;
 
 use Clone qw{clone};
 use Cpanel::JSON::XS();
@@ -213,7 +214,7 @@ sub fetch_hosts {
     my ($class) = @_;
 
     state %hosts;
-    my $hosts = $hosts{ join( "\0", @LIBDIRS ) } //= [ List::Util::uniq( sort map { $class->load($_)->fetch_hosts } $class->names ) ];
+    my $hosts = $hosts{ join( "\0", @LIBDIRS ) } //= [ List::Util::uniq( sort map { local ($_) = $_; $class->load($_)->fetch_hosts } $class->names ) ];
     return @$hosts;
 }
 
@@ -343,7 +344,7 @@ sub cache_classes {
     my ($class) = @_;
 
     state %classes;
-    my $classes = $classes{ join( "\0", @LIBDIRS ) } //= [ map { $class->load($_)->cache_classes } $class->names ];
+    my $classes = $classes{ join( "\0", @LIBDIRS ) } //= [ map { local ($_) = $_; $class->load($_)->cache_classes } $class->names ];
     return @$classes;
 }
 
@@ -394,7 +395,7 @@ sub distros_in_use {
 
     return map {
         my $name = $_;
-        map { [ $class->load($name), $_ ] } sort keys %{ $named{$name} }
+        map { local ($_) = $_; [ $class->load($name), $_ ] } sort keys %{ $named{$name} }
     } sort keys %named;
 }
 
@@ -737,7 +738,7 @@ my sub scaffold_walk ( $class, $named, %opts ) {
 
     # One entry for each named recipe.  The walk merges what each dependency
     # contributes into these.
-    my %domain_conf = map { $_ => clone( $base->{$_} // {} ) } @$named;
+    my %domain_conf = map { local ($_) = $_; $_ => clone( $base->{$_} // {} ) } @$named;
 
     my ( $modules, $builders ) = $class->resolve_dependencies(
         modules       => [@$named],
@@ -761,7 +762,7 @@ sub recipes_with {
     my ( $class, $named, %opts ) = @_;
 
     my ( $modules, $builders ) = scaffold_walk( $class, $named, %opts );
-    return grep { $builders->{$_}->is_module } @$modules;
+    return grep { local ($_) = $_; $builders->{$_}->is_module } @$modules;
 }
 
 =head2 scaffold_dependencies(\@named, %opts)
@@ -840,6 +841,7 @@ sub placeholders_in {
     my ( $class, $config, $path ) = @_;
 
     return map { $_->[0] } grep {
+        local ($_) = $_;
         my $value = ${ $_->[1] };
         defined $value && !ref $value && $value eq $class->PLACEHOLDER
     } Trog::Utils::slots_in( \$config, $path );
@@ -1076,7 +1078,7 @@ sub resolve_dependencies {
 
             # Also compare what the operator wrote for this recipe with what
             # its dependents asked for.
-            $builder->reconcile( $domain_conf->{$module}, $_ ) for ( $depmod_conf->{$module}, $as_written{$module} );
+            for my $item ( ( $depmod_conf->{$module}, $as_written{$module} ) ) { $builder->reconcile( $domain_conf->{$module}, $item ); }
         }
     }
 
@@ -1331,7 +1333,7 @@ C<$conf> is as for C<host_of>.
 sub domains {
     my ( $class, $conf ) = @_;
     $conf //= $class->configuration();
-    my @domains = sort grep { $class->configures( $_, $conf ) } keys %{$conf};
+    my @domains = sort grep { local ($_) = $_; $class->configures( $_, $conf ) } keys %{$conf};
     return @domains;
 }
 
@@ -1438,7 +1440,7 @@ my sub references ( $class, $domain, $conf ) {
     my ( @named, $declared );
     foreach my $guest ( $domain, $host || () ) {
         my $config = $class->domain_config( $guest, $conf );
-        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { $class->has($_) } keys %$config );
+        my %blocks = ( _global => $class->global_config( $guest, $conf ), map { $_ => $config->{$_} } grep { local ($_) = $_; $class->has($_) } keys %$config );
 
         foreach my $block ( sort keys %blocks ) {
             foreach my $slot ( Trog::Utils::slots_in( \$blocks{$block}, $block ) ) {
@@ -1469,7 +1471,9 @@ my sub references ( $class, $domain, $conf ) {
 # only when a reference is in _global.
 my sub weigh ( $class, @named ) {
     my $declared;
-    $_->{weak} = setting_marked( $class, 'x-weak', $_->{setting}, \$declared ) foreach grep { !defined $_->{weak} } @named;
+    for my $item ( grep { !defined $_->{weak} } @named ) {
+        $item->{weak} = setting_marked( $class, 'x-weak', $item->{setting}, \$declared );
+    }
     return;
 }
 

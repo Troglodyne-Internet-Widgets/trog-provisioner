@@ -139,7 +139,7 @@ sub list {
     my @names = Provisioner::Cookbook->names();
 
     if ($json) {
-        print $encoder->encode( [ map { { name => $_, abstract => Provisioner::Cookbook->abstract($_) } } @names ] );
+        print $encoder->encode( [ map { local ($_) = $_; { name => $_, abstract => Provisioner::Cookbook->abstract($_) } } @names ] );
         return 0;
     }
 

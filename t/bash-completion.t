@@ -82,6 +82,6 @@ is_deeply(
 my ( $out, $err ) = ( q{}, q{} );
 IPC::Run3::run3( [ 'bash', '-c', 'source "$1"; complete -p new_config provision destroy', 'bash', $completion ], \undef, \$out, \$err );
 is( $?, 0, 'the function is registered for each command' ) or diag $err;
-like( $out, qr/-F[ ]_trog_provisioner_domains[ ]$_$/m, "including $_" ) for qw{new_config provision destroy};
+for my $item (qw{new_config provision destroy}) { like( $out, qr/-F[ ]_trog_provisioner_domains[ ]$item$/m, "including $item" ); }
 
 done_testing();

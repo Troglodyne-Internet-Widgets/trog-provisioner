@@ -110,7 +110,7 @@ subtest 'auto-mode: a fragment it cannot use stops the build and leaves the sett
 sub basedir_with {
     my (@repos) = @_;
     my $base = tempdir( CLEANUP => 1 );
-    make_path("$base/$_/.git") for @repos;
+    for my $repo (@repos) { make_path("$base/$repo/.git"); }
     make_path("$base/not-a-repo");
 
     # The basedir a repository itself, which .*/.git matches as ./.git.

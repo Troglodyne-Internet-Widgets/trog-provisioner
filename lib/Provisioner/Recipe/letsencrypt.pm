@@ -306,7 +306,7 @@ sub enrich {
 
     # The zones of registrar accounts that hold a name of the certificate, longer
     # first, for the hook to choose a shortcut by.
-    my %zones = map { $_ => 1 } grep { defined } map { $registrar->zone_of( $_, $params{domain} ) } @{ $params{domain_aliases} };
+    my %zones = map { $_ => 1 } grep { defined } map { local ($_) = $_; $registrar->zone_of( $_, $params{domain} ) } @{ $params{domain_aliases} };
     $params{challenge_zones} = [ $registrar->longest_first( keys %zones ) ];
 
     return %params;
