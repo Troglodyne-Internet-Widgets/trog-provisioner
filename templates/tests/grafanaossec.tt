@@ -9,6 +9,14 @@ my $alerts_port = '[% alerts_port %]';
 my $datasource  = '[% datasource %]';
 my $influx      = 'http://127.0.0.1:8086';
 
+# The hosts that this test makes up.  The collector is a live one whose
+# database the backup keeps, so they go when the test ends, however it ends.
+my @fake_hosts;
+END {
+    local $?;
+    forget_hosts(@fake_hosts);
+}
+
 subtest 'the manager sends its alerts, and telegraf reads them' => sub {
     my $status = `/var/ossec/bin/ossec-control status 2>&1`;
     like( $status, qr/^ossec-csyslogd is running/m, 'ossec-csyslogd, the daemon of the output, is running' ) or diag $status;
@@ -50,6 +58,7 @@ subtest 'a root login on a guest arrives in influxdb as an alert about that gues
 
     # A name that no real guest has, so the alert can only be this one.
     my $guest = "ossec-selftest-$$-" . time() . '.test.test';
+    push @fake_hosts, $guest;
     my $stamp = strftime( '%b %e %H:%M:%S', localtime );
     my $line  = "<38>$stamp $guest sshd[4242]: Accepted publickey for root from 203.0.113.9 port 50486 ssh2: ED25519 SHA256:bogus\n";
     open( my $nc, '|-', 'nc', '-q1', '127.0.0.1', $cport ) or return fail("nc: $!");
@@ -81,5 +90,25 @@ subtest 'a root login on a guest arrives in influxdb as an alert about that gues
     is( $level, $alert->{crit}, 'and its level' );
     is( $groups, join( q{,}, grep { length } map { s/\A\s+|\s+\z//gr } split( m/,/, $alert->{classification} // q{} ) ), 'and its groups, without the spaces and the empty names' );
 };
+
+# Deletes the series of each host from every database, as the sender of a line
+# and as the host of an alert, and the log file that the collector keeps for
+# it.  DROP needs a POST.
+sub forget_hosts {
+    my @hosts = @_;
+    my $dbs   = eval { JSON::PP->new->decode(`curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>/dev/null`)->{results}[0]{series}[0]{values} } // [];
+    foreach my $db ( grep { $_ ne '_internal' } map { $_->[0] } @$dbs ) {
+        foreach my $host (@hosts) {
+            foreach my $tag (qw{hostname ossec_host}) {
+                my $q = qq{DROP SERIES WHERE "$tag" = '$host'};
+                open( my $curl, '-|', 'curl', '-sS', '-XPOST', "$influx/query", '--data-urlencode', "db=$db", '--data-urlencode', "q=$q" ) or die "curl: $!";
+                my $res = do { local $/; <$curl> } // q{};
+                warn "$db: $q: $res\n" if $res =~ m/"error"/ || !close($curl);
+            }
+        }
+    }
+    unlink map { "/var/log/hosts/$_.log" } @hosts;
+    return;
+}
 
 done_testing();
