@@ -1,0 +1,24 @@
+[%# The part of a guest test that asks postfix which clients skip the checks
+    of files/postfix.smtpd_restrictions.tt.  A mail guest and a mail relay both
+    include it.  192.0.2.254 is in a range for documentation, so no
+    configuration trusts it. -%]
+subtest 'port 25 trusts the trusted_clients, and no other client' => sub {
+    foreach my $list (qw{smtpd_client_restrictions smtpd_sender_restrictions}) {
+        my $value = `postconf -h $list 2>&1`;
+        my ($table) = $value =~ m/check_client_access\s+(inline:\{[^}]*\})/;
+[% IF trusted_clients.size() -%]
+        ok( $table, "$list asks a table of trusted clients" ) or diag $value;
+        next unless $table;
+        like( $value, qr/check_client_access.*reject_unknown_reverse_client_hostname/, 'before it checks the reverse DNS' ) or diag $value;
+        foreach my $address (qw{[% trusted_clients.join(' ') %]}) {
+            my $answer = `postmap -q '$address' '$table' 2>&1`;
+            chomp $answer;
+            is( $answer, 'OK', "postfix lets $address past the rest of $list" );
+        }
+        my $other = `postmap -q 192.0.2.254 '$table' 2>&1`;
+        is( $?, 256, 'and finds no other address' ) or diag $other;
+[% ELSE -%]
+        ok( !$table, "$list trusts no client" ) or diag $value;
+[% END -%]
+    }
+};

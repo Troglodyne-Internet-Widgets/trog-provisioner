@@ -775,4 +775,6 @@ subtest 'the resolver that SpamAssassin uses is one that URIBL answers' => sub {
 
 [% INCLUDE "files/postfix.greeting.test.tt" %]
 
+[% INCLUDE "files/postfix.trusted_clients.test.tt" %]
+
 done_testing();

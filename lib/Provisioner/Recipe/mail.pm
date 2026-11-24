@@ -192,6 +192,25 @@ else.  Port 53 does not clash, because the stub of systemd-resolved listens on
 C<pdns> on the same guest keeps 127.0.0.1.  C<unbound> recurses over port 53 to
 the authoritative servers, which the C<APT> profile of the firewall opens.
 
+=head3 Trusted clients
+
+Port 25 refuses a client whose address has no reverse DNS, whose reverse DNS
+does not resolve back to it, or that is on an RBL, and checks the sender.  A
+server that you must hear from can fail those checks, for example a server
+behind a home connection with no reverse DNS.  C<trusted_clients> names the
+addresses of such servers:
+
+    somedomain:
+        mail:
+            trusted_clients:
+                - 192.0.2.7
+
+A trusted client skips the checks of the client and of the sender.  It does
+not skip the checks of the recipient, so it can deliver only to the domains of
+this guest, as any other client can.  The list goes into the global half, so
+every domain on a machine must name the same list.  L<Provisioner::Recipe::mailrelay>
+takes the same setting.
+
 =head3 Relay and accounts
 
 The recipe can relay SMTP through another host.  C<relay.to> limits the relay
@@ -547,6 +566,7 @@ my $SPAM_FOLDER = qr/\A [^'%\r\n]+ \z/;
 my $FOLDER_NAME = q{\A(?![<\s])[^'"`%*?$\\\\/.#\r\n]+(?<!\s)\z};
 
 sub args {
+    my ($class) = @_;
     return (
         type       => 'object',
         properties => {
@@ -640,6 +660,8 @@ sub args {
 
             ipv6 => { type => 'boolean', default => 1 },
 
+            trusted_clients => { $class->trusted_clients_arg },
+
             # No default, because it depends on the guest: enrich turns it on
             # where main_ip is a public address.  A default here would say one
             # thing for every guest.
@@ -649,6 +671,38 @@ sub args {
             },
         },
     );
+}
+
+=head2 %field = $class->trusted_clients_arg()
+
+The schema of C<trusted_clients>, a new copy at each call.
+L<Provisioner::Recipe::mailrelay> takes the same field.  See L</Trusted clients>.
+
+=cut
+
+sub trusted_clients_arg {
+    return (
+        type        => 'array',
+        default     => [],
+        uniqueItems => 1,
+        items       => { anyOf => [ { type => 'string', format => 'ipv4' }, { type => 'string', format => 'ipv6' } ] },
+        description => 'The addresses of mail servers that skip the checks of the client and of the sender on port 25: reverse DNS, RBLs and the sender domain.  They still deliver only to the domains of this guest.  See "Trusted clients" in Provisioner::Recipe::mail.',
+    );
+}
+
+=head2 %settings = $recipe->machine_wide(%opts)
+
+C<trusted_clients>, as one string, because the global half writes the checks
+of port 25 for the whole machine.  See L<Provisioner::Recipe/machine_wide>.
+
+=cut
+
+sub machine_wide {
+    my ( $self, %opts ) = @_;
+
+    # bin/new_config compares each setting as a string.  The order of the list
+    # does not change what postfix does.
+    return ( trusted_clients => join( q{,}, sort @{ $opts{trusted_clients} // [] } ) );
 }
 
 =head2 @claims = $recipe->listens()
