@@ -32,6 +32,17 @@ is($kst[2] & 022, 0, 'and it is not group or world writable');
 # included, because the home can be the directory of the domain.
 is($st[2] & 022, 0, 'and the home directory is not group or world writable');
 
+# ssh refuses a config or a private key that the group can read, and skel can
+# bring both.
+{
+    my $dotssh = "$home/.ssh";
+    opendir( my $dh, $dotssh ) or die "cannot read $dotssh: $!";
+    my @private = grep { -f "$dotssh/$_" && ( $_ eq 'config' || ( m/^id_/ && !m/[.]pub\z/ ) ) } readdir $dh;
+    closedir $dh;
+    my @open = map { sprintf( '%s %04o', $_, ( stat "$dotssh/$_" )[2] & 07777 ) } grep { ( stat "$dotssh/$_" )[2] & 077 } sort @private;
+    is_deeply(\@open, [], 'no config or private key in the .ssh of the admin is open to the group or to others') or diag join "\n", @open;
+}
+
 # bin/provision runs the whole build over ssh as this user, and every command
 # uses sudo.  So sudo without a password is required.
 my $sudo = system("sudo -n -u [% admin_user %] sudo -n true >/dev/null 2>&1");
