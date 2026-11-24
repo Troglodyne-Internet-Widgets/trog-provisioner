@@ -58,6 +58,25 @@ subtest 'a prompt is asked with nothing left in @ARGV for it to open' => sub {
     ok( exists $asked[1]{opts}{-in}, 'including the handle to ask at' );
 };
 
+subtest 'the tmux badge of the run says that it asks while the prompt waits' => sub {
+    my @states;
+    my $tmux = Test::MockModule->new('Trog::Tmux');
+    $tmux->redefine( tmux    => sub { my ( $self, @args ) = @_; push @states, $args[5] if ( $args[4] // q{} ) eq '@provision_state'; return } );
+    $tmux->redefine( watched => sub { return 0 } );
+    $tmux->redefine( bell    => sub { return 1 } );
+    local $Trog::Tmux::CURRENT = bless { name => 'provision', pane => '%7', state => 'building' }, 'Trog::Tmux';
+
+    my @during;
+    my $prompter = Test::MockModule->new('IO::Prompter');
+    $prompter->redefine( prompt => sub { push @during, $Trog::Tmux::CURRENT->{state}; return 'typed' } );
+    my $utils = Test::MockModule->new('Trog::Utils');
+    $utils->redefine( output_is_redirected => sub { return 0 } );
+
+    is( Trog::Utils::prompt('Which one?'), 'typed', 'the answer comes back' );
+    is_deeply( \@during, ['asking'],            'the badge said asking while IO::Prompter waited' );
+    is_deeply( \@states, [qw{asking building}], 'and the build went back to building after the answer' );
+};
+
 subtest 'a question is asked at the terminal when only the output is redirected' => sub {
     my @asked;
     my $prompter = Test::MockModule->new('IO::Prompter');

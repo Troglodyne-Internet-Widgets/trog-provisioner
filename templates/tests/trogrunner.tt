@@ -192,6 +192,20 @@ else {
 diag 'skipped: no checkout here to run it from';
 [% END %]
 
+# A tmux server of its own reads /etc/tmux.conf, which sources the badge of a
+# build, and draws the state that Trog::Tmux sets on a window.
+{
+    my $sock = "/tmp/trogrunner-recipe-test.$$";
+    my @tmux = ('tmux', '-S', $sock, '-f', '/etc/tmux.conf');
+    my $tmux = sub { my $cmd = join ' ', map { "'$_'" } @tmux, @_; my $out = qx{$cmd 2>&1}; chomp $out; return $out };
+
+    $tmux->(qw{new-session -d -s test sleep 60});
+    ok(length $tmux->(qw{show -gv @provision_badge}), 'tmux reads the badge of a build through /etc/tmux.conf');
+    $tmux->(qw{set -w -t test:0 @provision_state failed});
+    like($tmux->(qw{display -p -t test:0}, '#{E:window-status-format}'), qr/colour196/, 'and draws a failed build on its window');
+    $tmux->('kill-server');
+}
+
 [% INCLUDE "files/reboot_check.test.tt" WITH name = "trogrunner-" _ domain, reason = "^provisions running: [0-9]+$", may_pass = 1 %]
 
 done_testing;

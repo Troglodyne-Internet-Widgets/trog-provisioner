@@ -11,6 +11,7 @@ use IO::Prompter();
 use IO::Interactive::Tiny();
 use File::Slurper::Temp();
 use Socket();
+use Trog::Tmux();
 
 =head1 NAME
 
@@ -91,6 +92,9 @@ from standard input.  Without that, L<IO::Prompter> shows neither the question
 nor the masked echo, and the program waits with nothing on the screen.  A
 C<-out> from the caller is used as given.
 
+While it waits for the answer, the tmux badge of the run shows that it asks.
+See L<Trog::Tmux/asking>.
+
 =cut
 
 # Where a question goes when the output is redirected.  A test points it at a file.
@@ -106,7 +110,7 @@ sub prompt {
     }
 
     local *ARGV = join ' ', @ARGV;
-    my $answer = IO::Prompter::prompt( $message, %opts );
+    my $answer = Trog::Tmux->asking( sub { IO::Prompter::prompt( $message, %opts ) } );
     close($tty) or die "Cannot close $TERMINAL: $!\n" if $tty;
     return $answer;
 }

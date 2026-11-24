@@ -212,6 +212,22 @@ commented out, and the recipe leaves that file alone.  So the completion works
 in a tmux pane and in an ssh session, which start login shells by default.  A
 plain C<bash> that is not a login shell has no completion.  Run C<bash -l> there.
 
+=head3 TMUX
+
+A build that F<bin/provision> runs in the foreground of a tmux pane shows its
+state after the name of the window, from the window option
+C<@provision_state> that L<Trog::Tmux> sets: a blue gear while building, a
+white C<?> on red while it asks, and a green check or a red cross when it ended
+and is not yet seen.  To look at the window marks the end seen.  Asking and the
+end also ring the bell, which flags the window.
+
+F</etc/tmux.conf.d/provision.conf> draws it, and F</etc/tmux.conf> sources
+every file in F</etc/tmux.conf.d>.  The file sets the same
+C<window-status-format> as F<claude.conf> of L<Provisioner::Recipe::claude>,
+which names both badges, so either recipe draws both.  tmux reads
+F<~/.tmux.conf> after it, so a setting there wins.  The badge needs tmux 3.2 or
+later.
+
 =head3 REBOOTS
 
 The recipe installs a reboot check that holds a reboot while perl runs
@@ -996,6 +1012,7 @@ sub template_files {
         'trogrunner.bwrap.apparmor.tt'        => 'trogrunner.bwrap.apparmor',
         'trogrunner.completion.bash'          => 'trogrunner.completion.bash',
         'trogrunner.reboot-check.tt'          => 'trogrunner-reboot-check',
+        'trogrunner.tmux.conf.tt'             => 'trogrunner.tmux.conf',
     );
 }
 

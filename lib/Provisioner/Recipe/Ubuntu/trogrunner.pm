@@ -57,6 +57,9 @@ that need one.
 puts F<completions/trog-provisioner.bash> into F</etc/bash_completion.d>, and
 this package is what reads that directory.  See L<Provisioner::Recipe::trogrunner/TAB COMPLETION>.
 
+=item * C<tmux> for the badge of a build on the window that runs it.  See
+L<Provisioner::Recipe::trogrunner/TMUX>.
+
 =back
 
 C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
@@ -80,6 +83,7 @@ sub deps {
       gpg
       bubblewrap
       bash-completion
+      tmux
     };
 }
 
