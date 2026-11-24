@@ -17,6 +17,12 @@ use Test::More;
 use Test::NoWarnings;
 use File::Temp qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use File::Copy();
+use IPC::Run3();
+use IO::Socket::IP;
+use IO::Select;
+use Time::HiRes();
 
 use FindBin::libs;
 
@@ -211,9 +217,90 @@ subtest 'a forwarded copy is written where the ruleset will still reach it' => s
 
     # RFC5424 with octet-counted framing, which keeps the fields of each
     # message.  The rsyslog default is RFC3164, which keeps none of them.
-    like( $ruleset, qr/template="RSYSLOG_SyslogProtocol23Format"/, 'forwarded as RFC5424' );
-    like( $ruleset, qr/TCP_Framing="octet-counted"/,               'and framed the way the reader expects' );
+    like( $ruleset, qr/template="logcollector-rfc5424"/,       'forwarded as RFC5424' );
+    like( $conf,    qr/template\(name="logcollector-rfc5424"/, 'with a template that the file defines' );
+    like( $ruleset, qr/TCP_Framing="octet-counted"/,           'and framed the way the reader expects' );
 };
+
+# The rendered configuration, run by rsyslogd itself.  A message sent as
+# "tag: text" must reach the reader of the RFC5424 copy as "text", with no
+# space in front, and the copy as text must stay what OSSEC decodes.
+subtest 'a message forwarded as RFC5424 starts at its first character' => sub {
+    plan skip_all => 'RELEASE_TESTING only' unless $ENV{RELEASE_TESTING};
+
+    # Not the installed binary.  Its AppArmor profile lets it read only the
+    # configuration under /etc, so it cannot open the one rendered here.  A copy
+    # at another path runs without the profile.
+    my $run = tempdir( CLEANUP => 1 );
+    File::Copy::copy( '/usr/sbin/rsyslogd', "$run/rsyslogd" ) or plan skip_all => "no rsyslogd here: $!";
+    chmod( 0700, "$run/rsyslogd" )                            or die "chmod: $!";
+
+    my $rfc5424 = IO::Socket::IP->new( LocalHost => '127.0.0.1', LocalPort => 0, Listen => 1 ) or die "listen: $!";
+    my $text    = IO::Socket::IP->new( LocalHost => '127.0.0.1', LocalPort => 0, Listen => 1 ) or die "listen: $!";
+    my $free    = IO::Socket::IP->new( LocalHost => '127.0.0.1', LocalPort => 0, Listen => 1 ) or die "listen: $!";
+    my $port    = $free->sockport;
+    close($free) or die "close: $!";
+
+    my ( $dir, undef ) = generated(
+        port         => $port,
+        log_dir      => tempdir( CLEANUP => 1 ),
+        forward      => [ '127.0.0.1:' . $rfc5424->sockport ],
+        forward_text => [ '127.0.0.1:' . $text->sockport ],
+    );
+
+    File::Slurper::Temp::write_text( "$run/rsyslog.conf", qq{global(workDirectory="$run")\n} . slurp( $dir, 'logcollector.conf' ) );
+
+    # Without -n it detaches, and its parent exits once the daemon is up.
+    my $out = q{};
+    IPC::Run3::run3( [ "$run/rsyslogd", '-f', "$run/rsyslog.conf", '-i', "$run/pid" ], \undef, \$out, \$out );
+    my ($pid) = ( eval { File::Slurper::read_text("$run/pid") } // q{} ) =~ m/\A([1-9][[:digit:]]*)\s*\z/;
+    ok( $pid, 'rsyslogd starts on the rendered configuration' ) or return diag $out;
+
+    my $sender;
+    foreach ( 1 .. 50 ) {
+        $sender = IO::Socket::IP->new( PeerHost => '127.0.0.1', PeerPort => $port ) and last;
+        Time::HiRes::sleep(0.1);
+    }
+    my $text_msg = 'hardening_index=1 warnings=0';
+    my ( $framed, $as_text ) = ( q{}, q{} );
+    if ( ok( $sender, 'and listens on the port of the collector' ) ) {
+        print {$sender} "<13>Nov 24 10:00:00 guest1.test.test lynis: $text_msg\n";
+        close($sender) or diag "close: $!";
+        $framed  = receive($rfc5424);
+        $as_text = receive($text);
+    }
+    kill( 'TERM', $pid );
+
+    my ( $length, $frame ) = $framed =~ m/\A([[:digit:]]+)[ ](.*)\z/s;
+    ok( defined $length, 'the RFC5424 copy is octet-counted' ) or return diag $framed;
+    is( length $frame, $length, 'and its count is the length of the frame' );
+
+    # PRI VERSION TIMESTAMP HOSTNAME, then APP-NAME, three nil fields
+    # (PROCID MSGID SD), and the message.
+    my $head = qr/<13>1[ ]\S+[ ]guest1[.]test[.]test[ ]/;
+    my $nils = qr/-[ ]-[ ]-[ ]/;
+    my ( $app, $msg ) = $frame =~ m/\A$head(\S+)[ ]$nils(.*?)\n?\z/s;
+    is( $app, 'lynis',   'the tag is the APP-NAME' ) or diag $frame;
+    is( $msg, $text_msg, 'and the message starts at its first character, with no space in front' );
+
+    like( $as_text, qr/[ ]lynis:[ ]\Q$text_msg\E\n\z/, 'the copy as text keeps one space after the tag' );
+};
+
+# What one connection to the listener receives before it closes, or in five
+# seconds.
+sub receive {
+    my ($listener) = @_;
+    return q{} unless IO::Select->new($listener)->can_read(5);
+    my $conn = $listener->accept or return q{};
+    my $sel  = IO::Select->new($conn);
+    my $got  = q{};
+    while ( $sel->can_read(1) ) {
+        last unless sysread( $conn, my $buf, 65536 );
+        $got .= $buf;
+        last if $got =~ m/\n\z/;
+    }
+    return $got;
+}
 
 subtest 'the same destination asked for twice is forwarded to once' => sub {
     my ( undef, $recipe ) = generated();

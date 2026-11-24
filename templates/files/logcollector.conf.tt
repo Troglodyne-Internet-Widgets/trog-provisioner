@@ -23,6 +23,13 @@ $AllowedSender UDP, [% sender %]
 [% END -%]
 
 template(name="logcollector-perhost" type="string" string="[% log_dir %]/%HOSTNAME:::secpath-replace%.log")
+[%# RSYSLOG_SyslogProtocol23Format, less the one space that "tag: text" leaves
+    at the start of the message.  Provisioner::Recipe::logcollector has the
+    whole account. -%]
+[% IF forward.size() -%]
+template(name="logcollector-rfc5424" type="string"
+         string="<%PRI%>1 %TIMESTAMP:::date-rfc3339% %HOSTNAME% %APP-NAME% %PROCID% %MSGID% %STRUCTURED-DATA% %msg:R,ERE,1,DFLT:^ ?(.*)--end%\n")
+[% END -%]
 
 ruleset(name="logcollector") {
     action(type="omfile" dynaFile="logcollector-perhost" dirCreateMode="0755" fileCreateMode="0640")
@@ -35,7 +42,7 @@ ruleset(name="logcollector") {
 [% FOR dest IN forward -%]
 [% parts = dest.split(':') -%]
     action(type="omfwd" target="[% parts.0 %]" port="[% parts.1 %]" protocol="tcp"
-           template="RSYSLOG_SyslogProtocol23Format" TCP_Framing="octet-counted"
+           template="logcollector-rfc5424" TCP_Framing="octet-counted"
            action.resumeRetryCount="-1"
            queue.type="linkedList" queue.size="10000")
 [% END -%]

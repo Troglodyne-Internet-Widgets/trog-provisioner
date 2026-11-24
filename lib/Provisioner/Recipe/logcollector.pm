@@ -57,6 +57,14 @@ severity, the facility, the host and the application as fields, and the framing
 says where each message ends.  RFC3164, which rsyslog sends by default, keeps
 neither, and some parsers reject it.
 
+The template is C<RSYSLOG_SyslogProtocol23Format> with one change: it takes
+away one space at the start of the message.  The guests send RFC3164, which is
+C<tag: text>.  rsyslog keeps the space after the colon in the message, and
+C<RSYSLOG_SyslogProtocol23Format> puts its own space in front of the message.
+So with the stock template, the message that the reader stores starts with a
+space, and a pattern anchored at the start of it matches nothing.  A message
+from an RFC5424 sender has no such space, and goes out unchanged.
+
 A recipe that reads the stream requires this recipe and asks for a copy on a
 loopback port.  So it gets the logs of the fleet without a second listener on
 the network, and this recipe does not need to know what it does with them.
