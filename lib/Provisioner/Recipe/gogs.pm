@@ -43,6 +43,8 @@ C<$install_dir/git.$domain>, which is a directory name and not a hostname.
 The package names are in the subclass for each distribution, for example
 L<Provisioner::Recipe::Ubuntu::gogs>.
 
+=head1 METHODS
+
 =head2 %required = $recipe->required_recipes(%opts)
 
 Requires C<nginxproxy>, with a vhost on port 80 that redirects to SSL and a vhost
@@ -52,6 +54,11 @@ turns IPv6 on or off for the port 443 vhost, and it is on by default.
 Also requires C<cron> when C<github_users> or C<github_orgs> names anything.  It
 installs F<gogs-mirror.cron> as F</etc/cron.d/gogs-mirror>, which mirrors them
 into gogs.
+
+Returns a list of pairs, from the name of each required recipe to a code
+reference that returns its options.
+
+    my %required = $recipe->required_recipes( ipv6 => 0, github_users => ['someuser'] );
 
 =cut
 
@@ -81,6 +88,10 @@ sub required_recipes {
 
 3000 on 127.0.0.1, where nginx sends the requests for gogs.
 
+Returns the one claim C<127.0.0.1:3000>, as a list.
+
+    my @claims = $recipe->listens();
+
 =cut
 
 sub listens {
@@ -93,6 +104,10 @@ False.  One gogs is one site.  C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,
 and the repositories, the database and the sessions are all in the directory of
 that domain.  A second domain on the guest rewrites all of them to point at
 itself.
+
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
 
 =cut
 
@@ -111,6 +126,10 @@ C<remote_files> salvages that file.  Before the fragment installs a new
 F<app.ini>, it takes the key out of the old one.  It makes a new key only when
 there is no key.  If you set C<secret_key> in F<recipes.yaml>, that value
 replaces the key on the guest.  Use this for a key that you keep somewhere else.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -138,6 +157,11 @@ sub args {
 Maps each template in F<templates/files/> to the file name that the fragment
 installs: the systemd unit, F<app.ini>, the setup script and the mirror script.
 
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -154,6 +178,10 @@ sub template_files {
 
 C<gogs>, the directory under the domain directory that receives the salvage.
 
+Returns that one name, as a list.
+
+    my @dirs = $recipe->datadirs();
+
 =cut
 
 sub datadirs {
@@ -165,6 +193,13 @@ sub datadirs {
 Puts the salvaged C<gogs> directory back at C<$install_dir/git.$domain>.  That
 is every repository, the issue database and the users.  The C<data> target does
 the restore before the target of this recipe runs.
+
+C<%opts> must hold C<install_dir> and C<domain>.
+
+Returns the pair C<$install_dir/git.$domain> and a hash reference whose
+C<from> is C<$install_dir/$domain/gogs>.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'test.test' );
 
 =cut
 
@@ -186,6 +221,19 @@ again.  See C<restores> above for where it goes back.
 F<custom/conf/app.ini> is in that directory, so C<SECRET_KEY> survives a
 rebuild.  See C<args> above.
 
+=over 4
+
+=item install_dir - Str - the directory that holds the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns the pair C<$install_dir/git.$domain/> and C<gogs/>, the path on the
+guest and where its salvage goes.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
+
 =cut
 
 sub remote_files {
@@ -197,7 +245,9 @@ sub remote_files {
 
 =head2 @tests = $recipe->tests()
 
-F<gogs.tt>, the test that runs on the guest.
+Returns a list of the test templates that run on the guest: F<gogs.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 
@@ -212,6 +262,11 @@ login fails.  It answers the failed C<POST /user/login> with a 200 and the
 form again, and a good one with a redirect, so the jail reads the access log
 of nginx for the 200.  That log is shared by every vhost on the guest, so
 another vhost that answers C<POST /user/login> with a 200 counts too.
+
+Returns the pair C<gogs-login> and a hash reference of the settings of that
+jail for fail2ban.
+
+    my %jails = $recipe->jails();
 
 =cut
 
@@ -233,6 +288,10 @@ GitHub, which serves the release tarballs of gogs.  See C<github_release_hosts>
 in L<Provisioner::Recipe>.  Also C<api.github.com>, which F<gogs.mirror.sh> asks
 for the list of repositories of each user and organization.
 
+Returns the host names, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -245,6 +304,10 @@ sub fetch_hosts {
 
 The classes for GitHub.  L<Provisioner::Recipe> keeps them, so that each recipe
 that downloads a release does not carry its own copy.
+
+Returns what C<github_release_classes> returns, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

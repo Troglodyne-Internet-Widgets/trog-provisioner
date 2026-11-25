@@ -88,7 +88,7 @@ services that are running.
 C<cpanminus> and C<make>, which cpanm needs to get a distribution from CPAN.
 Configd itself needs only core modules.
 
-=head3 args
+=head3 The options
 
 =over 4
 
@@ -117,6 +117,17 @@ The install is still held to C<version>, because cpanm does not know the
 version of a source until it unpacks it.
 
 =back
+
+=head1 METHODS
+
+=head2 %schema = $recipe->args()
+
+The schema of L</The options>: C<languages>, a list of words, C<version> and
+C<source>, strings.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -147,6 +158,17 @@ sub args {
     );
 }
 
+=head2 %opts = $recipe->enrich(%opts)
+
+Removes the duplicates from C<languages> and sorts it, because several recipes
+that ask for one language each add it to the list.
+
+Returns C<%opts>, with C<languages> replaced by the sorted array reference.
+
+    my %opts = $recipe->enrich( languages => [qw{ossec nginx ossec}] );
+
+=cut
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
@@ -156,6 +178,14 @@ sub enrich {
 
     return %opts;
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<configd.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{configd.tt};

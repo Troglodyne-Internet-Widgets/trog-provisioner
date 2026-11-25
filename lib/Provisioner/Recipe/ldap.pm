@@ -117,11 +117,16 @@ account is C<ldapusers>.
 
 An account has no password.  It logs in with a key.
 
-=cut
+=head1 METHODS
 
 =head2 @claims = $recipe->listens(%opts)
 
 slapd: LDAP on 389, and LDAP over TLS on C<port>, both on every address.
+C<port> is 636 when C<%opts> does not give it.
+
+Returns the two ports, as a list.
+
+    my @claims = $recipe->listens( port => 636 );
 
 =cut
 
@@ -141,9 +146,23 @@ TLS certificate all use the name of the domain that configured it.
 If a second domain on the same guest names ldap, its target does not run.  It
 does not overwrite the first directory, but it gets no directory of its own.
 
+    my $multi = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 args()
+
+The schema of the options: C<admin_password>, which is required and secret,
+C<base_dn>, C<port>, which is 636 by default, C<github>, the organization to
+keep accounts for, and C<users>, the accounts to seed.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -183,6 +202,18 @@ sub args {
     );
 }
 
+=head2 %opts = $recipe->enrich(%opts)
+
+Sets C<base_dn> from C<domain> when it is not given, so that C<test.test>
+becomes C<dc=test,dc=test>.  Sets C<ldap_domain>, the domain that debconf
+gives slapd, from C<base_dn>, and C<base_dc>, the first C<dc> of C<base_dn>.
+
+Returns C<%opts> with those keys set.
+
+    my %enriched = $recipe->enrich( domain => 'test.test' );
+
+=cut
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
@@ -204,6 +235,21 @@ sub enrich {
 
     return %opts;
 }
+
+=head2 template_files()
+
+The apparmor profile, the debconf seed of slapd, the LDIF of the seed and of
+TLS, the scripts and the cron of the export, the reload and configure scripts,
+the sync from GitHub with its configuration and cron, and the ufw profile.
+They are rendered for every domain, whichever recipes are loaded, so it takes
+no list of recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ($self) = @_;
@@ -237,6 +283,11 @@ F</etc/cron.d/ldap-github-sync>.
 C<letsencrypt>, which reloads C<slapd> when it links or renews the certificate
 that LDAPS serves.
 
+Returns a list of pairs, from the name of each recipe to a sub that returns
+its options.
+
+    my %required = $recipe->required_recipes( github => { org => 'test-org' } );
+
 =cut
 
 sub required_recipes {
@@ -250,11 +301,25 @@ sub required_recipes {
 
 =head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
+=over 4
+
+=item install_dir - Str - the directory on the guest that holds the domains
+
+=item domain - Str - the domain that this recipe is configured for
+
+=back
+
 With C<github>, the token that C<ldap-github-sync> asks GitHub with, as
 F</etc/ldap/github-sync.token>.  Nothing without it.
 
 An operator adds the token to the store.  A provision that finds none stops and
 says how to add it, because no value that the provisioner can make is a token.
+The C<generate> sub of the entry is what dies with those instructions.
+
+Returns a list of the path on the guest and a hash reference of C<ref>,
+C<generate> and C<mode>, or nothing without C<github>.
+
+    my %files = $recipe->guest_secrets( '/opt/domains', 'test.test', github => { org => 'test-org' } );
 
 =cut
 
@@ -277,6 +342,11 @@ sub guest_secrets {
 C<json>, which F<ldap.github-sync.json.tt> writes the configuration of the
 sync with.
 
+Returns the pair C<json> and its formatter, which encodes a value as canonical,
+pretty JSON.
+
+    my %formatters = $recipe->formatters();
+
 =cut
 
 sub formatters {
@@ -287,12 +357,29 @@ sub formatters {
 
 Returns C<ldap-export.sh>, which the guest runs before the fetch.  The cron runs
 it each hour, so without this call a rebuild can lose up to an hour of changes.
+The command is the same for every domain.
+
+    my @commands = $recipe->remote_prepare( '/opt/domains', 'test.test' );
 
 =cut
 
 sub remote_prepare {
     return ('/usr/local/sbin/ldap-export.sh');
 }
+
+=head2 %restores = $recipe->restores(%opts)
+
+The export directory F</var/backups/ldap>, restored from C<ldap> in the data
+directory of the domain, owned by root, with no access for others.  The
+export goes there and not into slapd; F<ldap-reload.sh> loads it later.
+C<%opts> gives C<install_dir> and C<domain>.
+
+Returns a list of the path on the guest and a hash reference of C<from>,
+C<owner> and C<mode>.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'test.test' );
+
+=cut
 
 sub restores {
     my ( $self,        %opts )   = @_;
@@ -305,12 +392,37 @@ sub restores {
     return ( '/var/backups/ldap' => { from => "$install_dir/$domain/ldap", owner => 'root:root', mode => 'u=rwX,go=' } );
 }
 
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+=over 4
+
+=item install_dir - Str - the directory on the guest that holds the domains
+
+=item domain - Str - the domain that this recipe is configured for
+
+=back
+
+Returns the pair of F</var/backups/ldap/> on the guest and C<ldap> in the
+data directory, which the fetch copies back.  It is the same for every domain.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
+
+=cut
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
         '/var/backups/ldap/' => 'ldap',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<ldap.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{ldap.tt};

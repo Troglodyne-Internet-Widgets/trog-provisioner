@@ -76,22 +76,21 @@ configuration.  If a node keeps its data in another place, the fetch finds
 nothing, and you must add that path to the backup targets.  C<restores> gets
 the configuration, so the restore uses the configured paths.
 
-=cut
-
-=head2 $version = Provisioner::Recipe::garage->latest_version()
-
-The newest stable garage release, as its tag: C<v2.4.1>.
-
-It reads the tag list on GitHub, not the releases, because that repository is
-a mirror with no releases.  If GitHub does not answer, it warns and returns
-C<$FALLBACK_VERSION>.  Without the warning, an older garage than you asked for
-goes unnoticed.
-
-The answer stays in C<$LATEST> until the process ends.  So every guest that
-one run of C<bin/new_config> builds gets the same version from one request.
+=head1 METHODS
 
 =cut
 
+# The newest stable garage release, as its tag, such as C<v2.4.1>.
+#
+# It reads the tag list on GitHub, not the releases, because that repository is
+# a mirror with no releases.  If GitHub does not answer, it warns and returns
+# C<$FALLBACK_VERSION>.  Without the warning, an older garage than you asked for
+# goes unnoticed.
+#
+# The answer stays in C<$LATEST> until the process ends.  So every guest that
+# one run of C<bin/new_config> builds gets the same version from one request.
+# @returns Str  the tag of the release
+# @example my $version = Provisioner::Recipe::garage->latest_version();
 sub latest_version {
     return $LATEST if defined $LATEST;
 
@@ -118,6 +117,20 @@ the rest of the cluster stops talking to this node.  It is also never in the
 domain directory, which goes into every backup.  See C<guest_secrets> in
 L<Provisioner::Recipe>.
 
+=over 4
+
+=item install_dir - Str - the directory of the domains on the guest
+
+=item domain - Str - the domain, which names the secret in the store
+
+=back
+
+Returns one pair, from the path on the guest to a hash reference with C<ref>,
+the reference in the secret store, C<generate>, a sub that makes a new secret,
+C<owner> and C<mode>.
+
+    my %files = $recipe->guest_secrets( '/opt/domains', 'test.test' );
+
 =cut
 
 sub guest_secrets {
@@ -132,6 +145,20 @@ sub guest_secrets {
         },
     );
 }
+
+=head2 %restores = $recipe->restores(%opts)
+
+Puts C<data_dir> and the F<snapshots> directory under C<metadata_dir> back from
+the salvage of the domain, under C<install_dir> and C<domain> of C<%opts>.  The
+two directories default to those of the schema, because C<required_recipes>
+calls this before validation.
+
+Returns two pairs, from each path on the guest to a hash reference whose
+C<from> is the path of the salvage.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'test.test' );
+
+=cut
 
 sub restores {
     my ( $self,        %opts )   = @_;
@@ -148,6 +175,18 @@ sub restores {
     );
 }
 
+=head2 rate_limits()
+
+The ports that the application profile of ufw opens, 3900 to 3903, each at a
+limit of 1024.  It takes no options, so the limits do not follow a port that
+the configuration moves.
+
+Returns a list of pairs, from each port to its limit.
+
+    my %limits = $recipe->rate_limits();
+
+=cut
+
 sub rate_limits {
 
     # The ports that templates/files/ufw.garage.tt opens.
@@ -162,6 +201,13 @@ token that garage does not know.  garage logs each refusal to the journal:
     2026-09-19T16:19:53.523536Z  INFO garage_api_common::generic_server: error 403 Forbidden, Forbidden: No such key: GKbogus0000000000000000000 in response to 192.168.122.57:53962 (key GKbogus0000000000000000000) GET /
 
 and C<Invalid bearer token> in place of C<No such key> on the admin API.
+
+The jail watches C<api_port> and C<admin_port> of C<%opts>, which default to
+3900 and 3903.
+
+Returns one pair, from C<garage-auth> to the settings of the jail.
+
+    my %jails = $recipe->jails( api_port => 3900, admin_port => 3903 );
 
 =cut
 
@@ -188,6 +234,10 @@ False.  The endpoints this node answers on are one domain's: C<root_domain> is
 C<.s3.E<lt>domainE<gt>> and C<.web.E<lt>domainE<gt>> in the single
 F</etc/garage.toml> it reads.  A second domain would not be served beside the
 first, it would take its place.
+
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
 
 =cut
 
@@ -228,6 +278,10 @@ download, or C<latest> for the newest stable one.  C<enrich> looks that up.
 
 =back
 
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 # latest, or the tag of a release.
@@ -265,6 +319,10 @@ Changes a C<version> of C<latest> into the current release.  This is not in
 C<args>, so C<bin/recipes>, C<bin/new_guest> and the tests can ask what this
 recipe takes without a network request.
 
+Returns the options, as a list of pairs.
+
+    my %opts = $recipe->enrich( version => 'latest' );
+
 =cut
 
 sub enrich {
@@ -274,6 +332,19 @@ sub enrich {
 
     return %opts;
 }
+
+=head2 template_files()
+
+The configuration, the unit, the script that sets up the layout and the
+buckets, and the snapshot script and its cron file.  It takes no list of
+recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     return (
@@ -289,6 +360,10 @@ sub template_files {
 
 C<cron>, which installs F<garage-snapshot.cron> as F</etc/cron.d/garage-snapshot>.
 
+Returns one pair, from C<cron> to a sub that returns its options.
+
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -300,12 +375,35 @@ sub required_recipes {
 Returns C<garage-snapshot.sh>, which the guest runs before the fetch.  The
 metadata says which object is which, so a rebuild needs a snapshot that matches
 the objects fetched with it.  The nightly snapshot is older than they are.
+It takes no arguments of its own.
+
+    my @commands = $recipe->remote_prepare();
 
 =cut
 
 sub remote_prepare {
     return ('/usr/local/sbin/garage-snapshot.sh');
 }
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+The objects, F</var/lib/garage/data/>, and the metadata snapshots,
+F</var/lib/garage/meta/snapshots/>.  Always the default directories, because
+the callers do not pass C<data_dir>.  See L</Surviving a rebuild>.
+
+=over 4
+
+=item install_dir - Str - the directory of the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns two pairs, from each path on the guest to its path in the salvage.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
+
+=cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
@@ -324,6 +422,14 @@ sub remote_files {
     );
 }
 
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<garage.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
+
 sub tests {
     return qw{garage.tt};
 }
@@ -333,6 +439,10 @@ sub tests {
 C<garagehq.deuxfleurs.fr>, which serves garage's binaries.  Not
 C<api.github.com>: the version is looked up by C<bin/new_config>, not by the
 guest.
+
+Returns the host name.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 
@@ -344,6 +454,11 @@ sub fetch_hosts {
 
 A published release is that release for good.  The tag list is not: it is what
 says which release is current, and C<latest_version> reads it every build.
+
+Returns two hash references, each with C<class> and C<pattern>, the pattern of
+nginx for the URLs of that class.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

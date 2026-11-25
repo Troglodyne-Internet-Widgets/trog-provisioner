@@ -36,6 +36,18 @@ Every jail bans through ufw, not the C<nftables> that Ubuntu sets as the default
 So a ban and the rate limits of C<ufw> are in one firewall.  fail2ban on Ubuntu
 enables its C<sshd> jail by default, and that jail bans through ufw too.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<jails>, a map from the name of each jail to its
+settings, each a string or an integer.  It is empty by default, and the jails
+of the other recipes of the domain fill it in.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -60,11 +72,31 @@ sub args {
     );
 }
 
+=head2 template_files()
+
+The one file of jails, which takes no list of recipes: F<jail.cfg> from
+F<fail2ban.jail.tt>.
+
+Returns a list of pairs, from the template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
 
     return ( 'fail2ban.jail.tt' => 'jail.cfg' );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<fail2ban.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{fail2ban.tt};

@@ -96,6 +96,18 @@ no guest uses, and C<usb-storage>, because nobody plugs a disk into a guest.
 
 A module that is already loaded stays loaded until the next boot.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<sysctl>, a map from each sysctl key to an integer,
+with a default for each key that L</sysctl> names, and C<blocked_modules>, a
+list of names of kernel modules.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -129,12 +141,32 @@ sub args {
     );
 }
 
+=head2 template_files()
+
+The drop-in of sysctl and the drop-in of modprobe, which are the same on every
+guest, so it takes no list of recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         'hardening.sysctl.conf.tt'   => 'hardening_sysctl.conf',
         'hardening.modprobe.conf.tt' => 'hardening_modprobe.conf',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<hardening.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{hardening.tt};

@@ -33,6 +33,19 @@ the Ubuntu cloud image ships.
 
 use parent qw{Provisioner::Recipe};
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<grub_vars>, which is required, a map of at least
+one variable name to a string.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
+
 sub args {
     return (
         type       => 'object',
@@ -48,6 +61,18 @@ sub args {
     );
 }
 
+=head2 template_files()
+
+The one file of grub variables, which takes no list of recipes:
+F<99-grubconf.cfg> from F<grubconf.tt>.
+
+Returns a list of pairs, from the template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
 
@@ -55,6 +80,14 @@ sub template_files {
         'grubconf.tt' => '99-grubconf.cfg',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<grubconf.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{grubconf.tt};

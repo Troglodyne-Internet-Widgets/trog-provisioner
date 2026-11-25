@@ -56,6 +56,18 @@ C<$HOME> when they are not set.
 None.  The fragment needs C<curl>, C<sha256sum> and C<tar>, which every
 image has.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<version>, the release of Go, and C<sha256>, the
+SHA-256 of its archive.  Each has a default, the release that this recipe was
+last checked against.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -78,6 +90,14 @@ sub args {
     );
 }
 
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<go.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
+
 sub tests {
     return qw{go.tt};
 }
@@ -86,6 +106,10 @@ sub tests {
 
 C<go.dev>, which the URL of the archive names, and C<dl.google.com>, where
 go.dev redirects the download.
+
+Returns the two host names as a list.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 

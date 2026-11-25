@@ -116,7 +116,7 @@ names a gogs host.  But if an https clone fails for a short time against a
 cached host, the fallback does not recover it.  On a guest with no cache, it
 does.
 
-=cut
+=head1 METHODS
 
 =head2 %required = $recipe->required_recipes(%opts)
 
@@ -130,6 +130,13 @@ Neither is given a login or a key.  An administrator logs in as themselves and
 forwards their own key; the host keys are the half of that which the guest has
 to have either way, because the C<ssh_url> fallback in F<scripts/repos_for>
 meets the same prompt as any other push and nothing is there to answer it.
+
+Returns a list of pairs, from the name of each required recipe to a code
+reference that takes the options of this recipe and returns the options of
+that one.
+
+    my %required = $recipe->required_recipes();
+    my %git      = $required{git}->( admin_user => 'admin', repos_from => [ { api_url => 'https://forge.test.test/api/v1/' } ] );
 
 =cut
 
@@ -157,6 +164,19 @@ sub required_recipes {
         },
     );
 }
+
+=head2 %schema = $recipe->args()
+
+The schema of the options: C<basedir>, a string, and C<repos_from>, a list of
+objects that each have an C<api_url>, a secret C<token> and C<repos_for>, a
+list of the users and organizations to clone.  Both are required.
+C<extra_pkgs> is an optional list of packages.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -194,6 +214,11 @@ Adds C<install_command>, the words of the C<install_command> of the
 L<Provisioner::Packager> that C<distro_packager> names, which the smoke runs
 with the system packages that a repository declares.
 
+Returns C<%opts>, with C<install_command> added as an array reference of
+words.
+
+    my %opts = $recipe->enrich( domain => 'test.test', basedir => 'Code' );
+
 =cut
 
 sub enrich {
@@ -202,9 +227,20 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files(@loaded_recipes)
+=head2 %files = $recipe->template_files(@recipes)
 
 F<admincode.claude.bash>, on a guest that also runs claude.
+
+=over 4
+
+=item @recipes - Str - the names of the recipes that the guest runs
+
+=back
+
+Returns the pair C<admincode.claude.bash.tt> and C<admincode.claude.bash>
+when C<@recipes> has C<claude>, and nothing otherwise.
+
+    my %files = $recipe->template_files(qw{admincode claude});
 
 =cut
 
@@ -212,6 +248,14 @@ sub template_files {
     my ( $self, @recipes ) = @_;
     return ( List::Util::any { $_ eq q{claude} } @recipes ) ? ( 'admincode.claude.bash.tt' => 'admincode.claude.bash' ) : ();
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<admincode.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{admincode.tt};
@@ -230,6 +274,8 @@ fallback.
 
 There are no C<cache_classes> either.  Each answer from the API is for one
 account and one token, so the cache must not keep it.
+
+    my @hosts = $recipe->fetch_hosts( repos_from => [ { api_url => 'https://forge.test.test/api/v1/' } ] );
 
 =cut
 

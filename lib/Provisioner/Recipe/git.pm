@@ -114,6 +114,18 @@ one existed.  A reference that resolves to nothing is one that
 F<bin/new_config> generates a fresh value for, and a forge is never told about
 the new key.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<accounts>, an object keyed by the account, whose
+members take C<hosts>, a list of host names, C<ssh_identity>, a boolean, and
+C<user_name> and C<user_email>, strings.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -148,14 +160,18 @@ sub args {
     );
 }
 
-=head3 %opts = $recipe->enrich(%opts)
+=head2 %opts = $recipe->enrich(%opts)
 
 Takes the duplicate hosts out of each account, which two dependents asking for
-the same forge leave behind.
+the same forge leave behind, and sorts them.
+
+Returns the options, as a list of pairs.
 
 Dies when an account asks for C<ssh_identity> with no C<user_email>, and when
 it asks for one with no C<hosts>: a key for a forge nobody named is a key with
 nothing to push to.
+
+    my %opts = $recipe->enrich( accounts => { somebot => { hosts => ['forge.test.test'] } } );
 
 =cut
 
@@ -179,10 +195,25 @@ sub enrich {
     return %opts;
 }
 
-=head3 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
-The ssh key of the account when C<ssh_identity> is on, and nothing when it is
+The ssh key of each account when C<ssh_identity> is on, and nothing when it is
 off.  See L</THE SSH KEY>.
+
+=over 4
+
+=item install_dir - Str - the directory that holds the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of pairs, from the path of each key on the guest,
+F<$install_dir/$domain/.ssh/id_git-$account>, to a hash reference with its
+C<ref> in the secret store, a C<generate> code reference that mints it, and
+its C<mode>.  Returns nothing when no account asks for a key.
+
+    my %files = $recipe->guest_secrets( '/opt/domains', 'test.test', accounts => { somebot => { ssh_identity => 1 } } );
 
 =cut
 
@@ -208,6 +239,14 @@ sub guest_secrets {
 
     return %placed;
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<git.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{git.tt};

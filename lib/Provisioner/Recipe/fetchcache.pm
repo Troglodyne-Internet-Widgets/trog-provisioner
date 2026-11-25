@@ -279,6 +279,10 @@ values use the units of nginx, for example C<10m>, C<1h> and C<365d>.
 
 =back
 
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -382,6 +386,8 @@ them.  Thus a recipe that gets a new upstream does not need an edit to the
 cache.  This module holds only C<default>, which belongs to no recipe, and
 C<$PASSTHROUGH>.
 
+    my @classes = $recipe->classes();
+
 =cut
 
 our @CLASS_ORDER = (
@@ -426,6 +432,8 @@ Returns C<nginx>, which fetches and serves.  C<nginx> brings C<ufw>, with the
 rate limit of nginx on 443.  The nginx profile that ufw allows also lets the
 cache connect to 443 upstream.
 
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -433,6 +441,14 @@ sub required_recipes {
 }
 
 =head2 %files = $recipe->template_files()
+
+The vhost, which takes no list of recipes: F<fetchcache.nginx.conf> from
+F<fetchcache.nginx.conf.tt>.
+
+Returns a list of pairs, from the template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -442,8 +458,20 @@ sub template_files {
 
 =head2 @written = $recipe->generate_files($output_dir, %vars)
 
-Writes the vhost and the certificate that it presents, see C<certify>.  Returns
-the names of the files that it wrote.
+Writes the vhost and the certificate that it presents, see C<certify>.
+
+=over 4
+
+=item output_dir - Str - the configuration directory of the domain
+
+=back
+
+C<%vars> are the template variables, as for L<Provisioner::Recipe/generate_files>.
+
+Returns the names of the files that it wrote, as a list.  Dies as C<certify>
+dies.
+
+    my @written = $recipe->generate_files( $output_dir, %vars );
 
 =cut
 
@@ -456,6 +484,11 @@ sub generate_files {
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest:
+F<fetchcache.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 
@@ -498,6 +531,10 @@ The stub of systemd-resolved fails over correctly, but nginx does not use it,
 because nginx asks the resolvers that it is told.  IPv6 goes
 because nginx is told C<ipv6=off>, as apt is told to use IPv4.
 
+Returns the options, as a list of pairs.
+
+    my %opts = $recipe->enrich( upstreams => { 'archive.test.test' => 1 }, resolvers => ['192.0.2.53'] );
+
 =cut
 
 sub enrich {
@@ -528,7 +565,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $paths = Provisioner::Recipe::fetchcache->authority()
+=head2 $paths = $class->authority()
 
 Returns the authority that signs the certificate of the cache, as a hash
 reference of C<cert> and C<key>, the paths of the two files.  If the certificate
@@ -539,6 +576,8 @@ Dies if the certificate is there without its key.  That is an installation that
 trusts the authority of another one, and a new pair would replace the
 certificate that signed the cache.  A caller that needs only the certificate
 asks C<trusted_authority>.
+
+    my $paths = Provisioner::Recipe::fetchcache->authority();
 
 =cut
 
@@ -560,12 +599,14 @@ sub authority {
     return \%paths;
 }
 
-=head2 $path = Provisioner::Recipe::fetchcache->trusted_authority()
+=head2 $path = $class->trusted_authority()
 
 Returns the path of F<fetchcache-ca.crt>, the certificate of the authority, which
 a guest that provisions through the cache trusts.  Unlike C<authority>, it
 never makes one, and it does not need the key.  Dies if the certificate is not
 there.
+
+    my $path = Provisioner::Recipe::fetchcache->trusted_authority();
 
 =cut
 
@@ -582,11 +623,23 @@ sub trusted_authority {
 
 Signs a certificate that names C<@hosts> with the C<authority>.  Writes it into
 C<$output_dir> as F<fetchcache.crt>, followed by the certificate of the
-authority, and writes its key as F<fetchcache.key>.  Returns the names of the
-two files.
+authority, and writes its key as F<fetchcache.key>.
 
 It signs a new certificate at each call.  The certificate is good for 397 days,
 which is the longest that clients accept.
+
+=over 4
+
+=item output_dir - Str - the directory to write the two files into
+
+=item @hosts - Str - each name that the certificate names, the first of them
+also its common name
+
+=back
+
+Returns the names of the two files, as a list.  Dies as C<authority> dies.
+
+    my @written = $recipe->certify( $output_dir, 'cache.test.test' );
 
 =cut
 

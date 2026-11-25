@@ -128,18 +128,21 @@ L<Provisioner::Recipe::clod> does with C<telemetry>.
 
 =head1 METHODS
 
-=head2 $path = Provisioner::Recipe::grafanaotel->dashboard_path()
-
-The path of the dashboard under the address of grafana.
-
 =cut
 
+# The path of the dashboard under the address of grafana, which
+# Provisioner::Recipe::clod appends to the host of its telemetry to link to it.
+# @returns Str  the path, /d/claude-runs
+# @example my $path = Provisioner::Recipe::grafanaotel->dashboard_path();
 sub dashboard_path { return '/d/claude-runs' }
 
 =head2 %required = $recipe->required_recipes(%opts)
 
 Returns C<grafana>, with the retention policy C<details> for
-C<detail_retention>.
+C<detail_retention>, 48h when C<%opts> does not name it: the pair C<grafana>
+and a code reference that returns those options.
+
+    my %required = $recipe->required_recipes( detail_retention => '48h' );
 
 =cut
 
@@ -158,6 +161,10 @@ The OTLP port, at 256 new connections a second from one sender, the limit
 that L<Provisioner::Recipe::logcollector> gives the other stream of the
 fleet.
 
+Returns the pair of the port, 4317 when C<%opts> does not name one, and 256.
+
+    my %limits = $recipe->rate_limits( port => 4317 );
+
 =cut
 
 sub rate_limits {
@@ -170,6 +177,10 @@ sub rate_limits {
 =head2 $bool = $recipe->is_multi_tenant()
 
 False.  There is one telegraf, one input and one processor on the machine.
+
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
 
 =cut
 
@@ -211,6 +222,10 @@ Code, which it puts on each metric.  See L</A metric does not say whose run it
 was>.
 
 =back
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %args = $recipe->args();
 
 =cut
 
@@ -282,6 +297,11 @@ sub args {
 The telegraf fragment, the processor that it loads, the ufw profile and the
 dashboard.
 
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -296,6 +316,10 @@ sub template_files {
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<grafanaotel.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

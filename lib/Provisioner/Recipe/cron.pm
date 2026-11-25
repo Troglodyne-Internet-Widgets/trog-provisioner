@@ -106,9 +106,9 @@ They also run each configured C<root_scripts> entry, from a PATH that starts
 with C<script_dir>.  The service user runs each C<user_scripts> entry, from a
 PATH that starts with the C<bin/> directory of the service install dir.
 
-=cut
+=head1 METHODS
 
-=head3 %opts = $recipe->enrich(%opts)
+=head2 %opts = $recipe->enrich(%opts)
 
 Sets what MAILFROM and each MAILTO say, and returns the options.
 
@@ -122,6 +122,18 @@ C<somebody@example.test@this.domain>.
 
 C<mailto: none> becomes an empty MAILTO, which tells cron to send nothing.  A
 script with no C<mailto> sends its output to the admin.
+
+Returns C<%opts>, with C<from> qualified, C<renews_certificate> and
+C<ossec_watches> added, and C<root_scripts> and C<user_scripts> replaced by
+copies whose C<mailto> is set.
+
+    my %opts = $recipe->enrich(
+        domain       => 'test.test',
+        from         => 'cron',
+        admin_email  => 'admin@test.test',
+        modules      => ['cron'],
+        root_scripts => [ { interval => '@daily', cmd => 'true', mailto => 'none' } ],
+    );
 
 =cut
 
@@ -156,11 +168,22 @@ sub enrich {
     return %opts;
 }
 
-=head3 $bool = $recipe->ossec_watches($domain)
+=head2 $bool = $recipe->ossec_watches($domain)
 
 True where an OSSEC manager reads the logs of C<$domain>, as
 L<Provisioner::Recipe::ossec/watches> decides.  See L</Where OSSEC watches the
 guest>.
+
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=back
+
+Returns what L<Provisioner::Recipe::ossec/watches> returns for C<$domain>,
+true or false.
+
+    my $watched = $recipe->ossec_watches('test.test');
 
 =cut
 
@@ -171,6 +194,19 @@ sub ossec_watches {
 
 # The name of a job, which names its file in cron.d.
 my $JOB_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]* \z/;
+
+=head2 %schema = $recipe->args()
+
+The schema of the options: C<from>, a local part or an address; C<files>, an
+object from the name of a job in F</etc/cron.d> to the file of the payload;
+and C<user_scripts> and C<root_scripts>, lists of objects of C<interval> and
+C<cmd>, which are required, and C<mailto>.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -217,6 +253,19 @@ sub args {
     );
 }
 
+=head2 %files = $recipe->template_files()
+
+The crontabs of root, of root for the domain and of the service user, the
+configuration and the defaults of rkhunter, and the job that checks the
+packaged files for changes, the same on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
 
@@ -229,6 +278,14 @@ sub template_files {
         'cron.changed_packaged_files.tt' => 'cron.changed_packaged_files',
     );
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<cron.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{cron.tt};

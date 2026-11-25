@@ -109,6 +109,10 @@ defaults agree.
 
 False.  There is one processor in one telegraf, and one dashboard.
 
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
@@ -123,6 +127,10 @@ sub is_multi_tenant { return 0 }
 The audit runs every day, so it is at least 25.
 
 =back
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %args = $recipe->args();
 
 =cut
 
@@ -150,6 +158,10 @@ sub args {
 C<grafanasyslog>, which installs telegraf and grafana and puts the stream in
 the measurement that this recipe reads.
 
+Returns the pair C<grafanasyslog> and a code reference that returns no options.
+
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -159,6 +171,11 @@ sub required_recipes {
 =head2 %files = $recipe->template_files()
 
 The telegraf fragment, the Starlark processor and the dashboard.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -172,7 +189,10 @@ sub template_files {
 
 =head2 @tests = $recipe->tests()
 
-Returns the template for the test that runs on the guest.
+Returns the template for the test that runs on the guest:
+F<grafanalynis.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

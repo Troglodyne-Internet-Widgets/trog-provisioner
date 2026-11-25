@@ -22,12 +22,15 @@ use parent qw{Provisioner::Recipe};
 
 Builds ImageMagick from source with its Perl bindings, and installs it.
 
-=cut
+=head1 METHODS
 
 =head2 %required = $recipe->required_recipes()
 
 Returns C<perl>.  The bindings build against the perl that the perl recipe
-installs under F</opt/perl5>.
+installs under F</opt/perl5>.  The name is paired with a code reference that
+returns no options.
+
+    my %required = $recipe->required_recipes();
 
 =cut
 
@@ -37,6 +40,17 @@ sub required_recipes {
 
 # A release of ImageMagick, such as 7.1.1-38.
 my $RELEASE = qr/\A [[:digit:]]+ [.] [[:digit:]]+ [.] [[:digit:]]+ - [[:digit:]]+ \z/;
+
+=head2 args()
+
+The schema of the options: C<version>, required, a full release with its patch
+number, such as C<7.1.1-38>.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -52,6 +66,14 @@ sub args {
     );
 }
 
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<imagemagick.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
+
 sub tests {
     return qw{imagemagick.tt};
 }
@@ -60,6 +82,10 @@ sub tests {
 
 C<download.imagemagick.org>, where F<scripts/build_imagick.sh> fetches the
 source release.
+
+Returns that one host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 
@@ -71,6 +97,11 @@ sub fetch_hosts {
 
 A release tarball named by version.  The archive keeps it until it prunes it.
 After that, the copy in the cache is the only copy left.
+
+Returns one hash reference, with the C<class> C<immutable> and the C<pattern>
+of the path of the releases, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

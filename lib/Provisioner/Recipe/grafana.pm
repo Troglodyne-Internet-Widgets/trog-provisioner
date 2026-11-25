@@ -90,6 +90,12 @@ fleet start after the restore.
 Returns C<nginxproxy>, in front.  Grafana answers on loopback, and something
 must serve the domain.
 
+Returns the pair C<nginxproxy> and a code reference that returns its vhosts: one
+on port 80 that redirects to SSL, and one on port 443 that proxies to grafana on
+C<port>, 3000 by default, with IPv6 as C<ipv6> says, on by default.
+
+    my %required = $recipe->required_recipes( port => 3000, ipv6 => 1 );
+
 =cut
 
 sub required_recipes {
@@ -121,6 +127,10 @@ sub required_recipes {
 grafana on C<port>, and influxd on 8086 for queries and on 8088 for backups,
 all three on 127.0.0.1.
 
+Returns the three claims, as a list.
+
+    my @claims = $recipe->listens( port => 3000 );
+
 =cut
 
 sub listens {
@@ -135,6 +145,10 @@ sub listens {
 False.  The machine has one grafana, one influxd and one telegraf.  This recipe
 writes each of their configuration files to a fixed path, so a second domain
 overwrites what the first wrote.  C<root_url> also names one domain.
+
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
 
 =cut
 
@@ -189,6 +203,10 @@ dashboard.  If two recipes name different files, the build stops, because only
 one dashboard can be the home page.
 
 =back
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %args = $recipe->args();
 
 =cut
 
@@ -259,6 +277,15 @@ sub args {
 
 =head2 %files = $recipe->template_files()
 
+The configuration of grafana, of influxd and of telegraf, the datasource and
+the dashboard provider, the setup script of InfluxDB, and the two scripts of
+the salvage.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -288,6 +315,18 @@ C<influx_database> to F<.grafana-salvage/influxdb>.  See L</What a rebuild
 keeps>.  On a guest built before this recipe had the script, the command
 fails, and the salvage keeps what it had.
 
+=over 4
+
+=item install_dir - Str - the directory that holds the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns the one command, F<$install_dir/$domain/grafana-salvage.sh>, as a list.
+
+    my @commands = $recipe->remote_prepare( '/opt/domains', 'test.test' );
+
 =cut
 
 sub remote_prepare {
@@ -299,6 +338,19 @@ sub remote_prepare {
 
 The backup that C<remote_prepare> made.  It lands in F<grafana-salvage> of the
 domain directory, where the restore reads it.
+
+=over 4
+
+=item install_dir - Str - the directory that holds the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns the pair F<$install_dir/$domain/.grafana-salvage/> and
+F<grafana-salvage/>.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
 
 =cut
 
@@ -316,6 +368,11 @@ to its log file, with the address that nginx forwarded:
 
 The filter that fail2ban ships for grafana looks for a message that grafana no
 longer writes.
+
+Returns the pair C<grafana-login> and a hash reference of the settings of that
+jail for fail2ban.
+
+    my %jails = $recipe->jails();
 
 =cut
 
@@ -336,6 +393,10 @@ sub jails {
 The two vendor archives.  C<influxdb> is not here, because it comes from the
 mirror of the distribution, which every guest already reaches.
 
+Returns C<apt.grafana.com> and C<repos.influxdata.com>, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -346,6 +407,11 @@ sub fetch_hosts {
 
 Both archives, as apt repositories.
 
+Returns what C<apt_repo_classes> returns for each host of C<fetch_hosts>, as a
+list.
+
+    my @classes = $recipe->cache_classes();
+
 =cut
 
 sub cache_classes {
@@ -355,6 +421,10 @@ sub cache_classes {
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<grafana.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

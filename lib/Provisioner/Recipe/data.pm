@@ -94,6 +94,18 @@ has a line in the F<authorized_keys> of C<transfer_user> instead.  That line
 runs a copy of the sandbox in the domain directory of the guest, and it works
 until somebody removes it.  The next build of the guest does not remove it.
 
+=head1 METHODS
+
+=head2 %schema = $recipe->args()
+
+The schema of the options: C<restores>, an object from each destination on the
+guest to an object of C<from>, which is required, C<owner> and C<mode>.  The
+C<restores> of each recipe fill it in.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -119,6 +131,14 @@ sub args {
         },
     );
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<data.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{data.tt};

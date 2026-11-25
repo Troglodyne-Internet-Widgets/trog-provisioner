@@ -241,6 +241,18 @@ my %REPO    = ( type => 'string', pattern => "$Trog::Patterns::GITHUB_REPO" );
 # perl_string quotes it, so this only holds it to that shape, on one line.
 my $RULE = qr/\A [[:alpha:]] [[:alnum:]_]* (?: [(] [^\n\r'"\\]+ [)] )? \z/;
 
+=head2 args()
+
+The schema of the options, with a description of each, which C<bin/recipes
+clod> prints.  C<bot>, C<github_token>, C<claude_oauth_token> and
+C<dashboard_password> are required, and so is C<spokes> or C<spoke_orgs>.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
+
 sub args {
     return (
         type     => 'object',
@@ -467,6 +479,8 @@ in the salvaged Minion database.  See
 L<App::Clod::Tasks/packages_restore>.  On a guest with no salvage, the bot
 has no scan yet, so the task installs nothing, and the buttons stay.
 
+=head1 METHODS
+
 =head2 %required = $recipe->required_recipes(%opts)
 
 C<perl>, which installs what the checkout needs, C<App::cpanoutdated>, the
@@ -485,6 +499,13 @@ service user run C</usr/bin/systemctl restart --no-block> for each unit, which
 is how the dashboard restarts the bot after an update.  The update runs in the
 worker, so a restart of the worker that waited would wait for itself.  It also lets the service user run the
 installer of L</THE SYSTEM PACKAGES> with any arguments.
+
+Each value is a sub that gets the options of the domain and returns the options
+of that recipe.
+
+Returns a list of pairs, from the name of each recipe to its sub.
+
+    my %required = $recipe->required_recipes( install_dir => '/opt/domains', domain => 'test.test' );
 
 =cut
 
@@ -541,6 +562,10 @@ and into the name of F</etc/sudoers.d/clod-E<lt>userE<gt>>, and sudo skips a
 file whose name has a dot in it.  C<user> is a global, which the schema of a
 recipe does not declare a second time, so the check is here.
 
+Returns the options, as a list of pairs.  Dies as C<telemetry_target> dies.
+
+    my %opts = $recipe->enrich(%validated);
+
 =cut
 
 sub enrich {
@@ -571,6 +596,11 @@ L<Provisioner::Utils/fleet_address> resolves it, or empty with no host.  Dies
 on a URL, because the endpoint takes the port from C<port>, and on this guest,
 which does not take telemetry.
 
+Returns Str, the address or name, or the empty value of
+L<Provisioner::Utils/fleet_address> when C<telemetry> names no host.
+
+    my $target = $recipe->telemetry_target( domain => 'test.test', telemetry => { host => 'otel.test.test' } );
+
 =cut
 
 sub telemetry_target {
@@ -591,6 +621,18 @@ guest without the database, the command fails, and the salvage keeps what it
 had.  Then it copies the evidence directory beside the database, when the
 guest has one.
 
+=over 4
+
+=item install_dir - Str - the directory of the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns the path of the script, as a list of one command.
+
+    my @commands = $recipe->remote_prepare( '/opt/domains', 'test.test' );
+
 =cut
 
 sub remote_prepare {
@@ -600,7 +642,20 @@ sub remote_prepare {
 
 =head2 %path_map = $recipe->remote_files($install_dir, $domain)
 
-The copy that C<remote_prepare> made.
+The copy that C<remote_prepare> made, F<.clod-salvage/> in the directory of
+the domain, which goes to F<clod-salvage/>.
+
+=over 4
+
+=item install_dir - Str - the directory of the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns one pair, from the path on the guest to the path in the salvage.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
 
 =cut
 
@@ -615,6 +670,14 @@ The salvaged database and evidence go back to F<clod-state>, owned by the
 service C<user>.  The evidence gets no mode, because C<restore_state> would
 apply it to every file in it.  App::Clod makes the directory mode 0700 again
 before a run writes to it.
+
+C<%opts> gives C<install_dir>, C<domain>, C<admin_user> and C<user>, which
+falls back to C<admin_user>.
+
+Returns two pairs, from each path on the guest to a hash reference with
+C<from>, the path of the salvage, and C<owner>, and C<mode> for the database.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'test.test', admin_user => 'admin' );
 
 =cut
 
@@ -635,11 +698,29 @@ escapes every quote, C<$>, C<@>, backslash and control character, so no text
 can end the string or interpolate into it.  It is raw, so Xslate does not
 escape it for HTML on top.
 
+Returns one pair, from C<perl_string> to the filter.
+
+    my %formatters = $recipe->formatters();
+
 =cut
 
 sub formatters {
     return ( perl_string => Text::Xslate::html_builder( sub ($text) { return B::perlstring($text) } ) );
 }
+
+=head2 template_files()
+
+The configuration, the environment and the units of the bot and its worker,
+its scripts, its sudoers file, its reboot check, the token of the agent, the
+installer of the system packages, and the application profile of ufw for the
+telemetry.  It takes no list of recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     return (
@@ -661,6 +742,14 @@ sub template_files {
     );
 }
 
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<clod.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
+
 sub tests {
     return qw{clod.tt};
 }
@@ -668,6 +757,10 @@ sub tests {
 =head2 @hosts = $recipe->fetch_hosts(%opts)
 
 The host of C<repo_url>, which is GitHub for the default.
+
+Returns the host as a list of one, or nothing when C<repo_url> has no host.
+
+    my @hosts = $recipe->fetch_hosts( repo_url => 'https://git.test.test/clod.git' );
 
 =cut
 

@@ -78,6 +78,18 @@ that required it.  A recipe that needs the login state rather than the binary
 C<queue_postrun_task>, which runs once every target has.
 L<Provisioner::Recipe::koan> clones its projects that way.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<account>, C<github_user>, C<github_token>, which
+is a secret, C<git_protocol>, C<https> or C<ssh>, and C<config_dir>, an
+absolute path.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 # An absolute path.
@@ -97,7 +109,7 @@ sub args {
     );
 }
 
-=head3 %required = $recipe->required_recipes(%opts)
+=head2 %required = $recipe->required_recipes(%opts)
 
 C<git>, for the host keys of C<github.com>.  A push to a host whose keys the
 account does not have waits on a prompt that nothing answers, and that is as
@@ -106,6 +118,12 @@ true of a key an operator forwards as of one a recipe placed.
 It asks for no key here.  Whether this account has one of its own is a question
 for whatever wanted a GitHub login in the first place, and it configures C<git>
 for itself.
+
+Returns the pair C<git> and a code reference.  Called with the options given
+to this recipe, the code returns the options for C<git>: C<accounts>, with the
+account, or else C<user>, or else C<admin_user>, trusting C<github.com>.
+
+    my %required = $recipe->required_recipes();
 
 =cut
 
@@ -125,12 +143,16 @@ sub required_recipes {
     );
 }
 
-=head3 %opts = $recipe->enrich(%opts)
+=head2 %opts = $recipe->enrich(%opts)
 
 Names the account when the configuration does not, which is the service user of
 the domain.
 
+Returns the options, as a list of pairs.
+
 Dies when only one of C<github_user> and C<github_token> is given.
+
+    my %opts = $recipe->enrich( user => 'someuser' );
 
 =cut
 
@@ -145,10 +167,15 @@ sub enrich {
     return %opts;
 }
 
-=head3 @files = $recipe->template_files()
+=head2 %files = $recipe->template_files()
 
 The login state of the account, which the fragment installs as
 F<.config/gh/hosts.yml>.
+
+Returns the pair F<github.hosts.yml.tt> and F<github.hosts.yml>, the template
+and the name of the file that it renders in the configuration directory.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -156,17 +183,29 @@ sub template_files {
     return ( 'github.hosts.yml.tt' => 'github.hosts.yml' );
 }
 
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<github.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
+
 sub tests {
     return qw{github.tt};
 }
 
-=head3 @hosts = $recipe->fetch_hosts(%opts)
+=head2 @hosts = $recipe->fetch_hosts(%opts)
 
 C<cli.github.com>, for the archive the CLI comes from.
+
+Returns that one host name, as a list.
 
 C<github.com> is not in the list.  What a guest fetches from there is a clone
 or an API call, each of which carries the account's credential, and a cache
 must not keep either.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 
@@ -174,9 +213,13 @@ sub fetch_hosts {
     return ('cli.github.com');
 }
 
-=head3 @classes = $recipe->cache_classes()
+=head2 @classes = $recipe->cache_classes()
 
 The classes for the apt repository of the CLI.  See C<apt_repo_classes>.
+
+Returns what C<apt_repo_classes> returns for C<cli.github.com>, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

@@ -139,6 +139,10 @@ L</The failure that the guest test makes visible>.
 
 =back
 
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 =head2 $bool = $recipe->is_multi_tenant()
@@ -150,6 +154,10 @@ A tenant that names this recipe, as every tenant does when C<_base> names it,
 gets that shipping.  C<machine_wide> names the settings that a tenant must
 leave as its host has them.
 
+Returns 1.
+
+    my $multi = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 1 }
@@ -160,6 +168,12 @@ Every setting, with its default, because each of them goes into the one
 forwarder file of the machine.  So F<bin/new_config> refuses a tenant that
 asks for another destination, other logs or another queue than its host.  See
 L<Provisioner::Recipe/machine_wide>.
+
+Returns a list of pairs, from each of C<host>, C<port>, C<protocol>,
+C<selector>, C<retry> and C<queue_size> to its value in C<%opts>, or else its
+default.
+
+    my %settings = $recipe->machine_wide( host => 'logs.test.test' );
 
 =cut
 
@@ -176,6 +190,11 @@ L<Provisioner::Recipe::ossecagent>, with C<host> as its manager, when an OSSEC
 manager on C<host> reads every line of this guest, as
 L<Provisioner::Recipe::ossec/watches> decides.  The agent runs what the
 manager cannot learn from the logs.  Nothing otherwise.
+
+Returns the pair of C<ossecagent> and a sub that returns its C<manager>, or
+nothing.
+
+    my %required = $recipe->required_recipes( domain => 'test.test', host => 'logs.test.test' );
 
 =cut
 
@@ -232,6 +251,15 @@ sub args {
 
 =head2 %files = $recipe->template_files()
 
+The rsyslog configuration F<logshipper.conf> and the ufw profile
+F<logshipper_ufw.conf>.  They are the same whichever recipes are loaded, so it
+takes no list of recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -246,6 +274,11 @@ sub template_files {
 
 =head2 @tests = $recipe->tests()
 
+Returns a list of the test templates that run on the guest:
+F<logshipper.tt>.
+
+    my @tests = $recipe->tests();
+
 =cut
 
 sub tests { return ('logshipper.tt') }
@@ -254,7 +287,9 @@ sub tests { return ('logshipper.tt') }
 
 Returns C<%opts> with C<target> added, as the C<target> method returns it.  The
 templates test C<target> and not C<host>, because C<target> is empty for a guest
-that is its own destination.
+that is its own destination.  Dies when C<target> dies.
+
+    my %enriched = $recipe->enrich( host => 'logs.test.test', domain => 'test.test' );
 
 =cut
 
@@ -269,7 +304,14 @@ sub enrich {
 
 Takes C<host>, C<domain> and C<ipmap> (domain name to address).  Returns the
 address or name to give rsyslog, as L</How C<host> is resolved> says.  For a guest
-that is its own destination, prints a message and returns empty.  Does not die.
+that is its own destination, prints a message and returns empty.
+
+Returns Str, the address or name, or the empty string.
+
+Dies when C<host> is a URL, because rsyslog takes a host alone, and the
+transport and the port from settings of their own.
+
+    my $target = $recipe->target( host => 'logs.test.test', domain => 'test.test', ipmap => {} );
 
 =cut
 

@@ -45,9 +45,20 @@ dependency of the build.  A C<?> in a flow collection stops PyYAML, which is
 L<https://gitlab.com/esr/loccount/-/work_items/33>.  When a release fixes
 that, the dependency can go.
 
-=head3 deps
+=head1 METHODS
+
+=head2 deps
 
 L<Provisioner::Recipe::Ubuntu::loccount> lists the packages.
+
+=head2 args()
+
+The schema of the options: C<version>, the tag of loccount to build, such as
+C<2.28>, which is also the default.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -67,13 +78,26 @@ sub args {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<go>, which builds it.
+C<go>, which builds it, with no options.
+
+Returns the pair of C<go> and a sub that returns an empty list.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
 
 =cut
 
 sub required_recipes {
     return ( go => sub { return () } );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest:
+F<loccount.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{loccount.tt};
@@ -84,6 +108,10 @@ sub tests {
 C<gitlab.com>, which the clone names, and C<proxy.golang.org>, which C<go
 build> fetches the modules of F<go.mod> from.  No template here names the
 proxy: go knows it, and this is the only thing that says so.
+
+Returns those two host names, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 

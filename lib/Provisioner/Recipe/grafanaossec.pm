@@ -72,6 +72,10 @@ defaults agree.
 False.  There is one manager on the machine, one output of its alerts, and one
 dashboard.
 
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
@@ -86,6 +90,10 @@ alerts and telegraf reads them.
 =item * C<datasource>: the grafana datasource that the dashboard reads.
 
 =back
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %args = $recipe->args();
 
 =cut
 
@@ -115,6 +123,11 @@ C<ossec>, whose alerts this draws, and C<grafanasyslog>, which installs
 telegraf and grafana and puts the stream in the measurement that the alerts
 join.
 
+Returns the two names, each paired with a code reference that returns no
+options.
+
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -126,7 +139,12 @@ sub required_recipes {
 
 =head2 @claims = $recipe->listens(%opts)
 
-The input of telegraf on C<alerts_port>, on 127.0.0.1.
+The input of telegraf on C<alerts_port>, on 127.0.0.1, over UDP.  The port is
+10516 when C<%opts> does not name one.
+
+Returns the one claim, such as C<127.0.0.1:10516/udp>, as a list.
+
+    my @claims = $recipe->listens( alerts_port => 10516 );
 
 =cut
 
@@ -142,6 +160,11 @@ sub listens {
 The fragment of F<ossec.conf>, the telegraf fragment, the Starlark processor and
 the dashboard.
 
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -155,7 +178,10 @@ sub template_files {
 
 =head2 @tests = $recipe->tests()
 
-Returns the template for the test that runs on the guest.
+Returns the template for the test that runs on the guest:
+F<grafanaossec.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 
