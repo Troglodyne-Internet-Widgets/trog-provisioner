@@ -145,11 +145,13 @@ sub main {
     return $had_failures ? 1 : 0;
 }
 
-=head2 $verb = verb_for($dir)
+=head2 verb_for($dir)
 
 The verb of F<cpan_install> that installs what the checkout in C<$dir> needs:
 C<dzil> for a F<dist.ini>, C<installdeps> for a F<Makefile.PL> or a
 F<Build.PL>, and undef for a checkout with none of them.
+
+    my $verb = verb_for($dir);
 
 =cut
 
@@ -166,11 +168,13 @@ sub verb_for {
 }
 ## use critic
 
-=head2 @names = forks_in($file)
+=head2 forks_in($file)
 
 The names of the repositories that C<$file>, the cache of
 F<scripts/repos_for>, records as forks, under every api_url and entity.  Dies
 when C<$file> cannot be read or is not JSON.
+
+    my @names = forks_in($file);
 
 =cut
 
@@ -191,12 +195,14 @@ sub forks_in {
     return @forks;
 }
 
-=head2 $failed = install_system_packages(\@conformance, \@install, $dir)
+=head2 install_system_packages(\@conformance, \@install, $dir)
 
 Asks C<conformance>, which the words of C<@conformance> run, which system
 packages the checkout in C<$dir> declares for this host, and runs C<@install>
 with them.  See L</System packages>.  Returns 0 when that worked, or when the
 checkout declares nothing, and the exit status of what failed otherwise.
+
+    my $failed = install_system_packages(\@conformance, \@install, $dir);
 
 =cut
 
@@ -215,11 +221,13 @@ sub install_system_packages {
     return $?;
 }
 
-=head2 @flags = as_owner($uid)
+=head2 as_owner($uid)
 
 The flags of F<cpan_install> that run its tests as the account C<$uid>.  Empty
 for the account that runs this script, which needs no change.  Dies for a
 C<$uid> that no account has.
+
+    my @flags = as_owner($uid);
 
 =cut
 
@@ -232,11 +240,13 @@ sub as_owner {
     return ( '--as', $name );
 }
 
-=head2 $path = owner_path($uid)
+=head2 owner_path($uid)
 
 The C<PATH> of an interactive bash of the account C<$uid>, with the home of
 that account as C<HOME>.  Nothing for the account that runs this script, and
 nothing when that bash prints no C<PATH>.  See L</Whose tools>.
+
+    my $path = owner_path($uid);
 
 =cut
 
@@ -249,12 +259,14 @@ sub owner_path {
     return interactive_path( 'runuser', '-u', $name, '--', 'env', "HOME=$home" );
 }
 
-=head2 $path = interactive_path(@prefix)
+=head2 interactive_path(@prefix)
 
 Runs C<bash -ic> after the words in C<@prefix>, and returns the C<PATH> that
 it prints.  The C<PATH> is on a line of its own, after whatever the startup
 files of bash print, and the last such line counts.  Nothing when bash prints
 none.
+
+    my $path = interactive_path(@prefix);
 
 =cut
 
@@ -271,11 +283,13 @@ sub interactive_path {
     return $path;
 }
 
-=head2 $path = path_with(@paths)
+=head2 path_with(@paths)
 
 Joins each C<PATH> in C<@paths>, then the C<PATH> of this script, into one,
 in that order.  A directory that is already there, and an empty one, is left
 out.
+
+    my $path = path_with(@paths);
 
 =cut
 

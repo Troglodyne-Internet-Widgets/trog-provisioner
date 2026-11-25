@@ -257,7 +257,7 @@ straight from upstream.
 
 =head1 METHODS
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -360,7 +360,7 @@ sub args {
     );
 }
 
-=head2 @classes = $recipe->classes()
+=head2 $recipe->classes()
 
 Returns the kinds of URL, most specific first.  Each is a hash of three keys:
 
@@ -426,7 +426,7 @@ them.
 
 our $PASSTHROUGH = '[^/]+/.+/info/refs\?service=git-';
 
-=head2 %required = $recipe->required_recipes()
+=head2 $recipe->required_recipes()
 
 Returns C<nginx>, which fetches and serves.  C<nginx> brings C<ufw>, with the
 rate limit of nginx on 443.  The nginx profile that ufw allows also lets the
@@ -440,7 +440,7 @@ sub required_recipes {
     return ( nginx => sub { return () } );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The vhost, which takes no list of recipes: F<fetchcache.nginx.conf> from
 F<fetchcache.nginx.conf.tt>.
@@ -456,7 +456,7 @@ sub template_files {
     return ( 'fetchcache.nginx.conf.tt' => 'fetchcache.nginx.conf' );
 }
 
-=head2 @written = $recipe->generate_files($output_dir, %vars)
+=head2 $recipe->generate_files($output_dir, %vars)
 
 Writes the vhost and the certificate that it presents, see C<certify>.
 
@@ -483,7 +483,7 @@ sub generate_files {
     return ( @written, $self->certify( $output_dir, @{ $opts{allow} } ) );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest:
 F<fetchcache.tt>.
@@ -494,7 +494,7 @@ F<fetchcache.tt>.
 
 sub tests { return ('fetchcache.tt') }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds these keys to C<%opts> and returns it:
 
@@ -565,7 +565,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $paths = $class->authority()
+=head2 $class->authority()
 
 Returns the authority that signs the certificate of the cache, as a hash
 reference of C<cert> and C<key>, the paths of the two files.  If the certificate
@@ -599,7 +599,7 @@ sub authority {
     return \%paths;
 }
 
-=head2 $path = $class->trusted_authority()
+=head2 $class->trusted_authority()
 
 Returns the path of F<fetchcache-ca.crt>, the certificate of the authority, which
 a guest that provisions through the cache trusts.  Unlike C<authority>, it
@@ -619,7 +619,7 @@ sub trusted_authority {
     die "There is no $cert, so a guest could not trust the authority\n" . "that signs the fetch cache and the CA of acmeca.  Configure the cache or acmeca\n" . "from this installation first, or copy fetchcache-ca.crt from the installation\n" . "that does.  Only the certificate: the key stays there.\n";
 }
 
-=head2 @written = $recipe->certify($output_dir, @hosts)
+=head2 $recipe->certify($output_dir, @hosts)
 
 Signs a certificate that names C<@hosts> with the C<authority>.  Writes it into
 C<$output_dir> as F<fetchcache.crt>, followed by the certificate of the

@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::mailrelay - Ubuntu's C<deps> and C<dep_conflicts> f
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 postfix, dovecot, the SPF policy of postfix, opendkim and opendmarc, the
 stream module of nginx, which passes the mail clients, C<ipset>, which holds
@@ -38,7 +38,7 @@ sub deps {
     return qw{postfix dovecot-core libcryptx-perl postfix-policyd-spf-python opendkim opendmarc libcpanel-json-xs-perl libnginx-mod-stream ipset libdata-validate-domain-perl};
 }
 
-=head2 @pkgs = $recipe->dep_conflicts()
+=head2 $recipe->dep_conflicts()
 
 C<sendmail>, because the relay is postfix.
 

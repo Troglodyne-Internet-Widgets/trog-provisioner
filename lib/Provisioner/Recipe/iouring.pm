@@ -160,7 +160,7 @@ Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
 
     my %schema = $recipe->args();
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds to C<members> the accounts of the recipes on this guest that run something
 able to use io_uring, and sets C<restart_units> to their services.  See

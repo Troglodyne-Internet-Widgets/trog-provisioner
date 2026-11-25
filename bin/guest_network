@@ -177,10 +177,12 @@ sub main {
     return 0;
 }
 
-=head2 $hv = libvirt_block($fleet, $name)
+=head2 libvirt_block($fleet, $name)
 
 The hypervisor of the block C<$name>.  Dies when the block is not a libvirt one,
 because only libvirt has networks to make.
+
+    my $hv = libvirt_block($fleet, $name);
 
 =cut
 

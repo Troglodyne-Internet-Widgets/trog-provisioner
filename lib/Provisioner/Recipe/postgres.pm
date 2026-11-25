@@ -54,7 +54,7 @@ is whole, C<touch> its C<complete> file.
 
 =cut
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 5432, where the packaged configuration listens, on 127.0.0.1.  It listens on
 C<localhost>, and on Ubuntu that name is only 127.0.0.1.
@@ -94,7 +94,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes()
+=head2 $recipe->required_recipes()
 
 C<cron>, which installs F<postgres-backup.cron> as F</etc/cron.d/postgres-backup>.
 
@@ -109,7 +109,7 @@ sub required_recipes {
     return ( cron => sub { return ( files => { 'postgres-backup' => 'postgres-backup.cron' } ) } );
 }
 
-=head3 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head3 $recipe->remote_prepare($install_dir, $domain)
 
 Returns the backup script, so the guest takes a fresh dump just before the fetch.
 The nightly dump is up to a day old, and a rebuild loses what changed since.
@@ -123,7 +123,7 @@ sub remote_prepare {
     return ('/usr/local/sbin/postgres-backup.sh');
 }
 
-=head3 %files = $recipe->remote_files($install_dir, $domain)
+=head3 $recipe->remote_files($install_dir, $domain)
 
 Returns the backup directory on the guest, mapped to C<postgres/> in the data
 directory.  These dumps are the only thing in the cluster that nothing here can
@@ -145,7 +145,7 @@ sub tests {
     return qw{postgres.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<apt.postgresql.org>, the apt repository of the PostgreSQL project.
 
@@ -159,7 +159,7 @@ sub fetch_hosts {
     return qw{apt.postgresql.org};
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes for that apt repository.  See C<apt_repo_classes> in
 L<Provisioner::Recipe>.

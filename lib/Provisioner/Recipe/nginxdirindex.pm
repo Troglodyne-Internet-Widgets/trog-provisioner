@@ -42,7 +42,7 @@ in too.
 
 =cut
 
-=head2 @names = $recipe->subdomains()
+=head2 $recipe->subdomains()
 
 C<www>, which the vhost of the domain answers for beside the domain itself.
 

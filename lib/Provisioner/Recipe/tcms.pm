@@ -410,7 +410,7 @@ sub remote_files {
     );
 }
 
-=head2 @patterns = $recipe->remote_skip()
+=head2 $recipe->remote_skip()
 
 C<secrets.key>.  C<remote_files> brings F<tCMS/config/> down whole, and this
 keeps one file in it behind.
@@ -448,7 +448,7 @@ sub tests {
     return qw{tcms.tt};
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<media_base>, from C<nginx.media_names> of the domain.  See
 L</THE HOSTS OF TCMS>.
@@ -473,7 +473,7 @@ sub enrich ( $, %opts ) {
     return %opts;
 }
 
-=head2 @hosts = $recipe->fetch_hosts(%opts)
+=head2 $recipe->fetch_hosts(%opts)
 
 The host of C<repo_url>, which serves the tCMS checkout this recipe clones, and
 the hosts that the C<prereq-frontend> target of F<Installer.mk> downloads from.

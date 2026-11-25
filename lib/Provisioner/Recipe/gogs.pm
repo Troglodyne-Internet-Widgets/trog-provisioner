@@ -45,7 +45,7 @@ L<Provisioner::Recipe::Ubuntu::gogs>.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Requires C<nginxproxy>, with a vhost on port 80 that redirects to SSL and a vhost
 on port 443 that proxies to gogs on C<127.0.0.1:3000>.  C<ipv6> in C<%opts>
@@ -84,7 +84,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 3000 on 127.0.0.1, where nginx sends the requests for gogs.
 
@@ -98,7 +98,7 @@ sub listens {
     return qw{127.0.0.1:3000};
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  One gogs is one site.  C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,
 and the repositories, the database and the sessions are all in the directory of
@@ -113,7 +113,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The JSON schema for the configuration of this recipe.
 
@@ -152,7 +152,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 Maps each template in F<templates/files/> to the file name that the fragment
 installs: the systemd unit, F<app.ini>, the setup script and the mirror script.
@@ -174,7 +174,7 @@ sub template_files {
     );
 }
 
-=head2 @dirs = $recipe->datadirs()
+=head2 $recipe->datadirs()
 
 C<gogs>, the directory under the domain directory that receives the salvage.
 
@@ -188,7 +188,7 @@ sub datadirs {
     return qw{gogs};
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 Puts the salvaged C<gogs> directory back at C<$install_dir/git.$domain>.  That
 is every repository, the issue database and the users.  The C<data> target does
@@ -212,7 +212,7 @@ sub restores {
     return ( "$install_dir/git.$domain" => { from => "$install_dir/$domain/gogs" } );
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 Salvages all of C<$install_dir/git.$domain>.  That is every repository, the
 issue database and the accounts that can push to them.  None of it can be made
@@ -243,7 +243,7 @@ sub remote_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<gogs.tt>.
 
@@ -255,7 +255,7 @@ sub tests {
     return qw{gogs.tt};
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 A jail that bans a host whose logins fail too often.  gogs logs nothing when a
 login fails.  It answers the failed C<POST /user/login> with a 200 and the
@@ -282,7 +282,7 @@ sub jails {
     );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 GitHub, which serves the release tarballs of gogs.  See C<github_release_hosts>
 in L<Provisioner::Recipe>.  Also C<api.github.com>, which F<gogs.mirror.sh> asks
@@ -300,7 +300,7 @@ sub fetch_hosts {
     return ( 'api.github.com', $class->github_release_hosts );
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes for GitHub.  L<Provisioner::Recipe> keeps them, so that each recipe
 that downloads a release does not carry its own copy.

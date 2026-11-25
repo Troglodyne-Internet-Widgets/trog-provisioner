@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::imagemagick - Ubuntu's C<deps> for L<Provisioner::R
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<ghostscript>, the development packages of the libraries that the build links
 against, among them that of perl for the bindings, C<libtcmalloc-minimal4t64>,

@@ -182,10 +182,12 @@ sub main {
     return 0;
 }
 
-=head2 @lines = keys_in(@files)
+=head2 keys_in(@files)
 
 The lines of C<@files> that hold a public key.  Dies when there are files and
 none of them holds one.
+
+    my @lines = keys_in(@files);
 
 =cut
 
@@ -200,11 +202,13 @@ sub keys_in {
     return @keys;
 }
 
-=head2 $text = trogrunner_entry($hv, \%plan)
+=head2 trogrunner_entry($hv, \%plan)
 
 The C<hypervisors> entry for the trogrunner block of the runner, as YAML, with
 the user in the C<libvirt_uri>, and the C<account> block that makes
 F<bin/provision> keep the account as this command left it.
+
+    my $text = trogrunner_entry($hv, \%plan);
 
 =cut
 

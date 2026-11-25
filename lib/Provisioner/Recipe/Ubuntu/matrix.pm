@@ -16,7 +16,7 @@ use Provisioner::Recipe::ubuntu();    ## no critic (ProhibitUnusedImports) -- re
 
 Provisioner::Recipe::Ubuntu::matrix - Ubuntu's C<deps> and archive for L<Provisioner::Recipe::matrix>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 The synapse package, C<matrix-synapse-py3>, from the archive of matrix.org that
 C<package_sources> below names, and the Python libraries of synapse from Ubuntu.
@@ -57,7 +57,7 @@ sub deps {
     };
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The archive of matrix.org, for C<distro_release>, the release of the domain.  It has the synapse package and its keyring, and
 nothing else.  The package carries its own Python dependencies, so
@@ -89,7 +89,7 @@ sub package_sources {
     };
 }
 
-=head2 @lines = $recipe->package_answers(%opts)
+=head2 $recipe->package_answers(%opts)
 
 The two questions that the package asks.  Without the answers, its install
 stops at a prompt for the server name.  The unit that this recipe installs reads

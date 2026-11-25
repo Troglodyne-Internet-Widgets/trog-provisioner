@@ -26,7 +26,7 @@ my sub host (%opts) {
     return { packager => $ubuntu->packager, distro => $ubuntu->distribution, release => $ubuntu->release_version($codename), codename => $codename };
 }
 
-=head2 @pkgs = $recipe->deps(%opts)
+=head2 $recipe->deps(%opts)
 
 git, which the fragment clones tCMS with, and the packages that tCMS
 declares for the release of Ubuntu in C<distro_release>.  See
@@ -50,7 +50,7 @@ sub deps {
     return ( 'git', @{ $self->declared_for( host(%opts), %opts )->{packages} } );
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The archives that tCMS declares for the same release, each with the
 fingerprint of its key.

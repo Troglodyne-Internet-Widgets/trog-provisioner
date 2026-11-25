@@ -281,7 +281,7 @@ sub fetch_hosts {
     return @$hosts;
 }
 
-=head2 @refs = secret_references()
+=head2 secret_references()
 
 Every C<secret:> reference this installation asks the store for, sorted and
 without duplicates.  These go in:
@@ -457,7 +457,7 @@ sub directors {
     return ( 'vm', $class->distros() );
 }
 
-=head2 @pairs = $class->distros_in_use()
+=head2 $class->distros_in_use()
 
 The distributions and releases that the configuration builds guests of, as
 pairs of a loaded distro recipe and a release: the C<distro> of each domain's
@@ -495,7 +495,7 @@ sub distros_in_use {
     } sort keys %named;
 }
 
-=head2 @values = $class->globals_in_use($key)
+=head2 $class->globals_in_use($key)
 
 Every value that C<$key> takes in the C<_global> of a domain, sorted, without
 repeats.  A preflight check that asks whether a hypervisor can build what the
@@ -950,7 +950,7 @@ my sub scaffold_walk ( $class, $named, %opts ) {
     return ( $modules, $builders, \%domain_conf );
 }
 
-=head2 @recipes = $class->recipes_with(\@named, %opts)
+=head2 $class->recipes_with(\@named, %opts)
 
 Returns the recipes of C<@named> and every recipe that they require, as
 C<bin/new_config> adds them.  C<%opts> is as in C<scaffold_dependencies>.
@@ -1088,7 +1088,7 @@ sub placeholders_in {
     } Trog::Utils::slots_in( \$config, $path );
 }
 
-=head2 $bool = requires_transitively(\%required_by, $recipe, $dependency)
+=head2 requires_transitively(\%required_by, $recipe, $dependency)
 
 True when C<$recipe> requires C<$dependency>, directly or through other
 recipes, as far as C<%required_by> knows so far.  C<%required_by> maps a
@@ -1668,7 +1668,7 @@ sub configures {
     return exists $conf->{$name} ? 1 : 0;
 }
 
-=head2 @domains = domains($conf)
+=head2 domains($conf)
 
 Returns each domain of the configuration, sorted: each name that C<configures>
 accepts.  A section, such as C<_base> or C<_shared>, is not in the list.
@@ -1926,7 +1926,7 @@ my sub upstream_order ( $class, $domain, $conf, @up ) {
     return ( \@order, [ @steps[ $at .. $#steps ] ] );
 }
 
-=head2 @domains = $class->upstream_domains($domain, $conf, @up)
+=head2 $class->upstream_domains($domain, $conf, @up)
 
 The domains whose guests must be up before the guest of C<$domain> builds, in
 the order to build them: each after the ones it needs itself.  C<$domain> is
@@ -1980,7 +1980,7 @@ sub upstream_domains {
     return grep { $_ ne $domain } @{$order};
 }
 
-=head2 @steps = $class->upstream_cycle($domain, $conf, @up)
+=head2 $class->upstream_cycle($domain, $conf, @up)
 
 The cycle that C<upstream_domains> dies on, and an empty list when there is
 none.  Each step is a hash reference as C<named_guests> returns it, and the
@@ -2011,7 +2011,7 @@ sub upstream_cycle {
     return @{$cycle};
 }
 
-=head2 @domains = $class->direct_upstream_domains($domain, $conf)
+=head2 $class->direct_upstream_domains($domain, $conf)
 
 The domains whose guests C<$domain> itself names, as in C<upstream_domains>,
 without the ones those guests need in turn.  The guest of C<$domain> has to
@@ -2036,7 +2036,7 @@ sub direct_upstream_domains {
     return uniq( map { $_->{domain} } $class->named_guests( $domain, $conf ) );
 }
 
-=head2 @named = $class->named_guests($domain, $conf)
+=head2 $class->named_guests($domain, $conf)
 
 Each place in the configuration of C<$domain> that names the guest of another
 domain of C<$conf>, as a hash reference: C<domain> is the guest that is named,
@@ -2488,7 +2488,7 @@ sub validated_globals {
     return $said;
 }
 
-=head2 @keys = declared_globals()
+=head2 declared_globals()
 
 Returns, sorted, every key that a C<_global> can hold.  That is each key that
 C<global_schema> declares, and each key that the C<schema> of a recipe
@@ -2518,7 +2518,7 @@ sub declared_globals {
     return @declared;
 }
 
-=head2 \%aliases = alias_map($conf)
+=head2 alias_map($conf)
 
 The other names each domain answers to, keyed by domain.  A domain names them
 in the C<aliases> of its own C<_global>.
@@ -2584,7 +2584,7 @@ sub install_dir {
     return '/opt/hosts';
 }
 
-=head2 $home = $class->admin_home(%globals)
+=head2 $class->admin_home(%globals)
 
 Returns the home directory of C<admin_user> on the guest.  C<%globals> are the
 settings of C<_global>, with C<domain>.

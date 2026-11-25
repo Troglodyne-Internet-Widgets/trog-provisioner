@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::perllsp - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<nodejs> and C<npm>, which install PerlNavigator, and C<vim>.
 

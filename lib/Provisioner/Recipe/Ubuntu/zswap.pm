@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::zswap - Ubuntu's C<deps> for L<Provisioner::Recipe:
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<systemd-oomd>, which kills a runaway first.
 

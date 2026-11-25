@@ -31,12 +31,14 @@ L<Trog::Credentials> documents for a run with nobody at a keyboard.
 
 =head1 FUNCTIONS
 
-=head2 $file = throwaway()
+=head2 throwaway()
 
 Makes a store at F<secrets.kdbx> in the configuration directory of the test,
 with the password C<throwaway>, and hands that password to
 L<Trog::Credentials>.  Returns the path of the store.  The test sets
 C<TROG_PROVISIONER_CONFIG> to a directory of its own first.
+
+    my $file = throwaway();
 
 =cut
 

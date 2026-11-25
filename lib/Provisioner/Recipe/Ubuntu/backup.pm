@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::backup - Ubuntu's C<deps> for L<Provisioner::Recipe
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<rsync>, which copies the data, and C<openssh-server>, which it copies over.
 

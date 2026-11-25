@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::perl - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<perlbrew>, which brings the compiler that a perl build needs, the libraries
 that F<scripts/cpan_install> needs on the system perl, and C<libssl-dev> and

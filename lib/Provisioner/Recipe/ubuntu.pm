@@ -142,7 +142,7 @@ sub packager_invocation {
     return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-overwrite --autoremove';
 }
 
-=head2 $path = $recipe->mirror_path()
+=head2 $recipe->mirror_path()
 
 C</ubuntu>, the path of the archive on a mirror.  C<mirror_uri> appends it to
 a mirror named as a bare domain, which makes C<aptmirror.example.test> into a
@@ -152,7 +152,7 @@ Returns Str, the path.
 
     my $path = $recipe->mirror_path();
 
-=head2 $uri = $recipe->mirror_uri(%opts)
+=head2 $recipe->mirror_uri(%opts)
 
 Takes C<mirror>, C<domain> and C<ipmap> (domain name to address).  Returns the
 mirror that this guest uses first, as a URL, or empty for none.
@@ -210,7 +210,7 @@ A mirror anywhere else is named as a URL instead:
 NOPE
 }
 
-=head2 $version = $recipe->release_version($release)
+=head2 $recipe->release_version($release)
 
 The version of C<$release>, or of the release that C<release> pins, such as
 C<24.04> for C<noble>.
@@ -236,7 +236,7 @@ sub release_version {
     return $VERSION_OF{$release} // die "The ubuntu recipe does not know the version of the release '$release'; add it to \%VERSION_OF\n";
 }
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of L<Provisioner::DistroRecipe>, with C<release>.  See
 L</Which release>.
@@ -260,7 +260,7 @@ sub args {
     return %args;
 }
 
-=head2 $url = $recipe->image_for($release)
+=head2 $recipe->image_for($release)
 
 Returns the URL of the cloud image for the named release, as a Str.
 
@@ -279,7 +279,7 @@ sub image_for {
     return "https://cloud-images.ubuntu.com/$release/current/$release-server-cloudimg-amd64.img";
 }
 
-=head2 $url = $recipe->current_image()
+=head2 $recipe->current_image()
 
 Returns the image for the LTS release that Canonical now says is supported.
 Returns undef if the request fails.  See
@@ -295,7 +295,7 @@ sub current_image {
     return $self->image_for($release);
 }
 
-=head2 $codename = $recipe->current_release()
+=head2 $recipe->current_release()
 
 Returns the codename of that release, from F<meta-release-lts>.  The Ubuntu
 upgrader reads that file, so it gives the answer directly.  The current release
@@ -326,7 +326,7 @@ sub current_release {
     return $current;
 }
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 Returns what every guest needs, whatever else goes on it.  That is C<openssl> to
 make a certificate, ssh as server and client, rsync for the payload, and retry
@@ -365,7 +365,7 @@ needs a second filter that differs from this one only in a number.
 
 sub BLOCK_SCALAR_INDENT { return 6 }
 
-=head2 @fmts = $recipe->formatters()
+=head2 $recipe->formatters()
 
 Returns two formatters.  C<yaml> gives a value to L<YAML::XS> and returns what
 it writes, for the places in a document that take a value.  It leaves out the
@@ -408,7 +408,7 @@ sub formatters {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns C<%opts> with the values added that the four templates read and that
 not every recipe gets.
@@ -633,7 +633,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $key = $recipe->guest_keypair(%opts)
+=head2 $recipe->guest_keypair(%opts)
 
 Returns the keypair that this guest fetches its payload with, as a hash of
 C<private>, C<public> and C<path>.  Makes the pair if the domain has none.

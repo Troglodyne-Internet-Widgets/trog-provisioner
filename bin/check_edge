@@ -153,10 +153,12 @@ sub main {
 
 =head1 SUBROUTINES
 
-=head2 $machine = machine($domain)
+=head2 machine($domain)
 
 The guest of C<$domain>, as L<Trog::Hypervisors/guest_of> finds it.  Dies when
 no hypervisor of the fleet runs it at an address.
+
+    my $machine = machine($domain);
 
 =cut
 
@@ -165,11 +167,13 @@ sub machine {
     return Trog::Hypervisors->guest_of($domain) // die "No hypervisor in the fleet runs $domain at an address, so there is nothing to check.\n";
 }
 
-=head2 ($output, $status) = as_root($machine, $command)
+=head2 as_root($machine, $command)
 
 Runs the shell C<$command> as root on C<$machine>, and returns what it printed
 and its exit status.  The status is undef when the command printed no status,
 for example because the connection failed.
+
+    my ($output, $status) = as_root($machine, $command);
 
 =cut
 
@@ -244,10 +248,12 @@ sub check_https {
     return [ 1, "$label, with a certificate for it, and HTTP $status" ];
 }
 
-=head2 $socket = tls_to($address, $name)
+=head2 tls_to($address, $name)
 
 A TLS connection to port 443 at C<$address> with C<$name> in SNI, and a
 certificate that is valid for C<$name>, or undef.
+
+    my $socket = tls_to($address, $name);
 
 =cut
 
@@ -310,10 +316,12 @@ sub check_http {
     return [ 1, "$label, with HTTP $status" ];
 }
 
-=head2 $status = http_status($socket, $name, $path)
+=head2 http_status($socket, $name, $path)
 
 Sends a GET of C<$path> for the host C<$name> on C<$socket>, and returns the
 status code of the answer, or undef when there is no status line.
+
+    my $status = http_status($socket, $name, $path);
 
 =cut
 
@@ -323,10 +331,12 @@ sub http_status {
     return $status;
 }
 
-=head2 ($status, \%headers) = http_answer($socket, $name, $path)
+=head2 http_answer($socket, $name, $path)
 
 As C<http_status>, and the headers of the answer too, by their names in lower
 case.
+
+    my ($status, $headers) = http_answer($socket, $name, $path);
 
 =cut
 
@@ -345,11 +355,13 @@ sub http_answer {
     return ( $status, \%headers );
 }
 
-=head2 $address = client_address($edge)
+=head2 client_address($edge)
 
 The address that the edge sees this machine at, from C<SSH_CONNECTION> of the
 connection that asks it.  That is also where the request of C<check_https>
 comes from, because both leave this machine the same way.
+
+    my $address = client_address($edge);
 
 =cut
 
@@ -360,11 +372,13 @@ sub client_address {
     return $address;
 }
 
-=head2 @addresses = edge_addresses($edge, $edge_domain)
+=head2 edge_addresses($edge, $edge_domain)
 
 The addresses that a request from the edge can come from: each address of
 C<$edge_domain> in the address pool, such as its tunnel, and the address that
 this machine reaches it at.
+
+    my @addresses = edge_addresses($edge, $edge_domain);
 
 =cut
 
@@ -428,10 +442,12 @@ sub check_ban {
     return [ 1, "$label ($jail)" ];
 }
 
-=head2 $bool = wait_for($probe, $want)
+=head2 wait_for($probe, $want)
 
 Calls C<$probe> once a second until it returns C<$want>, for at most
 C<$BAN_WAIT> seconds.  Returns true when it did.
+
+    my $bool = wait_for($probe, $want);
 
 =cut
 

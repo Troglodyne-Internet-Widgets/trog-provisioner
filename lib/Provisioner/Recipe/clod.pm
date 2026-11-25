@@ -481,7 +481,7 @@ has no scan yet, so the task installs nothing, and the buttons stay.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<perl>, which installs what the checkout needs, C<App::cpanoutdated>, the
 programs that App::Clod lets a run use, and C<spoke_modules>.  Those programs
@@ -539,7 +539,7 @@ sub required_recipes {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<agent_home>, the home that L<Provisioner::Recipe::claude> makes for
 C<agent_user>, when the domain names one.
@@ -589,7 +589,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $target = $recipe->telemetry_target(%opts)
+=head2 $recipe->telemetry_target(%opts)
 
 The address or name for the C<host> of C<telemetry>, as
 L<Provisioner::Utils/fleet_address> resolves it, or empty with no host.  Dies
@@ -612,7 +612,7 @@ sub telemetry_target {
     return $value;
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Runs F<clod-salvage.sh>, which copies the Minion database into
 F<.clod-salvage> with the C<.backup> of C<sqlite3>.  The worker writes the
@@ -640,7 +640,7 @@ sub remote_prepare {
     return ("$install_dir/$domain/clod-salvage.sh");
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The copy that C<remote_prepare> made, F<.clod-salvage/> in the directory of
 the domain, which goes to F<clod-salvage/>.
@@ -664,7 +664,7 @@ sub remote_files {
     return ( "$install_dir/$domain/.clod-salvage/" => 'clod-salvage/' );
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 The salvaged database and evidence go back to F<clod-state>, owned by the
 service C<user>.  The evidence gets no mode, because C<restore_state> would
@@ -691,7 +691,7 @@ sub restores {
     );
 }
 
-=head2 %formatters = $recipe->formatters()
+=head2 $recipe->formatters()
 
 C<perl_string>, which F<clod.conf.tt> quotes free text with.  L<B/perlstring>
 escapes every quote, C<$>, C<@>, backslash and control character, so no text
@@ -754,7 +754,7 @@ sub tests {
     return qw{clod.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts(%opts)
+=head2 $recipe->fetch_hosts(%opts)
 
 The host of C<repo_url>, which is GitHub for the default.
 

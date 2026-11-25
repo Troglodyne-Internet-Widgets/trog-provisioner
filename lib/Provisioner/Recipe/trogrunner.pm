@@ -401,7 +401,7 @@ sub required_recipes {
     );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  A machine has one F</etc/trog-provisioner>, and here it is a symlink
 into the directory of this domain.  A second domain does not get its own
@@ -1225,7 +1225,7 @@ sub tests {
     return qw{trogrunner.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 GitHub, which serves the checkout that this recipe clones.  Only the host of
 the default is declared, because C<fetch_hosts> is asked of the class without

@@ -160,7 +160,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Takes the duplicate hosts out of each account, which two dependents asking for
 the same forge leave behind, and sorts them.
@@ -195,7 +195,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 $recipe->guest_secrets($install_dir, $domain, %opts)
 
 The ssh key of each account when C<ssh_identity> is on, and nothing when it is
 off.  See L</THE SSH KEY>.

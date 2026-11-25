@@ -120,7 +120,7 @@ version of a source until it unpacks it.
 
 =head1 METHODS
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of L</The options>: C<languages>, a list of words, C<version> and
 C<source>, strings.
@@ -158,7 +158,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Removes the duplicates from C<languages> and sorts it, because several recipes
 that ask for one language each add it to the list.
@@ -179,7 +179,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<configd.tt>.
 

@@ -127,7 +127,7 @@ sub main {
     return 1;
 }
 
-=head2 $seeded = seed_admin_keys()
+=head2 seed_admin_keys()
 
 If F<admin_authorized_keys> is missing or empty, this offers to fill it in with
 ssh-import-id.  It asks for a service (C<gh> or C<lp>) and a name on that
@@ -137,6 +137,8 @@ It asks only at a terminal.  The provisioning workflow runs bin/preflight with
 nobody to answer, and a question there stops the run.
 
 Returns 1 if ssh-import-id succeeded, and 0 in all other cases.
+
+    my $seeded = seed_admin_keys();
 
 =cut
 
@@ -181,7 +183,7 @@ sub hypervisor {
     return $hv;
 }
 
-=head2 @failed = rest_of_fleet($fleet, $checked)
+=head2 rest_of_fleet($fleet, $checked)
 
 Reports every other block in F<hypervisors.conf>: what it builds through, and
 whether that client is installed.  Prints each answer as it arrives and returns
@@ -191,6 +193,8 @@ Those checks are of one hypervisor, because a run builds on one.  This is about
 the file.  A block that names two kinds of hypervisor, a block that names none,
 and a block whose client nobody installed are all faults that otherwise show
 when something reaches that block, which is a run that has already started.
+
+    my @failed = rest_of_fleet($fleet, $checked);
 
 =cut
 
@@ -207,7 +211,7 @@ sub rest_of_fleet {
     } @others;
 }
 
-=head2 @verdicts = block_verdicts($fleet, $name)
+=head2 block_verdicts($fleet, $name)
 
 Returns what can be said about one block, each verdict as C<[name] what>: what
 kind of hypervisor it is, and then the checks it answers about itself, which
@@ -217,6 +221,8 @@ None of those asks a hypervisor for anything or reads its credential, so a
 preflight of one machine does not authenticate to every cloud in the fleet, and
 does not open the secret store for a token.  A block of a kind whose client is
 not installed here is still reported.
+
+    my @verdicts = block_verdicts($fleet, $name);
 
 =cut
 
@@ -236,10 +242,12 @@ sub block_verdicts {
     } $hv->preflight_block_checks;
 }
 
-=head2 \%verdict = report(%verdict)
+=head2 report(%verdict)
 
 Prints one line for a check as its result arrives, not all of them at the end.
 C<%verdict> has C<ok> and C<what>.  Returns C<%verdict> as a hash reference.
+
+    my $verdict = report(%verdict);
 
 =cut
 

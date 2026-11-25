@@ -188,7 +188,7 @@ so L<Provisioner::Recipe::Ubuntu::ossec> installs it with the manager.
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  There is one manager on the machine, and one collector that feeds it.
 
@@ -264,7 +264,7 @@ sub manager_of {
     return Provisioner::Cookbook->configures($collector) ? $collector : undef;
 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -298,7 +298,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<logcollector>, with the copy as text that the manager reads, and
 C<configd>, which makes F<ossec.conf>.  logcollector requires this recipe too.
@@ -323,7 +323,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 The listener of the manager on C<port>, on 127.0.0.1, and the listener of
 the agents on 1514/udp, on every address.
@@ -341,7 +341,7 @@ sub listens {
     return ( '127.0.0.1:' . ( $opts{port} // 10514 ), '1514/udp' );
 }
 
-=head2 %files = $recipe->issue_grant($grant)
+=head2 $recipe->issue_grant($grant)
 
 The key of the agent of the C<client> of C<$grant>, as
 F</etc/ossec-client.keys.b64> on that guest: its line of F<client.keys>, in
@@ -375,7 +375,7 @@ sub issue_grant {
     );
 }
 
-=head2 @commands = $recipe->remote_prepare()
+=head2 $recipe->remote_prepare()
 
 Copies of F</var/ossec/etc/client.keys>, the keys of the agents, and of
 F</var/ossec/queue/rids/sender_counter>, the count of the messages of the
@@ -398,7 +398,7 @@ sub remote_prepare {
     return map { "if [ -f $_->[0] ]; then install -d -m 0700 /var/lib/ossec-salvage && install -m 0600 $_->[0] /var/lib/ossec-salvage/$_->[1]; fi" } ( [ '/var/ossec/etc/client.keys', 'client.keys' ], [ '/var/ossec/queue/rids/sender_counter', 'sender_counter' ] );
 }
 
-=head2 %path_map = $recipe->remote_files()
+=head2 $recipe->remote_files()
 
 The copy that C<remote_prepare> made.
 
@@ -413,7 +413,7 @@ sub remote_files {
     return ( '/var/lib/ossec-salvage/' => 'ossec-salvage/' );
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 The keys of the agents, back where the manager reads them, readable by the
 manager and nobody else.  The count of the messages of the manager, back where
@@ -436,7 +436,7 @@ sub restores {
     );
 }
 
-=head2 %revocation = $recipe->revoke_grant($grant)
+=head2 $recipe->revoke_grant($grant)
 
 The removal of the agent of the C<client> of C<$grant> from the manager.
 
@@ -464,7 +464,7 @@ sub revoke_grant {
     );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 The archive of Atomicorp.
 
@@ -478,7 +478,7 @@ sub fetch_hosts {
     return (qw{updates.atomicorp.com});
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The archive, as an apt repository.
 
@@ -494,7 +494,7 @@ sub cache_classes {
     return map { local ($_) = $_; $class->apt_repo_classes($_) } $class->fetch_hosts();
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The configuration of the manager, its rules for the log watchers, the scripts
 that issue and revoke the keys of the agents, and the firewall profile for the
@@ -517,7 +517,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the template for the test that runs on the guest.
 

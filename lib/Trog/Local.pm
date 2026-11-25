@@ -365,7 +365,7 @@ when both see the domain directories and the directory of guest keys at the
 same paths, as shares of one directory.  Then this machine writes the key, and
 the sshd of the other lets it in.
 
-=head2 $dir = guest_keys()
+=head2 guest_keys()
 
 Returns the directory of guest keys, a Str: C<guest_keys> of the C<_global> of C<_base> in
 F<recipes.yaml>, which is C<$Trog::Utils::GUEST_KEYS> unless the installation
@@ -424,7 +424,7 @@ sub authorize_guest_key {
     return Trog::Utils::write_binary_mode( $self->guest_keys() . "/$name", "$dir\n$pubkey\n", oct('0644') );
 }
 
-=head2 $had = revoke_guest_key($name)
+=head2 revoke_guest_key($name)
 
 =over 4
 

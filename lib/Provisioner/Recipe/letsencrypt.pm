@@ -118,7 +118,7 @@ F<domains.txt> then has an alias, so its certificate names the domain and
 nothing else, while the certificate of the domain still holds every name.
 own_certificate_dir() says where each certificate of its own is.
 
-=head2 $dir = own_certificate_dir($name, $domain)
+=head2 own_certificate_dir($name, $domain)
 
 The directory under F</var/lib/dehydrated/certs> that holds the certificate of
 its own of C<$name>, a name of C<own_certificates> of C<$domain>: C<$name>
@@ -308,7 +308,7 @@ sub args {
     );
 }
 
-=head2 %params = $recipe->enrich(%params)
+=head2 $recipe->enrich(%params)
 
 Sets C<ca>: the directory of the CA of the fleet, from
 L<Provisioner::Recipe::acmeca/directory_for>, where the domain names no CA and
@@ -385,7 +385,7 @@ sub enrich {
     return %params;
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 The certificates, so that a rebuild does not request them again against the
 rate limit, and the ACME account, but only for a CA that outlives the guest.
@@ -431,7 +431,7 @@ sub restores {
 # Not /etc/dehydrated/certs.  dehydrated has BASEDIR=/var/lib/dehydrated, so it
 # never writes there, and an empty salvage raises a warning on every run.
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The certificates and the ACME account, which the fetch copies back from the
 guest.  The paths are the same for every domain, so the sub reads neither
@@ -459,7 +459,7 @@ sub remote_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Returns the recipes that this one requires.  Each name comes with a sub that
 returns the options to give that recipe:

@@ -278,7 +278,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds to C<protect> the units that each recipe in C<modules> names in
 L<Provisioner::Recipe/oom_protect>, and to C<oomd_omit> the units that each
@@ -303,7 +303,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %settings = $recipe->machine_wide(%opts)
+=head2 $recipe->machine_wide(%opts)
 
 Every setting.  The recipe has only a global half, and each setting is a fact
 about the machine.  A list comes back as one string, its members sorted and

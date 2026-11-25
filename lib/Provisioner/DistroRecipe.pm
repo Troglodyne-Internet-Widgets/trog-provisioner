@@ -95,7 +95,7 @@ my sub unanswered ( $self, $what ) {
 
 =head1 METHODS A DISTRIBUTION MUST ANSWER
 
-=head2 $packager = $distro->packager()
+=head2 $distro->packager()
 
 The packaging system that the recipes name packages for, for example C<deb> or
 C<rpm>.  It also names the L<Provisioner::Packager> that turns the archives,
@@ -125,7 +125,7 @@ and names the distribution, which does not answer it.
 
 sub packager { return unanswered( shift, 'packager' ) }
 
-=head2 @modules = $distro->rerun_modules()
+=head2 $distro->rerun_modules()
 
 The cloud-init modules that a domain added to a guest that is up runs again,
 in order, from its own user-data.  The first ones point the downloads at the
@@ -151,7 +151,7 @@ sub rerun_modules {
     );
 }
 
-=head2 $url = $distro->base_image($release)
+=head2 $distro->base_image($release)
 
 The cloud image of C<$release> that is the base layer of the disk of a guest,
 or of the pinned C<release> without one.  It is a URL that the hypervisor can
@@ -178,7 +178,7 @@ distribution, which does not answer it.
 
 sub base_image { return unanswered( shift, 'base_image' ) }
 
-=head2 $version = $distro->release_version($release)
+=head2 $distro->release_version($release)
 
 The version of C<$release>, or of the pinned C<release> without one, as image
 catalogs name it: C<24.04>, not C<noble>.  A cloud finds the image a guest boots
@@ -201,7 +201,7 @@ distribution, which does not answer it.
 
 sub release_version { return unanswered( shift, 'release_version' ) }
 
-=head2 $release = $distro->release()
+=head2 $distro->release()
 
 The release that a domain gets when its C<_global> names none, such as
 C<noble>.  It is pinned on purpose: see C<current_image>.
@@ -217,7 +217,7 @@ distribution, which does not answer it.
 
 sub release { return unanswered( shift, 'release' ) }
 
-=head2 $release = $distro->release_of(%conf)
+=head2 $distro->release_of(%conf)
 
 The release that a domain builds on, from C<%global>, its C<_global>: its
 C<release>, or the pinned C<release> when it names none.  Dies for a
@@ -243,7 +243,7 @@ sub release_of ( $class, %conf ) {
     return $release;
 }
 
-=head2 $name = $distro->distribution()
+=head2 $distro->distribution()
 
 The distribution, as image catalogs name it: Glance's C<os_distro>, and the
 start of the name of a Linode image.  The name of the recipe, which is what the
@@ -261,7 +261,7 @@ C<recipe_name> returns it.
 
 sub distribution { my ($self) = @_; return $self->recipe_name }
 
-=head2 $cmd = $distro->packager_invocation()
+=head2 $distro->packager_invocation()
 
 The command that installs a list of packages.  It runs without prompts, and it
 does not need a terminal.
@@ -273,7 +273,7 @@ the distribution, which does not answer it.
 
     my $install = Provisioner::Recipe::ubuntu->packager_invocation;
 
-=head2 $cmd = $distro->packager_up_invocation()
+=head2 $distro->packager_up_invocation()
 
 The command that upgrades the installed packages.
 
@@ -284,7 +284,7 @@ the distribution, which does not answer it.
 
     my $upgrade = Provisioner::Recipe::ubuntu->packager_up_invocation;
 
-=head2 $cmd = $distro->packager_remove_invocation()
+=head2 $distro->packager_remove_invocation()
 
 The command that removes a list of packages.
 
@@ -306,7 +306,7 @@ sub packager_remove_invocation { return unanswered( shift, 'packager_remove_invo
 
 =head1 METHODS
 
-=head2 $bool = $distro->is_module()
+=head2 $distro->is_module()
 
 False.  See L</It directs the build and does not run in it>.
 
@@ -320,7 +320,7 @@ Returns Bool, false.
 
 sub is_module { return 0 }
 
-=head2 $url = $distro->current_image()
+=head2 $distro->current_image()
 
 The image that this distribution names as current today, or C<undef>.
 
@@ -345,7 +345,7 @@ Returns Str or undef: the URL, or undef.  This class returns undef.
 
 sub current_image { return undef }
 
-=head2 %args = $distro->args()
+=head2 $distro->args()
 
 Returns the schema of what a distribution takes.  C<bin/recipes ubuntu> prints
 it with the full description of each field.  The fields that an operator sets
@@ -439,7 +439,7 @@ sub args {
     );
 }
 
-=head2 %defaults = $distro->global_defaults()
+=head2 $distro->global_defaults()
 
 Returns each default that C<args> declares, as a hash of field name to default.
 Callable on the class.
@@ -469,7 +469,7 @@ sub global_defaults {
     return map { $_ => $properties->{$_}{default} } grep { exists $properties->{$_}{default} } sort keys %$properties;
 }
 
-=head2 $address = $distro->cache_address(%opts)
+=head2 $distro->cache_address(%opts)
 
 Takes C<cache>, C<domain> and C<ipmap>.  Returns the address of the fetch cache
 that this guest provisions through, or empty for none.
@@ -534,7 +534,7 @@ installation assigns an address to, or by its IPv4 address.
 NOPE
 }
 
-=head2 %files = $distro->template_files()
+=head2 $distro->template_files()
 
 Returns the four files that a guest is built from, as template name to output
 name.  Any other recipe declares its generated files the same way.
@@ -569,7 +569,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $distro->required_recipes(%opts)
+=head2 $distro->required_recipes(%opts)
 
 Returns C<vm>, which gets the same C<%opts>, and L<Provisioner::Recipe::sshd>
 and L<Provisioner::Recipe::hardening>, which get nothing.
@@ -605,7 +605,7 @@ sub required_recipes {
     );
 }
 
-=head2 $dir = $distro->template_subdir()
+=head2 $distro->template_subdir()
 
 The directory under F<templates/> that holds the fragments and generated files
 of this distribution.  It is the name of the recipe.  Callable on the class.

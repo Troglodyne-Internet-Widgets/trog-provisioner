@@ -59,7 +59,7 @@ sub template_files {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns %opts with C<resolvers> as an array reference.  C<resolvers> can come
 in as an array reference, or as a string separated by commas or spaces.  If
@@ -90,7 +90,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->resolver_files(%opts)
+=head2 $recipe->resolver_files(%opts)
 
 The drop-in that turns the stub off and names the resolvers, which the
 C<resolver> target installs before any recipe target.  See

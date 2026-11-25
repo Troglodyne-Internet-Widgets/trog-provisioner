@@ -108,7 +108,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<cron>, which installs F<lynis_cron> as F</etc/cron.d/lynis>.
 

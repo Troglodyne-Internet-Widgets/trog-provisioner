@@ -96,7 +96,7 @@ until somebody removes it.  The next build of the guest does not remove it.
 
 =head1 METHODS
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options: C<restores>, an object from each destination on the
 guest to an object of C<from>, which is required, C<owner> and C<mode>.  The
@@ -132,7 +132,7 @@ sub args {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<data.tt>.
 

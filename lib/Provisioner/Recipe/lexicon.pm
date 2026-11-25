@@ -57,7 +57,7 @@ zone and one provider, so the path does not name the provider.
 
 =head1 METHODS
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns C<%opts> with C<lexicon> added: the credentials that
 L<Provisioner::Recipe::registrar/credentials_for> returns for the domain.  It
@@ -82,7 +82,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 Returns the shortcut template, the six patches, and the list of the files that
 the patches change, each mapped to the name of the file that it becomes.  The
@@ -106,7 +106,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the guest test F<lexicon.tt>.
 

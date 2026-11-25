@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::git};
 
 Provisioner::Recipe::Ubuntu::git - Ubuntu's C<deps> for L<Provisioner::Recipe::git>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<git> itself, and the ssh client it pushes over.
 

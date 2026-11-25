@@ -244,7 +244,7 @@ sub args {
 our $MEDIA_SOCKET = '/run/nginxrelay-media.sock';
 our $PAGE_SOCKET  = '/run/nginxrelay-pages.sock';
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<media_socket> and C<page_socket>, where the media server and the page
 server listen, to what L<Provisioner::RelayRecipe/enrich> adds.
@@ -282,7 +282,7 @@ sub required_recipes {
     );
 }
 
-=head2 %limits = $recipe->rate_limits(%opts)
+=head2 $recipe->rate_limits(%opts)
 
 The limit of 443 for C<tls_port>, because the forward happens before the limit
 counts a connection.
@@ -304,7 +304,7 @@ sub rate_limits {
     return ( tls_port(%opts) => 1024 );
 }
 
-=head2 $dir = $recipe->relay_dir()
+=head2 $recipe->relay_dir()
 
 F</etc/nginx/nginxrelay.d>, which holds the registrations and the ban keys.
 See L<Provisioner::RelayRecipe>.
@@ -319,7 +319,7 @@ sub relay_dir {
     return '/etc/nginx/nginxrelay.d';
 }
 
-=head2 @ports = $recipe->banned_ports(%opts)
+=head2 $recipe->banned_ports(%opts)
 
 80 and C<tls_port>, where this guest proxies.  The ban closes C<tls_port> and
 not 443, because the forward comes first.
@@ -341,7 +341,7 @@ sub banned_ports {
     return ( 80, tls_port(%opts) );
 }
 
-=head2 %files = $recipe->registration_files($grant, %terms)
+=head2 $recipe->registration_files($grant, %terms)
 
 The ban key that the relay issues when it registers the names of the client of
 C<$grant>, at C<key_path> of the client.  L<Provisioner::RelayRecipe/issue_grant>
@@ -435,7 +435,7 @@ sub media_key_path {
     return '/etc/ssl/' . $self->recipe_name . "/$domain.media.key.b64";
 }
 
-=head2 %revocation = $recipe->revoke_grant($grant)
+=head2 $recipe->revoke_grant($grant)
 
 The release of the names of the client of C<$grant>, by
 F<scripts/relay_client> C<nginx release>, as C<revoke_grant> in

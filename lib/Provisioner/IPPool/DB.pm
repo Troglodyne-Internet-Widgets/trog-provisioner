@@ -758,7 +758,7 @@ my %OPS = (
     migrate            => \&migrate,
 );
 
-=head2 @ops = operations()
+=head2 operations()
 
 The names of the operations, sorted.
 

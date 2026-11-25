@@ -260,7 +260,7 @@ sub rate_limits {
     return ( ( $opts{port} // 1194 ) . '/' . ( $opts{proto} // 'udp' ) => 256 );
 }
 
-=head2 %jails = $recipe->jails(%opts)
+=head2 $recipe->jails(%opts)
 
 A jail that bans a host that sends packets without the C<tls-auth> key.  Such
 a host is not a client of this server, and openvpn logs it as one of these:
@@ -296,7 +296,7 @@ sub jails {
     );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  The machine has one server, with one F</etc/openvpn/server> and one
 C<openvpn-server@server>.  It has one easy-rsa PKI, and the CA has the name of
@@ -465,7 +465,7 @@ sub dynamic_pool ( $subnet, $cidr, @blocks ) {
     return { start => Provisioner::IPPool::int_to_address( $free[0][0] ), end => Provisioner::IPPool::int_to_address( $free[0][1] ) };
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<cidr>, the prefix length of C<netmask>, for the firewall rules of the
 VPN subnet.  Dies if C<netmask> is not a netmask.
@@ -498,7 +498,7 @@ Returns the options, as a list of key and value pairs.
 
 =cut
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Requires C<cron>, which installs F<openvpn-refresh-crl.cron> and
 F<openvpn-ca-expiry.cron> under F</etc/cron.d>.
@@ -597,7 +597,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->issue_grant($grant, %terms)
+=head2 $recipe->issue_grant($grant, %terms)
 
 The configuration that the server of C<$grant> issues for its client, at the
 static C<address>, as C<issue_grant> in L<Provisioner::Recipe> says.  The file
@@ -638,7 +638,7 @@ sub issue_grant {
     );
 }
 
-=head2 %revocation = $recipe->revoke_grant($grant)
+=head2 $recipe->revoke_grant($grant)
 
 The revoke of the certificate of the client of C<$grant> by
 C<openvpn-revoke-client>, which also frees its static address on the server, as
@@ -664,7 +664,7 @@ sub revoke_grant {
     );
 }
 
-=head2 @files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The configuration of the server, its scripts and cron files, the variables of
 easy-rsa and the ufw application profile.  It ignores the loaded recipes that
@@ -697,7 +697,7 @@ sub template_files {
     );
 }
 
-=head2 $command = $recipe->static_clients_command()
+=head2 $recipe->static_clients_command()
 
 The shell command that root runs on this server to list each client with a
 static address.  It prints the name of the client, a tab, and the address, one
@@ -728,7 +728,7 @@ sub restores {
     );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<openvpn-stage-pki>, so that the fetch gets the PKI as it is now and
 not as it was at the last provision.

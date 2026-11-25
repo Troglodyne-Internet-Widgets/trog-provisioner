@@ -179,7 +179,7 @@ sub args {
 
 =head1 METHODS
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Sets C<devices> to a copy of C<disk_devices>, or to an empty list, when the
 domain names no devices of its own.

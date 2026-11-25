@@ -110,7 +110,7 @@ sub rate_limits {
     return ( 32400 => 1024 );
 }
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 The ports that the Plex Media Server binds besides 32400, which
 C<rate_limits> names: 32401 and 32600 on 127.0.0.1, and 1901, 32410 and 32412
@@ -155,7 +155,7 @@ sub tests {
     return qw{plexmediaserver.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<repo.plex.tv>, the apt repository that the package comes from.  The signing
 key comes from C<downloads.plex.tv>, which F<bin/new_config> fetches, and the
@@ -171,7 +171,7 @@ sub fetch_hosts {
     return qw{repo.plex.tv};
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The cache classes for the apt repository at C<repo.plex.tv>.  See C<apt_repo_classes>
 in L<Provisioner::Recipe>.

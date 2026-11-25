@@ -176,11 +176,13 @@ GUIDANCE
     return 0;
 }
 
-=head2 %bins = guest_bins()
+=head2 guest_bins()
 
 The C<guests> bin of each pool of a bridge, as L<Provisioner::IPPool/guest_pools>
 finds them, by its label: C<guests:>, the bridge, and the names of the
 hypervisors that share it.
+
+    my %bins = guest_bins();
 
 =cut
 

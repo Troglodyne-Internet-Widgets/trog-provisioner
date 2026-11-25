@@ -28,7 +28,7 @@ my sub suite ($release) {
     return 'Provisioner::Recipe::ubuntu'->release_of( release => $release ) . '-pgdg';
 }
 
-=head2 @pkgs = $recipe->deps(%opts)
+=head2 $recipe->deps(%opts)
 
 C<postgresql-common>, C<pigz>, and the server, the client, the server
 development files and PL/Perl of the major version C<version>, or else of the
@@ -58,7 +58,7 @@ sub deps {
     return ( qw{postgresql-common pigz}, map { "$_-$major" } qw{postgresql postgresql-client postgresql-server-dev postgresql-plperl} );
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The apt repository of the PostgreSQL project, PGDG, for C<distro_release>, the
 release of the domain.  Its packages carry the major version in their names, so
@@ -90,7 +90,7 @@ sub package_sources {
     };
 }
 
-=head2 $major = $recipe->newest_version($release)
+=head2 $recipe->newest_version($release)
 
 The highest major version that PGDG publishes in C<main> for C<$release>, or
 for the pinned release, read from its package index.  C<main> holds only

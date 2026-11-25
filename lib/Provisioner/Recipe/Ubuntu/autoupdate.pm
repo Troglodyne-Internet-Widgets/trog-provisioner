@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::autoupdate - Ubuntu's C<deps> for L<Provisioner::Re
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 No package: on Ubuntu the recipe installs nothing.
 

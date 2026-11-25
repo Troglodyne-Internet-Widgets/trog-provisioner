@@ -24,7 +24,7 @@ Builds ImageMagick from source with its Perl bindings, and installs it.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes()
+=head2 $recipe->required_recipes()
 
 Returns C<perl>.  The bindings build against the perl that the perl recipe
 installs under F</opt/perl5>.  The name is paired with a code reference that
@@ -78,7 +78,7 @@ sub tests {
     return qw{imagemagick.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<download.imagemagick.org>, where F<scripts/build_imagick.sh> fetches the
 source release.
@@ -93,7 +93,7 @@ sub fetch_hosts {
     return ('download.imagemagick.org');
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 A release tarball named by version.  The archive keeps it until it prunes it.
 After that, the copy in the cache is the only copy left.

@@ -85,7 +85,7 @@ sub required_recipes {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Dies when an entry of C<loggers> is not the name of a Perl module, such as
 C<1Foo::Bar>, because tPSGI loads each one by name.
@@ -131,7 +131,7 @@ sub tests {
     return qw{tpsgi.tt};
 }
 
-=head2 %jails = $recipe->jails(%opts)
+=head2 $recipe->jails(%opts)
 
 A jail for the domain, which bans a host whose logins fail too often.  tCMS
 writes each failure into the log of tPSGI, in the format of its C<Trog::Log>:
@@ -171,7 +171,7 @@ sub jails {
     );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 Returns C<github.com>, which serves the tPSGI checkout that this recipe clones.
 

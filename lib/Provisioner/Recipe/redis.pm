@@ -106,7 +106,7 @@ sub rate_limits {
     return ( ( $opts{port} // 6379 ) => 512 );
 }
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 C<port> on each address in C<bind>, which is what C<rate_limits> would
 otherwise claim on every address.  redis reads C<bind> as a list of addresses.

@@ -123,7 +123,7 @@ C<allowed_senders> limits who can send.
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  The machine has one listener: one port, one ruleset, and one
 F</etc/rsyslog.d/09-logcollector.conf>.  A second domain does not add a second
@@ -137,7 +137,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 Returns the schema.  C<bin/recipes> shows each field, its default and its
 description.
@@ -217,7 +217,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns C<%opts> with each repeated C<forward> and C<forward_text> destination
 removed.
@@ -242,7 +242,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<ossec>, so that every collector runs an OSSEC manager over what it receives,
 with its rules and its mail to the admin.  The two require each other, because
@@ -259,7 +259,7 @@ sub required_recipes {
     return ( ossec => sub { () } );
 }
 
-=head2 %limits = $recipe->rate_limits(%opts)
+=head2 $recipe->rate_limits(%opts)
 
 Returns a limit of 256 on the configured port and protocol, not on 514.  So a
 collector on a different port gets the limit where it listens.  A busy fleet
@@ -284,7 +284,7 @@ sub rate_limits {
     return ( $port       => 256 );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 Returns the rsyslog configuration, the logrotate configuration and the ufw
 profile, each mapped to the name of the file that it becomes.  They are the
@@ -305,7 +305,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the guest test F<logcollector.tt>.
 

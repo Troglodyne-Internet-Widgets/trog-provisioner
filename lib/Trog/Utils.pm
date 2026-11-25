@@ -169,7 +169,7 @@ sub output_is_redirected {
     return IO::Interactive::Tiny::is_interactive(*STDIN) && !IO::Interactive::Tiny::is_interactive();
 }
 
-=head2 @slots = slots_in(\$root, $path)
+=head2 slots_in(\$root, $path)
 
 =over 4
 
@@ -215,7 +215,7 @@ sub slots_in {
     return @found;
 }
 
-=head2 @steps = slot_steps($path)
+=head2 slot_steps($path)
 
 =over 4
 
@@ -244,7 +244,7 @@ sub slot_steps {
     return @steps;
 }
 
-=head2 $quoted = shell_quote($string)
+=head2 shell_quote($string)
 
 =over 4
 

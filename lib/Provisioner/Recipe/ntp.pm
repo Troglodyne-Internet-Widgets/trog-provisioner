@@ -42,7 +42,7 @@ than 1 second during the first 3 clock updates.
 
 =cut
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 The command port of chrony, 323/udp on 127.0.0.1 and on ::1.  chrony serves no time, so
 nothing listens on 123.

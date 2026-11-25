@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::ldap - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
-=head2 @pkgs = $recipe->deps(%opts)
+=head2 $recipe->deps(%opts)
 
 C<slapd>, C<ldap-utils>, C<libldap2>, and C<ssl-cert> for its group, which
 slapd must be in to read its key.  With C<github>, also perl and the JSON and

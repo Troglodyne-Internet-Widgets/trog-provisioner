@@ -16,7 +16,7 @@ use Provisioner::Recipe::ubuntu();    ## no critic (ProhibitUnusedImports) -- pa
 
 Provisioner::Recipe::Ubuntu::clod - Ubuntu's C<deps> and packager for L<Provisioner::Recipe::clod>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 git, which the bot runs for its mirrors and work trees, and sqlite3, which
 C<remote_prepare> backs the database up with.  For the installer of
@@ -36,7 +36,7 @@ sub deps {
     return qw{git sqlite3 gnupg libio-socket-ssl-perl libnet-ssleay-perl strace gdb};
 }
 
-=head2 $packager = $recipe->distro_packager()
+=head2 $recipe->distro_packager()
 
 The packager of L<Provisioner::Recipe::ubuntu>, whose packages the installer
 of L<Provisioner::Recipe::clod/THE SYSTEM PACKAGES> installs.

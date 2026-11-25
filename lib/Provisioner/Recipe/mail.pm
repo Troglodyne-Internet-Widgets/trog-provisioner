@@ -695,7 +695,7 @@ sub trusted_clients_arg {
     );
 }
 
-=head2 %settings = $recipe->machine_wide(%opts)
+=head2 $recipe->machine_wide(%opts)
 
 C<trusted_clients>, as one string, because the global half writes the checks
 of port 25 for the whole machine.  See L<Provisioner::Recipe/machine_wide>.
@@ -715,7 +715,7 @@ sub machine_wide {
     return ( trusted_clients => join( q{,}, sort @{ $opts{trusted_clients} // [] } ) );
 }
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 The ports of postfix: SMTP on 25, and submission on 465 over TLS and on 587,
 on every address, and the return from amavis on 10025, on 127.0.0.1.  The
@@ -760,7 +760,7 @@ sub proxied_ports {
     return ( imaps => 10993, submissions => 10465, pop3s => 10995 );
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 The jails that fail2ban ships for postfix and dovecot.  They ban a host whose
 logins to SMTP, IMAP or POP fail too often, and read both from the journal.
@@ -781,7 +781,7 @@ sub jails {
     );
 }
 
-=head2 @names = $recipe->subdomains()
+=head2 $recipe->subdomains()
 
 C<mail>, which the MX names and the SRV records point at, and C<autodiscover>
 and C<autoconfig>, which F<mail.autodiscover_vhost.tt> answers for so a client
@@ -798,7 +798,7 @@ sub subdomains {
     return qw{mail autodiscover autoconfig};
 }
 
-=head2 @names = $recipe->addressed_names(%opts)
+=head2 $recipe->addressed_names(%opts)
 
 C<mail.DOMAIN>, which the MX and most of the SRV records name, and
 C<autodiscover.DOMAIN>, which the SRV record of Autodiscover names.  See
@@ -815,7 +815,7 @@ sub addressed_names {
     return map { "$_.$opts{domain}" } qw{mail autodiscover};
 }
 
-=head2 @records = $recipe->dns_records(%opts)
+=head2 $recipe->dns_records(%opts)
 
 The MX of the domain, which names C<mail.DOMAIN>, its SPF and DMARC policies,
 the records that point a mail client at its settings, an SRV record for each
@@ -896,7 +896,7 @@ sub dkim_records {
     return map { { type => 'TXT', name => "$_._domainkey.$domain", content => $record, match => 'v=DKIM1' } } qw{default mail};
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+=head2 $recipe->guest_secrets($install_dir, $domain)
 
 The DKIM key of the domain, which opendkim signs with.  It comes from the
 secret store, so a rebuild keeps it, and it never goes into the salvage of the
@@ -935,7 +935,7 @@ sub guest_secrets {
     );
 }
 
-=head2 $bool = $recipe->sends_mail
+=head2 $recipe->sends_mail
 
 True.  See L<Provisioner::Recipe>.
 
@@ -949,7 +949,7 @@ sub sends_mail {
     return 1;
 }
 
-=head2 @grants = $recipe->grants($domain, %opts)
+=head2 $recipe->grants($domain, %opts)
 
 When C<relay.host> is a mail relay of this installation, the login of
 C<$domain> on that guest, as C<grants> in L<Provisioner::Recipe> says.  See
@@ -984,7 +984,7 @@ sub grants {
     return { recipe => 'mailrelay', guest => $relay, client => $domain };
 }
 
-=head2 %terms = $recipe->grant_terms($grant, %opts)
+=head2 $recipe->grant_terms($grant, %opts)
 
 The address of the guest of the client of C<$grant>, where the mail relay sends
 the mail of the domain that comes in from the internet.  Also the upstream of
@@ -1016,7 +1016,7 @@ sub grant_terms {
     );
 }
 
-=head2 @files = $recipe->template_files(@recipes)
+=head2 $recipe->template_files(@recipes)
 
 The configuration of postfix, dovecot, opendkim, opendmarc, amavis,
 spamassassin and unbound, the files that tell a mail client its settings, and

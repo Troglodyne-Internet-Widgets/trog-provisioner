@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::aptmirror - Ubuntu's C<deps> for L<Provisioner::Rec
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<apt-mirror>, which keeps the mirror.
 

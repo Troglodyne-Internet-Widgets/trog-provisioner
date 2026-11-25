@@ -302,7 +302,7 @@ sub proxy_ports {
     return ( 443 => 8443, 80 => 8080 );
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 The jails that fail2ban ships for nginx: failed basic authentication, and
 requests for the paths that bots probe.  Both read the error log of nginx, so
@@ -321,7 +321,7 @@ sub jails {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<letsencrypt>, which reloads C<nginx> when it links or renews the certificate
 that the vhosts serve.  When C<media_names> or C<cached_names> has a name, it
@@ -512,7 +512,7 @@ my sub proxied_by_vhost (%opts) {
     return %names;
 }
 
-=head2 @names = $recipe->served_names(%opts)
+=head2 $recipe->served_names(%opts)
 
 The names of the base class, then each public name in the zone of the domain
 or in a zone that an account of the registrar lists, then C<public.VHOST> for
@@ -577,7 +577,7 @@ sub proxied_names {
     return @names;
 }
 
-=head2 @grants = $recipe->grants($domain, %opts)
+=head2 $recipe->grants($domain, %opts)
 
 With C<relay> and a public name, the registration of the names of C<$domain> on
 the relay, as C<grants> in L<Provisioner::Recipe> says.  The relay issues a key
@@ -612,7 +612,7 @@ sub grants {
     return relay_grant( $domain, $opts{relay} );
 }
 
-=head2 @revocations = $recipe->revocations($domain)
+=head2 $recipe->revocations($domain)
 
 The release of the names of C<$domain> on the relay whenever the configuration
 of C<$domain> names a C<relay>, also with no public name.  The configuration
@@ -644,7 +644,7 @@ sub revocations {
     return { guest => $relay, Provisioner::Cookbook->load('nginxrelay')->revoke_grant( relay_grant( $domain, $relay ) ) };
 }
 
-=head2 %terms = $recipe->grant_terms($grant, %opts)
+=head2 $recipe->grant_terms($grant, %opts)
 
 Where the relay sends TLS and plain HTTP for the client of C<$grant>, the names
 that it sends there, the media names and the cached names, as page names,
@@ -697,7 +697,7 @@ sub grant_terms {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 When a vhost serves the domain, adds C<domain_names>: the domain, and each alias
 of it that no vhost lists and that is not a public name.  When C<public_names>

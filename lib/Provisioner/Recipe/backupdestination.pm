@@ -70,7 +70,7 @@ To keep the backups when the guest is rebuilt, mount a separate disk at C<base_d
 
 =head1 METHODS
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options, which are all required: C<base_dir>, a string,
 C<hosts>, a list of host names with an optional port, C<targets>, a list of
@@ -102,7 +102,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Takes the port off each entry of C<hosts>, and puts it in C<host_port_map>,
 from the host to its port, 22 when the entry gives none.  Adds the names of the
@@ -150,7 +150,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The cron entry, the logrotate rule of the logs and the reboot check, the same
 on every guest.
@@ -170,7 +170,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<cron>, which installs F<backupdestination.cron> as
 F</etc/cron.d/E<lt>domainE<gt>-backups>.
@@ -188,7 +188,7 @@ sub required_recipes {
     return ( cron => sub { return ( files => { "$opts{domain}-backups" => 'backupdestination.cron' } ) } );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<backupdestination.tt>.
 

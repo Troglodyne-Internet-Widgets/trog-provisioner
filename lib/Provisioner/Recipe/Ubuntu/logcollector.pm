@@ -21,7 +21,7 @@ collector needs rsyslog and must not depend on what the image happens to contain
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<rsyslog>.  See L</DESCRIPTION>.
 

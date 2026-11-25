@@ -21,7 +21,7 @@ C<package_sources> below names.  Ubuntu has no OSSEC.
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<ossec-hids-server>, and C<libxml-libxml-perl> for the ossec language of
 configd.
@@ -39,7 +39,7 @@ sub deps {
     return qw{ossec-hids-server libxml-libxml-perl};
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The archive of Atomicorp, for C<distro_release>, the release of the domain.  The
 key below signs the suites of noble and older.  The installer of Atomicorp names

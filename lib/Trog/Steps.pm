@@ -250,7 +250,7 @@ sub revert {
     return $count;
 }
 
-=head2 $count = Trog::Steps::run(\@actions, $dryrun)
+=head2 Trog::Steps::run(\@actions, $dryrun)
 
 =over 4
 

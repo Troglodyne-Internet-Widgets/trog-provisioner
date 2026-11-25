@@ -147,7 +147,7 @@ our $DEFAULT_PORT = 9000;
 # expires before its signer.  It is far longer than any guest lives.
 our $INTERMEDIATE_DAYS = 1825;
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 step-ca on C<port>, on 127.0.0.1.  C<%opts> are the options of the recipe,
 which can be unvalidated, so an absent C<port> means the default, 9000.
@@ -166,7 +166,7 @@ sub listens {
     return ( "127.0.0.1:" . ( $opts{port} // $DEFAULT_PORT ) );
 }
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options: C<steppath>, C<port>, C<version>,
 C<constrain_to>, C<default_duration> and C<max_duration>, each with the
@@ -233,7 +233,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Sets C<constrain_to> to the top-level domain of C<$opts{domain}>, unless the
 domain already names one.  A CA on a guest issues that guest its certificate.
@@ -260,7 +260,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $port = $recipe->port_for($domain)
+=head2 $recipe->port_for($domain)
 
 The C<port> that C<$domain> configures for this recipe, or else the default of
 the schema.  It reads the configuration that the environment names, from
@@ -285,7 +285,7 @@ sub port_for {
     return ( Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name } // {} )->{port} // $DEFAULT_PORT;
 }
 
-=head2 $guest = $recipe->fleet_ca_of($domain)
+=head2 $recipe->fleet_ca_of($domain)
 
 Returns the guest whose CA issues the certificate of C<$domain>, where that is
 not the guest of C<$domain>, and undef otherwise.
@@ -323,7 +323,7 @@ sub fleet_ca_of {
     return $ca;
 }
 
-=head2 $url = $recipe->directory_for($domain)
+=head2 $recipe->directory_for($domain)
 
 The ACME directory that dehydrated asks for the certificate of C<$domain>: the
 CA of C<fleet_ca_of>, through the API of that guest, or else the CA on the
@@ -350,7 +350,7 @@ sub directory_for {
     return 'https://localhost:' . $self->port_for($domain) . '/acme/trog/directory';
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 The hosts that serve the releases of GitHub, where the fragment downloads
 step-ca, as C<github_release_hosts> gives them.
@@ -367,7 +367,7 @@ sub fetch_hosts {
     return $self->github_release_hosts();
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 F<acmeca.ca.json> and F<acmeca.service>, from the templates of the same name
 with C<.tt> after it.  It takes no list of recipes, because the files are the
@@ -387,7 +387,7 @@ sub template_files {
     );
 }
 
-=head2 @written = $recipe->generate_files($output_dir, %vars)
+=head2 $recipe->generate_files($output_dir, %vars)
 
 Writes the configuration and the unit, and then the key material that the CA
 issues from.  See C<intermediate>.
@@ -418,7 +418,7 @@ sub generate_files {
     return ( @written, $self->intermediate( $output_dir, $opts{constrain_to} ) );
 }
 
-=head2 $paths = $class->issuing_authority()
+=head2 $class->issuing_authority()
 
 The authority that this CA issues from, as a hash reference of C<cert> and
 C<key>, the paths of the two files:
@@ -466,7 +466,7 @@ sub issuing_authority {
     return \%own;
 }
 
-=head2 $path = $class->trusted_root()
+=head2 $class->trusted_root()
 
 The certificate of the authority that this CA issues from, as
 C<issuing_authority> chooses it, but never made: F<acmeca-ca.crt> where this installation made one,
@@ -488,7 +488,7 @@ sub trusted_root {
     return Provisioner::Cookbook->load('fetchcache')->trusted_authority();
 }
 
-=head2 @written = $recipe->intermediate($output_dir, $tld)
+=head2 $recipe->intermediate($output_dir, $tld)
 
 Signs an intermediate with C<issuing_authority>, constrained to names under C<$tld>
 and C<localhost>.  Writes it into C<$output_dir> as
@@ -546,7 +546,7 @@ sub intermediate {
     return qw{acmeca-root.crt acmeca-intermediate.crt acmeca-intermediate.key};
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<acmeca.tt>.
 

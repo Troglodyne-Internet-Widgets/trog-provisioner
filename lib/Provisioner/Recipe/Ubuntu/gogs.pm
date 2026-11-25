@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::gogs};
 
 Provisioner::Recipe::Ubuntu::gogs - Ubuntu's C<deps> for L<Provisioner::Recipe::gogs>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<git>, which gogs runs to serve repositories, and C<curl>, which the
 fragment and the setup and mirror scripts use.

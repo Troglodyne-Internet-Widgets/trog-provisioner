@@ -23,7 +23,7 @@ says why C<influxdb> does not come from its vendor.
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<influxdb> from Ubuntu, C<grafana> and C<telegraf> from the archives that
 C<package_sources> names, and C<curl>.
@@ -38,7 +38,7 @@ sub deps {
     return qw{influxdb grafana telegraf curl};
 }
 
-=head2 @sources = $recipe->package_sources()
+=head2 $recipe->package_sources()
 
 The archives of Grafana and InfluxData.  InfluxData also publishes
 C<influxdb>, at a version above the one in Ubuntu.  So its archive pins that

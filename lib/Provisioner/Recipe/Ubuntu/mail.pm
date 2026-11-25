@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::mail - Ubuntu's C<deps> and C<dep_conflicts> for L<
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 postfix with its PCRE maps and SASL modules, dovecot with its protocols and
 plugins, postgrey, opendmarc, opendkim, spamassassin, unbound, clamav,
@@ -36,7 +36,7 @@ sub deps {
     return qw{postfix postfix-pcre libsasl2-modules dovecot-imapd dovecot-pop3d dovecot-antispam dovecot-sieve dovecot-managesieved dovecot-lmtpd postgrey opendmarc opendkim spamassassin unbound clamav amavisd-new rpm2cpio 7zip bzip2 lrzip lzop unrar-free libcpanel-json-xs-perl};
 }
 
-=head2 @pkgs = $recipe->dep_conflicts()
+=head2 $recipe->dep_conflicts()
 
 C<sendmail>, because the mail server is postfix.
 

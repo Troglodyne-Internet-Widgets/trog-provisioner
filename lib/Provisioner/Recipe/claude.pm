@@ -251,7 +251,7 @@ round would work once and then be overwritten by the next build.
 
 =head1 METHODS
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options, none of which is required: C<rtk_version>; the bot
 in C<github_user>, C<github_token>, which is secret, C<git_email> and
@@ -325,7 +325,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<github>, for the login of the bot, when the domain names one.  It names no
 C<account>, so the login goes to the account that C<github> defaults to: the
@@ -355,7 +355,7 @@ sub required_recipes {
     );
 }
 
-=head2 $dir = $recipe->bot_config_dir(%opts)
+=head2 $recipe->bot_config_dir(%opts)
 
 Where the login of the bot goes: F<.claude/gh> in the directory of the domain.
 C<%opts> gives C<install_dir> and C<domain>.
@@ -371,7 +371,7 @@ sub bot_config_dir {
     return "$opts{install_dir}/$opts{domain}/.claude/gh";
 }
 
-=head2 $dir = $recipe->restricted_home(%opts)
+=head2 $recipe->restricted_home(%opts)
 
 The home of C<restricted_user>: F<agents/E<lt>restricted_userE<gt>> in the
 directory of the domain.  C<%opts> gives C<install_dir>, C<domain> and
@@ -388,7 +388,7 @@ sub restricted_home {
     return "$opts{install_dir}/$opts{domain}/agents/$opts{restricted_user}";
 }
 
-=head2 @plugins = $recipe->plugins(%opts)
+=head2 $recipe->plugins(%opts)
 
 The plugins that a guest with the recipes in C<modules> gets.  Each is a hash:
 C<name>, the plugin; C<marketplace>, the name of the marketplace that publishes
@@ -414,7 +414,7 @@ sub plugins {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<gh_config_dir>, the directory of C<bot_config_dir>, when the domain
 names a bot.  Dies when it names only some of C<github_user>, C<github_token>
@@ -453,7 +453,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 Where the rtk release comes from.  The npm registry is not here: the C<perl>
 and C<nvm> recipes name it, and this one installs through whatever npm is
@@ -470,7 +470,7 @@ sub fetch_hosts {
     return $self->github_release_hosts();
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes for a GitHub release, so that a cache keeps the C<.deb> rather than
 fetching it once per guest.
@@ -487,7 +487,7 @@ sub cache_classes {
     return $self->github_release_classes();
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The settings, the settings of the restricted agent, the two scripts of tmux
 and of the status line, and the configuration of tmux, the same on every guest.
@@ -509,7 +509,7 @@ sub template_files {
     );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Copies the F<memory/> directory of each project under F<.claude/projects> into
 F<.claude-memory-salvage>, beside it in the directory of the domain, and
@@ -560,7 +560,7 @@ sub remote_prepare {
     );
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The two staging directories that C<remote_prepare> fills, salvaged to
 F<claude/memory/> and F<claude/state/>.
@@ -587,7 +587,7 @@ sub remote_files {
     );
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 The salvaged memories go back to F<.claude/projects>, and F<.claude.json> to the
 directory of the domain with mode 0600, because it holds the account state of
@@ -617,7 +617,7 @@ sub restores {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<claude.tt>.
 

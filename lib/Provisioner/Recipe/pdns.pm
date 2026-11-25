@@ -154,7 +154,7 @@ sub rate_limits {
     return ( 53 => 4096, '53/udp' => 4096 );
 }
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 The authoritative server on 2500, on 127.0.0.1, where the recursor on 53 sends
 the zones that this guest serves.  C<rate_limits> names 53.
@@ -169,7 +169,7 @@ sub listens {
     return qw{127.0.0.1:2500 127.0.0.1:2500/udp};
 }
 
-=head2 @names = $recipe->subdomains()
+=head2 $recipe->subdomains()
 
 C<dnsapi.$domain>, where the API proxy answers.
 
@@ -183,7 +183,7 @@ sub subdomains {
     return qw{dnsapi};
 }
 
-=head2 $bool = $recipe->needs_address(%opts)
+=head2 $recipe->needs_address(%opts)
 
 True.  The zone of the domain names the guest at its address, in the C<A>
 record of the domain and in that of C<ns1>, the nameserver of the zone.  See
@@ -199,7 +199,7 @@ sub needs_address {
     return 1;
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Adds C<nostubresolver> and C<lexicon>, C<perl>, which installs the API proxy,
 and C<nginx>, which serves it.
@@ -392,7 +392,7 @@ sub token_path {
     return "/etc/lexicon/$name.token";
 }
 
-=head2 %files = $recipe->issue_grant($grant, %terms)
+=head2 $recipe->issue_grant($grant, %terms)
 
 The tokens that the guest of C<$grant> issues to its client, as C<issue_grant>
 in L<Provisioner::Recipe> says.  A grant to this recipe is one of two kinds.
@@ -446,7 +446,7 @@ sub issue_grant {
     return map { local ($_) = $_; $self->token_path($_) => { issue => { guest => $guest, command => $commands{$_} }, owner => 'root:root', mode => '0600' } } keys %commands;
 }
 
-=head2 %revocation = $recipe->revoke_grant($grant)
+=head2 $recipe->revoke_grant($grant)
 
 How C<bin/destroy> takes C<$grant> back, as C<revoke_grant> in
 L<Provisioner::Recipe> says.  Without C<zones>, F<scripts/pdns_client>
@@ -664,7 +664,7 @@ sub tests {
     return qw{pdns.tt pdns.acl.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 The PowerDNS apt repository, which this recipe adds and installs from.
 
@@ -678,7 +678,7 @@ sub fetch_hosts {
     return qw{repo.powerdns.com};
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes of the cache for the PowerDNS apt repository, from
 C<apt_repo_classes>.

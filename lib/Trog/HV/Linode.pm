@@ -601,7 +601,7 @@ sub guest_ssh_ip {
     return $public // die "The guest '$name' has no public IPv4 address on " . $self->describe . "\n";
 }
 
-=head2 $address = $hv->set_reverse_dns($domain, $name)
+=head2 $hv->set_reverse_dns($domain, $name)
 
 =over 4
 
@@ -1100,7 +1100,7 @@ runs on this backend, in order.  See L<Trog::HV/PREFLIGHT>.
 sub preflight_checks { return qw{check_client check_reachable check_linode_resources check_linode_budget check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
-=head2 $result = $hv->check_reachable()
+=head2 $hv->check_reachable()
 
 Makes sure that the token in the secret store opens the API.  The other checks
 need this to pass.
@@ -1125,7 +1125,7 @@ with an expiry, in the Cloud Manager under API Tokens.
 FIX
 }
 
-=head2 $result = $hv->check_linode_resources()
+=head2 $hv->check_linode_resources()
 
 Makes sure that the region in F<hypervisors.conf> exists and runs the metadata
 service, that Linode sells every type the guests name in C<linode_type>, and that Linode has an image for each distro
@@ -1188,7 +1188,7 @@ cloud-init.  Ask Linode:
 FIX
 }
 
-=head2 $result = $hv->check_linode_budget()
+=head2 $hv->check_linode_budget()
 
 Makes sure the account is inside C<monthly_budget>, and says what a guest of
 each type the configuration names would add to it.  Without a budget, it

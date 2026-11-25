@@ -394,7 +394,7 @@ sub would_provision {
 
 =head1 PREFLIGHT
 
-=head2 $result = $hv->check_transfer_ip()
+=head2 $hv->check_transfer_ip()
 
 Makes sure that a C<transfer_ip> is named, in the block of this hypervisor in
 F<hypervisors.conf> or in the C<_global> of F<recipes.yaml>.
@@ -464,7 +464,7 @@ host.
 
 =back
 
-=head2 %reasons = $hv->refusals()
+=head2 $hv->refusals()
 
 Returns each refused method paired with the reason it gives.  A backend
 overrides the reasons that it can say more precisely, in the terms of its own

@@ -16,7 +16,7 @@ use Provisioner::Recipe::ubuntu();    ## no critic (ProhibitUnusedImports) -- pa
 
 Provisioner::Recipe::Ubuntu::admincode - Ubuntu's C<deps> for L<Provisioner::Recipe::admincode>.
 
-=head2 @pkgs = $recipe->deps(%opts)
+=head2 $recipe->deps(%opts)
 
 What the clone script needs, and the C<extra_pkgs> of the operator, which
 cloud-init installs with the rest at first boot.
@@ -38,7 +38,7 @@ sub deps {
     return ( qw{libpithub-perl libfile-pushd-perl git}, @{ $opts{extra_pkgs} // [] } );
 }
 
-=head2 $packager = $recipe->distro_packager()
+=head2 $recipe->distro_packager()
 
 The packager of L<Provisioner::Recipe::ubuntu>, which installs the system
 packages that the smoke of L<Provisioner::Recipe::admincode> finds declared.

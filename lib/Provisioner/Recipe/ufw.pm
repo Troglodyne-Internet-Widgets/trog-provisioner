@@ -74,7 +74,7 @@ each relay of L<Provisioner::RelayRecipe> install one.
 
 =cut
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds to C<admin_networks> every address of ours that reaches the guest, and
 returns C<%opts>.  It takes the addresses from C<transfer_ips>.  If that list
@@ -106,7 +106,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $value = $recipe->resolve_conflict($path, $mine, $theirs)
+=head2 $recipe->resolve_conflict($path, $mine, $theirs)
 
 If two recipes name different limits for one port in C<rate_limits>, returns
 the higher limit.  Any other disagreement goes to
@@ -234,7 +234,7 @@ my %template2rule = (
     'ufw.garage.tt'          => 'ufw/garage',
 );
 
-=head2 %files = $recipe->template_files(@recipes)
+=head2 $recipe->template_files(@recipes)
 
 Removes the C<ufw> directory in C<output_dir> and makes a new, empty one.
 Returns the application profiles to render, as a map from template to output

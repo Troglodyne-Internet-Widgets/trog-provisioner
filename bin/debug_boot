@@ -340,11 +340,13 @@ sub shot {
     return 0;
 }
 
-=head2 $path = screen_file($domain, $mime)
+=head2 screen_file($domain, $mime)
 
 The default path in F</tmp> for a screenshot of C<$domain>.  The extension comes
 from C<$mime>, the MIME type that libvirt reports: F<.png>, F<.ppm>, or F<.img>
 for any other type.  On libvirt 10.0.0, qemu sends C<image/png>.
+
+    my $path = screen_file($domain, $mime);
 
 =cut
 

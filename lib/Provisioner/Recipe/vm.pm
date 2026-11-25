@@ -116,7 +116,7 @@ my @IOTUNE_KEY = qw{
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_module()
+=head2 $recipe->is_module()
 
 False.  See L</It directs the build rather than running in it>.
 
@@ -128,7 +128,7 @@ Returns Bool, always false.
 
 sub is_module { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 What the machine of a guest takes.
 
@@ -237,7 +237,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The domain XML and the device map.
 
@@ -255,7 +255,7 @@ sub template_files {
     );
 }
 
-=head2 %facts = $recipe->create_storage(%opts)
+=head2 $recipe->create_storage(%opts)
 
 Makes what the domain XML points at, and returns the paths.  It makes four
 things on the hypervisor:
@@ -359,7 +359,7 @@ my sub disk ( $tuning, %disk ) {
     return \%disk;
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Works out what this hypervisor accepts, and from that, what each disk of the
 guest looks like.

@@ -118,7 +118,7 @@ does.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<github> for the CLI, which somebody working at a shell on the guest expects
 and which used to be installed here, and C<git> for the host keys of the host
@@ -165,7 +165,7 @@ sub required_recipes {
     );
 }
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options: C<basedir>, a string, and C<repos_from>, a list of
 objects that each have an C<api_url>, a secret C<token> and C<repos_for>, a
@@ -208,7 +208,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<install_command>, the words of the C<install_command> of the
 L<Provisioner::Packager> that C<distro_packager> names, which the smoke runs
@@ -227,7 +227,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files(@recipes)
+=head2 $recipe->template_files(@recipes)
 
 F<admincode.claude.bash>, on a guest that also runs claude.
 
@@ -249,7 +249,7 @@ sub template_files {
     return ( List::Util::any { $_ eq q{claude} } @recipes ) ? ( 'admincode.claude.bash.tt' => 'admincode.claude.bash' ) : ();
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<admincode.tt>.
 
@@ -261,7 +261,7 @@ sub tests {
     return qw{admincode.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts(%opts)
+=head2 $recipe->fetch_hosts(%opts)
 
 Returns the host of each C<api_url> in C<repos_from>.  The archive of the
 GitHub CLI is L<Provisioner::Recipe::github>'s to name.

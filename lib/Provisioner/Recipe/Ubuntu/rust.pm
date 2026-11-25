@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::rust};
 
 Provisioner::Recipe::Ubuntu::rust - Ubuntu's C<deps> for L<Provisioner::Recipe::rust>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<rustup>, which is the installer and not a toolchain, and the C toolchain it
 links with.  rustc calls C<cc> to link every binary it builds, and depends on

@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::configd - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<cpanminus> and C<make>.
 

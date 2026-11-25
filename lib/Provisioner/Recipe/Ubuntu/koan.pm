@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::koan};
 
 Provisioner::Recipe::Ubuntu::koan - Ubuntu's C<deps> for L<Provisioner::Recipe::koan>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 Returns the Ubuntu packages that koan needs to build and run.
 

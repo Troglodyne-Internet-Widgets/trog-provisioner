@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::cron};
 
 Provisioner::Recipe::Ubuntu::cron - Ubuntu's C<deps> for L<Provisioner::Recipe::cron>.
 
-=head2 @pkgs = $recipe->deps(%opts)
+=head2 $recipe->deps(%opts)
 
 sysstat, cronie and debsums, and rkhunter where no OSSEC manager reads the logs
 of C<domain>.  Where one does, the agent of OSSEC runs rootcheck instead.  See

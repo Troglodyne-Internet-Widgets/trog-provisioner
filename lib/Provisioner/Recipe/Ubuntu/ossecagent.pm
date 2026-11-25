@@ -22,7 +22,7 @@ C<ossec-hids-agent> comes from the archive of Atomicorp, as the manager does.
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<ossec-hids-agent>, and C<libxml-libxml-perl> for the ossec language of
 configd.
@@ -37,7 +37,7 @@ sub deps {
     return qw{ossec-hids-agent libxml-libxml-perl};
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The archive of the manager, from L<Provisioner::Recipe::Ubuntu::ossec>.
 

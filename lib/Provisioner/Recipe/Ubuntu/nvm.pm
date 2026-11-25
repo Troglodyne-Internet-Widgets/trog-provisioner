@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::nvm - Ubuntu's C<deps> for L<Provisioner::Recipe::n
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<curl>, and C<libatomic1>, because the builds of node that nvm downloads link
 against it, and Ubuntu does not install it by default.

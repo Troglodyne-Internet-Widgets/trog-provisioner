@@ -172,7 +172,7 @@ sub required_recipes {
     );
 }
 
-=head2 %limits = $recipe->rate_limits(%opts)
+=head2 $recipe->rate_limits(%opts)
 
 The limit of a port of mail for C<relay_port>, and for 25, where the mail of the
 internet comes in.  The ports of the mail clients get the same limit from
@@ -189,7 +189,7 @@ sub rate_limits {
     return ( relay_port(%opts) => 64, 25 => 64 );
 }
 
-=head2 $hits = $recipe->port_rate_limit()
+=head2 $recipe->port_rate_limit()
 
 64, the limit of a port of mail, for the ports of the mail clients.  See
 L<Provisioner::RelayRecipe/Ports of the guests>.
@@ -204,7 +204,7 @@ sub port_rate_limit {
     return 64;
 }
 
-=head2 $dir = $recipe->relay_dir()
+=head2 $recipe->relay_dir()
 
 F</etc/postfix/mailrelay.d>, which holds the registrations and the ban keys.
 See L<Provisioner::RelayRecipe>.
@@ -219,7 +219,7 @@ sub relay_dir {
     return '/etc/postfix/mailrelay.d';
 }
 
-=head2 @ports = $recipe->banned_ports(%opts)
+=head2 $recipe->banned_ports(%opts)
 
 None.  The ports of the mail clients are ports of the guests, which the bans
 cover as L<Provisioner::RelayRecipe/Ports of the guests> says.  Not 25, because
@@ -235,7 +235,7 @@ sub banned_ports {
     return ();
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 The jail that fail2ban ships for postfix, because the relay takes mail from the
 internet on 25.  It bans here, where the client connects.
@@ -251,7 +251,7 @@ sub jails {
     return ( postfix => {} );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<relay_address>, where the guests reach this guest, as C<reachable_address>
 in L<Provisioner::IPPool> gives it, and where the relay listens.  Adds
@@ -274,7 +274,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $bool = $recipe->sends_mail
+=head2 $recipe->sends_mail
 
 True, because the relay delivers the mail of the guests to the internet.  See
 L<Provisioner::Recipe>.
@@ -289,7 +289,7 @@ sub sends_mail {
     return 1;
 }
 
-=head2 @names = $recipe->exclusive_on_machine_with
+=head2 $recipe->exclusive_on_machine_with
 
 C<mail>, because the postfix of each answers port 25 of the machine, and a
 machine has one postfix.  See L<Provisioner::Recipe>.
@@ -348,7 +348,7 @@ sub password_path {
     return "/etc/postfix/mailrelay/$domain.password";
 }
 
-=head2 %files = $recipe->registration_files($grant, %terms)
+=head2 $recipe->registration_files($grant, %terms)
 
 What this guest issues to the client of C<$grant> when it registers.
 L<Provisioner::RelayRecipe/issue_grant> adds the host key.
@@ -409,7 +409,7 @@ sub registration_files {
     );
 }
 
-=head2 %revocation = $recipe->revoke_grant($grant)
+=head2 $recipe->revoke_grant($grant)
 
 The removal of the login, the route in, the routes of the mail clients and the
 ban key of the client of C<$grant>, by F<scripts/relay_client> C<mail release>,
@@ -449,7 +449,7 @@ sub template_files {
     );
 }
 
-=head2 %files = $recipe->resolver_files(%opts)
+=head2 $recipe->resolver_files(%opts)
 
 The drop-in that keeps F</etc/hosts> out of the answers of DNS.  The
 C<resolver> target installs it before any recipe target.  See L</SPF> and

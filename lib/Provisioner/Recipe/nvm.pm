@@ -99,7 +99,7 @@ sub tests {
     return qw{nvm.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 The host of the nvm installer, and the host that nvm gets node from.
 
