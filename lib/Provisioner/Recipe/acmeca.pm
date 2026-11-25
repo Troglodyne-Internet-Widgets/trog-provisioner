@@ -133,6 +133,8 @@ the CA answers to must be inside the constraint.  The result is a certificate
 for C<localhost> that the fleet authority signed.  It is worth exactly as much as
 the loopback interface that it names.
 
+=head1 METHODS
+
 =cut
 
 # The release that the fragment downloads.  It must be a published release,
@@ -147,7 +149,12 @@ our $INTERMEDIATE_DAYS = 1825;
 
 =head2 @claims = $recipe->listens(%opts)
 
-step-ca on C<port>, on 127.0.0.1.
+step-ca on C<port>, on 127.0.0.1.  C<%opts> are the options of the recipe,
+which can be unvalidated, so an absent C<port> means the default, 9000.
+
+Returns a list of one address and port, as C<127.0.0.1:9000>.
+
+    my @claims = $recipe->listens( port => 9000 );
 
 =cut
 
@@ -160,6 +167,14 @@ sub listens {
 }
 
 =head2 %schema = $recipe->args()
+
+The schema of the options: C<steppath>, C<port>, C<version>,
+C<constrain_to>, C<default_duration> and C<max_duration>, each with the
+description that C<bin/recipes acmeca> prints.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -227,7 +242,11 @@ So the top-level domain of the guest is the only one it vouches for.
 A schema default cannot depend on another field, so this happens here and not
 in C<args>.
 
+Returns the options, with C<constrain_to> set.
+
 Dies if C<constrain_to> is not set and C<domain> has no top-level domain.
+
+    my %opts = $recipe->enrich( domain => 'guest.test.test' );
 
 =cut
 
@@ -248,6 +267,16 @@ the schema.  It reads the configuration that the environment names, from
 L<Provisioner::Cookbook>, and not the options of a recipe.  So a recipe that
 asks this CA for something gets the port where the CA answers.
 
+=over 4
+
+=item domain - Str - the domain whose configuration to read
+
+=back
+
+Returns Int, the port.
+
+    my $port = $recipe->port_for('guest.test.test');
+
 =cut
 
 sub port_for {
@@ -265,6 +294,16 @@ That guest is the authority of the registrar of C<$domain>, where both are
 under the same reserved TLD.  The constraint of the intermediate of the
 authority permits that TLD.  If the authority names an authority of its own, it
 runs no CA, and the answer is the CA of that one in turn.
+
+=over 4
+
+=item domain - Str - the domain that wants a certificate
+
+=back
+
+Returns Str, the name of the guest, or undef.
+
+    my $guest = $recipe->fleet_ca_of('guest.test.test');
 
 =cut
 
@@ -290,6 +329,16 @@ The ACME directory that dehydrated asks for the certificate of C<$domain>: the
 CA of C<fleet_ca_of>, through the API of that guest, or else the CA on the
 guest, on loopback at C<port_for>.
 
+=over 4
+
+=item domain - Str - the domain that wants a certificate
+
+=back
+
+Returns Str, the URL of the directory.
+
+    my $url = $recipe->directory_for('guest.test.test');
+
 =cut
 
 sub directory_for {
@@ -303,6 +352,13 @@ sub directory_for {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
+The hosts that serve the releases of GitHub, where the fragment downloads
+step-ca, as C<github_release_hosts> gives them.
+
+Returns a list of host names.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -312,6 +368,15 @@ sub fetch_hosts {
 }
 
 =head2 %files = $recipe->template_files()
+
+F<acmeca.ca.json> and F<acmeca.service>, from the templates of the same name
+with C<.tt> after it.  It takes no list of recipes, because the files are the
+same on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -327,6 +392,21 @@ sub template_files {
 Writes the configuration and the unit, and then the key material that the CA
 issues from.  See C<intermediate>.
 
+=over 4
+
+=item output_dir - Str - the configuration directory of the domain
+
+=back
+
+C<%vars> are the template variables, which are validated for
+C<constrain_to>.
+
+Returns a list of the names of the files that it wrote.
+
+Dies when C<intermediate> dies.
+
+    my @written = $recipe->generate_files( $output_dir, domain => 'guest.test.test' );
+
 =cut
 
 sub generate_files {
@@ -338,7 +418,7 @@ sub generate_files {
     return ( @written, $self->intermediate( $output_dir, $opts{constrain_to} ) );
 }
 
-=head2 $paths = Provisioner::Recipe::acmeca->issuing_authority()
+=head2 $paths = $class->issuing_authority()
 
 The authority that this CA issues from, as a hash reference of C<cert> and
 C<key>, the paths of the two files:
@@ -359,8 +439,12 @@ other issuer.  This makes the pair the first time, and keeps it.
 
 =back
 
+Returns a HashRef of C<cert> and C<key>.
+
 Dies if F<acmeca-ca.crt> is there without its key, for the reason that
 L<Provisioner::Recipe::fetchcache/authority> dies.
+
+    my $paths = Provisioner::Recipe::acmeca->issuing_authority();
 
 =cut
 
@@ -382,13 +466,17 @@ sub issuing_authority {
     return \%own;
 }
 
-=head2 $path = Provisioner::Recipe::acmeca->trusted_root()
+=head2 $path = $class->trusted_root()
 
 The certificate of the authority that this CA issues from, as
 C<issuing_authority> chooses it, but never made: F<acmeca-ca.crt> where this installation made one,
 or else the certificate of the fetch cache, from
 L<Provisioner::Recipe::fetchcache/trusted_authority>, which dies when there is
 none.
+
+Returns Str, the path of the certificate.
+
+    my $path = Provisioner::Recipe::acmeca->trusted_root();
 
 =cut
 
@@ -406,11 +494,23 @@ Signs an intermediate with C<issuing_authority>, constrained to names under C<$t
 and C<localhost>.  Writes it into C<$output_dir> as
 F<acmeca-intermediate.crt>, and its key as F<acmeca-intermediate.key>.  Also
 writes the authority as F<acmeca-root.crt>, which the guest chains to and
-trusts.  Returns those three file names.
+trusts.
+
+=over 4
+
+=item output_dir - Str - the directory to write the three files into
+
+=item tld - Str - the top-level domain that the intermediate may issue for
+
+=back
 
 Only the certificate of the root travels.  Its key stays where it was made.
 
+Returns a list of the three file names.
+
 Dies if it cannot copy the certificate of the authority.
+
+    my @written = $recipe->intermediate( $output_dir, 'test' );
 
 =cut
 
@@ -447,6 +547,10 @@ sub intermediate {
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<acmeca.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

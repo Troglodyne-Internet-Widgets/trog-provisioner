@@ -68,6 +68,21 @@ without a ban.
 The fetch reads the guest as root.  So the whole path down to C<state/> stays
 C<debian-deluged:debian-deluged>, and no other account gets access to it.
 
+=head1 METHODS
+
+=head2 %required = $recipe->required_recipes(%opts)
+
+C<nginxproxy>, with a vhost on port 80 that redirects to SSL, and one on port
+443 that serves the directory C<torrents> and sends every other request to the
+web UI on C<web_port> of 127.0.0.1.  C<ipv6> of C<%opts> says whether the
+vhost on 443 listens on IPv6.  C<web_port> defaults to 8112 and C<ipv6> to
+true, because this is called before validation.
+
+Returns a list of pairs, from the name of the recipe to a sub that returns its
+options.
+
+    my %required = $recipe->required_recipes( web_port => 8112, ipv6 => 1 );
+
 =cut
 
 sub required_recipes {
@@ -99,6 +114,10 @@ random.  Nor are 1900/udp and 6771/udp, which it binds for C<UPnP> and for local
 peer discovery.  It binds 1900 on each address of the guest, not on the
 wildcard, and a claim here would refuse any other recipe that uses C<UPnP>.
 
+Returns the two claims as a list, a port and an address with a port.
+
+    my @claims = $recipe->listens( web_port => 8112 );
+
 =cut
 
 sub listens {
@@ -115,9 +134,24 @@ its download location is the directory of this domain.  A second domain points
 the daemon at its own directory.  Then the client of the first domain writes to
 a place that the first domain does not look.
 
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 args()
+
+The schema of the options: C<web_port>, an integer of 1024 or more, 8112 by
+default, and C<ipv6>, a boolean, true by default.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -129,6 +163,19 @@ sub args {
     );
 }
 
+=head2 template_files()
+
+The configuration of the daemon and the application profile of ufw, which take
+no list of recipes: F<deluged_core.conf> from F<deluged.core.conf.tt>, and
+F<deluged_ufw.conf> from F<deluged.ufw.conf.tt>.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
     return (
@@ -137,11 +184,43 @@ sub template_files {
     );
 }
 
+=head2 %restores = $recipe->restores(%opts)
+
+Puts F</var/lib/deluged/config/state> back from the salvage of the domain,
+under C<install_dir> and C<domain> of C<%opts>.  See L</What survives a
+rebuild>.
+
+Returns one pair, from the path on the guest to a hash reference whose C<from>
+is the path of the salvage.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'test.test' );
+
+=cut
+
 sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
     return ( '/var/lib/deluged/config/state' => { from => "$install_dir/$domain/deluged/state" } );
 }
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+The torrent state that a rebuild salvages, F</var/lib/deluged/config/state/>,
+which goes to F<deluged/state/>.  It is the same for every domain.
+
+=over 4
+
+=item install_dir - Str - the directory of the domains on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns one pair, from the path on the guest to the path in the salvage.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
+
+=cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
@@ -150,6 +229,14 @@ sub remote_files {
         '/var/lib/deluged/config/state/' => 'deluged/state/',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<deluged.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{deluged.tt};

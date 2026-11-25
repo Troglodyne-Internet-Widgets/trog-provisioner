@@ -55,7 +55,7 @@ credentials:
 It is a file, not a directory with one file for each provider.  A domain has one
 zone and one provider, so the path does not name the provider.
 
-=cut
+=head1 METHODS
 
 =head2 %opts = $recipe->enrich(%opts)
 
@@ -67,6 +67,8 @@ installation holds the zone and the registrar names no provider.
 It also adds C<unmanaged>, as L<Provisioner::Recipe::registrar/unmanaged>
 answers it.  Where that is true, C<lexicon> is empty, and the guest gets no
 shortcut for the domain.
+
+    my %enriched = $recipe->enrich( domain => 'test.test' );
 
 =cut
 
@@ -87,6 +89,8 @@ the patches change, each mapped to the name of the file that it becomes.  The
 list goes into F</etc/changed_packaged_files.d>, so that the scan of the cron
 recipe does not report a patched file.
 
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -105,6 +109,8 @@ sub template_files {
 =head2 @tests = $recipe->tests()
 
 Returns the guest test F<lexicon.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

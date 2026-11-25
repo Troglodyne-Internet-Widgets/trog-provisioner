@@ -68,6 +68,18 @@ The scripts log to /var/log/backups/$HOST.log, and logrotate rotates those logs 
 
 To keep the backups when the guest is rebuilt, mount a separate disk at C<base_dir> with L<Provisioner::Recipe::mounts>.
 
+=head1 METHODS
+
+=head2 %schema = $recipe->args()
+
+The schema of the options, which are all required: C<base_dir>, a string,
+C<hosts>, a list of host names with an optional port, C<targets>, a list of
+the names of rsync modules, and C<key_file>, a string.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -89,6 +101,29 @@ sub args {
         },
     );
 }
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Takes the port off each entry of C<hosts>, and puts it in C<host_port_map>,
+from the host to its port, 22 when the entry gives none.  Adds the names of the
+C<default_targets> of L<Provisioner::Recipe::backup> to the front of
+C<targets>, without duplicates.
+
+Returns C<%opts>, with C<hosts> changed in place, C<targets> replaced and
+C<host_port_map> added as a hash reference.  Dies with C<key_file defined in
+[backupdestination] must exist in ...> when C<key_file> is not a file in the
+directory of C<domain> under C<data_source>.
+
+    my %opts = $recipe->enrich(
+        hosts       => ['backup.test.test:2222'],
+        targets     => ['database'],
+        modules     => [],
+        domain      => 'test.test',
+        data_source => '/srv/data',
+        key_file    => 'backup_key',
+    );
+
+=cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
@@ -115,6 +150,18 @@ sub enrich {
     return %opts;
 }
 
+=head2 %files = $recipe->template_files()
+
+The cron entry, the logrotate rule of the logs and the reboot check, the same
+on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         'backupdestination.cron.tt'         => 'backupdestination.cron',
@@ -128,6 +175,11 @@ sub template_files {
 C<cron>, which installs F<backupdestination.cron> as
 F</etc/cron.d/E<lt>domainE<gt>-backups>.
 
+Returns the pair C<cron> and a code reference that returns the C<files> for
+cron.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
+
 =cut
 
 sub required_recipes {
@@ -135,6 +187,14 @@ sub required_recipes {
 
     return ( cron => sub { return ( files => { "$opts{domain}-backups" => 'backupdestination.cron' } ) } );
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<backupdestination.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{backupdestination.tt};

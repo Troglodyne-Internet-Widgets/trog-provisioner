@@ -97,6 +97,11 @@ configures C<logcollector> with the forward that points to this recipe.  It
 makes the syslog dashboard the C<home_dashboard> of C<grafana>, so that the
 dashboard is what an operator sees after a login.
 
+Each name is paired with a code reference that returns its options.  The
+forward goes to C<port>, 6514 when C<%opts> does not name one.
+
+    my %required = $recipe->required_recipes( port => 6514 );
+
 =cut
 
 sub required_recipes {
@@ -115,7 +120,12 @@ sub required_recipes {
 
 =head2 @claims = $recipe->listens(%opts)
 
-The syslog input of telegraf on C<port>, on 127.0.0.1.
+The syslog input of telegraf on C<port>, on 127.0.0.1.  The port is 6514 when
+C<%opts> does not name one.
+
+Returns the one claim, such as C<127.0.0.1:6514>, as a list.
+
+    my @claims = $recipe->listens( port => 6514 );
 
 =cut
 
@@ -130,6 +140,10 @@ sub listens {
 
 False.  There is one telegraf input on one port, one dashboard, and one
 collector that forwards to it.  A second domain describes the same stream again.
+
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
 
 =cut
 
@@ -148,6 +162,10 @@ must be the name that L<Provisioner::Recipe::grafana> gave it.  See
 L</The dashboard names its datasource, and something has to agree>.
 
 =back
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %args = $recipe->args();
 
 =cut
 
@@ -176,6 +194,8 @@ sub args {
 Returns the telegraf fragment and the dashboard, each as template name to
 output file name.
 
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -187,7 +207,10 @@ sub template_files {
 
 =head2 @tests = $recipe->tests()
 
-Returns the template for the test that runs on the guest.
+Returns the template for the test that runs on the guest:
+F<grafanasyslog.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

@@ -223,6 +223,24 @@ C<deps> is in L<Provisioner::Recipe::Ubuntu::koan>.
 
 =cut
 
+=head1 METHODS
+
+=head2 %required = $recipe->required_recipes(%opts)
+
+The recipes that koan needs, each with a sub that turns the options of koan
+into its own: C<claude>, with no options; C<servicesudo>, with the commands
+that manage F<koan.service> and F<koan-awake.service>; C<github>, which logs
+the CLI in as C<github_user> with C<github_token>, over ssh when
+C<github_ssh_identity> is set and https otherwise; and C<git>, which sets up
+the account C<user>, or else C<admin_user>, for github.com with the name
+C<github_user> and the email C<koan_email>.
+
+Returns a list of pairs, from the name of each recipe to its sub.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
+
+=cut
+
 sub required_recipes {
     return (
         claude      => sub { () },
@@ -274,12 +292,27 @@ F</etc/systemd/system/koan.service> and F<koan-awake.service>.  Both name the
 checkout, the virtualenv and the F<.env> of this domain.  A second domain does
 not get its own koan.  It rewrites those units to point at itself.
 
+Returns 0.
+
+    my $multi = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
 
 # An absolute path.
 my $ABSOLUTE = qr/\A \//;
+
+=head2 args()
+
+The schema of the options, which DESCRIPTION explains.  C<user>,
+C<koan_email>, C<github_user> and C<github_token> are required.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -353,7 +386,11 @@ Dies when the messaging provider has no credentials, when the matrix
 credentials are not exactly one of a token or a password, and when a token has
 no C<matrix_device_id> under E2EE.  Dies when C<cli_provider> is C<claude> and
 there is no C<claude_oauth_token>.  Dies when only some of the SMTP settings
-are given.
+are given.  When they are all given, C<smtp_port> defaults to 587.
+
+Returns C<%opts>, with those keys set.
+
+    my %enriched = $recipe->enrich( %validated );
 
 =cut
 
@@ -411,7 +448,10 @@ sub enrich {
 
 Returns pairs of a template and the file that it renders to: the env file, the
 behavior configuration, the project list, the two systemd units, the ufw
-profile and the script that clones the projects.
+profile and the script that clones the projects.  They are the same
+whichever recipes are loaded, so it takes no list of recipes.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -439,6 +479,8 @@ sub template_files {
 Returns C<koan>, so that C<remote_files> has a data directory to copy into on
 the first provision.
 
+    my @dirs = $recipe->datadirs();
+
 =cut
 
 sub datadirs {
@@ -447,9 +489,20 @@ sub datadirs {
 
 =head2 %path_map = $recipe->remote_files($install_dir, $domain)
 
+=over 4
+
+=item install_dir - Str - the directory on the guest that holds the domains
+
+=item domain - Str - the domain that this recipe is configured for
+
+=back
+
 Returns what to copy back from the guest into the data directory, so that the
-next build keeps it: C<instance/>, C<logs/> and C<workspace/>.  The C<claude>
-recipe salvages F<.claude.json>.
+next build keeps it: C<instance/>, C<logs/> and C<workspace/>, as a list of
+pairs from the path on the guest to the path in the data directory.  The
+C<claude> recipe salvages F<.claude.json>.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
 
 =cut
 
@@ -462,6 +515,14 @@ sub remote_files {
     );
 }
 
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<koan.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
+
 sub tests {
     return qw{koan.tt};
 }
@@ -470,6 +531,9 @@ sub tests {
 
 Returns the host of C<repo_url>, which is GitHub for the default repo.  When
 the class is asked without a configuration, it returns the host of the default.
+Returns nothing when the URL has no host.
+
+    my @hosts = $recipe->fetch_hosts( repo_url => 'https://git.test.test/koan.git' );
 
 =cut
 

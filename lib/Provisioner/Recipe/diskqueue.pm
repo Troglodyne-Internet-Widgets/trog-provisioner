@@ -136,6 +136,11 @@ the rule apply to nothing, and the guest test fails.
 
 =back
 
+Returns the schema of these options as a list of pairs, for
+L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =head2 SEE ALSO
 
 The other half of this is on the hypervisor.  L<Provisioner::Recipe::vm> sets
@@ -172,9 +177,16 @@ sub args {
     );
 }
 
+=head1 METHODS
+
 =head2 %opts = $recipe->enrich(%opts)
 
-Sets C<devices> to C<disk_devices> when the domain names no devices of its own.
+Sets C<devices> to a copy of C<disk_devices>, or to an empty list, when the
+domain names no devices of its own.
+
+Returns the options, as a list of pairs.
+
+    my %opts = $recipe->enrich( disk_devices => ['vd*'] );
 
 =cut
 
@@ -184,11 +196,31 @@ sub enrich {
     return %opts;
 }
 
+=head2 template_files()
+
+The one udev rule, which takes no list of recipes: F<diskqueue.rules> from
+F<diskqueue.rules.tt>.
+
+Returns a list of pairs, from the template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         'diskqueue.rules.tt' => 'diskqueue.rules',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<diskqueue.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{diskqueue.tt};

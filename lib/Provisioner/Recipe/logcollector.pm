@@ -129,6 +129,10 @@ False.  The machine has one listener: one port, one ruleset, and one
 F</etc/rsyslog.d/09-logcollector.conf>.  A second domain does not add a second
 collector.  It rewrites the collector that the fleet already ships to.
 
+Returns 0.
+
+    my $multi = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
@@ -141,6 +145,8 @@ description.
 C<log_dir> is outside C<install_dir> on purpose.  On each provision, the C<data>
 target runs C<chown> and C<chmod> recursively on C<< install_dir/<domain> >>,
 and this directory only grows.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -222,6 +228,8 @@ C<reconcile> settles only scalar fields, and L<Hash::Merge> joins the two arrays
 Without this method, the ruleset gets two identical C<omfwd> actions and sends
 each message to that port twice.
 
+    my %enriched = $recipe->enrich( forward => [ 'localhost:5140', 'localhost:5140' ] );
+
 =cut
 
 sub enrich {
@@ -241,6 +249,10 @@ with its rules and its mail to the admin.  The two require each other, because
 C<ossec> asks this recipe for a copy of the stream.  See
 L<Provisioner::Cookbook/Recipes that require each other>.
 
+Returns the pair of C<ossec> and a sub that returns no options.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
+
 =cut
 
 sub required_recipes {
@@ -252,7 +264,10 @@ sub required_recipes {
 Returns a limit of 256 on the configured port and protocol, not on 514.  So a
 collector on a different port gets the limit where it listens.  A busy fleet
 keeps its connections open and does not open one for each message, so this
-limit is generous.
+limit is generous.  C<port> is 514 and C<protocol> is C<tcp> when C<%opts> does
+not give them.
+
+    my %limits = $recipe->rate_limits( port => 514, protocol => 'both' );
 
 =cut
 
@@ -272,7 +287,10 @@ sub rate_limits {
 =head2 %files = $recipe->template_files()
 
 Returns the rsyslog configuration, the logrotate configuration and the ufw
-profile, each mapped to the name of the file that it becomes.
+profile, each mapped to the name of the file that it becomes.  They are the
+same whichever recipes are loaded, so it takes no list of recipes.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -290,6 +308,8 @@ sub template_files {
 =head2 @tests = $recipe->tests()
 
 Returns the guest test F<logcollector.tt>.
+
+    my @tests = $recipe->tests();
 
 =cut
 

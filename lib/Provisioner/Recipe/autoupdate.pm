@@ -43,6 +43,18 @@ C<held by /root/noautorestart>, or C<outside the reboot window 02:00-05:00>.
 Other recipes hold it with checks of their own.  See Reboot checks in
 L<Provisioner::Recipe>.
 
+=head1 METHODS
+
+=head2 %schema = $recipe->args()
+
+The schema of the options: C<autorestart>, an absolute path, and
+C<reboot_window>, an object of the hours C<from> and C<to>, from 0 to 23.
+Neither is required.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -70,6 +82,18 @@ sub args {
     );
 }
 
+=head2 %files = $recipe->template_files()
+
+The cron entry of the update, the cron entry of the reboot and the reboot
+check, the same on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         'autoupdate.cron.tt'         => 'autoupdate_cron',
@@ -86,6 +110,11 @@ F</etc/cron.d/autorestart>.  The name has no domain in it, so a guest that
 holds several domains runs F<reboot_if_needed> once.  The reboot check of each
 domain is its own.
 
+Returns the pair C<cron> and a code reference that returns the C<files> for
+cron.
+
+    my %required = $recipe->required_recipes( autorestart => '/root/noautorestart' );
+
 =cut
 
 sub required_recipes {
@@ -96,6 +125,14 @@ sub required_recipes {
 
     return ( cron => sub { return ( files => \%files ) } );
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<autoupdate.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{autoupdate.tt};

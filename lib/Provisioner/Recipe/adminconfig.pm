@@ -32,6 +32,17 @@ The C<_global> of the installation names that user as C<admin_user>.
 
 C<pkgs> is optional.  It lists packages to install on the guest for the admin.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<skel>, a string, which is required, and C<pkgs>,
+a list of strings.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -54,6 +65,8 @@ Returns the C<pkgs> in C<%opts>, or nothing.  The operator names these
 packages, so this generic recipe answers and no distro variant does.  See
 C<deps> in L<Provisioner::Recipe>.
 
+    my @pkgs = $recipe->deps( pkgs => [qw{vim tmux}] );
+
 =cut
 
 sub deps {
@@ -62,10 +75,30 @@ sub deps {
     return ();
 }
 
+=head2 %paths = $recipe->fetch_sources(%opts)
+
+The C<skel> directory of this machine, which the guest fetches as the rsync
+module C<skel>.  C<%opts> are the raw options of the recipe.
+
+Returns the pair C<skel> and the path, or nothing when C<skel> is not set.
+
+    my %paths = $recipe->fetch_sources( skel => '/opt/dotfiles/admin' );
+
+=cut
+
 sub fetch_sources {
     my ( $self, %opts ) = @_;
     return defined $opts{skel} ? ( skel => $opts{skel} ) : ();
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest:
+F<adminconfig.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{adminconfig.tt};

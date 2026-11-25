@@ -33,6 +33,19 @@ places:
 
 TODO: send these logs to grafana (#219).
 
+=head1 METHODS
+
+=head2 template_files()
+
+The two rule files of auditd, which are the same on every guest, so it takes
+no list of recipes: F<global.rules> from F<auditd.global.tt>, and
+F<domain.rules> from F<auditd.domain.tt>.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -43,6 +56,14 @@ sub template_files {
         'auditd.domain.tt' => 'domain.rules',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<auditd.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{auditd.tt};

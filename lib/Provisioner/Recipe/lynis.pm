@@ -60,6 +60,17 @@ publish the current release in an archive of their own, and
 L<Provisioner::Recipe::Ubuntu::lynis> takes the package from there.  The guest
 test fails on a 3.0, so a guest that got the package of Ubuntu does not pass.
 
+=head1 METHODS
+
+=head2 args()
+
+The schema of the options: C<skip_tests>, a list of distinct Lynis test ids,
+empty by default.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -77,6 +88,19 @@ sub args {
     );
 }
 
+=head2 template_files()
+
+The profile of Lynis, F<lynis_custom.prf> from F<lynis.custom.prf.tt>, and the
+cron file F<lynis_cron> from F<lynis.cron.tt>.  They are the same whichever
+recipes are loaded, so it takes no list of recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         'lynis.custom.prf.tt' => 'lynis_custom.prf',
@@ -88,11 +112,23 @@ sub template_files {
 
 C<cron>, which installs F<lynis_cron> as F</etc/cron.d/lynis>.
 
+Returns the pair of C<cron> and a sub that returns its C<files> option.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
+
 =cut
 
 sub required_recipes {
     return ( cron => sub { return ( files => { lynis => 'lynis_cron' } ) } );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<lynis.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{lynis.tt};

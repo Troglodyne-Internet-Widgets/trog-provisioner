@@ -127,11 +127,15 @@ stricter value, but it can refuse a less strict one, depending on the kernel. So
 the fragment reads the value back after it applies it, and warns if the running
 kernel kept its own value. The file is still correct, and the next boot uses it.
 
-=head3 deps
+=head1 METHODS
+
+=head2 deps
 
 None. The sysctl belongs to the kernel, and C<groupadd> makes the group.
 
-=head3 args
+=head2 args()
+
+The schema of the options:
 
 =over 4
 
@@ -152,11 +156,20 @@ the guest, and not the value you gave it.
 
 =back
 
-=head3 enrich
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=head2 %opts = $recipe->enrich(%opts)
 
 Adds to C<members> the accounts of the recipes on this guest that run something
 able to use io_uring, and sets C<restart_units> to their services.  See
-L</Which accounts go in the group>.
+L</Which accounts go in the group>.  It reads the recipes of the guest from
+C<modules>.  Both lists come back sorted, without duplicates.
+
+Returns C<%opts> with those two keys set.
+
+    my %enriched = $recipe->enrich( modules => ['mariadb'], members => [] );
 
 =cut
 
@@ -206,11 +219,31 @@ sub enrich {
     return %opts;
 }
 
+=head2 template_files()
+
+The sysctl file F<io_uring.conf>, from F<iouring.sysctl.conf.tt>.  It is the
+same whichever recipes are loaded, so it takes no list of recipes.
+
+Returns a list of pairs, from the template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         'iouring.sysctl.conf.tt' => 'io_uring.conf',
     );
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest: F<iouring.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{iouring.tt};

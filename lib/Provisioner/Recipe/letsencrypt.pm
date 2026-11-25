@@ -127,6 +127,20 @@ command of C<certificate_deployers>, with C<$name> as the domain.  So a command
 that must not touch the certificate of the domain tells the two apart by this
 directory.
 
+It is a function, not a method.
+
+=over 4
+
+=item name - Str - a name of C<own_certificates>
+
+=item domain - Str - the domain that this recipe is configured for
+
+=back
+
+Returns the name of the directory, a Str.
+
+    my $dir = Provisioner::Recipe::letsencrypt::own_certificate_dir( 'media.test.test', 'test.test' );
+
 =cut
 
 sub own_certificate_dir ( $name, $domain ) {
@@ -192,6 +206,20 @@ The CA does not set this limit.  C<nameConstraints> takes a list, so one
 intermediate can permit several TLDs, and the leaf certificates under each of
 them verify.  The challenge is the limit.
 
+=head1 METHODS
+
+=head2 template_files()
+
+The script that fetches the certificate, the configuration of dehydrated and
+of this domain, the hook of this domain, F<domains.txt> and the logrotate
+configuration.  They are the same whichever recipes are loaded, so it takes no
+list of recipes.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -207,6 +235,15 @@ sub template_files {
     );
 }
 
+=head2 datadirs()
+
+Returns C<.letsencrypt>, the data directory that the certificates and the
+account are salvaged into.
+
+    my @dirs = $recipe->datadirs();
+
+=cut
+
 sub datadirs {
     return ('.letsencrypt');
 }
@@ -221,6 +258,18 @@ our $DEFAULT_CA = 'letsencrypt';
 my sub auto_ca (%opts) {
     return ( !defined $opts{ca} && Provisioner::Utils::reserved_tld( $opts{domain} ) ) ? 1 : 0;
 }
+
+=head2 args()
+
+The schema of the options: C<ca>, C<hostnames>, C<certificate_readers>,
+C<own_certificates> and C<certificate_deployers>.  C<ca> has no default in the
+schema, because its default depends on the domain; see C<enrich>.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
+=cut
 
 sub args {
     return (
@@ -258,6 +307,30 @@ sub args {
         },
     );
 }
+
+=head2 %params = $recipe->enrich(%params)
+
+Sets C<ca>: the directory of the CA of the fleet, from
+L<Provisioner::Recipe::acmeca/directory_for>, where the domain names no CA and
+is under a reserved TLD, and else C<letsencrypt>.  Sets C<unmanaged> and
+C<lexicon> from L<Provisioner::Recipe::registrar>, and C<lexicon_socket>, the
+socket of the server on the guest that answers the challenge, or an empty
+string.  Removes duplicates from C<certificate_readers>, C<own_certificates>
+and C<certificate_deployers>.  Sets C<domain_aliases> to the names of the
+domain without those of C<own_certificates>, C<own_lines> to the name and the
+directory of each of those, and C<challenge_zones> to the zones of registrar
+accounts that hold a name of the certificate, longer first.
+
+Dies when C<prefer_local_dns> is set, which is gone.  Dies when C<registrar>
+is a block of C<_global> and the domain configures no registrar recipe.  Dies
+when C<own_certificates> names a name that no recipe on the domain serves.
+Dies when C<credentials_for> of the registrar dies.
+
+Returns C<%params> with those keys set.
+
+    my %enriched = $recipe->enrich( domain => 'test.test', certificate_readers => ['nginx'] );
+
+=cut
 
 sub enrich {
     my ( $self, %params ) = @_;
@@ -332,6 +405,13 @@ a third party, and the recipe keeps it on purpose.  If the recipe drops it, the
 rebuild registers again for nothing.  With Let's Encrypt, that also breaks their
 terms.
 
+C<%opts> gives C<install_dir>, C<domain> and C<ca>.
+
+Returns a list of pairs, from each path on the guest to a hash reference of
+C<from> and C<owner>.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'test.test' );
+
 =cut
 
 sub restores {
@@ -350,6 +430,28 @@ sub restores {
 
 # Not /etc/dehydrated/certs.  dehydrated has BASEDIR=/var/lib/dehydrated, so it
 # never writes there, and an empty salvage raises a warning on every run.
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+The certificates and the ACME account, which the fetch copies back from the
+guest.  The paths are the same for every domain, so the sub reads neither
+argument.
+
+=over 4
+
+=item install_dir - Str - the directory on the guest that holds the domains
+
+=item domain - Str - the domain that this recipe is configured for
+
+=back
+
+Returns a list of pairs, from each directory on the guest to its place in the
+data directory.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
+
+=cut
+
 sub remote_files {
     return (
         '/var/lib/dehydrated/certs/' => '.letsencrypt/var-certs',
@@ -381,6 +483,8 @@ fetcher that this recipe queues asks the CA for a certificate during the
 postrun.  So the dependency makes sure that the CA answers by then.  It does not
 depend on where two recipes happen to sit in a list.
 
+    my %required = $recipe->required_recipes( domain => 'test.test' );
+
 =cut
 
 sub required_recipes {
@@ -392,6 +496,15 @@ sub required_recipes {
 
     return @required;
 }
+
+=head2 tests()
+
+Returns a list of the test templates that run on the guest:
+F<letsencrypt.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{letsencrypt.tt};

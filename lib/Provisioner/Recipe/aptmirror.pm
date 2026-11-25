@@ -146,6 +146,10 @@ decides.  The other domain then gets a mirror of releases it did not ask for.
 The vhost is not the problem, because its name comes from the domain.  Each
 domain gets its own vhost.  The mirror behind them is what they share.
 
+Returns 0.
+
+    my $shared = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
@@ -171,6 +175,10 @@ default of the C<vm> recipe fails at once.  A small mirror on purpose still
 passes.
 
 =back
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -270,6 +278,13 @@ C<cron>, which installs F<aptmirror.cron> as F</etc/cron.d/apt-mirror>.  That
 replaces the file of the package, so only one file says when a sync happens.
 The file of the package is all comments and schedules nothing.
 
+Returns a list of pairs, from the name of each required recipe to a code
+reference that takes the options of this recipe and returns the options of
+that one.
+
+    my %required = $recipe->required_recipes();
+    my %nginx    = $required{nginx}->( domain => 'mirror.test.test' );
+
 =cut
 
 sub required_recipes {
@@ -280,6 +295,14 @@ sub required_recipes {
 }
 
 =head2 %files = $recipe->template_files()
+
+The mirror list, the unit, the script that runs after a sync, the cron entry
+and the vhost, the same on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -295,6 +318,10 @@ sub template_files {
 
 =head2 @tests = $recipe->tests()
 
+Returns a list of the test templates that run on the guest: F<aptmirror.tt>.
+
+    my @tests = $recipe->tests();
+
 =cut
 
 sub tests { return ('aptmirror.tt') }
@@ -307,6 +334,16 @@ them.  Dies when C<upstream> is not a URL with a path.
 C<apt-mirror> puts a spool at C<< <spool>/mirror/<upstream host><path> >>.
 Thus the directory that nginx serves comes from C<upstream>, and a fixed path
 cannot replace it.  The vhost and the fragment must both use C<mirror_root>.
+
+Returns C<%opts>, with C<upstream_host> and C<mirror_root> as strings, and
+C<suites> as an array reference of each release with each pocket.
+
+    my %opts = $recipe->enrich(
+        upstream => 'http://mirror.test.test/ubuntu',
+        spool    => '/var/spool/apt-mirror',
+        releases => ['noble'],
+        pockets  => [ q{}, '-updates' ],
+    );
 
 =cut
 

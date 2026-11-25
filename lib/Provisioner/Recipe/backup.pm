@@ -60,6 +60,18 @@ See Reboot checks in L<Provisioner::Recipe>.
 
 TODO: Consult the other recipes on the guest to choose the user and group that each module runs as.
 
+=head1 METHODS
+
+=head2 %schema = $recipe->args()
+
+The schema of the options: C<targets>, an object from the name of a target to
+its path, and C<key_file>, a string, which are both required, and
+C<excludes>, an object from the name of a target to its exclude patterns.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -78,7 +90,7 @@ sub args {
     );
 }
 
-=head2 @targets = Provisioner::Recipe::backup->default_targets(%opts)
+=head2 @targets = $class->default_targets(%opts)
 
 The targets that the recipes in C<$opts{modules}> ask to have backed up, in the
 order of those recipes.  Each one is a hashref:
@@ -98,6 +110,15 @@ C<install_dir> and C<domain> go to each C<remote_files>.  Both this recipe and
 L<Provisioner::Recipe::backupdestination> name their targets from this list, so
 the rsync modules one side serves are the ones the other side asks for.
 
+Returns the targets, as a list of hash references.  Dies when a recipe in
+C<modules> cannot be loaded.
+
+    my @targets = Provisioner::Recipe::backup->default_targets(
+        modules     => [qw{mariadb}],
+        install_dir => '/opt/test.test',
+        domain      => 'test.test',
+    );
+
 =cut
 
 sub default_targets {
@@ -115,6 +136,29 @@ sub default_targets {
 
     return @targets;
 }
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds the C<default_targets> of the recipes in C<modules> to C<targets>, where
+C<targets> does not name them already, and adds the C<remote_skip> patterns of
+each to C<excludes>.  Sets C<pubkey> to the public half of C<key_file>, which
+it reads from the directory of C<domain> under C<data_source>.
+
+Returns C<%opts>, with C<targets> and C<excludes> changed in place and
+C<pubkey> added.  Dies with C<Could not extract pubkey from ...> when it cannot
+get the public half of the key.
+
+    my %opts = $recipe->enrich(
+        modules     => [qw{mariadb}],
+        install_dir => '/opt/test.test',
+        domain      => 'test.test',
+        data_source => '/srv/data',
+        key_file    => 'backup_key',
+        targets     => {},
+        excludes    => {},
+    );
+
+=cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
@@ -141,6 +185,18 @@ sub enrich {
     return %opts;
 }
 
+=head2 %files = $recipe->template_files()
+
+The configuration of the rsync daemon, the logrotate rule of its log and the
+reboot check, the same on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     return (
         "backup.rsyncd.conf.tt"  => "rsyncd.conf",
@@ -148,6 +204,14 @@ sub template_files {
         "backup.reboot-check.tt" => "backup-reboot-check",
     );
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<backup.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{backup.tt};

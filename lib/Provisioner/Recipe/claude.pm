@@ -249,6 +249,20 @@ plugins alone.  Run again it says the hook is already present and changes
 nothing, so a second provision costs nothing.  Installing it the other way
 round would work once and then be overwritten by the next build.
 
+=head1 METHODS
+
+=head2 %schema = $recipe->args()
+
+The schema of the options, none of which is required: C<rtk_version>; the bot
+in C<github_user>, C<github_token>, which is secret, C<git_email> and
+C<pr_assignee>; C<tui>, C<default> or C<fullscreen>; the status line in
+C<statusline_clocks>, a list of objects of C<zone> and C<label>, and
+C<compact_warn_at>; and C<restricted_user>.
+
+Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
+
+    my %schema = $recipe->args();
+
 =cut
 
 # A zone of the tz database, and the name that the status line shows for it.
@@ -317,6 +331,12 @@ C<github>, for the login of the bot, when the domain names one.  It names no
 C<account>, so the login goes to the account that C<github> defaults to: the
 service C<user>, or the admin on a domain that names none.
 
+Returns the pair C<github> and a code reference that takes the options of this
+recipe and returns those of C<github>, or nothing when C<github_user> is not
+set.
+
+    my %required = $recipe->required_recipes( github_user => 'test-bot' );
+
 =cut
 
 sub required_recipes {
@@ -338,6 +358,11 @@ sub required_recipes {
 =head2 $dir = $recipe->bot_config_dir(%opts)
 
 Where the login of the bot goes: F<.claude/gh> in the directory of the domain.
+C<%opts> gives C<install_dir> and C<domain>.
+
+Returns the path, as a string.
+
+    my $dir = $recipe->bot_config_dir( install_dir => '/opt', domain => 'test.test' );
 
 =cut
 
@@ -349,7 +374,12 @@ sub bot_config_dir {
 =head2 $dir = $recipe->restricted_home(%opts)
 
 The home of C<restricted_user>: F<agents/E<lt>restricted_userE<gt>> in the
-directory of the domain.
+directory of the domain.  C<%opts> gives C<install_dir>, C<domain> and
+C<restricted_user>.
+
+Returns the path, as a string.
+
+    my $home = $recipe->restricted_home( install_dir => '/opt', domain => 'test.test', restricted_user => 'agent' );
 
 =cut
 
@@ -365,6 +395,10 @@ C<name>, the plugin; C<marketplace>, the name of the marketplace that publishes
 it; and C<repo>, the GitHub repository of that marketplace.  Every guest gets
 perl-slop and C<simple-english>.  A guest with C<perllsp> also gets
 C<perlnavigator>, and a guest with C<perl> gets C<perl-development>.
+
+Returns the plugins, as a list of hash references.
+
+    my @plugins = $recipe->plugins( modules => [qw{claude perl}] );
 
 =cut
 
@@ -393,6 +427,11 @@ Adds C<restricted_home> when the domain names a C<restricted_user>.  Dies when
 that is the service C<user> or the admin, because the point of the account is
 that it is neither.
 
+Returns C<%opts>, with C<plugins> added as an array reference, and
+C<gh_config_dir> and C<restricted_home> added as strings where they apply.
+
+    my %opts = $recipe->enrich( install_dir => '/opt', domain => 'test.test', modules => ['claude'] );
+
 =cut
 
 sub enrich {
@@ -420,6 +459,10 @@ Where the rtk release comes from.  The npm registry is not here: the C<perl>
 and C<nvm> recipes name it, and this one installs through whatever npm is
 configured with.
 
+Returns the host names, as a list of strings.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -432,12 +475,29 @@ sub fetch_hosts {
 The classes for a GitHub release, so that a cache keeps the C<.deb> rather than
 fetching it once per guest.
 
+Returns the classes, as L<Provisioner::Recipe/github_release_classes> returns
+them.
+
+    my @classes = $recipe->cache_classes();
+
 =cut
 
 sub cache_classes {
     my ($self) = @_;
     return $self->github_release_classes();
 }
+
+=head2 %files = $recipe->template_files()
+
+The settings, the settings of the restricted agent, the two scripts of tmux
+and of the status line, and the configuration of tmux, the same on every guest.
+
+Returns a list of pairs, from each template to the name of the file that it
+renders in the configuration directory.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     return (
@@ -469,6 +529,18 @@ F<.claude/projects>, or no F<.claude> at all, it stages nothing and succeeds,
 and the same goes for a guest with no F<.claude.json>.  A staged copy of either that is gone from the
 guest goes from the staging directory too.
 
+=over 4
+
+=item install_dir - Str - the directory that holds the directory of each domain
+
+=item domain - Str - the domain
+
+=back
+
+Returns the two shell commands, as a list of strings.
+
+    my @commands = $recipe->remote_prepare( '/opt', 'test.test' );
+
 =cut
 
 sub remote_prepare {
@@ -488,6 +560,25 @@ sub remote_prepare {
     );
 }
 
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+The two staging directories that C<remote_prepare> fills, salvaged to
+F<claude/memory/> and F<claude/state/>.
+
+=over 4
+
+=item install_dir - Str - the directory that holds the directory of each domain
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of pairs, from each path on the guest to where its salvage goes.
+
+    my %path_map = $recipe->remote_files( '/opt', 'test.test' );
+
+=cut
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
@@ -505,6 +596,11 @@ C<HOME> the directory of the domain is, and to the group of the admin.  On a
 domain that names no service user, they belong to the admin.  On a guest that
 already has either, C<restore_state> keeps it.
 
+Returns a list of pairs, from each path on the guest to a hash reference of
+C<from>, C<owner> and, for F<.claude.json>, C<mode>.
+
+    my %restores = $recipe->restores( install_dir => '/opt', domain => 'test.test', admin_user => 'admin' );
+
 =cut
 
 sub restores {
@@ -520,6 +616,14 @@ sub restores {
         "$install_dir/$domain/.claude.json"     => { from => "$install_dir/$domain/claude/state/.claude.json", owner => "$user:$admin_user", mode => '0600' },
     );
 }
+
+=head2 @tests = $recipe->tests()
+
+Returns a list of the test templates that run on the guest: F<claude.tt>.
+
+    my @tests = $recipe->tests();
+
+=cut
 
 sub tests {
     return qw{claude.tt};
