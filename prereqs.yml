@@ -4,3 +4,9 @@
 runtime:
   requires:
     perl: '5.014'
+# t/repos_for.t loads scripts/repos_for, which uses Pithub.  [AutoPrereqs]
+# cannot see that use: it reads only the files under lib/, bin/ and t/, and
+# the test loads the script when it runs.
+test:
+  requires:
+    Pithub: '0'
