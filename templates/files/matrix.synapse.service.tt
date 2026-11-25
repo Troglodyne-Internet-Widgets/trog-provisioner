@@ -2,6 +2,11 @@
 Description=Synapse Matrix homeserver
 After=network-online.target
 Wants=network-online.target
+# A refused key does not fix itself, so stop trying after five starts, about
+# 25 s at RestartSec=5.  The default allows five starts in 10 s, which a
+# restart every 5 s never reaches, so synapse would retry forever.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -18,6 +23,12 @@ WorkingDirectory=/etc/matrix-synapse
 # No ExecStartPre with --generate-keys, unlike the packaged unit.  The signing key
 # comes from the secret store, and a key that synapse makes for itself is a new
 # identity.  If the key is missing, the fragment stops instead.
+#
+# Before every start, a check that the key signed the database.  It runs as
+# User=, not as root with +, because sqlite3 leaves the -shm and -wal files of
+# the database behind, owned by whoever opened it, and synapse cannot write to
+# files that root owns.
+ExecStartPre=[% INCLUDE "files/matrix.check_signing_key.tt" %]
 ExecStart=/opt/venvs/matrix-synapse/bin/python -m synapse.app.homeserver --config-path /etc/matrix-synapse/homeserver.yaml
 Restart=always
 RestartSec=5

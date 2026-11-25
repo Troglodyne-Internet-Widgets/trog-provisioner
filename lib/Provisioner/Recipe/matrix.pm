@@ -143,13 +143,15 @@ The recipe takes sqlite3 only.  Synapse's C<synapse_port_db> moves a database
 from sqlite3 to PostgreSQL, and synapse ships no tool for the other direction.
 So a homeserver on PostgreSQL cannot be taken over.
 
-Before synapse is enabled, F<matrix_check_signing_key> reads the newest events
-that accounts of C<server_name> sent.  If there are some, and none of them
-carries a signature under the ID of the key in the store or of a key in
-C<old_signing_keys>, the build stops, and synapse does not start.  That
-combination is a restored database with a new key, usually because step 2 was
-missed.  Other servers would see a known name with a key they do not know.  Put
-the right key in the store, and build again.
+F<matrix_check_signing_key> reads the newest events that accounts of
+C<server_name> sent.  If there are some, and none of them carries a signature
+under the ID of the key in the store or of a key in C<old_signing_keys>, the
+check fails.  That combination is a restored database with a new key, usually
+because step 2 was missed.  Other servers would see a known name with a key
+they do not know.  The unit of synapse that the recipe installs runs the check
+before every start, so a start by the package, by a reboot or by hand does not
+happen either.  The build runs it too, and stops with a message.  Put the right
+key in the store, and build again.
 
 The package names are in the subclass for each distribution, for example
 L<Provisioner::Recipe::Ubuntu::matrix>.

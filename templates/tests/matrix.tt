@@ -156,10 +156,19 @@ ok( exists( ( $published->{verify_keys} // {} )->{ 'ed25519:' . ( $version // ''
 is( ( ( $published->{old_verify_keys} // {} )->{'[% id %]'} // {} )->{key}, '[% old_signing_keys.$id.public %]', 'and publishes the old key [% id %] under old_verify_keys' ) or diag $keys;
 [% END %]
 
-# The check that the build ran before synapse started, now that synapse wrote
-# events of its own.
-my $check = `[% script_dir %]/matrix_check_signing_key $live/homeserver.db '[% server_name %]' $signing_key 2>&1`;
-is( $? >> 8, 0, 'the key from the store signed the events of this homeserver' ) or diag $check;
+# systemd takes the unit, and finds each program that it runs.
+my $verify = `systemd-analyze verify /etc/systemd/system/matrix-synapse.service 2>&1`;
+is( $? >> 8, 0, 'systemd-analyze verify takes the unit of synapse' ) or diag $verify;
+
+# The check that the unit runs before every start, as systemd loaded it and as
+# its user, now that synapse wrote events of its own.
+my $pre = `systemctl show -p ExecStartPre --value matrix-synapse 2>&1`;
+my ($argv) = $pre =~ m/argv\[\]=([^;]*matrix_check_signing_key[^;]*?)\s*;/;
+ok( $argv, 'the unit checks the signing key before it starts synapse' ) or diag $pre;
+my $user = `systemctl show -p User --value matrix-synapse`;
+chomp $user;
+my $check = `runuser -u '$user' -- @{[ $argv // 'false' ]} 2>&1`;
+is( $? >> 8, 0, 'and the key from the store signed the events of this homeserver' ) or diag $check;
 
 # homeserver.yaml must name these paths, so that synapse uses the secrets from
 # the store.
