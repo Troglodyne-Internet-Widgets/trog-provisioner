@@ -106,6 +106,8 @@ Returns C<uri>, the option that makes a block a libvirt one, from
 C<libvirt_uri>.  A block with no backend's marker is one too, because this
 backend can talk to the machine it runs on.
 
+    my $key = $hv->marker;
+
 =head2 client_module
 
 Returns L<Sys::Virt>, which L<Trog::HV/$module = $hv-E<gt>require_client> loads
@@ -113,10 +115,14 @@ when the connection is first opened.  It is not installed on an installation
 whose fleet is all clouds, and L<< /$result = $hv->check_sys_virt_in_step() >> is where a
 fleet with a libvirt hypervisor finds out that it has the wrong one.
 
+    my $module = $hv->client_module;
+
 =head2 config_keys
 
 Returns the pairs of constructor option and F<hypervisors.conf> key that this
 backend reads.  A block with C<libvirt_uri> in it is a block for this backend.
+
+    my %key_of = $hv->config_keys;
 
 =cut
 
@@ -132,7 +138,14 @@ sub config_keys {
 
 =head2 build(%given)
 
-Returns a new object for this backend.  L<Trog::HV/candidate> calls it after it
+=over 4
+
+=item given - HashRef - the options of the block: C<uri>, and the keys of
+L</config_keys>
+
+=back
+
+Returns Trog::HV::Libvirt, a new object for this backend.  L<Trog::HV/candidate> calls it after it
 selects this backend for the options.
 
 C<uri> defaults to C<qemu:///system>.  See L</explicit> for what the default
@@ -142,6 +155,8 @@ Dies if the URI does not parse.  Also dies if the hypervisor is remote and the
 transport gives no shell, because files and bridge detection need one.  Also
 dies if it gets a L</max_memory> and no L</partition>, and if the adapters of
 the block are not ones that a guest can have: see L</ADAPTERS>.
+
+    my $hv = Trog::HV::Libvirt->build( uri => 'qemu+ssh://root@hv.test.test/system' );
 
 =cut
 
@@ -250,15 +265,27 @@ sub build {
 
 The libvirt connection URI.  The default is C<qemu:///system>.
 
+Returns Str.
+
+    my $uri = $hv->uri;
+
 =head2 explicit
 
 True when the caller gave a URI, false when the URI is the default.  When it is
 false, libvirt selects its own default connection, as C<virsh> does with no
 C<-c>.
 
+Returns Bool.
+
+    my $given = $hv->explicit;
+
 =head2 is_local
 
 True when the hypervisor is the machine that runs this code.
+
+Returns Bool.
+
+    my $here = $hv->is_local;
 
 =cut
 
@@ -289,6 +316,10 @@ in the user slice of the account.
 
 =back
 
+Returns Bool.
+
+    my $session = $hv->is_session;
+
 =head2 local_uri
 
 The URI that names the same daemon on the hypervisor itself: the driver and the
@@ -303,11 +334,25 @@ the access that L</vmm> has, and needs no sudo.
 It is empty when L</uri> is not L</explicit>.  libvirt reads an empty URI as no
 URI, and selects its default, as L</vmm> lets it.
 
+Returns Str.
+
+    my $uri = $hv->local_uri;
+
 =head2 local_connect($uri)
+
+=over 4
+
+=item uri - Str - optional, the URI of the daemon
+
+=back
 
 The arguments that give C<virsh> or a tool of libguestfs the daemon C<$uri>, on
 the hypervisor: C<-c> and C<$uri>.  C<$uri> defaults to L</local_uri>.  When
 C<$uri> is empty, it returns no arguments, so that the tool selects its default.
+
+Returns the arguments, as a list of Str.
+
+    system( 'virsh', $hv->local_connect, 'list' );
 
 =cut
 
@@ -333,9 +378,17 @@ connection URI.  Undef when the hypervisor is local, or when the transport gives
 no shell, which C<build> refuses.  L<Trog::Machine> has C<ssh_user>,
 C<ssh_port> and C<ssh_target>.
 
+Returns Str, or undef.
+
+    my $host = $hv->ssh_host;
+
 =head2 describe
 
 What to call the hypervisor in a message: "the hypervisor at" and the URI.
+
+Returns Str.
+
+    print $hv->describe, "\n";
 
 =cut
 
@@ -361,6 +414,10 @@ C<pool_target>, because this code deletes files from that path.  If libvirt has
 no such pool, the result is F</opt/terraform/disks>, where existing hypervisors
 keep their volumes.
 
+Returns Str.
+
+    my $dir = $hv->pool_path;
+
 =head2 pool_name
 
 The name of the storage pool for the guests on this hypervisor.  The default is
@@ -371,6 +428,10 @@ ignores C<pool_path> and puts every volume where that pool points.  So to give
 a hypervisor its own pool, set both keys.  A pool on a filesystem with a quota is
 the only quota that applies to libvirt guests.
 
+Returns Str.
+
+    my $pool = $hv->pool_name;
+
 =head2 partition
 
 The cgroup partition for the guests on this hypervisor, or undef for the libvirt
@@ -380,6 +441,10 @@ one systemd slice, where an operator can limit CPU and I/O for all of them.
 When it is set, L</capacity> counts the guests and the vCPUs of this partition
 only, so that C<max_guests> and C<cpu_overcommit> are limits on it and not on
 the whole hypervisor.
+
+Returns Str, or undef.
+
+    my $partition = $hv->partition;
 
 =head2 max_memory
 
@@ -392,6 +457,10 @@ C<MemoryMax> on the slice kills a guest and does not refuse the next one.
 L</build(%given)> refuses it without a partition, because C<reserve_memory> already
 caps the memory of the whole host.
 
+Returns Int.
+
+    my $mb = $hv->max_memory;
+
 =head2 ip_db
 
 The path of the address database of this hypervisor, F<ips.db>, on the
@@ -403,6 +472,10 @@ directory without it.  Do not name a file on a filesystem that another machine
 mounts and writes, such as a configuration directory that a runner shares with
 its hypervisor, because then the processes of two machines open it.
 
+Returns Str, or undef.
+
+    my $db = $hv->ip_db;
+
 =head2 ip_perl
 
 The perl that runs F<bin/ippool> on this hypervisor, from C<ip_perl> in its
@@ -410,19 +483,43 @@ block.  The default is C<perl>, the first on the C<PATH> of the login user,
 which is usually the system perl.  See L<Provisioner::IPPool::Remote/What the
 far side needs>.
 
+Returns Str.
+
+    my $perl = $hv->ip_perl;
+
 =head2 $unit = Trog::HV::Libvirt::partition_slice($partition)
+
+=over 4
+
+=item partition - Str - the cgroup partition, such as C</machine/runner>
+
+=back
 
 The systemd unit of the slice that libvirt makes for C<$partition>: the path
 without its first slash, with each other slash a dash, and C<.slice> after it.
 So C</machine/runner> is F<machine-runner.slice>.
 
+Returns Str.
+
+    my $unit = Trog::HV::Libvirt::partition_slice('/machine/runner');
+
 =head2 $cores = $hv->slice_cpu_quota($unit)
+
+=over 4
+
+=item unit - Str - the name of the slice
+
+=back
 
 The C<CPUQuota> of the slice C<$unit> on this hypervisor, in cores: 4 for
 C<400%>.  Undef when the slice has no quota, or when C<systemctl> does not
 answer.  systemd answers for a slice that is not running yet, from its unit
 file, so a runner that has no running guest still gets its quota.  Dies when
 C<$unit> is not the name of a slice, because it goes into a shell command.
+
+Returns Num, or undef.
+
+    my $cores = $hv->slice_cpu_quota('machine-runner.slice');
 
 =cut
 
@@ -440,6 +537,10 @@ The user slice of the account of a session URI, F<user-UID.slice>, where systemd
 puts every process of that user, and so the qemu of each guest of the session.
 Dies when the hypervisor does not say the uid of the user.  It asks once, and
 remembers the answer.
+
+Returns Str.
+
+    my $unit = $hv->session_slice();
 
 =cut
 
@@ -482,8 +583,18 @@ sub pool_path {
 
 =head2 pool_target($name)
 
+=over 4
+
+=item name - Str - optional, the name of the pool
+
+=back
+
 The target directory that libvirt has for the pool C<$name>, or undef when
 there is no such pool.  C<$name> defaults to L</pool_name>.
+
+Returns Str, or undef.
+
+    my $dir = $hv->pool_target('tf_disks');
 
 =cut
 
@@ -512,6 +623,10 @@ only by the URI it was given.
 The L<Sys::Virt> connection.  The first call opens it and later calls return the
 same one.  Dies if libvirt does not accept the connection.
 
+Returns Sys::Virt, the connection.
+
+    my $vmm = $hv->vmm;
+
 =cut
 
 sub vmm {
@@ -535,6 +650,11 @@ read-only connection to the system daemon of the same host, as the same user,
 because the NAT network belongs to the system daemon.  A read-only connection
 needs no group: libvirt lets any user open one, and refuses every change on it.
 The first call opens it, and later calls return the same one.
+
+Returns Sys::Virt, the connection.  Dies if libvirt does not accept the
+read-only connection.
+
+    my $vmm = $hv->network_vmm;
 
 =cut
 
@@ -562,6 +682,10 @@ my sub domain ( $self, $name ) {
 
 The names of all domains that libvirt has here, running or not.
 
+Returns the names, as a list of Str.
+
+    my @names = $hv->guest_names;
+
 =cut
 
 sub guest_names {
@@ -571,7 +695,15 @@ sub guest_names {
 
 =head2 domain_exists($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 Returns 1 if libvirt has a domain of that name, running or not, and 0 if not.
+
+    my $exists = $hv->domain_exists('vm.example.test');
 
 =cut
 
@@ -579,12 +711,21 @@ sub domain_exists ( $self, $name ) { return defined domain( $self, $name ) ? 1 :
 
 =head2 stop_domain($name)
 
-Stops a domain and leaves it defined.  Returns 1 if the domain exists, and 0 if
-it does not.  Dies if libvirt cannot stop it.
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
+Stops a domain and leaves it defined.
+
+Returns 1 if the domain exists, and 0 if it does not.  Dies if libvirt cannot stop it.
 
 A rebuild that keeps the disk of a guest stops the guest but does not undefine
 it.  qemu-img then writes the image directly, and the image gets corrupted if
 qemu has it open.
+
+    $hv->stop_domain('vm.example.test');
 
 =cut
 
@@ -599,9 +740,18 @@ sub stop_domain {
 
 =head2 start_domain($name)
 
-Starts a domain that is defined but not running.  Returns 1 if the domain
-exists, and 0 if it does not.  A domain that is already running stays as it is.
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
+Starts a domain that is defined but not running.
+
+Returns 1 if the domain exists, and 0 if it does not.  A domain that is already running stays as it is.
 Dies if libvirt cannot start it.
+
+    $hv->start_domain('vm.example.test');
 
 =cut
 
@@ -620,11 +770,21 @@ Every action of F<bin/debug_boot>.  The tool was written against libvirt, and
 each of its actions edits the definition of a domain, drives libguestfs on the
 hypervisor, or asks libvirt for a screen.
 
+Returns the names of the actions, as a list of Str.
+
+    my @actions = $hv->debug_actions();
+
 =cut
 
 sub debug_actions { return qw{console fetch hold shot vnc keys restore cat ls single} }
 
 =head2 $xml = $hv->domain_definition($name)
+
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
 
 The definition of a domain, as libvirt would define it again.
 
@@ -632,6 +792,10 @@ Inactive, so this is the definition and not the runtime state.  The runtime
 state has allocated devices and aliases that libvirt cannot define.
 
 Dies if there is no such domain.
+
+Returns Str, the XML.
+
+    my $xml = $hv->domain_definition('vm.example.test');
 
 =cut
 
@@ -646,8 +810,18 @@ sub domain_definition {
 
 =head2 $hv->restart_domain($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 Stops a domain and starts it again, so that it boots with the definition it has
-now.  Returns 1.
+now.
+
+Returns 1.  Dies as C<stop_domain> and C<start_domain> do.
+
+    $hv->restart_domain('vm.example.test');
 
 =cut
 
@@ -667,21 +841,43 @@ sub restart_domain {
 
 =head2 $path = $hv->console_log_path($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 Where the console of this domain is captured on the hypervisor.
+
+Returns Str, the path.
+
+    my $path = $hv->console_log_path('vm.example.test');
 
 =cut
 
 sub console_log_path { my ( $self, $name ) = @_; return "$CONSOLE_LOG_DIR/$name-console.log" }
 
-=head2 $restarted = $hv->console_capture($name, wait =E<gt> $seconds)
+=head2 $restarted = $hv->console_capture($name, %opts)
+
+=over 4
+
+=item name - Str - the name of the domain
+
+=item opts - HashRef - C<wait>, the seconds to wait for the guest to boot, 0 by default
+
+=back
 
 Points the serial port of the domain at C<console_log_path> and restarts it, so
-that the capture starts at the first line of the firmware.  Waits C<$seconds>
-for the guest to boot, and returns 1: libvirt cannot read the output of a boot
+that the capture starts at the first line of the firmware.  Waits the
+C<wait> seconds for the guest to boot: libvirt cannot read the output of a boot
 that already happened.
 
 Dies if the domain already writes its console to a file, which C<console_output>
 reads and C<console_capture_off> undoes, or if it has no C<pty> serial port.
+
+Returns 1.
+
+    $hv->console_capture( 'vm.example.test', wait => 30 );
 
 =cut
 
@@ -708,9 +904,19 @@ sub console_capture {
 
 =head2 $hv->console_capture_off($name)
 
-Puts the serial port back to a C<pty>, undoing C<console_capture>.  Returns 1.
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
+Puts the serial port back to a C<pty>, undoing C<console_capture>.
 
 The domain has to be restarted for it to take effect.
+
+Returns 1.  Dies as C<domain_definition> and C<define_domain> do.
+
+    $hv->console_capture_off('vm.example.test');
 
 =cut
 
@@ -730,8 +936,18 @@ sub console_capture_off {
 
 =head2 $text = $hv->console_output($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 What C<console_capture> has captured, or undef if the file is not there or is
 empty.
+
+Returns Str, or undef.
+
+    my $text = $hv->console_output('vm.example.test');
 
 =cut
 
@@ -745,11 +961,21 @@ sub console_output {
 
 =head2 ($advice, $port) = $hv->vnc_access($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 The VNC port of the domain, and how to reach it.  The display listens on the
 loopback of the hypervisor, so the advice is the ssh tunnel to it.
 
 Dies if there is no such domain, or if it has no display with a port.  A
 display with C<autoport='yes'> has C<port='-1'> until the domain runs.
+
+Returns a list of the advice, a Str, and the port, an Int.
+
+    my ( $advice, $port ) = $hv->vnc_access('vm.example.test');
 
 =cut
 
@@ -781,6 +1007,12 @@ TUNNEL
 
 =head2 domain_uuid($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 The uuid that libvirt has for this domain, or undef when there is no such
 domain.
 
@@ -788,6 +1020,10 @@ A rebuild that keeps the disk does not undefine the domain, because that
 discards the libvirt record of its snapshots.  libvirt refuses to define a name
 again under a different uuid.  So the XML for that rebuild carries the existing
 uuid.  A first build carries none, and libvirt makes one.
+
+Returns Str, or undef.
+
+    my $uuid = $hv->domain_uuid('vm.example.test');
 
 =cut
 
@@ -800,9 +1036,18 @@ sub domain_uuid {
 
 =head2 annihilate_domain($name)
 
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
 Stops and undefines a domain, with its nvram and its snapshot metadata.  A domain
-that is already off is not an error.  Returns 1 if there was a domain to remove,
-and 0 if not.  Dies if libvirt cannot undefine it.
+that is already off is not an error.
+
+Returns 1 if there was a domain to remove, and 0 if not.  Dies if libvirt cannot undefine it.
+
+    $hv->annihilate_domain('vm.example.test');
 
 =cut
 
@@ -826,6 +1071,14 @@ sub annihilate_domain {
 
 =head2 lease_ip($network, %opts)
 
+=over 4
+
+=item network - Str - the name of the libvirt network
+
+=item opts - HashRef - C<mac>, C<hostname> and C<exclude>, as below
+
+=back
+
 The address that libvirt leased on C<$network>, usually C<default>, or undef
 when no lease matches.
 
@@ -846,6 +1099,10 @@ When several leases match, the result is the one that expires last.  That is
 the most recent lease.  One MAC can hold several leases, because a rebuilt
 guest gets a new address and the old lease stays until it expires.
 
+Returns Str, or undef.
+
+    my $ip = $hv->lease_ip( 'default', mac => '52:54:00:00:00:01' );
+
 =cut
 
 sub lease_ip {
@@ -856,9 +1113,21 @@ sub lease_ip {
 
 =head2 @ips = lease_ips($network, %opts)
 
+=over 4
+
+=item network - Str - the name of the libvirt network
+
+=item opts - HashRef - as C<lease_ip> takes them
+
+=back
+
 Every matching address leased on C<$network>, newest first.  It takes the same
 options as C<lease_ip>.  An empty list when there is no such network.  Use it
 to find the old leases of a rebuilt guest, to release them.
+
+Returns the addresses, as a list of Str.
+
+    my @ips = $hv->lease_ips( 'default', hostname => 'vm.example.test' );
 
 =cut
 
@@ -885,13 +1154,24 @@ sub lease_ips {
 
 =head2 release_dhcp_lease($ip, $bridge)
 
+=over 4
+
+=item ip - Str - the leased address
+
+=item bridge - Str - optional, the bridge of the network
+
+=back
+
 Removes a stale lease, so that the lease table does not fill up.  C<$bridge>
-defaults to L</lease_nic>.  Returns 1 if the release worked.  Returns 0 if
-it failed, if C<$ip> is empty, or if there is no lease helper.
+defaults to L</lease_nic>.
+
+Returns 1 if the release worked, and 0 if it failed, if C<$ip> is empty, or if there is no lease helper.
 
 This is the only libvirt operation that runs a command.  libvirt gives DHCP
 leases read-only, and C<virNetworkGetDHCPLeases> has no delete operation.  So
 this runs the libvirt lease helper on the hypervisor, as root.
+
+    $hv->release_dhcp_lease( '192.0.2.10', 'virbr0' );
 
 =cut
 
@@ -914,6 +1194,10 @@ sub release_dhcp_lease {
 The path of the libvirt lease helper on the hypervisor, or undef when it has
 none.  Distributions put it in one of two places.
 
+Returns Str, or nothing.
+
+    my $path = $hv->lease_helper();
+
 =cut
 
 sub lease_helper {
@@ -924,15 +1208,26 @@ sub lease_helper {
     return;
 }
 
-=head2 eject_cdrom($domain, $target)
+=head2 eject_cdrom($name, $target)
+
+=over 4
+
+=item name - Str - the name of the domain
+
+=item target - Str - optional, the target device of the drive
+
+=back
 
 Removes the cloud-init ISO from the drive, so that the guest does not boot it
-again.  C<$target> defaults to C<sda>, where the domain XML puts it.  Returns 1
-on success.  Returns 0, with a warning, if it fails or there is no such domain.
+again.  C<$target> defaults to C<sda>, where the domain XML puts it.
+
+Returns 1 on success, and 0, with a warning, if it fails or there is no such domain.
 
 Call this only after the guest says that cloud-init is finished.  The seed must
 stay in the drive while cloud-init can read it.  If you remove it earlier, the
 guest gets no user, no keys and no netplan.
+
+    $hv->eject_cdrom( 'vm.example.test', 'sda' );
 
 =cut
 
@@ -956,10 +1251,20 @@ The hypervisor owns what is on it, and this code adds one guest to it.
 
 =head2 pool($name)
 
+=over 4
+
+=item name - Str - optional, the name of the pool
+
+=back
+
 The storage pool object.  If the pool does not exist, this defines it, builds
 it and sets it to start with the host.  It also starts a pool that is not
 running.  C<$name> defaults to L</pool_name>.  Dies if libvirt cannot build or
 start the pool.
+
+Returns Sys::Virt::StoragePool, the pool.
+
+    my $pool = $hv->pool;
 
 =cut
 
@@ -980,6 +1285,16 @@ sub pool {
 
 =head2 $pool = $hv->define_pool($name, $path, %permissions)
 
+=over 4
+
+=item name - Str - the name of the pool
+
+=item path - Str - the directory of the pool
+
+=item permissions - HashRef - C<owner>, C<group> and C<mode>
+
+=back
+
 Defines a directory pool C<$name> at C<$path>, builds it and sets it to start
 with the host, and returns the pool object, which is not started.  Dies if
 libvirt cannot build it.
@@ -988,6 +1303,10 @@ C<%permissions> takes C<owner> and C<group>, as numeric ids, and C<mode>.
 libvirt applies them to the directory when it builds the pool, and again on
 every later build, so a C<chown> by hand does not last.  Without them, libvirt
 uses its defaults.
+
+Returns Sys::Virt::StoragePool, the pool.
+
+    my $pool = $hv->define_pool( 'tf_disks', '/srv/disks', mode => '0755' );
 
 =cut
 
@@ -1014,13 +1333,37 @@ XML
 
 =head2 volume($name, $pool)
 
+=over 4
+
+=item name - Str - the name of the volume
+
+=item pool - Str - optional, the name of the pool
+
+=back
+
 The volume C<$name> in the pool C<$pool>, or undef when there is no such
 volume.  C<$pool> defaults to L</pool_name>.
 
+Returns Sys::Virt::StorageVol, or undef.
+
+    my $volume = $hv->volume('vm.example.test.qcow2');
+
 =head2 volume_path($name, $pool)
+
+=over 4
+
+=item name - Str - the name of the volume
+
+=item pool - Str - optional, the name of the pool
+
+=back
 
 The path of the file of that volume, or undef when there is no such volume.  A
 disk in the domain XML needs this path.
+
+Returns Str, or undef.
+
+    my $path = $hv->volume_path('vm.example.test.qcow2');
 
 =cut
 
@@ -1037,6 +1380,12 @@ sub volume_path {
 
 =head2 $name = image_volume_name($url)
 
+=over 4
+
+=item url - Str - the URL of the image
+
+=back
+
 The name that the volumes of the image at C<$url> start with.  The file name
 keeps it readable in C<virsh vol-list>.  The hash keeps two images with one file
 name apart, such as the image of a mirror and the image of the archive.
@@ -1045,6 +1394,10 @@ A pool can hold several builds of one image, because a URL such as the C<current
 directory of a distribution moves.  C<base_image> names each build after what it
 is: this name, a dash, and the start of the SHA256 checksum of the file.  A volume
 with this name alone is a build from before that, and counts as one too.
+
+Returns Str.
+
+    my $name = Trog::HV::Libvirt::image_volume_name('https://images.test.test/os.qcow2');
 
 =cut
 
@@ -1055,7 +1408,15 @@ sub image_volume_name ($url) {
 
 =head2 base_image($url, $name)
 
-Returns the path of the base image under the disk of a guest.  Dies if there is
+=over 4
+
+=item url - Str - optional, the URL of the image
+
+=item name - Str - optional, the name of the volume
+
+=back
+
+Returns Str, the path of the base image under the disk of a guest.  Dies if there is
 no image and no URL, or if the download fails.
 
 With a C<$name>, or without a URL, this is the volume of that name, and nothing
@@ -1086,6 +1447,8 @@ libvirt cannot fetch a URL.  So this runs curl on the hypervisor, into the pool
 directory, and then refreshes the pool.  curl runs without sudo on purpose.  If
 this account cannot write to the pool directory, the pool is misconfigured, and
 sudo hides that.
+
+    my $path = $hv->base_image('https://images.test.test/os.qcow2');
 
 =cut
 
@@ -1133,15 +1496,39 @@ sub base_image {
 
 =head2 download_image($url, $family)
 
+=over 4
+
+=item url - Str - the URL of the image
+
+=item family - Str - the name of the family of volumes
+
+=back
+
 Downloads C<$url> into the pool directory under the name C<$family.partial>,
 and returns that path.  Dies if curl fails.  libvirt must not see half a file,
 so the download has a name that is not a volume until C<install_download> moves
 it.
 
+Returns Str, the path.
+
+    my $partial = $hv->download_image( 'https://images.test.test/os.qcow2', $family );
+
 =head2 install_download($partial, $name)
+
+=over 4
+
+=item partial - Str - the path of the download
+
+=item name - Str - the name of the volume
+
+=back
 
 Moves the download at C<$partial> to the volume C<$name>, refreshes the pool and
 returns the path of the volume.  Dies if the move fails.
+
+Returns Str, the path.
+
+    my $path = $hv->install_download( $partial, $name );
 
 =cut
 
@@ -1170,6 +1557,12 @@ sub install_download {
 
 =head2 $sum = $hv->published_checksum($url)
 
+=over 4
+
+=item url - Str - the URL of the image
+
+=back
+
 The SHA256 checksum, in lower case hex, that the distribution publishes for the
 image at C<$url>.  This runs on this machine, and not on the hypervisor.
 
@@ -1196,13 +1589,31 @@ C<note_stale_base_image> says nothing.  A distribution that publishes its sums
 somewhere else gets the same treatment, so its image is fetched once and then
 kept.
 
+Returns Str, or undef.
+
+    my $sum = $hv->published_checksum('https://images.test.test/os.qcow2');
+
 =head2 $sum = parse_checksums($text, $file, $only)
+
+=over 4
+
+=item text - Str - the text of the sums file
+
+=item file - Str - the file name of the image
+
+=item only - Bool - optional, true when the text is the sums of this image alone
+
+=back
 
 The SHA256 checksum of C<$file> from the text of a sums file, in lower case hex,
 or undef.  It reads the layout of C<sha256sum> (C<hex  file> or C<hex *file>)
 and the BSD layout (C<SHA256 (file) = hex>).  A line of only the hex is taken
 when C<$only> is true, which says that the text is the sums of this image alone,
 as C<$file.sha256> is.
+
+Returns Str, or undef.
+
+    my $sum = Trog::HV::Libvirt::parse_checksums( $text, 'os.qcow2' );
 
 =cut
 
@@ -1248,9 +1659,19 @@ sub published_checksum {
 
 =head2 $sum = $hv->file_checksum($path)
 
+=over 4
+
+=item path - Str - the path of the file on the hypervisor
+
+=back
+
 The SHA256 checksum, in lower case hex, of the file at C<$path> on the
 hypervisor, which C<sha256sum> there computes.  Undef when it does not answer.
 The file is 600 MB or so, and this takes a few seconds.
+
+Returns Str, or undef.
+
+    my $sum = $hv->file_checksum('/srv/disks/os.qcow2');
 
 =cut
 
@@ -1277,9 +1698,23 @@ hypervisor, and is when the volume was put in the pool.  A volume that has a
 name of its own, such as C<baseimage-qcow2>, is not here.  Dies if libvirt cannot
 list the pool.
 
+Returns the volumes, as a list of HashRef.
+
+    my @volumes = $hv->base_volumes();
+
 =head2 @volumes = $hv->image_volumes($family)
 
+=over 4
+
+=item family - Str - the name of the family
+
+=back
+
 The same, for one family.  C<$family> is an C<image_volume_name>.
+
+Returns the volumes, as a list of HashRef.  Dies as C<base_volumes> does.
+
+    my @volumes = $hv->image_volumes($family);
 
 =cut
 
@@ -1317,9 +1752,21 @@ sub image_volumes {
 
 =head2 $bool = $hv->is_build($volume, $sum)
 
+=over 4
+
+=item volume - HashRef - a volume from C<base_volumes>
+
+=item sum - Str - the SHA256 checksum, in lower case hex
+
+=back
+
 Whether the base volume C<$volume>, from C<base_volumes>, holds the file with the
 checksum C<$sum>.  A build is named after its checksum, so that answers without
 reading the file.  A volume from before builds has to be read.
+
+Returns Bool.
+
+    my $current = $hv->is_build( $volume, $sum );
 
 =cut
 
@@ -1346,6 +1793,10 @@ guest is built on.  There is no number of spare volumes.
 If the backing file of any volume cannot be read, or a base volume has no date,
 this removes nothing, because that disk may be backed by any base volume, and
 the newest is not known.  A volume that will not go is a warning.
+
+Returns the names of the removed volumes, as a list of Str.
+
+    my @removed = $hv->prune_base_images();
 
 =cut
 
@@ -1404,6 +1855,14 @@ my sub xml_escape ($str) {
 
 =head2 create_disk($name, %opts)
 
+=over 4
+
+=item name - Str - the name of the volume
+
+=item opts - HashRef - C<backing>, the path of the backing image, and C<capacity>, the size in bytes
+
+=back
+
 Makes a qcow2 volume over the base image, if the volume does not exist, and
 returns its path.  C<backing> is the path of the backing image.  C<capacity> is
 the size in bytes.  Dies if there is no C<capacity>.
@@ -1415,6 +1874,10 @@ change a disk that already exists, which holds the filesystem of a guest.
 It also takes the C<trog-pristine> snapshot of the new, empty disk.  If that
 fails, it gives a warning.  A rebuild then deletes the disk, and
 C<rollback_possible> says no.
+
+Returns Str, the path of the volume.
+
+    my $path = $hv->create_disk( 'vm.example.test.qcow2', backing => $base, capacity => 20 * 2**30 );
 
 =cut
 
@@ -1469,20 +1932,41 @@ XML
 
 =head2 delete_volume($name, $pool)
 
-Removes a volume.  Returns 1 if it did.  Returns 0 if there was no such volume,
+=over 4
+
+=item name - Str - the name of the volume
+
+=item pool - Str - optional, the name of the pool
+
+=back
+
+Removes a volume.
+
+Returns 1 if it did, and 0 if there was no such volume,
 or, with a warning, if libvirt cannot delete it.
+
+    $hv->delete_volume('vm.example.test.qcow2');
 
 =head2 refresh_pool($name)
 
+=over 4
+
+=item name - Str - optional, the name of the pool
+
+=back
+
 Makes libvirt read the pool directory again.  Use it after something other than
-libvirt adds a file there.  C<$name> defaults to L</pool_name>.  Returns 1, and
-dies if the refresh fails.
+libvirt adds a file there.  C<$name> defaults to L</pool_name>.
+
+Returns 1.  Dies if the refresh fails.
 
 libvirt refuses a refresh while a job of its own runs on the pool, such as the
 volume that another provision is creating.  That refusal says that the pool is
 busy, not broken, so this says so once, asks again every C<$POOL_BUSY_INTERVAL>
 seconds, and dies only after C<$POOL_BUSY_WAIT> seconds.  Any other refusal
 dies at once.
+
+    $hv->refresh_pool;
 
 =cut
 
@@ -1511,6 +1995,14 @@ sub refresh_pool {
 
 =head2 cloudinit_iso($domain, %files)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item files - HashRef - the contents of each NoCloud file, by its name
+
+=back
+
 Makes the cloud-init seed ISO on the hypervisor, in the pool, and returns its
 path.  C<%files> maps each NoCloud file name to its contents: C<user-data>,
 C<meta-data> and C<network-config>.  Dies if a file cannot be written or the ISO
@@ -1520,6 +2012,10 @@ The user-data holds the private keys of the guest.  So the work directory in
 F</tmp> is closed to every other user before a file goes into it, and this dies
 if it cannot be closed, as when another user made it first.  The ISO stays in
 the pool only until cloud-init has read it: see C<release_seed>.
+
+Returns Str, the path of the ISO.
+
+    my $iso = $hv->cloudinit_iso( 'vm.example.test', 'user-data' => $user_data, 'meta-data' => $meta_data );
 
 =cut
 
@@ -1560,6 +2056,10 @@ sub cloudinit_iso {
 The first of C<xorriso>, C<genisoimage> or C<mkisofs> that the hypervisor has.
 Dies if it has none of them.
 
+Returns Str, the name of the command.
+
+    my $maker = $hv->iso_maker;
+
 =cut
 
 sub iso_maker {
@@ -1576,9 +2076,21 @@ sub iso_maker {
 
 =head2 define_domain($xml, %opts)
 
+=over 4
+
+=item xml - Str - the XML of the domain
+
+=item opts - HashRef - C<autostart>, true by default
+
+=back
+
 Defines a domain from XML, starts it, and returns the domain object.
 C<autostart> sets it to start with the host, and defaults to true.  Dies if
 libvirt cannot set the domain to start with the host, or cannot start it.
+
+Returns Sys::Virt::Domain, the domain.
+
+    my $domain = $hv->define_domain( $xml, autostart => 1 );
 
 =cut
 
@@ -1646,6 +2158,14 @@ these replaced: see L<Trog::HV/replaced_keys>.
 
 =head2 guest_mac($domain, $index)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item index - Int - optional, the index of the interface
+
+=back
+
 The MAC address for interface C<$index> of a guest.  C<$index> defaults to 0.
 The address comes from the domain name, so it is the same on every build.
 
@@ -1658,6 +2178,10 @@ C<52:54:00> is the QEMU/KVM prefix.  The other three bytes come from a digest of
 the domain and the interface index.  Two guests can get the same MAC, but that
 becomes likely only with a few thousand guests.
 
+Returns Str, the MAC address.
+
+    my $mac = $hv->guest_mac( 'vm.example.test', 0 );
+
 =head2 dhcp_nics
 
 The bridges of the adapters of a guest that take a lease, from C<dhcp_nics> in
@@ -1665,16 +2189,35 @@ the block of F<hypervisors.conf>, in order.  The first one takes the lease that
 this machine reaches the guest by: see L</lease_nic>.  Without C<dhcp_nics>, it
 is L</lease_nic> alone.
 
+Returns the bridges, as a list of Str.
+
+    my @bridges = $hv->dhcp_nics;
+
 =head2 nic_bridges
 
 The bridge of each adapter of a guest, by index: C<dhcp_nics>, then
 C<static_nics>.  See L</ADAPTERS>.
 
+Returns the bridges, as a list of Str.
+
+    my @bridges = $hv->nic_bridges;
+
 =head2 nic_network($nic)
+
+=over 4
+
+=item nic - Str - the name of the bridge
+
+=back
 
 The block of the network of the bridge C<$nic>, such as C<10.0.0.0/24>: the
 network of C<gateway_NIC>, or of the first address of the pool when the block
 names no gateway, with the prefix of C<nic_prefix_length>.
+
+Returns Str, the block.  Dies when the block names neither a gateway nor a
+pool for C<$nic>.
+
+    my $network = $hv->nic_network('virbr1');
 
 =head2 address_index
 
@@ -1683,10 +2226,18 @@ of C<static_nics>, or undef when the block names none.  L</guest_mac($domain,
 $index)> of it is the MAC that the network configuration of the guest matches
 for that address.
 
+Returns Int, or undef.
+
+    my $index = $hv->address_index;
+
 =head2 nic_slots
 
 The PCI slots of the adapters, by index: 3, 4, and so on.  systemd names a PCI NIC after its hotplug slot.  So fixed slots keep the
 names the same when the device list changes.
+
+Returns the slots, as a list of Int.
+
+    my @slots = $hv->nic_slots;
 
 =head2 nic_prefix
 
@@ -1699,6 +2250,10 @@ gives C<ensN> for a device in hotplug slot N.  Other machine types give other
 names, most often C<enpNsM>.  A hypervisor that builds its guests differently
 overrides this.
 
+Returns Str.
+
+    my $prefix = $hv->nic_prefix;
+
 =head2 nic_names
 
 The names that the adapters of a guest get, by index.
@@ -1707,6 +2262,10 @@ This is a prediction.  cloud-init finds each interface by its MAC, which we
 choose, and gives it the name in the configuration.  So each interface gets the
 correct configuration even when the kernel names it differently.  This method
 gives the name after cloud-init renames it.
+
+Returns the names, as a list of Str.
+
+    my @names = $hv->nic_names;
 
 =cut
 
@@ -1759,6 +2318,10 @@ C<vd*>.  The domain XML puts each disk of a guest on the C<virtio> bus, which
 names it C<vdN>.  The seed is a CD-ROM on SATA, C<sda>, so C<sd*> is not one of
 the disks.
 
+Returns the pattern, a Str, as a list of one.
+
+    my @disks = $hv->guest_disks;
+
 =cut
 
 sub guest_disks { return ('vd*') }
@@ -1771,11 +2334,21 @@ sub nic_names {
 
 =head1 SNAPSHOTS
 
-=head2 snapshot_names($domain)
+=head2 snapshot_names($name)
+
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
 
 The names of all snapshots of the domain, oldest first.  An empty list when
 there is no such domain.  libvirt returns them in no fixed order, so this sorts
 them by creation time.  C<bin/restore --latest> and C<--oldest> need that order.
+
+Returns the names, as a list of Str.
+
+    my @names = $hv->snapshot_names('vm.example.test');
 
 =cut
 
@@ -1799,9 +2372,18 @@ sub snapshot_names {
       grep { $_->{name} } @dated;
 }
 
-=head2 snapshot_current_name($domain)
+=head2 snapshot_current_name($name)
 
-The name of the current snapshot of the domain, or undef if it has none.
+=over 4
+
+=item name - Str - the name of the domain
+
+=back
+
+Returns Str, or undef: the name of the current snapshot of the domain, or
+undef if it has none.
+
+    my $current = $hv->snapshot_current_name('vm.example.test');
 
 =cut
 
@@ -1812,10 +2394,22 @@ sub snapshot_current_name {
     return $snap->get_name();
 }
 
-=head2 create_snapshot($domain, $name, disk_only =E<gt> $bool, leave_down =E<gt> $bool)
+=head2 create_snapshot($name, $snapname, %opts)
 
-Takes an atomic snapshot.  Returns 1 if libvirt took it, and 0, with a warning,
-if not.  If C<$name> is undef, libvirt names the snapshot after the current
+=over 4
+
+=item name - Str - the name of the domain
+
+=item snapname - Str - the name of the snapshot, or undef
+
+=item opts - HashRef - C<disk_only> and C<leave_down>, each a Bool, as below
+
+=back
+
+Takes an atomic snapshot.
+
+Returns 1 if libvirt took it, and 0, with a warning, if not.  If C<$snapname>
+is undef, libvirt names the snapshot after the current
 time.  Dies if there is no such domain.
 
 A running guest gets a B<full system> snapshot.  Its memory goes into the qcow2
@@ -1832,6 +2426,8 @@ a caller that is about to take the guest apart.
 
 A guest that is already off has no memory, so it always gets a snapshot of the
 disk only.
+
+    $hv->create_snapshot( 'vm.example.test', 'before-upgrade', disk_only => 1 );
 
 =cut
 
@@ -1872,11 +2468,22 @@ sub create_snapshot {
     return $ok ? 1 : 0;
 }
 
-=head2 revert_snapshot($domain, $name)
+=head2 revert_snapshot($name, $snapname)
 
-Reverts the domain to the snapshot C<$name> and leaves it running.  Returns 1 on
-success.  Returns 0 if there is no such domain or snapshot, or, with a warning,
+=over 4
+
+=item name - Str - the name of the domain
+
+=item snapname - Str - the name of the snapshot
+
+=back
+
+Reverts the domain to the snapshot C<$snapname> and leaves it running.
+
+Returns 1 on success, and 0 if there is no such domain or snapshot, or, with a warning,
 if the revert fails.
+
+    $hv->revert_snapshot( 'vm.example.test', 'before-upgrade' );
 
 =cut
 
@@ -1911,6 +2518,10 @@ the emulated TPM protects a key only when the disk of the hypervisor is
 protected by hardware.  A TPM that cannot keep a secret is worse than no TPM,
 because software on the guest uses it and trusts it.
 
+Returns Bool.
+
+    my $tpm = $hv->has_tpm;
+
 =cut
 
 sub has_tpm {
@@ -1935,6 +2546,11 @@ so each hypervisor gives its own versions.
 Zero when the connection does not give a version.  Every capability check below
 then answers no.  So a hypervisor that does not answer gets a plain domain, and
 not XML that it can refuse.
+
+Returns Int, from each.
+
+    my $libvirt = $hv->libvirt_version;
+    my $qemu    = $hv->qemu_version;
 
 =cut
 
@@ -1975,6 +2591,12 @@ my %DISK_FEATURE = (
 
 =head2 supports($feature)
 
+=over 4
+
+=item feature - Str - the name of the disk tuning setting
+
+=back
+
 Returns 1 if this hypervisor accepts the disk tuning setting C<$feature>, and 0
 if not.  The names are the keys of C<%DISK_FEATURE> in the source.  Dies for any
 other name.  The answer is cached, because a build asks the same questions for
@@ -1983,6 +2605,8 @@ each disk.
 C<cache> is not in the table, because every libvirt accepts it.  Whether the
 filesystem of the pool can do a given cache mode is a different question.
 L</pool_takes_direct_io> answers it.
+
+    my $ok = $hv->supports('extended_l2');
 
 =cut
 
@@ -2019,6 +2643,10 @@ libvirt version alone does not answer the question.
 An empty hashref when qemu-img does not answer.  Then the disk gets none of the
 optional features.
 
+Returns HashRef.
+
+    my $knows = $hv->qemu_img_options;
+
 =cut
 
 sub qemu_img_options {
@@ -2042,6 +2670,10 @@ an empty string when C<stat> does not answer.  It names the filesystem in the
 message when the pool does not take O_DIRECT, and tells ZFS apart.
 L</pool_takes_direct_io> decides the cache mode.
 
+Returns Str.
+
+    my $type = $hv->pool_fstype;
+
 =cut
 
 sub pool_fstype {
@@ -2051,10 +2683,20 @@ sub pool_fstype {
 
 =head2 $type = $hv->path_fstype($path)
 
+=over 4
+
+=item path - Str - the path on the hypervisor
+
+=back
+
 The type of the filesystem at C<$path> on the hypervisor, as C<stat -f> names
 it, or an empty string when C<stat> does not answer.  L</pool_fstype> asks it
 of the pool.  F<bin/runner_account> asks it of the directory that a new pool
 goes under, before the pool exists.
+
+Returns Str.
+
+    my $type = $hv->path_fstype('/srv');
 
 =cut
 
@@ -2081,6 +2723,8 @@ of the dataset also control it.
 So the method writes 4K with O_DIRECT into the pool directory, which is the same
 open that qemu does.  It runs without sudo, for the reason that C<base_image>
 gives.
+
+    my $direct = $hv->pool_takes_direct_io;
 
 =cut
 
@@ -2109,6 +2753,10 @@ The OpenZFS version on this hypervisor, or undef when there is no ZFS.
 It is used only in the message for a ZFS pool that refuses an O_DIRECT write.
 Direct I/O arrived in 2.3, so the version tells the operator to upgrade, or to
 change the configuration of the pool.
+
+Returns Str, or undef.
+
+    my $version = $hv->zfs_version;
 
 =cut
 
@@ -2139,8 +2787,15 @@ my $QCOW2_LARGE_DISK = 128 * $Provisioner::Vars::GB;
 
 =head2 qcow2_tuning($capacity)
 
-The layout for a qcow2 of C<$capacity> bytes on this hypervisor.  Returns a hash
-with C<extended_l2> (subcluster allocation, 1 or 0), and C<cluster_size> and
+=over 4
+
+=item capacity - Int - the size of the disk in bytes
+
+=back
+
+The layout for a qcow2 of C<$capacity> bytes on this hypervisor.
+
+Returns a list of pairs, a hash with C<extended_l2> (subcluster allocation, 1 or 0), and C<cluster_size> and
 C<metadata_cache> in bytes when they differ from the qemu defaults.
 
 Two facts decide the layout, and they conflict.
@@ -2160,6 +2815,8 @@ A 1 MiB cluster covers 16 times as much, but its subclusters are 32 KiB, not
 2 KiB.  So only a disk larger than 128 GiB gets the large cluster.  A disk that
 still needs more cache gets a larger metadata cache, up to 256 MiB.  Each of
 the three applies only where L</supports($feature)> says the hypervisor takes it.
+
+    my %tuning = $hv->qcow2_tuning( 20 * 2**30 );
 
 =cut
 
@@ -2186,6 +2843,14 @@ sub qcow2_tuning {
 
 =head2 $hv->disk_reusable($domain, $capacity)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item capacity - Int - the size of the disk in bytes
+
+=back
+
 Returns 1 if a rebuild can keep the disk of this guest, and 0 if it must make
 a new one.  The answer is 1 only when the disk exists, has C<$capacity> bytes,
 and has the layout that C<qcow2_tuning> gives now.
@@ -2194,6 +2859,8 @@ The layout is part of the question because the image cannot change it later.
 C<qcow2_tuning> uses both the capacity and what the hypervisor supports.  If qemu
 got C<extended_l2> after the last build, the old image does not have it.
 Keeping that image keeps the old layout for the life of the guest.
+
+    my $keep = $hv->disk_reusable( 'vm.example.test', 20 * 2**30 );
 
 =cut
 
@@ -2214,7 +2881,15 @@ sub disk_reusable {
     return 1;
 }
 
-=head2 $hv->rollback_possible($domain, capacity =E<gt> $bytes)
+=head2 $hv->rollback_possible($domain, %opts)
+
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item opts - HashRef - C<capacity>, the size of the disk in bytes
+
+=back
 
 Returns 1 if a snapshot taken now still exists after the rebuild, and 0 if not.
 
@@ -2222,6 +2897,8 @@ A libvirt snapshot is inside the qcow2 of the guest.  So the snapshot survives
 only if the rebuild keeps the disk, which C<disk_reusable> decides.  The disk
 must also hold the C<trog-pristine> snapshot for the rebuild to revert to.  A
 first build has no guest to go back to, so the answer is 0.
+
+    my $ok = $hv->rollback_possible( 'vm.example.test', capacity => 20 * 2**30 );
 
 =cut
 
@@ -2237,7 +2914,15 @@ sub rollback_possible {
     return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
 }
 
-=head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
+=head2 $hv->rebuild_destroys_guest($domain, %opts)
+
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item opts - HashRef - C<capacity>, the size of the disk in bytes
+
+=back
 
 Returns 1 if a rebuild of this domain takes the guest apart, and 0 if not.
 
@@ -2248,6 +2933,8 @@ first build, and a rebuild that can keep the disk, give 0.
 This is not the opposite of C<rollback_possible>.  A reusable disk with no
 C<trog-pristine> snapshot gives 0 from both, and the rebuild deletes that disk
 without asking.  Many guests have such a disk, too many to stop the rebuild for.
+
+    my $destroys = $hv->rebuild_destroys_guest( 'vm.example.test', capacity => 20 * 2**30 );
 
 =cut
 
@@ -2260,8 +2947,15 @@ sub rebuild_destroys_guest {
 
 =head2 $hv->clone_guest_disk($domain)
 
-Copies the disk of this guest to the volume C<$domain.bak-qcow2>, and returns
-the path of the copy.  If that volume already exists, this keeps it and returns
+=over 4
+
+=item domain - Str - the name of the domain
+
+=back
+
+Copies the disk of this guest to the volume C<$domain.bak-qcow2>.
+
+Returns Str, the path of the copy.  If that volume already exists, this keeps it and returns
 its path.
 
 It stops the guest first, because a copy of a qcow2 that qemu is writing to is
@@ -2272,6 +2966,8 @@ Nothing removes the copy later, because C<guest_volumes> does not name it.
 
 Returns undef when there is no disk to copy.  Dies if the copy fails, because
 the caller rebuilds over the disk when this returns.
+
+    my $copy = $hv->clone_guest_disk('vm.example.test');
 
 =cut
 
@@ -2310,6 +3006,10 @@ Dies if libvirt cannot list the pool.
 Only this backend knows the suffix of a copy.  So a caller asks for this list
 and does not match names itself.
 
+Returns the names, as a list of Str.
+
+    my @copies = $hv->backup_volumes;
+
 =cut
 
 sub backup_volumes {
@@ -2325,11 +3025,23 @@ sub backup_volumes {
 
 =head2 $hv->disk_owner_runs(@argv), $hv->disk_owner_says(@argv)
 
+=over 4
+
+=item @argv - Str - each word of the command
+
+=back
+
 Run a command as the user that owns the disks of the pool, and return its exit
 code, or what it printed.  That is root on the system URI, because libvirt gives
 a disk to C<libvirt-qemu> when the guest starts.  On a session URI it is the
 user of the URI, because its qemu runs as that user, and the disks stay its own.
 C<@argv> is a list, as C<capture_cmd> takes.
+
+Returns Int, the exit code, from C<disk_owner_runs>, and Str, what the command
+printed, or undef, from C<disk_owner_says>.
+
+    my $rc   = $hv->disk_owner_runs( qw{qemu-img check}, $path );
+    my $info = $hv->disk_owner_says( qw{qemu-img info}, $path );
 
 =cut
 
@@ -2357,6 +3069,10 @@ So a session uses the fixed appliance that C<runner_account_steps> builds.
 Dies on a session URI when the appliance is not there, and says how to build
 it.
 
+Returns the words, as a list of Str.
+
+    my $info = $hv->disk_owner_says( $hv->guestfs_env, 'virt-df', '-a', $path );
+
 =cut
 
 sub guestfs_env ($self) {
@@ -2366,11 +3082,21 @@ sub guestfs_env ($self) {
     return ( 'env', "LIBGUESTFS_PATH=$GUESTFS_APPLIANCE" );
 }
 
-=head2 $hv->disk_layout($volume)
+=head2 $hv->disk_layout($name)
+
+=over 4
+
+=item name - Str - the name of the volume
+
+=back
 
 The layout of an existing qcow2 volume, as a hashref with C<cluster_size> in
 bytes and C<extended_l2> as 1 or 0.  Undef when there is no such volume or
 qemu-img does not answer.
+
+Returns HashRef, or undef.
+
+    my $layout = $hv->disk_layout('vm.example.test-qcow2');
 
 =cut
 
@@ -2392,14 +3118,26 @@ sub disk_layout {
     };
 }
 
-=head2 $hv->snapshot_disk($volume, $name)
+=head2 $hv->snapshot_disk($name, $snapname)
 
-Takes an internal qcow2 snapshot C<$name> of a volume, with no domain.  Returns
-1 if qemu-img took it, and 0 if not.  Dies if there is no such volume.
+=over 4
+
+=item name - Str - the name of the volume
+
+=item snapname - Str - the name of the snapshot
+
+=back
+
+Takes an internal qcow2 snapshot C<$snapname> of the volume C<$name>, with no
+domain.
+
+Returns 1 if qemu-img took it, and 0 if not.  Dies if there is no such volume.
 
 C<create_snapshot> asks libvirt to take a snapshot of a domain.  This asks
 qemu-img to take one of the file.  So it works before the domain exists, which
 is when C<create_disk> takes C<trog-pristine>.
+
+    $hv->snapshot_disk( 'vm.example.test-qcow2', 'trog-pristine' );
 
 =cut
 
@@ -2411,10 +3149,19 @@ sub snapshot_disk {
     return $self->disk_owner_runs( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
-=head2 $hv->revert_disk($volume, $name)
+=head2 $hv->revert_disk($name, $snapname)
 
-Reverts a volume to its internal snapshot C<$name>.  Returns 1 if qemu-img
-reverted it, and 0 if not.  Dies if there is no such volume.
+=over 4
+
+=item name - Str - the name of the volume
+
+=item snapname - Str - the name of the snapshot
+
+=back
+
+Reverts the volume C<$name> to its internal snapshot C<$snapname>.
+
+Returns 1 if qemu-img reverted it, and 0 if not.  Dies if there is no such volume.
 
 The domain must not be running.  qemu-img writes the file directly, and the
 image gets corrupted if qemu has it open.
@@ -2426,6 +3173,8 @@ because it runs before the domain exists.
 
 After a revert, every other snapshot is still listed and can still be reverted
 to, and the backing file stays.  The rebuild that keeps a disk depends on this.
+
+    $hv->revert_disk( 'vm.example.test-qcow2', 'trog-pristine' );
 
 =cut
 
@@ -2439,10 +3188,20 @@ sub revert_disk {
     return $self->disk_owner_runs( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
-=head2 $hv->disk_snapshot_names($volume)
+=head2 $hv->disk_snapshot_names($name)
+
+=over 4
+
+=item name - Str - the name of the volume
+
+=back
 
 The names of all internal snapshots in a volume, in the order that qemu-img
 lists them.  An empty list when there is no such volume or no snapshot.
+
+Returns the names, as a list of Str.
+
+    my @names = $hv->disk_snapshot_names('vm.example.test-qcow2');
 
 =cut
 
@@ -2467,11 +3226,19 @@ first of C<dhcp_nics> in the block, or else the bridge of the C<default>
 network, whose leases L</lease_ip($network, %opts)> reads.  It asks libvirt for
 that through L</network_vmm>, and dies when it finds nothing.
 
+Returns Str, the name of the bridge.
+
+    my $bridge = $hv->lease_nic;
+
 =head2 virbr_ip
 
 The address of the hypervisor on L</lease_nic>.  The guest fetches its files
 from this address and sends its logs to it.  It reads C<ip> on the hypervisor,
 and dies when that finds nothing.
+
+Returns Str, the address.
+
+    my $ip = $hv->virbr_ip;
 
 =cut
 
@@ -2570,39 +3337,34 @@ my sub network_on ( $self, $bridge ) {
     $self->network_vmm->list_all_networks;
 }
 
-=head2 \%plan = Trog::HV::Libvirt->guest_network_plan(%args)
+=head2 guest_network_plan(%args)
 
+Called on the class, as C<< Trog::HV::Libvirt->guest_network_plan(%args) >>.
 The network that C<guest_network_steps> makes, from these arguments:
 
 =over 4
 
-=item C<name>
-
-The name of the network in libvirt: a letter or a digit, then up to 49 letters,
+=item name - Str - the name of the network in libvirt: a letter or a digit, then up to 49 letters,
 digits, C<_>, C<.> and C<->.
 
-=item C<bridge>
+=item bridge - Str - its bridge, a name that the kernel takes for a link.
 
-Its bridge, a name that the kernel takes for a link.
+=item address - Str - the IPv4 address of the hypervisor on it, which is the gateway of its guests.
 
-=item C<address>
+=item prefix - Int - the length of its prefix, from 8 to 30.
 
-The IPv4 address of the hypervisor on it, which is the gateway of its guests.
-
-=item C<prefix>
-
-The length of its prefix, from 8 to 30.
-
-=item C<pool>
-
-The pool of its static adapter, as L<Trog::HV/nic_pool($nic)> gives it.  Optional.
+=item pool - HashRef - the pool of its static adapter, as L<Trog::HV/nic_pool($nic)> gives it.  Optional.
 
 =back
 
-Returns them, with C<cidr>, the block of the network.  Dies with the reason on
+Returns HashRef, them, with C<cidr>, the block of the network.
+
+Dies with the reason on
 a value that is not one of these, on an address that is the address of the
 block itself, and on an address or a block of the pool that is not inside the
 network, because a guest with that address could not reach its gateway.
+
+    my $plan = Trog::HV::Libvirt->guest_network_plan( name => 'guests', bridge => 'virbr1', address => '192.0.2.1', prefix => 24 );
 
 =cut
 
@@ -2626,9 +3388,17 @@ sub guest_network_plan ( $, %args ) {
     return \%plan;
 }
 
-=head2 $xml = Trog::HV::Libvirt->guest_network_xml(\%plan, $uuid)
+=head2 guest_network_xml($plan, $uuid)
 
-The libvirt XML of the network of C<\%plan>.  It forwards by NAT to the networks
+=over 4
+
+=item plan - HashRef - a plan from C<guest_network_plan>
+
+=item uuid - Str - optional, the uuid of the network
+
+=back
+
+Called on the class.  The libvirt XML of the network of C<\%plan>.  It forwards by NAT to the networks
 of the host, on the bridge of the plan, with the address of the plan.  It has no
 DHCP, because each guest on it has a static address from the pool, which its
 network configuration gives it.
@@ -2643,6 +3413,10 @@ machine still reaches a guest by the lease of its NAT adapter.  "The adapters
 of a guest" in F<docs/CONFIGURATION.md> says when to make a network with
 C<mode='route'> instead, by hand.
 
+Returns Str, the XML.
+
+    my $xml = Trog::HV::Libvirt->guest_network_xml( $plan, $uuid );
+
 =cut
 
 sub guest_network_xml ( $, $plan, $uuid = undef ) {
@@ -2650,6 +3424,12 @@ sub guest_network_xml ( $, $plan, $uuid = undef ) {
 }
 
 =head2 @actions = $hv->guest_network_steps(\%plan)
+
+=over 4
+
+=item plan - HashRef - a plan from C<guest_network_plan>
+
+=back
 
 The actions that make the network of C<\%plan> on the system daemon of this
 hypervisor, for L<Trog::Steps/run>, in order:
@@ -2672,6 +3452,10 @@ link away from each guest on it.
 Before the first, it dies when this hypervisor is a session, because nothing
 outside a session can join one of its networks, and when another network has
 the bridge of the plan.
+
+Returns the actions, as a list of HashRef.
+
+    Trog::Steps::run( $hv->guest_network_steps($plan) );
 
 =cut
 
@@ -2722,6 +3506,14 @@ sub guest_network_steps ( $hv, $plan ) {
 
 =head2 %adapters = $hv->runner_adapters(\%block, $user)
 
+=over 4
+
+=item block - HashRef - the block of the runner
+
+=item user - Str - the name of the account of the runner
+
+=back
+
 The adapters of the guests of the runner C<$user>, from C<\%block>, the block of
 the runner as L<Provisioner::Recipe::trogrunner> takes it, on the same host as
 this hypervisor, which acts for it:
@@ -2744,6 +3536,10 @@ network is named C<USER-BRIDGE>.
 
 Dies as the block of the runner would, on an adapter without a pool or a
 gateway, and as C<guest_network_plan> does.
+
+Returns a list of pairs, as above.
+
+    my %adapters = $hv->runner_adapters( $block, 'runner1' );
 
 =cut
 
@@ -2769,6 +3565,12 @@ sub runner_adapters ( $hv, $block, $user ) {
 
 =head2 @actions = $hv->runner_network_steps(\%plan)
 
+=over 4
+
+=item plan - HashRef - a plan from C<guest_network_plan>
+
+=back
+
 The actions that give a static adapter of the guests of a runner its network,
 on the system daemon of this hypervisor.  C<\%plan> is from
 C<guest_network_plan>, for a bridge of the C<static_nics> of the block of the
@@ -2779,6 +3581,10 @@ as one that bridges the LAN, it is not this software's to make.  Then the one
 action says so and changes nothing.  Otherwise the actions are those of
 C<guest_network_steps>.  L<Provisioner::Recipe::trogrunner> runs these when it
 provisions a runner with an account.
+
+Returns the actions, as a list of HashRef.  Dies as C<guest_network_steps> does.
+
+    Trog::Steps::run( $hv->runner_network_steps($plan) );
 
 =cut
 
@@ -2795,6 +3601,14 @@ sub runner_network_steps ( $hv, $plan ) {
 
 =head2 @actions = $hv->runner_network_removal_steps(\%plan, $user)
 
+=over 4
+
+=item plan - HashRef - a plan from C<guest_network_plan>
+
+=item user - Str - the name of the account of the runner
+
+=back
+
 The action that undoes C<runner_network_steps> when the runner C<$user> goes:
 the network of C<\%plan> is stopped and undefined.  It stays when it has
 another bridge than the plan, because then this software did not make it.  It
@@ -2804,6 +3618,10 @@ C<$user> is there.  That file goes with the account, which does not go while its
 pool holds the disk of a guest, so a network stays under the guests of a runner
 that could not be taken away.  Then the action says
 why and changes nothing.
+
+Returns HashRef, the action.
+
+    Trog::Steps::run( $hv->runner_network_removal_steps( $plan, 'runner1' ) );
 
 =cut
 
@@ -2905,6 +3723,10 @@ a partition with no budget is held to the host alone.
 Dies if libvirt does not answer, because a guest must not go on a hypervisor
 that cannot give these values.
 
+Returns HashRef, as above.
+
+    my $free = $hv->capacity->{memory_free};
+
 =cut
 
 sub capacity {
@@ -2998,8 +3820,18 @@ sub capacity {
 
 =head2 pool_free($name)
 
+=over 4
+
+=item name - Str - optional, the name of the pool
+
+=back
+
 The free bytes in the storage pool C<$name>, or 0 when there is no such pool.
 C<$name> defaults to L</pool_name>.
+
+Returns Int.
+
+    my $bytes = $hv->pool_free;
 
 =cut
 
@@ -3016,6 +3848,12 @@ sub pool_free {
 =head1 PROVISIONING
 
 =head2 prepare_host($virtiofs)
+
+=over 4
+
+=item virtiofs - Str - the path of the program on this machine
+
+=back
 
 Makes the directory of the storage pool, and installs C<$virtiofs> as
 F</usr/libexec/virtiofs-better> if it is not there.  libvirt starts that
@@ -3034,6 +3872,8 @@ asks: see L</virtiofsd_version>.
 
 On a session URI it does not install the program, because a guest there has no
 virtiofs share: see L<Provisioner::Recipe::vm/enrich>.
+
+    $hv->prepare_host('/usr/local/libexec/virtiofs-better');
 
 =cut
 
@@ -3074,6 +3914,10 @@ It asks once for each object, and gives the same answer after that.  The
 object lasts for one run, and an install on the hypervisor needs a new run to
 be seen.  The same goes for L</libvirtd_may_run_shim>.
 
+Returns Str, or undef.
+
+    my $version = $hv->virtiofsd_version;
+
 =cut
 
 sub virtiofsd_version ($self) {
@@ -3099,6 +3943,10 @@ login user, who is not confined, so it cannot see this.
 L</prepare_host($virtiofs)> adds the rule that allows it.  This looks for the
 path in any file under F</etc/apparmor.d>, and does not parse the profile.
 
+Returns Bool.
+
+    my $may = $hv->libvirtd_may_run_shim;
+
 =cut
 
 sub libvirtd_may_run_shim ($self) {
@@ -3113,18 +3961,37 @@ sub libvirtd_may_run_shim ($self) {
 
 =head2 release_seed($domain)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=back
+
 Removes the cloud-init ISO from the guest.  See
-L</eject_cdrom($domain, $target)>, which also says why this waits for cloud-init.
+L</eject_cdrom($name, $target)>, which also says why this waits for cloud-init.
 Then deletes the ISO from the pool, because it holds the private keys of the
-guest, and nothing reads it again.  Each provision writes a new one.  Returns
-1, or 0 when the eject failed.  Then the ISO stays, because a domain that names
+guest, and nothing reads it again.  Each provision writes a new one.
+
+Returns 1, or 0 when the eject failed.  Then the ISO stays, because a domain that names
 a file that is gone does not start.  A delete that fails warns, as
 C<delete_volume> does, and C<clear_guest> tries again on the next build.
 
+    $hv->release_seed('vm.example.test');
+
 =head2 guest_volumes($domain)
+
+=over 4
+
+=item domain - Str - the name of the domain
+
+=back
 
 The names of the overlay disk and the seed ISO of the guest, for those that
 exist.
+
+Returns the names, as a list of Str.
+
+    my @volumes = $hv->guest_volumes('vm.example.test');
 
 =cut
 
@@ -3141,6 +4008,14 @@ sub guest_volumes {
 
 =head2 guest_ssh_ip($config, $lease_ip)
 
+=over 4
+
+=item config - Config::Simple - the F<provision.conf> of the guest
+
+=item lease_ip - Str - optional, the NAT lease of the guest
+
+=back
+
 The address that I<this machine> uses to SSH into a guest.
 
 On a local hypervisor, that is C<$lease_ip>, the libvirt NAT lease.  On a remote
@@ -3152,6 +4027,10 @@ A guest with no C<ips> has only its lease, which
 L<Provisioner::IPPool/offers> explains.  This machine reaches that lease when
 it is a guest of the same hypervisor, on the same NAT network: see
 C<on_nat_network>.  Then the result is C<$lease_ip>.  Dies if neither is so.
+
+Returns Str, the address.
+
+    my $ip = $hv->guest_ssh_ip( $config, '192.0.2.10' );
 
 =cut
 
@@ -3179,6 +4058,10 @@ hypervisor is in the subnet of the others too, and reaches none of their guests.
 
 Always true on a local hypervisor.  It asks once, and remembers the answer.
 
+Returns Bool.
+
+    my $reach = $hv->on_nat_network;
+
 =cut
 
 sub on_nat_network {
@@ -3191,12 +4074,22 @@ sub on_nat_network {
 
 =head2 $address = nat_address($domain)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=back
+
 The NAT lease of the guest of C<$domain>, when this machine reaches it, as
 C<on_nat_network> says.  Undef when the guest holds no lease, or when this
 machine cannot reach it.
 
 A guest that got no address from the pool has no other address, and this is how
 C<bin/new_config> finds it again to salvage it before a rebuild.
+
+Returns Str, or undef.
+
+    my $ip = $hv->nat_address('vm.example.test');
 
 =cut
 
@@ -3207,8 +4100,20 @@ sub nat_address {
 
 =head2 image_for_distro($distro, $release)
 
+=over 4
+
+=item distro - Provisioner::DistroRecipe - the distro recipe
+
+=item release - Str - optional, the release
+
+=back
+
 The distro's C<base_image> for C<$release>: a URL, which C<base_image> here
 downloads into the pool.
+
+Returns Str, the URL.
+
+    my $url = $hv->image_for_distro( $distro, '24.04' );
 
 =cut
 
@@ -3216,9 +4121,19 @@ sub image_for_distro ( $, $distro, $release = undef ) { return $distro->base_ima
 
 =head2 inspection_address($domain)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=back
+
 The NAT lease of the guest's first interface, or undef when it holds none.  The
 guest answers there whether or not its static address ever came up, which is
 the case that matters when something went wrong.
+
+Returns Str, or undef.
+
+    my $ip = $hv->inspection_address('vm.example.test');
 
 =cut
 
@@ -3232,6 +4147,11 @@ sub inspection_address {
 The names of the checks and notes that C<bin/preflight> runs on this backend, in
 order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
 
+Returns the names, as a list of Str, from each.
+
+    my @checks = $hv->preflight_checks();
+    my @notes  = $hv->preflight_notes();
+
 =cut
 
 sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_guest_bridges check_guest_networks check_bridge_acl check_guest_pool check_pool_writable check_virtiofs check_config} }
@@ -3240,6 +4160,10 @@ sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image not
 =head2 $result = $hv->check_reachable()
 
 Passes on a local hypervisor, or when C<whoami> runs over ssh on a remote one.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_reachable();
 
 =cut
 
@@ -3269,6 +4193,10 @@ target on the guest, so this asks first.
 It asks the routing table, which cannot see a firewall or a route that works in
 one direction only.  So a pass means that there is an address to try, not that
 the guest can reach it.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_transfer_ip();
 
 =cut
 
@@ -3313,6 +4241,10 @@ C<sudo -n true> fails for the narrow grant, so this also asks C<sudo -n -l>
 about the lease helper.  It asks with the arguments that
 C<release_dhcp_lease> passes, because a grant that pins the arguments does not
 match the helper alone.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_passwordless_sudo();
 
 =cut
 
@@ -3386,6 +4318,10 @@ run cannot write to fails minutes into a provision, with an error about the URL
 and not the permissions.  C<pool_takes_direct_io> also writes here, and gives a
 wrong answer when the write itself is refused.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_pool_writable();
+
 =cut
 
 sub check_pool_writable {
@@ -3433,6 +4369,10 @@ can be: L</prepare_host($virtiofs)> installs it before the first guest of the
 system daemon.  Without it, this hypervisor has built no guest yet, and the
 build of a guest with a share asks again, in L<Provisioner::Recipe::vm/enrich>.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_virtiofs();
+
 =cut
 
 sub check_virtiofs ($self) {
@@ -3471,6 +4411,10 @@ FIX
 Passes when the hypervisor has a program that makes the seed ISO.  See
 L</iso_maker>.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_iso_builder();
+
 =cut
 
 sub check_iso_builder {
@@ -3497,6 +4441,10 @@ my sub version_string ($packed) {
 
 Passes when libvirt answers on the connection URI.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_libvirt();
+
 =cut
 
 sub check_libvirt {
@@ -3522,6 +4470,10 @@ Each Sys::Virt release follows a libvirt release and binds its API.  With a
 different libvirt, the error does not say "version mismatch".  It is a missing
 constant or a call that the hypervisor does not implement, in an error about
 some other operation.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_sys_virt_in_step();
 
 =cut
 
@@ -3599,6 +4551,10 @@ Passes when each bridge of L</nic_bridges> is a bridge on the hypervisor.  It
 asks for F</sys/class/net/BRIDGE/bridge>, which the kernel has for a bridge and
 for nothing else.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_guest_bridges();
+
 =cut
 
 sub check_guest_bridges ($self) {
@@ -3622,6 +4578,10 @@ L</lease_ip($network, %opts)> reads, and each bridge of L</nic_bridges> that a
 libvirt network owns belongs to a network that runs and starts with the host.  A
 bridge that no network owns, such as the bridge of the LAN of the host, passes,
 because libvirt does not start it.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_guest_networks();
 
 =cut
 
@@ -3665,6 +4625,10 @@ Passes on the system URI, whose daemon joins its guests to a bridge itself.  On
 a session, passes when F</etc/qemu/bridge.conf>, and each file that it includes,
 let the account join each bridge of L</nic_bridges>, as C<rules> and C<refused>
 in L<Trog::HV::Libvirt::BridgeHelper> read them.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_bridge_acl();
 
 =cut
 
@@ -3715,6 +4679,10 @@ the pool.
 
 A guest with an address outside the network of its bridge cannot reach it.  A
 DHCP range over the pool can lease an address of the pool to something else.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->check_guest_pool();
 
 =cut
 
@@ -3787,6 +4755,10 @@ Passes when the hypervisor has C<virt-cat>, C<virt-ls> or C<virt-edit>, which
 can read the disk of a guest that does not boot.  On a session URI, the fixed
 appliance of C<guestfs_env> must be there too.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->note_libguestfs();
+
 =cut
 
 sub note_libguestfs {
@@ -3821,6 +4793,10 @@ Fails when the hypervisor has a TPM and no C<swtpm>.  Passes on a hypervisor
 with no TPM, because L</has_tpm> gives its guests no TPM whether or not
 C<swtpm> is installed.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->note_swtpm();
+
 =cut
 
 sub note_swtpm {
@@ -3854,6 +4830,10 @@ The answer comes from the space available, not from libvirt.  libvirt sizes a
 directory pool from C<statvfs> on its path, which is the same call that C<df>
 makes, so the two always agree.  See C<pool_is_unlimited> for what is compared
 instead.
+
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->note_pool_quota();
 
 =cut
 
@@ -3893,6 +4873,10 @@ C<base_image> downloads the new build before the next guest, so this says what
 that build will cost, and how long the pool went without one.  It does not
 build anything, and does not define a pool that libvirt lacks.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->note_stale_base_image();
+
 =cut
 
 sub note_stale_base_image {
@@ -3930,12 +4914,22 @@ FIX
 
 =head2 \%space = $hv->pool_space($fstype)
 
+=over 4
+
+=item fstype - Str - the type of the filesystem, as C<pool_fstype> gives it
+
+=back
+
 The space at the storage pool's directory, from one command on the hypervisor.
 The keys are C<path>, the directory with its links resolved; C<avail>, the
 bytes free there; C<source> and C<mount>, the filesystem that holds it; and
 C<mount_avail>, the bytes free at that mount point.  On ZFS, C<$fstype> adds
 C<zpool_avail>, the bytes free in the whole zpool.  Undef when the directory
 does not exist or C<df> does not answer.
+
+Returns HashRef, or undef.
+
+    my $space = $hv->pool_space( $hv->pool_fstype );
 
 =cut
 
@@ -3965,6 +4959,14 @@ sub pool_space {
 
 =head2 $bool = pool_is_unlimited(\%space, $fstype)
 
+=over 4
+
+=item space - HashRef - as C<pool_space> reports it, or undef
+
+=item fstype - Str - the type of the filesystem
+
+=back
+
 Whether the space at the pool, as C<pool_space> reports it, shows that nothing
 limits it.  A quota shows up as less space free at the pool than at what
 encloses it: a project quota on XFS or ext4 against its mount point, and a
@@ -3972,9 +4974,11 @@ dataset quota on ZFS against its zpool.  C<statfs> reports each of those limits
 inside it.  A pool that is a mount point of its own, on anything but ZFS, is a
 filesystem of its own, and that is its limit.
 
-Returns false when C<%space> is undef or lacks the number to compare with,
+Returns Bool.  It is false when C<%space> is undef or lacks the number to compare with,
 because the note says nothing that it cannot show.  Free space within 1% of
 what encloses it counts as the same, because the two are read a moment apart.
+
+    my $unlimited = Trog::HV::Libvirt::pool_is_unlimited( $space, 'xfs' );
 
 =cut
 
@@ -3990,8 +4994,18 @@ sub pool_is_unlimited {
 
 =head2 $zpool = zpool_of($dataset)
 
+=over 4
+
+=item dataset - Str - the name of the dataset
+
+=back
+
 The zpool that the ZFS dataset C<$dataset> belongs to, which is its name up to
 the first slash.
+
+Returns Str.
+
+    my $zpool = Trog::HV::Libvirt::zpool_of('tank/vm-disks');
 
 =cut
 
@@ -4002,10 +5016,24 @@ sub zpool_of {
 
 =head2 $text = pool_quota_advice($fstype, $name, \%space)
 
+=over 4
+
+=item fstype - Str - the type of the filesystem
+
+=item name - Str - the name of the pool
+
+=item space - HashRef - as C<pool_space> reports it
+
+=back
+
 How to put a limit under the pool C<$name> on a filesystem of type C<$fstype>,
 as C<stat -f> names it.  ZFS gets a dataset with a quota.  XFS and ext4 get a
 project quota on the directory that the pool already has.  Anything else gets a
 filesystem of its own.
+
+Returns Str.
+
+    my $text = Trog::HV::Libvirt::pool_quota_advice( 'xfs', 'tf_disks', $space );
 
 =cut
 
@@ -4097,6 +5125,10 @@ It reads the configuration and uses the existing connection to the hypervisor.
 It does not ask the IP pool, because that makes a read-only command create
 F<ips.db>.
 
+Returns HashRef, with C<ok>, C<what> and C<fix>.
+
+    my $result = $hv->note_log_destination();
+
 =cut
 
 sub note_log_destination {
@@ -4157,9 +5189,19 @@ Nothing depends on that recipe, and a guest that does not run it ships nowhere.
 FIX
 }
 
-=head2 clear_guest($domain)
+=head2 clear_guest($domain, %opts)
 
-Removes what uses this domain name before a new build, and returns 1.
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item opts - HashRef - C<keep_disk>, a Bool
+
+=back
+
+Removes what uses this domain name before a new build.
+
+Returns 1.
 
 =over 4
 
@@ -4185,6 +5227,8 @@ distribution whose network-config does not set the identifier.  dnsmasq gives
 such a guest a new address and keeps the old lease.  Without the release, each
 rebuild of it holds one more address in the NAT range.  Also, the wait in
 C<provision_guest> finds the old lease and stops before the new guest asks.
+
+    $hv->clear_guest( 'vm.example.test', keep_disk => 1 );
 
 =cut
 
@@ -4224,9 +5268,20 @@ sub clear_guest {
 
 =head2 $address = $hv->provision_guest($config, $seed, %opts)
 
+=over 4
+
+=item config - Config::Simple - the F<provision.conf> of the guest
+
+=item seed - HashRef - the three NoCloud files, by name
+
+=item opts - HashRef - C<settings>, as below, and C<reuse>
+
+=back
+
 Makes the guest: its disks and cloud-init seed, the domain XML, and the domain,
-defined and started.  Returns the address that the guest leased on the NAT
-network.  Dies if no lease appears within about 30 seconds.
+defined and started.
+
+Returns Str, the address that the guest leased on the NAT network.  Dies if no lease appears within about 30 seconds.
 
 C<$seed> is a hashref of the three NoCloud files, for
 L</cloudinit_iso($domain, %files)>.
@@ -4234,6 +5289,8 @@ C<settings> is the configuration of the domain as a plain hash, which
 C<bin/provision> reads from F<provision.conf>.  So this code does not need
 L<Config::Simple>.  L<Provisioner::Recipe::vm> takes a hash for the same reason,
 because its other caller, C<bin/new_config>, has no such object.
+
+    my $ip = $hv->provision_guest( $config, \%seed, settings => \%settings );
 
 =cut
 
@@ -4289,9 +5346,23 @@ sub provision_guest {
 
 =head2 $text = address_report($domain, $lease, @ips)
 
+=over 4
+
+=item domain - Str - the name of the domain
+
+=item lease - Str - the NAT lease
+
+=item @ips - Str - each static address, of which a false one is skipped
+
+=back
+
 The lines that say where a guest that just started is: its NAT lease, and
 each static address from C<ips> in F<provision.conf>, each named for what it
 is.  C<guest_ssh_ip> decides which of them C<bin/provision> connects to.
+
+Returns Str, the lines.
+
+    print Trog::HV::Libvirt::address_report( 'vm.example.test', '192.0.2.10', '198.51.100.5' );
 
 =cut
 
@@ -4304,8 +5375,21 @@ sub address_report {
 
 =head2 $hv->would_provision($config, %opts)
 
+=over 4
+
+=item config - Config::Simple - the F<provision.conf> of the guest
+
+=item opts - HashRef - accepted and ignored
+
+=back
+
 Prints the plan for C<clear_guest> and C<provision_guest>, and does not carry
-it out.  Returns the current NAT lease of the guest, or C<bogus> when it has none.
+it out.
+
+Returns Str, the current NAT lease of the guest, or C<bogus> when it has
+none.
+
+    my $ip = $hv->would_provision($config);
 
 =cut
 
@@ -4367,10 +5451,18 @@ my sub slice_dropin ($uid) { return "/etc/systemd/system/user-$uid.slice.d/50-tr
 # True when root finds no $file on the hypervisor.
 my sub absent ( $hv, $file ) { return $hv->run_cmd( qw{sudo -n test ! -e}, $file ) == 0 }
 
-=head2 $text = Trog::HV::Libvirt->runner_sudoers(%args)
+=head2 runner_sudoers(%args)
 
-The sudoers file for an account that builds guests on this hypervisor, and
-cannot do anything else as root.  C<%args> takes C<user> and C<lease_helper>,
+=over 4
+
+=item user - Str - the name of the account
+
+=item lease_helper - Str - the full path of the lease helper
+
+=back
+
+Called on the class, as C<< Trog::HV::Libvirt->runner_sudoers(%args) >>.  The
+sudoers file for an account that builds guests on this hypervisor, and cannot do anything else as root.  C<%args> takes C<user> and C<lease_helper>,
 the second as a full path.  Dies if a value holds a character that sudoers or
 the pattern below would read as syntax.
 
@@ -4399,6 +5491,10 @@ read the disk of any guest, which is the reason to run them.
 
 =back
 
+Returns Str, the text of the file.
+
+    my $text = Trog::HV::Libvirt->runner_sudoers( user => 'runner1', lease_helper => '/usr/lib/libvirt/libvirt_leaseshelper' );
+
 =cut
 
 sub runner_sudoers {
@@ -4422,9 +5518,28 @@ $user ALL=(root) NOPASSWD: $lease ^del ip [0-9.]+\$
 SUDOERS
 }
 
-=head2 \%plan = Trog::HV::Libvirt->runner_account_plan(%args)
+=head2 runner_account_plan(%args)
 
-Checks what an account is to be, and returns what the methods below need.
+=over 4
+
+=item user - Str - the name of the account
+
+=item pool_name - Str - the name of its pool
+
+=item pool_path - Str - the directory of its pool
+
+=item quota - Str - optional, a size that zfs reads, such as 500G
+
+=item cores - Int - optional, the cores of its user slice
+
+=item io_weight - Int - optional, from 1 to 10000
+
+=item bridges - ArrayRef[Str] - optional, the bridges that its guests may join
+
+=back
+
+Called on the class.  Checks what an account is to be, and returns what the
+methods below need.
 C<%args> takes C<user>, C<pool_name> and C<pool_path>, which are required, and
 C<quota>, C<cores>, C<io_weight> and C<bridges>.  The plan has those.
 
@@ -4439,6 +5554,10 @@ C<CPUQuota>, 100% for each core.
 C<quota> is required to make an account, and not to take one away, and so are
 C<bridges>, so this does not require them.  Dies on a value that a step would write into a file or a
 command as syntax.
+
+Returns HashRef, the plan.
+
+    my $plan = Trog::HV::Libvirt->runner_account_plan( user => 'runner1', pool_name => 'runner1', pool_path => '/tank/runner1', quota => '500G', bridges => ['virbr0'] );
 
 =cut
 
@@ -4472,6 +5591,12 @@ sub runner_account_plan {
 }
 
 =head2 @actions = $hv->runner_account_steps(\%plan)
+
+=over 4
+
+=item plan - HashRef - a plan from C<runner_account_plan>
+
+=back
 
 The actions that make the account of C<\%plan>, in order:
 
@@ -4525,6 +5650,10 @@ or later for the pattern of the grant, the lease helper, F</dev/kvm>,
 qemu-bridge-helper, apt for the hook, the bridges of the plan, and ZFS under the parent
 of the pool.  On a filesystem other than ZFS, the message says how to put a
 quota there, which is the advice of C<note_pool_quota>.
+
+Returns the actions, as a list of HashRef.
+
+    Trog::Steps::run( $hv->runner_account_steps($plan) );
 
 =cut
 
@@ -4672,6 +5801,12 @@ sub runner_account_steps {
 
 =head2 @actions = $hv->runner_removal_steps(\%plan)
 
+=over 4
+
+=item plan - HashRef - a plan from C<runner_account_plan>
+
+=back
+
 The actions that take the account of C<\%plan> away, in the other order from
 C<runner_account_steps>.  The user goes with its home, and the keys and the
 session configuration of libvirt in it.  The dataset goes with C<zfs destroy>,
@@ -4683,6 +5818,10 @@ It refuses to start, and dies, while the directory of the pool holds a file
 other than a base image of C<base_image>, because that is a disk of a guest.
 Destroy the guests of the runner first.  So a refusal leaves the whole account,
 and not an account without its sudo or its slice.
+
+Returns the actions, as a list of HashRef.
+
+    Trog::Steps::run( $hv->runner_removal_steps($plan) );
 
 =cut
 
@@ -4758,6 +5897,14 @@ my sub rewrite_keys ( $hv, $path, $material, @add ) {
 
 =head2 @actions = $hv->runner_key_steps($user, $line)
 
+=over 4
+
+=item user - Str - the name of the account
+
+=item line - Str - a line of F<authorized_keys>
+
+=back
+
 The action that lets the key of C<$line>, a line of F<authorized_keys>, log in
 as C<$user>.  It writes as root, so the account of this object needs no login
 as C<$user>.  So the key of the operator never has to go into an account that is
@@ -4766,6 +5913,10 @@ meant to be narrow.
 The key is the second field of the line after its options, such as C<from=>.  The
 line replaces every line with that key, so a new C<from=> restriction does not
 leave the old line beside it.  sshd takes the first line that matches.
+
+Returns HashRef, the action.  Dies when C<$line> holds no key.
+
+    Trog::Steps::run( $hv->runner_key_steps( 'runner1', $line ) );
 
 =cut
 
@@ -4796,10 +5947,22 @@ sub runner_key_steps {
 
 =head2 @actions = $hv->runner_key_removal_steps($user, $material)
 
+=over 4
+
+=item user - Str - the name of the account
+
+=item material - Str - the key, the second field of its line
+
+=back
+
 The action that takes every line with the key C<$material> out of the
 F<authorized_keys> of C<$user>, as root.  It has nothing to do when the user or
 the file is not there.  Dies on a C<$material> that is too short to be a key,
 because a short string can match half the file.
+
+Returns HashRef, the action.
+
+    Trog::Steps::run( $hv->runner_key_removal_steps( 'runner1', $material ) );
 
 =cut
 

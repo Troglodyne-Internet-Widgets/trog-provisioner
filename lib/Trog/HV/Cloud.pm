@@ -64,25 +64,62 @@ out gets an error that names it.
 
 =for Pod::Coverage api server
 
+=head2 create_guest(%args)
+
+=over 4
+
+=item args - HashRef - C<name>, C<image>, C<size> and C<user_data>, as above
+
+=back
+
+What a subclass provides.  Here it returns nothing, because it dies that the
+backend does not implement it.
+
+Returns nothing.
+
+    $hv->create_guest( name => 'vm.example.test', image => $image, user_data => $payload );
+
+=head2 rebuild_guest(@args)
+
+=over 4
+
+=item args - ARRAY - the name of the guest, then C<image>, C<size> and
+C<user_data> as pairs, as above
+
+=back
+
+What a subclass provides.  Here it returns nothing, because it dies that the
+backend does not implement it.
+
+Returns nothing.
+
+    $hv->rebuild_guest( 'vm.example.test', image => $image, user_data => $payload );
+
 =head1 IDENTITY
 
 =head2 is_local
 
-True, but not because the service is this machine.
+Returns 1: true, but not because the service is this machine.
 
 There is no hypervisor filesystem to reach.  So the directory for each domain is
 on the machine that runs this tool, and every file operation that
 L<Trog::Machine> offers runs locally.
 
+    my $local = $hv->is_local;
+
 =head2 builds_by_api
 
-True.  The service creates the guest, so a backend here uses none of the
+Returns 1, true.  The service creates the guest, so a backend here uses none of the
 libvirt XML that this toolkit can generate.
+
+    my $by_api = $hv->builds_by_api;
 
 =head2 manages_addresses
 
-True.  The service allocates the addresses, and the address pool has no part in
-it.
+Returns 1, true.  The service allocates the addresses, and the address pool has
+no part in it.
+
+    my $managed = $hv->manages_addresses;
 
 =cut
 
@@ -99,14 +136,25 @@ core are acceptable.  What a service reports is already the number of vCPUs
 that we may run.  So there is nothing to overcommit, and a larger ratio gives
 headroom that the service refuses.
 
+    my $ratio = $hv->cpu_overcommit;
+
 =cut
 
 sub cpu_overcommit { return 1 }
 
 =head2 inspection_address($domain)
 
-The guest's own address, from the backend's C<guest_ssh_ip>: the service
-gives the guest its address and there is no other way in.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns Str, the guest's own address, from the backend's C<guest_ssh_ip>: the
+service gives the guest its address and there is no other way in.  Dies as the
+backend's C<guest_ssh_ip> does.
+
+    my $ip = $hv->inspection_address('vm.example.test');
 
 =cut
 
@@ -114,20 +162,55 @@ sub inspection_address ( $self, $domain ) { return $self->guest_ssh_ip($domain) 
 
 =head1 NOTHING TO DO
 
+Each of these does nothing, for its own reason.
+
 =head2 prepare_host
+
+Does nothing.  There is no machine to prepare, because the service builds the
+guest and its disk comes from an image.
+
+Returns 1.
+
+    $hv->prepare_host;
 
 =head2 release_seed($domain)
 
+=over 4
+
+=item domain - Str - the name of the guest, which is ignored
+
+=back
+
+Does nothing.  There is no seed to release, because the payload is a field on
+the guest, not a drive.
+
+Returns 1.
+
+    $hv->release_seed('vm.example.test');
+
 =head2 guest_volumes($domain)
+
+=over 4
+
+=item domain - Str - the name of the guest, which is ignored
+
+=back
+
+There are no volumes left after a guest is gone, because the backend's
+C<annihilate_domain> deletes what this tool made.
+
+Returns an empty list.
+
+    my @volumes = $hv->guest_volumes('vm.example.test');
 
 =head2 prune_base_images
 
-Each does nothing, for its own reason.  There is no machine to prepare, because
-the service builds the guest and its disk comes from an image.  There is no seed
-to release, because the payload is a field on the guest, not a drive.  There are
-no volumes left after a guest is gone, because the backend's
-C<annihilate_domain> deletes what this tool made.  There is no base image in a
-pool to remove, because the service keeps its images.
+There is no base image in a pool to remove, because the service keeps its
+images.
+
+Returns an empty list.
+
+    my @pruned = $hv->prune_base_images;
 
 =cut
 
@@ -138,11 +221,21 @@ sub prune_base_images { return () }
 
 =head2 clear_guest($domain)
 
-Does nothing, and returns 1.
+=over 4
+
+=item domain - Str - the name of the guest, which is ignored
+
+=back
+
+Does nothing.
+
+Returns 1.
 
 The libvirt backend deletes the domain and its disks before it builds them
 again.  A service rebuilds the guest that exists, so its addresses and attached
 volumes stay.  If this cleared the guest first, those would be lost.
+
+    $hv->clear_guest('vm.example.test');
 
 =cut
 
@@ -152,6 +245,14 @@ sub clear_guest { return 1 }
 
 =head2 rollback_possible($domain, %opts)
 
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item opts - HashRef - C<capacity>, which is ignored
+
+=back
+
 Returns 1 if a snapshot taken now survives the rebuild, and 0 if it does not.
 A snapshot here is an image the service keeps apart from the guest, and a
 rebuild leaves the image alone.  So this only asks whether there is a guest to
@@ -159,6 +260,8 @@ snapshot.  A guest that C<is_reservation> holds nothing to snapshot.
 
 C<capacity> is accepted and ignored.  The libvirt backend uses it, because there
 the snapshot lives in the disk.
+
+    my $ok = $hv->rollback_possible('vm.example.test');
 
 =cut
 
@@ -170,11 +273,20 @@ sub rollback_possible {
 
 =head2 snapshot_current_name($domain)
 
-Returns the name of the newest snapshot of this guest.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns Str, the name of the newest snapshot of this guest.
 
 libvirt records which snapshot a domain is on.  A service has no such record,
 so this is the first of the backend's C<snapshot_names>, which come newest
-first.
+first, or undef when there is none.  Dies as the backend's C<snapshot_names>
+does.
+
+    my $name = $hv->snapshot_current_name('vm.example.test');
 
 =cut
 
@@ -189,7 +301,18 @@ sub snapshot_current_name {
 
 =head2 provision_guest($config, $seed, %opts)
 
-Gets the guest from the service, and returns its address.  If the guest exists,
+=over 4
+
+=item config - Config::Simple - the F<provision.conf> of the guest
+
+=item seed - HashRef - the NoCloud files of the seed, by name
+
+=item opts - HashRef - C<reuse>, true to provision onto a guest that exists
+without a rebuild
+
+=back
+
+Gets the guest from the service.  If the guest exists,
 this rebuilds it.  If not, this creates it.  A guest that C<reserve_guest> made
 exists, so it is rebuilt from the image like any other.
 
@@ -200,8 +323,12 @@ for.  The service takes the seed
 directly, and the address comes back with the guest.  If C<reuse> is true and
 the guest exists, this provisions onto it without a rebuild.
 
+Returns Str, the address of the guest.
+
 Dies as the backend's C<create_guest>, C<rebuild_guest> and C<guest_ssh_ip>
 do.
+
+    my $ip = $hv->provision_guest( $config, \%seed, reuse => 0 );
 
 =cut
 
@@ -236,8 +363,20 @@ sub provision_guest {
 
 =head2 $hv->would_provision($config, %opts)
 
-Prints what C<provision_guest> does, without doing it.  Returns the address of
-a guest that exists, or C<(not built)>.
+=over 4
+
+=item config - Config::Simple - the F<provision.conf> of the guest
+
+=item opts - HashRef - C<reuse>, as C<provision_guest> takes it
+
+=back
+
+Prints what C<provision_guest> does, without doing it.
+
+Returns Str, the address of a guest that exists, or C<(not built)>.  Dies as
+the backend's C<guest_ssh_ip> does.
+
+    my $ip = $hv->would_provision( $config, reuse => 1 );
 
 =cut
 
@@ -262,6 +401,10 @@ F<hypervisors.conf> or in the C<_global> of F<recipes.yaml>.
 A service assigns the guest address only when it creates the guest, after the
 seed is written.  So the address cannot be found the way libvirt finds it.  See
 L<Trog::HV/PREFLIGHT>.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_transfer_ip();
 
 =cut
 
@@ -329,6 +472,10 @@ service, and keeps the rest:
 
     sub refusals ($self) { return ( $self->SUPER::refusals, create_disk => 'a disk is a Cinder volume' ) }
 
+The reasons of this class:
+
+    my %reasons = $hv->refusals();
+
 =for Pod::Coverage define_domain cloudinit_iso eject_cdrom pool_path pool_target base_image create_disk lease_ip nat_address on_nat_network release_dhcp_lease guest_mac nic_slots nic_names has_tpm
 
 =cut
@@ -383,9 +530,18 @@ sub rebuild_guest ( $self, @ ) { return $self->abstract('rebuild_guest') }
 
 =head2 domain_exists($name)
 
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
 Returns 1 if the service has a guest called C<$name>, in any state, and 0 if
 it has not.  Not only ours: an orphan sweep asks whether anything still uses a
-name, and one that somebody else created does.
+name, and one that somebody else created does.  Dies as the backend's C<server>
+does.
+
+    my $exists = $hv->domain_exists('vm.example.test');
 
 =cut
 

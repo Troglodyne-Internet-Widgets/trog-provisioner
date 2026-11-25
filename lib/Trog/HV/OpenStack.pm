@@ -106,7 +106,7 @@ our $CONSOLE_LINES = 5000;
 
 =head2 @actions = $hv->debug_actions()
 
-C<console>, C<fetch> and C<vnc>.  Nova keeps the console of a server and hands
+Returns a list of Str: C<console>, C<fetch> and C<vnc>.  Nova keeps the console of a server and hands
 out a console URL, so those three have an answer here.
 
 The rest of F<bin/debug_boot> edits a libvirt domain or drives libguestfs on
@@ -114,6 +114,8 @@ the hypervisor, and a cloud gives us neither the definition nor the disk.
 Rescuing a server is the nearest thing to C<--single>, and it boots the server
 from a rescue image rather than its own kernel, so it is not that action under
 another name.
+
+    my @actions = $hv->debug_actions();
 
 =cut
 
@@ -128,10 +130,20 @@ my sub nova ( $self, $method, $path, $body, $microversion = undef ) {
     return $compute->client->call( $method, \%headers, $compute->root_uri($path), $body );
 }
 
-=head2 $restarted = $hv->console_capture($name, wait =E<gt> $seconds)
+=head2 $restarted = $hv->console_capture($name, %opts)
+
+=over 4
+
+=item name - Str - the name of the guest, which is ignored
+
+=item opts - HashRef - C<wait>, in seconds, which is ignored
+
+=back
 
 Returns 0 and does nothing else.  Nova keeps the console of every server, so
 there is nothing to redirect and no reason to restart the server.
+
+    my $restarted = $hv->console_capture( 'vm.example.test', wait => 30 );
 
 =cut
 
@@ -139,10 +151,19 @@ sub console_capture { return 0 }
 
 =head2 $text = $hv->console_output($name)
 
-The console log of the server, from C<os-getConsoleOutput>, or undef if Nova
-returns none.  The cloud keeps the last part of it, so an old boot is gone.
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
+Returns Str or undef: the console log of the server, from
+C<os-getConsoleOutput>, or undef if Nova returns none.  The cloud keeps the last
+part of it, so an old boot is gone.
 
 Dies if the cloud has no server of that name.
+
+    my $text = $hv->console_output('vm.example.test');
 
 =cut
 
@@ -159,6 +180,14 @@ sub console_output {
 
 =head2 ($advice, $url) = $hv->vnc_access($name)
 
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
+Returns a list of two Str: what the operator has to know, and the URL.
+
 The URL of a C<noVNC> session for the server, from the C<remote-consoles> call,
 and what the operator has to know about it.
 
@@ -166,6 +195,8 @@ The URL carries a token of its own and the cloud expires it, so it is fetched
 each time and not kept.
 
 Dies if the cloud has no server of that name, or if it returns no URL.
+
+    my ( $advice, $url ) = $hv->vnc_access('vm.example.test');
 
 =cut
 
@@ -198,17 +229,32 @@ CONSOLE
 
 =head2 config_keys
 
-Returns the F<hypervisors.conf> keys that this backend reads.  C<cloud> marks a
-block as one for this backend.  It names an entry in F<clouds.yaml>.
+Returns a list of Str, each F<hypervisors.conf> key that this backend reads,
+paired with itself.  C<cloud> marks a block as one for this backend.  It names
+an entry in F<clouds.yaml>.
+
+    my %keys = $hv->config_keys;
 
 =head2 marker
 
-Returns C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
+Returns Str, C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
+
+    my $marker = $hv->marker;
+
+=head2 size_key
+
+Returns Str, C<openstack_flavor>, the key in the C<_global> of a guest that
+names its flavor.
+
+    my $key = $hv->size_key;
 
 =head2 client_module
 
-Returns L<OpenStack::MetaAPI>, which L<Trog::HV/$module = $hv-E<gt>require_client>
-loads when a client is first built.
+Returns Str, C<OpenStack::MetaAPI>, which
+L<Trog::HV/$module = $hv-E<gt>require_client> loads when a client is first
+built.
+
+    my $module = $hv->client_module;
 
 =cut
 
@@ -220,9 +266,16 @@ sub config_keys {
     return ( map { $_ => $_ } qw{cloud network floating_network availability_zone security_group keypair domain_dir} );
 }
 
-=head2 build(%opts)
+=head2 build(%given)
 
-Returns a new backend object.  C<cloud> is required, because without it there
+=over 4
+
+=item given - HashRef - the keys of the block in F<hypervisors.conf>, of which
+C<cloud> is required
+
+=back
+
+Returns a Trog::HV::OpenStack object.  C<cloud> is required, because without it there
 is no way to know which cloud in F<clouds.yaml> to use.
 
 Dies when C<cloud> is not given.
@@ -230,6 +283,8 @@ Dies when C<cloud> is not given.
 This does not contact the cloud.  Authentication happens at the first call that
 needs the API.  So C<bin/new_config> can build the object to read a path off it,
 without a working credential.
+
+    my $hv = Trog::HV::OpenStack->build( cloud => 'example' );
 
 =cut
 
@@ -249,11 +304,15 @@ C<manages_addresses> for every backend that builds by API.
 
 =head2 cloud
 
-Returns the name of the entry in F<clouds.yaml> that this object uses.
+Returns Str, the name of the entry in F<clouds.yaml> that this object uses.
+
+    my $entry = $hv->cloud;
 
 =head2 describe
 
-Returns a name for the cloud, for a diagnostic message.
+Returns Str, a name for the cloud, for a diagnostic message.
+
+    print $hv->describe, "\n";
 
 =cut
 
@@ -265,10 +324,12 @@ sub describe ($self) { return 'the OpenStack cloud ' . $self->{cloud} }
 
 =head2 guest_disks
 
-C<vd*>, the name that KVM gives a virtio-blk disk, which is the usual bus of
+Returns a list of one Str: C<vd*>, the name that KVM gives a virtio-blk disk, which is the usual bus of
 Nova.  An image can ask for another bus with C<hw_disk_bus>.  No guest of
 OpenStack has checked it here.  If its guests name their disks otherwise, the
 guest test of L<Provisioner::Recipe::diskqueue> fails and says so.
+
+    my @globs = $hv->guest_disks;
 
 =cut
 
@@ -276,8 +337,11 @@ sub guest_disks { return ('vd*') }
 
 =head2 uri
 
-Returns the Keystone endpoint, so that a message about where a guest is built
-has a correct value to show.
+Returns Str, the Keystone endpoint, so that a message about where a guest is
+built has a correct value to show.  Dies when the entry of C<cloud> cannot be
+read from F<clouds.yaml>.
+
+    my $endpoint = $hv->uri;
 
 =cut
 
@@ -288,8 +352,8 @@ sub uri {
 
 =head2 network, floating_network, availability_zone, security_group, keypair
 
-Return the values that F<hypervisors.conf> set for new guests.
-C<security_group> defaults to C<default>, which is the group that every project
+Returns Str or undef, each the value that F<hypervisors.conf> set for new
+guests.  C<security_group> defaults to C<default>, which is the group that every project
 has.  The others have no default, because there is no safe guess for a network.
 
 What size a guest is is not the block's to say: a guest names its flavor in its
@@ -298,9 +362,23 @@ See L<Trog::HV/size_key> and L</shortfalls(%needs)>.
 
 What a guest boots is not the block's to say: see L</image_for_distro($distro, $release)>.
 
+    my $network  = $hv->network;
+    my $floating = $hv->floating_network;
+    my $zone     = $hv->availability_zone;
+    my $group    = $hv->security_group;
+    my $keypair  = $hv->keypair;
+
 =head2 image_for_distro($distro, $release)
 
-The id of the newest active Glance image whose C<os_distro> and C<os_version>
+=over 4
+
+=item distro - Object - the distro recipe, as L<Provisioner::Cookbook> loads it
+
+=item release - Str - the release of the distro
+
+=back
+
+Returns Str, the id of the newest active Glance image whose C<os_distro> and C<os_version>
 properties are the distro's C<distribution> and the C<release_version> of
 C<$release>, or of the release it pins.  Those are
 the properties Glance defines for saying what an image is, and the images a
@@ -308,6 +386,8 @@ cloud offers set them.  A snapshot is never the answer, though it inherits them
 from the image it was taken of.
 
 Dies when the cloud has no such image, naming the two properties to set on one.
+
+    my $id = $hv->image_for_distro( $distro, 'noble' );
 
 =cut
 
@@ -337,7 +417,10 @@ Returns the authenticated L<OpenStack::MetaAPI> object, and keeps it for later
 calls.
 
 It is built at first use and not in the constructor.  So an object that never
-calls the cloud never needs a credential.
+calls the cloud never needs a credential.  Dies when the client is not installed
+or the credential cannot be read.
+
+    my $api = $hv->api;
 
 =cut
 
@@ -355,7 +438,14 @@ sub api {
 
 =head2 cheapest_for(%needs)
 
-The smallest flavor this cloud has that holds a guest wanting C<memory_mb>,
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus>, C<disk_bytes>, and the C<distro>
+and C<release> of the image
+
+=back
+
+Returns HashRef or undef: the smallest flavor this cloud has that holds a guest wanting C<memory_mb>,
 C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one,
 with a cost of 0.
 
@@ -367,6 +457,8 @@ A flavor is only offered when the project's quota has room for it, and when it
 is at least the C<min_disk> and C<min_ram> of the image the guest boots.  Nova
 refuses both, and an offer nobody can accept is worse than none.  Undef when
 nothing left holds the guest, or when the cloud cannot be asked.
+
+    my $offer = $hv->cheapest_for( memory_mb => 2048, cpus => 2, disk_bytes => 20 * 2**30 );
 
 =cut
 
@@ -410,10 +502,13 @@ L<Trog::HV> reads.
 
 =head2 max_guests
 
-Returns the value from F<hypervisors.conf> if it is set, or the instance quota
-if it is not.
+Returns Int, the value from F<hypervisors.conf> if it is set, or the instance
+quota if it is not, which is 0 when the quota is unlimited.
 
-The cloud enforces its instance quota, whatever this tool decides.
+The cloud enforces its instance quota, whatever this tool decides.  Dies as
+L</capacity> does.
+
+    my $most = $hv->max_guests;
 
 =cut
 
@@ -425,9 +520,21 @@ sub max_guests {
 
 =head2 shortfalls(%needs)
 
+=over 4
+
+=item needs - HashRef - C<openstack_flavor>, C<memory_mb>, C<cpus>,
+C<disk_bytes>, C<distro> and C<release>
+
+=back
+
 As L<Trog::HV/shortfalls(%needs)>, and one more: a guest that names no
 C<openstack_flavor> is not built here at all, which is how a guest is kept off
 this cloud on purpose.
+
+Returns a list of Str, one reason for each way that the guest does not fit, or
+an empty list when it fits.
+
+    my @reasons = $hv->shortfalls( openstack_flavor => 'm1.small', memory_mb => 2048 );
 
 =cut
 
@@ -476,10 +583,15 @@ C<disk_free> is undef.  A guest here boots from an image onto the disk of its
 flavor, so nothing it needs comes out of the Cinder quota, and refusing a guest
 for want of block storage it never asks for is how a project with no volume
 quota came to be unable to build anything.  L</create_volume($domain, $purpose,
-size_gb =E<gt> $n)> is what spends that quota, and nothing in a provision calls
+%opts)> is what spends that quota, and nothing in a provision calls
 it.
 
 The result is kept for the life of the object, as in the libvirt backend.
+
+Returns HashRef, the capacity.  Dies when the cloud cannot be asked for its
+limits.
+
+    my $have = $hv->capacity;
 
 =cut
 
@@ -518,10 +630,19 @@ sub capacity {
 
 =head2 image_for(%needs)
 
-The image a guest of this C<distro> and C<release> boots, as the cloud describes
+=over 4
+
+=item needs - HashRef - C<distro>, which defaults to C<ubuntu>, and C<release>
+
+=back
+
+Returns HashRef or undef: the image a guest of this C<distro> and C<release> boots, as the cloud describes
 it, or undef when there is none.  L</image_for_distro($distro, $release)> answers which it is; this
 answers what it is, because an image says the least it can be booted on in its
-C<min_disk> and C<min_ram>, and Nova refuses a flavor under either.
+C<min_disk> and C<min_ram>, and Nova refuses a flavor under either.  Dies when
+the cloud cannot be asked for its images.
+
+    my $image = $hv->image_for( distro => 'ubuntu', release => 'noble' );
 
 =cut
 
@@ -537,8 +658,17 @@ sub image_for {
 
 =head2 flavor_for(%needs)
 
-The flavor the guest named in C<openstack_flavor>, as the cloud describes it,
-or undef when the cloud has no such flavor.
+=over 4
+
+=item needs - HashRef - C<openstack_flavor>, the flavor that the guest names
+
+=back
+
+Returns HashRef or undef: the flavor the guest named in C<openstack_flavor>, as
+the cloud describes it, or undef when the cloud has no such flavor or the guest
+names none.  Dies when the cloud cannot be asked for its flavors.
+
+    my $flavor = $hv->flavor_for( openstack_flavor => 'm1.small' );
 
 =cut
 
@@ -558,11 +688,19 @@ name for a domain.
 
 =head2 server($name)
 
-Returns the server called C<$name>, or nothing.
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
+Returns HashRef or undef: the server called C<$name>, or undef.
 
 Dies when C<$name> is empty.  Dies when the cloud has more than one server with
 that name, because two servers with one domain name is a problem to report, not
 to guess at.
+
+    my $server = $hv->server('vm.example.test');
 
 =cut
 
@@ -583,12 +721,20 @@ sub server {
 
 =head2 server_detail($name)
 
-Returns the full record of the server called C<$name>, or nothing.  Dies as
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
+Returns HashRef, the full record of the server called C<$name>, or nothing.  Dies as
 L</server($name)> does.
 
 The Nova server I<list> returns only C<id>, C<name> and C<links>.  It gives no
 status, no addresses and no metadata.  To get those, this makes a second request
 by id.
+
+    my $detail = $hv->server_detail('vm.example.test');
 
 =cut
 
@@ -603,10 +749,14 @@ sub server_detail {
 
 =head2 guest_names
 
-Returns the name of every server in the project, whatever built it.
+Returns a list of Str, the name of every server in the project, whatever built
+it.
 
 An orphan sweep asks whether anything still uses a name.  A server that somebody
-else created still uses its name, so the list includes it.
+else created still uses its name, so the list includes it.  Dies when the cloud
+cannot be asked.
+
+    my @names = $hv->guest_names;
 
 =cut
 
@@ -615,11 +765,18 @@ sub guest_names {
     return map { $_->{name} } grep { ref $_ } $self->api->servers();
 }
 
-=head2 guest_ssh_ip($config, $lease)
+=head2 guest_ssh_ip($config, $_lease)
 
-Returns the IPv4 address to reach a guest at.  C<$config> is the configuration
-of the domain, or the domain name.  C<$lease> is for libvirt, and this backend
-ignores it.
+=over 4
+
+=item config - Config::Simple|Str - the configuration of the domain, or the
+domain name
+
+=item _lease - Any - for libvirt, and this backend ignores it
+
+=back
+
+Returns Str, the IPv4 address to reach a guest at.
 
 A floating IP comes first.  If there is none, an address on an external network
 is used.  A fixed address on a tenant network only routes inside that network,
@@ -627,6 +784,8 @@ so it is of no use.
 
 Dies when there is no such guest.  Dies with the name of the guest when it has
 no reachable address, and does not return an address that never connects.
+
+    my $ip = $hv->guest_ssh_ip('vm.example.test');
 
 =cut
 
@@ -681,7 +840,16 @@ name contains C<@>.
 
 =head2 snapshot_names($domain)
 
-Returns the names of the snapshots of this guest, newest first.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns a list of Str, the names of the snapshots of this guest, newest first.
+Dies when the cloud cannot be asked for its images.
+
+    my @snapshots = $hv->snapshot_names('vm.example.test');
 
 =cut
 
@@ -698,14 +866,27 @@ sub snapshot_names {
     return map { substr $_->{name}, length("$domain\@") } @images;
 }
 
-=head2 create_snapshot($domain, $name, disk_only =E<gt> $bool)
+=head2 create_snapshot($domain, $name, %opts)
 
-Takes a snapshot of the guest while it runs, and returns 1.  Dies when there is
-no such guest.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the name of the snapshot
+
+=item opts - HashRef - C<disk_only>, which is ignored
+
+=back
+
+Takes a snapshot of the guest while it runs.
+
+Returns 1.  Dies when there is no such guest.
 
 C<disk_only> is accepted and ignored.  The libvirt backend uses it to choose
 between a snapshot with memory and one of the disk only.  Nova never saves
 memory, and does not need to stop the guest.
+
+    $hv->create_snapshot( 'vm.example.test', 'before-upgrade' );
 
 =cut
 
@@ -721,11 +902,23 @@ sub create_snapshot {
 
 =head2 revert_snapshot($domain, $name)
 
-Puts the guest back on a snapshot, and returns 1.  This is a Nova rebuild onto
-the snapshot image.  The server, its addresses and its floating IP stay.  The
-contents of the root disk change.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the name of the snapshot
+
+=back
+
+Puts the guest back on a snapshot.  This is a Nova rebuild onto the snapshot
+image.  The server, its addresses and its floating IP stay.  The contents of the
+root disk change.
+
+Returns 1.
 
 Dies when there is no such guest, or no such snapshot.
+
+    $hv->revert_snapshot( 'vm.example.test', 'before-upgrade' );
 
 =cut
 
@@ -750,6 +943,14 @@ sub revert_snapshot {
 
 =head2 create_guest(%spec)
 
+=over 4
+
+=item spec - HashRef - C<name>, C<image>, C<size> or C<flavor>, C<network>,
+C<floating_network>, C<availability_zone>, C<security_group>, C<keypair>,
+C<user_data> and C<metadata>, as below
+
+=back
+
 Builds a guest, and waits until Nova reports it C<ACTIVE>.  If there is a
 C<floating_network>, it also attaches a floating IP from that network.
 
@@ -771,6 +972,13 @@ attached.
 
 Dies when C<name>, C<size>, C<image> or C<network> has no value.  Dies when
 the server does not become C<ACTIVE>.
+
+    my $server = $hv->create_guest(
+        name      => 'vm.example.test',
+        image     => $image_id,
+        size      => 'm1.small',
+        user_data => $cloud_config,
+    );
 
 =cut
 
@@ -813,7 +1021,16 @@ sub create_guest {
     );
 }
 
-=head2 rebuild_guest($name, image => $image, user_data => $seed)
+=head2 rebuild_guest($name, %spec)
+
+=over 4
+
+=item name - Str - the name of the guest
+
+=item spec - HashRef - C<image>, the id or name of the image, and C<user_data>,
+the cloud-init payload
+
+=back
 
 Puts a new root disk from the image under a guest that exists, with a new
 cloud-init payload.  Then waits until Nova reports it C<ACTIVE> again.
@@ -832,6 +1049,8 @@ Returns the full server record.
 Dies when there is no such guest, no image, or no image with that name.  Dies
 when the server goes to C<ERROR>, or is not C<ACTIVE> after
 C<$REBUILD_TIMEOUT> seconds.
+
+    my $detail = $hv->rebuild_guest( 'vm.example.test', image => $image_id, user_data => $cloud_config );
 
 =cut
 
@@ -883,10 +1102,16 @@ sub rebuild_guest {
 
 =head2 annihilate_domain($name)
 
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
 Deletes the guest, and the volumes that this tool made for it.
 
 A volume counts as ours when its name starts with C<$name->, which is how
-L</create_volume($domain, $purpose, size_gb =E<gt> $n)> names it.  This leaves
+L</create_volume($domain, $purpose, %opts)> names it.  This leaves
 every other volume alone, because a wrong guess destroys data.
 
 This does not delete the floating IP of the guest.
@@ -896,6 +1121,8 @@ already gone.  Returns 1 otherwise.
 
 Dies when the server is still there after C<$DELETE_TIMEOUT> seconds.  Warns,
 and continues, when a volume does not delete.
+
+    $hv->annihilate_domain('vm.example.test');
 
 =cut
 
@@ -931,12 +1158,27 @@ sub annihilate_domain {
     return 1;
 }
 
-=head2 create_volume($domain, $purpose, size_gb =E<gt> $n)
+=head2 create_volume($domain, $purpose, %opts)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item purpose - Str - what the volume is for
+
+=item opts - HashRef - C<size_gb>, which is required, and C<extra>, a hash of
+more fields for Cinder
+
+=back
 
 Creates a Cinder volume called C<$domain-$purpose>, so that teardown can find
-it.  C<extra> is a hash of more fields for Cinder.  Returns what Cinder returns.
+it.
+
+Returns HashRef, what Cinder returns.
 
 Dies when C<size_gb> is not given.
+
+    my $volume = $hv->create_volume( 'vm.example.test', 'data', size_gb => 10 );
 
 =cut
 
@@ -964,6 +1206,10 @@ match on a cloud.  This says why in OpenStack's own terms.
 As L<Trog::HV::Cloud/refusals>, with the reasons that Nova, Glance, Cinder and
 Neutron make more precise.
 
+Returns a list of Str, each refused method paired with its reason.
+
+    my %reasons = $hv->refusals;
+
 =cut
 
 sub refusals {
@@ -984,10 +1230,13 @@ sub refusals {
 
 =head1 PROVISIONING
 
-=head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
+=head2 preflight_checks, preflight_notes
 
-Return the names of the checks and notes that C<bin/preflight> runs on this
-backend, in order.  See L<Trog::HV/PREFLIGHT>.
+Returns a list of Str, the names of the checks and notes that C<bin/preflight>
+runs on this backend, in order.  See L<Trog::HV/PREFLIGHT>.
+
+    my @checks = $hv->preflight_checks();
+    my @notes  = $hv->preflight_notes();
 
 =cut
 
@@ -998,6 +1247,10 @@ sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext
 
 Makes sure that the credential in F<clouds.yaml> gets a token, and that the
 catalog has compute, image and network.  The other checks need this to pass.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_reachable();
 
 =cut
 
@@ -1030,6 +1283,10 @@ Makes sure that the network in F<hypervisors.conf>, and the floating network if
 one is set, exist on this cloud, that it has every flavor the guests name in
 C<openstack_flavor>, and an image for each distro the configuration uses.  A wrong name otherwise fails a provision
 minutes later, with an error from the API.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_cloud_resources();
 
 =cut
 
@@ -1084,6 +1341,10 @@ FIX
 Makes sure that the quota has room for one more guest: an instance, memory and
 cores.  On a cloud, the quota takes the place of hardware limits.  A quota that
 is unlimited is never full, and says so rather than reading as empty.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_cloud_quota();
 
 =cut
 

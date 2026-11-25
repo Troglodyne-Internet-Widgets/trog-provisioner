@@ -82,25 +82,38 @@ our $POLL           = 5;
 
 =head2 config_keys
 
-Returns the F<hypervisors.conf> keys that this backend reads.  C<linode_token>
-marks a block as one for this backend.
+Returns a list of Str, each F<hypervisors.conf> key that this backend reads,
+paired with itself.  C<linode_token> marks a block as one for this backend.
+
+    my %keys = $hv->config_keys;
 
 =head2 marker
 
-Returns C<linode_token>, the option that makes a block a Linode one.  See
+Returns Str, C<linode_token>, the option that makes a block a Linode one.  See
 L<Trog::HV/backend_for(%opts)>.
+
+    my $marker = $hv->marker;
+
+=head2 size_key
+
+Returns Str, C<linode_type>, the key in the C<_global> of a guest that names
+its Linode type.
+
+    my $key = $hv->size_key;
 
 =head2 client_module
 
-Returns L<Linode::API> and the version of it that this backend needs, which
-L<Trog::HV/$module = $hv-E<gt>require_client> loads when a client is first
-built.  0.004 is the first release with C<encode_user_data>, which compresses
+Returns a list of two Str: C<Linode::API> and the version of it that this
+backend needs, which L<Trog::HV/$module = $hv-E<gt>require_client> loads when a
+client is first built.  0.004 is the first release with C<encode_user_data>, which compresses
 the cloud-init payload under the 16384 bytes that Linode takes, and the first
 that refuses a longer one before it is sent.
 0.003 is the first release that has a rule for the C<ip> format, without
 which every call of L</$address = $hv-E<gt>set_reverse_dns($domain, $name)> warns.
 0.002 is the first that reads a path Linode writes a slash into as a path rather
 than as one escaped segment, without which every call about a type is a 404.
+
+    my ( $module, $version ) = $hv->client_module;
 
 =cut
 
@@ -111,13 +124,22 @@ sub marker        { return 'linode_token' }
 sub size_key      { return 'linode_type' }
 sub client_module { return ( 'Linode::API', '0.004' ) }
 
-=head2 build(%opts)
+=head2 build(%given)
 
-Returns a new backend object.  It does not contact Linode, so a script can
+=over 4
+
+=item given - HashRef - the keys of the block in F<hypervisors.conf>, of which
+C<linode_token> is required
+
+=back
+
+Returns a Trog::HV::Linode object.  It does not contact Linode, so a script can
 build it to read a path off it without the token.
 
 Dies unless C<linode_token> is a C<secret:> reference.  The token is written
 nowhere in the clear, so a literal one is refused rather than used.
+
+    my $hv = Trog::HV::Linode->build( linode_token => 'secret:linode/api/password', region => 'example-region' );
 
 =cut
 
@@ -136,12 +158,16 @@ sub build {
 
 =head2 describe
 
-Returns a name for the account and region, for a diagnostic message.
+Returns Str, a name for the account and region, for a diagnostic message.
+
+    print $hv->describe, "\n";
 
 =head2 uri
 
-Returns the address of the API, so that a message about where a guest is built
-has a correct value to show.
+Returns Str, the address of the API, so that a message about where a guest is
+built has a correct value to show.
+
+    my $endpoint = $hv->uri;
 
 =cut
 
@@ -152,8 +178,10 @@ sub uri              { return $API_URL }
 
 =head2 guest_disks
 
-C<sd*>.  A guest of Linode names its root disk C<sda>, and its swap disk
-C<sdb>.
+Returns a list of one Str: C<sd*>.  A guest of Linode names its root disk
+C<sda>, and its swap disk C<sdb>.
+
+    my @globs = $hv->guest_disks;
 
 =cut
 
@@ -161,7 +189,7 @@ sub guest_disks { return ('sd*') }
 
 =head2 region, firewall_id, private_ip, monthly_budget
 
-Return the values that F<hypervisors.conf> set.  C<region> has no default,
+Returns Str or undef, each the value that F<hypervisors.conf> set.  C<region> has no default,
 because there is no safe guess at where a guest runs.  C<firewall_id> names a
 Cloud Firewall to put a new guest behind, and C<private_ip> gives it an address
 on Linode's private network.  C<monthly_budget> is in the currency Linode bills
@@ -171,6 +199,11 @@ What a guest boots is not the block's to say: see L</image_for_distro($distro, $
 Neither is what size it is.  A guest names that in its C<_global>, as
 C<linode_type>, and one that names none is not built here at all: see
 L</shortfalls(%needs)>.
+
+    my $region   = $hv->region;
+    my $firewall = $hv->firewall_id;
+    my $private  = $hv->private_ip;
+    my $budget   = $hv->monthly_budget;
 
 =cut
 
@@ -185,7 +218,9 @@ sub monthly_budget ($self) { return $self->setting('monthly_budget') }
 
 Returns the L<Linode::API> client, and keeps it for later calls.  It is built
 at first use, so an object that never calls Linode never opens the secret
-store.
+store.  Dies when the client is not installed or the token cannot be read.
+
+    my $api = $hv->api;
 
 =cut
 
@@ -262,13 +297,21 @@ my sub linodes ($self) { return every_page( $self, 'get-linode-instances' ) }
 
 =head2 monthly_cost(%needs)
 
-The monthly price, in this block's region, of the type the guest names in
+=over 4
+
+=item needs - HashRef - C<linode_type>, the type that the guest names
+
+=back
+
+Returns Num, the monthly price, in this block's region, of the type the guest names in
 C<linode_type>.  Linode prices a type differently in some regions, and the
 region's price is the one that it bills.
 
 Dies when the guest names no type, when C<region> is not set, or when Linode
 has no such type.  L</shortfalls(%needs)> answers for a guest that names none
 before anything asks its price.
+
+    my $cost = $hv->monthly_cost( linode_type => 'g6-standard-2' );
 
 =cut
 
@@ -286,10 +329,13 @@ sub monthly_cost {
 
 =head2 monthly_spend
 
-What every Linode on the account costs a month now, with the backup service
+Returns Num, what every Linode on the account costs a month now, with the backup service
 where it is on.  It counts Linodes that something else built too, because the
 budget is for the account.  It does not count images, volumes or transfer,
-which are small beside the Linodes and billed by use.
+which are small beside the Linodes and billed by use.  Dies when Linode cannot
+be asked, or reports no price for a Linode.
+
+    my $spend = $hv->monthly_spend;
 
 =cut
 
@@ -304,10 +350,20 @@ sub monthly_spend {
 
 =head2 image_for_distro($distro, $release)
 
-The Linode image for the distro's distribution and C<$release>, or the release
+=over 4
+
+=item distro - Object - the distro recipe, as L<Provisioner::Cookbook> loads it
+
+=item release - Str - the release of the distro, or undef for the one it pins
+
+=back
+
+Returns Str, the Linode image for the distro's distribution and C<$release>, or the release
 it pins, which Linode names
 by both run together: C<linode/ubuntu24.04>.  Whether Linode has it, and whether
 it reads cloud-init, is C<check_linode_resources>'s to find out before a build.
+
+    my $image = $hv->image_for_distro( $distro, 'noble' );
 
 =cut
 
@@ -315,7 +371,13 @@ sub image_for_distro ( $, $distro, $release = undef ) { return 'linode/' . $dist
 
 =head2 cheapest_for(%needs)
 
-The cheapest type Linode sells that holds a guest wanting C<memory_mb>,
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus> and C<disk_bytes>
+
+=back
+
+Returns HashRef or undef: the cheapest type Linode sells that holds a guest wanting C<memory_mb>,
 C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one.
 
 A type that would take the account over C<monthly_budget> is not offered: an
@@ -326,7 +388,10 @@ ones.  Those are offered too, priced at C<$Provisioner::Vars::HOURS_A_MONTH> hou
 rate, and the offer comes back with C<hourly> as well, so that what is said
 about it can say that it is billed by the hour and has no monthly price to be
 capped at.  Undef when no type holds the guest,
-when the budget leaves room for none, or when Linode cannot be asked.
+when the budget leaves room for none, or when Linode cannot be asked.  Dies
+when C<monthly_budget> is set and what the account costs cannot be worked out.
+
+    my $offer = $hv->cheapest_for( memory_mb => 2048, cpus => 2, disk_bytes => 20 * 2**30 );
 
 =cut
 
@@ -368,18 +433,30 @@ sub cheapest_for {
 
 =head2 capacity(%needs)
 
-As L<Trog::HV/capacity(%needs)>, for one guest of the type it names in
+=over 4
+
+=item needs - HashRef - C<linode_type>, the type that the guest names
+
+=back
+
+Returns HashRef, as L<Trog::HV/capacity(%needs)>, for one guest of the type it names in
 C<linode_type>: that type's memory, vCPUs and disk, with nothing committed
 against them, because every guest gets a Linode of its own.  C<guests> is the
 number of Linodes on the account.
 
 Dies when the guest names no type, which L</shortfalls(%needs)> answers for
-first.
+first, or when Linode has no such type.
+
+    my $have = $hv->capacity( linode_type => 'g6-standard-2' );
 
 =head2 reserve_memory, reserve_cpus, reserve_disk
 
-0.  A reserve keeps something back for a host, and there is no host here to
-keep it for.
+Returns 0.  A reserve keeps something back for a host, and there is no host
+here to keep it for.
+
+    my $memory = $hv->reserve_memory;
+    my $cpus   = $hv->reserve_cpus;
+    my $disk   = $hv->reserve_disk;
 
 =cut
 
@@ -411,10 +488,23 @@ sub reserve_disk   { return 0 }
 
 =head2 shortfalls(%needs)
 
+=over 4
+
+=item needs - HashRef - C<linode_type>, C<memory_mb>, C<cpus> and
+C<disk_bytes>
+
+=back
+
 As L<Trog::HV/shortfalls(%needs)>, and two more.  A guest that names no
 C<linode_type> is not built here at all, which is how a guest is kept off
 Linode on purpose.  And a guest that would take what the account costs a month
 over C<monthly_budget> does not fit.
+
+Returns a list of Str, one reason for each way that the guest does not fit, or
+an empty list when it fits.  Dies as C<monthly_spend> and C<monthly_cost> do
+when there is a C<monthly_budget>.
+
+    my @reasons = $hv->shortfalls( linode_type => 'g6-standard-2', memory_mb => 2048 );
 
 =cut
 
@@ -442,7 +532,16 @@ within an account.
 
 =head2 server($name)
 
-Returns the Linode labeled C<$name>, or nothing.  Dies when C<$name> is empty.
+=over 4
+
+=item name - Str - the label of the Linode
+
+=back
+
+Returns HashRef or undef: the Linode labeled C<$name>, or undef.  Dies when
+C<$name> is empty, or when Linode refuses the call.
+
+    my $linode = $hv->server('vm.example.test');
 
 =cut
 
@@ -457,9 +556,11 @@ sub server {
 
 =head2 guest_names
 
-Returns the label of every Linode on the account, whatever built it.  An orphan
-sweep asks whether anything still uses a name, and one that somebody else
-built still does.
+Returns a list of Str, the label of every Linode on the account, whatever
+built it.  An orphan sweep asks whether anything still uses a name, and one
+that somebody else built still does.  Dies when Linode refuses the call.
+
+    my @names = $hv->guest_names;
 
 =cut
 
@@ -467,13 +568,22 @@ sub guest_names ($self) {
     return map { $_->{label} } linodes($self);
 }
 
-=head2 guest_ssh_ip($config, $lease)
+=head2 guest_ssh_ip($config, $_lease)
 
-Returns the public IPv4 address of a guest.  C<$config> is the configuration of
-the domain, or the domain name.  C<$lease> is for libvirt, and this backend
-ignores it.
+=over 4
+
+=item config - Config::Simple|Str - the configuration of the domain, or the
+domain name
+
+=item _lease - Any - for libvirt, and this backend ignores it
+
+=back
+
+Returns Str, the public IPv4 address of a guest.
 
 Dies when there is no such guest, or it has no public IPv4 address.
+
+    my $ip = $hv->guest_ssh_ip('vm.example.test');
 
 =cut
 
@@ -493,14 +603,26 @@ sub guest_ssh_ip {
 
 =head2 $address = $hv->set_reverse_dns($domain, $name)
 
-Points the reverse DNS of the public IPv4 address of the guest at C<$name>, and
-returns the address.  The token needs C<ips:read_write>.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the host name for the reverse DNS
+
+=back
+
+Points the reverse DNS of the public IPv4 address of the guest at C<$name>.
+The token needs C<ips:read_write>.
+
+Returns Str, the address.
 
 Linode takes C<$name> only when it resolves to the address.  The name can be
 one that the build of the guest published a moment ago, which the resolver of
 Linode has not seen yet.  So a refusal about C<rdns> is asked again until
 C<$RDNS_TIMEOUT>.  Dies with what Linode said after that, or at once on any
 other refusal.
+
+    my $address = $hv->set_reverse_dns( 'vm.example.test', 'vm.example.test' );
 
 =cut
 
@@ -525,10 +647,20 @@ my sub metadata ( $self, $user_data ) {
 
 =head2 $hv->check_user_data($user_data)
 
+=over 4
+
+=item user_data - Str - the cloud-init payload
+
+=back
+
 Dies when Linode would refuse C<$user_data> even compressed, with both of its
 sizes and the three largest files of its C<write_files>, which are where to
-look for something to take out.  Returns true otherwise.  See
+look for something to take out.  See
 L<Trog::HV/$hv-E<gt>check_user_data($user_data)>.
+
+Returns 1 otherwise.
+
+    $hv->check_user_data($cloud_config);
 
 =cut
 
@@ -584,6 +716,13 @@ my sub instance_body ( $self, %spec ) {
 
 =head2 create_guest(%spec)
 
+=over 4
+
+=item spec - HashRef - C<name>, C<size>, C<image>, C<region> and C<user_data>,
+as below
+
+=back
+
 Builds a guest, and waits until Linode reports it C<running>.
 
 C<name> is required, and is the label.  So is C<size>, the type the guest
@@ -596,9 +735,18 @@ metadata service gives to the guest.
 The root password is random and kept nowhere.  Every login is by ssh key, and
 Linode can reset the password if the console is ever needed.
 
-Returns the Linode.  Dies when C<name>, C<region>, C<type> or C<image> has no
-value, when C<name> is not a label Linode takes, or when the Linode does not
-come up in C<$BUILD_TIMEOUT> seconds.
+Returns HashRef, the Linode.
+
+Dies when C<name>, C<region>, C<type> or C<image> has no value, when C<name> is
+not a label Linode takes, or when the Linode does not come up in
+C<$BUILD_TIMEOUT> seconds.
+
+    my $linode = $hv->create_guest(
+        name      => 'vm.example.test',
+        size      => 'g6-standard-2',
+        image     => 'linode/ubuntu24.04',
+        user_data => $cloud_config,
+    );
 
 =cut
 
@@ -615,6 +763,12 @@ sub create_guest {
 
 =head2 reserve_guest(%spec)
 
+=over 4
+
+=item spec - HashRef - C<name>, C<size> and C<region>
+
+=back
+
 Makes a Linode with no image, and so no disk, and waits until Linode reports it
 C<offline>.  Linode gives a Linode its addresses when it makes it, so the
 address of the guest is known before its configuration is written.
@@ -625,7 +779,9 @@ L<Trog::HV/reserve_guest>.
 C<name>, C<size> and C<region> are as C<create_guest> takes them.  The Linode
 runs nothing until the rebuild, and Linode bills it from now.
 
-Returns true.  Dies as C<create_guest> does, except over an image.
+Returns 1.  Dies as C<create_guest> does, except over an image.
+
+    $hv->reserve_guest( name => 'vm.example.test', size => 'g6-standard-2' );
 
 =cut
 
@@ -640,8 +796,17 @@ sub reserve_guest {
 
 =head2 is_reservation($domain)
 
-True when the Linode of C<$domain> has no disk, as C<reserve_guest> leaves it.
-There is nothing on it to snapshot or to salvage.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns 1 when the Linode of C<$domain> has no disk, as C<reserve_guest> leaves
+it, and 0 otherwise.  There is nothing on it to snapshot or to salvage.  Dies
+when Linode refuses the call.
+
+    my $empty = $hv->is_reservation('vm.example.test');
 
 =cut
 
@@ -653,18 +818,30 @@ sub is_reservation {
     return @disks ? 0 : 1;
 }
 
-=head2 rebuild_guest($name, user_data => $seed, image => $image)
+=head2 rebuild_guest($name, %spec)
+
+=over 4
+
+=item name - Str - the name of the guest
+
+=item spec - HashRef - C<image>, which is required, C<user_data>, the new
+cloud-init payload, and C<size>, the type to resize to
+
+=back
 
 Deploys the image again over a guest that exists, with a new cloud-init
 payload, and waits until it is C<running> again.  C<image> is required: the
 guest's own, from its F<provision.conf>, or a snapshot's.
 
 Linode keeps the Linode and its addresses, and deletes its disks.  When the
-guest is not the type in F<hypervisors.conf>, the rebuild resizes it to that
-type.
+guest is not of the type C<size>, the rebuild resizes it to that type.
 
-Returns the Linode.  Dies when there is no such guest or no image, or when it
-does not come back in C<$BUILD_TIMEOUT> seconds.
+Returns HashRef, the Linode.
+
+Dies when there is no such guest or no image, or when it does not come back in
+C<$BUILD_TIMEOUT> seconds.
+
+    my $linode = $hv->rebuild_guest( 'vm.example.test', image => 'linode/ubuntu24.04', user_data => $cloud_config );
 
 =cut
 
@@ -697,6 +874,12 @@ sub rebuild_guest {
 
 =head2 annihilate_domain($name)
 
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
 Deletes the guest.  Linode releases its addresses with it.
 
 A volume that was attached to it is detached and kept, because a volume can
@@ -705,6 +888,8 @@ hold data that somebody attached it for, and this names each one it leaves.
 Returns 0 when there was no such guest, so it is safe to call on a name that is
 already gone.  Returns 1 once Linode no longer lists the guest, and dies if it
 still does after C<$DELETE_TIMEOUT> seconds.
+
+    $hv->annihilate_domain('vm.example.test');
 
 =cut
 
@@ -737,7 +922,16 @@ description, as C<$domain@$snapshot>.  No domain name contains C<@>.
 
 =head2 snapshot_names($domain)
 
-Returns the names of the snapshots of this guest, newest first.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns a list of Str, the names of the snapshots of this guest, newest first.
+Dies when Linode refuses the call.
+
+    my @snapshots = $hv->snapshot_names('vm.example.test');
 
 =cut
 
@@ -753,9 +947,22 @@ sub snapshot_names {
     return map { substr( $_->{description}, length("$domain\@") ) } snapshots( $self, $domain );
 }
 
-=head2 create_snapshot($domain, $name, leave_down => $bool)
+=head2 create_snapshot($domain, $name, %opts)
 
-Captures the guest's disk as a private image, and returns 1.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the name of the snapshot
+
+=item opts - HashRef - C<leave_down>, true to leave the guest down, and
+C<disk_only>, which is ignored
+
+=back
+
+Captures the guest's disk as a private image.
+
+Returns 1, or 0 when Linode will not capture it.
 
 Linode captures a disk consistently only while nothing writes to it, so this
 shuts the guest down, captures the disk, waits until the image is ready, boots
@@ -764,7 +971,10 @@ the guest down, as a rebuild about to happen wants.  C<disk_only> is accepted
 and ignored: an image never holds memory.
 
 Warns and returns 0 when Linode will not capture it, after booting the guest
-again unless C<leave_down>.  Dies when there is no such guest.
+again unless C<leave_down>.  Dies when there is no such guest, or when the
+guest does not come back up.
+
+    $hv->create_snapshot( 'vm.example.test', 'before-upgrade' );
 
 =cut
 
@@ -817,11 +1027,23 @@ sub create_snapshot {
 
 =head2 revert_snapshot($domain, $name)
 
-Puts the guest back on a snapshot, and returns 1.  This is a rebuild from the
-snapshot's image, so the Linode and its addresses stay and its disks are
-replaced.
+=over 4
 
-Dies when there is no such guest, or no such snapshot.
+=item domain - Str - the name of the guest
+
+=item name - Str - the name of the snapshot
+
+=back
+
+Puts the guest back on a snapshot.  This is a rebuild from the snapshot's
+image, so the Linode and its addresses stay and its disks are replaced.
+
+Returns 1.
+
+Dies when there is no such guest, or no such snapshot, and as
+C<rebuild_guest> does.
+
+    $hv->revert_snapshot( 'vm.example.test', 'before-upgrade' );
 
 =cut
 
@@ -845,6 +1067,10 @@ which is an ssh login of its own.
 
 As L<Trog::HV::Cloud/refusals>, in Linode's terms.
 
+Returns a list of Str, each refused method paired with its reason.
+
+    my %reasons = $hv->refusals;
+
 =cut
 
 sub refusals {
@@ -861,10 +1087,13 @@ sub refusals {
 
 =head1 PREFLIGHT
 
-=head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
+=head2 preflight_checks, preflight_notes
 
-Return the names of the checks and notes that C<bin/preflight> runs on this
-backend, in order.  See L<Trog::HV/PREFLIGHT>.
+Returns a list of Str, the names of the checks and notes that C<bin/preflight>
+runs on this backend, in order.  See L<Trog::HV/PREFLIGHT>.
+
+    my @checks = $hv->preflight_checks();
+    my @notes  = $hv->preflight_notes();
 
 =cut
 
@@ -875,6 +1104,10 @@ sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext
 
 Makes sure that the token in the secret store opens the API.  The other checks
 need this to pass.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_reachable();
 
 =cut
 
@@ -899,6 +1132,10 @@ service, that Linode sells every type the guests name in C<linode_type>, and tha
 the configuration uses, which reads its cloud-init payload from that service.
 Without either of the last two a guest boots with no payload, and nothing says
 why until the wait for it runs out.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_linode_resources();
 
 =cut
 
@@ -956,6 +1193,10 @@ FIX
 Makes sure the account is inside C<monthly_budget>, and says what a guest of
 each type the configuration names would add to it.  Without a budget, it
 passes, and says that nothing caps what builds here cost.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_linode_budget();
 
 =cut
 

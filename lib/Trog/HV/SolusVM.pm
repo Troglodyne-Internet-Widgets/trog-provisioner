@@ -76,22 +76,32 @@ our $POLL = 5;
 =head2 config_keys
 
 Returns the F<hypervisors.conf> keys this backend reads.  C<solusvm> marks a
-block as one of ours: it names the management node.
+block as one of ours: it names the management node.  Returns a list of Str,
+each key paired with itself.
+
+    my %keys = Trog::HV::SolusVM->config_keys;
 
 =head2 marker
 
-Returns C<solusvm>.  See L<Trog::HV/backend_for(%opts)>.
+Returns Str, C<solusvm>.  See L<Trog::HV/backend_for(%opts)>.
+
+    my $marker = Trog::HV::SolusVM->marker;
 
 =head2 size_key
 
-Returns C<solusvm_plan>.  A guest names the plan it is built as in its own
+Returns Str, C<solusvm_plan>.  A guest names the plan it is built as in its own
 C<_global>, not the block: one node sells many sizes, and which one a guest
 wants is the guest's business.
 
+    my $key = Trog::HV::SolusVM->size_key;
+
 =head2 client_module
 
-Returns L<SolusVM::Client> and the version this backend needs, which
-L<Trog::HV/require_client> loads when the client is first built.
+Returns a list of Str: L<SolusVM::Client> and the version this backend needs,
+which L<Trog::HV/require_client> loads when the client is first built.
+
+    my ( $module, $version ) = Trog::HV::SolusVM->client_module;
+
 
 =cut
 
@@ -102,9 +112,15 @@ sub marker        { return 'solusvm' }
 sub size_key      { return 'solusvm_plan' }
 sub client_module { return ( 'SolusVM::Client', '0.001' ) }
 
-=head2 build(%opts)
+=head2 build(%given)
 
-Returns a new backend object.  Nothing is contacted and the secret store is not
+=over 4
+
+=item given - HashRef - the keys of the block in F<hypervisors.conf>, of L</config_keys>
+
+=back
+
+Returns Trog::HV::SolusVM, a new backend object.  Nothing is contacted and the secret store is not
 opened, so a script that builds one merely to read a path off it needs neither a
 token nor a network.
 
@@ -112,6 +128,9 @@ Dies unless C<solusvm> names a node, and unless C<solusvm_token> is a C<secret:>
 reference.  A SolusVM token does not expire and is the whole credential -- a
 node with an identity provider in front of it has no password to offer instead
 -- so a literal one in the file is refused rather than used.
+
+    my $hv = Trog::HV::SolusVM->build( solusvm => 'solus.example.test', solusvm_token => 'secret:solusvm/api/password' );
+
 
 =cut
 
@@ -134,9 +153,16 @@ sub build {
 
 =head2 describe
 
+Returns Str, what to call this node in a message.
+
+    my $name = $hv->describe;
+
 =head2 uri
 
-Return what to call this node in a message, and the address of its API.
+Returns Str, the address of the API of the node.
+
+    my $uri = $hv->uri;
+
 
 =cut
 
@@ -147,10 +173,13 @@ sub uri      ($self) { return 'https://' . $self->{solusvm} . '/api/v1' }
 
 =head2 guest_disks
 
-C<vd*>, the name that KVM gives a virtio-blk disk, which is its usual bus.  No
+Returns Str, C<vd*>, the name that KVM gives a virtio-blk disk, which is its usual bus.  No
 guest of SolusVM has checked it here.  If its guests name their disks
 otherwise, the guest test of L<Provisioner::Recipe::diskqueue> fails and says
 so.
+
+    my @globs = $hv->guest_disks;
+
 
 =cut
 
@@ -173,14 +202,20 @@ my sub is_named ( $thing, $wanted ) {
 
 =head2 location
 
-Returns the location new guests are built in, as F<hypervisors.conf> named it.
-It may be a name or an id.
+Returns Str, the location new guests are built in, as F<hypervisors.conf>
+named it, or undef when it names none.  It may be a name or an id.
+
+    my $location = $hv->location;
 
 =head2 location_id
 
-Returns the same as the id the API takes, looking it up by name where that is
-what the file said.  Dies naming what the node does have, since an id is not
+Returns Str, the same as the id the API takes, looking it up by name where that
+is what the file said.  Dies when the block names no location, and when the
+node has no such location, naming what the node does have, since an id is not
 something to guess at.
+
+    my $id = $hv->location_id;
+
 
 =cut
 
@@ -208,6 +243,10 @@ sub location_id {
 
 Returns the L<SolusVM::Client>, and keeps it for later calls.  Built at first
 use, so an object that never asks the node anything never opens the store.
+Dies as L<Trog::HV/require_client> does when the client is not installed.
+
+    my $client = $hv->api;
+
 
 =cut
 
@@ -221,12 +260,18 @@ sub api {
 
 =head2 project
 
-Returns the project guests are built in: what F<hypervisors.conf> named, or the
-only one the account has.
+Returns Str, the project guests are built in: what F<hypervisors.conf> named,
+or the id of the only one the account has.
 
 Making somebody write down the only possible answer is how a configuration file
 grows keys nobody understands, so an account with one project needs no key.  An
 account with several is asked, by name and id.
+
+Dies when the account has no project, and when it has several and the block
+names none of them.
+
+    my $project = $hv->project;
+
 
 =cut
 
@@ -254,8 +299,12 @@ my sub account ($self) {
 
 =head2 roles
 
-Returns what the token's account may do, as the node names it.  C<CLIENT> is an
-account that uses the node; anything else administers some part of it.
+Returns a list of Str, what the token's account may do, as the node names it.  C<CLIENT> is an
+account that uses the node; anything else administers some part of it.  Dies
+as the client does when the node cannot be asked.
+
+    my @roles = $hv->roles;
+
 
 =cut
 
@@ -268,13 +317,26 @@ sub roles {
 
 =head2 plans
 
-Returns every plan the project may build with.
+Returns a list of HashRef, every plan the project may build with, as the node
+describes it.  Dies as L</project> does.
+
+    my @plans = $hv->plans;
 
 =head2 plan($wanted)
 
-Returns one of them, by id or by name -- F<provision.conf> may say either, and a
+=over 4
+
+=item wanted - Str - the id or the name of the plan
+
+=back
+
+Returns HashRef, one of them, by id or by name -- F<provision.conf> may say either, and a
 plan is called something like C<c8.d80.r1024 - Shared LVM>, which nobody wants
 to type twice.
+
+Dies when the project has no such plan.
+
+    my $plan = $hv->plan('plan-small');
 
 =cut
 
@@ -296,12 +358,23 @@ sub plan {
 
 =head2 image_for_distro($distro)
 
-Returns the id of the OS image version that installs this distro recipe's
+=over 4
+
+=item distro - Provisioner::DistroRecipe - the distro recipe of the guest
+
+=back
+
+Returns Int, the id of the OS image version that installs this distro recipe's
 release.
 
 Unlike the other backends' answers this one is a number the node issued, so it
 has to be asked for rather than spelled out: C<Debian> is an image and
 C<Debian 13> is a version under it, and the id belongs to the version.
+
+Dies when the node has no such image and version, naming those it has.
+
+    my $image = $hv->image_for_distro($distro);
+
 
 =cut
 
@@ -337,13 +410,22 @@ my sub monthly ($plan) {
 
 =head2 cheapest_for(%needs)
 
-Returns the cheapest plan the project sells that holds a guest wanting
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus>, C<disk_bytes> and C<solusvm_plan>, the plan that the guest names
+
+=back
+
+Returns HashRef or undef: the cheapest plan the project sells that holds a guest wanting
 C<memory_mb>, C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)>
 returns one.  Undef when no plan holds it, or when the node cannot be asked.
 
 A plan priced at nothing sorts as nothing, which is the truth on a node that
 bills elsewhere: every plan on the one this was written against costs zero
 tokens, so the cheapest that fits is simply the smallest.
+
+    my $plan = $hv->cheapest_for( memory_mb => 2048, cpus => 2, disk_bytes => 20 * 1024**3 );
+
 
 =cut
 
@@ -372,7 +454,17 @@ sub cheapest_for {
 
 =head2 monthly_cost(%needs)
 
-Returns what the plan the guest names costs a month.
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus>, C<disk_bytes> and C<solusvm_plan>, the plan that the guest names
+
+=back
+
+Returns Num, what the plan the guest names costs a month, or 0 when it names
+none.  Dies as L</plan($wanted)> does.
+
+    my $cost = $hv->monthly_cost( solusvm_plan => 'plan-small' );
+
 
 =cut
 
@@ -387,7 +479,13 @@ sub monthly_cost {
 
 =head2 capacity(%needs)
 
-Returns what the guest would get, in the shape L<Trog::HV/shortfalls(%needs)>
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus>, C<disk_bytes> and C<solusvm_plan>, the plan that the guest names
+
+=back
+
+Returns HashRef, what the guest would get, in the shape L<Trog::HV/shortfalls(%needs)>
 reads: the plan it names, and how many servers the project already holds.
 
 The size figures are one guest's rather than a fleet's, and deliberately.  The
@@ -396,12 +494,21 @@ what it means on a machine, and inventing one would put this tool in the
 business of second-guessing a scheduler it cannot see.  What the shape then says
 is the true thing: a guest asking for more than its plan provides does not fit.
 
+Dies when the guest names no plan, and as L</plan($wanted)> does.
+
+    my $capacity = $hv->capacity( solusvm_plan => 'plan-small' );
+
+
 =head2 reserve_memory, reserve_cpus, reserve_disk
 
-Return nothing, whatever F<hypervisors.conf> says.  A reserve is what is left
+Returns 0, whatever F<hypervisors.conf> says.  A reserve is what is left
 for a host we share; we do not share this node's hosts and cannot see them, and
 holding back a slice of a plan that is sold whole would only refuse guests the
 node would have built.
+
+    my $memory = $hv->reserve_memory;
+    my $cpus   = $hv->reserve_cpus;
+    my $disk   = $hv->reserve_disk;
 
 =cut
 
@@ -436,9 +543,13 @@ sub reserve_disk   { return 0 }
 
 =head2 max_guests
 
-Returns the account's own limit on how many servers it may hold, unless
+Returns Int, the account's own limit on how many servers it may hold, unless
 F<hypervisors.conf> set something lower.  An account in no limit group has none
-that this tool can read, and 0 is how that is spelled.
+that this tool can read, and 0 is how that is spelled.  Dies as the client does
+when the node cannot be asked.
+
+    my $max = $hv->max_guests;
+
 
 =cut
 
@@ -450,8 +561,17 @@ sub max_guests {
 
 =head2 shortfalls(%needs)
 
-Returns every reason this node cannot take the guest.  A guest that names no
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus>, C<disk_bytes> and C<solusvm_plan>, the plan that the guest names
+
+=back
+
+Returns a list of Str, every reason this node cannot take the guest.  A guest that names no
 plan is not built here at all, which is the first of them.
+
+    my @reasons = $hv->shortfalls( solusvm_plan => 'plan-small', memory_mb => 2048 );
+
 
 =cut
 
@@ -469,12 +589,26 @@ other backend uses too.
 
 =head2 servers
 
+Returns a list of HashRef, every server in the project, as the node describes
+it.  Dies as L</project> does.
+
+    my @servers = $hv->servers;
+
 =head2 server($name)
 
-Return every server in the project, and the one called C<$name>.
+=over 4
 
-C<server> dies where two share the name rather than picking one: the next thing
-done with the answer rebuilds it or deletes it.
+=item name - Str - the name of the guest
+
+=back
+
+Returns HashRef, the server called C<$name>, or undef when there is none.
+
+Dies where two share the name rather than picking one: the next thing done with
+the answer rebuilds it or deletes it.
+
+    my $server = $hv->server('vm.example.test');
+
 
 =cut
 
@@ -496,9 +630,13 @@ sub server {
 
 =head2 guest_names
 
-Returns every server in the project, whatever built it.  Not only ours: an
+Returns a list of Str, the name of every server in the project, whatever built
+it.  Not only ours: an
 orphan sweep asks whether anything is still using a name, and one somebody
-else created is.
+else created is.  Dies as L</servers> does.
+
+    my @names = $hv->guest_names;
+
 
 =cut
 
@@ -512,11 +650,24 @@ my sub detail ( $self, $name ) {
     return $self->api->get_an_existing_server( id => $server->{id} )->{data};
 }
 
-=head2 guest_ssh_ip($config, $lease)
+=head2 guest_ssh_ip($config, $_lease)
 
-Returns the address to reach a guest at: its primary IPv4, which is the one the
-node's own panel and DNS show.  C<$lease> is libvirt's and is ignored, so that
-F<bin/provision> can ask either kind of backend the same way.
+=over 4
+
+=item config - Config::Simple|Str - the F<provision.conf> of the guest, or the name of the guest
+
+=item _lease - Str - libvirt's lease, which is ignored
+
+=back
+
+Returns Str, the address to reach a guest at: its primary IPv4, which is the
+one the node's own panel and DNS show.  The lease is libvirt's and is ignored,
+so that F<bin/provision> can ask either kind of backend the same way.
+
+Dies when there is no such guest, and when the guest has no IPv4 address yet.
+
+    my $ip = $hv->guest_ssh_ip($config);
+
 
 =cut
 
@@ -539,10 +690,19 @@ sub guest_ssh_ip {
 
 =head2 guest_network_of($address)
 
-Returns the network, as a CIDR, of a server in the project whose own IPv4
+=over 4
+
+=item address - Str - an IPv4 address
+
+=back
+
+Returns Str, the network, as a CIDR, of a server in the project whose own IPv4
 address and netmask put C<$address> on the same network, or undef when none
 does.  The listing of the project's servers carries the netmask of every
-address the node issued, so this asks nothing else.
+address the node issued, so this asks nothing else.  Dies as L</servers> does.
+
+    my $cidr = $hv->guest_network_of('192.0.2.20');
+
 
 =cut
 
@@ -577,7 +737,17 @@ it needs no prefix to say whose it is.
 
 =head2 snapshot_names($domain)
 
-Returns them newest first.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns a list of Str, the names of the snapshots of the guest, newest first.
+Dies when there is no such guest.
+
+    my @names = $hv->snapshot_names('vm.example.test');
+
 
 =cut
 
@@ -588,12 +758,23 @@ sub snapshot_names {
 
 =head2 rollback_possible($domain, %opts)
 
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item opts - HashRef - C<capacity>, which is ignored
+
+=back
+
 Returns 1 if the guest exists and its plan allows snapshots, and 0 otherwise.
 A plan decides whether its servers can be snapshotted at all, and the node
 refuses a snapshot of a server on a plan that does not allow them.
 
 C<capacity> is accepted and ignored, as in L<Trog::HV::Cloud>.  Dies when the
 node cannot be asked, since that is not an answer about the guest.
+
+    my $ok = $hv->rollback_possible('vm.example.test');
+
 
 =cut
 
@@ -606,16 +787,43 @@ sub rollback_possible {
 
 =head2 create_snapshot($domain, $name)
 
-Takes one, and returns 1.  C<disk_only> and C<leave_down> are accepted and
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the name of the snapshot
+
+=back
+
+Takes one.
+
+Returns 1, or 0 when the node will not take it.  C<disk_only> and C<leave_down> are accepted and
 ignored, because the node's endpoint takes nothing but a name.
 
 Warns and returns 0 when the node will not take it, for example on a plan that
 does not allow snapshots.  Dies when there is no such guest.
 
+    $hv->create_snapshot( 'vm.example.test', 'before-upgrade' );
+
+
 =head2 revert_snapshot($domain, $name)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the name of the snapshot
+
+=back
 
 Puts the guest back on one.  Reverting is by the snapshot's own id, which is
 what the node's endpoint takes, so the snapshot is found first.
+
+Returns 1.  Dies when there is no such guest or no such snapshot, and as the
+client does when the node refuses.
+
+    $hv->revert_snapshot( 'vm.example.test', 'before-upgrade' );
+
 
 =cut
 
@@ -672,6 +880,12 @@ my sub wait_for_started ( $self, $id, $name ) {
 
 =head2 create_guest(%spec)
 
+=over 4
+
+=item spec - HashRef - C<name>, C<size>, C<image>, C<location> and C<user_data>, as\nbelow
+
+=back
+
 Builds a guest and waits until the node reports it started.
 
 C<name> is required, as are C<size>, the plan the guest names in
@@ -680,7 +894,14 @@ L</image_for_distro($distro)> answered when F<bin/new_config> wrote the guest's
 F<provision.conf>.  C<location> defaults to the block's.  C<user_data> is the
 cloud-init payload, which the node hands the guest itself.
 
-Returns the server.
+Returns HashRef, the server, as the node describes it once it has started.
+
+Dies when C<name>, C<image> or C<size> is missing, when the node has no such
+plan, when the build leaves the server unavailable, and when the server has not
+started after C<$BUILD_TIMEOUT> seconds.
+
+    my $server = $hv->create_guest( name => 'vm.example.test', image => 28, size => 'plan-small', user_data => $payload );
+
 
 =cut
 
@@ -711,7 +932,15 @@ sub create_guest {
     return wait_for_started( $self, $made->{data}{id}, $name );
 }
 
-=head2 rebuild_guest($name, image => $image, user_data => $seed)
+=head2 rebuild_guest($name, %spec)
+
+=over 4
+
+=item name - Str - the name of the guest
+
+=item spec - HashRef - C<image>, the OS image version id, and C<user_data>, the new\ncloud-init payload
+
+=back
 
 Puts the OS back on a guest that exists, with a fresh cloud-init payload, and
 waits for it to come back.
@@ -720,6 +949,15 @@ The server survives, and so does its address, which is the whole reason to
 prefer this to deleting and building again.  The payload is the point: it
 carries the key F<bin/provision> has just generated, and a reinstall that kept
 the old one would bring the guest up locked against us.
+
+Returns HashRef, the server, as the node describes it once it has started
+again.
+
+Dies when there is no such guest, when C<image> is missing, when the node never
+starts the reinstall, and as L</create_guest(%spec)> does while it waits.
+
+    my $server = $hv->rebuild_guest( 'vm.example.test', image => 28, user_data => $payload );
+
 
 =cut
 
@@ -758,8 +996,22 @@ sub rebuild_guest {
 
 =head2 annihilate_domain($name)
 
-Takes the guest away.  Returns false when there was no such guest, which makes
-it safe to call on a name that may already be gone.
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
+Takes the guest away.
+
+Returns 1, or 0 when there was no such guest, which makes it safe to call on a
+name that may already be gone.
+
+Dies when the server is still listed C<$DELETE_TIMEOUT> seconds after the
+delete.
+
+    $hv->annihilate_domain('vm.example.test');
+
 
 =cut
 
@@ -785,10 +1037,20 @@ sub annihilate_domain {
 
 =head1 PREFLIGHT
 
-=head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
+=head2 @names = $hv->preflight_checks()
 
-Return the names of the checks and notes that C<bin/preflight> runs on this
-backend, in order.  See L<Trog::HV/PREFLIGHT>.
+Returns a list of Str, the names of the checks that C<bin/preflight> runs on
+this backend, in order.  See L<Trog::HV/PREFLIGHT>.
+
+    my @checks = $hv->preflight_checks();
+
+=head2 @names = $hv->preflight_notes()
+
+Returns a list of Str, the names of the notes that C<bin/preflight> prints for
+this backend, in order.
+
+    my @notes = $hv->preflight_notes();
+
 
 =cut
 
@@ -797,8 +1059,12 @@ sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext
 
 =head2 $result = $hv->check_reachable()
 
-Returns whether the token works, and says which account it belongs to and what
-that account may do.  Everything below needs this to have worked.
+Returns HashRef, the answer of C<verdict>: whether the token works, which
+account it belongs to and what that account may do.  Everything below needs this
+to have worked.
+
+    my $result = $hv->check_reachable();
+
 
 =cut
 
@@ -817,13 +1083,16 @@ FIX
 
 =head2 $result = $hv->check_solusvm_resources()
 
-Returns whether the project and location this block names are things the node
-has.  One wrong fails a provision minutes in, with an error from the API rather
+Returns HashRef, the answer of C<verdict>: whether the project and location this
+block names are things the node has.  One wrong fails a provision minutes in, with an error from the API rather
 than from us.
 
 What plan a guest is built as is not checked here, because it is not the
 block's: a guest names it, and L</shortfalls(%needs)> is where a guest that
 names one the node does not sell is refused.
+
+    my $result = $hv->check_solusvm_resources();
+
 
 =cut
 
@@ -842,8 +1111,13 @@ sub check_solusvm_resources {
 
 =head2 $result = $hv->check_solusvm_quota()
 
-Returns whether there is room for one more guest.  How many servers it may hold
-is the only limit on a SolusVM account that this tool can read.
+Returns HashRef, the answer of C<verdict>: whether there is room for one more
+guest.  How many servers it may hold
+is the only limit on a SolusVM account that this tool can read.  Dies as
+L</max_guests> does.
+
+    my $result = $hv->check_solusvm_quota();
+
 
 =cut
 
