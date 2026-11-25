@@ -99,19 +99,15 @@ my sub context ( $domain, %opts ) {
     );
 }
 
-=head1 CLASS METHODS
-
-=head2 @steps = Trog::Steps->of($domain)
-
-The steps of every recipe of C<$domain>, in the order of the recipe names, from
-the configuration of C<$domain> as written.  After the steps of a recipe that
-C<sends_mail> comes C<reverse_dns_step>, which no recipe can leave out, since
-it is not one of its C<outside_steps>.  Two steps with one C<id> are one step,
-the first, so a guest with two recipes that send mail gets one.  A recipe that
-dies on the configuration dies here.
-
-=cut
-
+# The steps of every recipe of C<$domain>, in the order of the recipe names, from
+# the configuration of C<$domain> as written.  After the steps of a recipe that
+# C<sends_mail> comes C<reverse_dns_step>, which no recipe can leave out, since
+# it is not one of its C<outside_steps>.  Two steps with one C<id> are one step,
+# the first, so a guest with two recipes that send mail gets one.
+# @param   domain  Str  the domain of the guest
+# @returns HashRef  each step, as a list
+# @throws  when a recipe dies on the configuration
+# @example my @steps = Trog::Steps->of('test.test');
 sub of {
     my ( $class, $domain ) = @_;
 
@@ -127,21 +123,19 @@ sub of {
     return @steps;
 }
 
-=head2 $step = Trog::Steps->reverse_dns_step($domain)
-
-The step that sets the reverse DNS of the guest of C<$domain>, after its build,
-to C<helo_name_of> the domain in L<Provisioner::Cookbook>, through the
-C<set_reverse_dns> of the hypervisor of the run.  The guest is C<machine_of>
-the domain, so a tenant sets the reverse DNS of the guest of its host.  Its
-C<id> is C<reverse_dns>, and it has no revert.
-
-A refusal of the hypervisor is a warning, because the guest works, and only its
-mail out suffers.  When the hypervisor offers no way and the address of the
-guest is public, the step says what the operator must set, and where.  A
-private address gets neither, because no receiver of mail connects from it.
-
-=cut
-
+# The step that sets the reverse DNS of the guest of C<$domain>, after its build,
+# to C<helo_name_of> the domain in L<Provisioner::Cookbook>, through the
+# C<set_reverse_dns> of the hypervisor of the run.  The guest is C<machine_of>
+# the domain, so a tenant sets the reverse DNS of the guest of its host.  Its
+# C<id> is C<reverse_dns>, and it has no revert.
+#
+# A refusal of the hypervisor is a warning, because the guest works, and only its
+# mail out suffers.  When the hypervisor offers no way and the address of the
+# guest is public, the step says what the operator must set, and where.  A
+# private address gets neither, because no receiver of mail connects from it.
+# @param   domain  Str  the domain of the guest
+# @returns HashRef  the step, with C<id>, C<machine>, C<when> and C<apply>
+# @example my $step = Trog::Steps->reverse_dns_step('test.test');
 sub reverse_dns_step {
     my ( $class, $domain ) = @_;
 
@@ -176,25 +170,27 @@ sub reverse_dns_step {
     };
 }
 
-=head2 $count = Trog::Steps->apply($domain, %opts)
-
-Runs the C<apply> of each step of C<$domain> whose C<when> is C<$opts{when}>,
-and returns how many actions ran.  A step without an C<apply> only takes back
-what an earlier configuration made, and this skips it.  C<%opts> takes C<when>, which is required,
-C<dryrun>, C<hvconf>, and what goes into the context of a step: C<secrets> and
-C<address>.  A dry run asks each machine what is done, says what would run, and
-runs nothing.  It has no secrets, because a dry run does not open the store.
-
-Dies when an action dies, because a step that C<bin/provision> needs and could
-not do is a build that does not work.  A step that can fail without harm warns
-in its own C<do>.
-
-=cut
-
 # The moments of a provision, in their order.
 my @WHEN = qw{secrets built};
 my %WHEN = map { $_ => 1 } @WHEN;
 
+# Runs the C<apply> of each step of C<$domain> whose C<when> is C<$opts{when}>.
+# A step without an C<apply> only takes back what an earlier configuration made,
+# and this skips it.  A dry run asks each machine what is done, says what would
+# run, and runs nothing.  It has no secrets, because a dry run does not open the
+# store.  The options C<secrets>, a HashRef of the secrets by reference, and
+# C<address>, the address of the guest, go into the context of each step.
+# @param   domain  Str  the domain of the guest
+# @param   when    Str  C<secrets> or C<built>, the moment of the provision; required
+# @param   dryrun  Bool  say what would run, and run nothing
+# @param   hvconf  Str  the path of F<hypervisors.conf>
+# @returns Int  how many actions ran
+# @throws  when C<when> is missing or not a moment of a provision
+# @throws  when an action dies, because a step that C<bin/provision> needs and
+#   could not do is a build that does not work.  A step that can fail without
+#   harm warns in its own C<do>.
+# @throws  when a step names a machine that cannot be built
+# @example my $count = Trog::Steps->apply( 'test.test', when => 'built', address => '192.0.2.10' );
 sub apply {
     my ( $class, $domain, %opts ) = @_;
     die "Trog::Steps->apply needs a when that is one of: " . join( ', ', @WHEN ) . "\n" unless $WHEN{ $opts{when} // q{} };
@@ -208,16 +204,16 @@ sub apply {
     return $count;
 }
 
-=head2 $count = Trog::Steps->preview($domain, %opts)
-
-A dry run of every moment of C<$domain>, in the order of a provision, for a
-dry run of F<bin/provision>, which stops before the first of them.  Prints a
-line that names the domain, and then what C<apply> says with C<dryrun>.
-Prints nothing for a domain with no step to apply.  C<%opts> takes C<hvconf>.
-Returns how many actions would run.
-
-=cut
-
+# A dry run of every moment of C<$domain>, in the order of a provision, for a
+# dry run of F<bin/provision>, which stops before the first of them.  Prints a
+# line that names the domain, and then what C<apply> says with C<dryrun>.
+# Prints nothing for a domain with no step to apply.
+# @param   domain  Str  the domain of the guest
+# @param   %opts   Str  each option, by its name, which goes on to C<apply>
+# @param   hvconf  Str  the path of F<hypervisors.conf>
+# @returns Int  how many actions would run
+# @throws  when a step names a machine that cannot be built, as C<apply> does
+# @example my $count = Trog::Steps->preview('test.test');
 sub preview {
     my ( $class, $domain, %opts ) = @_;
     return 0 unless List::Util::any { $_->{apply} } $class->of($domain);
@@ -226,19 +222,18 @@ sub preview {
     return List::Util::sum0( map { local ($_) = $_; $class->apply( $domain, %opts, when => $_, dryrun => 1 ) } @WHEN );
 }
 
-=head2 $count = Trog::Steps->revert($domain, %opts)
-
-Runs the C<revert> of each step of C<$domain> that has one, last step first, and
-returns how many actions ran.  C<%opts> takes C<dryrun> and C<hvconf>.  The
-context has no secrets, so that a teardown never asks for the password of the
-store.
-
-A step that dies gets a warning, and the next step still runs, because the
-guest is going away either way.  The warning names the machine, and the step
-says in its message what stays there.
-
-=cut
-
+# Runs the C<revert> of each step of C<$domain> that has one, last step first.
+# The context has no secrets, so that a teardown never asks for the password of
+# the store.
+#
+# A step that dies gets a warning, and the next step still runs, because the
+# guest is going away either way.  The warning names the machine, and the step
+# says in its message what stays there.
+# @param   domain  Str  the domain of the guest
+# @param   dryrun  Bool  say what would run, and run nothing
+# @param   hvconf  Str  the path of F<hypervisors.conf>
+# @returns Int  how many actions ran
+# @example my $count = Trog::Steps->revert( 'test.test', dryrun => 1 );
 sub revert {
     my ( $class, $domain, %opts ) = @_;
 
@@ -257,11 +252,22 @@ sub revert {
 
 =head2 $count = Trog::Steps::run(\@actions, $dryrun)
 
+=over 4
+
+=item actions - ArrayRef[HashRef] - the actions
+
+=item dryrun - Bool - print what would run, and run nothing
+
+=back
+
 Runs each action whose C<done> returns false, and prints what it does.  An
 action is a hash reference of C<what>, a sentence that starts with a verb, and
 C<done> and C<do>, two code references.  With C<$dryrun>, prints what would
-run and runs nothing.  A C<do> that dies stops the run.  Returns how many
-actions ran or would run.
+run and runs nothing.  A C<do> that dies stops the run, with its error.
+
+Returns an Int, how many actions ran or would run.
+
+    my $count = Trog::Steps::run( [ { what => 'make the directory', done => sub { -d $dir }, do => sub { mkdir $dir } } ], 0 );
 
 =cut
 

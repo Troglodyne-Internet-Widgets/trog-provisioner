@@ -38,12 +38,22 @@ the cycle that loading L<Trog::Hypervisors> from there would make.
 
 =head2 load($path)
 
+=over 4
+
+=item path - Str|Undef - the path of F<hypervisors.conf>
+
+=back
+
 Reads a fleet from F<hypervisors.conf> and returns it.  No fleet is a normal
 state.  So when C<$path> is undef, does not exist or cannot be read, this
 returns an empty fleet, which means that no fleet is configured.
 
 Dies when a file it can read names no hypervisor.  That includes a file with
 keys but no C<[name]> header.
+
+Returns a Trog::Hypervisors::Config object.
+
+    my $fleet = Trog::Hypervisors::Config->load('/etc/trog-provisioner/hypervisors.conf');
 
 =cut
 
@@ -97,6 +107,8 @@ Returns the path of F<hypervisors.conf> when the caller names no other.  It is
 in the configuration directory, with the rest of the configuration of this
 installation.  See L<Trog::Config>.
 
+    my $path = Trog::Hypervisors::Config->default_path;
+
 =cut
 
 sub default_path { return Trog::Config->path('hypervisors.conf') }
@@ -108,9 +120,13 @@ sub default_path { return Trog::Config->path('hypervisors.conf') }
 Returns true when there is a fleet.  When it is false, the other methods here
 have nothing to say, and the hypervisor comes from F<provision.conf>.
 
+    print "no fleet\n" unless $fleet->configured;
+
 =head2 names
 
 Returns the hypervisor names, in the order of the file.
+
+    my @names = $fleet->names;
 
 =cut
 
@@ -119,10 +135,18 @@ sub names      ($self) { return @{ $self->{order} } }
 
 =head2 secret_references(@names)
 
+=over 4
+
+=item @names - Str - each name of a block to look in
+
+=back
+
 Returns every C<secret:> reference that a block of the fleet names, sorted and
 without duplicates.  A hypervisor's credential is one, such as the token of a
 Linode or SolusVM block.  With C<@names>, only the references of those blocks.
 Empty when there is no fleet.
+
+    my @refs = $fleet->secret_references('hv1');
 
 =cut
 
@@ -137,6 +161,8 @@ sub secret_references ( $self, @names ) {
 Returns the names of the blocks that name a C<secret:> reference, in the order
 of the file.  Empty when there is no fleet.
 
+    my @blocks = $fleet->secret_blocks;
+
 =cut
 
 sub secret_blocks ($self) {
@@ -149,9 +175,17 @@ sub secret_blocks ($self) {
 
 =head2 caches(@names)
 
+=over 4
+
+=item @names - Str - each name of a block to look in
+
+=back
+
 Returns the C<cache> that each block names, as a hash of the name of the block
 to its value, without the blocks that name none.  With C<@names>, only those
 blocks.  Empty when there is no fleet.  See L<Trog::HV/configured_cache>.
+
+    my %cache_of = $fleet->caches;
 
 =cut
 
@@ -162,8 +196,18 @@ sub caches ( $self, @names ) {    ## no critic (ProhibitUnusedDefinitions) -- th
 
 =head2 \%block = $fleet->block($name)
 
+=over 4
+
+=item name - Str - the name of the block
+
+=back
+
 The keys of the block C<$name> as they are in the file, in a new hash.  An
 empty hash when the fleet has no such block.
+
+Returns a HashRef.
+
+    my $block = $fleet->block('hv1');
 
 =cut
 

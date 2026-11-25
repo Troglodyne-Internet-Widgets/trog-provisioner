@@ -50,13 +50,6 @@ replace the state of the job that you watch in the same window.
 
 =head1 METHODS
 
-=head2 $badge = Trog::Tmux->badge($name)
-
-Returns a badge for the window of C<$TMUX_PANE>, or nothing when the process
-runs outside tmux or is not in the foreground of its terminal.  C<$name> is the
-prefix of the window options, in lower case letters.  The badge is also the
-one that C<asking> uses.  Dies on a C<$name> that is not lower case letters.
-
 =cut
 
 # The terminal that the run is in the foreground of.  A test points it elsewhere.
@@ -65,6 +58,13 @@ our $TTY = '/dev/tty';
 # The badge of this process, which asking() updates.
 our $CURRENT;
 
+# The badge for the window of C<$TMUX_PANE>.  The badge is also the one that
+# C<asking> uses.
+# @param   name  Str  the prefix of the window options, in lower case letters
+# @returns Trog::Tmux|Undef  the badge, or nothing when the process runs outside
+#   tmux or is not in the foreground of its terminal
+# @throws  when C<$name> is not lower case letters
+# @example my $badge = Trog::Tmux->badge('provision');
 sub badge {
     my ( $class, $name ) = @_;
     die "The name of a tmux badge is lower case letters, not '" . ( $name // q{} ) . "'\n" unless ( $name // q{} ) =~ m/\A[[:lower:]]+\z/;
@@ -76,14 +76,12 @@ sub badge {
     return $CURRENT;
 }
 
-=head2 $bool = Trog::Tmux->foreground()
-
-True when this process is in the foreground process group of its controlling
-terminal.  Standard input does not decide it, because a run can read a password
-from a pipe and still be the job that you watch.
-
-=cut
-
+# Whether this process is in the foreground process group of its controlling
+# terminal.  Standard input does not decide it, because a run can read a
+# password from a pipe and still be the job that you watch.
+# @returns Bool  1 when it is in the foreground, 0 when it is not or when the
+#   terminal cannot be opened
+# @example my $watched = Trog::Tmux->foreground();
 sub foreground {
     open( my $tty, '<', $TTY ) or return 0;
     my $group = POSIX::tcgetpgrp( fileno $tty );
@@ -93,8 +91,18 @@ sub foreground {
 
 =head2 $badge->set($state)
 
-Sets the state, as L</DESCRIPTION> says, and returns it.  A failure of tmux is
-ignored, because a badge must not stop the run that it shows.
+Sets the state, as L</DESCRIPTION> says.  A failure of tmux is ignored, because
+a badge must not stop the run that it shows.
+
+=over 4
+
+=item state - Str - C<building>, C<asking>, C<ok> or C<failed>
+
+=back
+
+Returns the state, a Str.
+
+    $badge->set('building');
 
 =cut
 
@@ -119,6 +127,16 @@ sub set {
 
 Sets C<ok> when C<$status>, an exit status, is 0, and C<failed> otherwise.
 
+=over 4
+
+=item status - Int - an exit status
+
+=back
+
+Returns the state that it set, a Str.
+
+    $badge->finish($?);
+
 =cut
 
 sub finish {
@@ -126,15 +144,13 @@ sub finish {
     return $self->set( $status ? 'failed' : 'ok' );
 }
 
-=head2 @result = Trog::Tmux->asking($code)
-
-Runs C<$code>, a prompt, and returns what it returns, in the context of the
-call.  While it runs, the badge from C<badge> shows C<asking>, and afterwards
-the state that it showed before, also when C<$code> dies.  Without a badge it
-only runs C<$code>.
-
-=cut
-
+# Runs a prompt.  While it runs, the badge from C<badge> shows C<asking>, and
+# afterwards the state that it showed before, also when C<$code> dies.  Without
+# a badge it only runs C<$code>.
+# @param   code  CodeRef  the prompt
+# @returns what C<$code> returns, in the context of the call
+# @throws  the error of C<$code>, again, when C<$code> dies
+# @example my $answer = Trog::Tmux->asking( sub { scalar <STDIN> } );
 sub asking {
     my ( $class, $code ) = @_;
     my $self = $CURRENT;
@@ -152,7 +168,10 @@ sub asking {
 
 =head2 $bool = $badge->watched()
 
-True when an attached client is looking at the window of the badge.
+Returns true when an attached client is looking at the window of the badge,
+and false when not.
+
+    my $seen = $badge->watched();
 
 =cut
 
@@ -165,6 +184,10 @@ sub watched {
 
 Rings the bell in the terminal of the run.
 
+Returns 1, or nothing when the terminal cannot be written.
+
+    $badge->bell();
+
 =cut
 
 sub bell {
@@ -176,8 +199,18 @@ sub bell {
 
 =head2 $out = $badge->tmux(@args)
 
-Runs C<tmux> with C<@args>, and returns what it printed, without the last
-newline.  Returns nothing when tmux is not there or fails.
+Runs C<tmux> with C<@args>.
+
+=over 4
+
+=item @args - Str - each argument of C<tmux>
+
+=back
+
+Returns what it printed, a Str without the last newline.  Returns nothing when
+tmux is not there or fails.
+
+    my $out = $badge->tmux( qw{display -p}, '#{window_name}' );
 
 =cut
 

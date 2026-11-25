@@ -50,8 +50,12 @@ us, and can bubblewrap make the sandbox that its fetches run in?
 
 =head2 new
 
-Takes nothing and returns the one object for this machine.  Each call returns
-the same object, because there is only one machine that we run on.
+Takes nothing.  Each call returns the same object, because there is only one
+machine that we run on.
+
+Returns the Trog::Local object for this machine.
+
+    my $this_machine = Trog::Local->new();
 
 =cut
 
@@ -65,6 +69,8 @@ sub new {
 Discards the object, as L<Trog::Machine/keep($object), kept, forget> says, so
 the next call to C<new> makes a new one.  Tests use it.  Returns 1.
 
+    Trog::Local->forget;
+
 =cut
 
 =head1 IDENTITY
@@ -73,9 +79,13 @@ the next call to C<new> makes a new one.  Tests use it.  Returns 1.
 
 Returns 1.  This is the purpose of this class.
 
+    my $here = Trog::Local->new->is_local;
+
 =head2 describe
 
 Returns the name for this machine in an error message.
+
+    die Trog::Local->new->describe . " cannot make the sandbox\n";
 
 =cut
 
@@ -85,6 +95,12 @@ sub describe { return 'this machine' }
 =head1 REACHABILITY
 
 =head2 transfer_ips(@towards)
+
+=over 4
+
+=item @towards - Str - each address of the guest, an address or a CIDR
+
+=back
 
 Returns each of our addresses that reaches a guest.  The list is in the order of
 C<@towards>, with no repeats.  It is empty when no address in C<@towards> has a
@@ -111,6 +127,8 @@ C<connect> on a datagram socket only sets the peer.
 This is also the limit.  Routing is not symmetric, and a socket here cannot see
 a firewall between us and the guest.  So these are addresses to try, not a
 promise that the guest can connect.  F<bin/preflight> makes sure of that.
+
+    my @ours = $this_machine->transfer_ips( '192.0.2.10/24', '198.51.100.20' );
 
 =cut
 
@@ -157,6 +175,12 @@ sub transfer_ips {
 
 =head2 transfer_ip(@towards)
 
+=over 4
+
+=item @towards - Str - each address of the guest, its own address first
+
+=back
+
 Returns the first address from C<transfer_ips>, or undef when there is none.
 The guest fetches its payload from this address.  It is one address, because
 the rsync in the template names one.
@@ -164,6 +188,10 @@ the rsync in the template names one.
 Put the address of the guest first in C<@towards>.  On a remote hypervisor, we
 connect to the guest with ssh at that address.  The answer is then the address
 the guest fetches from, and also the address that it sees us come from.
+
+Dies when C<@towards> is empty, as C<transfer_ips> does.
+
+    my $from = $this_machine->transfer_ip('192.0.2.10');
 
 =cut
 
@@ -175,11 +203,19 @@ sub transfer_ip {
 
 =head2 holds_address($address)
 
-Whether C<$address> is an address of this machine.
+=over 4
+
+=item address - Str - an IPv4 address
+
+=back
+
+Returns 1 when C<$address> is an address of this machine, and 0 when not.
 
 It asks the kernel by binding a socket to it, which succeeds only for an
 address this machine holds, rather than by reading a list of interfaces.  An
 address behind a gateway is not one of ours however much it looks like it.
+
+    print "ours\n" if Trog::Local->holds_address('192.0.2.1');
 
 =cut
 
@@ -199,13 +235,23 @@ sub holds_address {
 
 =head2 answers_on($address, $port)
 
-Whether something accepts a connection to C<$address> on C<$port>, within
-C<$CONNECT_TIMEOUT> seconds.
+=over 4
+
+=item address - Str - an IPv4 address
+
+=item port - Int - a TCP port
+
+=back
+
+Returns 1 when something accepts a connection to C<$address> on C<$port>,
+within C<$CONNECT_TIMEOUT> seconds, and 0 when nothing does.
 
 A false answer is not proof that nothing is there.  A gateway that forwards a
 port often does not answer its own public address from inside the network it
 forwards into, so this says no for a forward that works perfectly from
 outside.  Callers say that rather than reporting a broken forward.
+
+    my $open = Trog::Local->answers_on( '203.0.113.5', 22 );
 
 =cut
 
@@ -237,8 +283,8 @@ sub answers_on {
 
 =head2 sandbox_error
 
-Returns undef if bubblewrap can make the sandbox of F<rsyncd_sandbox> here,
-and otherwise the reason that it cannot.  The forced command of the key of
+Returns Str or undef: the reason that bubblewrap cannot make the sandbox of
+F<rsyncd_sandbox> here, or undef when it can.  The forced command of the key of
 every guest runs in that sandbox, so a guest cannot fetch anything while the
 reason holds.  See C<write_rsyncd_conf> in F<bin/new_config>.
 
@@ -246,6 +292,8 @@ It runs C<bwrap> with the same namespaces as F<rsyncd_sandbox>, because the
 program can be there and still be refused.  Ubuntu 24.04 lets a program make a
 user namespace only if AppArmor gives it a profile that allows that.  The
 object keeps the answer.
+
+    if ( my $why = $this_machine->sandbox_error ) { warn "$why\n" }
 
 =cut
 
@@ -266,8 +314,10 @@ sub sandbox_error {
 
 =head2 sandbox_program
 
-The path of the F<rsyncd_sandbox> that the forced command of every guest key
+Returns the path, a Str, of the F<rsyncd_sandbox> that the forced command of every guest key
 runs: F<rsyncd_sandbox> in C<$Trog::Utils::LIBEXEC>.
+
+    my $program = $this_machine->sandbox_program;
 
 =cut
 
@@ -277,10 +327,11 @@ sub sandbox_program {
 
 =head2 sandbox_program_error
 
-Returns undef if C<sandbox_program> is a file that root owns, that only root can
-write, and that everybody can run.  Otherwise it returns the reason that it is
-not.  The account that a guest connects as runs it, and it must not be able to
+Returns a Str, the reason that C<sandbox_program> is not a file that root owns,
+that only root can write, and that everybody can run, or nothing when it is.  The account that a guest connects as runs it, and it must not be able to
 change what it runs.  F<scripts/setup_transfer_user> installs it.
+
+    if ( my $why = $this_machine->sandbox_program_error ) { warn "$why\n" }
 
 =cut
 
@@ -316,10 +367,12 @@ the sshd of the other lets it in.
 
 =head2 $dir = guest_keys()
 
-The directory of guest keys: C<guest_keys> of the C<_global> of C<_base> in
+Returns the directory of guest keys, a Str: C<guest_keys> of the C<_global> of C<_base> in
 F<recipes.yaml>, which is C<$Trog::Utils::GUEST_KEYS> unless the installation
 names another.  Only C<_base> counts, because the sshd of the machine that
 guests fetch from reads one directory for every domain.
+
+    my $dir = $this_machine->guest_keys();
 
 =cut
 
@@ -330,13 +383,27 @@ sub guest_keys {
 
 =head2 authorize_guest_key($name, $dir, $pubkey)
 
+=over 4
+
+=item name - Str - the domain of the guest
+
+=item dir - Str - the domain directory, an absolute path
+
+=item pubkey - Str - the public key of the guest, one line
+
+=back
+
 Lets C<$pubkey> fetch from C<$dir>, the domain directory of C<$name> that holds
 its F<rsyncd.conf>: it writes C<$dir> and C<$pubkey>, a line each, to the file
 C<$name> in the directory of guest keys.  The file is replaced whole, and
-everybody can read it, because sshd reads it as C<nobody>.  Returns 1.
+everybody can read it, because sshd reads it as C<nobody>.
+
+Returns 1.
 
 Dies if C<$name> is not a domain name, if C<$dir> is not a path that the helper
 takes, or if it cannot write the file.
+
+    $this_machine->authorize_guest_key( 'vm.test.test', '/opt/domains/vm.test.test', $pubkey );
 
 =cut
 
@@ -359,9 +426,18 @@ sub authorize_guest_key {
 
 =head2 $had = revoke_guest_key($name)
 
-Removes the file that C<authorize_guest_key> wrote for C<$name>.  Returns 1 if
-there was one, and 0 if not.  Dies if C<$name> is not a domain name, or if it
+=over 4
+
+=item name - Str - the domain of the guest
+
+=back
+
+Removes the file that C<authorize_guest_key> wrote for C<$name>.
+
+Returns 1 if there was one, and 0 if not.  Dies if C<$name> is not a domain name, or if it
 cannot remove the file.
+
+    my $had = $this_machine->revoke_guest_key('vm.test.test');
 
 =cut
 
@@ -378,10 +454,12 @@ sub revoke_guest_key {
 
 =head2 guest_keys_error
 
-Returns undef if this account can write a file into the directory of guest
-keys, and otherwise the reason that it cannot.  It finds out by writing one,
+Returns a Str, the reason that this account cannot write a file into the
+directory of guest keys, or nothing when it can.  It finds out by writing one,
 and removing it again.  When the settings of the installation do not say a
 valid directory, the reason is that.
+
+    if ( my $why = $this_machine->guest_keys_error ) { warn "$why\n" }
 
 =cut
 
