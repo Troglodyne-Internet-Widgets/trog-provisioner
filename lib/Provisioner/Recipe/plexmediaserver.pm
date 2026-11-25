@@ -85,6 +85,11 @@ was never linked needs C<claim_token>.
 The fragment leaves the library owned by C<plex:plex>, and C<Preferences.xml>
 too.
 
+Returns a map from the path on the guest to its place in the salvage, as a
+list of pairs.
+
+    my %path_map = $recipe->remote_files( '/opt/hosts', 'test.test' );
+
 =cut
 
 sub required_recipes {
@@ -111,6 +116,10 @@ The ports that the Plex Media Server binds besides 32400, which
 C<rate_limits> names: 32401 and 32600 on 127.0.0.1, and 1901, 32410 and 32412
 to 32414, all UDP.  That is what it bound on a guest, which is not all that
 its ufw profile opens: it bound neither 1900/udp nor 32469.
+
+Returns the claims, as a list of strings.
+
+    my @claims = $recipe->listens();
 
 =cut
 
@@ -152,6 +161,10 @@ C<repo.plex.tv>, the apt repository that the package comes from.  The signing
 key comes from C<downloads.plex.tv>, which F<bin/new_config> fetches, and the
 guest does not.
 
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -162,6 +175,10 @@ sub fetch_hosts {
 
 The cache classes for the apt repository at C<repo.plex.tv>.  See C<apt_repo_classes>
 in L<Provisioner::Recipe>.
+
+Returns what C<apt_repo_classes> returns for that host, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

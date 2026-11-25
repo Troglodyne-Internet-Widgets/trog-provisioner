@@ -103,7 +103,9 @@ its host, so its key is the key of its host.  See C<host_key_ref>.
 
 =head1 METHODS
 
-=head2 $ref = $class->host_key_ref($domain)
+=cut
+
+=head2 host_key_ref(domain)
 
 The reference in the secret store of the host key of the guest that runs
 C<$domain>: C<secret:ssh/MACHINE-host-key/password>, where MACHINE is
@@ -113,6 +115,16 @@ one entry, and F<bin/provision> places the same key for both.
 L<Provisioner::Cookbook/secret_references> asks this for each domain, because
 no configuration names this recipe.
 
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Str, the reference.
+
+    my $ref = Provisioner::Recipe::sshd->host_key_ref('example.test');
+
 =cut
 
 sub host_key_ref {
@@ -120,12 +132,22 @@ sub host_key_ref {
     return 'secret:ssh/' . Provisioner::Cookbook->machine_of($domain) . '-host-key/password';
 }
 
-=head2 $ref = $class->relay_host_key_ref($domain)
+=head2 relay_host_key_ref(domain)
 
 The reference where the host key of a relay was before this recipe:
-C<secret:relay/MACHINE-ssh-host-key/password>.  The generator of
+C<secret:relay/MACHINE-ssh-host-key/password>.	The generator of
 C<guest_secrets> takes the key from there, so a relay keeps the key that the
 guests behind it pinned.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Str, the reference.
+
+    my $ref = Provisioner::Recipe::sshd->relay_host_key_ref('example.test');
 
 =cut
 
@@ -134,12 +156,26 @@ sub relay_host_key_ref {
     return 'secret:relay/' . Provisioner::Cookbook->machine_of($domain) . '-ssh-host-key/password';
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+
+=over 4
+
+=item install_dir - Str - the install directory of the domain, which this recipe does not use
+
+=item domain - Str - the domain
+
+=back
 
 The private ed25519 host key of sshd, at F</etc/ssh/ssh_host_ed25519_key>,
 from C<host_key_ref>.  When the store has no key there, the generator takes the
 key at C<relay_host_key_ref>, and makes a new one only when that is empty too.
-See L<Trog::Secrets/remember>.
+See L<Trog::Secrets/remember>.  It reads none of the options that the caller
+passes after the domain.
+
+Returns a map from the path on the guest to a hash reference with C<ref>,
+C<generate>, C<owner> and C<mode>, as a list of one pair.
+
+    my %files = $recipe->guest_secrets( '/opt/example.test', 'example.test' );
 
 =cut
 
@@ -174,6 +210,10 @@ C<ssh.service>, so that systemd-oomd does not kill the listener.  It is not in
 C<oom_protect>, because sshd gives each session the score that systemd gives
 the listener.  sshd already sets its listener to -1000 by itself.  See
 L<Provisioner::Recipe::zswap/What is protected>.
+
+Returns the name of the unit, as a list.
+
+    my @units = $recipe->oomd_omit();
 
 =cut
 

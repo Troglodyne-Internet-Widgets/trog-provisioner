@@ -91,6 +91,12 @@ an image catalog needs.  C<bin/new_config> hands the release of the domain to
 the hypervisor, for the image, and to every recipe, as C<distro_release> in
 C<package_sources>, for the suites of vendor archives.
 
+Returns Str, the codename of the pinned release.
+
+    my $release = $recipe->release();
+
+=head2 packager_invocation(), packager_up_invocation(), packager_remove_invocation()
+
 The install invocation accepts as much as it can:
 
 =over 4
@@ -110,7 +116,12 @@ and that is not a reason to fail a build.
 
 =back
 
-=for Pod::Coverage release
+Returns Str, the command line of C<apt-get> that installs, upgrades or removes
+packages.
+
+    my $install = $recipe->packager_invocation();
+    my $upgrade = $recipe->packager_up_invocation();
+    my $remove  = $recipe->packager_remove_invocation();
 
 =cut
 
@@ -137,10 +148,24 @@ C</ubuntu>, the path of the archive on a mirror.  C<mirror_uri> appends it to
 a mirror named as a bare domain, which makes C<aptmirror.example.test> into a
 URL that a guest can fetch from.
 
+Returns Str, the path.
+
+    my $path = $recipe->mirror_path();
+
 =head2 $uri = $recipe->mirror_uri(%opts)
 
 Takes C<mirror>, C<domain> and C<ipmap> (domain name to address).  Returns the
 mirror that this guest uses first, as a URL, or empty for none.
+
+=over 4
+
+=item mirror - Str - a URL, or the name of a domain of this installation
+
+=item domain - Str - the domain of this guest
+
+=item ipmap - HashRef - from each domain name to its address
+
+=back
 
 The value of C<mirror> has two forms.  If it has a scheme, it is a URL and is
 used as written.  Use a URL for a mirror outside this installation.  Any other
@@ -154,6 +179,8 @@ configuration of the guest gets C<http:///...> and fails at first boot.
 Returns empty when C<domain> is the mirror itself.  The usual configuration is
 one line in the C<_global> of C<_base>, which includes the mirror host.  When
 that host is built, it has nothing to fetch from yet.
+
+    my $uri = $recipe->mirror_uri( mirror => 'aptmirror.test.test', domain => 'test.test', ipmap => \%ipmap );
 
 =cut
 
@@ -186,8 +213,20 @@ NOPE
 =head2 $version = $recipe->release_version($release)
 
 The version of C<$release>, or of the release that C<release> pins, such as
-C<24.04> for C<noble>.  Dies for a release this does not know the version of,
-rather than guessing at an image name from a codename.
+C<24.04> for C<noble>.
+
+=over 4
+
+=item release - Str - optional: the codename
+
+=back
+
+Returns Str, the version.
+
+Dies for a release this does not know the version of, rather than guessing at
+an image name from a codename.
+
+    my $version = $recipe->release_version('noble');
 
 =cut
 
@@ -201,6 +240,10 @@ sub release_version {
 
 The schema of L<Provisioner::DistroRecipe>, with C<release>.  See
 L</Which release>.
+
+Returns the schema, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -219,7 +262,15 @@ sub args {
 
 =head2 $url = $recipe->image_for($release)
 
-Returns the URL of the cloud image for the named release.
+Returns the URL of the cloud image for the named release, as a Str.
+
+=over 4
+
+=item release - Str - the codename
+
+=back
+
+    my $url = $recipe->image_for('noble');
 
 =cut
 
@@ -233,6 +284,8 @@ sub image_for {
 Returns the image for the LTS release that Canonical now says is supported.
 Returns undef if the request fails.  See
 L<Provisioner::DistroRecipe/current_image>.
+
+    my $url = $recipe->current_image();
 
 =cut
 
@@ -253,6 +306,8 @@ that takes the highest version picks that entry, which is wrong.
 
 Returns undef if the fetch fails, or if no entry is marked supported.  Nothing
 here is worth failing a preflight over.
+
+    my $codename = $recipe->current_release();
 
 =cut
 
@@ -279,6 +334,8 @@ for the recipes that use it.  It also has sendmail, so that cron and the
 makefile can send failures somewhere.  F<scripts/post_install> keeps its queue
 in SQLite, through the C<DBI> of the system perl, and C<sqlite3> reads it.
 
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps { return qw{openssl openssh-server openssh-client rsync retry sendmail sqlite3 libdbd-sqlite3-perl} }
@@ -302,6 +359,8 @@ There is one depth, so there is one filter.  For that reason, everything that
 this document carries by value is at that depth.  A block one level deeper
 needs a second filter that differs from this one only in a number.
 
+    my $indent = Provisioner::Recipe::ubuntu::BLOCK_SCALAR_INDENT();
+
 =cut
 
 sub BLOCK_SCALAR_INDENT { return 6 }
@@ -314,6 +373,8 @@ document marker and the final newline that L<YAML::XS> always adds, because the
 document that the text goes into already has both.  It also quotes a scalar
 that PyYAML reads as a base-60 number and libyaml does not.  C<indent> indents
 a whole file that another file carries as a block scalar.
+
+    my %fmts = $recipe->formatters();
 
 =cut
 
@@ -433,6 +494,8 @@ It is undef in a run that read no store, and the seed then names no host key.
 
 Dies if C<ips> is set without C<gateway>, or with no static adapter to put it
 on, or if C<contact_email> is not set.
+
+    my %enriched = $recipe->enrich(%opts);
 
 =cut
 
@@ -592,6 +655,8 @@ locks out whoever holds the old one.
 A domain with no pair gets a new one, because the user-data is written from it.
 C<Trog::Guest::seal_key> removes the private half from the disk.  So before the
 call, the caller must put a sealed key back beside its public half.
+
+    my $key = $recipe->guest_keypair( domain => 'test.test' );
 
 =cut
 

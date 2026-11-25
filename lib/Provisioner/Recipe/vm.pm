@@ -120,6 +120,10 @@ my @IOTUNE_KEY = qw{
 
 False.  See L</It directs the build rather than running in it>.
 
+Returns Bool, always false.
+
+    my $bool = $recipe->is_module();
+
 =cut
 
 sub is_module { return 0 }
@@ -133,6 +137,10 @@ each schema default into F<provision.conf>.  An absent key is how a guest says
 "use what this hypervisor decides", and that is the purpose of asking the
 hypervisor.  Their real defaults are in C<enrich>, where the answer depends on
 what libvirt and qemu take.
+
+Returns the schema, as a list of key and value pairs.
+
+    my %args = $recipe->args();
 
 =cut
 
@@ -233,6 +241,11 @@ sub args {
 
 The domain XML and the device map.
 
+Returns a map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -269,6 +282,13 @@ then boots without a user on it.
 
 Returns C<pool_name>, C<disk_volume> and C<cloudinit>.  It also returns
 C<metadata_cache> when the disk is large enough to need one.
+
+    my %facts = $recipe->create_storage(
+        domain => 'test.test',
+        image  => $image,
+        size   => 85899345920,
+        seed   => { 'user-data' => $user_data, 'meta-data' => $meta_data, 'network-config' => $network_config },
+    );
 
 =cut
 
@@ -344,11 +364,17 @@ my sub disk ( $tuning, %disk ) {
 Works out what this hypervisor accepts, and from that, what each disk of the
 guest looks like.
 
-Takes the options of the recipe.  Returns them with C<tuning>, C<tpm>,
-C<partition>, C<session>, C<pcie>, C<interfaces>, C<disks>, C<filesystems> and
-C<devices_map> added.  Dies if it gets a throttle that the hypervisor does not
-support, or a total throttle together with one of its halves.  Also dies if
-F<mounts.txt> asks for more devices than C<vdb> to C<vdz>.
+Takes the options of the recipe.
+
+Returns them with C<tuning>, C<tpm>, C<partition>, C<session>, C<pcie>,
+C<interfaces>, C<disks>, C<filesystems> and C<devices_map> added.
+
+Dies if it gets a throttle that the hypervisor does not support, or a total
+throttle together with one of its halves.  Also dies if F<mounts.txt> asks for
+more devices than C<vdb> to C<vdz>, asks a session for anything but a file, or
+shares a disk over virtiofs on a hypervisor that cannot start virtiofsd.
+
+    my %enriched = $recipe->enrich(%opts);
 
 Each value it adds is a decision, not a string: which cache mode, how many
 iothreads, which disk gets which of the iothreads, and what F<mounts.txt> asks

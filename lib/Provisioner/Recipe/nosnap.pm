@@ -27,6 +27,18 @@ Use it if you consider snap an unacceptable risk on your deployed systems.
 
 use parent qw{Provisioner::Recipe};
 
+=head2 template_files()
+
+The apt preferences file that pins C<snapd> so that apt does not install it.
+It ignores the loaded recipes that the caller passes.
+
+Returns a map from the template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
 

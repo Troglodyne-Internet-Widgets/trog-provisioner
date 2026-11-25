@@ -112,6 +112,10 @@ examples.
 
 C<www>, which the vhost of the domain answers for beside the domain itself.
 
+Returns the name C<www>, as a list.
+
+    my @names = $recipe->subdomains();
+
 =cut
 
 sub subdomains {
@@ -217,6 +221,8 @@ Without the colon that ends the socket path, it says:
 
 An upstream has no URI part, so neither error applies.
 
+    my %vars = $recipe->enrich( domain => 'test.test', install_dir => '/srv/domains', proxy_uri => 'run/app.sock' );
+
 =cut
 
 sub enrich {
@@ -281,6 +287,18 @@ sub enrich {
 
     return %opts;
 }
+
+=head2 template_files()
+
+The vhost of the domain.  It ignores the loaded recipes that the caller
+passes.
+
+Returns a map from the template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ($self) = @_;

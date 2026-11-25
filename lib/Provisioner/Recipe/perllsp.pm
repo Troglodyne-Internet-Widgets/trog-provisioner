@@ -84,11 +84,20 @@ a time.  So a new name adds a plugin, and the name of a default moves its pin.
 
 =back
 
+Returns the schema of these fields, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
+
 =head3 template_files
 
 Renders C<perllsp.vimrc.tt> into C<perllsp.vim>, a vimrc snippet.  The fragment
 installs it in the C<~/.vim/> directory of the admin user.  Also copies the
 wrapper and the shim that L</The profile that each file gets> describes.
+
+Returns a map from each template to the file that it becomes, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -134,6 +143,10 @@ Turns C<vim_plugins> into C<plugins>, a list sorted by directory.  Each item has
 a C<dir>, a C<repo> and a C<ref>.  Dies if a directory name is not one plain
 path component, because the fragment empties that directory before it unpacks.
 
+Returns C<%opts> with C<plugins> added.
+
+    my %enriched = $recipe->enrich( vim_plugins => { 'vim-lsp' => { repo => 'someone/vim-lsp', ref => $commit } } );
+
 =cut
 
 sub enrich {
@@ -163,6 +176,10 @@ sub tests {
 
 C<codeload.github.com>, which serves the pinned tarballs of the vim plugins.
 
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -172,6 +189,10 @@ sub fetch_hosts {
 =head2 @classes = $recipe->cache_classes()
 
 A tarball that codeload serves for a full commit SHA never changes.
+
+Returns one hash reference, with C<class> and C<pattern>, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

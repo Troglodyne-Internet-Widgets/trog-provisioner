@@ -90,6 +90,10 @@ sub required_recipes {
 Dies when an entry of C<loggers> is not the name of a Perl module, such as
 C<1Foo::Bar>, because tPSGI loads each one by name.
 
+Returns C<%opts> as it came in.
+
+    my %enriched = $recipe->enrich( loggers => ['Log::Dispatch::Screen'] );
+
 =cut
 
 sub enrich {
@@ -143,6 +147,10 @@ a failed login with a 200.
 It is named after the domain, because two domains on one guest each have
 their own log.
 
+Returns a map from the name of the jail to its settings, as a list of pairs.
+
+    my %jails = $recipe->jails( domain => 'test.test', install_dir => '/opt/hosts' );
+
 =cut
 
 sub jails {
@@ -166,6 +174,8 @@ sub jails {
 =head2 @hosts = $recipe->fetch_hosts()
 
 Returns C<github.com>, which serves the tPSGI checkout that this recipe clones.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 

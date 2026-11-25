@@ -159,6 +159,10 @@ sub rate_limits {
 The authoritative server on 2500, on 127.0.0.1, where the recursor on 53 sends
 the zones that this guest serves.  C<rate_limits> names 53.
 
+Returns the two claims, as a list of strings.
+
+    my @claims = $recipe->listens();
+
 =cut
 
 sub listens {
@@ -168,6 +172,10 @@ sub listens {
 =head2 @names = $recipe->subdomains()
 
 C<dnsapi.$domain>, where the API proxy answers.
+
+Returns the name C<dnsapi>, as a list.
+
+    my @names = $recipe->subdomains();
 
 =cut
 
@@ -180,6 +188,10 @@ sub subdomains {
 True.  The zone of the domain names the guest at its address, in the C<A>
 record of the domain and in that of C<ns1>, the nameserver of the zone.  See
 L<Provisioner::Recipe>.
+
+Returns Bool, always true.
+
+    my $bool = $recipe->needs_address( domain => 'test.test' );
 
 =cut
 
@@ -203,6 +215,17 @@ it.  So on the stub, the guest cannot resolve its own name.
 A guest that holds its own zone lists this recipe, and
 L<Provisioner::Recipe::registrar> refuses one that does not.  See
 L<Provisioner::Recipe::registrar/authority_of>.
+
+=over 4
+
+=item opts - HASH - the options of the recipe, with C<domain>
+
+=back
+
+Returns each required recipe mapped to a sub that returns the options for it,
+as a list of pairs.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
 
 =cut
 
@@ -260,7 +283,7 @@ sub args {
     );
 }
 
-=head2 %credentials = $recipe->socket_credentials(%opts)
+=head2 socket_credentials(domain)
 
 The credentials with which lexicon on this guest writes the zone of
 C<$opts{domain}>, through the API proxy on its unix socket.  See
@@ -279,6 +302,16 @@ registrable form with tldextract before it asks for a zone.  A reserved TLD is
 not a public suffix, so without the flag lexicon asks for the zone "test" and
 gets a 404.
 
+=over 4
+
+=item domain
+
+=back
+
+Returns the credentials, as a list of key and value pairs.
+
+    my %credentials = $recipe->socket_credentials( domain => 'test.test' );
+
 =cut
 
 sub socket_credentials {
@@ -294,11 +327,11 @@ sub socket_credentials {
     );
 }
 
-=head2 %credentials = $recipe->client_credentials($guest, $name)
+=head2 client_credentials(guest, name)
 
 What lexicon needs on another guest to write C<$name> through the proxy on
-C<$guest>, as L<Provisioner::Recipe::registrar/lexicon_credentials> returns it.  The
-token is in C<key_file>, which C<issue_grant> puts there.
+C<$guest>, as L<Provisioner::Recipe::registrar/lexicon_credentials> returns it.
+ The token is in C<key_file>, which C<issue_grant> puts there.
 
 C<opts> is C<--resolve-zone-name>, so that lexicon asks the DNS for the zone.
 The guest resolves its own zone through C<$guest>.  See
@@ -309,6 +342,18 @@ asks C<$guest> through the stub of systemd-resolved, which answers a name with
 no record with the C<SOA> of the root and not of the zone.  So lexicon can find
 the zone of C<$name> and not the zone of C<www.$name> before the challenge of
 C<www.$name> is written.
+
+=over 4
+
+=item guest - Str - the pdns guest that holds the zone
+
+=item name - Str - the name to write
+
+=back
+
+Returns the credentials, as a list of key and value pairs.
+
+    my %credentials = $recipe->client_credentials( 'dns.test.test', 'www.test.test' );
 
 =cut
 
@@ -326,9 +371,19 @@ sub client_credentials {
     );
 }
 
-=head2 $path = $recipe->token_path($name)
+=head2 token_path(name)
 
 Where the token of C<$name> is, on the guest that writes C<$name>.
+
+=over 4
+
+=item name - Str - the name that the token writes
+
+=back
+
+Returns Str, the path of the token.
+
+    my $path = $recipe->token_path('www.test.test');
 
 =cut
 
@@ -356,7 +411,20 @@ their challenges, at C<token_path> of the zone.  The command is
 F<scripts/pdns_client> C<grant>.  It leaves the zone alone, because other guests
 serve names in it.  A zone with no names gets no token.
 
+=over 4
+
+=item grant - HashRef - the grant, with C<guest>, C<client>, and maybe C<zones>
+
+=item terms - HASH - the terms, with C<names> for a grant with C<zones>
+
+=back
+
+Returns a map from the path of each token on the client to the description of
+how it is issued, as a list of pairs.
+
 Dies as C<checked_names> does.
+
+    my %files = $recipe->issue_grant( { guest => 'dns.test.test', client => 'www.test.test' } );
 
 =cut
 
@@ -388,7 +456,18 @@ and the zones stay.  It asks about every zone of the grant, because a token
 that is gone already is no error.  If the guest is not up, what it holds stays,
 and C<bin/provision> replaces it when the client is built again.
 
+=over 4
+
+=item grant - HashRef - the grant, with C<guest>, C<client>, and maybe C<zones>
+
+=back
+
+Returns the revocation, with C<command>, C<doing>, C<done> and C<stays>, as a
+list of key and value pairs.
+
 Dies as C<checked_names> does.
+
+    my %revocation = $recipe->revoke_grant( { guest => 'dns.test.test', client => 'www.test.test' } );
 
 =cut
 
@@ -417,11 +496,23 @@ sub revoke_grant {
     );
 }
 
-=head2 $recipe->checked_names(@names)
+=head2 checked_names(names)
 
-Dies unless each of C<@names> is a domain in lower case, as
+Makes sure that each of C<@names> is a domain in lower case, as
 L<Data::Validate::Domain> judges it, with the reserved TLDs as private ones.
 Each of them goes into a command that root runs on a pdns guest.
+
+=over 4
+
+=item @names - Str - each name to check
+
+=back
+
+Returns Int, 1, when every name is a domain.
+
+Dies when a name is undefined, not in lower case, or not a domain.
+
+    $recipe->checked_names( 'test.test', 'www.test.test' );
 
 =cut
 
@@ -487,6 +578,19 @@ sub enrich {
 
     return %opts;
 }
+
+=head2 template_files()
+
+The zonefile, the configuration of the authoritative server and of the
+recursor, and the files of the API proxy.  It ignores the loaded recipes that
+the caller passes.
+
+Returns a map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ($self) = @_;
@@ -564,6 +668,10 @@ sub tests {
 
 The PowerDNS apt repository, which this recipe adds and installs from.
 
+Returns the host of the repository, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -571,6 +679,13 @@ sub fetch_hosts {
 }
 
 =head2 @classes = $recipe->cache_classes()
+
+The classes of the cache for the PowerDNS apt repository, from
+C<apt_repo_classes>.
+
+Returns the classes, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

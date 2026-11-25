@@ -162,6 +162,8 @@ Returns C<%opts> with C<cpan_steps> added.  For each step of C<cpan_deps>, that
 holds the words that go to F<scripts/cpan_install> after the optional
 C<--notest>.
 
+    my %enriched = $recipe->enrich( cpan_deps => [ { install => ['Moo'] } ] );
+
 =cut
 
 sub enrich {
@@ -202,6 +204,10 @@ gets Module::Build, Dist::Zilla and each C<cpan_deps> step, and cpanm gets a
 version pin.  MetaCPAN says which release a version pin names, and the mirrors
 serve it.
 
+Returns the three host names, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -214,6 +220,10 @@ CPAN.  The index and the MetaCPAN API say which release is current.  A
 distribution under F<authors/id> is named by its version and never changes.
 CHECKSUMS is excluded, because it is written again whenever anything beside it
 changes.
+
+Returns one hash reference per class, with C<class> and C<pattern>, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

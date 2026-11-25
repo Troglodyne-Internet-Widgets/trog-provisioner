@@ -178,6 +178,10 @@ The limit of a port of mail for C<relay_port>, and for 25, where the mail of the
 internet comes in.  The ports of the mail clients get the same limit from
 C<port_rate_limit>.
 
+Returns a map from each port to its limit, as a list.
+
+    my %limits = $recipe->rate_limits( relay_port => 2525 );
+
 =cut
 
 sub rate_limits {
@@ -190,6 +194,10 @@ sub rate_limits {
 64, the limit of a port of mail, for the ports of the mail clients.  See
 L<Provisioner::RelayRecipe/Ports of the guests>.
 
+Returns Int, 64.
+
+    my $hits = $recipe->port_rate_limit();
+
 =cut
 
 sub port_rate_limit {
@@ -200,6 +208,10 @@ sub port_rate_limit {
 
 F</etc/postfix/mailrelay.d>, which holds the registrations and the ban keys.
 See L<Provisioner::RelayRecipe>.
+
+Returns Str, the directory.
+
+    my $dir = $recipe->relay_dir();
 
 =cut
 
@@ -213,6 +225,10 @@ None.  The ports of the mail clients are ports of the guests, which the bans
 cover as L<Provisioner::RelayRecipe/Ports of the guests> says.  Not 25, because
 this guest takes that mail itself, and bans there itself.  See L</Mail clients>.
 
+Returns an empty list.
+
+    my @ports = $recipe->banned_ports();
+
 =cut
 
 sub banned_ports {
@@ -223,6 +239,11 @@ sub banned_ports {
 
 The jail that fail2ban ships for postfix, because the relay takes mail from the
 internet on 25.  It bans here, where the client connects.
+
+Returns the one jail and its settings, as a list of a name and a hash
+reference.
+
+    my %jails = $recipe->jails();
 
 =cut
 
@@ -237,6 +258,10 @@ in L<Provisioner::IPPool> gives it, and where the relay listens.  Adds
 C<helo_name>, which is C<helo_name_of> in L<Provisioner::Cookbook>, and
 C<client_ports>, the port of each service of the mail clients.  Adds what
 L<Provisioner::RelayRecipe/enrich> adds.
+
+Returns the options, as a list of key and value pairs.
+
+    my %opts = $recipe->enrich( domain => 'relay.test.test' );
 
 =cut
 
@@ -254,6 +279,10 @@ sub enrich {
 True, because the relay delivers the mail of the guests to the internet.  See
 L<Provisioner::Recipe>.
 
+Returns a Bool, always true.
+
+    my $bool = $recipe->sends_mail();
+
 =cut
 
 sub sends_mail {
@@ -265,16 +294,30 @@ sub sends_mail {
 C<mail>, because the postfix of each answers port 25 of the machine, and a
 machine has one postfix.  See L<Provisioner::Recipe>.
 
+Returns the one name, as a list.
+
+    my @names = $recipe->exclusive_on_machine_with();
+
 =cut
 
 sub exclusive_on_machine_with {
     return qw{mail};
 }
 
-=head2 $port = $recipe->relay_port_of($relay)
+=head2 relay_port_of(relay)
 
 The C<relay_port> of the guest C<$relay>, from its configuration, or the
 default when it sets none.
+
+=over 4
+
+=item relay - Str - the domain of the relay guest
+
+=back
+
+Returns Int, the port.
+
+    my $port = $recipe->relay_port_of('relay.test.test');
 
 =cut
 
@@ -283,10 +326,20 @@ sub relay_port_of {
     return relay_port( %{ Provisioner::Cookbook->domain_config($relay)->{mailrelay} // {} } );
 }
 
-=head2 $path = $recipe->password_path($domain)
+=head2 password_path(domain)
 
 Where the password of the login that this guest issues for C<$domain> is, on
 the guest of C<$domain>.
+
+=over 4
+
+=item domain - Str - the domain of the client
+
+=back
+
+Returns Str, the path.
+
+    my $path = $recipe->password_path('client.test.test');
 
 =cut
 
@@ -314,6 +367,11 @@ C<< names => \@names >>.  The command registers the port of each service as
 a port of its own, mapped to the port of the guest.  See L</Mail clients>.
 
 =back
+
+Returns a map from each path to how to issue it, as a list of paths and hash
+references.
+
+    my %files = $recipe->registration_files( $grant, address => '192.0.2.10', upstreams => \%upstreams, names => ['client.test.test'] );
 
 =cut
 
@@ -357,6 +415,11 @@ The removal of the login, the route in, the routes of the mail clients and the
 ban key of the client of C<$grant>, by F<scripts/relay_client> C<mail release>,
 as C<revoke_grant> in L<Provisioner::Recipe> says.
 
+Returns C<command>, C<doing>, C<done> and C<stays>, as a list of key and value
+pairs.
+
+    my %revocation = $recipe->revoke_grant( { client => 'client.test.test', guest => 'relay.test.test' } );
+
 =cut
 
 sub revoke_grant {
@@ -391,6 +454,11 @@ sub template_files {
 The drop-in that keeps F</etc/hosts> out of the answers of DNS.  The
 C<resolver> target installs it before any recipe target.  See L</SPF> and
 L<Provisioner::Recipe/resolver_files>.
+
+Returns a map from the file in the configuration directory to its name in
+F</etc/systemd/resolved.conf.d>, as a list.
+
+    my %files = $recipe->resolver_files();
 
 =cut
 

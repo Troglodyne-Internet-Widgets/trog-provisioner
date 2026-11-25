@@ -39,6 +39,16 @@ the only authoritative server for its own domain.  Any other resolver has no
 answer for that zone.  L<Provisioner::Recipe::letsencrypt> writes an
 C<_acme-challenge> record through the local API and must then see it served.
 
+=head2 template_files()
+
+The drop-in of systemd-resolved that turns the stub off.  It ignores the loaded
+recipes that the caller passes.
+
+Returns a map from the template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -57,6 +67,8 @@ C<modules> includes C<pdns>, C<127.0.0.1> goes first, unless the list already
 has it.
 
 Dies if the list is empty.
+
+    my %enriched = $recipe->enrich( resolvers => '192.0.2.1, 192.0.2.2', modules => ['pdns'] );
 
 =cut
 
@@ -83,6 +95,11 @@ sub enrich {
 The drop-in that turns the stub off and names the resolvers, which the
 C<resolver> target installs before any recipe target.  See
 L<Provisioner::Recipe/resolver_files>.
+
+Returns the map from the file in the configuration directory to its name in
+F</etc/systemd/resolved.conf.d>, as a list of pairs.
+
+    my %files = $recipe->resolver_files();
 
 =cut
 

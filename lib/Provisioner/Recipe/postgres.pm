@@ -59,6 +59,10 @@ is whole, C<touch> its C<complete> file.
 5432, where the packaged configuration listens, on 127.0.0.1.  It listens on
 C<localhost>, and on Ubuntu that name is only 127.0.0.1.
 
+Returns the claim, as a list.
+
+    my @claims = $recipe->listens();
+
 =cut
 
 sub listens {
@@ -94,6 +98,11 @@ sub template_files {
 
 C<cron>, which installs F<postgres-backup.cron> as F</etc/cron.d/postgres-backup>.
 
+Returns a map from the name of the required recipe to a sub that gives its
+options, as a list of pairs.
+
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -104,6 +113,9 @@ sub required_recipes {
 
 Returns the backup script, so the guest takes a fresh dump just before the fetch.
 The nightly dump is up to a day old, and a rebuild loses what changed since.
+It ignores both arguments.
+
+    my @commands = $recipe->remote_prepare( '/opt/hosts', 'test.test' );
 
 =cut
 
@@ -116,6 +128,9 @@ sub remote_prepare {
 Returns the backup directory on the guest, mapped to C<postgres/> in the data
 directory.  These dumps are the only thing in the cluster that nothing here can
 make again.  See L</What a rebuild keeps> for what imports them.
+It ignores both arguments.
+
+    my %files = $recipe->remote_files( '/opt/hosts', 'test.test' );
 
 =cut
 
@@ -134,6 +149,10 @@ sub tests {
 
 C<apt.postgresql.org>, the apt repository of the PostgreSQL project.
 
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -144,6 +163,10 @@ sub fetch_hosts {
 
 The classes for that apt repository.  See C<apt_repo_classes> in
 L<Provisioner::Recipe>.
+
+Returns what C<apt_repo_classes> returns for that host, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

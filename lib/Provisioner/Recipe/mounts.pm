@@ -151,6 +151,17 @@ sub remote_mountpoints {
     return map { $_->{mountpoint} } ( grep { $_->{pool} eq 'dir' } @{ $v{disks} // [] } ), @{ $v{fuse} // [] };
 }
 
+=head2 @files = $recipe->template_files(@recipes)
+
+The units of the fuse mounts and the list of the other mounts.  It ignores
+C<@recipes>, the loaded recipes.
+
+Returns a map from each template to the file that it renders, as a list.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ( $self, @recipes ) = @_;
 
