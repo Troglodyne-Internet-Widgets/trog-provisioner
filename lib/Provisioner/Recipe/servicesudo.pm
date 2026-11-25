@@ -120,6 +120,10 @@ goes into a sudoers line and into the name of a file in F<sudoers.d>, and sudo
 skips a file whose name has a dot in it.  C<user> is a global, which the schema
 of a recipe does not declare a second time, so the check is here.
 
+Returns the options unchanged, as a list of key and value pairs.
+
+    my %opts = $recipe->enrich( %opts, domain => 'example.test', user => 'someservice' );
+
 =cut
 
 sub enrich {
@@ -132,17 +136,27 @@ sub enrich {
     return %opts;
 }
 
-=head2 @commands = unit_commands(@units)
+=head2 unit_commands(units)
 
 A function, not a method.  The commands that let the service user restart each
-systemd unit of C<@units> and ask for its status:
-C</usr/bin/systemctl restart $unit> and C</usr/bin/systemctl status $unit>.
+systemd unit of C<@units> and ask for its status: C</usr/bin/systemctl restart
+$unit> and C</usr/bin/systemctl status $unit>.
 
 A recipe that installs a unit that runs as C<user> requires this recipe with
 these commands for its own units, and for no other.  Name each unit with its
 suffix, such as C<example.test.service>.  sudo matches the arguments as they
 are written, so a program that calls sudo writes the unit the same way, and
 C</usr/bin/systemctl> by its full path.
+
+=over 4
+
+=item @units - Str - the name of each unit, with its suffix
+
+=back
+
+Returns two commands for each unit, as a list of strings.
+
+    my @commands = Provisioner::Recipe::servicesudo::unit_commands('example.test.service');
 
 =cut
 

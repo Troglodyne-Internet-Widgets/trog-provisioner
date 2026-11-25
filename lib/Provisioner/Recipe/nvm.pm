@@ -64,6 +64,11 @@ L<https://github.com/nvm-sh/nvm/releases> lists the available versions.
 
 =back
 
+Returns the schema, as a list of key and value pairs.  It declares only
+C<nvm_version>.  C<user> is a global.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -79,6 +84,10 @@ sub args {
 =head3 template_files
 
 F<nvm.bashrc>, copied as it is, because it has no variables.
+
+Returns the map from the template to the file, as a list of pairs.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -96,6 +105,10 @@ The host of the nvm installer, and the host that nvm gets node from.
 
 Only this list names nodejs.org.  C<nvm install --lts> fetches from it, so no
 template in this recipe contains that URL.
+
+Returns the two host names, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 

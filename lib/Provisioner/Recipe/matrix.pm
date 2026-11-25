@@ -179,6 +179,17 @@ port 443 that serves the page from F<www> and proxies the rest to synapse on
 C<127.0.0.1:8008>.  nginx does not cache the C<_matrix> and C<_synapse/client>
 paths.
 
+=over 4
+
+=item opts - HASH - the options of the recipe, with C<domain>
+
+=back
+
+Returns each required recipe mapped to a sub that returns the options for it,
+as a list of pairs.
+
+    my %required = $recipe->required_recipes( domain => 'test.test', server_name => 'chat.test.test' );
+
 =cut
 
 sub required_recipes {
@@ -221,6 +232,10 @@ sub required_recipes {
 
 synapse on 8008, on 127.0.0.1 and on ::1, for clients and for federation both.
 
+Returns the two claims, as a list of strings.
+
+    my @claims = $recipe->listens();
+
 =cut
 
 sub listens {
@@ -233,6 +248,16 @@ sub listens {
 C<nginx> gives 443.  Behind a relay, also the port where the relay passes 8448
 through.  See L</Behind a relay>.  The ufw profile C<matrix-homeserver> opens
 the same ports.
+
+=over 4
+
+=item opts - HASH - the options of the recipe, with C<domain>
+
+=back
+
+Returns each port mapped to its limit, as a list of pairs.
+
+    my %limits = $recipe->rate_limits( domain => 'test.test' );
 
 =cut
 
@@ -249,6 +274,10 @@ it federates under.  It cannot hold two of them.  The public base URL, the
 database and the media store all follow from it.  So a second domain on the
 guest does not join this homeserver.  It replaces it.
 
+Returns Bool, always false.
+
+    my $bool = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
@@ -257,6 +286,10 @@ sub is_multi_tenant { return 0 }
 
 C<matrix>, which synapse is reached at, and C<admin.matrix> and
 C<element.matrix>, which the admin interface and Element are reached at.
+
+Returns the three names, as a list.
+
+    my @names = $recipe->subdomains();
 
 =cut
 
@@ -267,6 +300,10 @@ sub subdomains {
 =head2 %args = $recipe->args()
 
 The configuration that this recipe takes.  C<bin/recipes> lists it.
+
+Returns the schema, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -336,8 +373,19 @@ C<matrix.$domain>, and C<server_name> without a relay.  Behind one, the file
 of the proxy that the vhost includes names C<server_name>, so the vhost does
 not name it a second time.
 
+=over 4
+
+=item opts - HASH - the validated options of the recipe, with C<domain> and
+C<server_name>
+
+=back
+
+Returns the options with those keys added, as a list of key and value pairs.
+
 Dies when C<server_name> is the domain, C<www.$domain> or an alias of the
 domain, because the vhost of the domain answers for those.
+
+    my %vars = $recipe->enrich( domain => 'test.test', server_name => 'chat.test.test' );
 
 =cut
 
@@ -358,7 +406,12 @@ sub enrich {
 
 =head2 %files = $recipe->template_files()
 
-A map from each template to the name of the file that it renders.
+A map from each template to the name of the file that it renders.  It
+ignores the loaded recipes that the caller passes.
+
+Returns the map, as a list of pairs.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -384,6 +437,10 @@ sub template_files {
 C<matrix>, the directory in the data directory of the domain where the salvaged
 homeserver lands.  C<restores> puts it back from there.
 
+Returns the name C<matrix>, as a list.
+
+    my @dirs = $recipe->datadirs();
+
 =cut
 
 sub datadirs {
@@ -400,6 +457,19 @@ The signing key is in the format that C<signedjson> writes.  That is the
 algorithm, a short version tag that names this key among any others the server
 had, and 32 seed bytes in base64 without padding.  It is made here, not on the
 guest, because a guest that makes its own makes a new one on every rebuild.
+
+=over 4
+
+=item install_dir - Str - the install directory of the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns a map from the path of each secret on the guest to its description,
+with C<ref>, C<generate>, C<owner> and C<mode>, as a list of pairs.
+
+    my %files = $recipe->guest_secrets( '/srv/domains', 'test.test' );
 
 =cut
 
@@ -441,6 +511,10 @@ The key lives under F</etc/matrix-synapse>, which is not salvaged.  A guest buil
 by an older version of this recipe can still have a copy in its domain
 directory, and this keeps a rebuild from fetching it.
 
+Returns the pattern, as a list.
+
+    my @patterns = $recipe->remote_skip();
+
 =cut
 
 sub remote_skip {
@@ -451,6 +525,17 @@ sub remote_skip {
 
 Puts the salvaged homeserver back at C<$install_dir/matrix.$domain>.  That is
 the database and the media store.
+
+=over 4
+
+=item opts - HASH - the options of the recipe, with C<install_dir> and
+C<domain>
+
+=back
+
+Returns the destination mapped to where it comes from, as a list of one pair.
+
+    my %restores = $recipe->restores( install_dir => '/srv/domains', domain => 'test.test' );
 
 =cut
 
@@ -472,6 +557,19 @@ synapse starts.
 The admin interface is not salvaged.  The fragment downloads it from its GitHub
 release on every provision.
 
+=over 4
+
+=item install_dir - Str - the install directory of the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns the path on the guest mapped to the path in the data directory, as a
+list of one pair.
+
+    my %path_map = $recipe->remote_files( '/srv/domains', 'test.test' );
+
 =cut
 
 sub remote_files {
@@ -485,6 +583,10 @@ sub remote_files {
 =head2 @tests = $recipe->tests()
 
 F<matrix.tt>, the test that runs on the guest.
+
+Returns the name of the test, as a list.
+
+    my @tests = $recipe->tests();
 
 =cut
 
@@ -502,6 +604,10 @@ login with a 403, and its access log names the address that nginx forwarded:
 After three of those in a row, synapse answers with a 429 of its own, and the
 jail counts that too.  A host that stopped at the 429 would never reach the
 ban.  fail2ban ships no filter for synapse.
+
+Returns the name of the jail mapped to its settings, as a list of one pair.
+
+    my %jails = $recipe->jails();
 
 =cut
 
@@ -523,6 +629,10 @@ C<packages.matrix.org>, which serves the synapse package.  Also GitHub, which
 serves the ketesa admin interface as a release.  See C<github_release_hosts> in
 L<Provisioner::Recipe>.
 
+Returns the hosts, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -535,6 +645,10 @@ sub fetch_hosts {
 The classes for the apt repository at C<packages.matrix.org>, and the classes
 for GitHub.  L<Provisioner::Recipe> keeps both, so that each recipe does not
 carry its own copy.
+
+Returns the classes, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

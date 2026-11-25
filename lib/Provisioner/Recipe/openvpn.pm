@@ -273,6 +273,11 @@ L<Provisioner::Recipe::logshipper> forwards the same lines.  A line in the
 journal starts with the host name and the unit, and so the expression is not
 anchored at the start.
 
+Returns the one jail and its settings, as a list of a name and a hash
+reference.
+
+    my %jails = $recipe->jails( port => 1194, proto => 'udp' );
+
 =cut
 
 sub jails {
@@ -300,6 +305,10 @@ the domain that built it.
 A second domain does not get a tunnel of its own.  It must issue from the CA of
 the first domain, or replace that CA.  A new CA stops every client that already
 has a certificate from connecting.
+
+Returns a Bool, always false.
+
+    my $bool = $recipe->is_multi_tenant();
 
 =cut
 
@@ -398,16 +407,30 @@ my sub within ( $block, $net ) {
     return $overlap == $IP_A_IN_B_OVERLAP || $overlap == $IP_IDENTICAL;
 }
 
-=head2 $range = dynamic_pool($subnet, $cidr, @blocks)
+=head2 dynamic_pool(subnet, cidr, blocks)
 
 The part of the VPN subnet C<$subnet/$cidr> that the server hands out to a
-client without an address of its own, as C<< { start => $ip, end => $ip } >>.
-That is every host address of the subnet outside the CIDR blocks C<@blocks>,
-except the first, which is the server.
+client without an address of its own.  That is every host address of the subnet
+outside the CIDR blocks C<@blocks>, except the first, which is the server.
 
-Dies if a block is not inside the subnet, or holds the network address or the
-address of the server, or if the blocks leave no address, or leave two ranges,
-because C<ifconfig-pool> takes one.
+=over 4
+
+=item subnet - Str - the network address of the VPN subnet
+
+=item cidr - Int - the prefix length of the VPN subnet
+
+=item @blocks - Str - each CIDR block that a bin of static addresses takes
+
+=back
+
+Returns HashRef, the range, with C<start> and C<end>, its first and last
+address.
+
+Dies when a block is not inside the subnet, or holds the network address or the
+address of the server, or when the blocks leave no address, or leave two
+ranges, because C<ifconfig-pool> takes one.
+
+    my $range = Provisioner::Recipe::openvpn::dynamic_pool( '10.8.0.0', 24, '10.8.0.128/25' );
 
 =cut
 
@@ -469,12 +492,20 @@ Dies if any other bin has an address in C<subnet>.  A bin with another C<via>
 there means that two servers share the subnet.  A bin without C<via> there
 holds addresses that this server also hands out.
 
+Returns the options, as a list of key and value pairs.
+
+    my %opts = $recipe->enrich( domain => 'vpn.test.test', subnet => '10.8.0.0', netmask => '255.255.255.0' );
+
 =cut
 
 =head2 %required = $recipe->required_recipes(%opts)
 
 Requires C<cron>, which installs F<openvpn-refresh-crl.cron> and
 F<openvpn-ca-expiry.cron> under F</etc/cron.d>.
+
+Returns C<cron> and a code reference that gives its options, as a list.
+
+    my %required = $recipe->required_recipes( domain => 'vpn.test.test' );
 
 =cut
 
@@ -566,15 +597,29 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->issue_grant($grant, address => $address, server => $name)
+=head2 %files = $recipe->issue_grant($grant, %terms)
 
 The configuration that the server of C<$grant> issues for its client, at the
-static C<$address>, as C<issue_grant> in L<Provisioner::Recipe> says.
-C<$address> is an address, or C<auto> for the one that this server chooses:
-see L</Static addresses>.  C<$name>
-is the server block that the client connects to, as C<openvpn-client-config>
-takes it.  The file lands at F</etc/openvpn/client/CLIENT/issued.ovpn.b64>, in
-base64, because an issued secret is one line.
+static C<address>, as C<issue_grant> in L<Provisioner::Recipe> says.  The file
+lands at F</etc/openvpn/client/CLIENT/issued.ovpn.b64>, in base64, because an
+issued secret is one line.
+
+=over 4
+
+=item grant - HashRef - the grant, with C<client> and C<guest>
+
+=item address - Str - an address, or C<auto> for the one that this server
+chooses: see L</Static addresses>
+
+=item server - Str - the server block that the client connects to, as
+C<openvpn-client-config> takes it
+
+=back
+
+Returns the path of the file and how to issue it, as a list of a path and a
+hash reference.
+
+    my %files = $recipe->issue_grant( $grant, address => 'auto', server => 'vpn.test.test' );
 
 =cut
 
@@ -601,6 +646,11 @@ C<revoke_grant> in L<Provisioner::Recipe> says.  If the server is not up, the
 revocation says to revoke the client there by hand before another one gets the
 address, because two clients with one address cut each other off.
 
+Returns C<command>, C<doing>, C<done> and C<stays>, as a list of key and value
+pairs.
+
+    my %revocation = $recipe->revoke_grant( { client => 'client.test.test', guest => 'vpn.test.test' } );
+
 =cut
 
 sub revoke_grant {
@@ -613,6 +663,18 @@ sub revoke_grant {
         stays   => "the certificate and the address of $client stay on it.  Run openvpn-revoke-client $client there before another client gets the address",
     );
 }
+
+=head2 @files = $recipe->template_files()
+
+The configuration of the server, its scripts and cron files, the variables of
+easy-rsa and the ufw application profile.  It ignores the loaded recipes that
+the caller passes.
+
+Returns a map from each template to the file that it renders, as a list.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ($self) = @_;
@@ -642,6 +704,10 @@ static address.  It prints the name of the client, a tab, and the address, one
 client to a line.  L<Provisioner::IPPool> runs it to learn the address of a
 client, because this server is the only record of it.
 
+Returns Str, the command.
+
+    my $command = $recipe->static_clients_command();
+
 =cut
 
 sub static_clients_command {
@@ -666,6 +732,10 @@ sub restores {
 
 Returns C<openvpn-stage-pki>, so that the fetch gets the PKI as it is now and
 not as it was at the last provision.
+
+Returns the one command, as a list.
+
+    my @commands = $recipe->remote_prepare( '/path/to/install', 'vpn.test.test' );
 
 =cut
 

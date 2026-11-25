@@ -673,10 +673,15 @@ sub args {
     );
 }
 
-=head2 %field = $class->trusted_clients_arg()
+=head2 trusted_clients_arg
 
 The schema of C<trusted_clients>, a new copy at each call.
-L<Provisioner::Recipe::mailrelay> takes the same field.  See L</Trusted clients>.
+L<Provisioner::Recipe::mailrelay> takes the same field.  See L</Trusted
+clients>.
+
+Returns the schema of the field, as a list of key and value pairs.
+
+    my %field = Provisioner::Recipe::mail->trusted_clients_arg();
 
 =cut
 
@@ -694,6 +699,11 @@ sub trusted_clients_arg {
 
 C<trusted_clients>, as one string, because the global half writes the checks
 of port 25 for the whole machine.  See L<Provisioner::Recipe/machine_wide>.
+
+Returns C<trusted_clients> and the sorted addresses joined with commas, as a
+list of one key and one value.
+
+    my %settings = $recipe->machine_wide( trusted_clients => ['192.0.2.25'] );
 
 =cut
 
@@ -718,6 +728,10 @@ ManageSieve on 4190, on 127.0.0.1, and on ::1 unless C<ipv6> is off.  A claim
 on loopback opens nothing in the firewall, and dovecot binds the port on no
 other address, so no client outside the guest reaches it.
 
+Returns the claims, as a list.
+
+    my @claims = $recipe->listens( ipv6 => 1 );
+
 =cut
 
 sub listens {
@@ -730,11 +744,15 @@ sub listens {
     );
 }
 
-=head2 %ports = $recipe->proxied_ports()
+=head2 proxied_ports
 
 The port where this guest takes each service of the mail clients from a mail
-relay, with the PROXY protocol: C<imaps>, C<submissions> and C<pop3s>.  See
+relay, with the PROXY protocol: C<imaps>, C<submissions> and C<pop3s>.	See
 L</Sending through a mail relay>.
+
+Returns a map from each service to its port, as a list.
+
+    my %ports = $recipe->proxied_ports();
 
 =cut
 
@@ -748,6 +766,11 @@ The jails that fail2ban ships for postfix and dovecot.  They ban a host whose
 logins to SMTP, IMAP or POP fail too often, and read both from the journal.
 The dovecot jail allows ten matches.  L</The settings of a mail client> says
 why.
+
+Returns a map from each jail to its settings, as a list of names and hash
+references.
+
+    my %jails = $recipe->jails();
 
 =cut
 
@@ -765,6 +788,10 @@ and C<autoconfig>, which F<mail.autodiscover_vhost.tt> answers for so a client
 can find its own settings.  That vhost is why this recipe requires nginx, and
 it lists the two names in the C<sites> of nginx.
 
+Returns the three names, as a list.
+
+    my @names = $recipe->subdomains();
+
 =cut
 
 sub subdomains {
@@ -776,6 +803,10 @@ sub subdomains {
 C<mail.DOMAIN>, which the MX and most of the SRV records name, and
 C<autodiscover.DOMAIN>, which the SRV record of Autodiscover names.  See
 L<Provisioner::Recipe>.
+
+Returns the two names, as a list.
+
+    my @names = $recipe->addressed_names( domain => 'test.test' );
 
 =cut
 
@@ -791,6 +822,10 @@ the records that point a mail client at its settings, an SRV record for each
 port that a client sends or reads mail on, and C<dkim_records>.  See L<Provisioner::Recipe>.
 The SPF policy passes the address of the domain and of its MX, which is the
 address of a mail relay where the domain has one.
+
+Returns the records, as a list of hash references.
+
+    my @records = $recipe->dns_records( domain => 'test.test' );
 
 =cut
 
@@ -811,10 +846,20 @@ sub dns_records {
     );
 }
 
-=head2 $ref = $recipe->dkim_key_ref($domain)
+=head2 dkim_key_ref(domain)
 
 Where the secret store keeps the DKIM key of C<$domain>, which signs its
-outbound mail.  See C<guest_secrets>.
+outbound mail.	See C<guest_secrets>.
+
+=over 4
+
+=item domain - Str - the mail domain
+
+=back
+
+Returns Str, the reference into the secret store.
+
+    my $ref = $recipe->dkim_key_ref('test.test');
 
 =cut
 
@@ -823,12 +868,22 @@ sub dkim_key_ref {
     return "secret:mail/$domain-dkim-key/password";
 }
 
-=head2 @records = $recipe->dkim_records($domain)
+=head2 dkim_records(domain)
 
 The TXT record of the public half of the DKIM key of C<$domain>, once for each
 selector of F<mail.opendkim-keytable.tt>, which names the key under both.  Its
 match is C<v=DKIM1>, so that a new key replaces the old one.  None where
 C<held> in L<Trog::Secrets> has no key, as in a run that opened no store.
+
+=over 4
+
+=item domain - Str - the mail domain
+
+=back
+
+Returns the records, as a list of hash references, or an empty list.
+
+    my @records = $recipe->dkim_records('test.test');
 
 =cut
 
@@ -841,11 +896,26 @@ sub dkim_records {
     return map { { type => 'TXT', name => "$_._domainkey.$domain", content => $record, match => 'v=DKIM1' } } qw{default mail};
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 %files = $recipe->guest_secrets($install_dir, $domain)
 
 The DKIM key of the domain, which opendkim signs with.  It comes from the
 secret store, so a rebuild keeps it, and it never goes into the salvage of the
-guest.  The store makes it the first time: an RSA key of 2048 bits.
+guest.  The store makes it the first time: an RSA key of 2048 bits.  It takes
+no options.
+
+=over 4
+
+=item install_dir - Str - the install directory of the domain, which it does
+not use
+
+=item domain - Str - the mail domain
+
+=back
+
+Returns the path of the key on the guest and how to get it, as a list of a path
+and a hash reference.
+
+    my %files = $recipe->guest_secrets( '/path/to/install', 'test.test' );
 
 =cut
 
@@ -869,6 +939,10 @@ sub guest_secrets {
 
 True.  See L<Provisioner::Recipe>.
 
+Returns a Bool, always true.
+
+    my $bool = $recipe->sends_mail();
+
 =cut
 
 sub sends_mail {
@@ -880,6 +954,13 @@ sub sends_mail {
 When C<relay.host> is a mail relay of this installation, the login of
 C<$domain> on that guest, as C<grants> in L<Provisioner::Recipe> says.  See
 L</Sending through a mail relay>.
+
+Dies when C<relay.host> is a guest of this installation that runs no
+mailrelay, or when it runs mailrelay and C<relay.port> or C<relay.to> is set.
+
+Returns the grant as a list of one hash reference, or an empty list.
+
+    my @grants = $recipe->grants( 'test.test', relay => { host => 'relay.test.test' } );
 
 =cut
 
@@ -914,6 +995,10 @@ L<Provisioner::Recipe::mailrelay/Mail clients>.
 
 Dies when that guest has no address in the address pool.
 
+Returns C<address>, C<upstreams> and C<names>, as a list of key and value pairs.
+
+    my %terms = $recipe->grant_terms( { client => 'test.test', guest => 'relay.test.test' } );
+
 =cut
 
 sub grant_terms {
@@ -930,6 +1015,18 @@ sub grant_terms {
         names     => [ $domain, "mail.$domain" ],
     );
 }
+
+=head2 @files = $recipe->template_files(@recipes)
+
+The configuration of postfix, dovecot, opendkim, opendmarc, amavis,
+spamassassin and unbound, the files that tell a mail client its settings, and
+the files for a mail relay.  It ignores C<@recipes>, the loaded recipes.
+
+Returns a map from each template to the file that it renders or copies, as a list.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ( $self, @recipes ) = @_;

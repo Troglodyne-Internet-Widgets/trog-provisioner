@@ -71,6 +71,10 @@ sub tests {
 C<static.rust-lang.org>, which rustup downloads a toolchain from.  No template
 here holds that URL: rustup knows it, and this is the only thing that says so.
 
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {

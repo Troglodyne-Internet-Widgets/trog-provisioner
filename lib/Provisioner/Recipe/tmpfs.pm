@@ -77,6 +77,10 @@ specifiers in C<Options=>, and a single C<%> there starts one.
 
 =back
 
+Returns the schema, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
+
 =cut
 
 # A size as tmpfs takes it: bytes, a percent of memory, or k, m or g.

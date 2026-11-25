@@ -111,11 +111,26 @@ sub required_recipes {
 C<webmail>, which is the only name this is served at:
 F<roundcube.nginx.tt> answers for C<webmail.$domain> and nothing else.
 
+Returns the one name, as a list.
+
+    my @names = $recipe->subdomains();
+
 =cut
 
 sub subdomains {
     return qw{webmail};
 }
+
+=head2 @files = $recipe->template_files(@modules)
+
+The configuration of roundcube, its php-fpm pool and its nginx vhost.  It
+ignores C<@modules>, the loaded recipes.
+
+Returns a map from each template to the file that it renders, as a list.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ( $class, @modules ) = @_;
@@ -178,6 +193,11 @@ to the webmail fail too often.  Roundcube logs a failed login to the journal
 from php-fpm, which runs as the service user, so the jail reads every journal
 and not only the system one.  See L<Provisioner::Recipe/jails>.
 
+Returns the one jail and its settings, as a list of a name and a hash
+reference.
+
+    my %jails = $recipe->jails();
+
 =cut
 
 sub jails {
@@ -188,6 +208,10 @@ sub jails {
 
 GitHub, which serves roundcube's release tarballs: see C<github_release_hosts>
 in L<Provisioner::Recipe>.
+
+Returns the hosts, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 
@@ -200,6 +224,10 @@ sub fetch_hosts {
 
 The classes for GitHub.  C<Provisioner::Recipe> holds them, so that the three
 recipes that download a release do not each carry a copy.
+
+Returns the classes, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 

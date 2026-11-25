@@ -212,6 +212,10 @@ the recipes on the guest name.
 
 =back
 
+Returns the schema of these settings, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
+
 =cut
 
 # A size as make_swapfile takes it: bytes, a percent of memory, or K, M or G.
@@ -281,6 +285,10 @@ L<Provisioner::Recipe/oom_protect>, and to C<oomd_omit> the units that each
 names in L<Provisioner::Recipe/oomd_omit>.  Takes out of C<oomd_omit> each unit
 that is in C<protect>, because two drop-ins for one unit would disagree.
 
+Returns C<%opts> with the new C<protect> and C<oomd_omit>.
+
+    my %enriched = $recipe->enrich( modules => [qw{mariadb sshd}], protect => ['dbus.service'], oomd_omit => [] );
+
 =cut
 
 sub enrich {
@@ -300,6 +308,10 @@ sub enrich {
 Every setting.  The recipe has only a global half, and each setting is a fact
 about the machine.  A list comes back as one string, its members sorted and
 joined with commas.
+
+Returns a map from the name of each setting to its value, as a list of pairs.
+
+    my %settings = $recipe->machine_wide( swap_size => '2G' );
 
 =cut
 

@@ -113,6 +113,10 @@ otherwise claim on every address.  redis reads C<bind> as a list of addresses.
 A C<-> before one means that redis starts without it, and C<*> and C<::*> are
 every address.
 
+Returns the claims, one per address, as a list.
+
+    my @claims = $recipe->listens( port => 6379, bind => '127.0.0.1 ::1' );
+
 =cut
 
 sub listens {

@@ -136,6 +136,19 @@ sub enrich {
     return %opts;
 }
 
+=head2 template_files()
+
+The SQL that secures the server, the drop-in of the server, the C<.my.cnf>
+files, and the backup and restore scripts with the cron file of the backup.
+It ignores the loaded recipes that the caller passes.
+
+Returns a map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
 
@@ -154,6 +167,11 @@ sub template_files {
 
 C<cron>, which installs F<mariadb-backup.cron> as F</etc/cron.d/mariadb-backup>.
 
+Returns a map from the name of the required recipe to a sub that gives its
+options, as a list of pairs.
+
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -164,7 +182,9 @@ sub required_recipes {
 
 Returns C<mariadb-backup.sh>, which the guest runs before the fetch.  The cron
 runs it at 2:30 each night, so without this call a rebuild loses every write
-since then.
+since then.  It ignores both arguments.
+
+    my @commands = $recipe->remote_prepare( '/opt/hosts', 'test.test' );
 
 =cut
 
@@ -178,6 +198,11 @@ Salvages F</var/backups/mysql/> into C<mysql/> in the data directory.  Those
 dumps are the only state of this server that nothing here can regenerate.
 C<mariadb-restore.sh> imports them again.  See L</What a rebuild keeps> and
 L<Provisioner::Recipe/Naming a path is not enough>.
+
+Returns the map from the path on the guest to its place in the data
+directory, as a list of pairs.  It ignores both arguments.
+
+    my %path_map = $recipe->remote_files( '/opt/hosts', 'test.test' );
 
 =cut
 
@@ -199,6 +224,10 @@ third-party repository, so the cache serves it, not the mirrorlist of
 L<Provisioner::Recipe::aptmirror>.  The signing key comes from C<mariadb.org>,
 which F<bin/new_config> fetches, and the guest does not.
 
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -208,6 +237,10 @@ sub fetch_hosts {
 =head2 @classes = $recipe->cache_classes()
 
 The apt classes for C<archive.mariadb.org>, where the packages come from.
+
+Returns what C<apt_repo_classes> returns for that host, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 
@@ -220,6 +253,10 @@ sub cache_classes {
 
 C<mariadb.service>.  InnoDB has a reputation for databases that do not
 recover after the kernel OOM killer kills it.
+
+Returns the unit name, as a list.
+
+    my @units = $recipe->oom_protect();
 
 =cut
 

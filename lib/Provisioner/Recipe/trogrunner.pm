@@ -370,6 +370,11 @@ The closure gets the configuration without the schema defaults.  So it puts the
 defaults of this recipe under it, because C<checkout_dir> has one.  The perl
 recipe validates what it gets.
 
+Returns a map from the name of the required recipe to the sub that gives its
+options, as a list of pairs.
+
+    my %required = $recipe->required_recipes();
+
 =cut
 
 sub required_recipes {
@@ -402,6 +407,10 @@ False.  A machine has one F</etc/trog-provisioner>, and here it is a symlink
 into the directory of this domain.  A second domain does not get its own
 runner.  It points that link at itself, and takes the address pool in
 F<ips.db> with it.
+
+Returns Bool, always false.
+
+    my $bool = $recipe->is_multi_tenant();
 
 =cut
 
@@ -544,6 +553,10 @@ C<yaml>, which dumps a copy of a structure with every C<store:GROUP/TITLE/FIELD>
 string in it, at any depth, written back as C<secret:GROUP/TITLE/FIELD>.  See
 L</SECRETS IN recipes> for the reason.
 
+Returns the name of the formatter and the formatter, as a list of pairs.
+
+    my %fmts = $recipe->formatters();
+
 =cut
 
 sub formatters {
@@ -580,6 +593,10 @@ path under the domain directory, or if a hypervisor URI has no host or is
 remote without ssh.  Also dies if a hypervisor asks for an C<account> and its
 URI is not a session, or gives a C<partition> with a session URI.  See
 L</ACCOUNTS>.
+
+Returns the options, with what it filled in.
+
+    my %enriched = $recipe->enrich(%opts);
 
 =cut
 
@@ -705,16 +722,23 @@ sub enrich {
     return %opts;
 }
 
-=head3 %grant = Provisioner::Recipe::trogrunner->grant($block)
+=head2 grant(block)
 
 What the C<trogrunner> block of a domain asks for as hypervisor access:
-C<access>, C<restrict> and C<hypervisors>.  Returns an empty list if it asks
-for none, which is the default.
+C<access>, C<restrict> and C<hypervisors>.
 
 It reads the defaults from C<args()>, because a second copy of them can drift.
 
-Takes the block as written, not a validated one, because L</outside_steps>
-does, for the reason that it gives.
+=over 4
+
+=item block - HashRef - the block as written, not a validated one, because L</outside_steps> takes it so, for the reason that it gives.  Anything that is not a hash reference asks for nothing.
+
+=back
+
+Returns the request, as a list of key and value pairs, or an empty list when
+the block asks for no access, which is the default.
+
+    my %grant = Provisioner::Recipe::trogrunner->grant( { hypervisor_access => 'full', hypervisors => {} } );
 
 =cut
 
@@ -742,18 +766,37 @@ my sub key_ref ($domain) { return "secret:trogrunner/$domain-hypervisor-key/pass
 # store.
 my sub pub_file (%context) { return "$context{domain_dir}/hypervisor-key.pub" }
 
-=head3 $line = Provisioner::Recipe::trogrunner->key_line($domain, $restrict, %context)
+=head2 key_line(domain, restrict, secrets, dryrun)
 
-The F<authorized_keys> line of the runner of C<$domain>: the public half of
-its key in C<$context{secrets}>, with C<from=> and the address that the domain
-holds in the pool when C<$restrict> is true.  C<%context> is the context of a
-step, as L<Trog::Steps> gives it.  It writes the public half to
-F<hypervisor-key.pub> in C<$context{domain_dir}>.
+The F<authorized_keys> line of the runner of C<$domain>: the public half of its
+key in C<$context{secrets}>, with a C<from> option that names the address that
+the domain holds in the pool when C<$restrict> is true.  The other keys of
+C<%context> are the context of a step, as L<Trog::Steps> gives it.  It writes
+the public half to F<hypervisor-key.pub> in C<$context{domain_dir}>.
 
-A dry run has no store, so it reads that file instead, and returns undef when
-there is none.  Dies when the store has no key outside a dry run, or holds
-something that is not a key.  Warns when C<$restrict> is true and the domain
-holds no address, and leaves C<from=> out.
+A dry run has no store, so it reads that file instead.	It warns when
+C<$restrict> is true and the domain holds no address, and leaves out the
+C<from> option.
+
+=over 4
+
+=item domain - Str - the domain of the runner
+
+=item restrict - Bool - whether to restrict the key to the address of the domain
+
+=item secrets - HashRef - the secrets that the store gave, by reference
+
+=item dryrun - Bool - whether this is a dry run, which has no store
+
+=back
+
+Returns Str or Undef, the line, or undef in a dry run when there is no public
+half beside the domain.
+
+Dies when the store has no key outside a dry run, or holds something that is
+not a key.
+
+    my $line = Provisioner::Recipe::trogrunner->key_line( 'test.test', 1, secrets => \%secrets, domain_dir => '/opt/domains/test.test' );
 
 =cut
 
@@ -866,6 +909,21 @@ somebody took the access away.
 
 Takes the block as written, because F<bin/destroy> has a configuration and no
 recipe object.
+
+=over 4
+
+=item domain - Str - the domain of the runner
+
+=item hypervisors - HashRef - the C<hypervisors> entry of the block, by name
+
+=back
+
+Returns the steps, as a list of hash references, as L<Trog::Steps> takes them.
+
+Dies when a hypervisor of the block has no C<libvirt_uri>.  A step that it
+returns can die when it runs, as L<Trog::Steps> says.
+
+    my @steps = Provisioner::Recipe::trogrunner->outside_steps( 'test.test', %block );
 
 =head3 ACCOUNTS
 
@@ -1031,6 +1089,10 @@ root owns, the first C<bin/new_config> on the runner fails with a SQLite
 error.  Because it is under C<install_dir>, the next rebuild salvages the
 database.
 
+Returns the directory, as a list.
+
+    my @dirs = $recipe->datadirs();
+
 =cut
 
 sub datadirs {
@@ -1060,6 +1122,25 @@ The owner is the account that provisions: C<provision_user>, else C<user>,
 else C<admin_user>, as L</THE PROVISIONING ACCOUNT> says.  F<t/guest_secrets.t>
 expects that owner after the build.  A caller that passes none of the three
 gets C<root>, and must use only the paths and the references.
+
+=over 4
+
+=item install_dir - Str - the directory that holds the domains
+
+=item domain - Str - the domain
+
+=item provision_user - Str - optional: the account that provisions
+
+=item user - Str - optional: the service user
+
+=item admin_user - Str - optional: the admin user
+
+=back
+
+Returns a map from the path of the key on the guest to its declaration, as a
+list of pairs, or an empty list without access.
+
+    my %files = $recipe->guest_secrets( '/opt/domains', 'test.test', %opts );
 
 =cut
 
@@ -1094,6 +1175,19 @@ these with C<get_dir>.  An entry that is not a directory makes rsync fail.
 Both paths are always returned, because this is a class method and cannot see
 C<checkout>.  A path that is not on the guest is not an error for the salvage.
 
+=over 4
+
+=item install_dir - Str - the directory that holds the domains
+
+=item domain - Str - the domain
+
+=back
+
+Returns a map from each path on the guest to its place in the data directory,
+as a list of pairs.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'test.test' );
+
 =cut
 
 sub remote_files {
@@ -1117,6 +1211,10 @@ And if every file in a directory is skipped, the directory comes off the guest
 empty.  That looks the same as a failed fetch, and the salvage-gap check
 refuses to rebuild over it.
 
+Returns the names of the files, as a list.
+
+    my @patterns = $recipe->remote_skip();
+
 =cut
 
 sub remote_skip {
@@ -1133,6 +1231,10 @@ GitHub, which serves the checkout that this recipe clones.  Only the host of
 the default is declared, because C<fetch_hosts> is asked of the class without
 a configuration.  A C<repo_url> that points somewhere else goes directly
 upstream.
+
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
 
 =cut
 

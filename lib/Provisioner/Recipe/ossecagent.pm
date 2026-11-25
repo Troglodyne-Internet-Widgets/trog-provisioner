@@ -78,6 +78,10 @@ F<client.keys>.  Only the domain that is its own machine holds the key, as
 C<grants> says, so the build of a tenant does not replace it, and the removal
 of a tenant does not revoke it.  The global half runs once, from the host.
 
+Returns Bool, always 1.
+
+    my $shared = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 1 }
@@ -86,6 +90,10 @@ sub is_multi_tenant { return 1 }
 
 C<manager>, because the one agent of the machine sends to one manager.  See
 L<Provisioner::Recipe/machine_wide>.
+
+Returns the one pair C<< manager => $opts{manager} >>, as a list.
+
+    my %settings = $recipe->machine_wide( manager => 'logs.example.test' );
 
 =cut
 
@@ -100,6 +108,10 @@ C<ossec>.  The package of the agent conflicts with the package of the manager,
 so a machine has one or the other.  The manager reads the logs of its own
 machine from the stream, and needs no agent there.
 
+Returns the name, as a list.
+
+    my @names = $recipe->exclusive_on_machine_with();
+
 =cut
 
 sub exclusive_on_machine_with {
@@ -113,6 +125,10 @@ sub exclusive_on_machine_with {
 =item * C<manager>: the guest that runs the manager, which issues the key.
 
 =back
+
+Returns the schema, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
 
 =cut
 
@@ -135,6 +151,8 @@ Returns C<%opts> with C<manager_ip>, the address that the ip pool assigns
 C<manager>, or empty when the pool assigns it none.  Then the build looks up
 the address of C<manager> on the guest.  Also adds C<agent>, the name of the
 agent, which is the machine of C<domain>.  Dies when C<manager> is a URL.
+
+    my %opts = $recipe->enrich( %opts, domain => 'example.test', manager => 'logs.example.test' );
 
 =cut
 
@@ -161,6 +179,11 @@ no C<manager>, because logshipper adds this recipe.  So the manager is then
 the one that L<Provisioner::Recipe::ossec/manager_of> finds, and the key is
 revoked when the guest goes away.
 
+Returns one hash reference with C<recipe>, C<guest> and C<client>, as a list,
+or the empty list.
+
+    my @grants = $recipe->grants( 'example.test', manager => 'logs.example.test' );
+
 =cut
 
 sub grants {
@@ -176,6 +199,11 @@ sub grants {
 
 C<configd>, which makes F<ossec.conf>.
 
+Returns the map from the name of the recipe to a code reference that gives its
+options, as a list of one pair.
+
+    my %required = $recipe->required_recipes(%opts);
+
 =cut
 
 sub required_recipes {
@@ -186,6 +214,10 @@ sub required_recipes {
 
 The archive of Atomicorp, as for the manager.
 
+Returns the host names, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -195,6 +227,10 @@ sub fetch_hosts {
 =head2 @classes = $recipe->cache_classes()
 
 The archive, as an apt repository.
+
+Returns the classes, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 
@@ -208,6 +244,11 @@ sub cache_classes {
 
 The fragment of F<ossec.conf> and the firewall profile.
 
+Returns the map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
 =cut
 
 sub template_files {
@@ -220,6 +261,8 @@ sub template_files {
 =head2 @tests = $recipe->tests()
 
 Returns the template for the test that runs on the guest.
+
+    my @tests = $recipe->tests();
 
 =cut
 

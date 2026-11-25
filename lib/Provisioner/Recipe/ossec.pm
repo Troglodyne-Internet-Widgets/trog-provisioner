@@ -192,14 +192,28 @@ so L<Provisioner::Recipe::Ubuntu::ossec> installs it with the manager.
 
 False.  There is one manager on the machine, and one collector that feeds it.
 
+Returns Bool, always 0.
+
+    my $shared = $recipe->is_multi_tenant();
+
 =cut
 
 sub is_multi_tenant { return 0 }
 
-=head2 $bool = Provisioner::Recipe::ossec->watches($domain)
+=head2 watches(domain)
 
 True when an OSSEC manager of this installation reads every log line of the
 machine of C<$domain>, as C<manager_of> decides.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Bool, 1 or 0.
+
+    my $watched = Provisioner::Recipe::ossec->watches('example.test');
 
 =cut
 
@@ -208,7 +222,7 @@ sub watches {
     return defined( $class->manager_of($domain) ) ? 1 : 0;
 }
 
-=head2 $collector = Provisioner::Recipe::ossec->manager_of($domain)
+=head2 manager_of(domain)
 
 The collector whose OSSEC manager reads every log line of the machine of
 C<$domain>, or undef when there is none.  There is one when the machine runs
@@ -217,10 +231,21 @@ another domain of this installation.  That domain runs
 L<Provisioner::Recipe::logcollector>, which requires this recipe, so it runs
 the manager.
 
-A selector that is not C<*.*> can leave out a facility that a rule needs, so
-it gives none.  So does a C<host> that is an address or a name outside this
+A selector that is not C<*.*> can leave out a facility that a rule needs, so it
+gives none.  So does a C<host> that is an address or a name outside this
 installation, because nothing here says what runs there.  The collector itself
 ships nowhere, so it has none either.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Str or Undef, the domain of the collector, or undef (the empty list in
+list context) when there is none.
+
+    my $collector = Provisioner::Recipe::ossec->manager_of('example.test');
 
 =cut
 
@@ -252,6 +277,10 @@ C<alerts_port> and C<datasource> moved to L<Provisioner::Recipe::grafanaossec>.
 The schema here refuses them, so a configuration that still names them here
 names the recipe and the field.
 
+Returns the schema, as a list of key and value pairs.
+
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -275,6 +304,11 @@ C<logcollector>, with the copy as text that the manager reads, and
 C<configd>, which makes F<ossec.conf>.  logcollector requires this recipe too.
 See L<Provisioner::Cookbook/Recipes that require each other>.
 
+Returns the map from the name of each recipe to a code reference that gives its
+options, as a list of pairs.
+
+    my %required = $recipe->required_recipes( port => 10514 );
+
 =cut
 
 sub required_recipes {
@@ -294,6 +328,10 @@ sub required_recipes {
 The listener of the manager on C<port>, on 127.0.0.1, and the listener of
 the agents on 1514/udp, on every address.
 
+Returns the two claims, as a list of strings.
+
+    my @claims = $recipe->listens( port => 10514 );
+
 =cut
 
 sub listens {
@@ -312,6 +350,17 @@ agent decodes it into F<client.keys>.  It is outside F</var/ossec>, because the
 package gives every file in F</var/ossec/etc> to the group C<ossec> each time
 it installs.  The manager on the C<guest> of C<$grant>
 makes a new one each time.  See L</The agents>.
+
+=over 4
+
+=item grant - HashRef - the grant, with C<guest> and C<client>
+
+=back
+
+Returns the map from the path on the client to a hash reference with C<issue>,
+C<owner> and C<mode>, as a list of one pair.
+
+    my %files = $recipe->issue_grant( { recipe => 'ossec', guest => 'logs.example.test', client => 'example.test' } );
 
 =cut
 
@@ -339,6 +388,10 @@ A guest that does not run the manager yet has neither file, so each command
 then does nothing, and creates no directory.  A directory that a failed command
 left behind makes F<bin/new_config> refuse the salvage.
 
+Returns the two shell commands, as a list of strings.
+
+    my @commands = $recipe->remote_prepare();
+
 =cut
 
 sub remote_prepare {
@@ -348,6 +401,11 @@ sub remote_prepare {
 =head2 %path_map = $recipe->remote_files()
 
 The copy that C<remote_prepare> made.
+
+Returns the map from the directory on the guest to the directory of the copy,
+as a list of one pair.
+
+    my %path_map = $recipe->remote_files();
 
 =cut
 
@@ -360,6 +418,11 @@ sub remote_files {
 The keys of the agents, back where the manager reads them, readable by the
 manager and nobody else.  The count of the messages of the manager, back where
 remoted writes it, owned by the account that remoted runs as.
+
+Returns the map from each path on the guest to a hash reference with C<from>,
+C<owner> and C<mode>, as a list of pairs.
+
+    my %restores = $recipe->restores( install_dir => '/opt', domain => 'logs.example.test' );
 
 =cut
 
@@ -376,6 +439,17 @@ sub restores {
 =head2 %revocation = $recipe->revoke_grant($grant)
 
 The removal of the agent of the C<client> of C<$grant> from the manager.
+
+=over 4
+
+=item grant - HashRef - the grant, with C<client>
+
+=back
+
+Returns C<command>, C<doing>, C<done> and C<stays>, as a list of key and value
+pairs.
+
+    my %revocation = $recipe->revoke_grant( { recipe => 'ossec', guest => 'logs.example.test', client => 'example.test' } );
 
 =cut
 
@@ -394,6 +468,10 @@ sub revoke_grant {
 
 The archive of Atomicorp.
 
+Returns the host name, as a list.
+
+    my @hosts = $recipe->fetch_hosts();
+
 =cut
 
 sub fetch_hosts {
@@ -403,6 +481,10 @@ sub fetch_hosts {
 =head2 @classes = $recipe->cache_classes()
 
 The archive, as an apt repository.
+
+Returns the classes, as a list.
+
+    my @classes = $recipe->cache_classes();
 
 =cut
 
@@ -417,6 +499,11 @@ sub cache_classes {
 The configuration of the manager, its rules for the log watchers, the scripts
 that issue and revoke the keys of the agents, and the firewall profile for the
 agents.
+
+Returns the map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
 
 =cut
 
@@ -433,6 +520,8 @@ sub template_files {
 =head2 @tests = $recipe->tests()
 
 Returns the template for the test that runs on the guest.
+
+    my @tests = $recipe->tests();
 
 =cut
 

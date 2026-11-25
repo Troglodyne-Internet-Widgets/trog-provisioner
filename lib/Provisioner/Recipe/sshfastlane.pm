@@ -135,6 +135,10 @@ The fast lane sshd on C<port>, on every IPv4 address.  A redirect rewrites the
 destination to an address of the interface that the packet came in on, so the
 sshd must listen on all of them.
 
+Returns the one claim, as a list.
+
+    my @claims = $recipe->listens( port => 2222 );
+
 =cut
 
 sub listens {

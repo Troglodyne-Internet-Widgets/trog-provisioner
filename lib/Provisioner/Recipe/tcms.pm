@@ -244,27 +244,42 @@ sub args {
     );
 }
 
-=head2 $resolved = $recipe->declared_for(\%host, %opts)
+=head2 declared_for(host, repo_url, repo_branch)
 
-What F<metamerge.yml> on C<repo_branch> of C<repo_url> in C<%opts>, or on the
-default of each, declares for C<%host>, as
+What F<metamerge.yml> on C<repo_branch> of C<repo_url>, or on the default of
+each, declares for C<$host>, as
 L<Dist::Conformance::Check::SystemPackages/resolve> returns it: C<needs>,
-C<packages>, C<sources>, C<programs> and C<unresolved>, which is empty.  C<%host> is what C<resolve> takes: C<packager>,
-C<distro>, C<release> and C<codename>.  Each source has its C<fingerprint>,
-which L<Provisioner::Packager::Deb> holds its key to.
+C<packages>, C<sources>, C<programs> and C<unresolved>, which is empty.  Each
+source has its C<fingerprint>, which L<Provisioner::Packager::Deb> holds its
+key to.
 
 It reads the file once for each repository and branch in each process, with
 C<fetch>, and resolves it for each call.
 
-It dies rather than return no packages, because tCMS does not run without
-them, and a guest without them fails long after the generation: when the file
-cannot be read, with what git said; when the branch has no
+It dies rather than return no packages, because tCMS does not run without them,
+and a guest without them fails long after the generation.  A dependency that
+the declaration gives no package on the host, with a null, is not an error,
+because the declaration says so for that host.
+
+=over 4
+
+=item host - HashRef - what C<resolve> takes: C<packager>, C<distro>, C<release> and C<codename>
+
+=item repo_url - Str - optional: the repository, by default the tCMS repository
+
+=item repo_branch - Str - optional: the branch, by default C<master>
+
+=back
+
+Returns HashRef, the resolved declaration.
+
+Dies when the file cannot be read, with what git said; when the branch has no
 F<metamerge.yml>; when the declaration is not valid, or cannot be resolved for
 the host, with what L<Dist::Conformance::Check::SystemPackages> said about it;
 when it declares no dependency at all; and when a dependency has no package of
-the packager for the host, naming each.  A dependency that the declaration
-gives no package on the host, with a null, is not an error, because the
-declaration says so for that host.
+the packager for the host, naming each.
+
+    my $resolved = $recipe->declared_for( \%host, repo_url => 'https://git.test.test/tCMS.git', repo_branch => 'master' );
 
 =cut
 
@@ -290,14 +305,28 @@ sub declared_for ( $self, $host, %opts ) {    ## no critic (ProhibitMisplacedMet
     return $resolved;
 }
 
-=head2 $content = $recipe->fetch($repo, $branch)
+=head2 fetch(repo, branch)
 
-The content of F<metamerge.yml> on C<$branch> of the git repository C<$repo>,
-or undef when the branch has none.  It clones the branch with git, one commit
-deep, with no checkout and no other file, so it reads from any host that git
-reaches.  git asks no password, because nobody is there to answer.  Dies with
-what git said when it cannot clone.  The one place this recipe reaches the
+The content of F<metamerge.yml> on C<$branch> of the git repository C<$repo>.
+It clones the branch with git, one commit deep, with no checkout and no other
+file, so it reads from any host that git reaches.  git asks no password,
+because nobody is there to answer.  The one place this recipe reaches the
 network, so a test replaces it.
+
+=over 4
+
+=item repo - Str - the URL of the git repository
+
+=item branch - Str - the branch to read
+
+=back
+
+Returns Str or Undef, the content, or undef when the branch has no
+F<metamerge.yml>.
+
+Dies with what git said when it cannot clone the branch or read the file.
+
+    my $content = $recipe->fetch( 'https://git.test.test/tCMS.git', 'master' );
 
 =cut
 
@@ -398,6 +427,10 @@ tCMS installs that tPSGI runs under systemd do not have this file.  There the
 key is a systemd credential, and it is never a file on the guest.  This is for
 installs that use C<bin/tcms-vault-key --file>.
 
+Returns the pattern, as a list.
+
+    my @patterns = $recipe->remote_skip();
+
 =cut
 
 sub remote_skip {
@@ -420,6 +453,14 @@ sub tests {
 Adds C<media_base>, from C<nginx.media_names> of the domain.  See
 L</THE HOSTS OF TCMS>.
 
+Returns C<%opts> with C<media_base>, the empty string when no media name maps
+to the domain.
+
+Dies when more than one media name maps to the domain, because tCMS links its
+assets to one.
+
+    my %enriched = $recipe->enrich( domain => 'test.test' );
+
 =cut
 
 sub enrich ( $, %opts ) {
@@ -436,6 +477,10 @@ sub enrich ( $, %opts ) {
 
 The host of C<repo_url>, which serves the tCMS checkout this recipe clones, and
 the hosts that the C<prereq-frontend> target of F<Installer.mk> downloads from.
+
+Returns the host names, as a list.
+
+    my @hosts = $recipe->fetch_hosts( repo_url => 'https://git.test.test/tCMS.git' );
 
 =cut
 

@@ -213,6 +213,10 @@ server, C<server> is left out too.  The client connects to that name before
 the tunnel is up, so there it must resolve through DNS to the address that
 the internet reaches the server at, and not to its address in the ip pool.
 
+Returns the options, as a list of key and value pairs.
+
+    my %opts = $recipe->enrich( domain => 'client.test.test', server => 'vpn.test.test', cert_dir => '/path/to/certs' );
+
 =cut
 
 sub enrich {
@@ -244,6 +248,10 @@ With C<issue_from>, the certificate and the static address that that server
 issues to C<$domain>, as C<grants> in L<Provisioner::Recipe> says.  See
 L<Provisioner::Recipe::openvpn/issue_grant>.  Without it, nothing.
 
+Returns the grant as a list of one hash reference, or an empty list.
+
+    my @grants = $recipe->grants( 'client.test.test', issue_from => 'vpn.test.test' );
+
 =cut
 
 sub grants {
@@ -261,6 +269,10 @@ L<Provisioner::Recipe> says.  The server routes its clients to the network that
 it is on, and the client reaches the server by its public name.  So a guest
 behind it can go on a hypervisor of another network.
 
+Returns the names, without duplicates, as a list.
+
+    my @domains = $recipe->joins_network_of( issue_from => 'vpn.test.test', server => 'vpn.test.test' );
+
 =cut
 
 sub joins_network_of {
@@ -276,12 +288,27 @@ address is C<auto>: the server chooses it out of the bin of the C<ip_pool>
 whose C<via> it is, and a client that has one there keeps it.  No address
 database holds it.  See L<Provisioner::Recipe::openvpn/Static addresses>.
 
+Returns C<address> and C<server>, as a list of key and value pairs.
+
+    my %terms = $recipe->grant_terms( $grant, server => 'vpn.test.test' );
+
 =cut
 
 sub grant_terms {
     my ( $self, $grant, %opts ) = @_;
     return ( address => 'auto', server => $opts{server} );
 }
+
+=head2 @files = $recipe->template_files()
+
+The configuration of the client, its lines for F</etc/hosts> and its ufw
+application profile.  It ignores the loaded recipes that the caller passes.
+
+Returns a map from each template to the file that it renders, as a list.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ($self) = @_;

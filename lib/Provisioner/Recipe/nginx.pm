@@ -285,11 +285,16 @@ sub rate_limits {
     return %limits;
 }
 
-=head2 %ports = $recipe->proxy_ports()
+=head2 proxy_ports
 
 Each port that the proxy fronts, mapped to the port of the guest that the proxy
 connects to for it, with the PROXY protocol.  The templates of this recipe
 write the same numbers.  See L</Names that reach the guest through a proxy>.
+
+Returns the two ports, 443 mapped to 8443 and 80 mapped to 8080, as a list of
+pairs.
+
+    my %ports = $recipe->proxy_ports();
 
 =cut
 
@@ -303,6 +308,10 @@ The jails that fail2ban ships for nginx: failed basic authentication, and
 requests for the paths that bots probe.  Both read the error log of nginx, so
 both read the file and not the journal.
 
+Returns a map from the name of each jail to its settings, as a list of pairs.
+
+    my %jails = $recipe->jails();
+
 =cut
 
 sub jails {
@@ -312,10 +321,23 @@ sub jails {
     );
 }
 
-=head2 %required = $recipe->required_recipes()
+=head2 %required = $recipe->required_recipes(%opts)
 
 C<letsencrypt>, which reloads C<nginx> when it links or renews the certificate
-that the vhosts serve.
+that the vhosts serve.  When C<media_names> or C<cached_names> has a name, it
+also asks letsencrypt for a certificate of each such name of its own, and
+names C<cert_deployer> of the domain as the command that deploys them.
+
+=over 4
+
+=item opts - HASH - the options of the recipe, with C<domain>
+
+=back
+
+Returns C<letsencrypt> mapped to a sub that returns the options for it, as a
+list of one pair.
+
+    my %required = $recipe->required_recipes( domain => 'test.test' );
 
 =cut
 
@@ -333,11 +355,22 @@ sub required_recipes {
     );
 }
 
-=head2 $path = cert_deployer($domain)
+=head2 cert_deployer(domain)
 
 Where the command that sends the certificates of the media names and the cached
-names of C<$domain> to the relay is, on the guest.  L<Provisioner::Recipe::letsencrypt> runs it
-for each certificate.  See L</Media names> and L</Cached names>.
+names of C<$domain> to the relay is, on the guest.
+L<Provisioner::Recipe::letsencrypt> runs it for each certificate.  See L</Media
+names> and L</Cached names>.  It is a function, not a method.
+
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=back
+
+Returns Str, the path of the command.
+
+    my $path = Provisioner::Recipe::nginx::cert_deployer('test.test');
 
 =cut
 
@@ -487,6 +520,17 @@ each vhost that answers for a public name in neither, then each media name and
 each cached name.  See L</Names that reach the guest through a proxy>,
 L</Media names> and L</Cached names>.
 
+=over 4
+
+=item opts - HASH - the options of the recipe, with C<domain>
+
+=back
+
+Returns the names, as a list.  Dies when a value of C<public_names> is a bare
+name and not a map.
+
+    my @names = $recipe->served_names( domain => 'test.test' );
+
 =cut
 
 sub served_names {
@@ -505,12 +549,23 @@ sub served_names {
     );
 }
 
-=head2 @names = $recipe->proxied_names(%opts)
+=head2 proxied_names(opts)
 
 Every name that the guest answers for on the ports of the proxy, sorted: each
 public name, and C<public.VHOST> for each vhost that answers for a public name
-that it cannot certify.  A proxy routes these names to the guest.  It needs
-C<public_names>, C<domain>, and the C<aliases> of the domain.
+that it cannot certify.  A proxy routes these names to the guest.
+
+=over 4
+
+=item %opts - Any - each option of the recipe: C<public_names>, C<domain>, and the C<aliases> of the domain
+
+=back
+
+Returns the names, sorted, as a list.
+
+Dies when a value of C<public_names> is a bare name and not a map.
+
+    my @names = $recipe->proxied_names( domain => 'test.test', public_names => { 'shop.test.test' => { vhost => 'test.test' } } );
 
 =cut
 
@@ -529,6 +584,20 @@ the relay, as C<grants> in L<Provisioner::Recipe> says.  The relay issues a key
 for it, and releases the names when the domain goes away.  See
 L<Provisioner::Recipe::nginxrelay/issue_grant> and L</Registration with a relay
 guest>.
+
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item opts - HASH - the options of the recipe, which may give C<relay>,
+C<public_names>, C<media_names> and C<cached_names>
+
+=back
+
+Returns the grant, a hash reference with C<recipe>, C<guest> and C<client>,
+as a list of one, or an empty list.
+
+    my @grants = $recipe->grants( 'test.test', relay => 'relay.test.test', public_names => { 'shop.test.test' => { vhost => 'test.test' } } );
 
 =cut
 
@@ -552,6 +621,18 @@ the public names when the build resolves its dependencies, as
 L<Provisioner::Recipe::roundcube> does.  A release of a domain that registered
 nothing changes nothing.  See L<Provisioner::Recipe/revocations>.
 
+=over 4
+
+=item domain - Str - the domain that goes away
+
+=back
+
+Returns the revocation, a hash reference with C<guest> and what
+L<Provisioner::Recipe::nginxrelay/revoke_grant> returns, as a list of one, or
+an empty list when the domain names no relay.
+
+    my @revocations = $recipe->revocations('test.test');
+
 =cut
 
 sub revocations {
@@ -571,8 +652,21 @@ that it serves itself, and the ports of its own of the public names, each
 mapped to the names that list it, mapped to the port of the guest, as
 L<Provisioner::Recipe::nginxrelay/issue_grant> takes them.
 
+=over 4
+
+=item grant - HashRef - the grant, with C<client> and C<guest>
+
+=item opts - HASH - the options of the recipe
+
+=back
+
+Returns the terms, with C<upstreams>, C<names>, C<media>, C<pages> and
+C<ports>, as a list of key and value pairs.
+
 Dies when the guest of the client has no address in the address pool, because
 the relay reaches the guest by that address.
+
+    my %terms = $recipe->grant_terms( { client => 'test.test', guest => 'relay.test.test' }, public_names => {} );
 
 =cut
 
@@ -620,6 +714,19 @@ With C<relay> and a public name, it also adds C<relay_address>, where this
 guest reaches the relay, and C<relay_jails>, the jails that ban through it: its
 own and those of C<proxied_jails>.  See
 L</Bans through the relay>.
+
+=over 4
+
+=item opts - HASH - the validated options of the recipe
+
+=back
+
+Returns the options with those keys added, as a list of key and value pairs.
+Dies as said above, and also when there are C<media_names> or C<cached_names>
+and no C<relay>, when a media name or a cached name cannot be certified, is
+listed by a vhost, or is also a name of another kind.
+
+    my %vars = $recipe->enrich( domain => 'test.test', sites => ['test.test'] );
 
 =cut
 
@@ -729,6 +836,20 @@ sub enrich {
 
     return %opts;
 }
+
+=head2 template_files()
+
+The global configuration of nginx, its sysctl settings, the ufw application
+profile of the proxy ports, and the files that ban through the relay and
+deploy certificates to it.  It ignores the loaded recipes that the caller
+passes.
+
+Returns a map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
+=cut
 
 sub template_files {
     my ($self) = @_;

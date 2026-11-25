@@ -249,6 +249,16 @@ our $PAGE_SOCKET  = '/run/nginxrelay-pages.sock';
 Adds C<media_socket> and C<page_socket>, where the media server and the page
 server listen, to what L<Provisioner::RelayRecipe/enrich> adds.
 
+=over 4
+
+=item opts - HASH - the validated options of the recipe
+
+=back
+
+Returns the options with those keys added, as a list of key and value pairs.
+
+    my %vars = $recipe->enrich( domain => 'relay.test.test' );
+
 =cut
 
 sub enrich {
@@ -277,6 +287,16 @@ sub required_recipes {
 The limit of 443 for C<tls_port>, because the forward happens before the limit
 counts a connection.
 
+=over 4
+
+=item opts - HASH - the options of the recipe, which may give C<tls_port>
+
+=back
+
+Returns C<tls_port> and the limit 1024, as a list of one pair.
+
+    my %limits = $recipe->rate_limits( tls_port => 4443 );
+
 =cut
 
 sub rate_limits {
@@ -289,6 +309,10 @@ sub rate_limits {
 F</etc/nginx/nginxrelay.d>, which holds the registrations and the ban keys.
 See L<Provisioner::RelayRecipe>.
 
+Returns Str, the path of the directory.
+
+    my $dir = $recipe->relay_dir();
+
 =cut
 
 sub relay_dir {
@@ -299,6 +323,16 @@ sub relay_dir {
 
 80 and C<tls_port>, where this guest proxies.  The ban closes C<tls_port> and
 not 443, because the forward comes first.
+
+=over 4
+
+=item opts - HASH - the options of the recipe, which may give C<tls_port>
+
+=back
+
+Returns the two ports, as a list.
+
+    my @ports = $recipe->banned_ports( tls_port => 4443 );
 
 =cut
 
@@ -327,6 +361,23 @@ it fetches from C<$http>, and with C<@pages>, each of them as a page name.  If
 there is either, it issues the media key as well, at C<media_key_path> of the
 client, with which the client sends the certificates of both.  See
 L</Media names> and L</Page names>.
+
+=over 4
+
+=item grant - HashRef - the grant, with C<client> and C<guest>
+
+=item terms - HASH - the terms above
+
+=back
+
+Returns a map from each path on the client to the description of the file
+that the relay issues there, as a list of pairs.
+
+    my %files = $recipe->registration_files(
+        { client => 'www.test.test', guest => 'www.test.test' },
+        upstreams => { tls => '192.0.2.10:8443', http => '192.0.2.10:8080' },
+        names     => ['www.test.test'],
+    );
 
 =cut
 
@@ -361,11 +412,21 @@ sub registration_files {
     );
 }
 
-=head2 $path = $recipe->media_key_path($domain)
+=head2 media_key_path(domain)
 
 Where the media key that this relay issues for C<$domain> is, on the guest of
-C<$domain>, in base64.  The guest sends the certificates of its media names and
+C<$domain>, in base64.	The guest sends the certificates of its media names and
 its page names with it.  See L</Media names>.
+
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=back
+
+Returns Str, the path of the key on that guest.
+
+    my $path = $recipe->media_key_path('www.test.test');
 
 =cut
 
@@ -381,6 +442,17 @@ F<scripts/relay_client> C<nginx release>, as C<revoke_grant> in
 L<Provisioner::Recipe> says.  If the relay is not up, the revocation says to
 run the command there by hand before another guest gets the address, because
 the relay sends the names to whatever answers at it.
+
+=over 4
+
+=item grant - HashRef - the grant, with C<client>
+
+=back
+
+Returns the revocation, with C<command>, C<doing>, C<done> and C<stays>, as a
+list of key and value pairs.
+
+    my %revocation = $recipe->revoke_grant( { client => 'www.test.test' } );
 
 =cut
 

@@ -249,6 +249,8 @@ to publish another address.
 Returns the schema of the configuration.  The C<description> of each key
 documents it.
 
+    my %schema = $recipe->args();
+
 =cut
 
 sub args {
@@ -373,6 +375,8 @@ zone that is already known.
 
 Dies as C<domain_credentials> does.
 
+    my %credentials = $recipe->lexicon_credentials( %conf, domain => 'example.test' );
+
 =cut
 
 sub lexicon_credentials {
@@ -400,6 +404,8 @@ C<configuration_of> reads.
 L<Provisioner::Recipe::lexicon>, L<Provisioner::Recipe::letsencrypt> and
 L<Provisioner::Recipe::cron> ask this, so that the three agree with C<enrich>.
 
+    my $unmanaged = $recipe->unmanaged('example.test');
+
 =cut
 
 sub unmanaged ( $self, $domain ) {
@@ -422,6 +428,10 @@ caller in this run, gets 1 without a question, because the configuration that
 C<configuration_of> reads sets it now.
 
 Dies on a no, or where there is no terminal to ask at.
+
+Returns Bool: 1 where nothing here writes the zone, and 0 otherwise.
+
+    my $unmanaged = $recipe->zone_unmanaged( %conf, domain => 'example.test' );
 
 =cut
 
@@ -453,6 +463,11 @@ registrar.  They are those of the account whose zone is the domain or holds
 it, as C<account_for> finds it.  Where no account lists such a zone, they are
 C<configured_credentials>.  Dies as C<configured_credentials> does.
 
+Returns the credentials, as a list of key and value pairs, with the keys that
+C<lexicon_credentials> describes.
+
+    my %credentials = $recipe->domain_credentials( %conf, domain => 'example.test' );
+
 =cut
 
 sub domain_credentials ( $self, %opts ) {
@@ -468,6 +483,11 @@ where the C<NS> record that delegates it goes.  They are those of the account
 whose zone holds the domain and is not the domain itself.  Where no account
 lists such a zone, they are C<configured_credentials>.
 
+Returns the credentials, as a list of key and value pairs, with the keys that
+C<lexicon_credentials> describes.  Dies as C<configured_credentials> does.
+
+    my %credentials = $recipe->parent_credentials( %conf, domain => 'sub.example.test' );
+
 =cut
 
 sub parent_credentials ( $self, %opts ) {
@@ -476,12 +496,27 @@ sub parent_credentials ( $self, %opts ) {
     return $self->configured_credentials(%opts);
 }
 
-=head2 ($zone, \%account) = $recipe->account_for($domain, \%conf, above => $bool)
+=head2 ($zone, \%account) = $recipe->account_for($domain, \%conf, %how)
+
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - the configuration of this recipe, with C<accounts>
+
+=item above - Bool - a named option: when true, a zone that is the domain itself does not count
+
+=back
 
 The zone of C<$conf{accounts}> that is C<$domain> or holds it, and what
 C<account_zones> maps that zone to.  Where two zones hold the domain, the longer
-one does.  With C<above> true, a zone that is the domain itself does not
-count.  Returns an empty list when no account lists such a zone.
+one does.
+
+Returns the zone and the hash reference of its account, as a list of two, or
+an empty list when no account lists such a zone.  Dies as C<account_zones>
+does.
+
+    my ( $zone, $account ) = $recipe->account_for( 'sub.example.test', \%conf, above => 1 );
 
 =cut
 
@@ -503,6 +538,11 @@ names, from L<Provisioner::Cookbook>.
 L<Provisioner::Recipe::letsencrypt> and L<Provisioner::Recipe::lexicon> ask
 this, so that the hook and the shortcut render from one answer.
 
+Returns the credentials, as a list of key and value pairs, with the keys that
+C<lexicon_credentials> describes.  Dies as C<lexicon_credentials> does.
+
+    my %credentials = $recipe->credentials_for( domain => 'example.test' );
+
 =cut
 
 sub credentials_for {
@@ -515,6 +555,10 @@ sub credentials_for {
 
 The configuration of this recipe that C<$domain> has, or else the configuration
 of the guest that C<$domain> is layered onto, from L<Provisioner::Cookbook>.
+
+Returns HashRef: the configuration, or an empty hash reference.
+
+    my $conf = $recipe->configuration_of('example.test');
 
 =cut
 
@@ -532,6 +576,8 @@ an empty list.  Dies when there is no C<type>.
 
 C<domain_credentials> and C<parent_credentials> fall back to this, where no
 account lists the zone.
+
+    my %credentials = $recipe->configured_credentials( type => 'someprovider', key => 'secret:some/entry/password', domain => 'example.test' );
 
 =cut
 
@@ -568,6 +614,11 @@ domain.  Where two zones hold the name, the longer one does.  C<%zones> is what
 C<account_zones> returns.  Where it is undef, this reads it for C<$domain> from
 L<Provisioner::Cookbook>, as C<configured_zones> does.
 
+Returns Str or undef: the zone, or undef (the empty list in list context) where
+no zone of an account holds the name.
+
+    my $zone = $recipe->zone_of( 'www.other.test', 'example.test' );
+
 =cut
 
 sub zone_of ( $self, $name, $domain, $zones = undef ) {
@@ -583,6 +634,10 @@ sub zone_of ( $self, $name, $domain, $zones = undef ) {
 C<@zones>, the longer first, and in order of the name where two are as long.
 A zone inside another is longer, so it comes first, as C<zone_of> decides.
 
+Returns the sorted zones, as a list.
+
+    my @zones = $recipe->longest_first( 'test', 'example.test' );
+
 =cut
 
 sub longest_first ( $, @zones ) {
@@ -595,6 +650,11 @@ sub longest_first ( $, @zones ) {
 Maps each zone that an account of C<$conf{accounts}> lists to the C<type>,
 C<user> and C<key> of that account, or to its C<authority>.  Dies on a zone
 that two accounts list.  Each zone is in lower case, with no trailing dot.
+
+Returns the map from each zone to a hash reference of its account, as a list of
+pairs.
+
+    my %zones = $recipe->account_zones( accounts => { someaccount => { type => 'someprovider', zones => ['example.test'] } } );
 
 =cut
 
@@ -618,6 +678,11 @@ sub account_zones ( $, %conf ) {
 C<account_zones> of the configuration that C<configuration_of> reads for
 C<$domain>.
 
+Returns the map from each zone to a hash reference of its account, as a list of
+pairs.  Dies as C<account_zones> does.
+
+    my %zones = $recipe->configured_zones('example.test');
+
 =cut
 
 sub configured_zones ( $self, $domain ) {
@@ -630,6 +695,11 @@ How lexicon writes C<$zone>, for C<%account>, which is what C<account_zones>
 maps C<$zone> to.  For an account with an C<authority>, it is what
 L<Provisioner::Recipe::pdns/client_credentials> returns for that guest.
 Otherwise it is C<configured_credentials>.
+
+Returns the credentials, as a list of key and value pairs, with the keys that
+C<lexicon_credentials> describes.  Dies as C<configured_credentials> does.
+
+    my %credentials = $recipe->zone_credentials( 'example.test', { type => 'someprovider', key => 'secret:some/entry/password' } );
 
 =cut
 
@@ -661,6 +731,10 @@ zone.
 C<$opts{zones}> is what C<account_zones> returns, where the caller has it.
 Otherwise this reads it for the domain from L<Provisioner::Cookbook>.
 
+Returns the names, as a list.
+
+    my @aliases = $recipe->zone_aliases( %opts, domain => 'example.test' );
+
 =cut
 
 sub zone_aliases ( $self, %opts ) {
@@ -679,6 +753,10 @@ name that C<zone_of> places in a zone of an account.  Sorted.
 The writers of the zone that ask C<zone_aliases> ask this too.
 C<$opts{zones}> is as C<zone_aliases> says.
 
+Returns the names, as a list.
+
+    my @names = $recipe->zone_address_names( domain => 'example.test', modules => ['mail'] );
+
 =cut
 
 sub zone_address_names ( $self, %opts ) {
@@ -696,6 +774,11 @@ comes once, sorted by type, name and content.
 
 The writers of the zone that ask C<zone_aliases> ask this too.
 C<$opts{zones}> is as C<zone_aliases> says.
+
+Returns the records, as a list of hash references with C<type>, C<name> and
+C<content>.
+
+    my @records = $recipe->zone_records( domain => 'example.test', modules => ['mail'] );
 
 =cut
 
@@ -730,6 +813,8 @@ L<Provisioner::Cookbook>, and not the module list.  The depsolver adds to that
 list between C<required_recipes> and C<enrich>, so the two get different
 answers from it.
 
+    my $guest = $recipe->authority_of('example.test');
+
 =cut
 
 sub authority_of {
@@ -751,6 +836,10 @@ sub authority_of {
 
 True where the pdns of the server of C<$domain> holds its zone, as
 C<authority_of> says.
+
+Returns Bool, 1 or 0.
+
+    my $own = $recipe->serves_itself('example.test');
 
 =cut
 
@@ -774,6 +863,8 @@ with C<%walk> as its C<%opts>.  Nothing adds pdns to such a guest, and
 C<enrich> refuses it without one, so whatever writes the configuration of a
 guest asks this.
 
+    my @recipes = $recipe->zone_server_for( 'example.test', [ 'registrar', 'nginx' ], base => {} );
+
 =cut
 
 sub zone_server_for {
@@ -791,6 +882,8 @@ sub zone_server_for {
 
 Returns what C<authority_of> returns, where that is another guest than the
 server of C<$domain>, and undef otherwise.
+
+    my $guest = $recipe->delegated_to('example.test');
 
 =cut
 
@@ -815,6 +908,11 @@ domain in those zones, as one grant with C<zones>.  See
 L</Zones that a pdns guest holds>.  This names every such zone, so that
 C<bin/destroy> asks about each of them.  C<grant_terms> leaves out a zone that
 holds no served name of the domain.
+
+Returns the grants, as a list of hash references with C<recipe>, C<guest>,
+C<client> and, for a grant of the zones of accounts, C<zones>.
+
+    my @grants = $recipe->grants('example.test');
 
 =cut
 
@@ -843,6 +941,11 @@ For a grant with C<zones>, C<names>: each of those zones that holds a served
 name of the client, mapped to those names.  The served names are
 C<domain_aliases> of C<%opts>, where C<hostnames> is what the recipes on the
 domain handed over.  Otherwise nothing.
+
+Returns C<names>, a hash reference from each zone to an array reference of
+names, as a list of one pair, or an empty list for a grant without C<zones>.
+
+    my %terms = $recipe->grant_terms( { recipe => 'pdns', guest => 'ns.example.test', client => 'example.test', zones => ['other.test'] }, %opts );
 
 =cut
 
@@ -910,6 +1013,11 @@ guest first, so C<main_ip> is that address when the makefile is written.  See
 C<reserve_guest> in L<Trog::HV>.  There is nothing to publish where the guest
 has no address yet, as on a backend that cannot reserve, or in a run of
 F<bin/new_config> without C<--reserve>.
+
+Returns the options, as a list of key and value pairs.  Dies when
+C<$opts{internal_name}> is in a zone of an account.
+
+    my %publication = $recipe->publication( %opts, domain => 'example.test', main_ip => '192.0.2.10' );
 
 =cut
 
@@ -982,6 +1090,10 @@ labels.  Dies when the
 installation gave an address to neither another guest that holds the zone, nor
 a nameserver that needs glue.
 
+Returns the options, with what it adds, as a list of key and value pairs.
+
+    my %enriched = $recipe->enrich( %opts, domain => 'example.test' );
+
 =cut
 
 sub enrich {
@@ -1053,6 +1165,11 @@ authority.
 
 =back
 
+Returns the names of the files that it wrote, relative to C<$output_dir>, as a
+list.  Dies when it cannot copy the root of the authority.
+
+    my @written = $recipe->generate_files( '/tmp/example.test', %vars );
+
 =cut
 
 sub generate_files {
@@ -1091,6 +1208,11 @@ The drop-in that sends the names of the zone of the authority to it, when the
 registrar names an authority.  The C<resolver> target installs it before any
 recipe target.  See L<Provisioner::Recipe/resolver_files>.
 
+Returns the map from the file to the name of the drop-in, as a list of one pair,
+or an empty list.
+
+    my %files = $recipe->resolver_files( %opts, domain => 'example.test' );
+
 =cut
 
 sub resolver_files {
@@ -1109,6 +1231,8 @@ Returns lexicon, which publishes the records, and which an operator edits the
 zone with.  It does not return pdns where the guest holds its own zone.  The
 configuration of the guest names pdns there, as it does on another guest that
 holds a zone.
+
+    my %required = $recipe->required_recipes(%opts);
 
 =cut
 

@@ -80,6 +80,19 @@ sub args {
     );
 }
 
+=head2 template_files()
+
+The configuration of SSSD, the drop-in of sshd that asks SSSD for the keys of a
+user, and the sudoers file for C<sudo_groups>.  It ignores the loaded recipes
+that the caller passes.
+
+Returns a map from each template to the file that it renders, as a list of
+pairs.
+
+    my %files = $recipe->template_files();
+
+=cut
+
 sub template_files {
     my ($self) = @_;
     return (

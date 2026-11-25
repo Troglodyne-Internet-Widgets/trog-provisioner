@@ -86,6 +86,10 @@ the guest over ssh.  These connections do not always come from the same
 address of ours.  If only one address is exempt, the rate limits count the
 other.
 
+Returns C<%opts> with the new C<admin_networks>.
+
+    my %enriched = $recipe->enrich( transfer_ip => '192.0.2.1', admin_networks => ['198.51.100.0/24'] );
+
 =cut
 
 sub enrich {
@@ -107,6 +111,21 @@ sub enrich {
 If two recipes name different limits for one port in C<rate_limits>, returns
 the higher limit.  Any other disagreement goes to
 L<Provisioner::Recipe/resolve_conflict>, which dies.
+
+=over 4
+
+=item path - ArrayRef[Str] - the keys from the top of the configuration to the value
+
+=item mine - Int - the value of this recipe
+
+=item theirs - Int - the value of the other recipe
+
+=back
+
+Returns the higher limit, or what the parent returns.  Dies, in the parent,
+on any disagreement that is not a rate limit.
+
+    my $limit = $recipe->resolve_conflict( [ 'rate_limits', '22' ], 64, 128 );
 
 A limit says where the traffic to a port stops being plausible.  The recipe
 that expects the most legitimate traffic knows that best.  If the lower limit
@@ -224,11 +243,21 @@ F<ufw.admin_networks>, one network of C<admin_networks> on each line, which
 F<scripts/root_access> reads as the hosts that may log in as root.  Each recipe in
 C<@recipes> that has a profile for fixed ports adds its own.
 
+=over 4
+
+=item @recipes - Str - the names of the loaded recipes
+
+=back
+
 Without C<ntp> in C<@recipes>, the map also has C<ufw.timesyncd.tt>, which
 opens 123/udp outbound for the C<systemd-timesyncd> of the image.  The default
 denies outgoing traffic, so without it a guest cannot set its clock, and
 nothing outside the kernel log says so.  C<ntp> ships its own profile for
 chrony.
+
+Returns the map from each template to its output path, as a list of pairs.
+
+    my %files = $recipe->template_files(qw{nginx mail});
 
 =cut
 
