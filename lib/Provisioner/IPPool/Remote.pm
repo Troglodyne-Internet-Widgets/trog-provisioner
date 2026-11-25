@@ -87,6 +87,12 @@ my ( %READY, %MACHINE );
 Forgets which machine has which kit, and the connections that this module
 keeps, so that the next call asks again.  The tests use it.
 
+Takes no arguments.
+
+Returns Int, 1.
+
+    Provisioner::IPPool::Remote::forget();
+
 =cut
 
 sub forget {
@@ -101,6 +107,13 @@ Each file of the kit, at its path in the kit, to the file of this machine that
 it is a copy of: F<bin/ippool>, L<Provisioner::IPPool::DB>, F<schema/ips.sql>
 and its updates, and L<Trog::SQLite> and L<Sub::Retry> as this process loaded
 them.
+
+Takes no arguments.
+
+Returns a list of pairs of Str, from each path in the kit to the file on this
+machine.
+
+    my %files = Provisioner::IPPool::Remote::kit_files();
 
 =cut
 
@@ -121,6 +134,16 @@ sub kit_files {
 
 The SHA-256 of the kit C<%files>, as C<kit_files> gives it: of each path in
 the kit, and the content of its file, in the order of the paths.
+
+=over 4
+
+=item files - HASH - the kit, as C<kit_files> returns it
+
+=back
+
+Returns Str, the hash, in hex.
+
+    my $hash = Provisioner::IPPool::Remote::kit_hash( Provisioner::IPPool::Remote::kit_files() );
 
 =cut
 
@@ -146,6 +169,16 @@ my sub hash_there ( $machine, $dir ) {
 The directory of the kit of this checkout on C<$machine>, a L<Trog::Machine>,
 which this puts there when the hypervisor does not have it.  Asks once in each
 process for each machine.  Dies when the copy cannot be made.
+
+=over 4
+
+=item machine - Trog::Machine - the hypervisor
+
+=back
+
+Returns Str, the directory, relative to the home of the login user.
+
+    my $dir = Provisioner::IPPool::Remote::ensure_kit($hv);
 
 =cut
 
@@ -189,6 +222,24 @@ perl is the C<ip_perl> of the hypervisor.
 Dies with the error of the operation when it fails there.  Dies naming the
 hypervisor when it cannot be reached, or does not answer with JSON, with what
 it printed on standard error.
+
+=over 4
+
+=item machine - Trog::HV - the hypervisor that keeps the database
+
+=item path - Str - the path of the database there
+
+=item op - Str - the name of the operation
+
+=item args - HashRef - optional: the arguments of the operation, empty by default
+
+=item create - Bool - optional: make the database when it does not exist
+
+=back
+
+Returns Any, the result of the operation.
+
+    my $taken = Provisioner::IPPool::Remote::call( $hv, '/bogus/ips.db', 'taken', {} );
 
 =cut
 

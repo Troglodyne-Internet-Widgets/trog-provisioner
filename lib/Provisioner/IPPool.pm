@@ -207,6 +207,14 @@ between the items.
 Returns each address in the pool once, in order.  Dies if a CIDR block is not
 valid, or is not IPv4.
 
+=over 4
+
+=item pool - HashRef - one bin, with C<addresses> and C<cidr>
+
+=back
+
+    my \@ips = Provisioner::IPPool::pool_ips( { cidr => '192.0.2.0/29', addresses => '198.51.100.7' } );
+
 =cut
 
 sub pool_ips {
@@ -251,6 +259,14 @@ Returns the IPv4 address C<$address> as an integer, so that a range of
 addresses is a range of integers.  Dies if C<$address> is not an IPv4 address.
 It does not resolve a name.
 
+=over 4
+
+=item address - Str - the address
+
+=back
+
+    my $int = Provisioner::IPPool::address_to_int('192.0.2.1');    # 3221225985
+
 =cut
 
 sub address_to_int {
@@ -263,6 +279,14 @@ sub address_to_int {
 
 Returns the integer C<$int> as an IPv4 address.  Dies if C<$int> is not an
 integer from 0 to 4294967295.
+
+=over 4
+
+=item int - Int - the integer
+
+=back
+
+    my $address = Provisioner::IPPool::int_to_address(3221225985);    # '192.0.2.1'
 
 =cut
 
@@ -278,6 +302,10 @@ Returns the path of the database of this machine: F<ips.db>, in the same
 directory as the rest of the configuration.  It is the database when no fleet
 is configured, and the one of a hypervisor that is this machine and names no
 C<ip_db>.  The callers name it in a message about a missing address.
+
+Takes no arguments.
+
+    my $path = Provisioner::IPPool::db_path();
 
 =cut
 
@@ -313,6 +341,16 @@ A libvirt hypervisor keeps a database when its block names C<ip_db>, or when it
 is this machine.  Dies when a remote one has a pool for a static adapter and
 names no C<ip_db>, because its guests then have nowhere to get an address, and
 as C<guest_pools> does.  It builds the hypervisors, and connects to none.
+
+=over 4
+
+=item fleet - Trog::Hypervisors - optional: the fleet
+
+=back
+
+Returns HashRef, as above.
+
+    my $databases = Provisioner::IPPool::databases();
 
 =cut
 
@@ -354,6 +392,20 @@ machine, and otherwise on the hypervisor, through
 L<Provisioner::IPPool::Remote/call($machine, $path, $op, $args, %opts)>.
 Dies as the operation does, or when the hypervisor cannot be asked.
 
+=over 4
+
+=item database - HashRef - one of the C<list> of C<databases>
+
+=item op - Str - the name of the operation
+
+=item args - HashRef - optional: the arguments of the operation, empty by default
+
+=back
+
+Returns Any, the result of the operation.
+
+    my $taken = Provisioner::IPPool::call( Provisioner::IPPool::databases()->{list}[0], 'taken' );
+
 =cut
 
 sub call ( $database, $op, $args = {} ) {
@@ -366,6 +418,21 @@ sub call ( $database, $op, $args = {} ) {
 
 C<call> on the database of the hypervisor C<$name>, for F<bin/ippool>.  Dies
 when that hypervisor keeps none.
+
+=over 4
+
+=item name - Str - the block of the hypervisor, or undef when only one keeps a database
+
+=item op - Str - the name of the operation
+
+=item args - HashRef - optional: the arguments of the operation, empty by default
+
+=back
+
+Returns Any, the result of the operation.  Dies also when C<$name> is undef and
+more than one hypervisor keeps a database.
+
+    my $taken = Provisioner::IPPool::on_hypervisor( 'hv1', 'taken' );
 
 =cut
 
@@ -409,6 +476,10 @@ the other bridges and the other bins are not in it.  C<bin/new_config> gives
 this to the templates as the C<ipmap> variable, which is the address of each
 domain rather than a file, and the pdns zone makes its records from it.
 
+Takes no arguments.  Dies when two databases disagree about a domain.
+
+    my $ipmap = Provisioner::IPPool::assignments();
+
 =cut
 
 sub assignments { return merged('assignments') }
@@ -419,6 +490,16 @@ The guest that runs C<$domain>, which is C<host_of> it in
 L<Provisioner::Cookbook> or the domain itself, and the address of that guest in
 C<assignments>.  The address is undef when the guest has none, so that the
 caller can say what needed it.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of two: Str, the guest, and Str or undef, its address.
+
+    my ( $guest, $address ) = Provisioner::IPPool::guest_address('web.test.test');
 
 =cut
 
@@ -432,6 +513,10 @@ sub guest_address {
 
 Returns a hash reference of each address in the database to the name that holds
 it.  Reservations are in it, because a reserved address is not free.
+
+Takes no arguments.  Dies when two databases disagree about an address.
+
+    my $taken = Provisioner::IPPool::taken();
 
 =cut
 
@@ -448,6 +533,18 @@ never report that it gave back the gateway.
 
 It asks every database, and dies when two of them give the domain an address
 in the bin.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item bin - Str - optional: the bin
+
+=item nic - Str - optional: the bridge
+
+=back
+
+    my $ip = Provisioner::IPPool::held_by( 'web.test.test', 'guests', 'br0' );
 
 =cut
 
@@ -468,6 +565,14 @@ empty when the domain has none.  Like C<held_by>, it looks at domains only, not
 at reservations.  The address of a client of a VPN is in it as
 C<client_addresses> gives it, so it dies as that does.
 
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+    my $by_bin = Provisioner::IPPool::main_addresses('web.test.test');
+
 =cut
 
 sub main_addresses {
@@ -484,6 +589,14 @@ and nobody is asked, when the C<openvpnclient> of the domain names no
 C<issue_from>, or C<ip_pool> has no bin whose C<via> is that server.  Empty
 also when the server gives the domain no address in the bin.  Dies when the
 server cannot be asked.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+    my $by_bin = Provisioner::IPPool::client_addresses('laptop.test.test');
 
 =cut
 
@@ -506,6 +619,14 @@ the C<guests> bin, to that address, the main one among them.  An address from
 before the database recorded bridges is not in it until C<assign> gives it its
 bridge.
 
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+    my $by_nic = Provisioner::IPPool::nic_addresses('web.test.test');
+
 =cut
 
 sub nic_addresses {
@@ -519,6 +640,14 @@ Returns the address at which the other guests reach the guest of C<$domain>:
 its address in a bin other than C<guests>, which is the tunnel of a guest that
 is a client of the VPN, and otherwise its address in C<guests>.  Dies when it
 has neither, or more than one of the first kind.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+    my $address = Provisioner::IPPool::reachable_address('web.test.test');
 
 =cut
 
@@ -548,6 +677,18 @@ when C<$domain> has no address in a bin with a C<via>, because then the other
 guests reach it on its own network.  Dies as C<reachable_address> does when
 C<$domain> has an address in two tunnels.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item pool - HashRef - the pool, as C<pool_of> returns it
+
+=back
+
+Returns Str or undef: the guest.
+
+    my $router = Provisioner::IPPool::reached_through( 'laptop.test.test', $pool );
+
 =cut
 
 sub reached_through {
@@ -560,7 +701,8 @@ sub reached_through {
 =head2 release($domain)
 
 Gives back every address of C<$domain>, in every bin and on every bridge.
-Returns what it gave back: a hash reference of each bin to its address, as
+
+Returns HashRef[Str], what it gave back: each bin to its address, as
 C<main_addresses> gives it, and of C<guests on NIC> to the address on each bridge
 that is not the address of the guest.
 
@@ -569,6 +711,16 @@ hypervisor runs.  A domain that you provision again keeps its address.
 
 It gives them back in every database, one after another.  A hypervisor that
 cannot be asked stops it there, and a second run gives back the rest.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Dies when two databases disagree, or when a hypervisor cannot be asked.
+
+    my $freed = Provisioner::IPPool::release('web.test.test');
 
 =cut
 
@@ -581,6 +733,14 @@ sub release {
 
 Returns the items of one key of an C<ip_pool>, such as C<addresses> or C<cidr>.
 C<$said> is a list, or one string with whitespace between the items, or undef.
+
+=over 4
+
+=item said - Str|ArrayRef[Str]|Undef - the items
+
+=back
+
+    my \@items = Provisioner::IPPool::pool_items('192.0.2.0/29 198.51.100.0/30');
 
 =cut
 
@@ -598,6 +758,14 @@ Dies if C<$pool> has addresses at its top and also a bin named C<guests>, if a
 block of a bin is not valid, or if blocks of two bins overlap.  The pools of
 the other bridges under C<nics> count as bins of their own for that, because an
 address belongs to one bridge.
+
+=over 4
+
+=item pool - HashRef - the pool
+
+=back
+
+    my %bins = Provisioner::IPPool::bins($pool);
 
 =cut
 
@@ -636,6 +804,18 @@ does.  Such a bin holds addresses that C<$guest> routes to, such as the static
 addresses of the clients of an openvpn server, and every other guest reaches
 them through C<$guest>.  Empty when no bin names C<$guest>.
 
+=over 4
+
+=item pool - HashRef - the pool
+
+=item guest - Str - the domain of the guest
+
+=back
+
+Dies as C<bins> does.
+
+    my %bins = Provisioner::IPPool::bins_via( $pool, 'vpn.test.test' );
+
 =cut
 
 sub bins_via {
@@ -655,6 +835,18 @@ and the C<bins> of C<$installation_pool>, the C<ip_pool> of C<_global>.  A
 hypervisor that gives its guests their addresses has no C<guests> bin here,
 because its guests take none from the pool.
 
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item installation_pool - HashRef - optional: the C<ip_pool> of C<_global>
+
+=back
+
+Returns HashRef, the pool.
+
+    my $pool = Provisioner::IPPool::pool_of( $hv, $global{ip_pool} );
+
 =cut
 
 sub pool_of {
@@ -672,6 +864,16 @@ sub pool_of {
 The blocks of the bin C<$pool>, as C<blocks> gives them, sorted and joined
 into one string.  Two hypervisors on one network name the same blocks, so their
 pools have the same answer here.
+
+=over 4
+
+=item pool - HashRef - one bin
+
+=back
+
+Returns Str, the network.
+
+    my $network = Provisioner::IPPool::network_of( { cidr => '192.0.2.0/29' } );    # '192.0.2.0/29'
 
 =cut
 
@@ -693,6 +895,14 @@ bridge.  Two hypervisors each keep the addresses of their pools in a database
 of their own, so two of them that name one range, even the same blocks on a
 bridge of the same name, would both give out its addresses.  Give each
 hypervisor its own part of such a network.
+
+=over 4
+
+=item fleet - Trog::Hypervisors - the fleet
+
+=back
+
+    my %pools = Provisioner::IPPool::guest_pools($fleet);
 
 =cut
 
@@ -730,6 +940,14 @@ sub guest_pools {
 Returns the networks of C<$bin>, a block that C<pool_ips> takes, as CIDR
 blocks: each C<cidr> as it is, then each of its C<addresses> as a C</32>.
 
+=over 4
+
+=item bin - HashRef - one bin
+
+=back
+
+    my \@blocks = Provisioner::IPPool::blocks( { addresses => '192.0.2.7' } );    # ( '192.0.2.7/32' )
+
 =cut
 
 sub blocks {
@@ -741,6 +959,16 @@ sub blocks {
 
 The C<addresses> of C<$bin>, without the length of a prefix that one is written
 with.
+
+=over 4
+
+=item bin - HashRef - one bin
+
+=back
+
+Returns a list of Str, the addresses.
+
+    my \@addresses = Provisioner::IPPool::addresses_of( { addresses => '192.0.2.7/26' } );    # ( '192.0.2.7' )
 
 =cut
 
@@ -758,6 +986,16 @@ The server is the only record of these addresses: see L</BINS>.
 
 Dies if C<$via> is not up, or if the command does not finish, or if it prints
 a line that is not a name and an address.
+
+=over 4
+
+=item via - Str - the domain of the server
+
+=back
+
+Returns a list of pairs of Str.
+
+    my %clients = Provisioner::IPPool::via_clients('vpn.test.test');
 
 =cut
 
@@ -799,6 +1037,18 @@ its hypervisor.  That is the case of a runner that builds throwaway guests,
 which nothing outside the hypervisor has to reach.  So the callers ask this,
 and not C<assign>, which dies on such a bin.
 
+=over 4
+
+=item pool - HashRef - the pool
+
+=item bin - Str - optional: the bin
+
+=back
+
+Returns Bool, 1 or 0.  Dies as C<bins> does.
+
+    my $static = Provisioner::IPPool::offers($pool);
+
 =cut
 
 sub offers {
@@ -833,6 +1083,22 @@ the second waits, searches again, and finds the address taken.
 
 Dies if the bin has no addresses, or if no address in it is free.  Dies for a
 bin with C<via>, whose server gives out its addresses: see L</BINS>.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item pool - HashRef - the pool, as C<pool_of> returns it
+
+=item bin - Str - optional: the bin
+
+=item nic - Str - optional: the bridge
+
+=back
+
+Returns Str, the address.
+
+    my $ip = Provisioner::IPPool::assign( 'web.test.test', $pool );
 
 =cut
 
@@ -873,6 +1139,12 @@ so it asks no hypervisor twice.
 Dies if it cannot connect to a hypervisor.  A database with half the fleet
 in it gives out addresses that guests already use.  The seed does not mark that
 hypervisor as done, so the next run tries it again.
+
+Takes no arguments.
+
+Returns Int, the number of addresses recorded.
+
+    Provisioner::IPPool::ensure_seeded();
 
 =cut
 
@@ -1026,6 +1298,12 @@ What it found on one hypervisor goes into its database in one operation, so a
 hypervisor that does not answer, or a database that cannot be written, leaves
 that hypervisor unmarked, and the next seed asks it again.
 
+Takes no arguments.
+
+Returns Int, the number.  Dies also when a hypervisor cannot be asked.
+
+    my $recorded = Provisioner::IPPool::seed();
+
 =cut
 
 sub seed {
@@ -1062,6 +1340,18 @@ and after, C<on> and C<on_after>, each address of a guest to its bridge, before
 and after, and C<pruned>, the number of domains released.  Dies with C<prune>
 and no fleet, because then nothing can say which guests run, and every
 assignment would go.
+
+=over 4
+
+=item prune - Bool - optional: release each domain that no hypervisor runs
+
+=item dryrun - Bool - optional: roll each transaction back
+
+=back
+
+Dies also when a hypervisor cannot be asked.
+
+    my $result = Provisioner::IPPool::reseed( dryrun => 1 );
 
 =cut
 
@@ -1110,6 +1400,20 @@ C<dryrun>, it writes nothing.
 Returns C<added>, C<kept> and C<skipped>, the numbers of rows written, already
 there, and left behind.  Dies as that operation does, and when C<$from> cannot
 be read.
+
+=over 4
+
+=item name - Str - the block of the hypervisor
+
+=item from - Str - the path of the old database
+
+=item bins - ArrayRef[Str] - optional: more bins that belong to C<$name>
+
+=item dryrun - Bool - optional: write nothing
+
+=back
+
+    my $result = Provisioner::IPPool::migrate( 'hv1', '/bogus/old-ips.db', dryrun => 1 );
 
 =cut
 

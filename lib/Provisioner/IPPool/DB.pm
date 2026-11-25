@@ -74,6 +74,12 @@ our $GUESTS = 'guests';
 The absolute path of F<schema/ips.sql>, found from the location of this file.
 The kit keeps the same layout as the checkout, so the path works in both.
 
+Takes no arguments.
+
+Returns Str, the path.
+
+    my $schema = Provisioner::IPPool::DB::schema_path();
+
 =cut
 
 sub schema_path {
@@ -106,6 +112,18 @@ other than C<domain> and C<reserved> is refused.  A write through the view
 reports no rows, so where the number matters, count the rows of C<addresses>
 with C<do_with_update_hook> of L<Trog::SQLite>.
 
+=over 4
+
+=item path - Str - the path of the database
+
+=item create - Bool - optional: make the database when there is none
+
+=back
+
+Returns DBI::db, the handle.
+
+    my $db = Provisioner::IPPool::DB::dbh('/bogus/ips.db');
+
 =cut
 
 sub dbh ( $path, %opts ) {
@@ -122,11 +140,24 @@ my sub rows_written ( $db, $sql, @bind ) {
     return $rows;
 }
 
-=head2 check
+=head2 check($db, $args)
 
 What runs this: the version of perl and of SQLite, the path of the database,
 and where L<Trog::SQLite> was loaded from.  F<bin/ippool> answers it without a
 database, so that a caller can see whether a hypervisor can run the kit at all.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it, or undef for none
+
+=item args - HashRef - ignored
+
+=back
+
+Returns HashRef, with C<perl>, C<sqlite>, C<sqlite_module>, and C<path> when
+there is a database.
+
+    my $what = Provisioner::IPPool::DB::check( undef, {} );
 
 =cut
 
@@ -139,9 +170,21 @@ sub check ( $db, @ ) {
     };
 }
 
-=head2 init
+=head2 init($db, $args)
 
 Makes the database, if it is not there, and returns its path.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns Str, the path.
+
+    my $path = Provisioner::IPPool::DB::init( Provisioner::IPPool::DB::dbh( '/bogus/ips.db', create => 1 ), {} );
 
 =cut
 
@@ -149,10 +192,22 @@ sub init ( $db, @ ) {
     return $db->sqlite_db_filename();
 }
 
-=head2 assignments
+=head2 assignments($db, $args)
 
 Each guest domain, to the address of the guest: its main address in the
 C<guests> bin.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns HashRef[Str], from each domain to its address.
+
+    my $by_domain = Provisioner::IPPool::DB::assignments( $db, {} );
 
 =cut
 
@@ -161,9 +216,21 @@ sub assignments ( $db, @ ) {
     return { map { $_->{domain} => $_->{ip} } @$rows };
 }
 
-=head2 taken
+=head2 taken($db, $args)
 
 Each address, to the name that holds it, reservations too.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns HashRef[Str], from each address to its holder.
+
+    my $taken = Provisioner::IPPool::DB::taken( $db, {} );
 
 =cut
 
@@ -172,9 +239,21 @@ sub taken ( $db, @ ) {
     return { map { $_->{ip} => $_->{domain} } @$rows };
 }
 
-=head2 bridges
+=head2 bridges($db, $args)
 
 Each address of a guest in the C<guests> bin, to its bridge.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns HashRef[Str], from each address to its bridge.
+
+    my $on = Provisioner::IPPool::DB::bridges( $db, {} );
 
 =cut
 
@@ -183,10 +262,22 @@ sub bridges ( $db, @ ) {
     return { map { $_->{ip} => $_->{nic} } @$rows };
 }
 
-=head2 held_by
+=head2 held_by($db, $args)
 
 The address that C<domain> has in C<bin>, on C<nic> when it is given, or else its
 main one, or undef.  Domains only, never a reservation.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<domain>, and optionally C<bin>, C<guests> by default, and C<nic>
+
+=back
+
+Returns Str or undef: the address.
+
+    my $ip = Provisioner::IPPool::DB::held_by( $db, { domain => 'web.test.test', nic => 'br0' } );
 
 =cut
 
@@ -199,9 +290,21 @@ sub held_by ( $db, $args ) {
     return $row ? $row->[0] : undef;
 }
 
-=head2 main_addresses
+=head2 main_addresses($db, $args)
 
 Each bin in which C<domain> has an address, to its main address there.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<domain>
+
+=back
+
+Returns HashRef[Str], from each bin to the address.
+
+    my $by_bin = Provisioner::IPPool::DB::main_addresses( $db, { domain => 'web.test.test' } );
 
 =cut
 
@@ -210,10 +313,22 @@ sub main_addresses ( $db, $args ) {
     return { map { $_->{bin} => $_->{ip} } @$rows };
 }
 
-=head2 nic_addresses
+=head2 nic_addresses($db, $args)
 
 Each bridge on which C<domain> has an address in the C<guests> bin, to that
 address.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<domain>
+
+=back
+
+Returns HashRef[Str], from each bridge to the address.
+
+    my $by_nic = Provisioner::IPPool::DB::nic_addresses( $db, { domain => 'web.test.test' } );
 
 =cut
 
@@ -222,10 +337,22 @@ sub nic_addresses ( $db, $args ) {
     return { map { $_->{nic} => $_->{ip} } @$rows };
 }
 
-=head2 reserve
+=head2 reserve($db, $args)
 
 Records C<ip> as held by C<name>, which no guest gets, on the bridge C<nic>.
 Returns 1 when this wrote the row, and 0 when the address was already there.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<ip>, C<name>, and optionally C<nic>
+
+=back
+
+Returns Int, 1 or 0.
+
+    Provisioner::IPPool::DB::reserve( $db, { ip => '192.0.2.1', name => 'gateway:br0', nic => 'br0' } );
 
 =cut
 
@@ -233,11 +360,23 @@ sub reserve ( $db, $args ) {
     return rows_written( $db, "INSERT OR IGNORE INTO ips (ip, domain, kind, nic) VALUES (?, ?, 'reserved', ?)", @{$args}{qw(ip name)}, $args->{nic} // q{} ) ? 1 : 0;
 }
 
-=head2 record
+=head2 record($db, $args)
 
 Records C<ip> as the address of the guest C<domain> on the bridge C<nic>, the
 main one unless C<main> is false.  A row of C<domain> for C<ip> from before
 bridges gets C<nic> instead.  Returns 1 when this wrote a row.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<ip>, C<domain>, and optionally C<nic> and C<main>
+
+=back
+
+Returns Int, 1 or 0.
+
+    Provisioner::IPPool::DB::record( $db, { ip => '192.0.2.10', domain => 'web.test.test', nic => 'br0' } );
 
 =cut
 
@@ -250,10 +389,22 @@ sub record ( $db, $args ) {
     return rows_written( $db, "INSERT OR IGNORE INTO ips (ip, domain, kind, nic, main) VALUES (?, ?, 'domain', ?, ?)", $ip, $domain, $nic, ( $args->{main} // 1 ) ? 1 : 0 ) ? 1 : 0;
 }
 
-=head2 release
+=head2 release($db, $args)
 
 Deletes every address of C<domain>, and returns what it gave back: each bin to
 its main address, and C<guests on NIC> to each other address in C<guests>.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<domain>
+
+=back
+
+Returns HashRef[Str], what it gave back.
+
+    my $freed = Provisioner::IPPool::DB::release( $db, { domain => 'web.test.test' } );
 
 =cut
 
@@ -272,7 +423,7 @@ sub release ( $db, $args ) {
     return \%held;
 }
 
-=head2 assign
+=head2 assign($db, $args)
 
 The address of C<domain> in C<bin>, on the bridge C<nic>, out of C<candidates>,
 the addresses of that bin in order.  C<guest> is true for the C<guests> bin,
@@ -284,6 +435,18 @@ All of it is one transaction, which takes the write lock before it reads: see
 L<Trog::SQLite/transaction>, and C<sqlite_use_immediate_transaction> of
 L<DBD::SQLite>.  So two of these at once on one hypervisor cannot give out one
 address twice.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<domain>, C<bin>, C<nic>, C<main>, C<guest> and C<candidates>, an ArrayRef[Str]
+
+=back
+
+Returns Str, the address.  Dies when no candidate is free.
+
+    my $ip = Provisioner::IPPool::DB::assign( $db, { domain => 'web.test.test', bin => 'guests', nic => 'br0', main => 1, guest => 1, candidates => ['192.0.2.10'] } );
 
 =cut
 
@@ -329,9 +492,21 @@ sub assign ( $db, $args ) {
     return $address;
 }
 
-=head2 forget_seeding
+=head2 forget_seeding($db, $args)
 
 Deletes the record of which hypervisors were seeded.  Returns how many.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns Int, how many.
+
+    my $forgot = Provisioner::IPPool::DB::forget_seeding( $db, {} );
 
 =cut
 
@@ -340,9 +515,21 @@ sub forget_seeding ( $db, @ ) {
     return $rows && $rows ne '0E0' ? $rows + 0 : 0;
 }
 
-=head2 clear_reservations
+=head2 clear_reservations($db, $args)
 
 Deletes each reservation, and returns how many.  Assignments stay.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns Int, how many.
+
+    my $cleared = Provisioner::IPPool::DB::clear_reservations( $db, {} );
 
 =cut
 
@@ -350,9 +537,21 @@ sub clear_reservations ( $db, @ ) {
     return rows_written( $db, "DELETE FROM ips WHERE kind = 'reserved'" );
 }
 
-=head2 seeded
+=head2 seeded($db, $args)
 
 The sources that a seed finished, such as C<hv:hv1>.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - ignored
+
+=back
+
+Returns ArrayRef[Str], the sources.
+
+    my $sources = Provisioner::IPPool::DB::seeded( $db, {} );
 
 =cut
 
@@ -374,13 +573,26 @@ my sub apply_seed ( $db, $seed ) {
     return $written;
 }
 
-=head2 seed
+=head2 seed($db, $args)
 
 Writes C<rows> in their order, each C<[reserve, IP, NAME, NIC]> or
 C<[record, IP, DOMAIN, NIC, MAIN]>, as C<reserve> and C<record> do, and then
 marks each source of C<mark> as seeded, in one transaction.  Returns the
 number of rows written.  The caller asked the hypervisor what is in use, so a
 seed that could not finish writes nothing and marks nothing.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<rows>, an ArrayRef[ArrayRef], and C<mark>, an ArrayRef[Str]
+
+=back
+
+Returns Int, the number of rows written.  Dies on a row of another kind than
+C<reserve> or C<record>, and writes nothing then.
+
+    my $written = Provisioner::IPPool::DB::seed( $db, { rows => [ [ 'reserve', '192.0.2.1', 'hv:hv1', 'br0' ] ], mark => ['hv:hv1'] } );
 
 =cut
 
@@ -390,7 +602,7 @@ sub seed ( $db, $args ) {
     return $written;
 }
 
-=head2 reseed
+=head2 reseed($db, $args)
 
 In one transaction: forgets which hypervisors were seeded, deletes every
 reservation, writes each seed of C<seeds> as C<seed> does, and with C<prune>,
@@ -400,6 +612,19 @@ not domains.  With C<dryrun>, it rolls all of that back.
 
 Returns C<before> and C<after>, what C<taken> says, C<on> and C<on_after>,
 what C<bridges> says, and C<pruned>, how many domains it released.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<seeds>, an ArrayRef[HashRef] of what C<seed> takes, and optionally C<prune>, an ArrayRef[Str], and C<dryrun>
+
+=back
+
+Returns HashRef, as above.  Dies with the error of the step that failed, after
+it rolls back.
+
+    my $out = Provisioner::IPPool::DB::reseed( $db, { seeds => \@seeds, prune => ['web.test.test'], dryrun => 1 } );
 
 =cut
 
@@ -436,7 +661,7 @@ sub reseed ( $db, $args ) {
     return \%out;
 }
 
-=head2 migrate
+=head2 migrate($db, $args)
 
 Writes C<rows>, each a hash of C<ip>, C<domain>, C<kind>, C<bin>, C<nic>,
 C<main> and C<assigned_at> as the view C<ips> has them, and marks each source
@@ -444,6 +669,18 @@ of C<seeded>, in one transaction.  A row that is already here as it is is
 skipped.  Dies, and writes nothing, when an address or a name of a row is
 here with another holder or another address.  With C<dryrun>, it writes nothing.
 Returns C<added> and C<kept>, the numbers of rows.
+
+=over 4
+
+=item db - DBI::db - the handle, as C<dbh> returns it
+
+=item args - HashRef - with C<rows>, an ArrayRef[HashRef], C<seeded>, an ArrayRef[Str], and optionally C<dryrun>
+
+=back
+
+Returns HashRef, with C<added> and C<kept>.
+
+    my $out = Provisioner::IPPool::DB::migrate( $db, { rows => \@rows, seeded => ['hv:hv1'] } );
 
 =cut
 
@@ -482,6 +719,22 @@ Opens the database at C<$path>, as C<dbh> does with C<%opts>, and returns what
 the operation C<$op> returns for C<$args>.  C<check> runs without a database
 when there is none.  Dies on an operation that is not one of the above.
 
+=over 4
+
+=item path - Str - the path of the database
+
+=item op - Str - the name of the operation
+
+=item args - HashRef - optional: the arguments of the operation, empty by default
+
+=item create - Bool - optional: as for C<dbh>
+
+=back
+
+Returns Any, what the operation returns.
+
+    my $taken = Provisioner::IPPool::DB::run( '/bogus/ips.db', 'taken', {} );
+
 =cut
 
 my %OPS = (
@@ -508,6 +761,12 @@ my %OPS = (
 =head2 @ops = operations()
 
 The names of the operations, sorted.
+
+Takes no arguments.
+
+Returns a list of Str, the names.
+
+    my \@ops = Provisioner::IPPool::DB::operations();
 
 =cut
 

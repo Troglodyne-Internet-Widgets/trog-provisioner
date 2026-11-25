@@ -112,6 +112,13 @@ listens on the same ports.
 The directory of the registrations, and of the keys that the relay issued.  A
 subclass must say.
 
+Takes no arguments.
+
+Returns Str, the directory, from a subclass.  This class dies, and names the
+class, which does not say.
+
+    my $dir = Provisioner::Recipe::nginxrelay->relay_dir;
+
 =cut
 
 sub relay_dir {
@@ -123,6 +130,17 @@ sub relay_dir {
 
 The ports where the relay drops the packets of a banned address.  A subclass
 must say.
+
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns a list of Int, the ports, from a subclass.  This class dies, and names
+the class, which does not say.
+
+    my @ports = $recipe->banned_ports(%config);
 
 =cut
 
@@ -136,18 +154,37 @@ sub banned_ports {
 How many new connections an address may open each second on each port that a
 guest registered.  See L</Ports of the guests>.
 
+Takes no arguments.
+
+Returns Int, the connections a second.
+
+    my $hits = $recipe->port_rate_limit;    # 1024
+
 =cut
 
 sub port_rate_limit {
     return 1024;
 }
 
-=head2 @args = port_args(\%routes)
+=head2 @args = port_args($routes)
 
 The arguments of the client script of a relay for C<%routes>, which maps each
 port of its own to each name that passes on it, mapped to the port of the
 guest: a C<--port> and a C<PORT=GUEST_PORT:NAME,...> for each port and port of
 the guest, in order.  See L</Ports of the guests>.
+
+A function, not a method.
+
+=over 4
+
+=item routes - HashRef[HashRef[Int]] - from each port of the relay, to each name, to the port of the guest
+
+=back
+
+Returns a list of Str, the arguments.
+
+    my @args = Provisioner::RelayRecipe::port_args( { 8448 => { 'chat.test.test' => 8448 } } );
+    # ( '--port', '8448=8448:chat.test.test' )
 
 =cut
 
@@ -167,6 +204,12 @@ sub port_args {
 The name of the ipset of the bans of this relay: the name of the recipe, and
 C<-bans>.
 
+Takes no arguments.
+
+Returns Str, the name of the set.
+
+    my $set = Provisioner::Recipe::nginxrelay->ban_set;    # 'nginxrelay-bans'
+
 =cut
 
 sub ban_set {
@@ -178,6 +221,12 @@ sub ban_set {
 
 The directory where the hook of the bans saves C<ban_set>, with the time that
 each ban has left: F</var/lib/> and the name of the set.
+
+Takes no arguments.
+
+Returns Str, the directory.
+
+    my $dir = Provisioner::Recipe::nginxrelay->ban_dir;    # '/var/lib/nginxrelay-bans'
 
 =cut
 
@@ -192,6 +241,12 @@ The hook of the bans in F</etc/ufw/after.init.d>, which loads C<ban_set> into
 the firewall when ufw loads, and saves it to C<ban_dir> when ufw unloads, or
 when it is run with C<save>.
 
+Takes no arguments.
+
+Returns Str, the path of the hook.
+
+    my $hook = Provisioner::Recipe::nginxrelay->ban_hook;
+
 =cut
 
 sub ban_hook {
@@ -199,13 +254,21 @@ sub ban_hook {
     return '/etc/ufw/after.init.d/' . $self->ban_set;
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 %path_map = $recipe->remote_files()
 
 C<relay_dir>, which holds the registrations and the keys that the relay issued,
 and C<ban_dir>, which holds the bans in force.  Without the first, a rebuilt
 relay serves no guest behind it until each one is built again.  Without the
 second, an address that a guest banned connects again until it offends again,
 because a guest sends a ban only when it bans.
+
+It takes the C<$install_dir> and C<$domain> that L<Provisioner::Recipe/remote_files>
+describes, and reads neither.
+
+Returns a list of pairs of Str, from each directory on the relay to where it
+lands.
+
+    my %path_map = $recipe->remote_files;
 
 =cut
 
@@ -217,10 +280,17 @@ sub remote_files {
     );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 @commands = $recipe->remote_prepare()
 
 Runs C<ban_hook> with C<save>, so that the salvage holds the bans in force
 now, and not those of the last time that ufw unloaded.
+
+It takes the C<$install_dir> and C<$domain> that L<Provisioner::Recipe/remote_prepare>
+describes, and reads neither.
+
+Returns a list of Str, the one command.
+
+    my @commands = $recipe->remote_prepare;
 
 =cut
 
@@ -232,6 +302,19 @@ sub remote_prepare {
 =head2 %restores = $recipe->restores(%opts)
 
 The salvage of C<relay_dir> and of C<ban_dir> goes back where it came from.
+
+=over 4
+
+=item install_dir - Str - where the files of domains live on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of pairs, from each directory on the relay to a HashRef, as
+L<Provisioner::Recipe/restores> describes it.
+
+    my %restores = $recipe->restores( install_dir => '/opt/domains', domain => 'relay.test.test' );
 
 =cut
 
@@ -249,6 +332,16 @@ sub restores {
 Where the ban key that this relay issues for C<$domain> is, on the guest of
 C<$domain>, in base64.
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=back
+
+Returns Str, the path.
+
+    my $path = $recipe->key_path('web.test.test');
+
 =cut
 
 sub key_path {
@@ -260,6 +353,16 @@ sub key_path {
 
 Where the public host key of the relay is, on the guest of C<$domain>, in
 base64.
+
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=back
+
+Returns Str, the path.
+
+    my $path = $recipe->host_key_path('web.test.test');
 
 =cut
 
@@ -289,6 +392,18 @@ host key.
 
 =back
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item address - Str - the address that the guest reaches the relay at
+
+=back
+
+Returns HashRef, with the keys above.
+
+    my $ban = $recipe->ban_client( 'web.test.test', '192.0.2.10' );
+
 =cut
 
 sub ban_client {
@@ -310,6 +425,19 @@ The files that the relay issues when it registers the client of C<$grant>, as
 C<issue_grant> in L<Provisioner::Recipe> says, one of which is the ban key at
 C<key_path>.  A subclass must say.
 
+=over 4
+
+=item grant - HashRef - the grant, as L<Provisioner::Recipe/grants> describes it
+
+=item terms - HASH - the terms of the grant
+
+=back
+
+Returns a list of pairs, as L<Provisioner::Recipe/issue_grant> describes them,
+from a subclass.  This class dies, and names the class, which does not say.
+
+    my %files = $recipe->registration_files( $grant, %terms );
+
 =cut
 
 sub registration_files {
@@ -323,6 +451,19 @@ C<registration_files>, and the public host key of the relay at C<host_key_path>
 of the client, as C<issue_grant> in L<Provisioner::Recipe> says.  The client
 pins the host key, so that a ban never goes to a guest that only claims to be
 the relay.
+
+=over 4
+
+=item grant - HashRef - the grant, with C<client> and C<guest>
+
+=item terms - HASH - the terms of the grant
+
+=back
+
+Returns a list of pairs, from each path on the guest of the client to a
+HashRef.  Dies as C<registration_files> does in a subclass that does not say.
+
+    my %files = $recipe->issue_grant( { recipe => 'nginxrelay', guest => 'relay.test.test', client => 'web.test.test' } );
 
 =cut
 
@@ -347,6 +488,17 @@ C<relay_dir> of each relay in C<modules>.  sshd reads the keys of all of them
 from one directive, and the C<stream> block includes the ports of the guests
 from each.  A subclass that has an C<enrich> of its own calls this one.
 
+=over 4
+
+=item opts - HASH - the configuration, validated, with C<modules>
+
+=back
+
+Returns a list of pairs, C<%opts> with what is above.  Dies as C<relay_dir> and
+C<banned_ports> do in a subclass that does not say.
+
+    my %vars = $recipe->enrich(%opts);
+
 =cut
 
 sub enrich {
@@ -368,6 +520,13 @@ sub enrich {
 
 The files that F<templates/files/relay.install.tt> installs.  A subclass adds
 its own to these.
+
+Takes no arguments here, and ignores the recipes that
+L<Provisioner::Recipe/template_files> passes.
+
+Returns a list of pairs of Str, from each template to the file that it renders.
+
+    my %files = $recipe->template_files;
 
 =cut
 

@@ -135,10 +135,24 @@ my %SCHEMA = (
 
 =head1 METHODS
 
-=head2 @files = Provisioner::Packager::Deb->first_boot_files(%args)
+=head2 @files = $class->first_boot_files(%args)
 
 The files of C<files> for the C<sources> in C<%args>, and the pin of C<forbid>
 for its C<conflicts>, for C<domain>.  See L<Provisioner::Packager>.
+
+=over 4
+
+=item domain - Str - the domain, which names the file of the pin
+
+=item sources - ArrayRef[HashRef] - optional: the sources, as L</A source> describes them
+
+=item conflicts - ArrayRef[Str] - optional: the packages to keep off the guest
+
+=back
+
+Returns a list of HashRef, one file each.  Dies as C<merge> and C<files> do.
+
+    my @files = Provisioner::Packager::Deb->first_boot_files( domain => 'web.test.test', sources => \@sources, conflicts => ['sendmail'] );
 
 =cut
 
@@ -150,10 +164,20 @@ sub first_boot_files {
     );
 }
 
-=head2 @answers = Provisioner::Packager::Deb->answers(@answers)
+=head2 @answers = $class->answers(@answers)
 
 The answers once each, as lines that C<debconf-set-selections> reads.
 cloud-init gives them to debconf before it installs anything.
+
+=over 4
+
+=item @answers - Str - each answer, as a line of C<debconf-set-selections>
+
+=back
+
+Returns a list of Str, the answers, each once, in the order that they first came.
+
+    my @answers = Provisioner::Packager::Deb->answers( 'postfix postfix/main_mailer_type select No configuration', @more );
 
 =cut
 
@@ -162,10 +186,16 @@ sub answers {
     return uniq @answers;
 }
 
-=head2 @modules = Provisioner::Packager::Deb->cloud_init_modules()
+=head2 @modules = $class->cloud_init_modules()
 
 C<cc_apt_configure>, which sets the debconf answers.  The archives are files,
 which C<cc_write_files> writes for every packager.
+
+Takes no arguments.
+
+Returns a list of Str, the one module.
+
+    my @modules = Provisioner::Packager::Deb->cloud_init_modules;    # ( 'cc_apt_configure' )
 
 =cut
 
@@ -173,7 +203,7 @@ sub cloud_init_modules {
     return qw{cc_apt_configure};
 }
 
-=head2 $pattern = Provisioner::Packager::Deb->package_name()
+=head2 $pattern = $class->package_name()
 
 The rule of the Debian policy for the name of a package, as
 L<Dist::Conformance::Check::SystemPackages> holds a declaration to it, so that
@@ -181,13 +211,19 @@ an installer refuses what a declaration may not name.  Among what it refuses
 are C<foo->, which C<apt-get install> reads as a removal, C<-y>, C<foo=1.2>,
 C<foo/sid>, C<foo:i386>, F<./foo.deb> and a name with a space.
 
+Takes no arguments.
+
+Returns Str, the pattern.
+
+    my $pattern = Provisioner::Packager::Deb->package_name;
+
 =cut
 
 sub package_name {
     return $Dist::Conformance::Check::SystemPackages::PACKAGE_NAME{deb};
 }
 
-=head2 @argv = Provisioner::Packager::Deb->install_command()
+=head2 @argv = $class->install_command()
 
 C<apt-get install> without recommends, through C<env> with
 C<DEBIAN_FRONTEND=noninteractive>, so that sudo, which empties the environment,
@@ -198,6 +234,12 @@ and waits for the lock of the package database rather than failing on it, becaus
 unattended-upgrades can hold it.  Unlike the C<packager_invocation> of
 L<Provisioner::Recipe::ubuntu>, it does not remove the packages that nothing needs any more.
 
+Takes no arguments.
+
+Returns a list of Str, the words.
+
+    my @argv = ( Provisioner::Packager::Deb->install_command, 'nginx' );
+
 =cut
 
 sub install_command {
@@ -207,11 +249,21 @@ sub install_command {
     );
 }
 
-=head2 @argv = Provisioner::Packager::Deb->update_command($file)
+=head2 @argv = $class->update_command($file)
 
 C<apt-get update> of the deb822 F<.sources> file C<$file> alone, which keeps
 the lists of every other source as they are.  It finds C<apt-get> on the
 C<PATH>, as C<install_command> does.
+
+=over 4
+
+=item file - Str - the path of the F<.sources> file
+
+=back
+
+Returns a list of Str, the words.
+
+    my @argv = Provisioner::Packager::Deb->update_command('/etc/apt/sources.list.d/vendor.sources');
 
 =cut
 
@@ -230,13 +282,24 @@ my sub canonical ($value) {
     return join( ',', map { "$_->[0]=" . ( ${ $_->[1] } // q{} ) } grep { !ref ${ $_->[1] } } Trog::Utils::slots_in( \$value ) );
 }
 
-=head2 @sources = Provisioner::Packager::Deb->merge(@sources)
+=head2 @sources = $class->merge(@sources)
 
 Returns C<@sources> validated, with one entry for each C<name>.  Two recipes can
 name the same archive, and then they must describe it the same way.
 
 Dies on a source that does not match L</A source>, and on two different sources
 under one name.
+
+=over 4
+
+=item @sources - HashRef - each source, as L</A source> describes it
+
+=back
+
+Returns a list of HashRef, the sources, each with a C<pin> that has C<packages>
+when it has a C<pin> at all.
+
+    my @merged = Provisioner::Packager::Deb->merge(@sources);
 
 =cut
 
@@ -262,7 +325,7 @@ sub merge {
     return map { $by_name{$_} } @order;
 }
 
-=head2 @files = Provisioner::Packager::Deb->files(@sources)
+=head2 @files = $class->files(@sources)
 
 Fetches the key of each source, asks the archive for each suite, and returns
 the files for them.  Each file is a hash reference with C<path>, C<content>,
@@ -280,6 +343,16 @@ Dies when a key cannot be fetched or is not a PGP key, when a source has a
 C<fingerprint> and its key is not one primary key with it, and when the archive
 does not answer for a suite.  A guest that boots with either fails in its
 package install, where the error names neither the archive nor the key.
+
+=over 4
+
+=item @sources - HashRef - each source, as C<merge> returns it
+
+=back
+
+Returns a list of HashRef, one file each.
+
+    my @files = Provisioner::Packager::Deb->files( Provisioner::Packager::Deb->merge(@sources) );
 
 =cut
 
@@ -330,7 +403,7 @@ sub files {
     return @files;
 }
 
-=head2 @files = Provisioner::Packager::Deb->forbid($domain, @packages)
+=head2 @files = $class->forbid($domain, @packages)
 
 A pin that keeps apt from installing C<@packages> at all, from any archive, as
 the one file in a list, or no file when C<@packages> is empty.  The file is
@@ -341,6 +414,18 @@ A pin does not remove a package that is installed.  It keeps a package that
 another one merely recommends, or offers as one of several choices, from being
 installed.  A package that depends on a forbidden one outright cannot install
 either, and apt says so.
+
+=over 4
+
+=item domain - Str - the domain, which names the file
+
+=item @packages - Str - the names of the packages
+
+=back
+
+Returns a list of HashRef: the one file, or nothing when C<@packages> is empty.
+
+    my @files = Provisioner::Packager::Deb->forbid( 'web.test.test', 'sendmail' );
 
 =cut
 
@@ -359,6 +444,20 @@ sub forbid {
 The key at C<$url>, as bytes.  C<$name> is the source that wants it, for the
 error.  Dies when the fetch fails, and when the answer is neither an armored
 nor a binary PGP key.  A captive portal answers C<200> with a page of HTML.
+
+A function, not a method.  The key of each URL is fetched once for each process.
+
+=over 4
+
+=item url - Str - the URL of the key
+
+=item name - Str - the name of the source
+
+=back
+
+Returns Str, the key, as bytes.
+
+    my $key = Provisioner::Packager::Deb::key( 'https://apt.test.test/key.asc', 'vendor' );
 
 =cut
 
@@ -389,6 +488,18 @@ algorithm of OpenPGP key, and it reads the key into a home directory of its
 own, so no keyring changes.  The installer of L<Provisioner::Recipe::clod>
 reads keys on the guest in the same way.  Dies when there is no gpg to run, and
 when gpg reads no key in C<$key>.
+
+A function, not a method.
+
+=over 4
+
+=item key - Str - the key, armored or binary
+
+=back
+
+Returns a list of Str, the fingerprints.
+
+    my @fingerprints = Provisioner::Packager::Deb::key_fingerprints($key);
 
 =cut
 
@@ -438,6 +549,18 @@ gpg reads it in a home directory of its own, as
 L</@fingerprints = key_fingerprints($key)> does.
 Dies when there is no gpg to run, and when gpg reads no key in C<$key>.
 
+A function, not a method.
+
+=over 4
+
+=item key - Str - the key, as bytes
+
+=back
+
+Returns Str, the trimmed key, as bytes.
+
+    my $trimmed = Provisioner::Packager::Deb::trim_key($key);
+
 =cut
 
 sub trim_key {
@@ -450,11 +573,17 @@ sub trim_key {
     return gpg( $home, q{}, $doing, 'gpg could not export the key', qw{--export --export-options export-minimal --export-filter}, 'drop-subkey=usage = e' );
 }
 
-=head2 $why = Provisioner::Packager::Deb->gpg_error()
+=head2 $why = $class->gpg_error()
 
 Why C<key_fingerprints> cannot run on this machine, or undef when it can: gpg
 must run, and be GnuPG 2.2.8 or later, the first release with C<--show-keys>.
 C<bin/preflight> asks it.
+
+Takes no arguments.
+
+Returns Str, why, or undef.
+
+    if ( my $why = Provisioner::Packager::Deb->gpg_error ) { warn "$why\n" }
 
 =cut
 
@@ -476,6 +605,23 @@ none for a release older than the distribution.
 A signed index is F<InRelease>, or F<Release> with its signature beside it in
 F<Release.gpg>.  apt reads either, and some archives, such as that of
 Atomicorp, publish only the second.
+
+A function, not a method.  An index that answered once is not asked again in
+the same process.
+
+=over 4
+
+=item uri - Str - the URI of the archive
+
+=item suite - Str - the suite
+
+=item name - Str - the name of the source, for the error
+
+=back
+
+Returns Int, 1.
+
+    Provisioner::Packager::Deb::check_suite( 'https://apt.test.test/ubuntu', 'noble', 'vendor' );
 
 =cut
 
@@ -500,6 +646,20 @@ sub check_suite {
 An L<HTTP::Tiny> response for C<$url>, by C<GET> unless C<$method> says
 otherwise.  The one place this module reaches the network, so a test replaces
 it.
+
+A function, not a method.
+
+=over 4
+
+=item url - Str - the URL
+
+=item method - Str - optional: the method, C<GET> by default
+
+=back
+
+Returns HashRef, the response.
+
+    my $res = Provisioner::Packager::Deb::fetch( 'https://apt.test.test/ubuntu/dists/noble/InRelease', 'HEAD' );
 
 =cut
 
