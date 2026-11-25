@@ -95,6 +95,10 @@ C<cache_min_free> free.
 =item * drops the C<Cookie> of the reader and the C<Set-Cookie> of the guest,
 so every reader gets the same file.
 
+=item * asks the guest for each file uncompressed, and compresses text with
+gzip for a reader that asks, with C<Vary: Accept-Encoding>.  The cache key has
+no C<Accept-Encoding>, so the cache holds one copy that every reader can read.
+
 =item * takes only C<GET> and C<HEAD>.
 
 =item * answers 404 under F</assets/private/> without asking the guest.  The
@@ -139,6 +143,9 @@ a page name is a mistake.
 
 =item * While the guest does not answer, or answers with an error, readers get
 the last page that the cache holds.
+
+=item * It asks the guest for each page uncompressed, and compresses it as the
+media server does.
 
 =back
 

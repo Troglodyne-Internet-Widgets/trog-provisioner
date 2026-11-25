@@ -4,6 +4,8 @@ use warnings;
 use Test::More;
 use IO::Socket::INET;
 use IO::Select;
+use IO::Compress::Gzip ();
+use IO::Uncompress::Gunzip ();
 use MIME::Base64 ();
 
 my $client = '[% script_dir %]/relay_client nginx';
@@ -165,8 +167,10 @@ subtest 'the key of a guest sends bans, and nothing else' => sub {
 
 # A media name and a page name, which this guest serves and caches, from an
 # origin that stands in for the HTTP port of the guest.  The origin logs the
-# request line of each request, and whether it had a cookie.  It answers a path
-# under /page as tCMS answers a page, and anything else as it answers a file.
+# request line of each request, and whether it had a cookie or an
+# Accept-Encoding.  It answers a path under /page as tCMS answers a page, and
+# anything else as it answers a file.  It gzips /page-long for a request that
+# takes gzip, as tPSGI does.
 # The names are short, because openssl refuses a common name of more than 64
 # characters.
 my $media  = 'media.relay-selftest.test.test';
@@ -191,8 +195,19 @@ if ( !$origin_pid ) {
             last if $request =~ m/\r\n\r\n/;
         }
         my ($line) = $request =~ m/\A([^\r\n]*)/;
-        print {$log} $line, ( $request =~ m/^Cookie:/mi ? ' cookie' : q{} ), "\n";
-        if ( $line =~ m{\A\S+ /page} ) {
+        my $takes_gzip = $request =~ m/^Accept-Encoding:[^\r\n]*gzip/mi;
+        print {$log} $line, ( $request =~ m/^Cookie:/mi ? ' cookie' : q{} ), ( $request =~ m/^Accept-Encoding:/mi ? ' accept-encoding' : q{} ), "\n";
+        if ( $line =~ m{\A\S+ /page-long} ) {
+            my $body = "a page that is long enough for gzip to compress\n" x 20;
+            my $head = "Content-Type: text/html\r\nConnection: close\r\n";
+            if ($takes_gzip) {
+                IO::Compress::Gzip::gzip( \$body => \my $gzipped ) or die "gzip failed\n";
+                $body = $gzipped;
+                $head .= "Content-Encoding: gzip\r\n";
+            }
+            print {$conn} "HTTP/1.1 200 OK\r\nContent-Length: " . length($body) . "\r\n$head\r\n$body";
+        }
+        elsif ( $line =~ m{\A\S+ /page} ) {
             my $body = "page probe\n";
             my $head = "ETag: \"v1\"\r\nCache-Control: no-cache, max-age=0\r\nConnection: close\r\n";
             print {$conn} $request =~ m/^If-None-Match: "v1"/mi ? "HTTP/1.1 304 Not Modified\r\n$head\r\n" : "HTTP/1.1 200 OK\r\nContent-Length: " . length($body) . "\r\n$head\r\n$body";
@@ -321,6 +336,18 @@ subtest 'a page name is served and cached here, for readers alone' => sub {
 
     my $redirect = `curl -s --max-time 5 -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$page:80:127.0.0.1' 'http://$page/page' 2>/dev/null`;
     is( $redirect, "301 https://$page/page", 'on 80, a page name goes to HTTPS' );
+
+    ( $code, $out ) = page_get( '/page-long', q{-H 'Accept-Encoding: gzip'} );
+    like( $out, qr/^Content-Encoding: gzip\r$/mi,         'a reader that takes gzip gets the page gzipped' ) or diag( ( split m/\r\n\r\n/, $out, 2 )[0] );
+    like( $out, qr/^Vary: Accept-Encoding\r$/mi,          'with Vary, so a cache past this one keeps a copy for each' );
+    my ($gzipped) = $out =~ m/\r\n\r\n(.*)\z/s;
+    IO::Uncompress::Gunzip::gunzip( \$gzipped => \my $page_text );
+    like( $page_text // q{}, qr/\Aa page that is long enough/, 'which unzips to the page' );
+    ( $code, $out ) = page_get('/page-long');
+    like( $out, qr/^X-Relay-Cache: HIT\r$/mi,             'a reader that does not take gzip gets the same copy from the cache' );
+    unlike( $out, qr/^Content-Encoding:/mi,               'but not gzipped' ) or diag $out;
+    like( $out, qr/\r\n\r\na page that is long enough/, 'so it reads the page' );
+    is( origin_saw('GET /page-long HTTP/1.1 accept-encoding'), 0, 'because the origin is never asked for gzip' );
 
     kill 'TERM', $origin_pid;
     waitpid( $origin_pid, 0 );
