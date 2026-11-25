@@ -167,6 +167,21 @@ subtest 'the cache says which repositories are forks' => sub {
     is_deeply( { map { $_ => $cache->{'https://api.test/'}{carol}{$_}{fork} } qw{own forked} }, { own => 0, forked => 1 }, 'as 1 for a fork and 0 for the rest, which the smoke of admincode reads' );
 };
 
+subtest 'an archived repository is neither cached nor cloned' => sub {
+    my $archive_home = tempdir( CLEANUP => 1 );
+    my $r            = repos_for(
+        home  => $archive_home,
+        args  => [qw{https://api.test/ dave}],
+        repos => { dave => [ +{ %{ row( 'dave', 'live' ) }, archived => Cpanel::JSON::XS::false }, +{ %{ row( 'dave', 'dead' ) }, archived => Cpanel::JSON::XS::true } ] },
+    );
+    is( $r->{rc}, 0, 'the run reports nothing wrong' ) or diag $r->{err};
+    ok( cloned( $r,  'live' ), 'the live repository is cloned' );
+    ok( !cloned( $r, 'dead' ), 'the archived one is not' );
+
+    my $cache = Trog::repogetter::read_cache("$archive_home/.repos_for.json");
+    is_deeply( [ sort keys %{ $cache->{'https://api.test/'}{dave} } ], ['live'], 'and only the live one is in the cache' );
+};
+
 subtest 'a name that is not a plain directory component is refused' => sub {
     foreach my $name (qw{../escape . .. a/b}) {
         my $nasty = repos_for(

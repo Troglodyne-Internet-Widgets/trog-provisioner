@@ -41,6 +41,11 @@ API says that the repository is a fork, and 0 when it does not.
 F<scripts/smoke_perl_modules.pl> reads C<fork>.  A cache written before C<fork>
 was recorded has no such key, until C<--reset>.
 
+A repository that the API says is archived does not go into the cache, so it
+is not cloned.  A cache written before this rule can still hold one, until
+C<--reset>.  A clone of an archived repository that is there already is left
+alone, as C<clone> leaves every directory that exists.
+
 =cut
 
 # JSON::PP and not JSON, because this runs on the system perl of a guest.  The
@@ -78,6 +83,11 @@ sub main {
         $cache->{$api_url}{$entity} //= {};
 
         foreach my $row ( repos_of( $api_url, $entity, $token ) ) {
+
+            # An archived repository is read-only, so a clone of it is a
+            # directory that nobody can push to.
+            next if $row->{archived};
+
             $cache->{$api_url}{$entity}{ $row->{name} } = {
                 clone_url      => $row->{clone_url},
                 ssh_url        => $row->{ssh_url},
