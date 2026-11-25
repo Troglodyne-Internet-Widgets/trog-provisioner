@@ -18,6 +18,10 @@ Provisioner::Recipe::Ubuntu::koan - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 Returns the Ubuntu packages that koan needs to build and run.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {

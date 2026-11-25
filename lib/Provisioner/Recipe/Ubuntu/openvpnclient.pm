@@ -16,9 +16,18 @@ Provisioner::Recipe::Ubuntu::openvpnclient - Ubuntu's C<deps> for L<Provisioner:
 
 =cut
 
-sub deps {
+=head2 @pkgs = $recipe->deps()
 
-    # The certificates arrive by rsync over ssh, so it needs both as well as openvpn.
+C<openvpn>, and C<openssh-client> and C<rsync>, because the certificates
+arrive by rsync over ssh.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
+sub deps {
     return qw{openvpn openssh-client rsync};
 }
 

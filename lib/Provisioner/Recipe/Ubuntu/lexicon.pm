@@ -16,6 +16,17 @@ Provisioner::Recipe::Ubuntu::lexicon - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<lexicon>, and C<python3-requests-unixsocket>, which the patch to lexicon
+imports whichever provider it runs.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
 
     # lexicon-pdns-af-unix.patch imports requests_unixsocket into a module the

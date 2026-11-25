@@ -21,6 +21,17 @@ C<package_sources> below names.  Ubuntu has no OSSEC.
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<ossec-hids-server>, and C<libxml-libxml-perl> for the ossec language of
+configd.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
 
     # libxml-libxml-perl for the ossec language of configd, which reads
@@ -28,12 +39,25 @@ sub deps {
     return qw{ossec-hids-server libxml-libxml-perl};
 }
 
-=head2 @sources = $recipe->package_sources()
+=head2 @sources = $recipe->package_sources(%opts)
 
 The archive of Atomicorp, for C<distro_release>, the release of the domain.  The
 key below signs the suites of noble and older.  The installer of Atomicorp names
 a second key for the suites of Ubuntu 26 and later, so a later release needs
 that key here.
+
+=over 4
+
+=item distro_release - Str|Undef - the release of the domain, such as
+C<noble>; the pinned release when undef
+
+=back
+
+Returns a list of HashRef, one per archive, as L<Provisioner::Packager::Deb/A
+source> describes it.  Dies when L<Provisioner::Recipe::ubuntu> does not know
+C<distro_release>.
+
+    my @sources = $recipe->package_sources( distro_release => 'noble' );
 
 =cut
 

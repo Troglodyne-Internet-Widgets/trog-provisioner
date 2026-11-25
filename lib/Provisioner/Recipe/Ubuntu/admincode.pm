@@ -21,6 +21,16 @@ Provisioner::Recipe::Ubuntu::admincode - Ubuntu's C<deps> for L<Provisioner::Rec
 What the clone script needs, and the C<extra_pkgs> of the operator, which
 cloud-init installs with the rest at first boot.
 
+=over 4
+
+=item extra_pkgs - ArrayRef[Str]|Undef - the further packages of the operator
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps( extra_pkgs => ['htop'] );
+
 =cut
 
 sub deps {
@@ -32,6 +42,10 @@ sub deps {
 
 The packager of L<Provisioner::Recipe::ubuntu>, which installs the system
 packages that the smoke of L<Provisioner::Recipe::admincode> finds declared.
+
+Returns a Str, such as C<deb>.
+
+    my $packager = $recipe->distro_packager();
 
 =cut
 

@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::sssd - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<sssd> with its LDAP provider, and its modules for PAM and NSS.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{sssd sssd-ldap libpam-sss libnss-sss};
 }

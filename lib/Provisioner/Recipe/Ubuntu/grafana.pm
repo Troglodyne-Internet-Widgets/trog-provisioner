@@ -23,6 +23,17 @@ says why C<influxdb> does not come from its vendor.
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<influxdb> from Ubuntu, C<grafana> and C<telegraf> from the archives that
+C<package_sources> names, and C<curl>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{influxdb grafana telegraf curl};
 }
@@ -32,6 +43,11 @@ sub deps {
 The archives of Grafana and InfluxData.  InfluxData also publishes
 C<influxdb>, at a version above the one in Ubuntu.  So its archive pins that
 package below every other, and apt keeps the one from Ubuntu.
+
+Returns a list of HashRef, one per archive, as L<Provisioner::Packager::Deb/A
+source> describes it.
+
+    my @sources = $recipe->package_sources();
 
 =cut
 

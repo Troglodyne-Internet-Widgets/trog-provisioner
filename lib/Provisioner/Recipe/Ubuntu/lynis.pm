@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::lynis - Ubuntu's C<deps> for L<Provisioner::Recipe:
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<lynis>, from the archive that C<package_sources> names.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{lynis};
 }
@@ -24,6 +34,11 @@ sub deps {
 
 The archive of CISOfy.  It has a newer C<lynis> than Ubuntu, so apt takes the
 package from it with no pin.
+
+Returns a list of HashRef, one per archive, as L<Provisioner::Packager::Deb/A
+source> describes it.
+
+    my @sources = $recipe->package_sources();
 
 =cut
 

@@ -16,6 +16,25 @@ Provisioner::Recipe::Ubuntu::ldap - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
+=head2 @pkgs = $recipe->deps(%opts)
+
+C<slapd>, C<ldap-utils>, C<libldap2>, and C<ssl-cert> for its group, which
+slapd must be in to read its key.  With C<github>, also perl and the JSON and
+TLS libraries that F<ldap-github-sync> runs with.
+
+=over 4
+
+=item github - HashRef|Undef - the organization whose members get accounts;
+only whether it is set counts here
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps( github => { org => 'example' } );
+
+=cut
+
 sub deps {
 
     my ( $self, %opts ) = @_;

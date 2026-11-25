@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::sshfastlane - Ubuntu's C<deps> for L<Provisioner::R
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<openssh-server>, which runs the second sshd, and C<ipset>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{openssh-server ipset};
 }

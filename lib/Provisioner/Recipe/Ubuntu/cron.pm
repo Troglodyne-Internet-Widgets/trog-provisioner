@@ -21,6 +21,16 @@ of C<domain>.  Where one does, the agent of OSSEC runs rootcheck instead.  See
 L<Provisioner::Recipe::cron/Where OSSEC watches the guest>.  Without a
 C<domain>, the list has rkhunter.
 
+=over 4
+
+=item domain - Str|Undef - the domain of the guest, such as C<test.test>
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps( domain => 'test.test' );
+
 =cut
 
 sub deps {

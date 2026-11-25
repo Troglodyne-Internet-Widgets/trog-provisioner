@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::data - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<openssh-server>, C<openssh-client> and C<rsync>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{openssh-server openssh-client rsync};
 }

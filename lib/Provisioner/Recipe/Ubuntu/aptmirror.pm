@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::aptmirror - Ubuntu's C<deps> for L<Provisioner::Rec
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<apt-mirror>, which keeps the mirror.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps { return qw{apt-mirror} }
 
 1;

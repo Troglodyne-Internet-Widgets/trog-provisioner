@@ -32,6 +32,17 @@ git, which the fragment clones tCMS with, and the packages that tCMS
 declares for the release of Ubuntu in C<distro_release>.  See
 L<Provisioner::Recipe::tcms/THE SYSTEM PACKAGES>, which also says when it dies.
 
+=over 4
+
+=item %opts - the configuration of the recipe for the domain, of which
+C<distro_release>, C<repo_url> and C<repo_branch> count here
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps( distro_release => 'noble' );
+
 =cut
 
 sub deps {
@@ -43,6 +54,17 @@ sub deps {
 
 The archives that tCMS declares for the same release, each with the
 fingerprint of its key.
+
+=over 4
+
+=item %opts - as for C<deps>
+
+=back
+
+Returns a list of HashRef, one per archive, as L<Provisioner::Packager::Deb/A
+source> describes it.  Dies as C<deps> does.
+
+    my @sources = $recipe->package_sources( distro_release => 'noble' );
 
 =cut
 

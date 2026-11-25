@@ -19,6 +19,10 @@ Provisioner::Recipe::Ubuntu::gogs - Ubuntu's C<deps> for L<Provisioner::Recipe::
 C<git>, which gogs runs to serve repositories, and C<curl>, which the
 fragment and the setup and mirror scripts use.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {

@@ -18,6 +18,17 @@ Provisioner::Recipe::Ubuntu::mariadb - Ubuntu's C<deps> and archive for L<Provis
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+The server, the client, C<mariadb-backup>, the client libraries for
+development, and C<pigz>, which the backup script uses.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
 
     # The backup script uses pigz.
@@ -33,6 +44,21 @@ distributions that existed when it made the release.  For example, 11.4.4 and
 10.11.10 have noble, and 10.11.7 does not.  For resolute, only 11.8.8 and later
 and 12.3.2 and later have one, and no 10.11 or 11.4 release does.
 L<Provisioner::Packager::Deb> asks for the suite, and says so.
+
+=over 4
+
+=item version - Str - the version of MariaDB, such as C<11.4.4>
+
+=item distro_release - Str|Undef - the release of the domain, such as
+C<noble>; the pinned release when undef
+
+=back
+
+Returns a HashRef, the archive, as L<Provisioner::Packager::Deb/A source>
+describes it.  Dies when L<Provisioner::Recipe::ubuntu> does not know
+C<distro_release>.
+
+    my $source = $recipe->package_sources( version => '11.4.4', distro_release => 'noble' );
 
 =cut
 

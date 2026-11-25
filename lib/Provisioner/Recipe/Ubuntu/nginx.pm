@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::nginx - Ubuntu's C<deps> for L<Provisioner::Recipe:
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<nginx-full>, the nginx of Ubuntu with its modules.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{nginx-full};
 }
@@ -24,6 +34,10 @@ sub deps {
 
 C<apache2>, which C<libapache2-mod-php> brings in as the first of its choices,
 and which would bind the ports of nginx.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->dep_conflicts();
 
 =cut
 

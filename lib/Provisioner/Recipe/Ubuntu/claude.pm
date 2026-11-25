@@ -23,6 +23,10 @@ line reads what Claude Code tells it with C<jq>.  C<tmux> is there because the
 recipe configures it, so an operator need not list it in the C<pkgs> of
 L<Provisioner::Recipe::adminconfig>.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {
