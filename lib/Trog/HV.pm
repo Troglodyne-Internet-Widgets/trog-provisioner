@@ -191,6 +191,13 @@ must not return an undef that the caller carries somewhere else before it fails.
 
 =head2 new(%opts)
 
+=over 4
+
+=item opts - HashRef - the constructor options of a backend, the limits under
+L</PLACEMENT>, and C<name>
+
+=back
+
 Build or return the hypervisor.
 
 If no option is set, it returns the instance built earlier in the process.  If
@@ -202,6 +209,10 @@ The options are the constructor options of each backend (see C<config_keys>),
 the limits under L</PLACEMENT>, and C<name>.  An option with a false value
 (undef, empty or 0) is dropped.  So callers can pass unset command line options
 straight through.
+
+Returns Trog::HV, an instance of the backend.  Dies as C<candidate> does.
+
+    my $hv = Trog::HV->new( uri => 'qemu+ssh://root@hv1.example.test/system' );
 
 =cut
 
@@ -218,8 +229,11 @@ sub new {
 
 =head2 activate
 
-Make this hypervisor the one that C<new> returns from now on.  Returns the
-object, so calls can chain.
+Make this hypervisor the one that C<new> returns from now on.
+
+Returns Trog::HV, this object, so calls can chain.
+
+    my $hv = Trog::HV->candidate(%opts)->activate();
 
 =cut
 
@@ -230,7 +244,15 @@ sub activate {
 
 =head2 candidate(%opts)
 
+=over 4
+
+=item opts - HashRef - the options that C<new> takes
+
+=back
+
 Build a hypervisor and return it, but do not make it the current one.
+
+Returns Trog::HV, an instance of the backend.
 
 C<new> is a singleton because almost every caller wants the one hypervisor of
 this run.  L<Trog::Hypervisors> is the exception.  It holds several hypervisors
@@ -243,6 +265,8 @@ C<static_nics> or a key of L</NIC_KEY>, and the backend does not read
 C<static_nics>.  C<options_from_block> reads the keys of every backend, so a
 cloud block that names them would otherwise be built as if it did not, and its
 guests would get none of the adapters or addresses that it asks for.
+
+    my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv1.example.test/system' );
 
 =cut
 
@@ -264,7 +288,10 @@ sub candidate {
 
 =head2 backends
 
-Returns the class name of every backend, and loads each one.
+Returns the class name of every backend, as a list of Str, and loads each one.
+Dies as C<require> does when a backend does not load.
+
+    my @classes = Trog::HV->backends;
 
 =cut
 
@@ -284,8 +311,17 @@ sub backends {
 
 =head2 backend_for(%opts)
 
-Returns the backend class that these options ask for: the one whose C<marker>
-option is set, or L<Trog::HV::Libvirt> when none is.  Dies if more than one is.
+=over 4
+
+=item opts - HashRef - the options that C<new> takes
+
+=back
+
+Returns Str, the backend class that these options ask for: the one whose
+C<marker> option is set, or L<Trog::HV::Libvirt> when none is.  Dies if more
+than one is.
+
+    my $class = Trog::HV->backend_for( uri => 'qemu+ssh://root@hv1.example.test/system' );
 
 This is the one seam.  Everything else about another kind of hypervisor is a
 subclass, and this method decides which subclass you get.
@@ -312,6 +348,11 @@ sub backend_for {
 The F<hypervisors.conf> key of a backend's C<marker>, which is how a person
 writing the file knows it.
 
+Returns Str, the key.  Dies as C<config_keys> and C<marker> do, which is when
+it is asked of this class and not of a backend.
+
+    my $key = Trog::HV::Linode->marker_key;
+
 =cut
 
 sub marker_key {
@@ -323,7 +364,9 @@ sub marker_key {
 
 =head2 $module = $hv->require_client
 
-Loads the API client of this backend and returns its name.
+Loads the API client of this backend.
+
+Returns Str, the name of the client module.
 
 Each backend reaches its hypervisor through one client: L<Sys::Virt>,
 L<OpenStack::MetaAPI>, L<Linode::API>.  Each of those is an optional dependency,
@@ -338,6 +381,8 @@ load, and the command that installs it.
 A backend class answers it too, for a caller that wants to know whether a client
 is there without building a hypervisor to ask.  F<bin/preflight> does that for
 every block in F<hypervisors.conf>, before a run.
+
+    my $module = $hv->require_client;
 
 =cut
 
@@ -363,8 +408,18 @@ sub require_client {
 
 =head2 options_from_block($block)
 
-Turn one F<hypervisors.conf> block into constructor options, and return them as
-a list of pairs.  A key that the block does not set is left out.
+=over 4
+
+=item block - HashRef - one block of F<hypervisors.conf>
+
+=back
+
+Turn one F<hypervisors.conf> block into constructor options.  A key that the
+block does not set is left out.
+
+Returns the options, as a list of pairs.  Dies as C<backends> does.
+
+    my %opts = Trog::HV->options_from_block( { libvirt_uri => 'qemu:///system' } );
 
 It reads the keys of every backend, because the content of a block decides
 which backend it describes.  So all keys must be read before that decision.
@@ -382,13 +437,23 @@ adapter of a guest: C<ip_pool_NIC>, C<ip_addresses_NIC>, C<gateway_NIC> and
 C<prefix_NIC>, where NIC is the bridge of the adapter in C<static_nics>.  See
 L</nic_pool($nic)>, L</nic_gateway($nic)> and L</nic_prefix_length($nic)>.
 
-=head2 @keys = Trog::HV->replaced_keys($block)
+=head2 replaced_keys($block)
 
-The keys of C<$block>, a block of F<hypervisors.conf> or the settings of
-F<provision.conf>, that name the adapters and the pool of a guest in the way
-that C<dhcp_nics> and C<static_nics> replaced, each with what replaced it, as
-pairs.  Empty for a block that names none.  L<Trog::Hypervisors> refuses a block
-that has one, and so does C<from_config>.
+=over 4
+
+=item block - HashRef - a block of F<hypervisors.conf> or the settings of
+F<provision.conf>
+
+=back
+
+The keys of C<$block> that name the adapters and the pool of a guest in the
+way that C<dhcp_nics> and C<static_nics> replaced.  L<Trog::Hypervisors>
+refuses a block that has one, and so does C<from_config>.
+
+Returns each such key with what replaced it, as a list of pairs of Str, or an
+empty list for a block that names none.
+
+    my %replaced = Trog::HV->replaced_keys( { bridge_device => 'br0' } );
 
 =cut
 
@@ -435,15 +500,28 @@ sub options_from_block {
 
 =head2 from_config($config, %override)
 
-Build the hypervisor from a L<Config::Simple> object through C<new>, and return
-it.  A value in C<%override>, for example from the command line, wins over the
+=over 4
+
+=item config - Config::Simple|HashRef|Undef - the configuration, or a false
+value for every default
+
+=item override - HashRef - values that win over the file
+
+=back
+
+Build the hypervisor from a L<Config::Simple> object through C<new>.  A value in C<%override>, for example from the
+command line, wins over the
 file.  An empty override counts as not given, as it does in C<new>, so the file
 still answers for it.  A false C<$config> is allowed, and means that every value
 takes its default.
 
 It reads every key that a backend names in C<config_keys>: C<libvirt_uri> for
-C<uri>, and the rest under their own names, and each key of L</NIC_KEY>.  Dies
-on a key of C<replaced_keys>, with what to name instead.
+C<uri>, and the rest under their own names, and each key of L</NIC_KEY>.
+
+Returns Trog::HV, the hypervisor, as C<new> returns it.  Dies on a key of
+C<replaced_keys>, with what to name instead, and as C<new> does.
+
+    my $hv = Trog::HV->from_config( $config, uri => $uri );
 
 =cut
 
@@ -462,10 +540,19 @@ sub from_config {
     return $class->new( map { local ($_) = $_; $_ => ( $override{$_} || $class->config_value( $config, $key{$_} ) ) } keys %key );
 }
 
-=head2 @keys = Trog::HV->config_keys_of($config)
+=head2 config_keys_of($config)
 
-The names of the keys that C<$config> sets, a L<Config::Simple> object of a
-file with no blocks or a plain hashref.  Empty for no configuration.
+=over 4
+
+=item config - Config::Simple|HashRef|Undef - a configuration of a file with
+no blocks, or nothing
+
+=back
+
+Returns the names of the keys that C<$config> sets, as a list of Str, or an
+empty list for no configuration.
+
+    my @keys = Trog::HV->config_keys_of($config);
 
 =cut
 
@@ -477,9 +564,20 @@ sub config_keys_of ( $, $config ) {
 
 =head2 config_value($config, $key)
 
-Returns one value from a configuration, which is a L<Config::Simple> object or
-a plain hashref.  A key that is given more than once returns its first value.
-Returns undef when there is no configuration, no such key, or an empty value.
+=over 4
+
+=item config - Config::Simple|HashRef|Undef - the configuration
+
+=item key - Str - the name of the key
+
+=back
+
+Returns Str|Undef, one value from a configuration, which is a
+L<Config::Simple> object or a plain hashref.  A key that is given more than once returns its
+first value.  Returns undef when there is no configuration, no such key, or an
+empty value.
+
+    my $uri = Trog::HV->config_value( $config, 'libvirt_uri' );
 
 =cut
 
@@ -503,8 +601,19 @@ because the guests of one run can be on different hypervisors.
 
 =head2 setting($name)
 
+=over 4
+
+=item name - Str - the key in the block
+
+=back
+
 One value from the block of this hypervisor in F<hypervisors.conf>, with a
 C<secret:> reference resolved.
+
+Returns Str|ArrayRef|Undef: the value, an array reference when the block gives
+the key more than once, or undef when the block does not name it.
+
+    my $token = $hv->setting('linode_token');
 
 Any value in a block may be a reference, as a value in F<recipes.yaml> may:
 C<secret:GROUP/ENTRY/FIELD>, resolved against the secret store.  A Linode
@@ -536,10 +645,20 @@ sub setting {
 
 =head2 @items = $hv->setting_list($name)
 
+=over 4
+
+=item name - Str - the key in the block
+
+=back
+
 One value from the block, as C<setting> gives it, read as a list.  The block
 separates the items with commas or spaces, and L<Config::Simple> already makes a
-list of a value with a comma in it.  An empty list when the block does not name
-it.
+list of a value with a comma in it.
+
+Returns the items, as a list of Str, or an empty list when the block does not
+name it.
+
+    my @resolvers = $hv->setting_list('resolvers');
 
 =cut
 
@@ -566,7 +685,12 @@ depends on where the guest is.  A guest on a machine of ours reaches us across
 our own network.  A guest on a cloud reaches us through the gateway, at an
 address and a port forwarded past it.
 
+Returns Str|Undef, the address, and the port.
+
 Dies when C<transfer_port> is not a port number.
+
+    my $ip   = $hv->configured_transfer_ip;
+    my $port = $hv->configured_transfer_port;
 
 =cut
 
@@ -584,6 +708,10 @@ L<Trog::Hypervisors/select_for> places a guest that needs another guest up on
 the network of that guest.  For example, the hypervisors of a home network
 share a label, and a block for a cloud region has a label of its own.
 
+Returns Str, the name, or the empty string.
+
+    my $network = $hv->network;
+
 =cut
 
 sub network ($self) { return $self->setting('network') // q{} }
@@ -596,7 +724,12 @@ with commas.  Empty when the block names none, and C<bin/new_config> refuses a
 guest of such a hypervisor.
 
 Each block names its own, because a guest on a cloud cannot reach the gateway
-of a home network.  Dies on a value that is not an address.
+of a home network.
+
+Returns the addresses, as a list of Str.  Dies on a value that is not an
+address.
+
+    my @resolvers = $hv->configured_resolvers;
 
 =cut
 
@@ -620,6 +753,10 @@ not hold the cache of the fleet, so its block names the cache by address.
 L<Provisioner::DistroRecipe/cache_address> turns the value into the address
 that a guest points the hosts it downloads from at.
 
+Returns Str|Undef, the domain or address of the cache.
+
+    my $cache = $hv->configured_cache;
+
 =cut
 
 sub configured_cache ($self) { return $self->setting('cache') }
@@ -633,10 +770,17 @@ the guest, the one in C<ipmap>, its records and its default route.  Empty for a
 block that names none, and for every hypervisor of a service, which gives its
 guests their addresses.
 
+Returns the bridges, as a list of Str.
+
+    my @bridges = $hv->static_nics;
+
 =head2 address_nic
 
-The first of C<static_nics>, whose address is the address of the guest, or
-undef when there is none.
+The first of C<static_nics>, whose address is the address of the guest.
+
+Returns Str|Undef, the bridge, or undef when there is none.
+
+    my $bridge = $hv->address_nic;
 
 =cut
 
@@ -645,18 +789,31 @@ sub address_nic ($self) { my ($first) = $self->static_nics; return $first }
 
 =head2 nic_pool($nic)
 
+=over 4
+
+=item nic - Str - the bridge of the adapter
+
+=back
+
 The addresses that a static adapter on the bridge C<$nic> gets, as a bin of
-L<Provisioner::IPPool/BINS>: a hash reference with C<cidr> from C<ip_pool_NIC>
-and C<addresses> from C<ip_addresses_NIC> in the block of this hypervisor, each
-a list.  A key that the block does not name is left out.
+L<Provisioner::IPPool/BINS>.
+
+Returns HashRef, with C<cidr> from C<ip_pool_NIC> and C<addresses> from
+C<ip_addresses_NIC> in the block of this hypervisor, each an array reference of
+Str.  A key that the block does not name is left out.
+
+    my $pool = $hv->nic_pool('br0');
 
 Two blocks that name the same pool for the same bridge share its addresses in
 F<ips.db>.  See L<Provisioner::IPPool/guest_pools>.
 
 =head2 static_pools
 
-The pool of each of C<static_nics>, as a hash reference of the bridge to what
-C<nic_pool> gives.
+The pool of each of C<static_nics>.
+
+Returns HashRef, from each bridge to what C<nic_pool> gives.
+
+    my $pools = $hv->static_pools;
 
 =cut
 
@@ -676,10 +833,20 @@ sub static_pools ($self) {
 
 =head2 nic_gateway($nic)
 
+=over 4
+
+=item nic - Str - the bridge of the adapter
+
+=back
+
 The gateway of the subnet of the static adapter on the bridge C<$nic>, from
-C<gateway_NIC> in the block of this hypervisor, or undef when the block names
-none.  The first of C<static_nics> routes everything through it.  Dies on a
+C<gateway_NIC> in the block of this hypervisor.  The first of C<static_nics>
+routes everything through it.
+
+Returns Str|Undef, the address, or undef when the block names none.  Dies on a
 value that is not an IPv4 address.
+
+    my $gateway = $hv->nic_gateway('br0');
 
 =cut
 
@@ -693,6 +860,12 @@ sub nic_gateway ( $self, $nic ) {
 
 =head2 nic_prefix_length($nic)
 
+=over 4
+
+=item nic - Str - the bridge of the adapter
+
+=back
+
 The length of the prefix of the network of the bridge C<$nic> of
 C<static_nics>, which a static address on it gets unless C<ip_addresses_NIC>
 writes one of its own.  It is C<prefix_NIC> when the block names it.  Otherwise
@@ -704,12 +877,28 @@ C<10.0.0.64/26> on a network whose gateway is C<10.0.0.1>, does not say how
 large that network is, and a guest given the prefix of its pool could not
 reach its gateway.  Also dies on a C<prefix_NIC> that is not from 8 to 30.
 
+Returns Int, the length.
+
+    my $length = $hv->nic_prefix_length('br0');
+
 =head2 address_prefix($nic, $address)
+
+=over 4
+
+=item nic - Str - the bridge of the adapter
+
+=item address - Str - the static address, without a prefix
+
+=back
 
 The length of the prefix that the static address C<$address> on the bridge
 C<$nic> gets in the network configuration of a guest: the one that
 C<ip_addresses_NIC> writes after it, such as C<10.0.0.5/26>, or else
 C<nic_prefix_length>.
+
+Returns Int, the length.  Dies as C<nic_prefix_length> does.
+
+    my $length = $hv->address_prefix( 'br0', '192.0.2.5' );
 
 =cut
 
@@ -731,8 +920,18 @@ sub nic_prefix_length ( $self, $nic ) {
 
 =head2 $cidr = Trog::HV::network_of($address, $prefix)
 
-The block of the network of the length C<$prefix> that holds C<$address>, such
-as C<10.0.0.0/24> for C<10.0.0.1> and 24.
+=over 4
+
+=item address - Str - an IPv4 address
+
+=item prefix - Int - the length of the prefix of the network
+
+=back
+
+Returns Str, the block of the network of the length C<$prefix> that holds
+C<$address>, such as C<192.0.2.0/24> for C<192.0.2.1> and 24.
+
+    my $cidr = Trog::HV::network_of( '192.0.2.1', 24 );
 
 =cut
 
@@ -742,9 +941,19 @@ sub network_of ( $address, $prefix ) { return ( Net::CIDR::addr2cidr($address) )
 
 =head2 $bool = Trog::HV::is_prefix_length($prefix)
 
+=over 4
+
+=item prefix - Str|Undef - what to judge
+
+=back
+
 Whether C<$prefix> is the length of the prefix of a network of guests: a whole
 number from 8 to 30.  A /31 and a /32 have no address for a host beside the
 gateway.
+
+Returns Bool, 1 when it is and 0 when it is not.
+
+    my $ok = Trog::HV::is_prefix_length(24);
 
 =cut
 
@@ -770,6 +979,8 @@ business of a backend.  It is a directory on the machine that runs this code,
 and it holds what we generated for a guest.  Its meaning does not change with
 how the guest gets built.
 
+    my $dir = $hv->domain_dir;
+
 =cut
 
 sub domain_dir ($self) { return $self->{domain_dir} // $self->default_domain_dir }
@@ -785,6 +996,8 @@ It is a class method, so C<bin/provision> and C<bin/restore> can call it before
 they have a hypervisor.  C<bin/provision> needs the path to find
 F<provision.conf>, and F<provision.conf> names the hypervisor.  Keep the default
 here only, so that the two cannot disagree.
+
+    my $dir = Trog::HV->default_domain_dir;
 
 =cut
 
@@ -811,10 +1024,18 @@ L</prepare_host($virtiofs)>, L</release_seed($domain)> and
 L</guest_volumes($domain)>, and a guest that a service builds answers them by
 doing nothing.
 
+Returns Bool, 0 here.
+
+    my $by_api = $hv->builds_by_api;
+
 =head2 manages_addresses
 
 Whether the hypervisor gives its guests their addresses, so that we do not
 choose one out of the address pool.
+
+Returns Bool, 0 here.
+
+    my $managed = $hv->manages_addresses;
 
 If it does, the pool has nothing to allocate and nothing of ours to collide
 with.  L<Provisioner::IPPool> does not sweep that hypervisor, because its
@@ -827,21 +1048,42 @@ sub manages_addresses { return 0 }
 
 =head2 reserve_guest(%spec)
 
+=over 4
+
+=item spec - HashRef - C<name>, the guest, C<size>, and for some backends
+C<region>
+
+=back
+
 Makes the guest C<name> empty, so that it has its addresses before its
-configuration is written, and returns true.  Returns false where the backend
-cannot, which is the default here.  C<bin/new_config> calls it for
-C<bin/provision>, on a backend that C<manages_addresses>, for a guest that does
-not exist yet.  Then it reads the address of the guest, and C<provision_guest>
-builds the image onto the guest that is there.  Without it, the address is known
-only after the build, so the configuration names none.
+configuration is written.
+
+Returns Bool: true when the backend reserved the guest, and false where it
+cannot, which is the 0 that it returns here.
+
+C<bin/new_config> calls it for C<bin/provision>, on a backend that
+C<manages_addresses>, for a guest that does not exist yet.  Then it reads the
+address of the guest, and C<provision_guest> builds the image onto the guest
+that is there.  Without it, the address is known only after the build, so the
+configuration names none.
 
 C<size> is the value of the C<size_key> of the guest, and a backend can also
 take C<region>.
 
+    my $reserved = $hv->reserve_guest( name => 'vm.example.test', size => $size );
+
 =head2 is_reservation($domain)
 
-True when the guest of C<$domain> is as C<reserve_guest> left it, with nothing
-on it to snapshot or to salvage.  False by default.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns Bool: true when the guest of C<$domain> is as C<reserve_guest> left it,
+with nothing on it to snapshot or to salvage.  0 here.
+
+    my $empty = $hv->is_reservation('vm.example.test');
 
 =cut
 
@@ -858,31 +1100,65 @@ Empty by default, so a backend that says nothing debugs nothing and the tool
 refuses before it touches the guest.  A backend that names an action
 implements the methods below that the action uses.
 
+Returns the names, as a list of Str.
+
+    my @actions = $hv->debug_actions();
+
 =cut
 
 sub debug_actions { return () }
 
-=head2 $restarted = $hv->console_capture($domain, wait =E<gt> $seconds)
+=head2 $restarted = $hv->console_capture(@args)
 
-Makes the console of C<$domain> readable by C<console_output>, and
-returns whether it restarted the guest to do it.
+=over 4
+
+=item args - ARRAY - the name of the guest, then C<wait =E<gt> $seconds>
+
+=back
+
+Makes the console of the guest readable by C<console_output>.
 
 A backend that has to redirect the console restarts the guest, waits
 C<$seconds> for it to boot, and returns true.  A backend that keeps the console
 of every guest does nothing and returns false.
 
+Returns Bool, whether it restarted the guest.  Here it dies, because the
+backend does not implement it.
+
+    my $restarted = $hv->console_capture( 'vm.example.test', wait => 60 );
+
 =head2 $text = $hv->console_output($domain)
 
-What the console of C<$domain> has printed, as text, or undef if there is none
-to read.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns Str|Undef, what the console of C<$domain> has printed, or undef if
+there is none to read.  Here it dies, because the backend does not implement
+it.
+
+    my $text = $hv->console_output('vm.example.test');
 
 =head2 ($advice, $value) = $hv->vnc_access($domain)
 
-How to reach the display of C<$domain>.  C<$advice> is text for the operator,
-which names what stands between them and the display, such as an ssh tunnel.
-C<$value> is the one thing a caller can act on: a port, or a URL.
+=over 4
 
-Dies if the guest has no display.
+=item domain - Str - the name of the guest
+
+=back
+
+How to reach the display of C<$domain>.
+
+Returns two Str: C<$advice>, text for the operator, which names what stands
+between them and the display, such as an ssh tunnel, and C<$value>, the one
+thing a caller can act on: a port, or a URL.
+
+Dies if the guest has no display, and here, because the backend does not
+implement it.
+
+    my ( $advice, $value ) = $hv->vnc_access('vm.example.test');
 
 =cut
 
@@ -892,28 +1168,228 @@ This class declares these methods, so a backend that leaves one out gets an
 error that names the method.  See L</WHAT A BACKEND HAS TO PROVIDE> for the
 purpose of each.
 
+Each of these dies here, naming the backend and the method, because the backend
+does not implement it.
+
+=head2 build(%opts)
+
+=over 4
+
+=item opts - HashRef - the options that C<new> takes, those of the backend's
+C<config_keys> among them
+
+=back
+
+Called on the backend class, makes a hypervisor of that kind.  C<candidate>
+calls it.
+
+Returns Trog::HV, the new instance of the backend.  A backend dies when the
+options do not make a hypervisor of its kind.
+
+    my $hv = Trog::HV::Libvirt->build( uri => 'qemu:///system' );
+
+=head2 domain_exists($name)
+
+=over 4
+
+=item name - Str - the name of the guest
+
+=back
+
+Returns Bool: 1 if the hypervisor has a guest called C<$name>, and 0 if it has
+not.
+
+    my $exists = $hv->domain_exists('vm.example.test');
+
+=head2 guest_names
+
+Every guest that the backend has.  An orphan sweep uses it to tell that a
+directory belongs to a guest that still exists.
+
+Returns the names, as a list of Str.
+
+    my @names = $hv->guest_names;
+
+=head2 guest_ssh_ip($config)
+
+=over 4
+
+=item config - Config::Simple - the F<provision.conf> of the guest
+
+=back
+
+The address at which this machine reaches a built guest over ssh.  A backend
+may take a second argument, the address of a lease, as
+L<Trog::HV::Libvirt> does.
+
+Returns Str, the address.  A backend dies when the guest has no address.
+
+    my $ip = $hv->guest_ssh_ip($config);
+
+=head2 snapshot_names($domain)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns the names of the snapshots of the guest, newest first, as a list of
+Str.
+
+    my @snapshots = $hv->snapshot_names('vm.example.test');
+
+=head2 snapshot_current_name($domain)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Returns Str|Undef, the name of the snapshot that the guest is on, or undef
+when there is none.
+
+    my $current = $hv->snapshot_current_name('vm.example.test');
+
+=head2 create_snapshot(@args)
+
+=over 4
+
+=item args - ARRAY - the name of the guest, the name of the snapshot, then the
+options as pairs: C<disk_only> and C<leave_down>, which a cloud ignores
+
+=back
+
+Takes a snapshot of the guest under that name.  C<snapshot_before_rebuild>
+calls it.
+
+Returns Bool, true when the snapshot was taken.  A backend warns and returns
+false when it could not take it.
+
+    my $ok = $hv->create_snapshot( 'vm.example.test', 'before-change', disk_only => 1 );
+
+=head2 clear_guest(@args)
+
+=over 4
+
+=item args - ARRAY - the name of the guest, then C<keep_disk =E<gt> 1> to
+leave the disk of the guest in place
+
+=back
+
+Removes what must go before a guest of that name can be made.  See
+L</WHAT A BACKEND HAS TO PROVIDE>.
+
+Returns Bool, true when the guest is clear.
+
+    $hv->clear_guest( 'vm.example.test', keep_disk => 0 );
+
+=head2 rollback_possible(@args)
+
+=over 4
+
+=item args - ARRAY - the name of the guest, then C<capacity =E<gt> $bytes>, the
+size that the rebuild asks for
+
+=back
+
+Whether a snapshot taken now is still there to go back to after the rebuild.
+See L</WHAT A BACKEND HAS TO PROVIDE>.
+
+Returns Bool, 1 when it is and 0 when it is not.
+
+    my $ok = $hv->rollback_possible( 'vm.example.test', capacity => $bytes );
+
+=head2 provision_guest(@args)
+
+=over 4
+
+=item args - ARRAY - the F<provision.conf> of the guest as a L<Config::Simple>
+object, the NoCloud files of the seed as a hash reference, then the options as
+pairs, such as C<reuse> and C<settings>
+
+=back
+
+Makes the guest from the seed that C<bin/provision> wrote.
+
+Returns Str, the address that the guest came up at.  A backend dies when it
+cannot make the guest.
+
+    my $ip = $hv->provision_guest( $config, \%seed, reuse => 0 );
+
+=head2 would_provision(@args)
+
+=over 4
+
+=item args - ARRAY - the F<provision.conf> of the guest as a L<Config::Simple>
+object, then the options as pairs, as C<provision_guest> takes them
+
+=back
+
+For a dry run: prints what C<clear_guest> and C<provision_guest> would do, and
+does not do it.
+
+Returns Str, the address of a guest that exists, or what stands for one that
+does not.
+
+    my $ip = $hv->would_provision( $config, reuse => 1 );
+
 =head2 prepare_host($virtiofs)
+
+=over 4
+
+=item virtiofs - Str - our copy of F<virtiofs-better>
+
+=back
 
 Does what the hypervisor needs before a guest can be built on it.  C<$virtiofs>
 is our copy of F<virtiofs-better>, for a backend whose guests run in a qemu
 process that uses it.
 
+Returns Bool, true when the hypervisor is ready.
+
+    $hv->prepare_host($virtiofs);
+
 =head2 release_seed($domain)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
 
 Called after the guest reports that cloud-init finished, and not before.  Until
 then, the guest can still be reading its seed.
 
+Returns Bool, true when the seed is released.
+
+    $hv->release_seed('vm.example.test');
+
 =head2 guest_volumes($domain)
 
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
 Returns the volumes that belong to this guest alone, which we delete after the
-guest is gone.  Never the base image, because every other guest is built on it.
+guest is gone, as a list of Str.  Never the base image, because every other
+guest is built on it.
+
+    my @volumes = $hv->guest_volumes('vm.example.test');
 
 =head2 @removed = $hv->prune_base_images()
 
-Removes the base images that nothing is built on any more, and returns their
-names.  Call it after a disk has gone.  A base image that is not the newest of
-its kind stays while any disk is backed by it.  A backend with no base image
-returns an empty list.
+Removes the base images that nothing is built on any more.  Call it after a
+disk has gone.  A base image that is not the newest of its kind stays while any
+disk is backed by it.
+
+Returns the names of the images it removed, as a list of Str.  A backend with
+no base image returns an empty list.
+
+    my @removed = $hv->prune_base_images();
 
 =cut
 
@@ -925,10 +1401,16 @@ L<Provisioner::Recipe::diskqueue> sets the queue of the disks that these
 globs name.  A glob must not name a device that is not a disk of the guest,
 such as the CD-ROM of a seed.
 
+Returns the globs, as a list of Str.
+
+    my @globs = $hv->guest_disks();
+
 =head2 uri
 
-The address of the hypervisor, as a message names it: a libvirt connection
-URI, or the endpoint of the API of a service.
+Returns Str, the address of the hypervisor, as a message names it: a libvirt
+connection URI, or the endpoint of the API of a service.
+
+    my $uri = $hv->uri;
 
 =head2 The libvirt nouns
 
@@ -944,11 +1426,19 @@ L<Trog::HV::Cloud> does.
 
 =head2 $hv->abstract($method)
 
-Dies with an error that names the class of C<$hv>, C<$method>, and the class
+=over 4
+
+=item method - Str - the name of the method that the backend lacks
+
+=back
+
+Returns nothing.  Dies with an error that names the class of C<$hv>, C<$method>, and the class
 that declares C<$method>, which is the class that calls this.  A class
 declares a method that each of its subclasses has to provide with a sub that
 calls this, so that a subclass that leaves it out gets that error and not
 "method not found".
+
+    sub capacity ( $self, @ ) { return $self->abstract('capacity') }
 
 =cut
 
@@ -1002,6 +1492,12 @@ sub has_tpm               ( $self, @ ) { return abstract( $self, 'has_tpm' ) }
 
 =head2 $hv->check_user_data($user_data)
 
+=over 4
+
+=item user_data - Str - the cloud-init payload
+
+=back
+
 Dies with the reason when this backend cannot hand the cloud-init payload
 C<$user_data> to a guest, and returns true when it can.  F<bin/provision> asks
 it before it snapshots or clears the guest, so a payload that cannot be sent
@@ -1011,17 +1507,30 @@ True here, because libvirt writes the seed to an ISO, which has no limit to
 speak of.  A backend that sends the payload through an API with a limit
 overrides it, as L<Trog::HV::Linode> does.
 
+Returns Bool, 1 here.
+
+    $hv->check_user_data( $seed{'user-data'} );
+
 =cut
 
 sub check_user_data { return 1 }
 
-=head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
+=head2 $name = $hv->snapshot_before_rebuild($domain, %opts)
 
-Takes a snapshot just before a rebuild, as the rollback point, and returns its
-name.  C<capacity> is the size that the rebuild asks for, and
-C<rollback_possible> uses it.  Backends do not override this method.
+=over 4
 
-Returns undef whenever the snapshot did not happen.  That is when
+=item domain - Str - the name of the guest
+
+=item opts - HashRef - C<capacity>, the size in bytes that the rebuild asks
+for, which C<rollback_possible> uses
+
+=back
+
+Takes a snapshot just before a rebuild, as the rollback point.  Backends do not
+override this method.
+
+Returns Str|Undef: the name of the snapshot, or undef whenever the snapshot did
+not happen.  That is when
 C<rollback_possible> is false, or when C<create_snapshot> warns and returns
 false.  The caller offers a returned name to an operator as the way back.  So a
 name for a snapshot that does not exist is worse than no name.
@@ -1030,6 +1539,8 @@ The name holds the date and the time to the second.  An operator reads it back
 out of the backend and types it at C<bin/restore>.  It has no colons, because
 it goes onto a command line, and on libvirt into the snapshot XML too.  Nothing
 sorts on it, because C<snapshot_names> sorts by creation time.
+
+    my $name = $hv->snapshot_before_rebuild( 'vm.example.test', capacity => $bytes );
 
 =cut
 
@@ -1045,14 +1556,25 @@ sub snapshot_before_rebuild {
     return $self->create_snapshot( $domain, $name, disk_only => 1, leave_down => 1 ) ? $name : undef;
 }
 
-=head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
+=head2 $hv->rebuild_destroys_guest($domain, %opts)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item opts - HashRef - C<capacity>, the size in bytes that the build asks for
+
+=back
 
 Whether a rebuild of this domain takes the existing guest apart, as opposed to
-a build over it.  C<capacity> is the size that the build asks for.
+a build over it.
 
-False here: a backend that replaces the root disk of a server in place keeps the
-server and its addresses, so nothing is lost.  L<Trog::HV::Libvirt> overrides
-it.  F<bin/provision> decides what to do about a true answer.
+Returns Bool, 0 here: a backend that replaces the root disk of a server in
+place keeps the server and its addresses, so nothing is lost.
+L<Trog::HV::Libvirt> overrides it.  F<bin/provision> decides what to do about a
+true answer.
+
+    my $destroys = $hv->rebuild_destroys_guest( 'vm.example.test', capacity => $bytes );
 
 =cut
 
@@ -1060,9 +1582,19 @@ sub rebuild_destroys_guest { return 0 }
 
 =head2 $hv->clone_guest_disk($domain)
 
-Copies the disk of a guest aside before a rebuild destroys it.  Returns where
-the copy is, or undef.  Undef here, and nothing calls this one: only a backend
-that answers true to C<rebuild_destroys_guest> has a guest to copy aside.
+=over 4
+
+=item domain - Str - the name of the guest
+
+=back
+
+Copies the disk of a guest aside before a rebuild destroys it.
+
+Returns Str|Undef, where the copy is, or undef.  Undef here, and nothing calls
+this one: only a backend that answers true to C<rebuild_destroys_guest> has a
+guest to copy aside.
+
+    my $copy = $hv->clone_guest_disk('vm.example.test');
 
 =cut
 
@@ -1074,11 +1606,21 @@ Returns the names of the disks that C<clone_guest_disk> left behind.  An empty
 list here, for the same reason.  Callers ask for this list and do not match
 names themselves, so the name of a copy stays the business of the backend.
 
+    my @copies = $hv->backup_volumes;
+
 =cut
 
 sub backup_volumes { return () }
 
 =head2 $address = $hv->set_reverse_dns($domain, $name)
+
+=over 4
+
+=item domain - Str - the name of the guest
+
+=item name - Str - the name that the address is to answer to
+
+=back
 
 Points the reverse DNS of the public address of the guest of C<$domain> at
 C<$name>, and returns that address.  A receiver of mail rejects a client whose
@@ -1088,6 +1630,8 @@ of the address can set its reverse record.
 Returns nothing here, which means that this hypervisor offers no way.
 F<bin/provision> then tells the operator to set it by hand.  A backend that
 offers one overrides this, and dies when its hypervisor refuses.
+
+    my $address = $hv->set_reverse_dns( 'vm.example.test', 'mail.example.test' );
 
 =cut
 
@@ -1112,6 +1656,14 @@ quota as well as to the host.  A partition can also have a budget of memory,
 C<max_memory> in L<Trog::HV::Libvirt>.  See L<Trog::HV::Libvirt/capacity>.  The
 defaults are 2048MB, 1 CPU, 10GB, no cap, and 4.
 
+Returns Num, each, the limit or its default.
+
+    my $memory = $hv->reserve_memory;
+    my $cpus   = $hv->reserve_cpus;
+    my $disk   = $hv->reserve_disk;
+    my $cap    = $hv->max_guests;
+    my $ratio  = $hv->cpu_overcommit;
+
 =cut
 
 sub reserve_memory ($self) { return $self->{reserve_memory} // 2048 }
@@ -1122,13 +1674,23 @@ sub cpu_overcommit ($self) { return $self->{cpu_overcommit} // 4 }
 
 =head2 capacity(%needs)
 
-Returns what the hypervisor has, and what it already promised.  The backend
-provides it.  L</WHAT A BACKEND HAS TO PROVIDE> lists the keys of the hash.
+=over 4
+
+=item needs - HashRef - what the guest asks for: C<memory_mb>, C<cpus> and
+C<disk_bytes>
+
+=back
+
+Returns HashRef, what the hypervisor has, and what it already promised.  The
+backend provides it, and here it dies, because the backend does not implement
+it.  L</WHAT A BACKEND HAS TO PROVIDE> lists the keys of the hash.
 
 C<%needs> is what the guest asks for, as L</shortfalls(%needs)> takes it.  A
 machine has what it has whatever the guest wants, and ignores it.  A hypervisor
 that sells a guest a size answers for the size this guest names in its
 C<size_key>.
+
+    my $have = $hv->capacity( memory_mb => 2048, cpus => 2, disk_bytes => $bytes );
 
 =cut
 
@@ -1142,13 +1704,23 @@ and C<size> answers.  A hypervisor that sells sizes by name returns its key,
 and a guest whose C<_global> does not name one is not built there: see
 L</shortfalls(%needs)>.
 
+Returns Str|Undef, the key, or undef.
+
+    my $key = $hv->size_key;
+
 =cut
 
 sub size_key { return undef }
 
 =head2 monthly_cost(%needs)
 
-Returns what a guest that wants C<memory_mb>, C<cpus> and C<disk_bytes> would
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus> and C<disk_bytes>
+
+=back
+
+Returns Num, what a guest that wants C<memory_mb>, C<cpus> and C<disk_bytes> would
 cost a month here, as a number in the currency the backend bills in.
 L<Trog::Hypervisors/place($domain, %needs)> chooses the cheapest hypervisor that
 fits before the roomiest one.
@@ -1158,11 +1730,19 @@ not.  A backend that bills for each guest overrides it.  It dies when it cannot
 find the price, and placement then reports it as unreachable, because a guess at
 a price is the one answer that spends money.
 
+    my $cost = $hv->monthly_cost( memory_mb => 2048, cpus => 2, disk_bytes => $bytes );
+
 =cut
 
 sub monthly_cost { return 0 }
 
 =head2 cheapest_for(%needs)
+
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus> and C<disk_bytes>
+
+=back
 
 What this hypervisor would sell to hold a guest that wants C<memory_mb>,
 C<cpus> and C<disk_bytes>: a hashref of C<key>, the C<size_key> to write in the
@@ -1175,15 +1755,28 @@ L</shortfalls(%needs)> already answered for.  L<Trog::Hypervisors/select_for>
 asks the ones that do when no machine has room, so an operator is offered
 something rather than only told no.
 
+Returns HashRef|Undef, the offer, or undef.
+
+    my $offer = $hv->cheapest_for( memory_mb => 2048, cpus => 2, disk_bytes => $bytes );
+
 =cut
 
 sub cheapest_for { return undef }
 
 =head2 shortfalls(%needs)
 
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus> and C<disk_bytes>
+
+=back
+
 Returns every reason why this hypervisor cannot take a guest that wants
-C<memory_mb>, C<cpus> and C<disk_bytes>.  Each reason is text that a person can
-act on.  An empty list means that the guest fits.
+C<memory_mb>, C<cpus> and C<disk_bytes>, as a list of Str.  Each reason is text
+that a person can act on.  An empty list means that the guest fits.  Dies as
+the backend's C<capacity> does.
+
+    my @reasons = $hv->shortfalls( memory_mb => 2048, cpus => 2, disk_bytes => $bytes );
 
 =cut
 
@@ -1243,10 +1836,19 @@ sub shortfalls {
 
 =head2 headroom(%needs)
 
-Returns how much room this hypervisor has left after it takes the guest, from 0
-(exactly full) to 1 (empty).  The value comes from the tightest of the three
-resources.  Placement by the tightest resource stops one hypervisor from filling
-its disk while the fleet still has plenty of RAM.
+=over 4
+
+=item needs - HashRef - C<memory_mb>, C<cpus> and C<disk_bytes>
+
+=back
+
+Returns Num, how much room this hypervisor has left after it takes the guest,
+from 0 (exactly full) to 1 (empty).  The value comes from the tightest of the
+three resources.  Placement by the tightest resource stops one hypervisor from
+filling its disk while the fleet still has plenty of RAM.  Dies as the
+backend's C<capacity> does.
+
+    my $room = $hv->headroom( memory_mb => 2048, cpus => 2, disk_bytes => $bytes );
 
 =cut
 
@@ -1295,12 +1897,20 @@ what to do about it.
 =head2 @names = $hv->preflight_checks()
 
 Returns the names of the checks that this backend answers, in the order to ask
-them.  Each name is a method on the backend.  A failed check means that a guest
-cannot be built.
+them, as a list of Str.  Each name is a method on the backend.  A failed check
+means that a guest cannot be built.  Here it dies, because the backend does not
+implement it.
+
+    my @checks = $hv->preflight_checks();
 
 =head2 @names = $hv->preflight_notes()
 
 The same, for things that are good to have but not required.
+
+Returns the names of the notes, as a list of Str.  Here it dies, because the
+backend does not implement it.
+
+    my @notes = $hv->preflight_notes();
 
 =head2 @names = $hv->preflight_block_checks()
 
@@ -1318,6 +1928,11 @@ block itself.  A check that opens a connection, authenticates, or reads a
 credential does not: asking every block those would contact every cloud in the
 fleet, and open the secret store, to preflight a run against one machine.
 
+Returns the names, as a list of Str: C<check_client> and
+C<check_transfer_route> here.
+
+    my @checks = $hv->preflight_block_checks();
+
 =cut
 
 sub preflight_checks ( $self, @ ) { return abstract( $self, 'preflight_checks' ) }
@@ -1327,13 +1942,25 @@ sub preflight_block_checks { return qw{check_client check_transfer_route} }
 
 =head2 $result = $hv->verdict($ok, $what, $fix)
 
-Returns the answer of one check, in the form that C<bin/preflight> prints:
+=over 4
+
+=item ok - Bool - true when nothing is wrong
+
+=item what - Str - what was found
+
+=item fix - Str - what to do about it, or empty
+
+=back
+
+Returns HashRef, the answer of one check, in the form that C<bin/preflight> prints:
 C<{ ok =E<gt> $ok, what =E<gt> $what, fix =E<gt> $fix }>.  C<$ok> is true when
 nothing is wrong.  C<$what> says what was found, and C<$fix> says what to do
 about it, or is empty when there is nothing to do.
 
 The checks of this class and of every backend answer through it, so that the
 form is written down in one place.
+
+    return $self->verdict( 1, 'rsync on both ends', q{} );
 
 =cut
 
@@ -1351,6 +1978,10 @@ the checks after it fail for a reason that is not theirs.
 
 A backend class answers it as well as a hypervisor, which is how F<bin/preflight>
 judges a block it has not built.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_client();
 
 =cut
 
@@ -1374,6 +2005,12 @@ address that a guest fetches from, libvirt asks the routing table about a NAT
 bridge.  A cloud reads it out of the configuration, because it has nothing to
 ask until the guest exists.
 
+Returns HashRef, the answer of C<verdict>, each.  Here each dies, because the
+backend does not implement it.
+
+    my $reached = $hv->check_reachable();
+    my $named   = $hv->check_transfer_ip();
+
 =cut
 
 sub check_reachable   ( $self, @ ) { return abstract( $self, 'check_reachable' ) }
@@ -1381,13 +2018,21 @@ sub check_transfer_ip ( $self, @ ) { return abstract( $self, 'check_transfer_ip'
 
 =head2 $network = $hv->guest_network_of($address)
 
-Returns the network, as a CIDR, of a guest here whose own network holds
+=over 4
+
+=item address - Str - an address of this machine
+
+=back
+
+Returns Str|Undef, the network, as a CIDR, of a guest here whose own network holds
 C<$address>, or undef when none does.
 
 A backend that addresses its own guests may still put them on a private network
 this machine is also on, and then they reach us across it with no forward.
 Only the backend can say what networks its guests are on.  Undef here, which is
 the answer for a service on the internet.
+
+    my $network = $hv->guest_network_of('192.0.2.10');
 
 =cut
 
@@ -1420,6 +2065,10 @@ that does not answer its own public address from inside will get wrong.
 backend covers as well.
 
 =back
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_transfer_route();
 
 =cut
 
@@ -1498,6 +2147,10 @@ It does not check guests.  Every guest that this tool builds installs rsync
 among its base packages, and a guest that is not built yet has nothing to
 salvage.
 
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_rsync();
+
 =cut
 
 sub check_rsync {
@@ -1530,6 +2183,10 @@ them, C<bin/provision> refuses to authorize the key of a guest, because the key
 would fetch nothing.  See L<Trog::Local/THE KEYS OF
 GUESTS>.  It asks only this machine, because the guest fetches from here and
 not from the hypervisor.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_sandbox();
 
 =cut
 
@@ -1579,6 +2236,10 @@ a signing key with.  C<bin/new_config> reads the fingerprint of the key of each
 apt archive that names one, such as those that tCMS declares, and stops
 without it.  It asks only this machine, because C<new_config> runs here.
 
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_gpg();
+
 =cut
 
 sub check_gpg {
@@ -1610,6 +2271,10 @@ It checks every domain, because preflight is about the machine and C<skel> is
 usually set once in C<_base> for the whole fleet.  It reads the configuration
 raw, without validation or enrichment.  A configuration that still has a
 CHANGEME in it is one that somebody is writing, and they need this answer next.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_fetch_sources();
 
 =cut
 
@@ -1662,6 +2327,10 @@ F<recipes.yaml>, an F<admin_authorized_keys> that is not empty, and a
 F<recipes.yaml> that says what its guests are built with.  It validates the
 C<_global> of C<_base> and of each domain, as F<bin/new_config> does.  See
 L<Provisioner::Cookbook/globals>.
+
+Returns HashRef, the answer of C<verdict>.
+
+    my $result = $hv->check_config();
 
 =cut
 
@@ -1723,6 +2392,10 @@ distribution.  It is a note and not a check.  A pin one release behind can be a
 deliberate decision, and a mirror that does not answer is no reason to refuse a
 build.
 
+Returns HashRef, with C<ok>, and C<what> and C<fix> when it is not ok.
+
+    my $note = $hv->note_stale_image();
+
 =cut
 
 sub note_stale_image {
@@ -1771,6 +2444,10 @@ worse one, because the work is done and every build still pays for downloads.
 It reads the configuration and nothing else.  It does not ask the IP pool
 whether a named mirror has an address.  That makes a read-only command create
 F<ips.db>, and the question belongs to C<bin/new_config>.
+
+Returns HashRef, with C<ok>, and C<what> and C<fix> when it is not ok.
+
+    my $note = $hv->note_apt_mirror();
 
 =cut
 
@@ -1848,6 +2525,10 @@ L<Provisioner::Recipe/secrets_in>.  A block for a recipe that does not load is
 skipped, because preflight has other checks for that.  Also, any value that is
 a private key is a secret wherever it is, so a key pasted into a field that no
 schema marks is found too.
+
+Returns HashRef, with C<ok>, and C<what> and C<fix> when it is not ok.
+
+    my $note = $hv->note_plaintext_secrets();
 
 =cut
 

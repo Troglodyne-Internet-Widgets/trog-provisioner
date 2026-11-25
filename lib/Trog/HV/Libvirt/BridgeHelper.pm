@@ -36,7 +36,7 @@ of it is about addresses: which bridge a guest is on, and what address it gets
 there, is the business of L<Trog::HV/static_pools> and L<Provisioner::IPPool>.
 This module only decides whether an account may put a guest on a bridge at all.
 
-=head2 Why there is a bridge helper at all
+=head2 Why there is a qemu-bridge-helper at all
 
 A runner account builds its guests in its own session of libvirt, and not on
 the system daemon, because the C<libvirt> group that the system daemon needs is
@@ -52,7 +52,7 @@ that, and it is the one program here that has it.
 =head2 Why it needs a capability, and an apt hook
 
 Ubuntu installs the helper without setuid and without a capability, so it can
-do nothing for a user who is not root.  L</capability_steps> gives it
+do nothing for a user who is not root.  L</capability_steps($hv, $helper)> gives it
 C<cap_net_admin>, and writes an apt hook that sets the capability again after
 each upgrade of the package, because the new file has none.
 
@@ -112,11 +112,11 @@ F</etc/qemu/bridge.conf>, the file that the helper reads first.
 
 =item C<@HELPERS>
 
-Where a distribution puts the helper, in the order that L</helper> looks.
+Where a distribution puts the helper, in the order that L</helper($hv)> looks.
 
 =item C<$APT_HOOK>
 
-The apt hook of L</capability_steps>.
+The apt hook of L</capability_steps($hv, $helper)>.
 
 =back
 
@@ -128,17 +128,35 @@ our $APT_HOOK = '/etc/apt/apt.conf.d/90trog-qemu-bridge-helper';
 
 =head1 FUNCTIONS
 
-=head2 acl_file
+=head2 acl_file($user)
 
-C<($user)>.  F</etc/qemu/trog-runner-USER.conf>, the ACL of the account C<$user>.
+=over 4
+
+=item user - Str - the name of the runner account
+
+=back
+
+Returns Str, F</etc/qemu/trog-runner-USER.conf>, the path of the ACL of the
+account C<$user>.
+
+    my $acl = Trog::HV::Libvirt::BridgeHelper::acl_file('runner');
 
 =cut
 
 sub acl_file ($user) { return "/etc/qemu/trog-runner-$user.conf" }
 
-=head2 helper
+=head2 helper($hv)
 
-C<($hv)>.  The first of C<@HELPERS> that the hypervisor C<$hv> has, or undef.
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=back
+
+Returns Str, the first of C<@HELPERS> that the hypervisor C<$hv> has, or
+nothing when it has none of them.
+
+    my $helper = Trog::HV::Libvirt::BridgeHelper::helper($hv);
 
 =cut
 
@@ -149,17 +167,24 @@ sub helper ($hv) {
     return;
 }
 
-=head2 rules
+=head2 rules($read)
 
-C<($read)>.  What the helper reads, as an array reference of C<[$verb, $bridge]>, where the
-verb is C<allow> or C<deny> and the bridge can be C<all>.  C<$read> is a code
-reference that takes a path and returns the text of the file, or undef when it
-cannot read it.  It starts with C<$CONF> and follows each C<include>.
+=over 4
+
+=item read - CodeRef - takes a path and returns the text of the file, or undef when
+it cannot read it
+
+=back
+
+Returns ArrayRef, what the helper reads, as an array reference of C<[$verb, $bridge]>, where the
+verb is C<allow> or C<deny> and the bridge can be C<all>.  It starts with C<$CONF> and follows each C<include>.
 
 Dies when it cannot read a file, naming it, and when the includes go on past
 32 files, which a loop of includes does.  The helper ignores a file that it
 cannot read.  This does not, because a check that cannot read a file cannot
 say what the helper allows.
+
+    my $rules = Trog::HV::Libvirt::BridgeHelper::rules( sub ($file) { $hv->read_text($file) } );
 
 =cut
 
@@ -180,11 +205,21 @@ sub rules ($read) {
     return \@rules;
 }
 
-=head2 refused
+=head2 refused($rules, @bridges)
 
-C<($rules, @bridges)>.  Each of C<@bridges> that C<$rules>, from L</rules>, do not let a user join: one
-that no C<allow> line names, by its name or by C<all>, and one that a C<deny>
-line names.
+=over 4
+
+=item rules - ArrayRef - the rules, from L</rules($read)>
+
+=item @bridges - Str - each name of a bridge
+
+=back
+
+Returns a list of Str: each of C<@bridges> that C<$rules> do not let a user
+join.  That is one that no C<allow> line names, by its name or by C<all>, and
+one that a C<deny> line names.
+
+    my @refused = Trog::HV::Libvirt::BridgeHelper::refused( $rules, qw{virbr0 virbr1} );
 
 =cut
 
@@ -195,14 +230,24 @@ sub refused ( $rules, @bridges ) {
     return grep { local ($_) = $_; !$says->( 'allow', $_ ) || $says->( 'deny', $_ ) } @bridges;
 }
 
-=head2 grant_steps
+=head2 grant_steps($hv, $user, @bridges)
 
-C<($hv, $user, @bridges)>.  The actions, for L<Trog::Steps/run>, that let C<$user> put the guests of its
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item user - Str - the name of the runner account
+
+=item @bridges - Str - each name of a bridge
+
+=back
+
+Returns a list of HashRef: the actions, for L<Trog::Steps/run>, that let C<$user> put the guests of its
 session on each of C<@bridges>, in order:
 
 =over 4
 
-=item 1. An C<allow> line for each bridge in L</acl_file>.  A line that is
+=item 1. An C<allow> line for each bridge in L</acl_file($user)>.  A line that is
 there already stays, also for a bridge that is not in C<@bridges>.  So
 F<bin/guest_network> adds its bridge without taking away one that something
 else allowed.
@@ -210,6 +255,8 @@ else allowed.
 =item 2. An C<include> of that file in C<$CONF>.
 
 =back
+
+    my @steps = Trog::HV::Libvirt::BridgeHelper::grant_steps( $hv, 'runner', qw{virbr0} );
 
 =cut
 
@@ -247,14 +294,24 @@ sub grant_steps ( $hv, $user, @bridges ) {
     );
 }
 
-=head2 allow_only_steps
+=head2 allow_only_steps($hv, $user, @bridges)
 
-C<($hv, $user, @bridges)>.  The actions that let C<$user> join each of
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item user - Str - the name of the runner account
+
+=item @bridges - Str - each name of a bridge
+
+=back
+
+Returns a list of HashRef: the actions that let C<$user> join each of
 C<@bridges> and no other bridge, in order:
 
 =over 4
 
-=item 1. L</acl_file> with an C<allow> line for each bridge, in that order, and
+=item 1. L</acl_file($user)> with an C<allow> line for each bridge, in that order, and
 no other line.  A line for another bridge goes, whoever wrote it.
 
 =item 2. An C<include> of that file in C<$CONF>.
@@ -264,6 +321,8 @@ no other line.  A line for another bridge goes, whoever wrote it.
 C<runner_account_steps> in L<Trog::HV::Libvirt> uses these, because the file of
 a runner with an account holds the bridges of the block of the runner, and a
 bridge that the block no longer names must not stay allowed.
+
+    my @steps = Trog::HV::Libvirt::BridgeHelper::allow_only_steps( $hv, 'runner', qw{virbr0 virbr1} );
 
 =cut
 
@@ -286,11 +345,21 @@ sub allow_only_steps ( $hv, $user, @bridges ) {
     );
 }
 
-=head2 revoke_steps
+=head2 revoke_steps($hv, $user)
 
-C<($hv, $user)>.  The actions that undo L</grant_steps> and L</allow_only_steps> for C<$user>: the C<include> line goes
-out of C<$CONF>, and then L</acl_file> goes.  A C<$CONF> that root cannot read
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item user - Str - the name of the runner account
+
+=back
+
+Returns a list of HashRef: the actions that undo L</grant_steps($hv, $user, @bridges)> and L</allow_only_steps($hv, $user, @bridges)> for C<$user>: the C<include> line goes
+out of C<$CONF>, and then L</acl_file($user)> goes.  A C<$CONF> that root cannot read
 looks to these like one without the line, so it stays as it was.
+
+    my @steps = Trog::HV::Libvirt::BridgeHelper::revoke_steps( $hv, 'runner' );
 
 =cut
 
@@ -313,12 +382,23 @@ sub revoke_steps ( $hv, $user ) {
     );
 }
 
-=head2 capability_steps
+=head2 capability_steps($hv, $helper)
 
-C<($hv, $helper)>.  The actions that let the helper at C<$helper>, from L</helper>, add a tap
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item helper - Str - the path of the helper, from L</helper($hv)>
+
+=back
+
+Returns a list of HashRef: the actions that let the helper at C<$helper> add a tap
 device to a bridge: C<cap_net_admin> on it, and C<$APT_HOOK>, which sets the
 capability again after each upgrade of the package.  The hook needs apt, which
-a caller makes sure of first.
+a caller makes sure of first.  The second action dies when it cannot write the
+hook.
+
+    my @steps = Trog::HV::Libvirt::BridgeHelper::capability_steps( $hv, $helper );
 
 =cut
 
@@ -341,11 +421,21 @@ sub capability_steps ( $hv, $helper ) {
     );
 }
 
-=head2 is_last_account
+=head2 is_last_account($hv, $user)
 
-C<($hv, $user)>.  True when no runner account other than C<$user> has an
-L</acl_file> on the hypervisor.  Something that every runner account shares
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item user - Str - the name of the runner account
+
+=back
+
+Returns Bool, true when no runner account other than C<$user> has an
+L</acl_file($user)> on the hypervisor.  Something that every runner account shares
 goes only with the last one.
+
+    my $last = Trog::HV::Libvirt::BridgeHelper::is_last_account( $hv, 'runner' );
 
 =cut
 
@@ -355,12 +445,24 @@ sub is_last_account ( $hv, $user ) {
     return !List::Util::any { m/\Atrog-runner-.+[.]conf\z/ && $_ ne $own } $hv->list_dir($dir);
 }
 
-=head2 capability_removal_steps
+=head2 capability_removal_steps($hv, $helper, $user)
 
-C<($hv, $helper, $user)>.  The actions that undo L</capability_steps> when C<$user> is the last runner
-account on the hypervisor, and do nothing while L</acl_file> of another one is
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item helper - Str|Undef - the path of the helper, from L</helper($hv)>
+
+=item user - Str - the name of the runner account
+
+=back
+
+Returns a list of HashRef: the actions that undo L</capability_steps($hv, $helper)> when C<$user> is the last runner
+account on the hypervisor, and do nothing while L</acl_file($user)> of another one is
 there, because that account still needs the helper.  Without a C<$helper> there
 is no capability to take away, and only the hook goes.
+
+    my @steps = Trog::HV::Libvirt::BridgeHelper::capability_removal_steps( $hv, $helper, 'runner' );
 
 =cut
 
@@ -385,10 +487,22 @@ sub capability_removal_steps ( $hv, $helper, $user ) {
     );
 }
 
-=head2 allowed_by_others
+=head2 allowed_by_others($hv, $bridge, $user)
 
-C<($hv, $bridge, $user)>.  The files of the runner accounts other than C<$user>
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item bridge - Str - the name of the bridge
+
+=item user - Str - the name of the runner account
+
+=back
+
+Returns a list of Str: the files of the runner accounts other than C<$user>
 that let their account join C<$bridge>, by name, sorted.  Empty when none does.
+
+    my @files = Trog::HV::Libvirt::BridgeHelper::allowed_by_others( $hv, 'virbr0', 'runner' );
 
 =cut
 
@@ -403,10 +517,20 @@ sub allowed_by_others ( $hv, $bridge, $user ) {
     return @files;
 }
 
-=head2 has_capability
+=head2 has_capability($hv, $helper)
 
-C<($hv, $helper)>.  True when C<getcap> says that the helper at C<$helper>, one of C<@HELPERS>,
+=over 4
+
+=item hv - Trog::HV - the hypervisor
+
+=item helper - Str - the path of the helper, one of C<@HELPERS>
+
+=back
+
+Returns Bool, true when C<getcap> says that the helper at C<$helper>, one of C<@HELPERS>,
 has C<cap_net_admin>.
+
+    my $capable = Trog::HV::Libvirt::BridgeHelper::has_capability( $hv, $helper );
 
 =cut
 
