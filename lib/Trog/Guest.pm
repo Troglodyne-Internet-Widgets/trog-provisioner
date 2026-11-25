@@ -52,9 +52,24 @@ Each way needs a different check, and each check is a method here.
 
 =head2 new(%opts)
 
-Takes C<host>, C<user>, C<key_path> and C<name>.  C<name> is what messages call
-this guest.  Dies when C<host> is missing.  The others are optional, but a
-connection nearly always needs C<user> and C<key_path>.
+=over 4
+
+=item host - Str - the address of the guest; required
+
+=item user - Str - the account to log in as
+
+=item key_path - Str - the private key to log in with
+
+=item name - Str - what messages call this guest
+
+=back
+
+The options below are optional but for C<host>, and a connection nearly always
+needs C<user> and C<key_path>.  Dies when C<host> is missing.
+
+Returns a Trog::Guest object.
+
+    my $guest = Trog::Guest->new( name => 'vm.test.test', host => '203.0.113.10', user => 'ubuntu' );
 
 =cut
 
@@ -109,10 +124,14 @@ sub new {
 Returns the name that messages use for this guest, or its address when it has
 no name.
 
+    my $name = $guest->name;
+
 =head2 describe
 
 Returns C<name (user@host)> when the guest has a name, and C<user@host> when it
 does not.  With no C<user>, the address is only the host.
+
+    print 'Connecting to ' . $guest->describe . "\n";
 
 =cut
 
@@ -128,8 +147,15 @@ sub describe {
 
 =head2 wait_for_ssh(%opts)
 
-Waits until an SSH connection to the guest opens, and returns the guest.  Takes
-C<timeout> in seconds, default 300.
+=over 4
+
+=item timeout - Int - seconds to wait, 300 by default
+
+=back
+
+Waits until an SSH connection to the guest opens.
+
+Returns the guest, a Trog::Guest object.
 
 Two things must be true.  The port must be open, I<and> the connection must
 succeed.  A VM that listens but does not yet accept our key is of no use.  A
@@ -137,6 +163,8 @@ check of the port alone gives a confusing failure three steps later.
 
 Dies when the port does not open within C<timeout>, or when the connection does
 not open in about the same time.
+
+    $guest->wait_for_ssh( timeout => 600 );
 
 =cut
 
@@ -165,12 +193,16 @@ sub wait_for_ssh {
 
 =head2 disconnect
 
-Closes the connection, if one is open, and returns the guest.  The next call
+Closes the connection, if one is open.
+
+Returns the guest, a Trog::Guest object.  The next call
 to L<Trog::Machine/ssh> then opens a new one, with the options of that call.
 
 Use it after the guest rebooted.  L<Net::OpenSSH::More> opens a new master
 when a command fails to start, but its object keeps the old one, so the command
 fails again.
+
+    $guest->disconnect->wait_for_ssh();
 
 =cut
 
@@ -181,8 +213,17 @@ sub disconnect ($self) {
 
 =head2 wait_for_cloud_init($domain, %opts)
 
+=over 4
+
+=item domain - Str|Undef - the domain of the guest, its name by default
+
+=item timeout - Str - how long C<timeout> on the guest waits, such as C<90m>
+
+=back
+
 Waits for cloud-init to finish, then makes sure that it told the truth.
-C<$domain> defaults to L</name>.  Takes C<timeout>, default C<$SETUP_TIMEOUT>.
+The default C<timeout> is C<$SETUP_TIMEOUT>.
+
 Returns 1.
 
 The wait ends when F</var/log/cloud-init-output.log> says C<Boot configuration
@@ -197,6 +238,8 @@ that module, because otherwise cloud-init does not run it a second time.
 
 Dies when the wait fails or times out, or when C<cloud-init analyze dump> does
 not return a JSON array.
+
+    $guest->wait_for_cloud_init( undef, timeout => '30m' );
 
 =cut
 
@@ -245,8 +288,15 @@ sub wait_for_cloud_init {
 
 =head2 wait_for_makefile($domain, %opts)
 
-Waits for the Makefile of the payload to run, and returns true when make exited
-zero.  C<$domain> defaults to L</name>.  Takes C<timeout>, default
+=over 4
+
+=item domain - Str|Undef - the domain of the guest, its name by default
+
+=item timeout - Str - how long C<timeout> on the guest waits, such as C<90m>
+
+=back
+
+Waits for the Makefile of the payload to run.  The default C<timeout> is
 C<$SETUP_TIMEOUT>.
 
 C<at> starts the Makefile, so there are five waits, in this order:
@@ -272,9 +322,12 @@ F<setup.sh> writes it as make exits, so this wait is only C<$STATUS_GRACE>.
 
 =back
 
-Returns false when make exited non-zero, and also when the build recorded no
-status.  The status comes from a file because C<make | tee> reports the exit
+Returns true when make exited zero.  Returns false when make exited non-zero,
+and also when the build recorded no status.  Dies when nothing is going to start
+make.  The status comes from a file because C<make | tee> reports the exit
 code of tee, and never that of make.
+
+    $guest->wait_for_makefile() or die "The build failed\n";
 
 =cut
 
@@ -319,15 +372,13 @@ sub wait_for_makefile {
     return $result eq '0';
 }
 
-=head2 $path = Trog::Guest->secrets_marker($domain)
-
-The file that F<bin/provision> writes on the guest after it places the secrets
-of C<$domain>, the files that F<guest-secrets.yaml> names.  When the domain has
-any, F<setup.sh> waits for this file before it starts make, and removes it when
-it has seen it, so that the next build of the domain waits for its own.
-
-=cut
-
+# The file that F<bin/provision> writes on the guest after it places the secrets
+# of C<$domain>, the files that F<guest-secrets.yaml> names.  When the domain has
+# any, F<setup.sh> waits for this file before it starts make, and removes it when
+# it has seen it, so that the next build of the domain waits for its own.
+# @param   domain  Str  the domain of the guest
+# @returns Str  the path of the file on the guest
+# @example my $marker = Trog::Guest->secrets_marker('vm.test.test');
 sub secrets_marker {
     my ( undef, $domain ) = @_;
     return "/root/.guest-secrets-$domain";
@@ -363,12 +414,13 @@ callers have no guest.  F<bin/new_config> seals the key before the guest exists
 or has an address, and F<bin/guest_key> gets only a domain.  C<new> refuses a
 guest with no host, so instance methods need an invented one.
 
-=head2 $ref = Trog::Guest->ref_for_key($domain)
-
-Returns the reference under which the store keeps the key of this domain.
-
 =cut
 
+# The reference under which the store keeps the key of a domain.  See
+# L</THE KEY>.
+# @param   domain  Str  the domain of the guest
+# @returns Str  the C<secret:> reference
+# @example my $ref = Trog::Guest->ref_for_key('vm.test.test');
 sub ref_for_key { my ( undef, $domain ) = @_; return "secret:guests/$domain/password" }
 
 # The path of the secret store, or undef when the installation has none.  Ask
@@ -380,23 +432,22 @@ my sub store_path () {
     return defined $store && -f $store ? $store : undef;
 }
 
-=head2 Trog::Guest->seal_key($domain, $path)
-
-Puts the private key at C<$path> into the store, deletes the file, and returns
-1.  Returns 0 and changes nothing when the file cannot be read or is empty, or
-when the installation has no store.
-
-It overwrites the key in the store, and does not use
-L<Trog::Secrets/remember>, which keeps the first answer forever.  A domain
-rebuilt from nothing, or a key replaced by hand, has a key the store has not
-seen.  The store must hold that one.  A key that did not change seals to the
-same bytes.
-
-The file goes only after the store has the key.  If the password prompt or the
-store fails, this dies and the key stays on disk.
-
-=cut
-
+# Puts the private key at C<$path> into the store, and deletes the file.  See
+# L</THE KEY>.
+#
+# It overwrites the key in the store, and does not use
+# L<Trog::Secrets/remember>, which keeps the first answer forever.  A domain
+# rebuilt from nothing, or a key replaced by hand, has a key the store has not
+# seen.  The store must hold that one.  A key that did not change seals to the
+# same bytes.
+#
+# The file goes only after the store has the key.
+# @param   domain  Str  the domain of the guest
+# @param   path    Str  the file of the private key
+# @returns Bool  1 when the store has the key, or 0, with nothing changed, when
+#   the file cannot be read or is empty, or when the installation has no store
+# @throws  when the password prompt or the store fails.  Then the key stays on disk.
+# @example Trog::Guest->seal_key( 'vm.test.test', '/opt/domains/vm.test.test/key.rsa' );
 sub seal_key {
     my ( $class, $domain, $path ) = @_;
 
@@ -420,29 +471,29 @@ sub seal_key {
     return 1;
 }
 
-=head2 $path = Trog::Guest->key_path($domain, $on_disk)
-
-Returns a path to the private key of this domain that ssh can use, or undef
-when there is no key for it anywhere.
-
-C<$on_disk> is the path of a F<key.rsa> in the domain directory.  The caller
-knows that path, and this class does not.  To ask L<Trog::HV> loads
-L<Sys::Virt> into everything that connects to a guest.  Also, the location of a
-domain directory is a question for L<Trog::HV>.  If C<$on_disk> exists, it is
-the answer.  See L</A key on disk still works>.
-
-Otherwise the key comes from the store.  It goes into a temporary file that this
-process owns, and the file goes away when the process exits.  A second call for
-the same domain in one run does not fetch it again, unless C<seal_key> has put
-a new key for the domain in the store since.
-
-Returns undef, and does not die, for a domain the store does not know or a store
-that cannot be read.  A first build has no key yet, and without a key the
-callers use the agent or the ssh configuration.  An installation with no store
-gets undef with no password prompt, because a password has nothing to open.
-
-=cut
-
+# A path to the private key of a domain that ssh can use.
+#
+# C<$on_disk> is the path of a F<key.rsa> in the domain directory.  The caller
+# knows that path, and this class does not.  To ask L<Trog::HV> loads
+# L<Sys::Virt> into everything that connects to a guest.  Also, the location of a
+# domain directory is a question for L<Trog::HV>.  If C<$on_disk> exists, it is
+# the answer.  See L</A key on disk still works>.
+#
+# Otherwise the key comes from the store.  It goes into a temporary file that this
+# process owns, and the file goes away when the process exits.  A second call for
+# the same domain in one run does not fetch it again, unless C<seal_key> has put
+# a new key for the domain in the store since.
+#
+# A first build has no key yet, and without a key the callers use the agent or
+# the ssh configuration.  An installation with no store gets undef with no
+# password prompt, because a password has nothing to open.
+# @param   domain   Str  the domain of the guest
+# @param   on_disk  Str|Undef  the path of a F<key.rsa> in the domain directory
+# @returns Str|Undef  the path of the key, or undef when there is no key for the
+#   domain anywhere: a domain that the store does not know, or a store that
+#   cannot be read, is no error
+# @throws  when the temporary file of the key cannot be closed
+# @example my $key = Trog::Guest->key_path( 'vm.test.test', '/opt/domains/vm.test.test/key.rsa' );
 sub key_path {
     my ( $class, $domain, $on_disk ) = @_;
 

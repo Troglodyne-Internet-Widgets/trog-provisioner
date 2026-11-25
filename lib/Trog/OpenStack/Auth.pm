@@ -93,6 +93,14 @@ our $EXPIRY_MARGIN = 300;
 
 =head2 from_cloud($name, %args)
 
+=over 4
+
+=item name - Str|Undef - the name of the cloud in F<clouds.yaml>
+
+=item %args - the options of C<new>, which override the file
+
+=back
+
 Authenticates against a cloud from F<clouds.yaml>, and returns a new object.
 C<$name> goes to L<Trog::OpenStack::Config/load>, so the default is
 C<$OS_CLOUD>, or the only cloud in the file.  C<%args> goes to C<new>, after
@@ -113,6 +121,10 @@ The module looks up the secret only when it must ask Keystone for a token.  A
 run that finds a cached token does not ask for the passphrase of the database.
 Other runs ask for it one time, under the name C<keepass>.  Everything else in
 this repository uses that name for it too.
+
+Returns a Trog::OpenStack::Auth object.
+
+    my $auth = Trog::OpenStack::Auth->from_cloud( 'example', no_cache => 1 );
 
 =cut
 
@@ -137,6 +149,14 @@ sub from_cloud {
 }
 
 =head2 new($endpoint, %args)
+
+=over 4
+
+=item endpoint - Str - the URL of the Keystone endpoint
+
+=item %args - the named options below
+
+=back
 
 Returns an object that holds a token, from the cache or from Keystone.  A
 token from Keystone goes into the cache for the next command.  A cache that
@@ -175,6 +195,12 @@ TLS hostname check, and the token goes over that connection.
 
 Dies when C<$endpoint>, the id or the secret is missing.  Also dies when
 Keystone does not give a token and a service catalog.
+
+    my $auth = Trog::OpenStack::Auth->new(
+        'https://keystone.test.test:5000/v3',
+        application_credential_id     => $id,
+        application_credential_secret => $secret,
+    );
 
 =cut
 
@@ -315,6 +341,12 @@ sub new {
 
 =head2 secret_for($cloud)
 
+=over 4
+
+=item cloud - HashRef - a cloud as L<Trog::OpenStack::Config/load> returns it
+
+=back
+
 Returns the application credential secret of C<$cloud>, which is a cloud as
 L<Trog::OpenStack::Config/load> returns one.  A secret written out is itself.
 A C<secret:> reference comes back as a code reference that fetches it from
@@ -323,6 +355,9 @@ token never opens the store.  Dies at once when the reference is malformed.
 
 F<bin/openstack-env> calls it and then the code reference, to hand the secret
 to the tools that read F<clouds.yaml> and have no idea what a reference is.
+
+    my $secret = Trog::OpenStack::Auth->secret_for($cloud);
+    $secret = $secret->() if ref $secret eq 'CODE';
 
 =cut
 
@@ -351,10 +386,14 @@ Returns the Keystone token, in the form that C<X-Auth-Token> takes.
 This replaces the method of the parent, which reads the token from the headers
 of the HTTP response.  A token from the cache has no response.
 
+    my $token = $auth->token;
+
 =head2 region, interface
 
 Return the values that went to C<new>, for a caller that makes the options
 for C<service>.
+
+    my $client = $auth->service( 'compute', region => $auth->region, interface => $auth->interface );
 
 =cut
 
@@ -370,6 +409,8 @@ Returns the path of the cache file for the token of this object.  It is in
 C<cache_dir>, or else in F<trog-provisioner> under C<$XDG_CACHE_HOME> or under
 F<$HOME/.cache>.  Returns nothing when there is no directory for the cache,
 which is when none of those is set.
+
+    my $path = $auth->cache_path;
 
 =cut
 

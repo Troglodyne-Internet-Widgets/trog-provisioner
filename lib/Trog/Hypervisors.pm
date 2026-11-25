@@ -139,6 +139,24 @@ my sub check_network ( $domain, $hv, %opts ) {
 
 =head2 find($domain, %opts)
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item hypervisor - Str - the name of a hypervisor of the fleet
+
+=item hvconf - Str - the path of F<hypervisors.conf>
+
+=item domain_dir - Str - the directory of the domains, over the one of the hypervisor
+
+=item config - Config::Simple|HashRef - the configuration of the guest, for a hypervisor without a fleet
+
+=item missing_ok - Bool - return undef for a guest that no hypervisor has
+
+=item must_answer - Bool - die when a hypervisor cannot be asked
+
+=back
+
 Returns the hypervisor that runs a guest, made current.  I<Made current> means
 that L<Trog::HV/new> returns it from then on.  Every tool that acts on an
 existing guest, and does not create one, uses this.  Takes C<hypervisor>,
@@ -152,6 +170,10 @@ C<missing_ok>, it returns undef there instead, for a caller with something to
 do about a guest that is nowhere.  With C<must_answer>, a hypervisor that
 cannot be asked is not taken to lack the guest: see L</hosting($domain, %opts)>.
 With no fleet configured, this returns C<< Trog::HV->from_config >>.
+
+Returns a Trog::HV, or undef with C<missing_ok>.
+
+    my $hv = Trog::Hypervisors->find( 'vm.test.test', missing_ok => 1 );
 
 =cut
 
@@ -173,6 +195,28 @@ sub find {
 
 =head2 choose($domain, %opts)
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item hypervisor - Str - the name of a hypervisor of the fleet
+
+=item hvconf - Str - the path of F<hypervisors.conf>
+
+=item domain_dir - Str - the directory of the domains, over the one of the fleet
+
+=item config - Config::Simple|HashRef - the configuration of the guest
+
+=item host - Str - the domain whose guest this domain goes onto
+
+=item host_config - Config::Simple|HashRef - the configuration of that host
+
+=item network - Str - the network that the guest must be on
+
+=item network_why - Str - why, for the errors
+
+=back
+
 Returns the hypervisor that a guest is built on, made current.  C<find> is for
 a guest that exists, and this is for a guest that is about to be built or
 rebuilt.  F<bin/new_config> and F<bin/provision> both call it.  Takes
@@ -190,6 +234,11 @@ domain that goes onto the guest of another domain names that domain as
 C<host>, and passes its configuration as C<host_config>.  The fleet then
 chooses for the host, because the host is the machine that runs.  A
 C<domain_dir> wins over the directory that the fleet names.
+
+Returns a Trog::HV.  Dies when the named hypervisor is not in the fleet or is on
+the wrong network, and for each reason that C<select_for> dies.
+
+    my $hv = Trog::Hypervisors->choose( 'vm.test.test', config => $config );
 
 =cut
 
@@ -216,11 +265,21 @@ sub choose {
 
 =head2 hypervisor($name)
 
+=over 4
+
+=item name - Str - the name of a block of the fleet
+
+=back
+
 Returns one hypervisor by name, built but not made current.  Dies if the file
 does not name it, because a typo in C<hypervisor=> must not put a guest
 somewhere else.  Also dies if its block has the key of more than one kind of
 hypervisor, C<libvirt_uri>, C<cloud> or C<linode_token>, or of none, which
 L</$class = $fleet-E<gt>backend_of($name)> is where it finds out.
+
+Returns a Trog::HV.
+
+    my $hv = $fleet->hypervisor('hv1');
 
 =cut
 
@@ -237,6 +296,12 @@ sub hypervisor {
 
 =head2 $class = $fleet->backend_of($name)
 
+=over 4
+
+=item name - Str - the name of a block of the fleet
+
+=back
+
 Returns the backend class that a block describes, without building it.  Dies if
 the file does not name the block, if the block has the key of more than one kind
 of hypervisor, or if it has none of them.  Also dies if it has a key of
@@ -246,6 +311,10 @@ F<bin/preflight> asks this of every block, so a file that cannot be built on is
 reported before a run rather than when something reaches that block.  Which is
 also why it does not build: a block answers what kind it is without a cloud
 being contacted, or its client being installed.
+
+Returns a Str, the name of the class.
+
+    my $class = $fleet->backend_of('hv1');
 
 =cut
 
@@ -276,6 +345,8 @@ sub backend_of {
 
 Returns every hypervisor in the fleet, built but not made current.
 
+    my @all = $fleet->hypervisors;
+
 =cut
 
 sub hypervisors {
@@ -293,6 +364,14 @@ my sub oneline ($message) {
 
 =head2 hosting($domain, %opts)
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item must_answer - Bool - die rather than skip a hypervisor that cannot be asked
+
+=back
+
 Returns the hypervisor that already runs C<$domain>, or undef when none does.
 
 This warns about a hypervisor it cannot reach, and skips it.  Perhaps that one
@@ -303,6 +382,10 @@ where to build.
 When the question is whether to remove what is left of a guest, that is the
 wrong way round, so with C<must_answer> it dies instead, naming each
 hypervisor it could not ask, when none of the others has the guest.
+
+Returns a Trog::HV, or undef.
+
+    my $hv = $fleet->hosting( 'vm.test.test', must_answer => 1 );
 
 =cut
 
@@ -327,25 +410,23 @@ sub hosting {
     return undef;
 }
 
-=head2 $guest = Trog::Hypervisors->guest_of($domain)
-
-A L<Trog::Guest> for the guest of C<$domain> that is up, as its admin user,
-with its key from the store, or undef when no hypervisor runs it.  A class
-method: it loads the fleet that C<default_path> names.  Without a fleet, it
-asks the hypervisor that L<Trog::HV/new> returns.
-
-The guest of a domain in C<_shared> is the guest of its host, which
-L<Provisioner::Cookbook/host_of> names.
-
-Dies when there is no key for the guest.  The store holds the key, and a
-program with nobody at its terminal cannot ask for the password of the store,
-so the message says to give it on standard input, or to log in through the ssh
-agent with C<guest_of_with_agent>.
-
-It takes the options of C<locate_guest>.
-
-=cut
-
+# A L<Trog::Guest> for the guest of C<$domain> that is up, as its admin user,
+# with its key from the store.  A class method: it loads the fleet that
+# C<default_path> names.  Without a fleet, it asks the hypervisor that
+# L<Trog::HV/new> returns.
+#
+# The guest of a domain in C<_shared> is the guest of its host, which
+# L<Provisioner::Cookbook/host_of> names.
+#
+# It takes the options of C<locate_guest>.
+# @param   domain  Str  the domain of the guest
+# @param   %opts   Str  each option of C<locate_guest>, by its name
+# @returns Trog::Guest|Undef  the guest, or undef when no hypervisor runs it
+# @throws  when there is no key for the guest.  The store holds the key, and a
+#   program with nobody at its terminal cannot ask for the password of the store,
+#   so the message says to give it on standard input, or to log in through the
+#   ssh agent with C<guest_of_with_agent>.
+# @example my $guest = Trog::Hypervisors->guest_of('vm.test.test') or die "Not up\n";
 sub guest_of {
     my ( $class, $domain, %opts ) = @_;
 
@@ -356,20 +437,17 @@ sub guest_of {
     return Trog::Guest->new( %{$where}{qw{name host user}}, key_path => $key );
 }
 
-=head2 $guest = Trog::Hypervisors->guest_of_with_agent($domain)
-
-As C<guest_of>, but the guest logs in with the keys of the ssh agent
-in C<SSH_AUTH_SOCK>, and never asks for the key of the guest.  So it never
-opens the store for that key.  The admin of a guest trusts the keys of
-F<admin_authorized_keys>, so an operator whose key is there needs no store to
-reach the guest.  Finding a guest on a hypervisor that needs a token, such as a
-cloud, still opens the store for that token.
-
-Returns undef when no hypervisor runs the guest.  Dies when C<SSH_AUTH_SOCK>
-is not set.  It takes the options of C<locate_guest>.
-
-=cut
-
+# As C<guest_of>, but the guest logs in with the keys of the ssh agent in
+# C<SSH_AUTH_SOCK>, and never asks for the key of the guest.  So it never opens
+# the store for that key.  The admin of a guest trusts the keys of
+# F<admin_authorized_keys>, so an operator whose key is there needs no store to
+# reach the guest.  Finding a guest on a hypervisor that needs a token, such as a
+# cloud, still opens the store for that token.
+# @param   domain  Str  the domain of the guest
+# @param   %opts   Str  each option of C<locate_guest>, by its name
+# @returns Trog::Guest|Undef  the guest, or undef when no hypervisor runs it
+# @throws  when C<SSH_AUTH_SOCK> is not set
+# @example my $guest = Trog::Hypervisors->guest_of_with_agent( 'vm.test.test', fall_back_to_name => 1 );
 sub guest_of_with_agent {
     my ( $class, $domain, %opts ) = @_;
 
@@ -379,57 +457,44 @@ sub guest_of_with_agent {
     return Trog::Guest->new( %{$where}{qw{name host user}} );
 }
 
-=head2 $where = Trog::Hypervisors->locate_guest($domain, %opts)
-
-Where the guest of C<$domain> is, for C<guest_of> and
-C<guest_of_with_agent>: a hash of C<name>, the machine, C<host>, its
-address, C<user>, its admin user, and C<dir>, the directory of its
-configuration.  Returns undef when no hypervisor runs it at an address.
-
-The guest of a domain in C<_shared> is the guest of its host, which
-L<Provisioner::Cookbook/host_of> names.  The admin user comes from the
-F<provision.conf> of the guest, and is C<root> without one.  The address is the
-guest itself, also for a domain behind a relay, whose public names reach the
-relay.
-
-It takes these options:
-
-=over 4
-
-=item C<< fall_back_to_name => 1 >>
-
-When no hypervisor says an address for the guest, because none has it or
-because the one that might could not be asked, the address is the one that
-the name of the machine resolves to, as for C<ssh $machine>.  It warns that it
-did so, and why.  It returns undef only when the name does not resolve either.
-A hypervisor that dies when it is asked for the address is then a warning, not
-an error.
-
-This is for an operator who asks a guest a question, such as C<ask_guest> and
-C<collect_artifacts>.  A hypervisor that wants a token from the store cannot
-be asked with nobody at the terminal, and C<--agent> wants no store at all.
-It is off by default, because the other callers take undef to mean that the
-guest is not up: C<bin/destroy> then skips the guest, and must not run a
-command as root on whatever machine a stale name still reaches.  The name can
-also reach a relay in front of the guest, and not the guest.
-
-=item C<< host => $address >>
-
-The address of the guest, so that nobody is asked for one.  The hypervisor is
-still found, for the directory of the guest.
-
-=item C<< hypervisor => $name >>, C<< hvconf => $file >>
-
-The hypervisor of the fleet to ask, rather than whichever has the guest, and
-the file of the fleet, rather than C<default_path>.
-
-=back
-
-Without a hypervisor that has the guest, the directory is under
-L<Trog::HV/default_domain_dir>.
-
-=cut
-
+# Where the guest of C<$domain> is, for C<guest_of> and C<guest_of_with_agent>.
+#
+# The guest of a domain in C<_shared> is the guest of its host, which
+# L<Provisioner::Cookbook/host_of> names.  The admin user comes from the
+# F<provision.conf> of the guest, and is C<root> without one.  The address is the
+# guest itself, also for a domain behind a relay, whose public names reach the
+# relay.  Without a hypervisor that has the guest, the directory is under
+# L<Trog::HV/default_domain_dir>.
+#
+# With C<fall_back_to_name>, when no hypervisor says an address for the guest,
+# because none has it or because the one that might could not be asked, the
+# address is the one that the name of the machine resolves to, as for
+# C<ssh $machine>.  It warns that it did so, and why.  It returns undef only
+# when the name does not resolve either.  A hypervisor that dies when it is asked
+# for the address is then a warning, not an error.
+#
+# This is for an operator who asks a guest a question, such as C<ask_guest> and
+# C<collect_artifacts>.  A hypervisor that wants a token from the store cannot be
+# asked with nobody at the terminal, and C<--agent> wants no store at all.  It is
+# off by default, because the other callers take undef to mean that the guest is
+# not up: C<bin/destroy> then skips the guest, and must not run a command as root
+# on whatever machine a stale name still reaches.  The name can also reach a
+# relay in front of the guest, and not the guest.
+# @param   domain             Str  the domain of the guest
+# @param   fall_back_to_name  Bool  resolve the name of the machine when no
+#   hypervisor says its address
+# @param   host               Str  the address of the guest, so that nobody is
+#   asked for one.  The hypervisor is still found, for the directory of the guest.
+# @param   hypervisor         Str  the name of the hypervisor of the fleet to ask,
+#   rather than whichever has the guest
+# @param   hvconf             Str  the file of the fleet, rather than C<default_path>
+# @returns HashRef|Undef  C<name>, the machine, C<host>, its address, C<user>, its
+#   admin user, and C<dir>, the directory of its configuration; or undef when no
+#   hypervisor runs it at an address
+# @throws  when the hypervisor dies as it is asked for the address, without
+#   C<fall_back_to_name>
+# @throws  when the named C<hypervisor> is not in the fleet
+# @example my $where = Trog::Hypervisors->locate_guest( 'vm.test.test', fall_back_to_name => 1 );
 sub locate_guest {
     my ( $class, $domain, %opts ) = @_;
 
@@ -471,6 +536,22 @@ sub locate_guest {
 
 =head2 place($domain, %needs)
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item memory_mb - Int - the memory that it wants
+
+=item cpus - Int - the CPUs that it wants
+
+=item disk_bytes - Int - the disk that it wants
+
+=item network - Str - the network that the guest must be on
+
+=item network_why - Str - why, for the errors
+
+=back
+
 Returns the hypervisor that should hold a guest that wants C<memory_mb>,
 C<cpus> and C<disk_bytes>, and prints which one it chose.  Of those that can
 hold it, that is the cheapest by L<Trog::HV/monthly_cost(%needs)>, then the
@@ -480,6 +561,10 @@ nothing more for one more guest, is chosen over any that bills for it.
 When none can hold it, dies with the name of each hypervisor and what it lacks.
 A hypervisor that cannot be reached, or cannot say what the guest would cost,
 is in that list as unreachable.
+
+Returns a Trog::HV.
+
+    my $hv = $fleet->place( 'vm.test.test', memory_mb => 2048, cpus => 2, disk_bytes => 20 * 2**30 );
 
 =cut
 
@@ -560,6 +645,18 @@ my sub needs ($config) {
 
 =head2 select_for($domain, $config, %opts)
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item config - Config::Simple|HashRef - the F<provision.conf> of the guest, or the C<_global> block of its recipe
+
+=item network - Str - the network that the guest must be on
+
+=item network_why - Str - why, for the errors
+
+=back
+
 Returns the hypervisor for a guest, made current (see C<find>).  That is the
 hypervisor where the guest already lives.  If it lives nowhere, it is the one
 that F<provision.conf> pins with C<hypervisor=>.  With no pin, it is the one
@@ -579,6 +676,10 @@ Dies when the pinned hypervisor is not in the file or cannot take the guest.
 Also dies when no hypervisor can take it.  See C<place>.  C<place> and C<offer>
 also take C<network> and C<network_why> among the needs, and consider only the
 hypervisors on that network.
+
+Returns a Trog::HV.
+
+    my $hv = $fleet->select_for( 'vm.test.test', $config );
 
 =cut
 
@@ -613,6 +714,18 @@ sub select_for {
 
 =head2 offer($domain, $config, $why, %needs)
 
+=over 4
+
+=item domain - Str - the domain of the guest
+
+=item config - Config::Simple|HashRef - the configuration of the guest
+
+=item why - Str - what C<place> said when nothing fitted
+
+=item %needs - what the guest wants, as C<place> takes it
+
+=back
+
 Returns the hypervisor to build C<$domain> on after an operator accepts what it
 would sell, having recorded the size in the domain's own file so that the next
 run needs no answer.  C<$why> is what C<place> said when nothing fitted.
@@ -627,6 +740,11 @@ in the guest's C<_global> to accept it.  A hypervisor that bills by the hour
 says so, and what the rate is, because the monthly figure for one of those is
 hours of it rather than a price that caps anything.  That covers the reprovision button,
 cron and CI, which drive this with no terminal.
+
+Returns a Trog::HV.  Dies when the operator declines, when the hypervisor then
+refuses what it offered, and as said above.
+
+    my $hv = $fleet->offer( 'vm.test.test', $config, $why, memory_mb => 2048 );
 
 =cut
 

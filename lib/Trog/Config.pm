@@ -44,14 +44,24 @@ our $DIR = $ENV{TROG_PROVISIONER_CONFIG} // '/etc/trog-provisioner';
 Returns the configuration directory.  C<TROG_PROVISIONER_CONFIG> overrides it
 at each call.
 
+    my $dir = Trog::Config->dir;
+
 =cut
 
 sub dir { return $ENV{TROG_PROVISIONER_CONFIG} // $DIR }
 
 =head2 path($name)
 
+=over 4
+
+=item name - Str - the name of a file in the configuration directory
+
+=back
+
 Returns the path of the file C<$name> in the configuration directory.  It does
 not look for the file.
+
+    my $recipes = Trog::Config->path('recipes.yaml');
 
 =cut
 

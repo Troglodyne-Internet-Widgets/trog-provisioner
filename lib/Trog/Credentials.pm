@@ -97,6 +97,16 @@ my sub terminal ( $mode, $what ) {
 
 =head2 prompt($message, $name, %opts)
 
+=over 4
+
+=item message - Str|Undef - the question, C<Enter password:> by default
+
+=item name - Str|Undef - the name of the password in C<%KNOWN>
+
+=item %opts - C<terminal> to ask at F</dev/tty>
+
+=back
+
 Returns the password.  It asks for the password only if this run does not
 already have it.  Every password this tool asks for comes through here,
 including the sudo password that L<Trog::Machine> needs.
@@ -115,6 +125,8 @@ An empty answer is a valid answer.
 Dies if the input ends before an answer, and does not return an empty password.
 Dies if C<terminal> is set and it cannot open the terminal.  Dies before it
 asks if C<$name> is not a known name.
+
+    my $sudo = Trog::Credentials->prompt( 'Sudo password on the hypervisor:', 'sudo' );
 
 =cut
 
@@ -143,10 +155,18 @@ sub prompt {
 
 =head2 store_password(%opts)
 
+=over 4
+
+=item %opts - the options of C<prompt>
+
+=back
+
 Returns the password of the secret store, the KeePass database, through
 C<prompt> under the name C<keepass>.  The prompt names the store, so that a
 person who has just typed a secret for it does not take the question for a
 second ask of that secret.  C<%opts> goes to C<prompt>.
+
+    my $passphrase = Trog::Credentials->store_password( terminal => 1 );
 
 =cut
 
@@ -159,13 +179,25 @@ sub store_password {
 
 =head2 typed_twice($message, $what)
 
+=over 4
+
+=item message - Str - the first question
+
+=item what - Str - what the value is, for the error
+
+=back
+
 Asks at the terminal, F</dev/tty>, for a value that nobody can check by eye,
-two times, and returns it.  C<$message> is the first question.  Dies if the two
-answers differ, saying that nothing was stored for C<$what>.  Standard input
-stays free for the caller.  Dies if there is no terminal.
+two times.  C<$message> is the first question.  Standard input stays free for
+the caller.
+
+Returns the value.  Dies if the two answers differ, saying that nothing was
+stored for C<$what>.  Dies if there is no terminal.
 
 This is the prompt of C<bin/add_secret --prompt> and of the mail account tools.
 It shows a C<*> for each character, as every other prompt here does.
+
+    my $password = Trog::Credentials->typed_twice( 'New mail password:', 'user@test.test' );
 
 =cut
 
@@ -181,6 +213,14 @@ sub typed_twice {
 
 =head2 remember($name, $value)
 
+=over 4
+
+=item name - Str - a name in C<%KNOWN>
+
+=item value - Str - the credential
+
+=back
+
 Keeps a credential that a person typed, so that the rest of the run does not
 ask for it again.
 
@@ -190,6 +230,8 @@ but must not generate.  A second prompt is worse than a nuisance, because the
 usual caller pipes the answer in, and a pipe answers once.
 
 Returns 1.  Dies if C<$name> is not a known name.
+
+    Trog::Credentials->remember( keepass => $passphrase );
 
 =cut
 
@@ -204,7 +246,15 @@ sub remember {
 
 =head2 get($name)
 
+=over 4
+
+=item name - Str - a name in C<%KNOWN>
+
+=back
+
 Returns the credential, or undef if it was not given.
+
+    my $passphrase = Trog::Credentials->get('keepass');
 
 =cut
 
@@ -215,8 +265,16 @@ sub get {
 
 =head2 have($name)
 
+=over 4
+
+=item name - Str - a name in C<%KNOWN>
+
+=back
+
 Returns 1 if the credential was given, and 0 if not, without reading it.  In a
 boolean test, C<get> is false for an empty value and for a missing one.
+
+    my $passphrase = Trog::Credentials->have('keepass') ? Trog::Credentials->get('keepass') : undef;
 
 =cut
 
@@ -226,6 +284,12 @@ sub have {
 }
 
 =head2 load($fh)
+
+=over 4
+
+=item fh - FileHandle|Undef - where the block is, standard input by default
+
+=back
 
 Reads the block.  C<$fh> defaults to standard input.  A test passes its own
 handle.
@@ -247,6 +311,8 @@ C<prompt> looks first at what this reads, so nothing asks again for a password
 given here.
 
 Returns 1.  Dies if a line is not C<name: value>, or if a name is not known.
+
+    Trog::Credentials->load( \*STDIN );
 
 =cut
 
@@ -273,6 +339,10 @@ sub load {
 =head2 forget()
 
 Drops every credential that C<load> or C<remember> kept.  Only tests need this.
+
+Returns 1.
+
+    Trog::Credentials->forget;
 
 =cut
 

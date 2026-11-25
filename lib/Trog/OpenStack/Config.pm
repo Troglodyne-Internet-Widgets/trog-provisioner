@@ -86,6 +86,8 @@ before the open gives the file time to change.
 Dies with a list of each path that it tried, because "no clouds.yaml" alone does
 not tell you what to fix.
 
+    my ( $path, $text ) = Trog::OpenStack::Config->file;
+
 =cut
 
 sub file {
@@ -106,6 +108,12 @@ sub file {
 }
 
 =head2 load($name)
+
+=over 4
+
+=item name - Str|Undef - the name of the cloud in the file
+
+=back
 
 Returns the cloud named C<$name>, as a flat hash reference.
 
@@ -134,6 +142,8 @@ is used as it is written -- by this toolkit, and by every other reader of a
 F<clouds.yaml>, none of which has ever heard of a reference.  A region called
 C<secret:...> would go to Keystone as that string, so say so here rather than
 there.
+
+    my $cloud = Trog::OpenStack::Config->load('example');
 
 =cut
 

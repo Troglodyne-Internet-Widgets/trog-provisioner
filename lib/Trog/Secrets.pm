@@ -60,12 +60,20 @@ saves.
 
 =head2 needed($config)
 
+=over 4
+
+=item config - HashRef - a configuration
+
+=back
+
 Returns each C<secret:> reference in C<$config> as a hash.  A key is the place
 of the reference, and its value is the reference.  Returns an empty list if
 C<$config> is not a hash reference.
 
 The place is the path of hash keys and array indices to the reference, joined
 with C</>.  C<apply> reads this path to find the place again.
+
+    my %needed = Trog::Secrets->needed($config);
 
 =cut
 
@@ -141,13 +149,26 @@ my sub entry_named ( $group, $title ) {
 
 =head2 lookup($file, $password, %needed)
 
+=over 4
+
+=item file - Str - the path of the database
+
+=item password - Str - the password of the database
+
+=item %needed - Str - each reference, by its key
+
+=back
+
 Resolves each reference in C<%needed> against the database in C<$file>.
 C<%needed> maps a key to a reference, as the return value of C<needed> does.
-Returns a hash of the same keys to their values.
+
+Returns a hash of the same keys to their values, as a list.
 
 Dies if C<%needed> is empty, or if the database cannot be opened or unlocked.
 Also dies with the name of a group, entry or field that is not there.  Without
 this, a reference that resolves to nothing gets to a guest as an empty password.
+
+    my %values = Trog::Secrets->lookup( $file, $password, token => 'secret:registrar/example_token/password' );
 
 =cut
 
@@ -190,10 +211,22 @@ sub lookup {
 
 =head2 apply($config, %values)
 
+=over 4
+
+=item config - HashRef - the configuration that C<needed> read
+
+=item %values - Str - each value, by the place of its reference
+
+=back
+
 Puts each value in C<%values>, which is what C<lookup> returns, back where its
-reference was in C<$config>.  Returns C<$config>.
+reference was in C<$config>.
+
+Returns C<$config>, a HashRef.
 
 Dies if a path does not lead back to a place in C<$config>.
+
+    Trog::Secrets->apply( $config, %values );
 
 =cut
 
@@ -221,11 +254,25 @@ sub apply {
 
 =head2 create($file, $password, %value_by_ref)
 
+=over 4
+
+=item file - Str - the path of the new database
+
+=item password - Str - the password of the new database
+
+=item %value_by_ref - Str - each value, by its reference
+
+=back
+
 Makes a new database in C<$file> that holds a value for each reference in
-C<%value_by_ref>.  Returns C<$file>.
+C<%value_by_ref>.
+
+Returns C<$file>, a Str.
 
 Use it to make a throwaway store to provision against.  The caller chooses the
 values.  Do not use it on a real store, because it replaces the whole file.
+
+    Trog::Secrets->create( "$dir/secrets.kdbx", 'test', 'secret:guests/vm.test.test/password' => $key );
 
 =cut
 
@@ -251,11 +298,22 @@ sub create {
 
 =head2 remember($file, $password, %generator_by_ref)
 
-Returns a hash of each reference in C<%generator_by_ref> to its value.  A
-generator is a coderef.  If a reference holds nothing, this calls its generator
+=over 4
+
+=item file - Str - the path of the database
+
+=item password - Str - the password of the database
+
+=item %generator_by_ref - CodeRef - each generator, by its reference
+
+=back
+
+A generator is a coderef.  If a reference holds nothing, this calls its generator
 and keeps the result in the database.  A reference that holds a value keeps
-that value, and its generator is not called.  Returns an empty list if
-C<%generator_by_ref> is empty.
+that value, and its generator is not called.
+
+Returns a hash of each reference in C<%generator_by_ref> to its value, as a
+list.  Returns an empty list if C<%generator_by_ref> is empty.
 
 A generator gets one argument, a coderef that takes another reference and
 returns what the store holds for it, or undef.  A secret that moves to a new
@@ -275,6 +333,8 @@ false value.  Also dies if the database did not keep a new value: after a save
 it opens the file again and makes sure that each new value is there.
 
 Each value is also kept for C<held>, for the rest of the process.
+
+    my %values = Trog::Secrets->remember( $file, $password, 'secret:dkim/vm.test.test/password' => sub ($stored) { new_key() } );
 
 =cut
 
@@ -358,11 +418,19 @@ sub remember {
 
 =head2 $value = held($ref)
 
-The value that C<remember> read or made for C<$ref> earlier in this process,
-or undef.  It opens no store.  So a recipe can derive something public from a
+=over 4
+
+=item ref - Str - a C<secret:> reference
+
+=back
+
+Returns the value that C<remember> read or made for C<$ref> earlier in this
+process, a Str, or undef.  It opens no store.  So a recipe can derive something public from a
 secret that the provisioner owns, such as the public half of a key for a DNS
 record, once C<bin/new_config> has read the secrets of the guest.  A test sets
 C<%Trog::Secrets::HELD> with C<local>.
+
+    my $key = Trog::Secrets->held('secret:dkim/vm.test.test/password');
 
 =cut
 
@@ -373,9 +441,20 @@ sub held {
 
 =head2 replace($file, $password, %value_by_ref)
 
+=over 4
+
+=item file - Str - the path of the database
+
+=item password - Str - the password of the database
+
+=item %value_by_ref - Str - each value, by its reference
+
+=back
+
 Sets each reference in C<%value_by_ref> to its value, in the database that is
-already in C<$file>.  It adds a group or entry that is not there.  Returns 1, or
-0 if C<%value_by_ref> is empty.
+already in C<$file>.  It adds a group or entry that is not there.
+
+Returns 1, or 0 if C<%value_by_ref> is empty.
 
 Dies if the database cannot be opened or unlocked.
 
@@ -384,6 +463,8 @@ the store, sets the fields that you name, and does not change other secrets.
 
 C<remember> keeps a value that is already there.  This sub replaces it.  Use it
 for a value that changes on each provision, such as a guest key.
+
+    Trog::Secrets->replace( $file, $password, 'secret:guests/vm.test.test/password' => $key );
 
 =cut
 
@@ -415,11 +496,27 @@ sub replace {
     );
 }
 
-=head2 $outcome = put($file, $password, ref => $ref, value => $value, overwrite => $bool)
+=head2 $outcome = put($file, $password, %opts)
+
+=over 4
+
+=item file - Str - the path of the database
+
+=item password - Str - the password of the database
+
+=item ref - Str - the C<secret:> reference to put
+
+=item value - Str - the value of the secret
+
+=item overwrite - Bool - replace a value that is already there
+
+=back
 
 Puts one secret into the database in C<$file>, and reads it back.  This is what
 C<bin/add_secret> and the mail account tools do, so they cannot disagree about
-when a value may be replaced.  Returns one of these:
+when a value may be replaced.
+
+Returns a Str, one of these:
 
 =over 4
 
@@ -438,6 +535,8 @@ working.
 Dies if the database does not hold C<$value> after a write.  The database drops
 a field that it does not keep, and a tool that reported success then would have
 written nothing.
+
+    my $outcome = Trog::Secrets->put( $file, $password, ref => 'secret:mail/user@test.test/password', value => $value, overwrite => 0 );
 
 =cut
 
@@ -467,8 +566,17 @@ sub put {
 
 =head2 forget($file, $password, @refs)
 
-Removes the entry that each reference in C<@refs> names, and returns the
-references it removed.  A reference whose group or entry is not there is not an
+=over 4
+
+=item file - Str - the path of the database
+
+=item password - Str - the password of the database
+
+=item @refs - Str - each reference to remove
+
+=back
+
+Removes the entry that each reference in C<@refs> names.  A reference whose group or entry is not there is not an
 error: the point of asking is to end with it gone.
 
 The whole entry goes, not the one field the reference names.  An entry with its
@@ -478,8 +586,12 @@ that is not what somebody asking to delete a secret means.
 The group stays, even when it is left empty.  A group is the operator's filing
 rather than this module's, and one of them holding nothing costs nothing.
 
+Returns the references that it removed, as a list.
+
 Dies if the database cannot be opened or unlocked.  Nothing is written when no
 reference matched anything.
+
+    my @gone = Trog::Secrets->forget( $file, $password, 'secret:mail/user@test.test/password' );
 
 =cut
 
@@ -521,8 +633,16 @@ sub forget {
 
 =head2 locked($file, $work)
 
+=over 4
+
+=item file - Str - the path of the database
+
+=item work - CodeRef - what to run while the lock is held
+
+=back
+
 Runs the coderef C<$work> while this process holds the store in C<$file> for
-writing, and returns what C<$work> returns, in the context of the call.  Every
+writing.  Every
 sub here that saves the store calls it, around everything from its load to its
 save.
 
@@ -537,6 +657,8 @@ replaces the store with a new file, and a lock on the old file does not stop a
 writer that opens the new one.  A reader needs no lock, because a save
 replaces the file whole.
 
+Returns what C<$work> returns, in the context of the call.
+
 Waits up to C<$Trog::Secrets::LOCK_WAIT> seconds for another writer.  Dies if
 the lock file cannot be opened, or if the wait runs out.  The lock is released
 when C<$work> returns or dies.
@@ -544,6 +666,8 @@ when C<$work> returns or dies.
 C<$work> must not call a sub here that saves the store.  That sub opens the
 lock file again through a handle of its own, and the lock makes it wait for
 the one that its own process holds, until the wait runs out.
+
+    Trog::Secrets->locked( $file, sub { regroup( $file, $password ) } );
 
 =cut
 
@@ -563,10 +687,19 @@ sub locked {
 
 =head2 parse($reference)
 
-Returns the group, entry and field that C<$reference> names, as a list.
+=over 4
+
+=item reference - Str - a C<secret:> reference
+
+=back
+
+Returns the group, entry and field that C<$reference> names, as a list of
+three Str.
 
 Dies if C<$reference> does not start with C<secret:>, or if it does not name all
 three parts.
+
+    my ( $group, $entry, $field ) = Trog::Secrets->parse('secret:registrar/example_token/password');
 
 =cut
 

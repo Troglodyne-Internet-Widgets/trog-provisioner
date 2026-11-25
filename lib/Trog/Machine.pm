@@ -86,9 +86,25 @@ packages.
 
 =head2 new(%opts)
 
-Takes C<host>, C<user>, C<port> and C<key_path>, all optional, and returns the
-object.  Subclasses usually calculate these values from other data and pass them
-in.
+Takes C<host>, C<user>, C<port> and C<key_path>, all optional.  Subclasses
+usually calculate these values from other data and pass them in.  The object
+keeps every option that it is given.
+
+=over 4
+
+=item host - Str - the address to connect to
+
+=item user - Str - the account to log in as
+
+=item port - Int - the port of sshd, 22 by default
+
+=item key_path - Str - the private key to log in with
+
+=back
+
+Returns a Trog::Machine object, of the class that it is called on.
+
+    my $machine = Trog::Machine->new( host => '192.0.2.10', user => 'admin' );
 
 =cut
 
@@ -111,12 +127,25 @@ sub new {
 =head2 keep($object), kept, forget
 
 A class that keeps one object for the rest of the process keeps it here.
-C<keep> keeps C<$object> as the one of the class it is called on, and returns
-it.  C<kept> returns that object, or undef.  C<forget> drops it, so that the
-next C<new> makes another, and returns 1.  Call each as the class that keeps
+C<keep> keeps C<$object> as the one of the class it is called on.  C<kept>
+returns that object.  C<forget> drops it, so that the next C<new> makes
+another.  Call each as the class that keeps
 the object: L<Trog::HV> keeps the hypervisor that the process talks to, and
 L<Trog::Local> keeps the one object for this machine.  A class that keeps
 nothing has nothing to forget.
+
+=over 4
+
+=item object - Trog::Machine - the object to keep
+
+=back
+
+Returns Trog::Machine or undef or 1: C<keep> returns C<$object>, C<kept> returns
+the object that is kept, or undef, and C<forget> returns 1.
+
+    Trog::Local->keep( Trog::Local->new );
+    my $here = Trog::Local->kept;
+    Trog::Local->forget;
 
 =cut
 
@@ -131,25 +160,38 @@ sub forget ($class)            { delete $KEPT{$class}; return 1 }
 
 =head2 ssh_host, ssh_user, ssh_port, ssh_key, ssh_target
 
-Where to connect, and as which user.  C<ssh_port> returns 22 when no port is
-set, as any other ssh client does.  C<ssh_target> returns C<user@host>, or only
-the host when no user is set, or undef when no host is set.
+Where to connect, and as which user.
+
+Returns Str or undef: what went to C<new>, or undef when it was not given.
+C<ssh_port> returns 22 when no port is set, as any other ssh client does.
+C<ssh_target> returns C<user@host>, or only the host when no user is set, or
+undef when no host is set.
+
+    my @ssh = ( 'ssh', '-p', $machine->ssh_port, '-i', $machine->ssh_key, $machine->ssh_target );
+    my ( $host, $user ) = ( $machine->ssh_host, $machine->ssh_user );
 
 =head2 name
 
-The name of this machine in the configuration that it came from, or undef
-when it has none.
+Returns the name of this machine in the configuration that it came from, a
+Str, or undef when it has none.
+
+    my $name = $machine->name // 'unnamed';
 
 =head2 is_local
 
-True when this "machine" is the one we run on.  Then each method below becomes a
+Returns 1 when this "machine" is the one we run on, and 0 when not, which is
+the answer of this class.  Then each method below becomes a
 plain local filesystem call or a C<system()> call.  A guest is never local.
 L<Trog::Local> always is, and a hypervisor can be.
 
+    my $where = $machine->is_local ? 'here' : $machine->ssh_target;
+
 =head2 describe
 
-The name for this machine in an error message: its C<ssh_target>, or "this
-machine".
+Returns the name for this machine in an error message, a Str: its
+C<ssh_target>, or "this machine".
+
+    die 'Could not reach ' . $machine->describe . "\n";
 
 =cut
 
@@ -178,20 +220,27 @@ that holds the files, so they are here and not on a subclass.
 
 =head2 transfer_user
 
-The unprivileged account that the guest fetches as.  Locally, that is the user
-that runs this tool.  On a remote machine, it is the login user.
+Returns the unprivileged account that the guest fetches as, a Str.  Locally,
+that is the user that runs this tool.  On a remote machine, it is the login
+user, or what C<id -un> says there, or undef when that says nothing.
+
+    my $user = $machine->transfer_user;
 
 =head2 authorized_keys
 
-The path of the C<authorized_keys> file of that account.  Dies if it cannot
-find the home directory on a remote machine.
+Returns the path of the C<authorized_keys> file of that account, a Str.  Dies
+if it cannot find the home directory on a remote machine.
+
+    my $file = $machine->authorized_keys;
 
 =head2 sshd_port
 
-The port that the sshd of that machine listens on.  It comes from the sshd
+Returns the port that the sshd of that machine listens on, an Int.  It comes from the sshd
 configuration, not from the network, because several sshd instances can run at
 once.  If no C<Port> line exists, it returns 22, which is the sshd default.  The
 object keeps the result.
+
+    my $port = $machine->sshd_port;
 
 =cut
 
@@ -238,14 +287,22 @@ sub sshd_port {
 
 =head2 ssh
 
-The L<Net::OpenSSH::More> connection.  It opens on first use and the object keeps
-it.  Returns undef when the machine is us, because there is nothing to connect
-to.  Dies if it cannot connect.
+=over 4
+
+=item %opts - the options of the constructor of L<Net::OpenSSH::More>
+
+=back
+
+Returns the L<Net::OpenSSH::More> connection.  It opens on first use and the
+object keeps it.  Returns undef when the machine is us, because there is
+nothing to connect to.  Dies if it cannot connect.
 
 C<%opts> goes to the constructor.  So a caller that waits on a machine that is
 still starting can increase C<retry_interval> and C<retry_max>.  Only the first
 call can do this.  Every later call gets the existing connection and ignores its
 options.
+
+    my $ssh = $machine->ssh( retry_interval => 6, retry_max => 50 );
 
 =cut
 
@@ -283,13 +340,30 @@ sub ssh {
 
 =head2 capture_cmd(@argv)
 
-Takes an argv list and returns its standard output.  This module quotes the
+=over 4
+
+=item @argv - Str - each word of the command, or one string for the shell
+
+=back
+
+Takes an argv list.  This module quotes the
 arguments, so they can contain any character, a quote or a newline too.  A
 single argument goes to the shell instead, and that is how you write a
 pipeline.  Locally, a list goes to L<IPC::Run3> and a string goes to
 C</bin/sh>.
 
+Returns the standard output, a Str.  Locally, a command that cannot start gives
+an empty string.
+
+    my $kernel = $machine->capture_cmd(qw{uname -r});
+
 =head2 capture_quiet(@argv)
+
+=over 4
+
+=item @argv - Str - each word of the command, or one string for the shell
+
+=back
 
 As C<capture_cmd>, and it throws standard error away, so that a command that
 can fail does not print to the terminal of the caller.  It takes the place of
@@ -298,25 +372,54 @@ standard error apart from the output, so there it is the same as C<capture_cmd>.
 can still carry its standard error in the output, because sudo can run it in a
 pty.  For that, drop it inside sudo: C<< capture_sudo( qw{sh -c}, 'exec 2>/dev/null; exec cat "$1"', 'sh', $path ) >>.
 
+Returns the standard output, a Str.
+
+    my $said = $machine->capture_quiet( qw{systemctl is-active}, 'ssh' );
+
 =head2 capture_sudo(@argv)
 
-Returns C<< $self->capture_cmd( qw{sudo -n}, @argv ) >>.  The C<-n> makes sudo
+=over 4
+
+=item @argv - Str - each word of the command
+
+=back
+
+Returns C<< $self->capture_cmd( qw{sudo -n}, @argv ) >>, a Str.  The C<-n> makes sudo
 fail at once where it would ask for a password, so this never asks, and a
 caller cannot leave the C<-n> out.  It returns standard output.
 L</run_sudo(@argv)> returns the exit code, and it can ask.
 
+    my $shadow = $machine->capture_sudo(qw{cat /etc/shadow});
+
 =head2 ($out, $err) = capture_with_input($input, @argv)
 
-Runs the argv list C<@argv> with C<$input> on its standard input, and returns
-its standard output and its standard error.  The input can be as large as the
+=over 4
+
+=item input - Str - what goes to standard input
+
+=item @argv - Str - each word of the command
+
+=back
+
+Runs the argv list C<@argv> with C<$input> on its standard input.  The input can be as large as the
 command reads: an argument has a limit of 128 KiB on Linux, and standard input
 has none.  Over ssh, the command gets no terminal, because a terminal would
 echo the input and break it into lines.  It runs under the alarm of the other
 commands, and a C<sudo> that can ask is refused, as for C<capture_cmd>.
 
+Returns the standard output and the standard error, two Str, as a list.
+
+    my ( $out, $err ) = $machine->capture_with_input( $config, qw{sudo -n tee /etc/example.conf} );
+
 =head2 run_cmd(@argv)
 
-Takes an argv list and returns the exit code.  This module escapes the
+=over 4
+
+=item @argv - Str - each word of the command, or one string for the shell
+
+=back
+
+Takes an argv list.  This module escapes the
 arguments, so they can contain any character.  A single argument goes to the
 shell of the far side instead, and that is how you write a pipeline.
 
@@ -351,16 +454,27 @@ C<sudo -n> fails at once instead, and L</run_sudo(@argv)> can give a password.
 Only the first word is checked.  A sudo later in a pipeline is the business of
 its caller.
 
-=head2 Trog::Machine::hang_limit($command)
+Returns the exit code, an Int.
 
-Returns how many seconds C<$command> can run on a remote machine before it
+    my $rc = $machine->run_cmd( qw{test -d}, '/opt/domains' );
+
+=head2 Trog::Machine::hang_limit($what)
+
+=over 4
+
+=item what - Str|Undef - the command, as one string
+
+=back
+
+Returns how many seconds, an Int, the command C<$what> can run on a remote machine before it
 counts as hung.  That is C<$HANG_TIMEOUT>, or the command's own C<timeout> plus
-60 seconds if that is longer.  C<$command> is the command as one string, and
-undef gives C<$HANG_TIMEOUT>.
+60 seconds if that is longer.  Undef gives C<$HANG_TIMEOUT>.
 
 A command that blocks for a long time on purpose, such as the wait of
 L<Trog::Guest> for the Makefile of a guest, must say so with C<timeout>.  Its
 own limit then decides, and the alarm does not stop it early.
+
+    my $seconds = Trog::Machine::hang_limit('sudo -n timeout 90m make');
 
 =cut
 
@@ -412,10 +526,19 @@ my sub refuse_asking_sudo ( $self, $what ) {
 
 =head2 Trog::Machine::unpaged(@command)
 
-C<@command> as C<capture_cmd> and C<run_cmd> send it to the far side, with no
-pager: C<SYSTEMD_PAGER> and C<PAGER> set to C<cat>.  A single argument is a
+=over 4
+
+=item @command - Str - each word of the command, or one string for the shell
+
+=back
+
+Returns C<@command> as C<capture_cmd> and C<run_cmd> send it to the far side,
+with no pager: C<SYSTEMD_PAGER> and C<PAGER> set to C<cat>.  A single argument is a
 string for the shell of the far side, so the variables are exported in front
-of it, and a pipeline sees them too.  A list gets C<env> in front.
+of it, and a pipeline sees them too.  A list gets C<env> in front.  So it
+returns one Str for one argument, and a list of Str for a list.
+
+    my @argv = Trog::Machine::unpaged(qw{systemctl status ssh});
 
 =cut
 
@@ -504,9 +627,12 @@ content, never both.
 
 =head2 sudo_password
 
-The password kept for this machine, or undef if we did not ask for one.  The key
+Returns the password kept for this machine, a Str, or undef if we did not ask
+for one.  The key
 is the target of the machine, so two objects for the same host share it and
 nobody is asked twice.
+
+    my $asked = defined $machine->sudo_password;
 
 =cut
 
@@ -524,6 +650,10 @@ sub sudo_password {
 
 Clears every kept password.  Only the tests use this.
 
+Returns 1.
+
+    Trog::Machine->forget_sudo_passwords;
+
 =cut
 
 sub forget_sudo_passwords { %SUDO_PASSWORD = (); return 1 }
@@ -533,8 +663,15 @@ our @WANTS_PASSWORD = ( 'sudo: a password is required', 'sudo: password is requi
 
 =head2 run_sudo(@argv)
 
+=over 4
+
+=item @argv - Str - each word of the command
+
+=back
+
 Runs C<@argv> as root, and asks for a password if the far side needs one.
-Returns the exit code, like C<run_cmd>.  Dies if it cannot ask for a password,
+
+Returns the exit code, an Int, like C<run_cmd>.  Dies if it cannot ask for a password,
 or after three wrong ones.
 
 The password is the one given to L<Trog::Credentials> before the run, under the
@@ -542,10 +679,22 @@ name C<sudo>.  Without one, it asks at the terminal through
 C<< Trog::Credentials->prompt >>, and dies with what to configure when there is
 no terminal.  Dies if the answer is empty.
 
+    my $rc = $machine->run_sudo( qw{systemctl restart}, 'ssh' );
+
 =head2 run_sudo_or_die(@argv)
 
-Runs C<@argv> as C<run_sudo> does, and returns 1.  Dies, naming the command
-and the machine, unless it exits 0.
+=over 4
+
+=item @argv - Str - each word of the command
+
+=back
+
+Runs C<@argv> as C<run_sudo> does.
+
+Returns 1.  Dies, naming the command and the machine, unless it exits 0, and for
+each reason that C<run_sudo> dies.
+
+    $machine->run_sudo_or_die( qw{systemctl restart}, 'ssh' );
 
 =cut
 
@@ -633,125 +782,6 @@ result, and the default is 0644.  The chmod is necessary because a staging file
 from C<mktemp> is 0600, and a local copy through sudo gets the umask of root.  A
 write without C<sudo> leaves the mode to the writer.
 
-=over 4
-
-=item C<file_exists($path)>
-
-True if C<$path> is a plain file.
-
-=item C<is_dir($path)>, C<is_block_device($path)>
-
-True if C<$path> is a directory, or a block device.  Each follows a symlink, as
-C<test> does.
-
-=item C<mkpath(@paths)>
-
-Makes each directory and its parents.  On a remote machine, if the login user
-cannot make one, it uses C<sudo> and gives the directory to the login user.
-Returns 0 if that fails.
-
-=item C<remove(@paths)>
-
-Deletes each file.
-
-=item C<remove_tree(@paths)>
-
-Deletes each directory and everything under it.
-
-=item C<list_dir($path)>
-
-Returns the names in a directory, with no path and no dotfiles.  Returns an
-empty list for a directory that does not exist, as C<glob> does.  The callers ask
-what is left in a place, and "nothing" is a valid answer.
-
-=item C<read_text($path)>
-
-Returns the content of the file.  On a remote machine, returns undef if the read
-fails.  Locally, dies if the read fails.
-
-=item C<write_text($path, $content, %opts)>
-
-Writes C<$content> to C<$path>.  Takes C<sudo> and C<mode>.  Returns 1 on
-success and 0 on failure.  Locally, without C<sudo>, dies on failure.
-
-=item C<append_line($path, $line)>
-
-Appends a line, but only if the file does not already contain it.
-
-=item C<root_text($path)>
-
-What root reads in C<$path>, through C<sudo -n cat>, without its last newline.
-An empty string when root reads nothing there, which is also the answer for a
-file that is not there and for a read that failed.  So a caller that writes
-from what it read uses C<rewrite_lines>, below, which tells those apart.
-
-=item C<holds_line($path, $line)>
-
-True when root reads C<$line>, as a whole line, in C<$path>.
-
-=item C<rewrite_lines($path, %opts)>
-
-Writes C<$path> as root, with C<mode>, 0644 by default.  It keeps each line of
-the file for which the code reference C<keep> returns true, in their order,
-and then puts each line of the array reference C<add>.  Without C<keep>, it
-keeps every line.  Returns 1.
-
-Dies, and writes nothing, when the read comes back empty but the file is not
-empty.  A write from that read would drop every line that somebody else put
-there.  Dies when the write fails.
-
-=item C<put_file($local, $remote, %opts)>
-
-Copies one file from here to there.  Takes C<sudo> and C<mode>.  Returns 1 on
-success and 0 on failure.
-
-=item C<get_dir($remote, $local, %opts)>
-
-Copies a whole directory tree from that machine to here.  It is incremental: a
-file that is already here and did not change does not travel again.  See
-L</Why a directory comes over rsync>.  Prints the total size transferred.
-Returns 1 on success.  On failure, warns with the rsync errors and returns 0.
-
-rsync is a local process, not a command down the connection, so it does not run
-under the alarm of L</RUNNING THINGS>.  That limit is wall-clock time, and it
-would stop a long data transfer at exactly C<$HANG_TIMEOUT>, however well it
-went.  The C<--timeout> of rsync measures silence, not elapsed time.  So a
-transfer that keeps moving has as long as it needs, and one that stops ends.
-
-C<exclude> takes an arrayref of rsync patterns for paths that must not come
-down.  The patterns in use come from C<remote_skip> in L<Provisioner::Recipe>.
-C<update> keeps our copy of a file when it is the newer one.
-
-C<sudo> runs the far end as root, for a tree that the login user cannot read.  A
-service keeps its state in a directory that only it can open.  An unprivileged
-fetch of that directory walks the tree, makes the local directories, copies no
-files, and exits with success.  That looks the same as a guest with no state.
-C<sudo> needs passwordless sudo on the far side, and without it the fetch fails
-and does not wait.
-
-Without C<deleted_to>, nothing is deleted here.  With it, our copy mirrors the
-far side: a file that is gone there leaves our copy as well.  It is not
-removed.  It moves into the directory that C<deleted_to> names, at the same
-relative path.  The copy that C<get_dir> writes into is the only copy, so that
-directory is the history that a mirror needs.  It must be an absolute path
-outside C<$local>.
-
-A dry run of rsync with C<--delete> lists what to move, before the fetch.  So
-only deleted files are kept: rsync's own C<--backup> would also keep each file
-that a run overwrites, and a salvage overwrites every database that changed.
-rsync lists no deletions on a run that had an I/O error, so a run that could not
-read part of the far side moves nothing.  If the dry run fails, nothing moves,
-and the fetch runs as without C<deleted_to>.  A path that C<exclude> names is
-neither fetched nor moved.
-
-The files that arrive belong to the user that runs this tool, not to the uids
-that they had on the guest.  rsync restores ownership only when the
-B<receiving> end is root, and this end is not.  C<scripts/restore_state> puts
-the files back as the user that the service runs as.  The caller gives it that
-owner.
-
-=back
-
 =cut
 
 # Runs @cmd on the far side with the options of Net::OpenSSH's system in
@@ -808,22 +838,40 @@ my sub pour ( $self, $stdin, $path, %opts ) {
     return $ok ? 1 : 0;
 }
 
+# Whether C<$path> is a plain file.
+# @param   path  Str  the path to test
+# @returns Bool  1 if C<$path> is a plain file, and 0 if not
+# @example print "there\n" if $machine->file_exists('/etc/hostname');
 sub file_exists {
     my ( $self, $path ) = @_;
     return -f $path                                  ? 1 : 0 if $self->is_local;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the question test -f asks of a remote machine
     return $self->run_cmd( qw{test -f}, $path ) == 0 ? 1 : 0;
 }
 
+# Whether C<$path> is a directory.  It follows a symlink, as C<test> does.
+# @param   path  Str  the path to test
+# @returns Bool  1 if C<$path> is a directory, and 0 if not
+# @example print "there\n" if $machine->is_dir('/opt/domains');
 sub is_dir ( $self, $path ) {
     return -d $path                                  ? 1 : 0 if $self->is_local;
     return $self->run_cmd( qw{test -d}, $path ) == 0 ? 1 : 0;
 }
 
+# Whether C<$path> is a block device.  It follows a symlink, as C<test> does.
+# @param   path  Str  the path to test
+# @returns Bool  1 if C<$path> is a block device, and 0 if not
+# @example print "a disk\n" if $machine->is_block_device('/dev/vda');
 sub is_block_device ( $self, $path ) {
     return -b $path                                  ? 1 : 0 if $self->is_local;
     return $self->run_cmd( qw{test -b}, $path ) == 0 ? 1 : 0;
 }
 
+# Makes each directory and its parents.  On a remote machine, if the login user
+# cannot make one, it uses C<sudo> and gives the directory to the login user.
+# @param   @paths  Str  each directory to make
+# @returns Bool  1, or 0 when a C<sudo> to make a directory fails
+# @throws  when C<sudo> cannot ask for a password, as C<run_sudo> does
+# @example $machine->mkpath('/opt/domains/vm.test.test') or die "Could not make it\n";
 sub mkpath {
     my ( $self, @paths ) = @_;
     if ( $self->is_local ) {
@@ -844,6 +892,10 @@ sub mkpath {
     return 1;
 }
 
+# Deletes each file.
+# @param   @paths  Str  each file to delete
+# @returns Bool  true when the files are gone, false when C<rm> failed
+# @example $machine->remove('/tmp/setup.sh');
 sub remove {
     my ( $self, @paths ) = @_;
     if ( $self->is_local ) {
@@ -853,6 +905,10 @@ sub remove {
     return $self->run_cmd( qw{rm -f}, @paths ) == 0;
 }
 
+# Deletes each directory and everything under it.
+# @param   @paths  Str  each directory to delete
+# @returns Bool  true when the trees are gone, false when C<rm> failed
+# @example $machine->remove_tree('/opt/domains/vm.test.test');
 sub remove_tree {
     my ( $self, @paths ) = @_;
     if ( $self->is_local ) {
@@ -862,6 +918,12 @@ sub remove_tree {
     return $self->run_cmd( qw{rm -rf}, @paths ) == 0;
 }
 
+# The names in a directory, with no path and no dotfiles.  The callers ask
+# what is left in a place, and "nothing" is a valid answer.
+# @param   path  Str  the directory
+# @returns Str  each name, sorted when the machine is us, as a list; an empty
+#   list for a directory that does not exist, as C<glob> does
+# @example my @names = $machine->list_dir('/opt/domains');
 sub list_dir {
     my ( $self, $path ) = @_;
     if ( $self->is_local ) {
@@ -875,6 +937,11 @@ sub list_dir {
     return grep { $_ } split( m/\n/, $listing );
 }
 
+# The content of a file.
+# @param   path  Str  the file to read
+# @returns Str|Undef  the content; on a remote machine, undef if the read fails
+# @throws  when the machine is us and the read fails
+# @example my $text = $machine->read_text('/etc/hostname');
 sub read_text {
     my ( $self, $path ) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
@@ -898,6 +965,14 @@ sub read_text {
     return $? >> 8 ? undef : $content;
 }
 
+# Writes C<$content> to C<$path>.  See L</FILES> for C<sudo> and C<mode>.
+# @param   path     Str  the file to write
+# @param   content  Str  what to write
+# @param   sudo     Bool  write it as root
+# @param   mode     Str  the mode of the file with C<sudo>, C<0644> by default
+# @returns Bool  1 on success and 0 on failure
+# @throws  when the machine is us, without C<sudo>, and the write fails
+# @example $machine->write_text( '/etc/motd', "Built by trog-provisioner\n", sudo => 1, mode => '0644' );
 sub write_text {
     my ( $self, $path, $content, %opts ) = @_;
     return pour( $self, { stdin_data => $content }, $path, %opts ) unless $self->is_local;
@@ -916,6 +991,13 @@ sub write_text {
     return $ok ? 1 : 0;
 }
 
+# Copies one file from here to there.  See L</FILES> for C<sudo> and C<mode>.
+# @param   local   Str  the file here
+# @param   remote  Str  the path there
+# @param   sudo    Bool  write it as root
+# @param   mode    Str  the mode of the file with C<sudo>, C<0644> by default
+# @returns Bool  1 on success and 0 on failure
+# @example $machine->put_file( 'setup.sh', '/root/setup.sh', sudo => 1, mode => '0755' );
 sub put_file {
     my ( $self, $local, $remote, %opts ) = @_;
 
@@ -931,6 +1013,55 @@ sub put_file {
     return pour( $self, { stdin_file => $local }, $remote, %opts );
 }
 
+# Copies a whole directory tree from that machine to here.  It is incremental: a
+# file that is already here and did not change does not travel again.  See
+# L</Why a directory comes over rsync>.  Prints the total size transferred.
+#
+# rsync is a local process, not a command down the connection, so it does not run
+# under the alarm of L</RUNNING THINGS>.  That limit is wall-clock time, and it
+# would stop a long data transfer at exactly C<$HANG_TIMEOUT>, however well it
+# went.  The C<--timeout> of rsync measures silence, not elapsed time.  So a
+# transfer that keeps moving has as long as it needs, and one that stops ends.
+#
+# The patterns of C<exclude> in use come from C<remote_skip> in
+# L<Provisioner::Recipe>.
+#
+# C<sudo> runs the far end as root, for a tree that the login user cannot read.  A
+# service keeps its state in a directory that only it can open.  An unprivileged
+# fetch of that directory walks the tree, makes the local directories, copies no
+# files, and exits with success.  That looks the same as a guest with no state.
+# C<sudo> needs passwordless sudo on the far side, and without it the fetch fails
+# and does not wait.
+#
+# Without C<deleted_to>, nothing is deleted here.  With it, our copy mirrors the
+# far side: a file that is gone there leaves our copy as well.  It is not
+# removed.  It moves into the directory that C<deleted_to> names, at the same
+# relative path.  The copy that C<get_dir> writes into is the only copy, so that
+# directory is the history that a mirror needs.
+#
+# A dry run of rsync with C<--delete> lists what to move, before the fetch.  So
+# only deleted files are kept: rsync's own C<--backup> would also keep each file
+# that a run overwrites, and a salvage overwrites every database that changed.
+# rsync lists no deletions on a run that had an I/O error, so a run that could not
+# read part of the far side moves nothing.  If the dry run fails, nothing moves,
+# and the fetch runs as without C<deleted_to>.  A path that C<exclude> names is
+# neither fetched nor moved.
+#
+# The files that arrive belong to the user that runs this tool, not to the uids
+# that they had on the guest.  rsync restores ownership only when the
+# B<receiving> end is root, and this end is not.  C<scripts/restore_state> puts
+# the files back as the user that the service runs as.  The caller gives it that
+# owner.
+# @param   remote      Str  the directory there
+# @param   local       Str  the directory here, made if it is not there
+# @param   exclude     ArrayRef[Str]  rsync patterns for paths that must not come down
+# @param   update      Bool  keep our copy of a file when it is the newer one
+# @param   sudo        Bool  run the far end as root
+# @param   deleted_to  Str  an absolute path outside C<$local>, where a file that the
+#   far side no longer has moves to
+# @returns Bool  1 on success; on failure, it warns with the rsync errors and
+#   returns 0
+# @example $machine->get_dir( '/var/lib/example', "$data_dir/example", exclude => ['*.sock'], sudo => 1 );
 sub get_dir {
     my ( $self, $remote, $local, %opts ) = @_;
 
@@ -1037,6 +1168,13 @@ sub get_dir {
     return 1;
 }
 
+# Appends a line, but only if the file does not already contain it.  It makes
+# the directory of the file first.
+# @param   path  Str  the file
+# @param   line  Str  the line, with or without its newline
+# @returns Bool  1 when the file holds the line, or 0 when a remote write failed
+# @throws  when the machine is us and the file cannot be opened or closed
+# @example $machine->append_line( "$home/.ssh/authorized_keys", $pubkey );
 sub append_line {
     my ( $self, $path, $line ) = @_;
     chomp $line;
@@ -1061,6 +1199,13 @@ sub append_line {
     return pour( $self, { stdin_data => "$line\n" }, $path, append => 1 );
 }
 
+# What root reads in C<$path>, through C<sudo -n cat>, without its last newline.
+# So a caller that writes from what it read uses C<rewrite_lines>, which tells the
+# empty answers apart.
+# @param   path  Str  the file
+# @returns Str  the text; an empty string when root reads nothing there, which is
+#   also the answer for a file that is not there and for a read that failed
+# @example my $hosts = $machine->root_text('/etc/hosts');
 sub root_text ( $self, $path ) {
 
     # The redirect is inside sudo, because sudo can run the command in a pty
@@ -1071,10 +1216,28 @@ sub root_text ( $self, $path ) {
     return $text;
 }
 
+# Whether root reads C<$line>, as a whole line, in C<$path>.
+# @param   path  Str  the file
+# @param   line  Str  the line, without its newline
+# @returns Bool  true when the file holds the line
+# @example print "set\n" if $machine->holds_line( '/etc/hosts', '192.0.2.10 vm.test.test' );
 sub holds_line ( $self, $path, $line ) {
     return any { $_ eq $line } split m/\n/, $self->root_text($path);
 }
 
+# Writes C<$path> as root.  It keeps each line of the file for which C<keep>
+# returns true, in their order, and then puts each line of C<add>.
+# @param   path  Str  the file
+# @param   keep  CodeRef  gets a line and returns true to keep it; without it,
+#   every line is kept
+# @param   add   ArrayRef[Str]  the lines to put after the kept ones
+# @param   mode  Str  the mode of the file, C<0644> by default
+# @returns Int  1
+# @throws  when the read comes back empty but the file is not empty, and then it
+#   writes nothing.  A write from that read would drop every line that somebody
+#   else put there.
+# @throws  when the write fails
+# @example $machine->rewrite_lines( '/etc/hosts', keep => sub ($line) { $line !~ m/test[.]test/ }, add => ['192.0.2.10 vm.test.test'] );
 sub rewrite_lines ( $self, $path, %opts ) {
     my $keep = $opts{keep} // sub ($line) { 1 };
     my $text = $self->root_text($path);

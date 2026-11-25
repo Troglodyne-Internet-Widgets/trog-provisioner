@@ -40,6 +40,8 @@ the internet is where that is most dangerous.
 Returns a new user agent, as L<LWP::UserAgent> does.  C<verify_hostname> and
 C<SSL_verify_mode> are always on, whatever C<%opts> asks for.
 
+    my $ua = Trog::OpenStack::UserAgent->new( timeout => 30 );
+
 =cut
 
 sub new {
