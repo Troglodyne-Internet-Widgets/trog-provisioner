@@ -56,8 +56,8 @@ has nobody to accept.  C<claude plugin install> adds the marketplace of the
 plugin and installs it, and needs no login.  Run again, it says that the plugin
 is already installed, and exits 0.
 
-The recipe salvages F<.claude.json> from that directory on the old guest, and
-the memories that the agent saved, but not its transcripts.  See
+The recipe salvages F<.claude.json> and the login from that directory on the
+old guest, and the memories that the agent saved, but not its transcripts.  See
 C<remote_prepare>.
 
 SLOP in the ice machine.
@@ -519,14 +519,18 @@ its tools: hundreds of megabytes, and whatever passed through a session, secrets
 included.  It names what to keep, because a salvage can only exclude, and an
 exclude list lets through whatever Claude Code starts to keep there next.
 
-It also copies F<.claude.json> into F<.claude-state-salvage>, because
-C<remote_files> salvages directories, not files.
+It also copies F<.claude.json> and F<.claude/.credentials.json> into
+F<.claude-state-salvage>, because C<remote_files> salvages directories, not
+files.  F<.claude.json> names the account, but the tokens of the login are in
+F<.credentials.json>.  Without them, a rebuilt guest knows who logged in and
+asks for the login again.
 
 The commands are rsync and not an installed script, so that it also runs on a
 guest built before this recipe salvaged memories.  Every guest has rsync,
 because the salvage itself runs it there.  On a guest with no
 F<.claude/projects>, or no F<.claude> at all, it stages nothing and succeeds,
-and the same goes for a guest with no F<.claude.json>.  A staged copy of either that is gone from the
+and the same goes for a guest with no F<.claude.json> or no
+F<.credentials.json>.  A staged copy of any of them that is gone from the
 guest goes from the staging directory too.
 
 =over 4
@@ -537,7 +541,7 @@ guest goes from the staging directory too.
 
 =back
 
-Returns the two shell commands, as a list of strings.
+Returns the three shell commands, as a list of strings.
 
     my @commands = $recipe->remote_prepare( '/opt', 'test.test' );
 
@@ -554,9 +558,11 @@ sub remote_prepare {
     # of .claude, because rsync fails when the parent of a source is missing,
     # as on a guest whose build stopped before this recipe ran.
     my $staged = "$home/.claude-memory-salvage";
+    my $state  = "$home/.claude-state-salvage";
     return (
         "if [ -d '$home/.claude' ]; then rsync -a --delete --delete-missing-args --prune-empty-dirs --include='/projects' --include='*/' --include='/projects/*/memory/***' --exclude='*' '$home/.claude/projects' '$staged/'; else mkdir -p '$staged' && rm -rf '$staged/projects'; fi",
-        "rsync -a --delete-missing-args '$home/.claude.json' '$home/.claude-state-salvage/'",
+        "rsync -a --delete-missing-args '$home/.claude.json' '$state/'",
+        "if [ -d '$home/.claude' ]; then rsync -a --delete-missing-args '$home/.claude/.credentials.json' '$state/'; else rm -f '$state/.credentials.json'; fi",
     );
 }
 
@@ -589,15 +595,16 @@ sub remote_files {
 
 =head2 $recipe->restores(%opts)
 
-The salvaged memories go back to F<.claude/projects>, and F<.claude.json> to the
-directory of the domain with mode 0600, because it holds the account state of
-whoever runs Claude Code there.  Both belong to the service C<user>, whose
+The salvaged memories go back to F<.claude/projects>, F<.claude.json> to the
+directory of the domain, and F<.credentials.json> to F<.claude>.  The two files
+get mode 0600, because they hold the account state and the login of whoever
+runs Claude Code there.  All three belong to the service C<user>, whose
 C<HOME> the directory of the domain is, and to the group of the admin.  On a
 domain that names no service user, they belong to the admin.  On a guest that
-already has either, C<restore_state> keeps it.
+already has any of them, C<restore_state> keeps it.
 
 Returns a list of pairs, from each path on the guest to a hash reference of
-C<from>, C<owner> and, for F<.claude.json>, C<mode>.
+C<from>, C<owner> and, for the two files, C<mode>.
 
     my %restores = $recipe->restores( install_dir => '/opt', domain => 'test.test', admin_user => 'admin' );
 
@@ -612,8 +619,9 @@ sub restores {
     my $user = $opts{user} // $admin_user;
 
     return (
-        "$install_dir/$domain/.claude/projects" => { from => "$install_dir/$domain/claude/memory/projects",    owner => "$user:$admin_user" },
-        "$install_dir/$domain/.claude.json"     => { from => "$install_dir/$domain/claude/state/.claude.json", owner => "$user:$admin_user", mode => '0600' },
+        "$install_dir/$domain/.claude/projects"          => { from => "$install_dir/$domain/claude/memory/projects",         owner => "$user:$admin_user" },
+        "$install_dir/$domain/.claude.json"              => { from => "$install_dir/$domain/claude/state/.claude.json",      owner => "$user:$admin_user", mode => '0600' },
+        "$install_dir/$domain/.claude/.credentials.json" => { from => "$install_dir/$domain/claude/state/.credentials.json", owner => "$user:$admin_user", mode => '0600' },
     );
 }
 
