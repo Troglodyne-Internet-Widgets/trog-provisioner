@@ -1,0 +1,6 @@
+[%# The command that checks that the signing key signed the database.  The
+    fragment runs it once in the build, and the unit of synapse runs it before
+    every start.  Both include this file, so they cannot disagree about the
+    database or the old keys.  See matrix_check_signing_key.  The last
+    directive eats the newline, so that the includer goes on the same line. -%]
+/usr/local/sbin/matrix_check_signing_key [% install_dir %]/matrix.[% domain %]/homeserver.db '[% server_name %]' /etc/matrix-synapse/homeserver.signing.key[% FOR id IN old_signing_keys.keys().sort() %] '[% id %]'[% END -%]
