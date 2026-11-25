@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::zswap - Ubuntu's C<deps> for L<Provisioner::Recipe:
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<systemd-oomd>, which kills a runaway first.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{systemd-oomd};
 }

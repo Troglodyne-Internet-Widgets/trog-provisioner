@@ -26,6 +26,10 @@ HTTP::Tiny, which fetches it.  C<strace> and C<gdb>, because the default tools
 of App::Clod let a run that changes a spoke trace or debug a program that the
 spoke integrates with.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {
@@ -36,6 +40,10 @@ sub deps {
 
 The packager of L<Provisioner::Recipe::ubuntu>, whose packages the installer
 of L<Provisioner::Recipe::clod/THE SYSTEM PACKAGES> installs.
+
+Returns a Str, such as C<deb>.
+
+    my $packager = $recipe->distro_packager();
 
 =cut
 

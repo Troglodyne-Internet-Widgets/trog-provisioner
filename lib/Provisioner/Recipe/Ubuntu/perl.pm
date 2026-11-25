@@ -16,6 +16,18 @@ Provisioner::Recipe::Ubuntu::perl - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<perlbrew>, which brings the compiler that a perl build needs, the libraries
+that F<scripts/cpan_install> needs on the system perl, and C<libssl-dev> and
+C<zlib1g-dev>, without which Net::SSLeay does not build.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
 
     # perlbrew brings gcc and libc6-dev, which a perl build needs.

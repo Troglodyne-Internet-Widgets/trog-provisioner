@@ -22,6 +22,10 @@ The synapse package, C<matrix-synapse-py3>, from the archive of matrix.org that
 C<package_sources> below names, and the Python libraries of synapse from Ubuntu.
 Also C<sqlite3>, which F<matrix_check_signing_key> reads the database with.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {
@@ -59,6 +63,19 @@ The archive of matrix.org, for C<distro_release>, the release of the domain.  It
 nothing else.  The package carries its own Python dependencies, so
 C<txredisapi>, which synapse uses for redis, is inside it.
 
+=over 4
+
+=item distro_release - Str|Undef - the release of the domain, such as
+C<noble>; the pinned release when undef
+
+=back
+
+Returns a HashRef, the archive, as L<Provisioner::Packager::Deb/A source>
+describes it.  Dies when L<Provisioner::Recipe::ubuntu> does not know
+C<distro_release>.
+
+    my $source = $recipe->package_sources( distro_release => 'noble' );
+
 =cut
 
 sub package_sources {
@@ -77,6 +94,16 @@ sub package_sources {
 The two questions that the package asks.  Without the answers, its install
 stops at a prompt for the server name.  The unit that this recipe installs reads
 only F<homeserver.yaml>, so the name here reaches nothing that runs.
+
+=over 4
+
+=item server_name - Str - the name of the homeserver
+
+=back
+
+Returns a list of Str, one line of C<debconf-set-selections> per answer.
+
+    my @lines = $recipe->package_answers( server_name => 'test.test' );
 
 =cut
 

@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::ufw - Ubuntu's C<deps> for L<Provisioner::Recipe::u
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<ufw>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{ufw};
 }

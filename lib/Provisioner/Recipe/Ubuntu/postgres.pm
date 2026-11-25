@@ -28,6 +28,29 @@ my sub suite ($release) {
     return 'Provisioner::Recipe::ubuntu'->release_of( release => $release ) . '-pgdg';
 }
 
+=head2 @pkgs = $recipe->deps(%opts)
+
+C<postgresql-common>, C<pigz>, and the server, the client, the server
+development files and PL/Perl of the major version C<version>, or else of the
+newest that C<newest_version> finds for C<distro_release>.
+
+=over 4
+
+=item version - Int|Undef - the major version of postgres, such as C<16>
+
+=item distro_release - Str|Undef - the release of the domain, such as
+C<noble>; the pinned release when undef
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+Dies as C<newest_version> does, when C<version> is not set.
+
+    my @pkgs = $recipe->deps( version => 16, distro_release => 'noble' );
+
+=cut
+
 sub deps {
     my ( $self, %opts ) = @_;
 
@@ -40,6 +63,19 @@ sub deps {
 The apt repository of the PostgreSQL project, PGDG, for C<distro_release>, the
 release of the domain.  Its packages carry the major version in their names, so
 it needs no pin.
+
+=over 4
+
+=item distro_release - Str|Undef - the release of the domain, such as
+C<noble>; the pinned release when undef
+
+=back
+
+Returns a HashRef, the archive, as L<Provisioner::Packager::Deb/A source>
+describes it.  Dies when L<Provisioner::Recipe::ubuntu> does not know
+C<distro_release>.
+
+    my $source = $recipe->package_sources( distro_release => 'noble' );
 
 =cut
 
@@ -62,6 +98,16 @@ released versions.  PGDG puts a beta in a component of its own, such as C<19>.
 
 Asked once for each release in each process.  Dies when the index cannot be
 fetched, or names no server.
+
+=over 4
+
+=item release - Str|Undef - the release of Ubuntu, such as C<noble>
+
+=back
+
+Returns an Int, the major version.
+
+    my $major = $recipe->newest_version('noble');
 
 =cut
 

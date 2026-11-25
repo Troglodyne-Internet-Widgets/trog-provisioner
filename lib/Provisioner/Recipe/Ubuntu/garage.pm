@@ -18,6 +18,10 @@ Provisioner::Recipe::Ubuntu::garage - Ubuntu's C<deps> for L<Provisioner::Recipe
 
 C<curl>, which downloads the garage binary, and C<liblmdb0>.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {

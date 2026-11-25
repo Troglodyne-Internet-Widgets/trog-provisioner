@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::plexmediaserver - Ubuntu's C<deps> and archive for 
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<plexmediaserver>, from the archive that C<package_sources> names.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{plexmediaserver};
 }
@@ -25,6 +35,11 @@ sub deps {
 The archive of Plex at C<repo.plex.tv>, with the v2 signing key.  Plex retired
 C<downloads.plex.tv/repos/deb>, where every path answers 403.  The v2 key is a
 different key, not the old key at a new URL.
+
+Returns a HashRef, the archive, as L<Provisioner::Packager::Deb/A source>
+describes it.
+
+    my $source = $recipe->package_sources();
 
 =cut
 

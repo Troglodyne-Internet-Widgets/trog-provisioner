@@ -20,6 +20,10 @@ C<rustup>, which is the installer and not a toolchain, and the C toolchain it
 links with.  rustc calls C<cc> to link every binary it builds, and depends on
 neither.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {

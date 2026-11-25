@@ -21,6 +21,16 @@ needs rsyslog and must not depend on what the image happens to contain.
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<rsyslog>.  See L</DESCRIPTION>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps { return qw{rsyslog} }
 
 1;

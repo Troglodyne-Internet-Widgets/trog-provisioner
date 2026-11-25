@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::fail2ban - Ubuntu's C<deps> for L<Provisioner::Reci
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<fail2ban>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{fail2ban};
 }

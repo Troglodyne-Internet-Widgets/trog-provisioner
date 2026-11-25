@@ -66,6 +66,10 @@ C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
 is where the cloud-init seed is built.  C<rsync> and C<openssh-client> are
 already in the base packages of every guest.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {

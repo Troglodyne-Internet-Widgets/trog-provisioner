@@ -18,6 +18,10 @@ Provisioner::Recipe::Ubuntu::git - Ubuntu's C<deps> for L<Provisioner::Recipe::g
 
 C<git> itself, and the ssh client it pushes over.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {

@@ -21,6 +21,10 @@ ships gh 2.45.0, which is older than the removal of the Projects-classic
 GraphQL field.  So C<gh pr edit> fails there with a deprecation notice about
 C<projectCards>, and edits nothing.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {
@@ -30,6 +34,11 @@ sub deps {
 =head2 @sources = $recipe->package_sources()
 
 The archive of the GitHub CLI.
+
+Returns a HashRef, the archive, as L<Provisioner::Packager::Deb/A source>
+describes it.
+
+    my $source = $recipe->package_sources();
 
 =cut
 

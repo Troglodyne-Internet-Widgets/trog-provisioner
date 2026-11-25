@@ -16,6 +16,16 @@ Provisioner::Recipe::Ubuntu::configd - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
+=head2 @pkgs = $recipe->deps()
+
+C<cpanminus> and C<make>.
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
+=cut
+
 sub deps {
     return qw{cpanminus make};
 }

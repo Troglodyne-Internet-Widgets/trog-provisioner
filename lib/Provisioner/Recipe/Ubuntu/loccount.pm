@@ -21,6 +21,10 @@ C<python3-ruamel.yaml>, because C<go generate> runs F<tablegen.py>, which
 needs ruamel.yaml to read F<languages.yaml>.  The DESCRIPTION of
 L<Provisioner::Recipe::loccount> says why.
 
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps();
+
 =cut
 
 sub deps {
