@@ -54,6 +54,16 @@ directory, for example the recipes or the scripts packed into a domain.
 Returns an empty list for a directory that does not exist or that it cannot
 read.  Every caller treats that the same as an empty directory.
 
+=over 4
+
+=item dir - Str - the directory
+
+=back
+
+Returns a list of Str, the names.
+
+    my @recipes = Provisioner::Utils::files_in('lib/Provisioner/Recipe');
+
 =cut
 
 sub files_in {
@@ -100,6 +110,16 @@ An absent value and an empty value both return an empty arrayref.
 C<Config::Simple> returns undef for a missing key and the empty string for
 C<key=>, but no caller needs that difference.
 
+=over 4
+
+=item value - Str|ArrayRef|Undef - one value, a list of them, or nothing
+
+=back
+
+Returns ArrayRef.
+
+    my $hosts = Provisioner::Utils::coerce_arrayref( $opts{hosts} );
+
 =cut
 
 sub coerce_arrayref {
@@ -116,6 +136,16 @@ The names of the directories directly in C<$dir>, sorted, with no leading path.
 The companion of C<files_in>, with the same rules: the top level only, and an
 empty list for a directory that does not exist.  Both prune instead of walk,
 because the question is what is I<in> a directory, not what is under it.
+
+=over 4
+
+=item dir - Str - the directory
+
+=back
+
+Returns a list of Str, the names.
+
+    my @distros = Provisioner::Utils::dirs_in('templates');
 
 =cut
 
@@ -144,12 +174,20 @@ sub dirs_in {
     return @sorted;
 }
 
-=head3 lastuniq(@array)
+=head3 lastuniq(@input)
 
 Like C<List::Util::uniq>, but each value keeps the position of its last
 occurrence, not its first.
 
-Returns ARRAY.
+Returns a list of Str, the values.
+
+=over 4
+
+=item @input - Str - the values
+
+=back
+
+    my @modules = Provisioner::Utils::lastuniq(qw{nginx ufw nginx});    # ( 'ufw', 'nginx' )
 
 =cut
 
@@ -173,8 +211,18 @@ Two recipes use this.  The mistake it prevents shows only in a mail log.  If you
 add the domain to an address, you get C<somebody@example.test@this.domain>.
 Postfix and cron both accept that, and neither delivers it.
 
-Returns STRING.  Returns C<$value> unchanged if C<$value> or C<$domain> is
+Returns Str.  Returns C<$value> unchanged if C<$value> or C<$domain> is
 empty.
+
+=over 4
+
+=item value - Str - a local part or an address
+
+=item domain - Str - the domain to add
+
+=back
+
+    my $to = Provisioner::Utils::qualify_address( 'root', 'web.test.test' );    # 'root@web.test.test'
 
 =cut
 
@@ -197,6 +245,16 @@ C<ARGON2ID> scheme, with that scheme in front:
 The costs are the ones C<doveadm pw -s ARGON2ID> uses, and the salt is 16
 random bytes, so each call gives a different hash of the same password.
 C<doveadm pw -t> verifies it.
+
+=over 4
+
+=item password - Str - the password
+
+=back
+
+Returns Str, the hash.
+
+    my $hash = Provisioner::Utils::dovecot_password_hash($password);
 
 =cut
 
@@ -223,6 +281,16 @@ URL, because gogs gives that form for a repository.
 A recipe with a configured upstream passes its C<repo_url> or C<api_url> here.
 The answer is the host it connects to, which it declares in C<fetch_hosts> so
 that the fetch cache serves it.
+
+=over 4
+
+=item url - Str - the URL, or an scp-style git address
+
+=back
+
+Returns Str, the host, or nothing.
+
+    my $host = Provisioner::Utils::host_of('https://Git.Test.Test/app.git');    # 'git.test.test'
 
 =cut
 
@@ -262,6 +330,20 @@ Cloud-init runs before the guest has DNS, so a caller for cloud-init cannot use
 a name and dies.  The makefile runs after the guest has resolvers, so a caller
 there can use the name.
 
+=over 4
+
+=item name - Str - the name of the machine, a URL, or empty
+
+=item domain - Str - optional: the guest that asks
+
+=item ipmap - HashRef[Str] - optional: the address of each domain
+
+=back
+
+Returns a list of two Str, the kind and the value.
+
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( 'mirror.test.test', domain => 'web.test.test', ipmap => \%ipmap );
+
 =cut
 
 sub fleet_address {
@@ -290,6 +372,16 @@ another to agree.  L<Provisioner::Recipe::letsencrypt> uses it to decide if a
 public CA can issue for a name.  L<Provisioner::Recipe::acmeca> limits its
 intermediate to it.
 
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Str, the last label, or nothing.
+
+    my $tld = Provisioner::Utils::tld_of('web.test.test');    # 'test'
+
 =cut
 
 sub tld_of {
@@ -307,6 +399,12 @@ Returns the top-level domains that RFC 2606 and RFC 6761 reserve.  No public
 registrar holds a zone under one of them, and no public CA issues a certificate
 for a name under one.
 
+Takes no arguments.
+
+Returns a list of Str, the TLDs.
+
+    my @tlds = Provisioner::Utils::reserved_tlds();
+
 =cut
 
 our @RESERVED_TLDS = qw{test example invalid localhost};
@@ -316,6 +414,16 @@ sub reserved_tlds { return @RESERVED_TLDS }
 =head3 reserved_tld($domain)
 
 Returns the TLD of C<$domain> if C<reserved_tlds> has it, and nothing if not.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Str, the TLD, or nothing.
+
+    print "no public CA issues for it\n" if Provisioner::Utils::reserved_tld('web.test.test');
 
 =cut
 
@@ -331,6 +439,16 @@ sub reserved_tld {
 Returns C<$name> in lower case and without a trailing dot, which is how a
 name compares to another.
 
+=over 4
+
+=item name - Str - the name, or undef for the empty string
+
+=back
+
+Returns Str, the name.
+
+    my $name = Provisioner::Utils::dns_name('Web.Test.Test.');    # 'web.test.test'
+
 =cut
 
 sub dns_name {
@@ -344,6 +462,18 @@ Whether the zone C<$zone> holds C<$name>: the name is the zone, or a name under
 it.  The test is at a label boundary, so C<customer.test> holds
 C<web.customer.test> and not C<web.xcustomer.test>.  Both compare as
 C<dns_name> gives them, so case and a trailing dot do not matter.
+
+=over 4
+
+=item name - Str - the name
+
+=item zone - Str - the zone
+
+=back
+
+Returns Bool.
+
+    my $ours = Provisioner::Utils::in_zone( 'web.customer.test', 'customer.test' );    # true
 
 =cut
 
@@ -359,6 +489,22 @@ Makes a certificate authority with an EC key on prime256v1, valid for C<$days>
 days, with C<$name> as its common name.  Writes the key to C<$key_path>, 0600,
 and then the certificate to C<$cert_path>, 0644.  The key comes first, because
 a caller counts the pair as made only when both files exist.
+
+=over 4
+
+=item cert_path - Str - where the certificate goes
+
+=item key_path - Str - where the key goes
+
+=item name - Str - the common name
+
+=item days - Int - how long it is valid
+
+=back
+
+Returns nothing.
+
+    Provisioner::Utils::write_authority( 'ca.crt', 'ca.key', 'Test CA', 3650 );
 
 =cut
 
@@ -406,6 +552,22 @@ C<ssh_pubkey_from_private> below cannot read a key that this module wrote.  RFC
 This is reported upstream as L<briandfoy/net-ssh-perl#76|https://github.com/briandfoy/net-ssh-perl/issues/76>.
 Remove the rewrap when a release has the fix.
 
+=over 4
+
+=item path - Str - where the private key goes
+
+=item type - Str - C<RSA>, C<Ed25519> or C<ECDSA>
+
+=item bits - Int - the size of the key, for a type with more than one
+
+=item comment - Str - optional: the comment of the key
+
+=back
+
+Returns Str, the public half.
+
+    my $public = Provisioner::Utils::write_ssh_keypair( 'id_ed25519', 'Ed25519', 256, 'admin@web.test.test' );
+
 =cut
 
 sub write_ssh_keypair {
@@ -440,6 +602,20 @@ L<Provisioner::Recipe> returns for a private key.
 
 The text has no final newline.  F<bin/provision> adds one when it places the
 file, and C<ssh-keygen> refuses a key that ends with a blank line.
+
+=over 4
+
+=item type - Str - as for C<write_ssh_keypair>
+
+=item bits - Int - as for C<write_ssh_keypair>
+
+=item comment - Str - optional: the comment of the key
+
+=back
+
+Returns Str, the private half.
+
+    my $private = Provisioner::Utils::new_ssh_private_key( 'Ed25519', 256, 'host@web.test.test' );
 
 =cut
 
@@ -514,11 +690,19 @@ PEM container and the newer OPENSSH container.
 The key must not have a passphrase.  The provisioner runs with nobody present,
 so an encrypted key is fatal, not a prompt.
 
-Returns STRING of the form "$type $base64", with no comment and no trailing
+Returns Str, of the form "$type $base64", with no comment and no trailing
 newline.
 
 Dies if no importer can read the key, and gives the error of each importer.
 Also dies on an ECDSA curve that is not in that list.
+
+=over 4
+
+=item path - Str - the path of the private key
+
+=back
+
+    my $public = Provisioner::Utils::ssh_pubkey_from_private('id_ed25519');
 
 =cut
 

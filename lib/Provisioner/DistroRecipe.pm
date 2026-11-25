@@ -77,7 +77,7 @@ Every distro recipe depends on L<Provisioner::Recipe::vm>.  The two recipes
 divide one job.  This one describes what the guest runs, and C<vm> describes the
 machine that it runs on.
 
-=head2 What a distribution must answer
+=head2 What a distro recipe must answer
 
 The methods below die in this class and have no default.  If a distribution
 does not answer one of them, the provisioner cannot build a guest from it.  An
@@ -114,6 +114,13 @@ parent class.  See L<Provisioner::Recipe/Where the packages are named>.
 
 =back
 
+Takes no arguments.
+
+Returns Str, the name of the packager, from a distribution.  This class dies,
+and names the distribution, which does not answer it.
+
+    my $packager = Provisioner::Recipe::ubuntu->packager;    # 'deb'
+
 =cut
 
 sub packager { return unanswered( shift, 'packager' ) }
@@ -125,6 +132,13 @@ in order, from its own user-data.  The first ones point the downloads at the
 fetch cache and write the files that the packager needs, then the packager
 applies what it has to, and then the packages install and the accounts are
 made.
+
+Takes no arguments.  Dies as C<packager> does, when the distribution does not
+answer it.
+
+Returns a list of Str, the names of the modules.
+
+    my @modules = Provisioner::Recipe::ubuntu->rerun_modules;
 
 =cut
 
@@ -149,6 +163,17 @@ domain as C<image>, and C<base_image> in L<Trog::HV::Libvirt> downloads it.  A
 cloud has its own catalog, and names its image from C<distribution> and
 C<release_version> instead.
 
+=over 4
+
+=item release - Str - optional: the release, such as C<noble>
+
+=back
+
+Returns Str, the URL, from a distribution.  This class dies, and names the
+distribution, which does not answer it.
+
+    my $url = Provisioner::Recipe::ubuntu->base_image('noble');
+
 =cut
 
 sub base_image { return unanswered( shift, 'base_image' ) }
@@ -161,6 +186,17 @@ from by it, with C<distribution>: Linode as C<linode/ubuntu24.04>, Glance by its
 C<os_distro> and C<os_version> properties.  Dies for a release that the
 distribution does not know.
 
+=over 4
+
+=item release - Str - optional: the release, such as C<noble>
+
+=back
+
+Returns Str, the version, from a distribution.  This class dies, and names the
+distribution, which does not answer it.
+
+    my $version = Provisioner::Recipe::ubuntu->release_version('noble');    # '24.04'
+
 =cut
 
 sub release_version { return unanswered( shift, 'release_version' ) }
@@ -170,16 +206,34 @@ sub release_version { return unanswered( shift, 'release_version' ) }
 The release that a domain gets when its C<_global> names none, such as
 C<noble>.  It is pinned on purpose: see C<current_image>.
 
+Takes no arguments.
+
+Returns Str, the release, from a distribution.  This class dies, and names the
+distribution, which does not answer it.
+
+    my $release = Provisioner::Recipe::ubuntu->release;
+
 =cut
 
 sub release { return unanswered( shift, 'release' ) }
 
-=head2 $release = $distro->release_of(%global)
+=head2 $release = $distro->release_of(%conf)
 
 The release that a domain builds on, from C<%global>, its C<_global>: its
 C<release>, or the pinned C<release> when it names none.  Dies for a
 release that C<release_version> does not know, so a typo stops the build before
 anything asks a hypervisor or an archive for it.
+
+=over 4
+
+=item release - Str - optional: the C<release> of the C<_global> of the domain
+
+=back
+
+Returns Str, the release.
+
+    my $release = Provisioner::Recipe::ubuntu->release_of(%global);
+    my $pinned  = Provisioner::Recipe::ubuntu->release_of( release => 'noble' );
 
 =cut
 
@@ -196,6 +250,13 @@ start of the name of a Linode image.  The name of the recipe, which is what the
 catalogs call every distribution that this toolkit has a recipe for.  A
 distribution whose catalog name is not its recipe name overrides it.
 
+Takes no arguments.
+
+Returns Str, the name, or undef for a class whose name is not a recipe name, as
+C<recipe_name> returns it.
+
+    my $name = Provisioner::Recipe::ubuntu->distribution;    # 'ubuntu'
+
 =cut
 
 sub distribution { my ($self) = @_; return $self->recipe_name }
@@ -205,13 +266,34 @@ sub distribution { my ($self) = @_; return $self->recipe_name }
 The command that installs a list of packages.  It runs without prompts, and it
 does not need a terminal.
 
+Takes no arguments.
+
+Returns Str, the command, from a distribution.  This class dies, and names
+the distribution, which does not answer it.
+
+    my $install = Provisioner::Recipe::ubuntu->packager_invocation;
+
 =head2 $cmd = $distro->packager_up_invocation()
 
 The command that upgrades the installed packages.
 
+Takes no arguments.
+
+Returns Str, the command, from a distribution.  This class dies, and names
+the distribution, which does not answer it.
+
+    my $upgrade = Provisioner::Recipe::ubuntu->packager_up_invocation;
+
 =head2 $cmd = $distro->packager_remove_invocation()
 
 The command that removes a list of packages.
+
+Takes no arguments.
+
+Returns Str, the command, from a distribution.  This class dies, and names
+the distribution, which does not answer it.
+
+    my $remove = Provisioner::Recipe::ubuntu->packager_remove_invocation;
 
 C<bin/new_config> puts all three into the generated makefile under the same
 names.  So F<templates/makefile.tt> does not depend on a distribution.
@@ -227,6 +309,12 @@ sub packager_remove_invocation { return unanswered( shift, 'packager_remove_invo
 =head2 $bool = $distro->is_module()
 
 False.  See L</It directs the build and does not run in it>.
+
+Takes no arguments.
+
+Returns Bool, false.
+
+    next unless Provisioner::Recipe::ubuntu->is_module;
 
 =cut
 
@@ -246,6 +334,12 @@ C<undef> is a valid answer and the default.  It means that this distribution
 has no way to be asked, or that it did not answer.  A preflight run must not
 fail because a mirror is down.  So a caller treats C<undef> as "no opinion" and
 reports nothing.
+
+Takes no arguments.
+
+Returns Str or undef: the URL, or undef.  This class returns undef.
+
+    my $current = $distro->current_image;
 
 =cut
 
@@ -280,6 +374,12 @@ Use C<_global> and not a C<_base> block for the distro recipe.  A mirror is a
 fact about the guest that several recipes get, and the distro recipe does not
 own it.  Both places work, and a domain overrides what C<_base> says in either.
 See L<Provisioner::Cookbook/domain_config>.
+
+Takes no arguments, and is callable on the class.
+
+Returns a list of pairs: an openapiv3 schema of type C<object>.
+
+    my %args = Provisioner::Recipe::ubuntu->args;
 
 =cut
 
@@ -353,6 +453,12 @@ holds the only copy of each default.
 A field with no default, such as C<mirror_insecure>, is left out.  Its absence
 is the answer.
 
+Takes no arguments.
+
+Returns a list of pairs, from the name of each field to its default.
+
+    my %defaults = Provisioner::Recipe::ubuntu->global_defaults;    # ( mirror => '' )
+
 =cut
 
 sub global_defaults {
@@ -384,6 +490,23 @@ upstream hosts, because the cache is empty when it is built.
 
 C<bin/new_config> calls this one time and gives the result to every recipe as
 C<cache_ip>.
+
+=over 4
+
+=item cache - Str - optional: the cache of the hypervisor, an IPv4 address or a domain
+
+=item domain - Str - optional: the domain of the guest
+
+=item ipmap - HashRef[Str] - the address of each domain of the installation
+
+=back
+
+Returns Str: the address, or the empty string.
+
+Dies when C<cache> is neither an IPv4 address nor a domain that the ip pool
+gives an address.
+
+    my $cache_ip = $distro->cache_address( cache => 'cache.test.test', domain => 'web.test.test', ipmap => \%ipmap );
 
 =cut
 
@@ -425,6 +548,13 @@ payload.  F<user-data> holds the private key of the guest.  F<setup.sh> gets to
 the guest in the C<write_files> of cloud-init, because it is the script that
 fetches the payload tarball.
 
+Takes no arguments.
+
+Returns a list of pairs of Str, from each template to the name of the file
+that it renders.
+
+    my %files = $distro->template_files;
+
 =cut
 
 sub template_files {
@@ -453,6 +583,17 @@ distribution requires C<sshd>, and every guest keeps its host key across a
 rebuild.  For the same reason it requires C<hardening>, so every guest gets
 the same kernel settings.
 
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns a list of pairs, from C<vm>, C<sshd> and C<hardening> to a CodeRef
+each.
+
+    my %required = $distro->required_recipes( %config, domain => 'web.test.test' );
+
 =cut
 
 sub required_recipes {
@@ -472,6 +613,12 @@ of this distribution.  It is the name of the recipe.  Callable on the class.
 L<Provisioner::Cookbook/template_dirs> puts the directory of this name before
 F<templates/> on the search path.  So the distribution version of a fragment
 wins over the generic one.
+
+Takes no arguments.
+
+Returns Str, the directory.
+
+    my $dir = Provisioner::Recipe::ubuntu->template_subdir;    # 'ubuntu'
 
 =cut
 

@@ -262,6 +262,10 @@ list, not the makefile.
 
 Returns undef for a class whose name is not a recipe name.
 
+Returns Str, the name, or undef when the class is not a recipe.
+
+    my $name = Provisioner::Recipe::Ubuntu::pdns->recipe_name;    # 'pdns'
+
 =cut
 
 sub recipe_name {
@@ -290,6 +294,18 @@ If C<cache> is absent, the cache is off when C<HARNESS_ACTIVE> is set, which
 C<prove> does for every test, and on otherwise.  A test that wants the cache
 passes C<< cache => 1 >>.
 
+=over 4
+
+=item cache - Bool - optional: false turns the cache off
+
+=item cache_dir - Str - optional: the directory of the cache
+
+=back
+
+Returns a list of pairs for C<< Text::Xslate->new >>.
+
+    my %cache = Provisioner::Recipe->xslate_cache( cache => 1 );
+
 =cut
 
 sub xslate_cache ( $, %opts ) {
@@ -308,6 +324,20 @@ C<cache_dir> say where the renderer keeps compiled templates, see
 C<xslate_cache>.
 
 Dies if the class name is not a recipe name, or if the renderer does not start.
+
+=over 4
+
+=item template_dirs - ArrayRef[Str] - the directories that the renderer searches for templates
+
+=item cache - Bool - optional: as for C<xslate_cache>
+
+=item cache_dir - Str - optional: as for C<xslate_cache>
+
+=back
+
+Returns a Provisioner::Recipe object, of the class it is called on.
+
+    my $recipe = Provisioner::Recipe::Ubuntu::nginx->new( template_dirs => ['templates'] );
 
 =cut
 
@@ -357,6 +387,13 @@ Neither loads L<Trog::HV>, and this class has no accessor for it.  That keeps
 L<Sys::Virt> out of an ordinary recipe, so C<bin/recipes> does not need libvirt
 installed to print a schema.
 
+Takes no arguments.  An override returns a constant, and takes no
+configuration.
+
+Returns Bool.
+
+    next unless $recipe->is_module;
+
 =cut
 
 sub is_module { return 1 }
@@ -381,6 +418,10 @@ half is work done once for the machine, and a recipe with much of it can still
 serve several domains.  This method says whether the domains can coexist at
 all.
 
+Takes no arguments.  Returns Bool.
+
+    die "one domain only\n" if $layered && !$recipe->is_multi_tenant;
+
 =cut
 
 sub is_multi_tenant { return 1 }
@@ -394,6 +435,12 @@ domain whose recipes, dependencies included, have both.  One side says it, and
 the check reads both.
 
 Empty by default.
+
+Takes no arguments.
+
+Returns a list of Str, the names of the recipes, such as C<nginx>.
+
+    my @refused = $recipe->exclusive_with;
 
 =cut
 
@@ -410,6 +457,12 @@ C<is_multi_tenant>, it compares a tenant with its host, not with the other
 tenants.  One side says it, and the checks read both.
 
 Empty by default.
+
+Takes no arguments.
+
+Returns a list of Str, the names of the recipes.
+
+    my @refused = $recipe->exclusive_on_machine_with;
 
 =cut
 
@@ -430,6 +483,17 @@ for example values that both inherit from C<_base>, generates.
 
 Empty by default, which compares nothing.  A recipe that is not
 C<is_multi_tenant> needs none, because its tenant is refused anyway.
+
+=over 4
+
+=item opts - HASH - the configuration of the recipe for one domain, with
+the defaults of the schema in place
+
+=back
+
+Returns a list of pairs, from the name of each setting to its value.
+
+    my %settings = $recipe->machine_wide(%config);
 
 =cut
 
@@ -459,6 +523,22 @@ A mark covers each field below the one that carries it, and nothing marks one
 of those strong again.  So put it on a field that holds a name or a list of
 names, never on an object, and mark each weak member of an object instead.
 F<t/recipes.t> refuses a mark on a field that holds fields.
+
+Takes no arguments.  An override is called on the class as well as on an
+object, so it reads nothing of the object.
+
+Returns a list of pairs: the keys of an openapiv3 schema of type C<object>,
+such as C<type>, C<properties> and C<required>.
+
+    my %args = Provisioner::Recipe::Ubuntu::nginx->args;
+
+    # in a recipe
+    sub args {
+        return (
+            type       => 'object',
+            properties => { port => { type => 'integer', default => 8080 } },
+        );
+    }
 
 =cut
 
@@ -523,6 +603,13 @@ No recipe receives a setting that it does not declare.  C<takes> gives each
 recipe only the keys that its own C<schema> names, so that schema can refuse
 everything else.  A setting left out here stays out of the hash.  A setting
 that a recipe declares still arrives.
+
+Takes no arguments.
+
+Returns a list of pairs: an openapiv3 schema of type C<object>, whose
+C<properties> are the settings above.
+
+    my %global = Provisioner::Recipe->global_args;
 
 =cut
 
@@ -635,6 +722,12 @@ a field of every recipe to scaffold.  Two of those callers read it directly and
 not through L<Provisioner::Cookbook/properties>, so hiding global settings at
 display time does not work either.
 
+Takes no arguments.
+
+Returns a list of pairs, the schema, as C<args> returns it.
+
+    my %schema = $recipe->schema;
+
 =cut
 
 sub schema {
@@ -663,6 +756,16 @@ everything that travels beside it.
 The configuration of a recipe does not pass through here.  An unknown key there
 is a mistake by the operator, and the schema must refuse it.
 
+=over 4
+
+=item offered - HASH - the settings that one domain offers every recipe
+
+=back
+
+Returns a list of pairs, the settings that the schema declares.
+
+    my %mine = $recipe->takes( domain => 'web.test.test', libdir => ['lib'] );
+
 =cut
 
 sub takes {
@@ -679,17 +782,24 @@ sub takes {
 Declares custom template formatters, for use in makefile fragments and in
 generated files.
 
+Takes no arguments.  An override is called on the class, from C<new>.
+
+Returns a list of pairs, from the name of each formatter to a CodeRef, as
+the C<function> option of L<Text::Xslate> takes them.
+
+    my %fmts = Provisioner::Recipe::Ubuntu::nginx->formatters;
+
 =cut
 
 sub formatters {
     return ();
 }
 
-=head3 @pkgs = $recipe->deps(%recipe_config)
+=head3 @pkgs = $recipe->deps(%opts)
 
 The system packages that this recipe needs installed.
 
-C<%recipe_config> is the configuration of this recipe for the domain, with
+C<%opts> is the configuration of this recipe for the domain, with
 C<distro_release> added: the release of the domain, such as C<noble>, which
 C<bin/new_config> gets from the distro recipe.  It also has C<domain>, except
 when a caller asks without one, as C<t/recipes.t> does.  C<package_sources>,
@@ -702,13 +812,23 @@ supplies its list.
 
 Empty by default, which is correct for a recipe that installs nothing.
 
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+    my @pkgs = $recipe->deps( %config, distro_release => 'noble' );
+
 =cut
 
 sub deps {
     return ();
 }
 
-=head3 @sources = $recipe->package_sources(%recipe_config)
+=head3 @sources = $recipe->package_sources(%opts)
 
 The vendor archives that C<deps> installs from, in the terms of the packager of
 the distribution, which L<Provisioner::Packager> chooses.  For Ubuntu that is
@@ -722,13 +842,24 @@ add an archive, or install from one.
 
 Empty by default.
 
+=over 4
+
+=item opts - HASH - as for C<deps>
+
+=back
+
+Returns a list of HashRef, one source each, in the form that the packager
+takes.
+
+    my @sources = $recipe->package_sources( %config, distro_release => 'noble' );
+
 =cut
 
 sub package_sources {
     return ();
 }
 
-=head3 @answers = $recipe->package_answers(%recipe_config)
+=head3 @answers = $recipe->package_answers(%opts)
 
 Answers for the questions that the packages of C<deps> ask when they install,
 in the form that the packager takes them.  For Ubuntu that is a line that
@@ -737,13 +868,23 @@ anything.  A packager whose packages ask nothing ignores them.
 
 Empty by default.
 
+=over 4
+
+=item opts - HASH - as for C<deps>
+
+=back
+
+Returns a list of Str, one answer each.
+
+    my @answers = $recipe->package_answers( %config, distro_release => 'noble' );
+
 =cut
 
 sub package_answers {
     return ();
 }
 
-=head3 @pkgs = $recipe->dep_conflicts(%recipe_config)
+=head3 @pkgs = $recipe->dep_conflicts(%opts)
 
 Packages that conflict with this recipe.  They come from another recipe, or
 the distribution installs them by default, such as sendmail against postfix.
@@ -751,6 +892,16 @@ the distribution installs them by default, such as sendmail against postfix.
 Every package returned here is removed from the dependency list, and the
 packager keeps any other package from bringing it in at first boot.  So a
 fragment does not remove it.
+
+=over 4
+
+=item opts - HASH - as for C<deps>
+
+=back
+
+Returns a list of Str, the names of the packages.
+
+    my @conflicts = $recipe->dep_conflicts( %config, distro_release => 'noble' );
 
 =cut
 
@@ -765,6 +916,13 @@ that installs packages on the running guest, after first boot.  The subclass
 of the recipe for each distribution answers it, from its distro recipe, as
 L<Provisioner::Recipe::Ubuntu::clod> does.  This class dies.
 
+Takes no arguments.
+
+Returns Str, the name of the packager, from an override.  This class dies, and
+names the class, which does not say which packager its distribution has.
+
+    my $packager = $recipe->distro_packager;    # such as deb
+
 =cut
 
 sub distro_packager {
@@ -772,7 +930,7 @@ sub distro_packager {
     die( ( ref $self || $self ) . " does not say which packager its distribution has, so it cannot install packages on the guest there.\n" );
 }
 
-=head3 @hosts = $recipe->fetch_hosts(%recipe_config)
+=head3 @hosts = $recipe->fetch_hosts(%opts)
 
 The hosts that this recipe downloads from on the guest, by name, such as
 C<www.cpan.org> or C<codeload.github.com>.
@@ -798,7 +956,7 @@ third-party apt repository, because nothing else fetches from it.
 C<apt_repo_classes> is how a recipe adds one.
 
 For a host that the configuration names, such as a C<repo_url> or an
-C<api_url>, return that host when C<%recipe_config> gives it.  Return the
+C<api_url>, return that host when C<%opts> gives it.  Return the
 default host when it does not.
 
 Empty by default.  On a guest with a C<cache>, each host that its recipes name
@@ -808,6 +966,17 @@ for downloads that anybody can fetch, because the cache fetches without
 credentials.  If downloads from a host redirect to another host, name that host
 too.  The cache follows a redirect only to a host that it fetches from.
 C<github_release_hosts> gives the hosts for GitHub.
+
+=over 4
+
+=item opts - HASH - optional: the configuration of the recipe for one domain
+
+=back
+
+Returns a list of Str, the host names.
+
+    my @hosts = Provisioner::Recipe::Ubuntu::clod->fetch_hosts;
+    my @mine  = $recipe->fetch_hosts( repo_url => 'https://git.test.test/app.git' );
 
 =cut
 
@@ -819,6 +988,12 @@ sub fetch_hosts {
 
 Returns C<github.com> and the hosts that it redirects a release download to.  A
 recipe that downloads a GitHub release names these in C<fetch_hosts>.
+
+Takes no arguments.
+
+Returns a list of Str, the host names.
+
+    sub fetch_hosts ($self) { return $self->github_release_hosts }
 
 =cut
 
@@ -843,6 +1018,12 @@ host never change is a fact about that upstream, and the recipe that downloads
 from it knows that fact.  If the cache held the list itself, every new upstream
 in a recipe means an edit to the cache.
 
+Takes no arguments.  An override is called on the class.
+
+Returns a list of HashRef, each with C<class> and C<pattern>.
+
+    my @classes = Provisioner::Recipe::gogs->cache_classes;
+
 =cut
 
 sub cache_classes {
@@ -859,6 +1040,12 @@ These live here, not in each recipe, for the same reason as
 C<github_release_hosts>.  The layout belongs to one upstream.  Without this,
 gogs, roundcube and matrix each carry a copy, and the copies drift apart when
 GitHub changes it.
+
+Takes no arguments.
+
+Returns a list of HashRef, each with C<class> and C<pattern>.
+
+    sub cache_classes ($self) { return $self->github_release_classes }
 
 =cut
 
@@ -883,6 +1070,16 @@ C<Packages> beside it.  A stale copy of one with a fresh copy of the other
 causes a hash sum mismatch.  No repository that this fleet uses publishes
 C<Acquire-By-Hash>, which makes the indexes content-addressed and removes the
 problem.  So the C<aptindex> class turns C<proxy_cache_use_stale> off.
+
+=over 4
+
+=item host - Str - the host name of the repository
+
+=back
+
+Returns a list of HashRef, each with C<class> and C<pattern>.
+
+    my @classes = $recipe->apt_repo_classes('apt.test.test');
 
 =cut
 
@@ -939,6 +1136,17 @@ The base class requires L<Provisioner::Recipe::registrar> and
 L<Provisioner::Recipe::letsencrypt> for a recipe that serves a name, and hands
 each the names in its C<hostnames> option.  See C<served_names> below.
 
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain, with C<domain>
+
+=back
+
+Returns a list of pairs, from the name of each recipe that this one needs
+to a CodeRef that returns the options for it.
+
+    my %required = $recipe->required_recipes( %config, domain => 'web.test.test' );
+
 =cut
 
 sub required_recipes {
@@ -994,6 +1202,19 @@ nested hashes and leaves arrays to the merge.  Call it with the merged result
 and the contribution that just arrived.  One call per contribution gives the
 same answer as a look at all of them at once.
 
+=over 4
+
+=item merged - HashRef - the configuration merged so far
+
+=item incoming - HashRef - the contribution that just arrived
+
+=back
+
+Returns HashRef, C<$merged>, or C<$merged> as it came when either argument
+is not a hash reference.
+
+    my $merged = $recipe->reconcile( $merged, { port => 8080 } );
+
 =cut
 
 sub reconcile {
@@ -1041,6 +1262,22 @@ configuration that nobody wrote.  Override it only where the recipe does know.
 C<Provisioner::Recipe::ufw> is the example: two recipes that listen on one port
 both get the higher of their limits.  An override must say why it is safe.
 
+=over 4
+
+=item path - ArrayRef[Str] - the keys from the top of the configuration to the field
+
+=item mine - Str - the value merged so far
+
+=item theirs - Str - the value that the other dependent asks for
+
+=back
+
+Returns Str, the value to use, from an override.
+
+Dies by default, with the field, both values and the recipe.
+
+    my $value = $recipe->resolve_conflict( [ 'rate_limits', '22' ], 6, 10 );
+
 =cut
 
 sub resolve_conflict {
@@ -1087,6 +1324,17 @@ into the other.  A key has no address, because a limit applies to the port on
 every address.  The recipe claims the port on every address, unless C<listens>
 names the port with an address.  See C<listens>.
 
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain, before validation
+
+=back
+
+Returns a list of pairs, from each port, as Str, to Int, the connections per
+second.
+
+    my %limits = $recipe->rate_limits(%config);    # ( 22 => 6, '1194/udp' => 10 )
+
 =cut
 
 sub rate_limits {
@@ -1131,6 +1379,16 @@ behind C<nginxproxy> binds nothing of its own on 80 or 443, which C<nginx>
 claims.  This method runs before validation, so read C<%opts> with the same
 defaults that the schema declares.
 
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain, before validation
+
+=back
+
+Returns a list of Str, the claims.
+
+    my @claims = $recipe->listens(%config);    # ( '127.0.0.1:3000', 8448 )
+
 =cut
 
 sub listens {
@@ -1146,6 +1404,17 @@ on the port.
 
 Dies on a claim that is not a port, an address and a port, or either of them
 with a protocol, and on an address that is not an IP address.
+
+=over 4
+
+=item opts - HASH - as for C<listens>
+
+=back
+
+Returns a list of pairs, from each port to a HashRef from each address to
+C<< { $recipe_name => 1 } >>.
+
+    my %listeners = $recipe->claims(%config);
 
 =cut
 
@@ -1216,13 +1485,23 @@ set to C<systemd[journalflags=1]>, which reads every journal.
 A jail name is shared by every domain on the guest.  Name a jail of your own
 after the domain, so that two domains with the same recipe do not collide.
 
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns a list of pairs, from the name of each jail to a HashRef of its options.
+
+    my %jails = $recipe->jails( %config, domain => 'web.test.test' );
+
 =cut
 
 sub jails {
     return ();
 }
 
-=head2 @units = $recipe->oom_protect()
+=head3 @units = $recipe->oom_protect()
 
 The systemd units of this recipe that the OOM killers pass over, by name with
 the type, such as C<mariadb.service>.  Empty by default.  It takes no
@@ -1236,13 +1515,19 @@ adds the units to its C<protect> list, see L<Provisioner::Recipe::zswap/What is
 protected>.  A guest without that recipe protects nothing, so a recipe that
 names a unit here does not bring zswap onto the guest.
 
+Takes no arguments.
+
+Returns a list of Str, the names of the units.
+
+    my @units = Provisioner::Recipe::mariadb->oom_protect;
+
 =cut
 
 sub oom_protect {
     return ();
 }
 
-=head2 @units = $recipe->oomd_omit()
+=head3 @units = $recipe->oomd_omit()
 
 The systemd units of this recipe that systemd-oomd skips, with no change to
 their kernel OOM score.  Empty by default, and it takes no configuration, as
@@ -1251,6 +1536,12 @@ C<oom_protect> does.
 Name a unit here, and not in C<oom_protect>, when its children inherit its
 score and must not, such as the sessions of sshd.
 L<Provisioner::Recipe::zswap/What is protected> has the measurement.
+
+Takes no arguments.
+
+Returns a list of Str, the names of the units.
+
+    my @units = Provisioner::Recipe::sshd->oomd_omit;
 
 =cut
 
@@ -1276,6 +1567,20 @@ arguments, so the difference matters.
 
 A field that declares no default stays undef.  There, a recipe can care about
 the difference between unset and absent.
+
+A function, not a method.
+
+=over 4
+
+=item opts - HashRef - the configuration, changed in place
+
+=item schema - HashRef - the schema that describes it
+
+=back
+
+Returns HashRef, C<$opts>.
+
+    Provisioner::Recipe::forget_undefs( \%opts, { $recipe->schema } );
 
 =cut
 
@@ -1311,6 +1616,23 @@ Sets more options, based on the options already given.  C<validate> calls it
 after the schema passes, and returns what it returns.  Put here what a schema
 cannot express.
 
+=over 4
+
+=item opts - HASH - the configuration, validated, with its defaults
+
+=back
+
+Returns a list of pairs, the configuration with what this adds.  This class
+returns C<%opts> as it came.
+
+    my %vars = $recipe->enrich(%opts);
+
+    # in a recipe
+    sub enrich ( $self, %opts ) {
+        $opts{url} //= "https://$opts{domain}/";
+        return %opts;
+    }
+
 =cut
 
 sub enrich {
@@ -1342,6 +1664,17 @@ absent field, and do not assume that it exists.
 Do not confuse these with C<datadirs>, which this tool creates for the recipe.
 Somebody else makes these directories, and the tool only reads them.
 
+=over 4
+
+=item opts - HASH - the raw configuration of the recipe for the domain
+
+=back
+
+Returns a list of pairs, from the name of each rsync module to Str, a directory
+on this machine.
+
+    my %paths = $recipe->fetch_sources(%config);
+
 =cut
 
 sub fetch_sources {
@@ -1372,6 +1705,12 @@ tCMS, not only out of the configuration directory.
 To leave a file behind by mistake is the safe error here.  That is why the last
 rule needs no workaround.
 
+Takes no arguments.
+
+Returns a list of Str, the patterns.
+
+    my @patterns = $recipe->remote_skip;    # ( 'secrets.key' )
+
 =cut
 
 sub remote_skip {
@@ -1388,6 +1727,16 @@ The salvage before a rebuild fetches nothing from these, because a rebuild of
 the guest does not touch them.  Back them up where they live, with a
 C<backup> host.  See C<salvage_around_mounts> in F<bin/new_config>, and
 L<Provisioner::Recipe::mounts>, which names them.
+
+=over 4
+
+=item opts - HASH - the configuration, as for C<render_file>
+
+=back
+
+Returns a list of Str, the mount points.
+
+    my @mountpoints = $recipe->remote_mountpoints(%config);
 
 =cut
 
@@ -1444,6 +1793,20 @@ F<t/guest_secrets.t>.  C<bin/new_config> writes it from the entries of every
 recipe of the guest, so a recipe adds no test of its own.  It expects C<owner>
 and C<mode> as declared, C<root:root> and C<0600> when the entry has none.
 
+=over 4
+
+=item install_dir - Str - where the files of domains live on the guest
+
+=item domain - Str - the domain
+
+=item opts - HASH - the configuration of the recipe
+
+=back
+
+Returns a list of pairs, from each path on the guest to a HashRef as above.
+
+    my %files = $recipe->guest_secrets( '/opt/domains', 'web.test.test', %config );
+
 =cut
 
 sub guest_secrets {
@@ -1475,6 +1838,18 @@ asks, so a grant must follow from what the operator wrote.  This must have no
 side effects, because C<bin/destroy> calls it.  Nothing here, because most
 recipes hold nothing.
 
+=over 4
+
+=item domain - Str - the domain that holds the grants
+
+=item opts - HASH - the configuration of this recipe on C<$domain>
+
+=back
+
+Returns a list of HashRef, one grant each.
+
+    my @grants = $recipe->grants( 'web.test.test', %config );
+
 =cut
 
 sub grants {
@@ -1489,6 +1864,16 @@ of them, wherever it is placed, so those guests do not limit where it goes.
 C<%opts> is the configuration of this recipe on the domain, as the file holds
 it.  Nothing here.
 
+=over 4
+
+=item opts - HASH - the configuration of this recipe on the domain
+
+=back
+
+Returns a list of Str, the domains of the guests.
+
+    my @domains = $recipe->joins_network_of(%config);
+
 =cut
 
 sub joins_network_of {
@@ -1501,6 +1886,18 @@ What the issue of C<$grant> needs that the grant does not say, such as an
 address or a list of names, for C<issue_grant>.  C<%opts> is as for C<grants>.
 Only C<granted_secrets> calls this, so this is where a side effect goes, such
 as an address that the pool assigns.  Nothing here.
+
+=over 4
+
+=item grant - HashRef - one grant, as C<grants> returns it
+
+=item opts - HASH - as for C<grants>
+
+=back
+
+Returns a list of pairs, the terms.
+
+    my %terms = $recipe->grant_terms( $grant, %config );
 
 =cut
 
@@ -1518,6 +1915,18 @@ command as root on that guest, and places what it prints on the guest of the
 client.  The store never holds it, and the guest must be up first.  This
 returns nothing when C<%terms> leave nothing to issue.  Nothing here, because
 most recipes issue nothing.
+
+=over 4
+
+=item grant - HashRef - one grant, as C<grants> returns it
+
+=item terms - HASH - what C<grant_terms> of the recipe that holds it returned
+
+=back
+
+Returns a list of pairs, from each path on the guest of the client to a HashRef.
+
+    my %files = Provisioner::Cookbook->load('openvpn')->issue_grant( $grant, %terms );
 
 =cut
 
@@ -1542,6 +1951,17 @@ C<done> and the guest when the command succeeds, and C<doing> on a dry run.
 When the guest is not up, it warns that C<stays>, so C<stays> says what is left
 and how to take it back by hand.  Nothing here.
 
+=over 4
+
+=item grant - HashRef - one grant, as C<grants> returns it
+
+=back
+
+Returns a list of pairs, with C<command>, C<doing>, C<done> and C<stays>, all
+Str.
+
+    my %revocation = Provisioner::Cookbook->load('openvpn')->revoke_grant($grant);
+
 =cut
 
 sub revoke_grant {
@@ -1553,6 +1973,19 @@ sub revoke_grant {
 The files that other guests issue for the C<grants> of this recipe on
 C<$domain>, from the C<issue_grant> of each recipe that issues one.
 C<bin/new_config> places them beside what C<guest_secrets> places.
+
+=over 4
+
+=item domain - Str - the domain that holds the grants
+
+=item opts - HASH - the configuration of this recipe on C<$domain>
+
+=back
+
+Returns a list of pairs, from each path on the guest to a HashRef, as
+C<issue_grant> returns them.
+
+    my %files = $recipe->granted_secrets( 'web.test.test', %config );
 
 =cut
 
@@ -1573,6 +2006,16 @@ What C<bin/destroy> takes back from other guests when C<$domain> goes away: the
 C<revoke_grant> of each of the C<grants> of this recipe, as the configuration
 of C<$domain> declares them, with the C<guest> of the grant added.  This is
 asked of every recipe, and one that holds nothing returns nothing.
+
+=over 4
+
+=item domain - Str - the domain that goes away
+
+=back
+
+Returns a list of HashRef, the C<revoke_grant> of each grant with its C<guest>.
+
+    my @revocations = $recipe->revocations('web.test.test');
 
 =cut
 
@@ -1639,6 +2082,18 @@ reverse DNS of a guest that C<sends_mail> is not a step of this method, so an
 override cannot lose it.  C<of> in L<Trog::Steps> adds that step for each
 recipe that sends mail.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item opts - HASH - the configuration of this recipe as the file holds it
+
+=back
+
+Returns a list of HashRef, one step each.
+
+    my @steps = $recipe->outside_steps( 'web.test.test', %config );
+
 =cut
 
 sub outside_steps {
@@ -1660,6 +2115,12 @@ C<Trog::HV::Libvirt::provision_guest> give one to the builder that each makes
 itself.  There is no default, because a hypervisor chosen here is a second
 answer to a question that placement settled.
 
+Takes no arguments.
+
+Returns the Trog::HV object, the hypervisor.
+
+    my $hv = $recipe->hv;
+
 =cut
 
 sub hv {
@@ -1676,6 +2137,12 @@ They are made before the fragment runs, with the same ownership as everything
 else the domain owns.  A fragment therefore does not need to start with a run
 of C<mkdir -p>.
 
+Takes no arguments.
+
+Returns a list of Str, the directories, relative to the directory of the domain.
+
+    my @dirs = $recipe->datadirs;
+
 =cut
 
 sub datadirs {
@@ -1689,6 +2156,12 @@ names: C<www>, not C<www.$domain>.
 
 Empty by default, which is the ordinary answer: a recipe reached at the domain
 itself declares nothing.
+
+Takes no arguments.
+
+Returns a list of Str, the labels.
+
+    my @names = $recipe->subdomains;    # ( 'www' )
 
 =cut
 
@@ -1706,6 +2179,12 @@ Overriding C<outside_steps> does not change that.  The name is C<helo_name_of> i
 L<Provisioner::Cookbook>, and the recipe puts the same name in its
 configuration of postfix.  False here, because most recipes send no mail.
 
+Takes no arguments.
+
+Returns Bool.
+
+    my $rdns = $recipe->sends_mail;
+
 =cut
 
 sub sends_mail {
@@ -1721,6 +2200,16 @@ L<Provisioner::Recipe::letsencrypt> for a recipe that serves a name, and hands
 each of them these names in their C<hostnames> option.  So the zone and the
 certificate of a domain name what its recipes serve, whichever server holds the
 zone.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of Str, the names.
+
+    my @names = $recipe->served_names( domain => 'web.test.test' );    # ( 'www.web.test.test' )
 
 =cut
 
@@ -1738,6 +2227,16 @@ at the address of the domain.  See C<zone_address_names> in
 L<Provisioner::Recipe::registrar>.  None here.  It reads only
 C<$opts{domain}>.
 
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of Str, the names.  This class returns nothing.
+
+    my @names = $recipe->addressed_names( domain => 'mail.test.test' );
+
 =cut
 
 sub addressed_names {
@@ -1752,6 +2251,16 @@ recipe with C<addressed_names>, because each of those names is an C<A> record
 at the address.  F<bin/new_config> refuses such a domain on a hypervisor whose
 block names no address pool, where the guest has only a lease on its NAT
 network.  It reads only C<$opts{domain}>.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns Bool, 1 or 0.
+
+    die "needs an address\n" if $recipe->needs_address( domain => 'mail.test.test' );
 
 =cut
 
@@ -1777,6 +2286,16 @@ command that deletes it.  It deletes none of them.  See C<zone_records> in
 L<Provisioner::Recipe::registrar>.  None here.  It reads
 only C<$opts{domain}>.
 
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of HashRef, one record each.  This class returns nothing.
+
+    my @records = $recipe->dns_records( domain => 'mail.test.test' );
+
 =cut
 
 sub dns_records {
@@ -1789,6 +2308,20 @@ Every name that this recipe answers for besides the domain itself: the aliases
 that the operator configured for the domain, in their order, then the names of
 this recipe and the C<hostnames> option that other recipes handed it, sorted.  Each
 name comes once.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item aliases - HashRef[ArrayRef[Str]] - optional: the aliases of each domain
+
+=item hostnames - ArrayRef[Str] - optional: the names that other recipes handed this one
+
+=back
+
+Returns a list of Str, the names.
+
+    my @aliases = $recipe->domain_aliases( domain => 'web.test.test', aliases => { 'web.test.test' => ['www.test.test'] } );
 
 =cut
 
@@ -1818,6 +2351,18 @@ script, because its first provision has not run yet.  Last night's dump is
 better than no dump, and a die leaves no dump.  The warning must still appear,
 because somebody later restores from a salvage that nobody refreshed.  See
 C<refresh_salvage> in C<bin/new_config> for when a failure dies.
+
+=over 4
+
+=item install_dir - Str - where the files of domains live on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of Str, the commands.
+
+    my @commands = $recipe->remote_prepare( '/opt/domains', 'web.test.test' );
 
 =cut
 
@@ -1858,6 +2403,16 @@ A recipe cannot use this if a service owns the destination and runs before the
 makefile starts.  Then the restore must happen between a stop and a start in
 the target of that recipe.  C<redis> and C<plexmediaserver> are the two, and
 they keep their own C<restore_state> calls.
+
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain, with C<domain>
+
+=back
+
+Returns a list of pairs, from each destination on the guest to a HashRef as above.
+
+    my %restores = $recipe->restores( %config, domain => 'web.test.test' );
 
 =cut
 
@@ -1912,6 +2467,19 @@ A recipe whose state already lives under C<install_dir/domain> needs none of
 this.  The data target puts the state back where it came from.  So keep state
 there when the software allows it.
 
+=over 4
+
+=item install_dir - Str - where the files of domains live on the guest
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of pairs of Str, from each directory on the guest to where it
+lands.
+
+    my %path_map = $recipe->remote_files( '/opt/domains', 'web.test.test' );
+
 =cut
 
 sub remote_files {
@@ -1919,7 +2487,7 @@ sub remote_files {
     return ();
 }
 
-=head3 @files = $recipe->template_files(@loaded_recipes)
+=head3 %files = $recipe->template_files(@recipes)
 
 Files that this recipe generates.  Returns a map from the template under
 C<templates/files/> to where it is installed, relative to the configuration
@@ -1934,6 +2502,16 @@ The fragment must install every file named here, except a drop-in that
 C<resolver_files> names, which the C<resolver> target installs.  A file that nothing installs
 is dead.  Either it must be installed and is not, or it must be removed.
 Rendering it only leaves a file on the hypervisor that nothing reads.
+
+=over 4
+
+=item @recipes - Str - the names of the recipes on the guest
+
+=back
+
+Returns a list of pairs of Str.
+
+    my %files = $recipe->template_files(qw{nginx ufw});
 
 =cut
 
@@ -1956,6 +2534,16 @@ restarts systemd-resolved one time, before any recipe target runs.  A restart
 in a recipe target runs beside the other targets under C<make -j>, and a lookup
 that one of them makes in that moment fails.
 
+=over 4
+
+=item opts - HASH - the configuration, as for C<render_file>
+
+=back
+
+Returns a list of pairs of Str.
+
+    my %files = $recipe->resolver_files(%config);
+
 =cut
 
 sub resolver_files {
@@ -1970,6 +2558,12 @@ run, not only to the fragment of this recipe.
 Override this when a fragment needs a value that make itself expands.  Do not
 use it to pass configuration to your own templates.  Use C<args> and the
 template variables for that.
+
+Takes no arguments.
+
+Returns a list of pairs, from the name of each variable to its value.
+
+    my %vars = $recipe->makefile_vars;
 
 =cut
 
@@ -1990,6 +2584,12 @@ exists passes on a guest where nothing started.
 
 See L<t/TESTING.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/t/TESTING.md>.
 
+Takes no arguments.
+
+Returns a list of Str, the names of the templates, relative to C<templates/tests/>.
+
+    my @tests = $recipe->tests;
+
 =cut
 
 sub tests {
@@ -1999,6 +2599,16 @@ sub tests {
 =head3 @pms = $recipe->testdeps(@modules)
 
 Perl modules that the tests of this recipe need.
+
+=over 4
+
+=item @modules - Str - the recipes on the guest
+
+=back
+
+Returns a list of Str, the names of the modules.
+
+    my @pms = $recipe->testdeps(qw{nginx ufw});
 
 =cut
 
@@ -2013,6 +2623,16 @@ sub testdeps {
 
 Renders the makefile fragment of the recipe.  See C<render_file>.
 
+=over 4
+
+=item template_vars - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns Str, the fragment.  Dies as C<render_file> does.
+
+    my $fragment = $recipe->render( %config, domain => 'web.test.test' );
+
 =cut
 
 sub render ( $self, %template_vars ) {
@@ -2023,6 +2643,12 @@ sub render ( $self, %template_vars ) {
 
 Returns true if a C<$recipe.global.tt> exists in any configured template
 directory.
+
+Takes no arguments.
+
+Returns Bool.
+
+    print $recipe->render_global(%vars) if $recipe->has_global_template;
 
 =cut
 
@@ -2035,6 +2661,12 @@ sub has_global_template {
 =head3 $bool = $recipe->has_template()
 
 Returns true if a C<$recipe.tt> exists in any configured template directory.
+
+Takes no arguments.
+
+Returns Bool.
+
+    print $recipe->render(%vars) if $recipe->has_template;
 
 =cut
 
@@ -2049,6 +2681,16 @@ sub has_template {
 Renders the global makefile fragment of the recipe (C<$recipe.global.tt>).  Call
 this only after C<has_global_template> returns true.
 
+=over 4
+
+=item template_vars - HASH - as for C<render>
+
+=back
+
+Returns Str, the fragment.  Dies as C<render_file> does.
+
+    my $fragment = $recipe->render_global(%vars);
+
 =cut
 
 sub render_global ( $self, %template_vars ) {
@@ -2060,18 +2702,40 @@ sub render_global ( $self, %template_vars ) {
 Renders the template C<$file> with the C<vars> of the recipe and
 C<%template_vars>, after C<validated> checks them.  Dies if they are not valid.
 
+=over 4
+
+=item file - Str - the name of the template, relative to a directory of C<template_dirs>
+
+=item template_vars - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns Str, the rendered text.
+
+    my $text = $recipe->render_file( 'files/nginx.conf.tt', %vars );
+
 =cut
 
 sub render_file ( $self, $file, %template_vars ) {
     return $self->render_raw( $file, $self->validated( $self->vars(), %template_vars ) );
 }
 
-=head3 @commands = Provisioner::Recipe->fragment_commands($fragment)
+=head3 @commands = $class->fragment_commands($fragment)
 
 The commands of a rendered fragment, one to each element.  A command that
 continues onto the next line, with a C<\> at the end, is one element with the
 lines joined, newlines included.  Joined back together, the elements are the
 fragment.
+
+=over 4
+
+=item fragment - Str - a rendered fragment
+
+=back
+
+Returns a list of Str, the commands.
+
+    my @commands = Provisioner::Recipe->fragment_commands($fragment);
 
 =cut
 
@@ -2085,7 +2749,7 @@ sub fragment_commands ( $, $fragment ) {
     return @commands;
 }
 
-=head3 $fragment = Provisioner::Recipe->quiet_secrets($fragment, @secrets)
+=head3 $fragment = $class->quiet_secrets($fragment, @secrets)
 
 Returns the rendered C<$fragment> with an C<@> at the start of each command that
 holds one of C<@secrets>, so that make does not print it into the setup log.
@@ -2097,6 +2761,18 @@ with C<@> is left as it is.
 
 C<bin/new_config> calls this on every fragment it renders.  See L</The fragment
 is a makefile, not a shell script>.
+
+=over 4
+
+=item fragment - Str - a rendered fragment
+
+=item @secrets - Str - the values of the secrets
+
+=back
+
+Returns Str, the fragment.
+
+    $fragment = Provisioner::Recipe->quiet_secrets( $fragment, $password );
 
 =cut
 
@@ -2124,6 +2800,16 @@ Mark every field whose value is a password, a token or a key that an operator
 supplies.  C<bin/new_config> quiets each value found here, written literally or
 resolved from the store, and C<bin/preflight> reports each one that is written
 literally.  An unmarked secret gets neither.
+
+=over 4
+
+=item config - HashRef - the raw configuration of the recipe
+
+=back
+
+Returns a list of ArrayRef, each C<[ $path, $value ]>.
+
+    my @found = $recipe->secrets_in( { token => 'secret:registrar/token/password' } );
 
 =cut
 
@@ -2155,7 +2841,7 @@ sub secrets_in ( $self, $config ) {
     return @found;
 }
 
-=head3 $output = $recipe->render_raw($file, %template_vars)
+=head3 $output = $recipe->render_raw($file, %vars)
 
 Renders a template with variables that already went through C<validate>.
 
@@ -2169,6 +2855,18 @@ C<write_files> entry.  So the script must be rendered before the user-data that
 quotes it.  The answer is a template variable, not an order between two
 C<template_files> entries, because C<template_files> promises no order.
 
+=over 4
+
+=item file - Str - the name of the template
+
+=item vars - HASH - the validated variables
+
+=back
+
+Returns Str, the rendered text.
+
+    my $script = $self->render_raw( 'files/setup.sh.tt', %opts );
+
 =cut
 
 sub render_raw {
@@ -2176,7 +2874,7 @@ sub render_raw {
     return $self->{tt}->render( $file, \%vars );
 }
 
-=head3 @written = $recipe->generate_files($output_dir, %template_vars)
+=head3 @written = $recipe->generate_files($output_dir, %vars)
 
 Renders everything in C<template_files> into C<$output_dir>.  Returns the paths
 it wrote, relative to C<$output_dir>.  Dies if it cannot copy a static file.
@@ -2186,6 +2884,18 @@ C<template_files> says.  This method lives here because it has two callers.
 C<bin/new_config> generates the files of a recipe while it walks the modules.
 C<bin/provision> generates the files that cannot exist until a hypervisor
 answers for itself.  See C<Provisioner::Recipe::vm>.
+
+=over 4
+
+=item output_dir - Str - the directory to write into
+
+=item vars - HASH - the configuration of the recipe for the domain, with C<modules>
+
+=back
+
+Returns a list of Str, the paths written.
+
+    my @written = $recipe->generate_files( 'web.test.test/config', %vars );
 
 =cut
 
@@ -2221,6 +2931,16 @@ The renderer finds a template by name on its own.  This method is for a file
 that is copied, not rendered, such as a file with no variables in it that
 C<template_files> names.  It is also for a caller that must give the path to
 something else.
+
+=over 4
+
+=item file - Str - the name of the template, relative to a directory of C<template_dirs>
+
+=back
+
+Returns Str, the path.
+
+    my $path = $recipe->template_path('files/motd');
 
 =cut
 
@@ -2263,6 +2983,17 @@ production host.
 C<admin_home> defaults here too, to what L<Provisioner::Cookbook/admin_home>
 returns.  So a template that writes into the home of the admin names
 C<admin_home>, and never F</home/>C<admin_user>.
+
+=over 4
+
+=item opts - HASH - the configuration of the recipe for the domain
+
+=back
+
+Returns a list of pairs, the configuration, validated, with defaults, as
+C<enrich> returns it.
+
+    my %vars = $recipe->validate( %config, domain => 'web.test.test' );
 
 =cut
 
@@ -2331,6 +3062,17 @@ the right lifetime.  A C<state> variable in a named sub is one variable for the
 sub, not one per object, so it outlives the object.  A new recipe with a
 configuration that must fail then gets the last valid answer, and never dies.
 
+=over 4
+
+=item opts - HASH - as for C<validate>
+
+=back
+
+Returns a list of pairs, as C<validate> returns them.  Dies as C<validate> does,
+the first time.
+
+    my %vars = $recipe->validated(%config);
+
 =cut
 
 sub validated {
@@ -2343,6 +3085,12 @@ sub validated {
 
 Default template variables for the recipe.  C<render_file> gives them to
 C<validated> before the variables of the caller.
+
+Takes no arguments.
+
+Returns a list of pairs, from the name of each variable to its value.
+
+    my %vars = $recipe->vars;
 
 =cut
 

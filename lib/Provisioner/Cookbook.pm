@@ -69,11 +69,17 @@ and loads everything there as a recipe.
 Returns the directory that holds the recipe modules.  It is found relative to
 this file, so a checkout and an installed dist give the same answer.
 
+Takes no arguments.
+
+Returns Str, the directory.
+
+    my $dir = Provisioner::Cookbook->recipe_dir;
+
 =cut
 
 sub recipe_dir { return File::Basename::dirname(__FILE__) . '/Recipe' }
 
-=head2 use_libdirs(@libdirs)
+=head2 use_libdirs(@to_include)
 
 Makes the recipes of each vendor F<libdir> available: its F<lib/> goes onto
 C<@INC>, and C<has>, C<names> and C<load> search its recipe directory.  A
@@ -87,6 +93,16 @@ configuration sees the vendor recipes before it asks about a recipe.
 The vendor directories come after this checkout, both on C<@INC> and in the
 search.  A vendor recipe with the name of a recipe here is never loaded.  This
 is process-wide, as C<@INC> is, and C<forget> does not undo it.
+
+=over 4
+
+=item \@to_include - Str - each F<libdir>; a false one is skipped
+
+=back
+
+Returns a list of Str, the F<libdir>s in use.
+
+    my \@libdirs = Provisioner::Cookbook->use_libdirs('/bogus/vendor');
 
 =cut
 
@@ -111,6 +127,12 @@ Returns the directories that hold recipe modules, in the order they are
 searched: C<recipe_dir>, then the recipe directory of each F<libdir> from
 C<use_libdirs> that has one.
 
+Takes no arguments.
+
+Returns a list of Str, the directories.
+
+    my \@dirs = Provisioner::Cookbook->recipe_dirs;
+
 =cut
 
 sub recipe_dirs {
@@ -122,6 +144,16 @@ sub recipe_dirs {
 
 Returns the path of the first file named C<$relative> in C<recipe_dirs>, such
 as C<nginx.pm> or C<Ubuntu/nginx.pm>, or undef when none has it.
+
+=over 4
+
+=item relative - Str - the path of the file, relative to a recipe directory
+
+=back
+
+Returns Str or undef: the path.
+
+    my $path = Provisioner::Cookbook->recipe_file('Ubuntu/nginx.pm');
 
 =cut
 
@@ -136,6 +168,12 @@ sub recipe_file {
 
 Returns the template directory.  It is found relative to this file, for the
 same reason as C<recipe_dir>.
+
+Takes no arguments.
+
+Returns Str, the directory.
+
+    my $dir = Provisioner::Cookbook->template_dir;
 
 =cut
 
@@ -160,6 +198,19 @@ The distribution's directory is the one its recipe names in C<template_subdir>.
 That recipe looks up its own generated files there as well, so the two cannot
 name different directories.  C<$distro> has to name a distro recipe.
 
+=over 4
+
+=item distro - Str - optional: the name of a distro recipe
+
+=item \@libdirs - Str - each vendor F<libdir>
+
+=back
+
+Returns ArrayRef[Str], the directories.  Dies as C<load> does for a C<$distro>
+that is not a recipe.
+
+    my $dirs = Provisioner::Cookbook->template_dirs('ubuntu');
+
 =cut
 
 sub template_dirs {
@@ -177,6 +228,12 @@ from each of C<recipe_dirs>.  Dies if C<recipe_dir> does not exist.
 
 This leaves out the recipes that direct a build and do not take part in it,
 because nobody writes one under a domain.  See C<directors>.
+
+Takes no arguments.
+
+Returns a list of Str, the names.
+
+    my \@names = Provisioner::Cookbook->names;
 
 =cut
 
@@ -207,6 +264,12 @@ duplicates.  L<Provisioner::Recipe::fetchcache> uses these hosts by default.
 
 This loads every recipe, which C<names> does not.  It asks once for each set of
 C<use_libdirs>, because the answer is a fact about the code.
+
+Takes no arguments.
+
+Returns a list of Str, the hosts.  Dies as C<load> does.
+
+    my \@hosts = Provisioner::Cookbook->fetch_hosts;
 
 =cut
 
@@ -251,6 +314,13 @@ it is called, not who reads it.
 
 A recipe this installation does not have is skipped rather than fatal, as in
 C<configured_fetch_hosts>.
+
+Takes no arguments.
+
+Returns a list of Str, the references.  Dies when a file of the configuration is
+not valid YAML, and when a recipe cannot be loaded.
+
+    my \@refs = Provisioner::Cookbook->secret_references;
 
 =cut
 
@@ -303,6 +373,12 @@ This method does not cache its answer.  C<configuration> already remembers
 each file by path.  A second cache with a different lifetime goes stale under a
 test that points C<TROG_PROVISIONER_CONFIG> at a different place.
 
+Takes no arguments.
+
+Returns a list of Str, the hosts.
+
+    my \@hosts = Provisioner::Cookbook->configured_fetch_hosts;
+
 =cut
 
 sub configured_fetch_hosts {
@@ -338,6 +414,12 @@ them to decide how long it keeps a file.
 This asks every recipe, not only the recipes of one domain, because the cache
 serves the whole fleet.  It asks once for each set of C<use_libdirs>.
 
+Takes no arguments.
+
+Returns a list of HashRef.  Dies as C<load> does.
+
+    my \@classes = Provisioner::Cookbook->cache_classes;
+
 =cut
 
 sub cache_classes {
@@ -362,6 +444,12 @@ The list comes from names, not from C<is_module> on each module, because
 C<names> loads nothing.  C<abstract> reads the file for the same reason.
 C<t/recipes.t> makes sure that the two answers agree.
 
+Takes no arguments.
+
+Returns a list of Str, the names.
+
+    my \@directors = Provisioner::Cookbook->directors;    # ( 'vm', 'ubuntu' )
+
 =cut
 
 sub directors {
@@ -369,7 +457,7 @@ sub directors {
     return ( 'vm', $class->distros() );
 }
 
-=head2 @pairs = Provisioner::Cookbook->distros_in_use()
+=head2 @pairs = $class->distros_in_use()
 
 The distributions and releases that the configuration builds guests of, as
 pairs of a loaded distro recipe and a release: the C<distro> of each domain's
@@ -377,6 +465,14 @@ C<_global>, C<ubuntu> where it names none, and the C<release> there, or the one
 that recipe pins.  For a configuration with no domains yet, the
 pinned release of C<ubuntu> alone.  A preflight check that asks whether a
 hypervisor has an image asks it for each pair.
+
+Takes no arguments.
+
+Returns a list of ArrayRef, each C<[ $class, $release ]>.  Dies as C<load> does
+for a C<distro> that names no recipe, and as the distro recipe does for a
+release that it does not pin.
+
+    for my $pair ( Provisioner::Cookbook->distros_in_use ) { my ( $distro, $release ) = \@$pair; ... }
 
 =cut
 
@@ -399,12 +495,22 @@ sub distros_in_use {
     } sort keys %named;
 }
 
-=head2 @values = Provisioner::Cookbook->globals_in_use($key)
+=head2 @values = $class->globals_in_use($key)
 
 Every value that C<$key> takes in the C<_global> of a domain, sorted, without
 repeats.  A preflight check that asks whether a hypervisor can build what the
 guests ask for asks it for C<size_key>: the types the configuration names, and
 nothing about a type nobody uses.
+
+=over 4
+
+=item key - Str - the key of C<_global>
+
+=back
+
+Returns a list of Str, the values.
+
+    my \@types = Provisioner::Cookbook->globals_in_use('linode_type');
 
 =cut
 
@@ -432,6 +538,12 @@ holds the specializations for Ubuntu, and C<Recipe/ubuntu.pm> is the distro
 recipe itself.  The list comes from the directory, so to add a distribution you
 add files.
 
+Takes no arguments.
+
+Returns a list of Str, the names.
+
+    my \@distros = Provisioner::Cookbook->distros;    # ( 'ubuntu' )
+
 =cut
 
 sub distros {
@@ -444,6 +556,16 @@ sub distros {
 
 Returns true if there is a recipe named C<$name> in C<recipe_dirs>.  A name
 that is not a single word is never a recipe.
+
+=over 4
+
+=item name - Str - the name of the recipe
+
+=back
+
+Returns Bool.
+
+    print "there is one\n" if Provisioner::Cookbook->has('nginx');
 
 =cut
 
@@ -474,6 +596,18 @@ compile stops the run.  With a fallback, a typo in F<Ubuntu/mail.pm> gives a
 guest without postfix, and nothing says why.  For the same reason, this dies if
 the specialization does not inherit from the recipe.  Otherwise a subclass that
 forgot its C<parent> inherits an empty C<deps> and quietly installs nothing.
+
+=over 4
+
+=item name - Str - the name of the recipe
+
+=item distro - Str - optional: the distribution, whose specialization is wanted
+
+=back
+
+Returns Str, the name of the class.
+
+    my $class = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' );    # 'Provisioner::Recipe::Ubuntu::nginx'
 
 =cut
 
@@ -511,6 +645,16 @@ undef if there is none.  Dies if it cannot close the file.
 It reads the file and does not load the module.  So a list of every recipe
 costs one open for each recipe and no module loads.
 
+=over 4
+
+=item name - Str - the name of the recipe
+
+=back
+
+Returns Str or undef: the abstract.
+
+    my $abstract = Provisioner::Cookbook->abstract('nginx');
+
 =cut
 
 sub abstract {
@@ -546,6 +690,18 @@ A recipe can do real work here.  The garage recipe asks GitHub for the current
 release to use as its version default.  So C<spec('garage')> makes a network
 request and takes as long as that request.
 
+=over 4
+
+=item name - Str - the name of the recipe
+
+=item opts - HASH - the fields of the object, with C<output_dir>, Str, optional
+
+=back
+
+Returns a list of pairs, the schema.
+
+    my %spec = Provisioner::Cookbook->spec('nginx');
+
 =cut
 
 sub spec {
@@ -570,6 +726,16 @@ here.  A scaffold that offered those fields claims that the recipe checks
 something that it does not check.  F<t/Provisioner-Cookbook.t> fails on any
 recipe that spells it C<parameters>.
 
+=over 4
+
+=item spec - HashRef - an object schema
+
+=back
+
+Returns HashRef, the properties.
+
+    my $props = Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('nginx') } );
+
 =cut
 
 sub properties {
@@ -592,6 +758,18 @@ It returns only top-level fields that declare a default.  A nested default
 belongs to the object that declares it, and the validator applies it.  See
 L<Provisioner::Recipe/args>.
 
+=over 4
+
+=item name - Str - the name of the recipe
+
+=item opts - HASH - as for C<spec>
+
+=back
+
+Returns a list of pairs, from each field to its default.  Dies as C<spec> does.
+
+    my %defaults = Provisioner::Cookbook->defaults('nginx');
+
 =cut
 
 sub defaults {
@@ -609,6 +787,12 @@ C<CHANGEME>.
 It is an obvious string on purpose.  A required boolean filled in with a
 plausible C<0> provisions quietly and wrongly.  This string fails validation of
 a boolean, and the error names the key.
+
+Takes no arguments.
+
+Returns Str, C<CHANGEME>.
+
+    my $todo = Provisioner::Cookbook->PLACEHOLDER;
 
 =cut
 
@@ -638,6 +822,21 @@ C<output_dir> goes to C<spec>.
 
 The configuration is undef for a recipe that needs nothing.  The configuration
 files spell that as a bare C<nosnap:> with nothing under it.
+
+=over 4
+
+=item name - Str - the name of the recipe
+
+=item all - Bool - optional: also the optional fields
+
+=item provided - HashRef - optional: the configuration from somewhere else
+
+=item output_dir - Str - optional: as for C<spec>
+
+=back
+
+Returns a list: HashRef or undef, the configuration, then Str, each dotted
+path to fill in.
 
 =cut
 
@@ -756,6 +955,18 @@ my sub scaffold_walk ( $class, $named, %opts ) {
 Returns the recipes of C<@named> and every recipe that they require, as
 C<bin/new_config> adds them.  C<%opts> is as in C<scaffold_dependencies>.
 
+=over 4
+
+=item named - ArrayRef[Str] - the recipes that a person named
+
+=item opts - HASH - as for C<scaffold_dependencies>
+
+=back
+
+Returns a list of Str, the names.  Dies as C<resolve_dependencies> does.
+
+    my \@recipes = Provisioner::Cookbook->recipes_with( ['tcms'], domain => 'web.test.test' );
+
 =cut
 
 sub recipes_with {
@@ -792,6 +1003,24 @@ C<resolve_dependencies>.  C<all> and C<output_dir> go to C<scaffold>.
 
 Dies as C<resolve_dependencies> does, which includes a C<required_recipes> sub
 that cannot answer without the global configuration.
+
+=over 4
+
+=item named - ArrayRef[Str] - the recipes that a person named
+
+=item domain - Str - the domain
+
+=item base - HashRef - optional: the C<_base> block
+
+=item global_config - HashRef - optional: the C<_global> block
+
+=item all - Bool - optional: as for C<scaffold>
+
+=item output_dir - Str - optional: as for C<scaffold>
+
+=back
+
+Returns a list: HashRef, the blocks, then Str, each dotted path to fill in.
 
 =cut
 
@@ -835,6 +1064,18 @@ C<root_pw: CHANGEME> validates, provisions, and gives a database whose root
 password is CHANGEME.  So a person must look, and this method finds what to
 look at.
 
+=over 4
+
+=item config - HashRef - the configuration
+
+=item path - Str - optional: the prefix of the paths
+
+=back
+
+Returns a list of Str, the paths.
+
+    my \@todo = Provisioner::Cookbook->placeholders_in( $config, 'mariadb' );
+
 =cut
 
 sub placeholders_in {
@@ -853,6 +1094,20 @@ True when C<$recipe> requires C<$dependency>, directly or through other
 recipes, as far as C<%required_by> knows so far.  C<%required_by> maps a
 dependency to the recipes that require it, as C<resolve_dependencies> builds
 it.  A function.
+
+=over 4
+
+=item required_by - HashRef[HashRef] - from each dependency to the recipes that require it
+
+=item recipe - Str - the recipe
+
+=item dependency - Str - the dependency
+
+=back
+
+Returns Bool, 1 or 0.
+
+    my $cycle = Provisioner::Cookbook::requires_transitively( { ufw => { nginx => 1 } }, 'nginx', 'ufw' );    # 1
 
 =cut
 
@@ -956,6 +1211,27 @@ what it was building, not about a configuration.  So this dies with a message
 that names the recipe that did not answer and the dependency it was asked
 about.  That configuration comes from C<_global> in F<recipes.yaml>.  A caller
 without it has a file to fix, not a dependency to skip.
+
+=over 4
+
+=item modules - ArrayRef[Str] - the recipes of the domain
+
+=item domain_conf - HashRef - the configuration of each recipe, changed in place
+
+=item global_config - HashRef - optional: the C<_global> of the domain
+
+=item distro - Str - the distribution
+
+=item provisioner - HashRef - optional: the options of the constructor of each recipe
+
+=item domain - Str - the domain
+
+=back
+
+Returns a list of three: ArrayRef[Str], the list, HashRef, the builders, and
+HashRef[ArrayRef[Str]], what requires what.  Dies also when a
+C<required_recipes> sub dies, and when a dependency cannot C<reconcile> what
+two recipes asked of it.
 
 =cut
 
@@ -1119,6 +1395,14 @@ decide what every guest gets.
 It reads each file once and remembers the result.  Nobody edits the
 configuration under a command that is already running on it.
 
+=over 4
+
+=item path - Str - optional: the path of F<recipes.yaml>
+
+=back
+
+    my $conf = Provisioner::Cookbook->configuration;
+
 =cut
 
 # Keyed by resolved path, so two installations give two answers, and a second
@@ -1188,6 +1472,18 @@ C<domain_config> gets the reference and not the secret.
 It keys by path in the same way as C<configuration>, so both agree on the file.
 C<forget> clears it.
 
+=over 4
+
+=item path - Str - optional: the path of F<recipes.yaml>
+
+=item conf - HashRef - the configuration
+
+=back
+
+Returns HashRef, the copy.
+
+    Provisioner::Cookbook->remember( undef, $resolved );
+
 =cut
 
 sub remember {
@@ -1226,6 +1522,16 @@ before you put a list in C<_base>.
 C<_global> is not in the result.  It says what the guest is, not what a recipe
 takes.  See C<global_config>.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $config = Provisioner::Cookbook->domain_config('web.test.test');
+
 =cut
 
 sub domain_config {
@@ -1246,6 +1552,14 @@ sub domain_config {
 Returns the C<_base> entry without its C<_global>, as a new hash reference.
 That is what C<domain_config> gives a domain that says nothing itself.
 C<$conf> is as in C<domain_config>.
+
+=over 4
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $base = Provisioner::Cookbook->base_config;
 
 =cut
 
@@ -1277,6 +1591,16 @@ Call it in scalar context.  For a domain with its own machine, this returns an
 empty list and not undef.  In a list, the empty list disappears.  So
 C<< is( host_of($d), undef ) >> compares the wrong arguments.
 
+=over 4
+
+=item domain - Str - the domain, or undef
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $host = Provisioner::Cookbook->host_of('blog.test.test');
+
 =cut
 
 sub host_of {
@@ -1300,6 +1624,16 @@ sub host_of {
 Returns the domain whose guest runs C<$domain>: C<host_of> it, or C<$domain>
 itself when it has a machine of its own.  C<$conf> is as for C<host_of>.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $machine = Provisioner::Cookbook->machine_of('blog.test.test');
+
 =cut
 
 sub machine_of {
@@ -1312,6 +1646,18 @@ sub machine_of {
 True when the configuration has a domain named C<$name>, so that C<$name> is a
 guest of this installation and not a host outside it.  C<$conf> is as for
 C<host_of>.
+
+=over 4
+
+=item name - Str - the name
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns Bool, 1 or 0.
+
+    my $ours = Provisioner::Cookbook->configures('web.test.test');
 
 =cut
 
@@ -1327,6 +1673,14 @@ sub configures {
 Returns each domain of the configuration, sorted: each name that C<configures>
 accepts.  A section, such as C<_base> or C<_shared>, is not in the list.
 C<$conf> is as for C<host_of>.
+
+=over 4
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my \@domains = Provisioner::Cookbook->domains;
 
 =cut
 
@@ -1351,6 +1705,16 @@ of a domain that takes mail, because postfix puts C<$myhostname> in
 C<mydestination>, and so delivers the mail of that name on the guest.
 C<$conf> is as for C<host_of>.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $helo = Provisioner::Cookbook->helo_name_of('web.test.test');
+
 =cut
 
 sub helo_name_of {
@@ -1368,6 +1732,22 @@ C<$guest> can be the machine of C<$domain> itself: the domain, or C<host_of>
 it.  A guest that serves a domain in such a role is checked and not added to,
 whether it is the machine of the domain or another guest.  The message says
 which machine the recipe goes on.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item guest - Str - the domain of the guest
+
+=item recipe - Str - the recipe
+
+=item role - Str - what the guest is to C<$domain>, for the message
+
+=back
+
+Returns nothing.
+
+    Provisioner::Cookbook->needs_recipe( 'web.test.test', 'dns.test.test', 'pdns', 'the authority of its registrar' );
 
 =cut
 
@@ -1574,6 +1954,20 @@ guest after the ones it needs.  The message names each guest in the cycle and
 the setting that names the next one, so that a person can change one of those
 settings.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=item \@up - Str - the guests that are up
+
+=back
+
+Returns a list of Str, the domains.
+
+    my \@first = Provisioner::Cookbook->upstream_domains('web.test.test');
+
 =cut
 
 sub upstream_domains {
@@ -1594,6 +1988,20 @@ C<by> of each step is the C<domain> of the step before it.  The arguments are
 as for C<upstream_domains>.  With the guests of this cycle added to C<@up>,
 it returns the next cycle, if there is one.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=item \@up - Str - the guests that are up
+
+=back
+
+Returns a list of HashRef, the steps.
+
+    my \@steps = Provisioner::Cookbook->upstream_cycle('web.test.test');
+
 =cut
 
 sub upstream_cycle {
@@ -1608,6 +2016,18 @@ sub upstream_cycle {
 The domains whose guests C<$domain> itself names, as in C<upstream_domains>,
 without the ones those guests need in turn.  The guest of C<$domain> has to
 reach these, and only these.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns a list of Str, the domains.
+
+    my \@reached = Provisioner::Cookbook->direct_upstream_domains('web.test.test');
 
 =cut
 
@@ -1644,6 +2064,18 @@ A domain built onto the guest of another, see C<host_of>, also names what the
 settings of that guest name, with C<by> set to that guest.  The guest itself
 does not count.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns a list of HashRef, with C<domain>, C<setting>, C<by> and C<weak>.
+
+    my \@named = Provisioner::Cookbook->named_guests('web.test.test');
+
 =cut
 
 sub named_guests {
@@ -1663,6 +2095,16 @@ C<base_global>.
 
 C<_global> holds what several recipes share, not what one recipe owns.  So it
 merges apart from the recipes, and C<domain_config> leaves it out.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $global = Provisioner::Cookbook->global_config('web.test.test');
 
 =cut
 
@@ -1685,6 +2127,14 @@ Returns the C<_global> block of C<_base>, as a new hash reference.  That is
 what C<global_config> gives a domain that says nothing itself.  C<$conf> is as
 in C<domain_config>.
 
+=over 4
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $global = Provisioner::Cookbook->base_global;
+
 =cut
 
 sub base_global {
@@ -1700,6 +2150,20 @@ C<record_setting> for the C<_global> of the domain.
 It is for a setting that a person agreed to rather than typed: the size an
 operator accepted for a guest that fitted nowhere else.  See
 L<Trog::Hypervisors/select_for($domain, $config)>.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item key - Str - the key
+
+=item value - Any - the value
+
+=back
+
+Returns Str, the path that it wrote.  Dies as C<record_setting> does.
+
+    Provisioner::Cookbook->record_global( 'web.test.test', 'linode_type', 'g6-standard-2' );
 
 =cut
 
@@ -1717,6 +2181,20 @@ C<record_setting> wrote would not take effect.  Returns 1 otherwise.
 It is the first step of C<record_setting>.  A caller that does other work
 before it writes asks first, so that it does not do that work for a write that
 will be refused.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item block - Str - the block, a recipe or C<_global>
+
+=item key - Str - the key
+
+=back
+
+Returns Int, 1.
+
+    Provisioner::Cookbook->check_settable( 'mail.test.test', 'mail', 'names' );
 
 =cut
 
@@ -1744,6 +2222,22 @@ does not ask again.  See L<Provisioner::Recipe::registrar/zone_unmanaged>.
 A file of a domain adds to F<recipes.yaml> and does not override it, so a value
 in F<recipes.yaml> would win over what this writes.  It refuses rather than
 writing something that would not take effect, and says which file to edit.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item block - Str - the block, a recipe or C<_global>
+
+=item key - Str - the key
+
+=item value - Any - the value
+
+=back
+
+Returns Str, the path.  Dies as C<check_settable> does.
+
+    my $path = Provisioner::Cookbook->record_setting( 'web.test.test', 'registrar', 'zone_unmanaged', 1 );
 
 =cut
 
@@ -1785,6 +2279,12 @@ carries settings that a recipe owns, such as C<cpus> for C<vm> and C<release>
 for the distro recipe.  The recipe declares each of those itself.  C<globals>
 refuses a key that neither this schema nor a recipe declares.  See
 C<declared_globals>.
+
+Takes no arguments.
+
+Returns a list of pairs, the schema.
+
+    my %schema = Provisioner::Cookbook->global_schema;
 
 =cut
 
@@ -1892,6 +2392,18 @@ reads it, or the build works it out and would disagree with it, or a release
 moved the setting somewhere else, as it moved C<cache> to the block of the
 hypervisor.  The refusal says which, and where a moved setting went.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns HashRef, the settings.
+
+    my $globals = Provisioner::Cookbook->globals('web.test.test');
+
 =cut
 
 sub globals {
@@ -1910,6 +2422,16 @@ sub globals {
 The settings of the C<_global> of C<_base>, validated as C<globals> validates
 the settings of a domain.  C<$conf> is as in C<domain_config>.
 
+=over 4
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns HashRef, the settings.  Dies as C<globals> does.
+
+    my $globals = Provisioner::Cookbook->base_globals;
+
 =cut
 
 sub base_globals {
@@ -1922,6 +2444,22 @@ sub base_globals {
 The check that C<globals> and C<base_globals> share, on the C<_global> block
 C<%said>.  Returns it validated, or dies as C<globals> says.  C<$where> goes
 into the message after "not valid", for example C< for $domain>.
+
+A function that takes the class first.
+
+=over 4
+
+=item class - Str - the class, C<Provisioner::Cookbook>
+
+=item said - HashRef - the C<_global> block
+
+=item where - Str - what goes into the message
+
+=back
+
+Returns HashRef, C<%said>.
+
+    my $said = Provisioner::Cookbook::validated_globals( 'Provisioner::Cookbook', $global, ' for web.test.test' );
 
 =cut
 
@@ -1964,6 +2502,12 @@ build uses.
 
 It loads every recipe, and so dies as C<load> does.
 
+Takes no arguments.
+
+Returns a list of Str, the keys.
+
+    my \@keys = Provisioner::Cookbook->declared_globals;
+
 =cut
 
 sub declared_globals {
@@ -1982,6 +2526,16 @@ in the C<aliases> of its own C<_global>.
 Every domain, not only the one being built: a zone holds the names of the
 fleet, and F<templates/files/pdns.zone.tt> writes them.  C<$conf> is as in
 C<domain_config>.
+
+=over 4
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns HashRef[ArrayRef[Str]], from each domain to its aliases.
+
+    my $aliases = Provisioner::Cookbook->alias_map;
 
 =cut
 
@@ -2009,6 +2563,16 @@ The default is not F</opt/domains>, the default of C<basedir>.  A guest that
 runs the provisioner keeps a directory for each guest that it builds under its
 C<basedir>, and a domain installed on that guest must not land among them.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $dir = Provisioner::Cookbook->install_dir('web.test.test');
+
 =cut
 
 sub install_dir {
@@ -2020,7 +2584,7 @@ sub install_dir {
     return '/opt/hosts';
 }
 
-=head2 $home = Provisioner::Cookbook->admin_home(%globals)
+=head2 $home = $class->admin_home(%globals)
 
 Returns the home directory of C<admin_user> on the guest.  C<%globals> are the
 settings of C<_global>, with C<domain>.
@@ -2033,6 +2597,20 @@ the domain.  Otherwise it is F</home/>C<admin_user>.
 cloud-init makes the account with this home, before anything else writes to
 the directory.  Returns nothing when C<admin_user> is not set, and
 F</home/>C<admin_user> when C<install_dir> or C<domain> is not.
+
+=over 4
+
+=item admin_user - Str - optional: the account
+
+=item user - Str - optional: the service account
+
+=item install_dir - Str - optional: as for C<install_dir>
+
+=item domain - Str - optional: the domain
+
+=back
+
+    my $home = Provisioner::Cookbook->admin_home( admin_user => 'admin', install_dir => '/opt/hosts', domain => 'web.test.test' );
 
 =cut
 
@@ -2056,6 +2634,16 @@ a path in a rendered configuration.  But the teardown deletes what is under the
 data source.  So if the configuration says nothing, this returns undef, which
 means that there is nothing to sweep.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $from = Provisioner::Cookbook->data_source('web.test.test');
+
 =cut
 
 sub data_source {
@@ -2072,6 +2660,16 @@ sub data_source {
 The data source that the C<_global> of C<_base> names, or undef, as for
 C<data_source>.  It is for a sweep of the whole installation, which has no
 domain to ask about.
+
+=over 4
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+Returns Str or undef: the directory.
+
+    my $from = Provisioner::Cookbook->base_data_source;
 
 =cut
 
@@ -2090,6 +2688,16 @@ into it what it fetched from the last guest.  The guest fetches its payload
 from this machine, not from the hypervisor.
 C<bin/destroy --purge-data> removes it.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item conf - HashRef - optional: the configuration, C<configuration()> by default
+
+=back
+
+    my $dir = Provisioner::Cookbook->data_dir('web.test.test');
+
 =cut
 
 sub data_dir {
@@ -2106,6 +2714,12 @@ sub data_dir {
 
 Clears what C<configuration> and C<remember> hold, and returns 1.  A test uses it
 to write a configuration, read it, and write it again.
+
+Takes no arguments.
+
+Returns Int, 1.
+
+    Provisioner::Cookbook->forget;
 
 =cut
 

@@ -86,6 +86,18 @@ our $GID_PLACEHOLDER = '%DOVECOT_GID%';
 C<$name@$domain>.  It is the key of the line in the passwd-file, and the user
 name that dovecot and C<doveadm> know.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=back
+
+Returns Str, the address.
+
+    my $address = Provisioner::MailAccount::address( 'mail.test.test', 'someone' );    # 'someone\@mail.test.test'
+
 =cut
 
 sub address ( $domain, $name ) {
@@ -96,6 +108,18 @@ sub address ( $domain, $name ) {
 
 The reference of the password of the account in the secret store:
 C<secret:mail/$domain-$name/password>.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=back
+
+Returns Str, the reference.
+
+    my $ref = Provisioner::MailAccount::secret_ref( 'mail.test.test', 'someone' );
 
 =cut
 
@@ -114,6 +138,14 @@ C<a.b>, C<.a> or C<a..b>, is fine.  The recipe asks this in C<enrich>, because t
 when a function dies, and then renders nothing.  An account would vanish from
 the passwd-file and the build would go on.
 
+=over 4
+
+=item name - Str - the name of the account
+
+=back
+
+    Provisioner::MailAccount::check_name('someone');
+
 =cut
 
 sub check_name ($name) {
@@ -129,6 +161,14 @@ a dot at the end.  The check of the top-level domain is off, because a guest can
 sit under a private or reserved one.  The label of such a domain holds letters,
 digits and hyphens, so a colon, a space, a slash, a line break and an
 underscore are all refused.  Dies for any other.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+    Provisioner::MailAccount::check_domain('mail.test.test');
 
 =cut
 
@@ -148,6 +188,28 @@ that the build replaces with the uid of dovecot and the gid of its group.  Dies
 when only one of the two is given.  Dies on a name, a domain or a gecos that
 would put a colon or a line break into the file, because the passwd-file has no
 way to quote one.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=item gecos - Str - optional: the full name, empty by default
+
+=item password - Str - the password, unless C<hash> is given
+
+=item hash - Str - the hash, unless C<password> is given
+
+=item uid - Int - optional: the uid of dovecot
+
+=item gid - Int - optional: the gid of the dovecot group
+
+=back
+
+Returns Str, the line, without a line break.
+
+    my $line = Provisioner::MailAccount::passwd_line( domain => 'mail.test.test', name => 'someone', gecos => 'Some One', password => $password );
 
 =cut
 
@@ -179,6 +241,16 @@ my sub accounts_of ($text) {
 
 The address of each account in the passwd-file text C<$text>, in file order.
 
+=over 4
+
+=item text - Str - the text of the passwd-file
+
+=back
+
+Returns a list of Str, the addresses.
+
+    my \@addresses = Provisioner::MailAccount::addresses_in($passwd);
+
 =cut
 
 sub addresses_in ($text) {
@@ -190,6 +262,18 @@ sub addresses_in ($text) {
 True when C<$address> is the address of an account in the passwd-file text
 C<$text>.
 
+=over 4
+
+=item text - Str - the text of the passwd-file
+
+=item address - Str - the address
+
+=back
+
+Returns Bool.
+
+    my $there = Provisioner::MailAccount::has_address( $passwd, 'someone\@mail.test.test' );
+
 =cut
 
 sub has_address ( $text, $address ) {
@@ -200,6 +284,18 @@ sub has_address ( $text, $address ) {
 
 C<$text> with C<$line> at the end.  Dies if the address of the line is already
 in C<$text>.
+
+=over 4
+
+=item text - Str - the text of the passwd-file
+
+=item line - Str - the line, as C<passwd_line> makes it
+
+=back
+
+Returns Str, the text.  Dies also when C<$line> is not a line of a passwd-file.
+
+    $passwd = Provisioner::MailAccount::add_line( $passwd, $line );
 
 =cut
 
@@ -217,6 +313,20 @@ sub add_line ( $text, $line ) {
 
 C<$text> with the hash of C<$address> replaced, and every other byte as it was.
 Dies if the address is not in C<$text>, or is there more than once.
+
+=over 4
+
+=item text - Str - the text of the passwd-file
+
+=item address - Str - the address
+
+=item hash - Str - the new hash
+
+=back
+
+Returns Str, the text.  Dies also when C<$hash> holds a colon or a line break.
+
+    $passwd = Provisioner::MailAccount::replace_hash( $passwd, 'someone\@mail.test.test', $hash );
 
 =cut
 
@@ -242,6 +352,18 @@ sub replace_hash ( $text, $address, $hash ) {
 
 C<$text> without the line of C<$address>.  Dies if it is not there.
 
+=over 4
+
+=item text - Str - the text of the passwd-file
+
+=item address - Str - the address
+
+=back
+
+Returns Str, the text.
+
+    $passwd = Provisioner::MailAccount::remove_line( $passwd, 'someone\@mail.test.test' );
+
 =cut
 
 sub remove_line ( $text, $address ) {
@@ -261,6 +383,18 @@ the line of an account.  The recipe also calls it for an alias, whose owner is
 the address that it delivers to.  Dies for an address with a space or a line
 break in it, because the table has no way to quote one.
 
+=over 4
+
+=item address - Str - the sender address
+
+=item owner - Str - optional: the login that owns it
+
+=back
+
+Returns Str, the line.
+
+    my $line = Provisioner::MailAccount::sender_login_line('someone\@mail.test.test');
+
 =cut
 
 sub sender_login_line ( $address, $owner = $address ) {
@@ -278,6 +412,18 @@ wildcard line at the end of the table, so this line keeps the mail of the
 account out of the catchall.  The recipe calls it for each name of
 C<mail.names>.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=back
+
+Returns Str, the line.  Dies as C<check_domain> and C<check_name> do.
+
+    my $line = Provisioner::MailAccount::virtual_aliases_line( 'mail.test.test', 'someone' );
+
 =cut
 
 sub virtual_aliases_line ( $domain, $name ) {
@@ -292,6 +438,18 @@ sub virtual_aliases_line ( $domain, $name ) {
 The line of the C<virtual_maps> table for one account: its address, and its
 mailbox C<$domain/$name> under the mail store of the domain.  The recipe calls
 it for each name of C<mail.names>.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=back
+
+Returns Str, the line.  Dies as C<check_domain> and C<check_name> do.
+
+    my $line = Provisioner::MailAccount::virtual_maps_line( 'mail.test.test', 'someone' );
 
 =cut
 
@@ -314,6 +472,20 @@ catchall stays the last entry as the build renders it.  A table with no
 catchall line gets the line at the end.  A line that is already there changes
 nothing.  Dies if the key of the line is in C<$text> with another value,
 because the table would then hold two answers for one address.
+
+=over 4
+
+=item text - Str - the text of the table, or undef for none
+
+=item line - Str - the line
+
+=item domain - Str - the domain, whose catchall line it goes above
+
+=back
+
+Returns Str, the text.  Dies also when C<$line> is not a line of a table.
+
+    $table = Provisioner::MailAccount::add_table_line( $table, $line, 'mail.test.test' );
 
 =cut
 
@@ -340,6 +512,18 @@ C<$text> without the entries whose key is C<$key>.  A table that has none comes
 back as it was, because a guest whose account was made before the tools wrote
 the tables has no line to remove.
 
+=over 4
+
+=item text - Str - the text of the table
+
+=item key - Str - the key, the address
+
+=back
+
+Returns Str, the text.
+
+    $table = Provisioner::MailAccount::remove_table_line( $table, 'someone\@mail.test.test' );
+
 =cut
 
 sub remove_table_line ( $text, $key ) {
@@ -357,6 +541,16 @@ sub remove_table_line ( $text, $key ) {
 The C<mail.names> of C<$domain>, as the configuration says them, with the
 C<secret:> references not resolved.  An empty hash reference when there are
 none.
+
+=over 4
+
+=item domain - Str - the domain
+
+=back
+
+Returns HashRef, from each name to its account.
+
+    my $accounts = Provisioner::MailAccount::configured_accounts('mail.test.test');
 
 =cut
 
@@ -382,6 +576,21 @@ C<mailboxes>.  Dies if F<recipes.yaml> sets C<mail.names> for the domain,
 because a value there wins over this file, so the account would not take
 effect.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=item account - HASH - with C<password>, C<gecos> and C<mailboxes>
+
+=back
+
+Returns Str, the path of the file that it wrote, as
+L<Provisioner::Cookbook/record_setting> returns it.
+
+    Provisioner::MailAccount::add_to_configuration( 'mail.test.test', 'someone', password => $ref, gecos => 'Some One' );
+
 =cut
 
 sub add_to_configuration ( $domain, $name, %account ) {
@@ -395,6 +604,19 @@ sub add_to_configuration ( $domain, $name, %account ) {
 Takes the account out of F<recipes.d/$domain.yaml>.  Dies for an account that is
 not in that file, for example one that F<recipes.yaml> holds, and says which
 file to edit.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=back
+
+Returns Str, the path of the file that it wrote, as
+L<Provisioner::Cookbook/record_setting> returns it.
+
+    Provisioner::MailAccount::remove_from_configuration( 'mail.test.test', 'someone' );
 
 =cut
 
@@ -449,6 +671,18 @@ my sub replace_file ( $guest, $dir, $file, $text ) {
 
 The passwd-file of C<$domain> on the guest, or undef where the file is not there.
 
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=item domain - Str - the domain
+
+=back
+
+Returns Str or undef: the text.
+
+    my $passwd = Provisioner::MailAccount::read_passwd( $guest, 'mail.test.test' );
+
 =cut
 
 sub read_passwd ( $guest, $domain ) {
@@ -463,6 +697,20 @@ file it replaces, and renames it.  The rename is one step, so dovecot reads the
 old file or the new one and never half of either.  Dies, and removes the
 temporary file, if any step fails.
 
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=item domain - Str - the domain
+
+=item text - Str - the text of the passwd-file
+
+=back
+
+Returns Int, 1.
+
+    Provisioner::MailAccount::write_passwd( $guest, 'mail.test.test', $passwd );
+
 =cut
 
 sub write_passwd ( $guest, $domain, $text ) {
@@ -473,6 +721,20 @@ sub write_passwd ( $guest, $domain, $text ) {
 
 The postfix table C<$table> (one of C<@TABLES>) of C<$domain>
 on the guest, or undef where the file is not there.
+
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=item domain - Str - the domain
+
+=item table - Str - the name of the table
+
+=back
+
+Returns Str or undef: the text.
+
+    my $table = Provisioner::MailAccount::read_table( $guest, 'mail.test.test', 'virtual_maps' );
 
 =cut
 
@@ -486,6 +748,22 @@ Replaces the postfix table C<$table> of C<$domain> on the guest with C<$text>, a
 C<write_passwd> does for the passwd-file, and then runs C<postmap> on it.
 Postfix rereads a changed C<hash:> table without a reload, so this does not
 reload postfix.  Dies if C<postmap> fails.  The file is then already replaced.
+
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=item domain - Str - the domain
+
+=item table - Str - the name of the table
+
+=item text - Str - the text of the table
+
+=back
+
+Returns Int, 1.
+
+    Provisioner::MailAccount::write_table( $guest, 'mail.test.test', 'virtual_maps', $table );
 
 =cut
 
@@ -541,6 +819,16 @@ The uid of the C<dovecot> account and the gid of the C<dovecot> group on the
 guest, which C<mail_uid> and C<mail_gid> name in the configuration of dovecot.
 Dies when the guest does not answer with a number for each.
 
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=back
+
+Returns a list of two Str of digits, the uid and the gid.
+
+    my ( $uid, $gid ) = Provisioner::MailAccount::dovecot_ids($guest);
+
 =cut
 
 sub dovecot_ids ($guest) {
@@ -559,6 +847,20 @@ sub dovecot_ids ($guest) {
 Makes each mailbox with C<doveadm mailbox create>, and skips one that is there,
 as the template does.
 
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=item address - Str - the address of the account
+
+=item \@mailboxes - Str - the names of the mailboxes
+
+=back
+
+Returns Int, 1.  Dies when C<doveadm> cannot make a mailbox.
+
+    Provisioner::MailAccount::make_mailboxes( $guest, 'someone\@mail.test.test', qw{Sent Trash} );
+
 =cut
 
 sub make_mailboxes ( $guest, $address, @mailboxes ) {
@@ -576,6 +878,18 @@ Ends the open sessions of C<$address> with C<doveadm kick>.  True when it
 exited 0.  It exits non-zero for an account with no session, which is not a
 failure of anything.
 
+=over 4
+
+=item guest - Trog::Guest - the guest, connected
+
+=item address - Str - the address of the account
+
+=back
+
+Returns Bool.
+
+    Provisioner::MailAccount::kick( $guest, 'someone\@mail.test.test' );
+
 =cut
 
 sub kick ( $guest, $address ) {
@@ -588,6 +902,18 @@ The password of an account.  With C<stdin>, one line of standard input, which
 follows the credentials block that C<--credentials> reads.  Otherwise it asks at
 the terminal with no echo, two times, through L<Trog::Credentials/typed_twice>.
 Dies on an empty password, because an empty one lets nobody in or everybody.
+
+=over 4
+
+=item address - Str - the address of the account, for the prompt
+
+=item stdin - Bool - optional: read the line from standard input
+
+=back
+
+Returns Str, the password.
+
+    my $password = Provisioner::MailAccount::ask_password( 'someone\@mail.test.test', stdin => 1 );
 
 =cut
 
@@ -624,6 +950,30 @@ the line to the passwd-file and makes the mailboxes, and adds the account to the
 configuration.  The tables come before the passwd-file.  If the passwd-file
 cannot be written, all three tables are put back as they were.  The configuration comes last, so that a
 failure on the guest leaves nothing behind that a second run refuses.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=item gecos - Str - optional: the full name, the name by default
+
+=item mailboxes - ArrayRef[Str] - optional: the mailboxes to make
+
+=item password - Str - the password
+
+=item secrets - Str - the path of the secret store
+
+=item guest - Trog::Guest - optional: the guest, by default the one that runs the domain
+
+=back
+
+Returns Int, 1.  Dies on each refusal above, when no hypervisor runs the
+domain, when the guest lacks the passwd-file or a table, and when a step on
+the guest fails.
+
+    Provisioner::MailAccount::add( domain => 'mail.test.test', name => 'someone', password => $password, secrets => $store );
 
 =cut
 
@@ -690,6 +1040,29 @@ value in the store, as C<bin/add_secret --overwrite> does.  The reference in
 the configuration does not change.  On the guest it replaces the hash of that
 one line, through a temporary file and a rename.
 
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=item password - Str - the new password
+
+=item secrets - Str - the path of the secret store
+
+=item guest - Trog::Guest - optional: the guest, by default the one that runs the domain
+
+=item kick - Bool - optional: end the open sessions of the account
+
+=back
+
+Returns Str: C<kicked> or C<no session> with C<kick>, and C<done> without it.
+Dies on each refusal above, when no hypervisor runs the domain, when the
+account is not in the passwd-file of the guest, and when a step on the guest
+fails.
+
+    my $said = Provisioner::MailAccount::reset_password( domain => 'mail.test.test', name => 'someone', password => $password, secrets => $store, kick => 1 );
+
 =cut
 
 sub reset_password (%args) {
@@ -725,6 +1098,26 @@ account that an older version of the tool made has none.  If the passwd-file
 cannot be written, all three tables are put back as they were.  The mailboxes stay on the disk
 of the guest, because they hold mail, and a tool that deletes mail on a typing
 error is worse than one that leaves it.
+
+=over 4
+
+=item domain - Str - the domain
+
+=item name - Str - the name of the account
+
+=item secrets - Str - the path of the secret store
+
+=item guest - Trog::Guest - optional: the guest, by default the one that runs the domain
+
+=item kick - Bool - optional: end the open sessions of the account
+
+=back
+
+Returns Int, 1.  Dies on the refusal above, when no hypervisor runs the
+domain, when the guest lacks the passwd-file, and when a step on the guest
+fails.
+
+    Provisioner::MailAccount::remove( domain => 'mail.test.test', name => 'someone', secrets => $store );
 
 =cut
 
