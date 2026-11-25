@@ -311,7 +311,7 @@ subtest 'only the memories are staged for the salvage' => sub {
     }
 
     my @commands = recipe()->remote_prepare( $install_dir, 'agent.test.test' );
-    is( scalar @commands, 2, 'one command for the memories, and one for .claude.json' );
+    is( scalar @commands, 3, 'one command for the memories, one for .claude.json, and one for the login' );
     my ( $rc, $err ) = run_sh( $commands[0] );
     is( $rc, 0, 'which succeeds' ) or diag "$commands[0]\n$err";
 
@@ -378,20 +378,58 @@ subtest '.claude.json is staged in a directory of its own for the salvage' => su
     ok( !-e $staged, 'and the copy staged before goes with it' );
 };
 
+subtest 'the login is staged beside .claude.json for the salvage' => sub {
+    my $install_dir = tempdir( CLEANUP => 1 );
+    my $home        = "$install_dir/agent.test.test";
+    File::Path::make_path($home);
+    my $staged = "$home/.claude-state-salvage/.credentials.json";
+
+    my ( undef, undef, $command ) = recipe()->remote_prepare( $install_dir, 'agent.test.test' );
+
+    my ( $rc_bare, $err_bare ) = run_sh($command);
+    is( $rc_bare, 0, 'a guest with no .claude at all is not a failure' ) or diag "$command\n$err_bare";
+    ok( !-e $staged, 'and stages nothing' );
+
+    File::Path::make_path("$home/.claude");
+    is( ( run_sh($command) )[0], 0, 'a guest that never logged in is not a failure' );
+    ok( !-e $staged, 'and stages nothing' );
+
+    open( my $fh, '>', "$home/.claude/.credentials.json" ) or die "Cannot write $home/.claude/.credentials.json: $!";
+    print {$fh} qq{{"claudeAiOauth":{}}\n};
+    close($fh) or die "Cannot close $home/.claude/.credentials.json: $!";
+    chmod 0600, "$home/.claude/.credentials.json" or die "Cannot chmod: $!";
+
+    my ( $rc, $err ) = run_sh($command);
+    is( $rc, 0, 'which succeeds' )                                  or diag "$command\n$err";
+    ok( -s $staged && !-d $staged, 'the file is staged as a file' ) or return;
+    is( ( stat $staged )[2] & oct(7777), oct(600), 'and keeps its mode, so the staged login is no more readable than the login' );
+
+    unlink "$home/.claude/.credentials.json" or die "Cannot unlink: $!";
+    is( ( run_sh($command) )[0], 0, 'a login that is gone is not a failure' );
+    ok( !-e $staged, 'and the copy staged before goes with it' );
+
+    open( $fh, '>', $staged ) or die "Cannot write $staged: $!";
+    close($fh)                or die "Cannot close $staged: $!";
+    File::Path::remove_tree("$home/.claude");
+    is( ( run_sh($command) )[0], 0, 'a guest whose .claude is gone is not a failure' );
+    ok( !-e $staged, 'and the copy staged before goes with it' );
+};
+
 subtest 'the memories go back where the agent reads them' => sub {
     my %restores = recipe()->restores(%G);
     is_deeply(
         \%restores,
         {
-            '/opt/domains/agent.test.test/.claude/projects' => { from => '/opt/domains/agent.test.test/claude/memory/projects',    owner => 'agent:someadmin' },
-            '/opt/domains/agent.test.test/.claude.json'     => { from => '/opt/domains/agent.test.test/claude/state/.claude.json', owner => 'agent:someadmin', mode => '0600' },
+            '/opt/domains/agent.test.test/.claude/projects'          => { from => '/opt/domains/agent.test.test/claude/memory/projects',         owner => 'agent:someadmin' },
+            '/opt/domains/agent.test.test/.claude.json'              => { from => '/opt/domains/agent.test.test/claude/state/.claude.json',      owner => 'agent:someadmin', mode => '0600' },
+            '/opt/domains/agent.test.test/.claude/.credentials.json' => { from => '/opt/domains/agent.test.test/claude/state/.credentials.json', owner => 'agent:someadmin', mode => '0600' },
         },
-        'into .claude/projects of the domain, and .claude.json for the service user alone, both owned by the service user'
+        'into .claude/projects of the domain, and .claude.json and the login for the service user alone, all owned by the service user'
     );
     my %no_user = %G;
     delete $no_user{user};
     my %fallback = recipe()->restores(%no_user);
-    is_deeply( [ map { $fallback{$_}{owner} } sort keys %fallback ], [ ('someadmin:someadmin') x 2 ], 'with no service user, both belong to the admin' );
+    is_deeply( [ map { $fallback{$_}{owner} } sort keys %fallback ], [ ('someadmin:someadmin') x 3 ], 'with no service user, all three belong to the admin' );
 };
 
 my %BOT = ( github_user => 'bot', github_token => 'ghp_x', git_email => 'bot@test.test' );

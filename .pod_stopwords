@@ -139,6 +139,7 @@ statfs
 statvfs
 SolusVM
 SUDO
+Str
 Subclasses
 Subclusters
 Substitutable
@@ -536,6 +537,7 @@ vnc
 webmail
 websocket
 whitespace
+worktree
 www
 yaml
 zonediff
