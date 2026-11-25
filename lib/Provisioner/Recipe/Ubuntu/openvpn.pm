@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::openvpn - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<openvpn>, and C<easy-rsa>, which makes its certificates.
 

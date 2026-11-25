@@ -194,7 +194,7 @@ sub caches ( $self, @names ) {    ## no critic (ProhibitUnusedDefinitions) -- th
     return map { $_ => $self->{blocks}{$_}{cache} } grep { defined $self->{blocks}{$_} && ( $self->{blocks}{$_}{cache} // q{} ) ne q{} } @names;
 }
 
-=head2 \%block = $fleet->block($name)
+=head2 $fleet->block($name)
 
 =over 4
 

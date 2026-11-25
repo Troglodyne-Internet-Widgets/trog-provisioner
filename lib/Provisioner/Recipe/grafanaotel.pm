@@ -136,7 +136,7 @@ L<Provisioner::Recipe::clod> does with C<telemetry>.
 # @example my $path = Provisioner::Recipe::grafanaotel->dashboard_path();
 sub dashboard_path { return '/d/claude-runs' }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Returns C<grafana>, with the retention policy C<details> for
 C<detail_retention>, 48h when C<%opts> does not name it: the pair C<grafana>
@@ -155,7 +155,7 @@ sub required_recipes {
     return ( grafana => sub { ( retention_policies => { details => $keep } ) } );
 }
 
-=head2 %limits = $recipe->rate_limits(%opts)
+=head2 $recipe->rate_limits(%opts)
 
 The OTLP port, at 256 new connections a second from one sender, the limit
 that L<Provisioner::Recipe::logcollector> gives the other stream of the
@@ -174,7 +174,7 @@ sub rate_limits {
     return ( ( $opts{port} // 4317 ) => 256 );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  There is one telegraf, one input and one processor on the machine.
 
@@ -186,7 +186,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -292,7 +292,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The telegraf fragment, the processor that it loads, the ufw profile and the
 dashboard.
@@ -315,7 +315,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<grafanaotel.tt>.
 

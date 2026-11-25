@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::ntp - Ubuntu's C<deps> and C<dep_conflicts> for L<P
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<chrony>.
 
@@ -30,7 +30,7 @@ sub deps {
     return qw{chrony};
 }
 
-=head2 @pkgs = $recipe->dep_conflicts()
+=head2 $recipe->dep_conflicts()
 
 C<ntp>, C<ntpdate> and C<systemd-timesyncd>, the other clients of NTP, which
 the packager keeps off the guest.

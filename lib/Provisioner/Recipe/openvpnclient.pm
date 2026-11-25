@@ -184,7 +184,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Takes the options of the recipe and returns them with C<device> set.  If the
 domain names its own C<device>, it keeps it.  If not, the name comes from a hash
@@ -242,7 +242,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 @grants = $recipe->grants($domain, %opts)
+=head2 $recipe->grants($domain, %opts)
 
 With C<issue_from>, the certificate and the static address that that server
 issues to C<$domain>, as C<grants> in L<Provisioner::Recipe> says.  See
@@ -262,7 +262,7 @@ sub grants {
     return { recipe => 'openvpn', guest => $issuer, client => $domain };
 }
 
-=head2 @domains = $recipe->joins_network_of(%opts)
+=head2 $recipe->joins_network_of(%opts)
 
 The guest of C<issue_from> and of C<server>, as C<joins_network_of> in
 L<Provisioner::Recipe> says.  The server routes its clients to the network that
@@ -280,7 +280,7 @@ sub joins_network_of {
     return List::Util::uniq( grep { defined && $_ ne q{} } @opts{qw{issue_from server}} );
 }
 
-=head2 %terms = $recipe->grant_terms($grant, %opts)
+=head2 $recipe->grant_terms($grant, %opts)
 
 The static address of the client of C<$grant> and the C<server> block that it
 connects to, as L<Provisioner::Recipe::openvpn/issue_grant> takes them.  The
@@ -299,7 +299,7 @@ sub grant_terms {
     return ( address => 'auto', server => $opts{server} );
 }
 
-=head2 @files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The configuration of the client, its lines for F</etc/hosts> and its ufw
 application profile.  It ignores the loaded recipes that the caller passes.

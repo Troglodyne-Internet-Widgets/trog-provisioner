@@ -102,7 +102,7 @@ sub tests {
     return qw{go.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<go.dev>, which the URL of the archive names, and C<dl.google.com>, where
 go.dev redirects the download.

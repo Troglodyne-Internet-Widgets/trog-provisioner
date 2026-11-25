@@ -93,9 +93,11 @@ configuration is not this program's decision.
 
 =head1 SUBROUTINES
 
-=head2 $rc = main(@args)
+=head2 main(@args)
 
 Runs the move.  Returns 0, or 2 for a usage error.
+
+    my $rc = main(@args);
 
 =cut
 
@@ -147,12 +149,14 @@ sub main {
     return 0;
 }
 
-=head2 (\@moved, \@kept, \@dropped) = move_into($from, $into)
+=head2 move_into($from, $into)
 
 Folds the blocks of C<$from>, a L<Config::Simple>, into C<$into>, the
 configuration as YAML gives it.  Changes C<$into> in place.  Returns what it
 moved, what it left because C<$into> already said it, and what it left because
 F<recipes.yaml> does not take it, all as lines to print.
+
+    my ($moved, $kept, $dropped) = move_into($from, $into);
 
 =cut
 

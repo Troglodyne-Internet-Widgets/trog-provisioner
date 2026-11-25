@@ -90,7 +90,7 @@ destinations.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Returns C<grafana> for the stack, and C<logcollector> for the stream.  It
 configures C<logcollector> with the forward that points to this recipe.  It
@@ -118,7 +118,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 The syslog input of telegraf on C<port>, on 127.0.0.1.  The port is 6514 when
 C<%opts> does not name one.
@@ -136,7 +136,7 @@ sub listens {
     return ( "127.0.0.1:" . ( $opts{port} // 6514 ) );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  There is one telegraf input on one port, one dashboard, and one
 collector that forwards to it.  A second domain describes the same stream again.
@@ -149,7 +149,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -189,7 +189,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 Returns the telegraf fragment and the dashboard, each as template name to
 output file name.
@@ -205,7 +205,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the template for the test that runs on the guest:
 F<grafanasyslog.tt>.

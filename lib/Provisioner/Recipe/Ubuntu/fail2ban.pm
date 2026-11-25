@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::fail2ban - Ubuntu's C<deps> for L<Provisioner::Reci
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<fail2ban>.
 

@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::loccount};
 
 Provisioner::Recipe::Ubuntu::loccount - Ubuntu's C<deps> for L<Provisioner::Recipe::loccount>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<git>, which clones it, and C<make>, which runs its build.  C<python3> and
 C<python3-ruamel.yaml>, because C<go generate> runs F<tablegen.py>, which

@@ -101,7 +101,7 @@ sub forget {
     return 1;
 }
 
-=head2 %files = kit_files()
+=head2 kit_files()
 
 Each file of the kit, at its path in the kit, to the file of this machine that
 it is a copy of: F<bin/ippool>, L<Provisioner::IPPool::DB>, F<schema/ips.sql>
@@ -130,7 +130,7 @@ sub kit_files {
     );
 }
 
-=head2 $hash = kit_hash(%files)
+=head2 kit_hash(%files)
 
 The SHA-256 of the kit C<%files>, as C<kit_files> gives it: of each path in
 the kit, and the content of its file, in the order of the paths.
@@ -164,7 +164,7 @@ my sub hash_there ( $machine, $dir ) {
     return $said;
 }
 
-=head2 $dir = ensure_kit($machine)
+=head2 ensure_kit($machine)
 
 The directory of the kit of this checkout on C<$machine>, a L<Trog::Machine>,
 which this puts there when the hypervisor does not have it.  Asks once in each
@@ -212,7 +212,7 @@ sub ensure_kit ($machine) {
     return $READY{$key} = $dir;
 }
 
-=head2 $result = call($machine, $path, $op, $args, %opts)
+=head2 call($machine, $path, $op, $args, %opts)
 
 Runs the operation C<$op> of L<Provisioner::IPPool::DB> with C<$args> on the
 database at C<$path> on C<$machine>, a remote L<Trog::HV>, through the kit,

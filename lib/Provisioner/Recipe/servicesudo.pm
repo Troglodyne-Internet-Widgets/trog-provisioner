@@ -113,7 +113,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Dies when C<user> is not C<admin_user> and is not a plain account name.  It
 goes into a sudoers line and into the name of a file in F<sudoers.d>, and sudo

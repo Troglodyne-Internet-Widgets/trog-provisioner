@@ -71,7 +71,7 @@ F<ossec.conf.d/50-ossecagent>.
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 True.  One agent runs on the machine, under the name of the machine, with one
 F<client.keys>.  Only the domain that is its own machine holds the key, as
@@ -86,7 +86,7 @@ Returns Bool, always 1.
 
 sub is_multi_tenant { return 1 }
 
-=head2 %settings = $recipe->machine_wide(%opts)
+=head2 $recipe->machine_wide(%opts)
 
 C<manager>, because the one agent of the machine sends to one manager.  See
 L<Provisioner::Recipe/machine_wide>.
@@ -102,7 +102,7 @@ sub machine_wide {
     return ( manager => $opts{manager} );
 }
 
-=head2 @names = $recipe->exclusive_on_machine_with()
+=head2 $recipe->exclusive_on_machine_with()
 
 C<ossec>.  The package of the agent conflicts with the package of the manager,
 so a machine has one or the other.  The manager reads the logs of its own
@@ -118,7 +118,7 @@ sub exclusive_on_machine_with {
     return qw{ossec};
 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -145,7 +145,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns C<%opts> with C<manager_ip>, the address that the ip pool assigns
 C<manager>, or empty when the pool assigns it none.  Then the build looks up
@@ -168,7 +168,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 @grants = $recipe->grants($domain, %opts)
+=head2 $recipe->grants($domain, %opts)
 
 The key of the agent of the machine, which the C<ossec> recipe of C<manager>
 issues, when C<$domain> is its own machine.  Nothing for a tenant, whose
@@ -195,7 +195,7 @@ sub grants {
     return { recipe => 'ossec', guest => $manager, client => $domain };
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<configd>, which makes F<ossec.conf>.
 
@@ -210,7 +210,7 @@ sub required_recipes {
     return ( configd => sub { ( languages => ['ossec'] ) } );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 The archive of Atomicorp, as for the manager.
 
@@ -224,7 +224,7 @@ sub fetch_hosts {
     return Provisioner::Cookbook->load('ossec')->fetch_hosts();
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The archive, as an apt repository.
 
@@ -240,7 +240,7 @@ sub cache_classes {
     return map { local ($_) = $_; $class->apt_repo_classes($_) } $class->fetch_hosts();
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The fragment of F<ossec.conf> and the firewall profile.
 
@@ -258,7 +258,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the template for the test that runs on the guest.
 

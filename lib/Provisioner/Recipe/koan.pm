@@ -225,7 +225,7 @@ C<deps> is in L<Provisioner::Recipe::Ubuntu::koan>.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 The recipes that koan needs, each with a sub that turns the options of koan
 into its own: C<claude>, with no options; C<servicesudo>, with the commands
@@ -285,7 +285,7 @@ sub required_recipes {
     );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  This recipe installs two units for the whole machine,
 F</etc/systemd/system/koan.service> and F<koan-awake.service>.  Both name the
@@ -376,7 +376,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Sets C<github_nickname> to C<github_user> when it is not given.  For matrix,
 it turns E2EE on by default and mints C<matrix_pickle_key> when E2EE is on and
@@ -444,7 +444,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 @files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 Returns pairs of a template and the file that it renders to: the env file, the
 behavior configuration, the project list, the two systemd units, the ufw
@@ -474,7 +474,7 @@ sub template_files {
     );
 }
 
-=head2 @dirs = $recipe->datadirs()
+=head2 $recipe->datadirs()
 
 Returns C<koan>, so that C<remote_files> has a data directory to copy into on
 the first provision.
@@ -487,7 +487,7 @@ sub datadirs {
     return qw{koan};
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 =over 4
 
@@ -527,7 +527,7 @@ sub tests {
     return qw{koan.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts(%opts)
+=head2 $recipe->fetch_hosts(%opts)
 
 Returns the host of C<repo_url>, which is GitHub for the default repo.  When
 the class is asked without a configuration, it returns the host of the default.

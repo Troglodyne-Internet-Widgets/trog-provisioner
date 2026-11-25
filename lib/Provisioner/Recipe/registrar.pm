@@ -244,7 +244,7 @@ to publish another address.
 
 =cut
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 Returns the schema of the configuration.  The C<description> of each key
 documents it.
@@ -330,7 +330,7 @@ sub args {
     );
 }
 
-=head2 %credentials = $recipe->lexicon_credentials(%opts)
+=head2 $recipe->lexicon_credentials(%opts)
 
 Returns how lexicon gets to the server that holds the zone of
 C<$opts{domain}>, as these keys:
@@ -393,7 +393,7 @@ sub lexicon_credentials {
     return $self->domain_credentials(%opts);
 }
 
-=head2 $bool = $recipe->unmanaged($domain)
+=head2 $recipe->unmanaged($domain)
 
 Returns 1 where nothing of this installation writes the zone of C<$domain>, and
 0 where something does.  See L</A zone that nothing here can write>.  It is 0
@@ -413,7 +413,7 @@ sub unmanaged ( $self, $domain ) {
     return $self->zone_unmanaged( %{ $self->configuration_of($domain) }, domain => $domain );
 }
 
-=head2 $bool = $recipe->zone_unmanaged(%opts)
+=head2 $recipe->zone_unmanaged(%opts)
 
 Whether nothing of this installation writes the zone of C<$opts{domain}>, where
 C<%opts> is the configuration of this recipe and no server of this
@@ -456,7 +456,7 @@ sub zone_unmanaged ( $self, %opts ) {
     return 1;
 }
 
-=head2 %credentials = $recipe->domain_credentials(%opts)
+=head2 $recipe->domain_credentials(%opts)
 
 The credentials with which C<$opts{domain}> writes its own zone at a
 registrar.  They are those of the account whose zone is the domain or holds
@@ -476,7 +476,7 @@ sub domain_credentials ( $self, %opts ) {
     return $self->configured_credentials(%opts);
 }
 
-=head2 %credentials = $recipe->parent_credentials(%opts)
+=head2 $recipe->parent_credentials(%opts)
 
 The credentials with which C<$opts{domain}> writes the zone above its own,
 where the C<NS> record that delegates it goes.  They are those of the account
@@ -496,7 +496,7 @@ sub parent_credentials ( $self, %opts ) {
     return $self->configured_credentials(%opts);
 }
 
-=head2 ($zone, \%account) = $recipe->account_for($domain, \%conf, %how)
+=head2 $recipe->account_for($domain, \%conf, %how)
 
 =over 4
 
@@ -528,7 +528,7 @@ sub account_for ( $self, $domain, $conf, %how ) {
     return ( $zone, $zones{$zone} );
 }
 
-=head2 %credentials = $recipe->credentials_for(%opts)
+=head2 $recipe->credentials_for(%opts)
 
 C<lexicon_credentials> for C<$opts{domain}>, with the configuration of this
 recipe that the domain has, or else the configuration of the guest that the
@@ -551,7 +551,7 @@ sub credentials_for {
     return $self->lexicon_credentials( %{ $self->configuration_of( $opts{domain} ) }, domain => $opts{domain} );
 }
 
-=head2 \%conf = $recipe->configuration_of($domain)
+=head2 $recipe->configuration_of($domain)
 
 The configuration of this recipe that C<$domain> has, or else the configuration
 of the guest that C<$domain> is layered onto, from L<Provisioner::Cookbook>.
@@ -568,7 +568,7 @@ sub configuration_of ( $self, $domain ) {
     return Provisioner::Cookbook->domain_config($domain)->{$name} // Provisioner::Cookbook->domain_config($server)->{$name} // {};
 }
 
-=head2 %credentials = $recipe->configured_credentials(%opts)
+=head2 $recipe->configured_credentials(%opts)
 
 Returns C<type>, C<user> and C<key> as the operator configured them, with an
 empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
@@ -596,7 +596,7 @@ sub configured_credentials {
     );
 }
 
-=head2 $zone = $recipe->zone_of($name, $domain, \%zones)
+=head2 $recipe->zone_of($name, $domain, \%zones)
 
 The zone of an account that holds C<$name>, or undef where the zone of
 C<$domain> holds it, or where no account lists a zone that does.  So it
@@ -629,7 +629,7 @@ sub zone_of ( $self, $name, $domain, $zones = undef ) {
     return $zone;
 }
 
-=head2 @zones = $recipe->longest_first(@zones)
+=head2 $recipe->longest_first(@zones)
 
 C<@zones>, the longer first, and in order of the name where two are as long.
 A zone inside another is longer, so it comes first, as C<zone_of> decides.
@@ -645,7 +645,7 @@ sub longest_first ( $, @zones ) {
     return @sorted;
 }
 
-=head2 %zones = $recipe->account_zones(%conf)
+=head2 $recipe->account_zones(%conf)
 
 Maps each zone that an account of C<$conf{accounts}> lists to the C<type>,
 C<user> and C<key> of that account, or to its C<authority>.  Dies on a zone
@@ -673,7 +673,7 @@ sub account_zones ( $, %conf ) {
     return %zones;
 }
 
-=head2 %zones = $recipe->configured_zones($domain)
+=head2 $recipe->configured_zones($domain)
 
 C<account_zones> of the configuration that C<configuration_of> reads for
 C<$domain>.
@@ -689,7 +689,7 @@ sub configured_zones ( $self, $domain ) {
     return $self->account_zones( %{ $self->configuration_of($domain) } );
 }
 
-=head2 %credentials = $recipe->zone_credentials($zone, \%account)
+=head2 $recipe->zone_credentials($zone, \%account)
 
 How lexicon writes C<$zone>, for C<%account>, which is what C<account_zones>
 maps C<$zone> to.  For an account with an C<authority>, it is what
@@ -708,7 +708,7 @@ sub zone_credentials ( $self, $zone, $account ) {
     return $self->configured_credentials( %$account, domain => $zone );
 }
 
-=head2 @aliases = $recipe->zone_aliases(%opts)
+=head2 $recipe->zone_aliases(%opts)
 
 The names that the zone of C<$opts{domain}> holds as C<CNAME> records of the
 domain.
@@ -743,7 +743,7 @@ sub zone_aliases ( $self, %opts ) {
     return grep { local ($_) = $_; !$addressed{$_} && !defined $self->zone_of( $_, $opts{domain}, $zones ) } $self->domain_aliases(%opts);
 }
 
-=head2 @names = $recipe->zone_address_names(%opts)
+=head2 $recipe->zone_address_names(%opts)
 
 The names that the zone of C<$opts{domain}> holds as C<A> records at the
 address of the domain, and not as C<CNAME> records: the C<addressed_names> of
@@ -765,7 +765,7 @@ sub zone_address_names ( $self, %opts ) {
     return grep { local ($_) = $_; !defined $self->zone_of( $_, $opts{domain}, $zones ) } sort( uniq(@names) );
 }
 
-=head2 @records = $recipe->zone_records(%opts)
+=head2 $recipe->zone_records(%opts)
 
 The records other than names that the zone of C<$opts{domain}> holds: the
 C<dns_records> of each recipe in C<$opts{modules}>, as L<Provisioner::Recipe>
@@ -791,7 +791,7 @@ sub zone_records ( $self, %opts ) {
     return @sorted;
 }
 
-=head2 $guest = $recipe->authority_of($domain)
+=head2 $recipe->authority_of($domain)
 
 Returns the guest whose pdns holds the zone of C<$domain>, or undef where the
 registrar of C<type> holds it.  For a domain that is layered onto another
@@ -832,7 +832,7 @@ sub authority_of {
     return;
 }
 
-=head2 $bool = $recipe->serves_itself($domain)
+=head2 $recipe->serves_itself($domain)
 
 True where the pdns of the server of C<$domain> holds its zone, as
 C<authority_of> says.
@@ -852,7 +852,7 @@ sub serves_itself {
     return ( defined $holder && $holder eq $server ) ? 1 : 0;
 }
 
-=head2 @recipes = $recipe->zone_server_for($domain, \@recipes, %walk)
+=head2 $recipe->zone_server_for($domain, \@recipes, %walk)
 
 Returns pdns where a guest of C<@recipes> holds its own zone and does not list
 pdns, and an empty list otherwise.  The guest holds its own zone where its
@@ -878,7 +878,7 @@ sub zone_server_for {
     return 'pdns';
 }
 
-=head2 $guest = $recipe->delegated_to($domain)
+=head2 $recipe->delegated_to($domain)
 
 Returns what C<authority_of> returns, where that is another guest than the
 server of C<$domain>, and undef otherwise.
@@ -896,7 +896,7 @@ sub delegated_to {
     return ( defined $holder && $holder ne $server ) ? $holder : undef;
 }
 
-=head2 @grants = $recipe->grants($domain, %opts)
+=head2 $recipe->grants($domain, %opts)
 
 What the pdns guests that serve C<$domain> grant it, as C<grants> in
 L<Provisioner::Recipe> says.  See L<Provisioner::Recipe::pdns/issue_grant>.
@@ -935,7 +935,7 @@ sub grants {
     return @grants;
 }
 
-=head2 %terms = $recipe->grant_terms($grant, %opts)
+=head2 $recipe->grant_terms($grant, %opts)
 
 For a grant with C<zones>, C<names>: each of those zones that holds a served
 name of the client, mapped to those names.  The served names are
@@ -965,7 +965,7 @@ sub grant_terms {
     return ( names => \%names );
 }
 
-=head2 %publication = $recipe->publication(%opts)
+=head2 $recipe->publication(%opts)
 
 What this recipe publishes for C<$opts{domain}>, as options for its templates:
 C<address>, C<domain_aliases>, C<address_names>, C<zone_records>,
@@ -1059,7 +1059,7 @@ sub publication {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds what C<publication> says this recipe publishes.
 
@@ -1143,7 +1143,7 @@ sub enrich {
     return ( %opts, %publication );
 }
 
-=head2 @written = $recipe->generate_files($output_dir, %vars)
+=head2 $recipe->generate_files($output_dir, %vars)
 
 Writes the templates, and the C<zone_records> as F<registrar-records.json>
 where there are records to publish in the zone of the domain.  Also, where
@@ -1202,7 +1202,7 @@ sub template_files {
     );
 }
 
-=head2 %files = $recipe->resolver_files(%opts)
+=head2 $recipe->resolver_files(%opts)
 
 The drop-in that sends the names of the zone of the authority to it, when the
 registrar names an authority.  The C<resolver> target installs it before any
@@ -1225,7 +1225,7 @@ sub tests {
     return qw{registrar.tt};
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Returns lexicon, which publishes the records, and which an operator edits the
 zone with.  It does not return pdns where the guest holds its own zone.  The

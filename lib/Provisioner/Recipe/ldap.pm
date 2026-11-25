@@ -119,7 +119,7 @@ An account has no password.  It logs in with a key.
 
 =head1 METHODS
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 slapd: LDAP on 389, and LDAP over TLS on C<port>, both on every address.
 C<port> is 636 when C<%opts> does not give it.
@@ -138,7 +138,7 @@ sub listens {
     return ( 389, $opts{port} // 636 );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 Returns false.  A guest has one slapd.  Its suffix, its organization and its
 TLS certificate all use the name of the domain that configured it.
@@ -202,7 +202,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Sets C<base_dn> from C<domain> when it is not given, so that C<test.test>
 becomes C<dc=test,dc=test>.  Sets C<ldap_domain>, the domain that debconf
@@ -274,7 +274,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<cron>, which installs F<ldap-export.cron> as F</etc/cron.d/ldap-export>.
 With C<github>, it also installs F<ldap-github-sync.cron> as
@@ -299,7 +299,7 @@ sub required_recipes {
     );
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head2 $recipe->guest_secrets($install_dir, $domain, %opts)
 
 =over 4
 
@@ -337,7 +337,7 @@ sub guest_secrets {
     );
 }
 
-=head2 %formatters = $recipe->formatters()
+=head2 $recipe->formatters()
 
 C<json>, which F<ldap.github-sync.json.tt> writes the configuration of the
 sync with.
@@ -353,7 +353,7 @@ sub formatters {
     return ( json => Text::Xslate::html_builder( sub { return Cpanel::JSON::XS->new->canonical->pretty->encode(shift) } ) );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<ldap-export.sh>, which the guest runs before the fetch.  The cron runs
 it each hour, so without this call a rebuild can lose up to an hour of changes.
@@ -367,7 +367,7 @@ sub remote_prepare {
     return ('/usr/local/sbin/ldap-export.sh');
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 The export directory F</var/backups/ldap>, restored from C<ldap> in the data
 directory of the domain, owned by root, with no access for others.  The
@@ -392,7 +392,7 @@ sub restores {
     return ( '/var/backups/ldap' => { from => "$install_dir/$domain/ldap", owner => 'root:root', mode => 'u=rwX,go=' } );
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 =over 4
 

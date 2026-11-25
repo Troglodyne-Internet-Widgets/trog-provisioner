@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::backupdestination - Ubuntu's C<deps> for L<Provisio
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<rsync>, which receives the data, and C<openssh-server>, which it arrives
 over.

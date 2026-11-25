@@ -121,7 +121,7 @@ be.
 
 =head1 METHODS
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -145,7 +145,7 @@ Returns the schema as a list of pairs, for L<Provisioner::Recipe/args>.
 
 =cut
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 True.  The machine has one rsyslog and one
 F</etc/rsyslog.d/10-logshipper.conf>, which the global half writes once, with
@@ -162,7 +162,7 @@ Returns 1.
 
 sub is_multi_tenant { return 1 }
 
-=head2 %settings = $recipe->machine_wide(%opts)
+=head2 $recipe->machine_wide(%opts)
 
 Every setting, with its default, because each of them goes into the one
 forwarder file of the machine.  So F<bin/new_config> refuses a tenant that
@@ -184,7 +184,7 @@ sub machine_wide {
     return map { $_ => $opts{$_} // $default{$_} } qw{host port protocol selector retry queue_size};
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 L<Provisioner::Recipe::ossecagent>, with C<host> as its manager, when an OSSEC
 manager on C<host> reads every line of this guest, as
@@ -249,7 +249,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The rsyslog configuration F<logshipper.conf> and the ufw profile
 F<logshipper_ufw.conf>.  They are the same whichever recipes are loaded, so it
@@ -272,7 +272,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest:
 F<logshipper.tt>.
@@ -283,7 +283,7 @@ F<logshipper.tt>.
 
 sub tests { return ('logshipper.tt') }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns C<%opts> with C<target> added, as the C<target> method returns it.  The
 templates test C<target> and not C<host>, because C<target> is empty for a guest
@@ -300,7 +300,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $target = $recipe->target(%opts)
+=head2 $recipe->target(%opts)
 
 Takes C<host>, C<domain> and C<ipmap> (domain name to address).  Returns the
 address or name to give rsyslog, as L</How C<host> is resolved> says.  For a guest

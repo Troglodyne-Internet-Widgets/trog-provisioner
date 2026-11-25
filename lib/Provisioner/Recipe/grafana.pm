@@ -85,7 +85,7 @@ fleet start after the restore.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 Returns C<nginxproxy>, in front.  Grafana answers on loopback, and something
 must serve the domain.
@@ -122,7 +122,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 grafana on C<port>, and influxd on 8086 for queries and on 8088 for backups,
 all three on 127.0.0.1.
@@ -140,7 +140,7 @@ sub listens {
     return ( "127.0.0.1:" . ( $opts{port} // 3000 ), "127.0.0.1:8086", "127.0.0.1:8088" );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  The machine has one grafana, one influxd and one telegraf.  This recipe
 writes each of their configuration files to a fixed path, so a second domain
@@ -154,7 +154,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -275,7 +275,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The configuration of grafana, of influxd and of telegraf, the datasource and
 the dashboard provider, the setup script of InfluxDB, and the two scripts of
@@ -308,7 +308,7 @@ sub template_files {
     );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Runs F<grafana-salvage.sh>, which writes a portable backup of
 C<influx_database> to F<.grafana-salvage/influxdb>.  See L</What a rebuild
@@ -334,7 +334,7 @@ sub remote_prepare {
     return ("$install_dir/$domain/grafana-salvage.sh");
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The backup that C<remote_prepare> made.  It lands in F<grafana-salvage> of the
 domain directory, where the restore reads it.
@@ -359,7 +359,7 @@ sub remote_files {
     return ( "$install_dir/$domain/.grafana-salvage/" => 'grafana-salvage/' );
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 A jail that bans a host whose logins fail too often.  grafana logs each request
 to its log file, with the address that nginx forwarded:
@@ -388,7 +388,7 @@ sub jails {
     );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 The two vendor archives.  C<influxdb> is not here, because it comes from the
 mirror of the distribution, which every guest already reaches.
@@ -403,7 +403,7 @@ sub fetch_hosts {
     return (qw{apt.grafana.com repos.influxdata.com});
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 Both archives, as apt repositories.
 
@@ -420,7 +420,7 @@ sub cache_classes {
     return map { local ($_) = $_; $class->apt_repo_classes($_) } $class->fetch_hosts();
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<grafana.tt>.
 

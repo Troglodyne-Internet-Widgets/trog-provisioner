@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::lexicon - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<lexicon>, and C<python3-requests-unixsocket>, which the patch to lexicon
 imports whichever provider it runs.

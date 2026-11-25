@@ -144,11 +144,13 @@ sub main {
     return @found ? 1 : 0;
 }
 
-=head2 (\%names, \@ranges) = private_names($conf, $fleet)
+=head2 private_names($conf, $fleet)
 
 The names that the configuration C<$conf> and the fleet C<$fleet> hold, each
 in lower case and mapped to its kind, and the IPv4 ranges that they name.
 See L</DESCRIPTION>.
+
+    my ($names, $ranges) = private_names($conf, $fleet);
 
 =cut
 
@@ -180,10 +182,12 @@ sub private_names ( $conf, $fleet ) {
     return ( \%names, [ uniq @ranges ] );
 }
 
-=head2 @parents = parents($domain)
+=head2 parents($domain)
 
 Each parent of C<$domain> that has two labels or more: F<b.c.test> and
 F<c.test> for F<a.b.c.test>.
+
+    my @parents = parents($domain);
 
 =cut
 
@@ -192,10 +196,12 @@ sub parents ($domain) {
     return map { join q{.}, @labels[ $_ .. $#labels ] } 1 .. $#labels - 1;
 }
 
-=head2 @strings = strings_in(@data)
+=head2 strings_in(@data)
 
 Every string in C<@data>, a list of structures of hashes and arrays, keys
 included.
+
+    my @strings = strings_in(@data);
 
 =cut
 
@@ -232,11 +238,13 @@ sub forget_public ($names) {
     return;
 }
 
-=head2 @findings = findings(\%names, \@ranges, $prose)
+=head2 findings(\%names, \@ranges, $prose)
 
 One line for each line of C<$prose> and each kind of name that it holds:
 C<line N: KIND>.  It matches C<%names> in any case, as whole names, and each
 IPv4 address against C<@ranges>.
+
+    my @findings = findings(\%names, \@ranges, $prose);
 
 =cut
 
@@ -259,9 +267,11 @@ sub findings ( $names, $ranges, $prose ) {
     return @found;
 }
 
-=head2 $bool = valid_ipv4($address)
+=head2 valid_ipv4($address)
 
 Whether each of the four parts of C<$address> is 255 or less.
+
+    my $bool = valid_ipv4($address);
 
 =cut
 

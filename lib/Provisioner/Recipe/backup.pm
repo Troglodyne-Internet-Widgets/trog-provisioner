@@ -62,7 +62,7 @@ TODO: Consult the other recipes on the guest to choose the user and group that e
 
 =head1 METHODS
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options: C<targets>, an object from the name of a target to
 its path, and C<key_file>, a string, which are both required, and
@@ -90,7 +90,7 @@ sub args {
     );
 }
 
-=head2 @targets = $class->default_targets(%opts)
+=head2 $class->default_targets(%opts)
 
 The targets that the recipes in C<$opts{modules}> ask to have backed up, in the
 order of those recipes.  Each one is a hashref:
@@ -137,7 +137,7 @@ sub default_targets {
     return @targets;
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds the C<default_targets> of the recipes in C<modules> to C<targets>, where
 C<targets> does not name them already, and adds the C<remote_skip> patterns of
@@ -185,7 +185,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The configuration of the rsync daemon, the logrotate rule of its log and the
 reboot check, the same on every guest.
@@ -205,7 +205,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<backup.tt>.
 

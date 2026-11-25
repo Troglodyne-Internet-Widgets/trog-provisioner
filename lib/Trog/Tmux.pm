@@ -166,7 +166,7 @@ sub asking {
     return $want ? @result : $result[0];
 }
 
-=head2 $bool = $badge->watched()
+=head2 $badge->watched()
 
 Returns true when an attached client is looking at the window of the badge,
 and false when not.
@@ -197,7 +197,7 @@ sub bell {
     return 1;
 }
 
-=head2 $out = $badge->tmux(@args)
+=head2 $badge->tmux(@args)
 
 Runs C<tmux> with C<@args>.
 

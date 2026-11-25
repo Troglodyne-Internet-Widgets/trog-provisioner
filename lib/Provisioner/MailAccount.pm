@@ -81,7 +81,7 @@ our @TABLES = qw{sender_login virtual_aliases virtual_maps};
 our $UID_PLACEHOLDER = '%DOVECOT_UID%';
 our $GID_PLACEHOLDER = '%DOVECOT_GID%';
 
-=head2 $address = address($domain, $name)
+=head2 address($domain, $name)
 
 C<$name@$domain>.  It is the key of the line in the passwd-file, and the user
 name that dovecot and C<doveadm> know.
@@ -104,7 +104,7 @@ sub address ( $domain, $name ) {
     return "$name\@$domain";
 }
 
-=head2 $ref = secret_ref($domain, $name)
+=head2 secret_ref($domain, $name)
 
 The reference of the password of the account in the secret store:
 C<secret:mail/$domain-$name/password>.
@@ -237,7 +237,7 @@ my sub accounts_of ($text) {
     return map { m/\A([^:\s][^:]*):/ ? [ $1, $_ ] : () } grep { !m/\A\s*(?:\#|\z)/ } split( m/\n/, $text // q{} );
 }
 
-=head2 @addresses = addresses_in($text)
+=head2 addresses_in($text)
 
 The address of each account in the passwd-file text C<$text>, in file order.
 
@@ -257,7 +257,7 @@ sub addresses_in ($text) {
     return map { $_->[0] } accounts_of($text);
 }
 
-=head2 $bool = has_address($text, $address)
+=head2 has_address($text, $address)
 
 True when C<$address> is the address of an account in the passwd-file text
 C<$text>.
@@ -280,7 +280,7 @@ sub has_address ( $text, $address ) {
     return any { $_ eq $address } addresses_in($text);
 }
 
-=head2 $text = add_line($text, $line)
+=head2 add_line($text, $line)
 
 C<$text> with C<$line> at the end.  Dies if the address of the line is already
 in C<$text>.
@@ -309,7 +309,7 @@ sub add_line ( $text, $line ) {
     return "$text$line\n";
 }
 
-=head2 $text = replace_hash($text, $address, $hash)
+=head2 replace_hash($text, $address, $hash)
 
 C<$text> with the hash of C<$address> replaced, and every other byte as it was.
 Dies if the address is not in C<$text>, or is there more than once.
@@ -348,7 +348,7 @@ sub replace_hash ( $text, $address, $hash ) {
     return $text;
 }
 
-=head2 $text = remove_line($text, $address)
+=head2 remove_line($text, $address)
 
 C<$text> without the line of C<$address>.  Dies if it is not there.
 
@@ -375,7 +375,7 @@ sub remove_line ( $text, $address ) {
     return $text;
 }
 
-=head2 $line = sender_login_line($address, $owner)
+=head2 sender_login_line($address, $owner)
 
 The line of the C<sender_login> table: C<$address> and the login that owns it,
 with a space between.  C<$owner> is C<$address> where it is left out, which is
@@ -404,7 +404,7 @@ sub sender_login_line ( $address, $owner = $address ) {
     return "$address $owner";
 }
 
-=head2 $line = virtual_aliases_line($domain, $name)
+=head2 virtual_aliases_line($domain, $name)
 
 The line of the C<virtual_aliases> table for one account: its address, and the
 same address as the target.  Postfix tries the whole address before the
@@ -433,7 +433,7 @@ sub virtual_aliases_line ( $domain, $name ) {
     return "$address $address";
 }
 
-=head2 $line = virtual_maps_line($domain, $name)
+=head2 virtual_maps_line($domain, $name)
 
 The line of the C<virtual_maps> table for one account: its address, and its
 mailbox C<$domain/$name> under the mail store of the domain.  The recipe calls
@@ -465,7 +465,7 @@ my sub entries_of ($text) {
     return map { m/\A(\S+)\s+\S/ ? [ $1, $_ ] : () } grep { !m/\A\s*(?:\#|\z)/ } split( m/\n/, $text // q{} );
 }
 
-=head2 $text = add_table_line($text, $line, $domain)
+=head2 add_table_line($text, $line, $domain)
 
 C<$text> with C<$line> in it, above the catchall line C<@$domain>, so that the
 catchall stays the last entry as the build renders it.  A table with no
@@ -506,7 +506,7 @@ sub add_table_line ( $text, $line, $domain ) {
     return "$text$line\n";
 }
 
-=head2 $text = remove_table_line($text, $key)
+=head2 remove_table_line($text, $key)
 
 C<$text> without the entries whose key is C<$key>.  A table that has none comes
 back as it was, because a guest whose account was made before the tools wrote
@@ -536,7 +536,7 @@ sub remove_table_line ( $text, $key ) {
     return $text;
 }
 
-=head2 $accounts = configured_accounts($domain)
+=head2 configured_accounts($domain)
 
 The C<mail.names> of C<$domain>, as the configuration says them, with the
 C<secret:> references not resolved.  An empty hash reference when there are
@@ -667,7 +667,7 @@ my sub replace_file ( $guest, $dir, $file, $text ) {
     return 1;
 }
 
-=head2 $text = read_passwd($guest, $domain)
+=head2 read_passwd($guest, $domain)
 
 The passwd-file of C<$domain> on the guest, or undef where the file is not there.
 
@@ -717,7 +717,7 @@ sub write_passwd ( $guest, $domain, $text ) {
     return replace_file( $guest, "$MAIL_ROOT/$domain", 'passwd', $text );
 }
 
-=head2 $text = read_table($guest, $domain, $table)
+=head2 read_table($guest, $domain, $table)
 
 The postfix table C<$table> (one of C<@TABLES>) of C<$domain>
 on the guest, or undef where the file is not there.
@@ -813,7 +813,7 @@ my sub with_tables ( $guest, $domain, $old, $new, $code ) {
     die $why;
 }
 
-=head2 ($uid, $gid) = dovecot_ids($guest)
+=head2 dovecot_ids($guest)
 
 The uid of the C<dovecot> account and the gid of the C<dovecot> group on the
 guest, which C<mail_uid> and C<mail_gid> name in the configuration of dovecot.
@@ -872,7 +872,7 @@ sub make_mailboxes ( $guest, $address, @mailboxes ) {
     return 1;
 }
 
-=head2 $bool = kick($guest, $address)
+=head2 kick($guest, $address)
 
 Ends the open sessions of C<$address> with C<doveadm kick>.  True when it
 exited 0.  It exits non-zero for an account with no session, which is not a
@@ -896,7 +896,7 @@ sub kick ( $guest, $address ) {
     return root( $guest, 'doveadm kick ' . Trog::Utils::shell_quote($address) ) == 0;
 }
 
-=head2 $password = ask_password($address, %opts)
+=head2 ask_password($address, %opts)
 
 The password of an account.  With C<stdin>, one line of standard input, which
 follows the credentials block that C<--credentials> reads.  Otherwise it asks at

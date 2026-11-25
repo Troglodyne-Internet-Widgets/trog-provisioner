@@ -129,7 +129,7 @@ session on it is the same as a session on the main sshd.
 
 our $DEFAULT_PORT = 2222;
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 The fast lane sshd on C<port>, on every IPv4 address.  A redirect rewrites the
 destination to an address of the interface that the packet came in on, so the

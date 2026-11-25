@@ -163,7 +163,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes()
+=head2 $recipe->required_recipes()
 
 C<cron>, which installs F<mariadb-backup.cron> as F</etc/cron.d/mariadb-backup>.
 
@@ -178,7 +178,7 @@ sub required_recipes {
     return ( cron => sub { return ( files => { 'mariadb-backup' => 'mariadb-backup.cron' } ) } );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<mariadb-backup.sh>, which the guest runs before the fetch.  The cron
 runs it at 2:30 each night, so without this call a rebuild loses every write
@@ -192,7 +192,7 @@ sub remote_prepare {
     return ('/usr/local/sbin/mariadb-backup.sh');
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 Salvages F</var/backups/mysql/> into C<mysql/> in the data directory.  Those
 dumps are the only state of this server that nothing here can regenerate.
@@ -217,7 +217,7 @@ sub tests {
     return qw{mariadb.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<archive.mariadb.org>, the apt repository of the packages.  It is a
 third-party repository, so the cache serves it, not the mirrorlist of
@@ -234,7 +234,7 @@ sub fetch_hosts {
     return qw{archive.mariadb.org};
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The apt classes for C<archive.mariadb.org>, where the packages come from.
 
@@ -249,7 +249,7 @@ sub cache_classes {
     return $self->apt_repo_classes('archive.mariadb.org');
 }
 
-=head2 @units = $recipe->oom_protect()
+=head2 $recipe->oom_protect()
 
 C<mariadb.service>.  InnoDB has a reputation for databases that do not
 recover after the kernel OOM killer kills it.

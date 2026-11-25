@@ -108,7 +108,7 @@ PATH that starts with the C<bin/> directory of the service install dir.
 
 =head1 METHODS
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Sets what MAILFROM and each MAILTO say, and returns the options.
 
@@ -168,7 +168,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 $bool = $recipe->ossec_watches($domain)
+=head2 $recipe->ossec_watches($domain)
 
 True where an OSSEC manager reads the logs of C<$domain>, as
 L<Provisioner::Recipe::ossec/watches> decides.  See L</Where OSSEC watches the
@@ -195,7 +195,7 @@ sub ossec_watches {
 # The name of a job, which names its file in cron.d.
 my $JOB_NAME = qr/\A [[:alnum:]] [[:alnum:]_.-]* \z/;
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options: C<from>, a local part or an address; C<files>, an
 object from the name of a job in F</etc/cron.d> to the file of the payload;
@@ -253,7 +253,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The crontabs of root, of root for the domain and of the service user, the
 configuration and the defaults of rkhunter, and the job that checks the
@@ -279,7 +279,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<cron.tt>.
 

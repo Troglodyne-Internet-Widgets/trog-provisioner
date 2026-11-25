@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::auditd - Ubuntu's C<deps> for L<Provisioner::Recipe
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<auditd>, the audit daemon.
 

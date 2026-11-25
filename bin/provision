@@ -392,12 +392,14 @@ sub place_guest_secrets {
     return 1;
 }
 
-=head2 $said = chown_error($guest, $owner, $path)
+=head2 chown_error($guest, $owner, $path)
 
 Runs the C<chown> that failed again on C<$guest>, in the C locale, and returns
 what it said.  C<run_sudo> returns only the exit code, and that does not tell a
 missing account from a file that is not there.  Only the text does.  It returns
 the text of sudo when sudo needs a password, which is not an account error.
+
+    my $said = chown_error($guest, $owner, $path);
 
 =cut
 
@@ -409,7 +411,7 @@ sub chown_error {
     return $guest->capture_sudo( qw{sh -c}, 'exec 2>&1; exec env LC_ALL=C chown "$1" "$2"', 'sh', $owner, $path ) // q{};
 }
 
-=head2 $secret = issue_secret($domain, $path, $issue)
+=head2 issue_secret($domain, $path, $issue)
 
 Asks another guest for a secret that C<$domain> needs at C<$path>.  C<$issue>
 is the C<issue> of a C<guest_secrets> entry: C<guest> is the guest that issues
@@ -419,6 +421,8 @@ error is discarded.  Returns the secret.
 
 Dies when no hypervisor runs that guest, or the command prints nothing, or
 more than one line.  The guest that issues it must be up first.
+
+    my $secret = issue_secret($domain, $path, $issue);
 
 =cut
 
@@ -590,7 +594,7 @@ sub main {
     return build_guest( %build, domain => $domain, reuse => $reuse, salvage_gaps_ok => $salvage_gaps_ok, salvage_from => $salvage_from );
 }
 
-=head2 %there = cycles_left_up($domain, $conf, %args)
+=head2 cycles_left_up($domain, $conf, %args)
 
 The guests of each cycle among the guests that C<$domain> needs, see
 L<Provisioner::Cookbook/upstream_cycle>, when this run can leave every one of
@@ -606,6 +610,8 @@ ask on, it dies, as a cycle always did.
 It stops at the first cycle that this run cannot leave alone: one that holds
 C<$domain>, or a guest that is not up.  It returns what it found up to there,
 and C<upstream_domains> dies on that cycle with its own message.
+
+    my %there = cycles_left_up($domain, $conf, %args);
 
 =cut
 
@@ -635,13 +641,15 @@ sub cycles_left_up {
     return %there;
 }
 
-=head2 $name = guest_is_up($domain, %args)
+=head2 guest_is_up($domain, %args)
 
 The name of the hypervisor of the fleet that has a guest of C<$domain>, or
 undef when none does.  It asks every hypervisor, whichever one C<hypervisor>
 in C<%args> names, and warns about one that it cannot ask and skips it, as when
 a guest is placed.  C<hvconf> and C<domain_dir> in C<%args> are as for
 C<build_guest>.
+
+    my $name = guest_is_up($domain, %args);
 
 =cut
 
@@ -842,11 +850,13 @@ sub build_guest {
     return 0;
 }
 
-=head2 @result = with_rollback($domain, $on_failure, $code)
+=head2 with_rollback($domain, $on_failure, $code)
 
 Runs C<$code>, which builds the guest of C<$domain>, and returns what it
 returns.  When it dies, this calls C<offer_rollback> and then dies with the
 same error, so a failed build stops the run after the offer.
+
+    my @result = with_rollback($domain, $on_failure, $code);
 
 =cut
 
@@ -861,7 +871,7 @@ sub with_rollback {
     return @result;
 }
 
-=head2 $rolled_back = offer_rollback($domain, $on_failure)
+=head2 offer_rollback($domain, $on_failure)
 
 Offers to put the guest of C<$domain> back to the snapshot that
 C<provision_domain> took before this run rebuilt it.  Returns true when it did.
@@ -874,6 +884,8 @@ told to.  A guest built for the first time has no snapshot, and this says so.
 The snapshot is of the guest before the rebuild, and the store holds the guest
 key of the rebuild.  So after a rollback the stored key does not open the
 guest, and the keys of the administrator still do.
+
+    my $rolled_back = offer_rollback($domain, $on_failure);
 
 =cut
 
@@ -1027,7 +1039,7 @@ sub refuse_on_salvage_gaps {
       . "\nThe guest was asked, and it still has files under each of those -- so this is\na fetch that did not bring them, not a service that has nothing.  Rebuilding now\ndestroys the only copy.\n\nThe salvage reads them as root over sudo, so the usual cause is sudo being\nrefused on the guest or the fetch failing partway.  Look at what it said above,\nfix it and run again, or pass --salvage-gaps-ok if that state is gone for good\nand you want the guest rebuilt without it.\n";
 }
 
-=head2 $behavior = ask_about_nonreusable($domain)
+=head2 ask_about_nonreusable($domain)
 
 Asks the operator what to do about a rebuild that destroys the guest of
 $domain.  Call it only when a person is there to answer.
@@ -1035,6 +1047,8 @@ $domain.  Call it only when a person is there to answer.
 It returns C<$NONREUSABLE{clone}> for the answer C<copy>, and
 C<$NONREUSABLE{destroy}> for C<destroy>.  For any other answer, an empty one
 too, it returns C<$NONREUSABLE{stop}>.
+
+    my $behavior = ask_about_nonreusable($domain);
 
 =cut
 
@@ -1130,7 +1144,7 @@ sub provision_domain (%args) {
     return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $address ) );
 }
 
-=head2 ($user, $host) = reprovision_guest(%args)
+=head2 reprovision_guest(%args)
 
 Adds a domain to a guest that is up, and does not build a guest.  It takes the
 keys C<hv>, C<config>, C<domain>, C<reuse>, C<reuser>, C<depends> and C<own_hv>.
@@ -1147,6 +1161,8 @@ guest.  The other is the removal of a guest that has the name of this domain.
 
 It ships F<user-data>, the addresses, F<setup.sh> and the secrets, and
 schedules F<setup.sh> with C<at>.  It dies if it cannot ship a file.
+
+    my ($user, $host) = reprovision_guest(%args);
 
 =cut
 
@@ -1278,7 +1294,7 @@ sub merge_guest_addresses (%args) {
     return 1;
 }
 
-=head2 $name = primary_adapter($netplan, $mac)
+=head2 primary_adapter($netplan, $mac)
 
 Returns the name of the outbound interface in $netplan, the parsed netplan of
 the guest.  It finds the entry whose C<match> stanza has the MAC address $mac.
@@ -1292,6 +1308,8 @@ the hypervisor.
 
 It dies if netplan has no C<ethernets> section, or if no entry has the MAC or
 the name.
+
+    my $name = primary_adapter($netplan, $mac);
 
 =cut
 
@@ -1315,7 +1333,7 @@ sub primary_adapter {
     die "Could not find the outbound adapter in the guest's netplan: nothing matches\n" . "$mac, and there is " . ( defined $named ? "no $named either" : 'no static adapter to name it' ) . ".  It has: " . join( ', ', sort keys %$ethernets ) . "\n";
 }
 
-=head2 %seed = read_seed($config)
+=head2 read_seed($config)
 
 Returns the three NoCloud files that the seed ISO of the guest is made from,
 keyed by name: C<user-data>, C<meta-data> and C<network-config>.  It reads them
@@ -1328,6 +1346,8 @@ there is no reason to continue.
 
 A dry run does not call this, because it has no ISO to make and no guest to
 give it to.
+
+    my %seed = read_seed($config);
 
 =cut
 

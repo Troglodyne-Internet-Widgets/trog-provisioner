@@ -184,10 +184,12 @@ sub main {
     return 0;
 }
 
-=head2 $hostname = default_hostname()
+=head2 default_hostname()
 
 Returns a new lowercase UUID under C<.test>, the TLD that RFC 2606 reserves for
 this use.
+
+    my $hostname = default_hostname();
 
 =cut
 
@@ -201,7 +203,7 @@ sub unique {
     return grep { !$seen{$_}++ } @in;
 }
 
-=head2 \%base = base_config()
+=head2 base_config()
 
 Returns the C<_base> block of F<recipes.yaml>, with its C<_global>, as
 L<Provisioner::Cookbook> reads it.  Every domain gets the values in C<_base>
@@ -214,6 +216,8 @@ C<required_recipes> sub reads those settings while this scaffolds: a guest
 scaffolded without an C<admin_user> gets files owned by nobody, and nothing
 between here and the build says so.
 
+    my $base = base_config();
+
 =cut
 
 sub base_config {
@@ -224,7 +228,7 @@ sub base_config {
     return $base;
 }
 
-=head2 ($config, @todo) = build($hostname, \@recipes, \%opts)
+=head2 build($hostname, \@recipes, \%opts)
 
 Returns the domain configuration as a hash keyed by C<$hostname>, and the
 fields that you must fill in.  The configuration has a C<_global> entry with
@@ -232,6 +236,8 @@ the hypervisor resources, then one entry for each recipe.
 
 C<%opts> takes C<all>, C<memory>, C<cpus>, C<size> and C<user> as the options
 of the same names, and C<base> as the return of C<base_config>.
+
+    my ($config, @todo) = build($hostname, \@recipes, \%opts);
 
 =cut
 

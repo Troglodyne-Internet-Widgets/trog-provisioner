@@ -135,7 +135,7 @@ my %SCHEMA = (
 
 =head1 METHODS
 
-=head2 @files = $class->first_boot_files(%args)
+=head2 $class->first_boot_files(%args)
 
 The files of C<files> for the C<sources> in C<%args>, and the pin of C<forbid>
 for its C<conflicts>, for C<domain>.  See L<Provisioner::Packager>.
@@ -164,7 +164,7 @@ sub first_boot_files {
     );
 }
 
-=head2 @answers = $class->answers(@answers)
+=head2 $class->answers(@answers)
 
 The answers once each, as lines that C<debconf-set-selections> reads.
 cloud-init gives them to debconf before it installs anything.
@@ -186,7 +186,7 @@ sub answers {
     return uniq @answers;
 }
 
-=head2 @modules = $class->cloud_init_modules()
+=head2 $class->cloud_init_modules()
 
 C<cc_apt_configure>, which sets the debconf answers.  The archives are files,
 which C<cc_write_files> writes for every packager.
@@ -203,7 +203,7 @@ sub cloud_init_modules {
     return qw{cc_apt_configure};
 }
 
-=head2 $pattern = $class->package_name()
+=head2 $class->package_name()
 
 The rule of the Debian policy for the name of a package, as
 L<Dist::Conformance::Check::SystemPackages> holds a declaration to it, so that
@@ -223,7 +223,7 @@ sub package_name {
     return $Dist::Conformance::Check::SystemPackages::PACKAGE_NAME{deb};
 }
 
-=head2 @argv = $class->install_command()
+=head2 $class->install_command()
 
 C<apt-get install> without recommends, through C<env> with
 C<DEBIAN_FRONTEND=noninteractive>, so that sudo, which empties the environment,
@@ -249,7 +249,7 @@ sub install_command {
     );
 }
 
-=head2 @argv = $class->update_command($file)
+=head2 $class->update_command($file)
 
 C<apt-get update> of the deb822 F<.sources> file C<$file> alone, which keeps
 the lists of every other source as they are.  It finds C<apt-get> on the
@@ -282,7 +282,7 @@ my sub canonical ($value) {
     return join( ',', map { "$_->[0]=" . ( ${ $_->[1] } // q{} ) } grep { !ref ${ $_->[1] } } Trog::Utils::slots_in( \$value ) );
 }
 
-=head2 @sources = $class->merge(@sources)
+=head2 $class->merge(@sources)
 
 Returns C<@sources> validated, with one entry for each C<name>.  Two recipes can
 name the same archive, and then they must describe it the same way.
@@ -325,7 +325,7 @@ sub merge {
     return map { $by_name{$_} } @order;
 }
 
-=head2 @files = $class->files(@sources)
+=head2 $class->files(@sources)
 
 Fetches the key of each source, asks the archive for each suite, and returns
 the files for them.  Each file is a hash reference with C<path>, C<content>,
@@ -403,7 +403,7 @@ sub files {
     return @files;
 }
 
-=head2 @files = $class->forbid($domain, @packages)
+=head2 $class->forbid($domain, @packages)
 
 A pin that keeps apt from installing C<@packages> at all, from any archive, as
 the one file in a list, or no file when C<@packages> is empty.  The file is
@@ -439,7 +439,7 @@ sub forbid {
     };
 }
 
-=head2 $key = key($url, $name)
+=head2 key($url, $name)
 
 The key at C<$url>, as bytes.  C<$name> is the source that wants it, for the
 error.  Dies when the fetch fails, and when the answer is neither an armored
@@ -480,7 +480,7 @@ sub key {
     };
 }
 
-=head2 @fingerprints = key_fingerprints($key)
+=head2 key_fingerprints($key)
 
 The fingerprint of each primary key in C<$key>, an armored or a binary key, in
 upper case, as C<gpg --show-keys> reads it.  gpg reads every version and
@@ -536,7 +536,7 @@ sub key_fingerprints {
     return @fingerprints;
 }
 
-=head2 $trimmed = trim_key($key)
+=head2 trim_key($key)
 
 C<$key>, an armored or a binary key, as a binary key with only what apt needs
 to check the signature of an archive.  Each primary key keeps its user IDs, its
@@ -573,7 +573,7 @@ sub trim_key {
     return gpg( $home, q{}, $doing, 'gpg could not export the key', qw{--export --export-options export-minimal --export-filter}, 'drop-subkey=usage = e' );
 }
 
-=head2 $why = $class->gpg_error()
+=head2 $class->gpg_error()
 
 Why C<key_fingerprints> cannot run on this machine, or undef when it can: gpg
 must run, and be GnuPG 2.2.8 or later, the first release with C<--show-keys>.
@@ -641,7 +641,7 @@ sub check_suite {
     die "The apt source $name has no suite $suite: " . join( ', and ', @answers ) . ".\n";
 }
 
-=head2 $res = fetch($url, $method)
+=head2 fetch($url, $method)
 
 An L<HTTP::Tiny> response for C<$url>, by C<GET> unless C<$method> says
 otherwise.  The one place this module reaches the network, so a test replaces

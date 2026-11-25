@@ -19,7 +19,7 @@ Provisioner::Recipe::Ubuntu::pdns - Ubuntu's C<deps> and archive for L<Provision
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 The authoritative server with its tools and its sqlite3 backend, the recursor,
 C<sqlite3>, and C<libnet-dns-perl>, C<libjson-perl> and
@@ -35,7 +35,7 @@ sub deps {
     return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libnet-dns-perl libjson-perl libdata-validate-domain-perl};
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The release train of the authoritative server that C<repo_branch> names, from
 C<repo.powerdns.com>, for C<distro_release>, the release of the domain.  It pins C<pdns-*> above Ubuntu, as PowerDNS says to, so

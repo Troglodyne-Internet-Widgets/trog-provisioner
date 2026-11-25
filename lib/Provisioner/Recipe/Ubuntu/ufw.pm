@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::ufw - Ubuntu's C<deps> for L<Provisioner::Recipe::u
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<ufw>.
 

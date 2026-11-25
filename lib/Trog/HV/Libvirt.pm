@@ -487,7 +487,7 @@ Returns Str.
 
     my $perl = $hv->ip_perl;
 
-=head2 $unit = Trog::HV::Libvirt::partition_slice($partition)
+=head2 Trog::HV::Libvirt::partition_slice($partition)
 
 =over 4
 
@@ -503,7 +503,7 @@ Returns Str.
 
     my $unit = Trog::HV::Libvirt::partition_slice('/machine/runner');
 
-=head2 $cores = $hv->slice_cpu_quota($unit)
+=head2 $hv->slice_cpu_quota($unit)
 
 =over 4
 
@@ -531,7 +531,7 @@ sub ip_perl    ($self) { return $self->setting('ip_perl') // 'perl' }
 
 sub partition_slice ($partition) { return ( $partition =~ s{\A/}{}r =~ tr{/}{-}r ) . '.slice' }
 
-=head2 $unit = $hv->session_slice()
+=head2 $hv->session_slice()
 
 The user slice of the account of a session URI, F<user-UID.slice>, where systemd
 puts every process of that user, and so the qemu of each guest of the session.
@@ -764,7 +764,7 @@ sub start_domain {
     return 1;
 }
 
-=head2 @actions = $hv->debug_actions()
+=head2 $hv->debug_actions()
 
 Every action of F<bin/debug_boot>.  The tool was written against libvirt, and
 each of its actions edits the definition of a domain, drives libguestfs on the
@@ -778,7 +778,7 @@ Returns the names of the actions, as a list of Str.
 
 sub debug_actions { return qw{console fetch hold shot vnc keys restore cat ls single} }
 
-=head2 $xml = $hv->domain_definition($name)
+=head2 $hv->domain_definition($name)
 
 =over 4
 
@@ -839,7 +839,7 @@ sub restart_domain {
     return 1;
 }
 
-=head2 $path = $hv->console_log_path($name)
+=head2 $hv->console_log_path($name)
 
 =over 4
 
@@ -857,7 +857,7 @@ Returns Str, the path.
 
 sub console_log_path { my ( $self, $name ) = @_; return "$CONSOLE_LOG_DIR/$name-console.log" }
 
-=head2 $restarted = $hv->console_capture($name, %opts)
+=head2 $hv->console_capture($name, %opts)
 
 =over 4
 
@@ -934,7 +934,7 @@ sub console_capture_off {
     return 1;
 }
 
-=head2 $text = $hv->console_output($name)
+=head2 $hv->console_output($name)
 
 =over 4
 
@@ -959,7 +959,7 @@ sub console_output {
     return $self->capture_sudo( 'cat', $log ) || undef;
 }
 
-=head2 ($advice, $port) = $hv->vnc_access($name)
+=head2 $hv->vnc_access($name)
 
 =over 4
 
@@ -1111,7 +1111,7 @@ sub lease_ip {
     return $newest;
 }
 
-=head2 @ips = lease_ips($network, %opts)
+=head2 lease_ips($network, %opts)
 
 =over 4
 
@@ -1189,7 +1189,7 @@ sub release_dhcp_lease {
     return $self->run_sudo( "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip ) == 0 ? 1 : 0;
 }
 
-=head2 $path = $hv->lease_helper()
+=head2 $hv->lease_helper()
 
 The path of the libvirt lease helper on the hypervisor, or undef when it has
 none.  Distributions put it in one of two places.
@@ -1283,7 +1283,7 @@ sub pool {
     return $self->{_pools}{$name} = $pool;
 }
 
-=head2 $pool = $hv->define_pool($name, $path, %permissions)
+=head2 $hv->define_pool($name, $path, %permissions)
 
 =over 4
 
@@ -1378,7 +1378,7 @@ sub volume_path {
     return eval { $volume->get_path() };
 }
 
-=head2 $name = image_volume_name($url)
+=head2 image_volume_name($url)
 
 =over 4
 
@@ -1555,7 +1555,7 @@ sub install_download {
     return $self->volume_path($name) // $path;
 }
 
-=head2 $sum = $hv->published_checksum($url)
+=head2 $hv->published_checksum($url)
 
 =over 4
 
@@ -1593,7 +1593,7 @@ Returns Str, or undef.
 
     my $sum = $hv->published_checksum('https://images.test.test/os.qcow2');
 
-=head2 $sum = parse_checksums($text, $file, $only)
+=head2 parse_checksums($text, $file, $only)
 
 =over 4
 
@@ -1657,7 +1657,7 @@ sub published_checksum {
     return undef;
 }
 
-=head2 $sum = $hv->file_checksum($path)
+=head2 $hv->file_checksum($path)
 
 =over 4
 
@@ -1689,7 +1689,7 @@ sub file_checksum {
 my $TWELVE_DIGITS = qr/[[:xdigit:]]{12}/;
 my $BASE_VOLUME   = qr/\A (?<family> baseimage-\N+?-$TWELVE_DIGITS) (?: - (?<tag> $TWELVE_DIGITS) )? \z/;
 
-=head2 @volumes = $hv->base_volumes()
+=head2 $hv->base_volumes()
 
 Every base volume that C<base_image> made in the pool, newest first, as hashrefs
 with C<name>, C<path>, C<family>, C<tag> (the start of the checksum, or undef for
@@ -1702,7 +1702,7 @@ Returns the volumes, as a list of HashRef.
 
     my @volumes = $hv->base_volumes();
 
-=head2 @volumes = $hv->image_volumes($family)
+=head2 $hv->image_volumes($family)
 
 =over 4
 
@@ -1750,7 +1750,7 @@ sub image_volumes {
     return grep { $_->{family} eq $family } $self->base_volumes();
 }
 
-=head2 $bool = $hv->is_build($volume, $sum)
+=head2 $hv->is_build($volume, $sum)
 
 =over 4
 
@@ -1778,7 +1778,7 @@ sub is_build {
     return defined $have && $have eq $sum ? 1 : 0;
 }
 
-=head2 @removed = $hv->prune_base_images()
+=head2 $hv->prune_base_images()
 
 Removes each base volume that nothing is backed by, except the newest of its
 image, and returns the names that it removed.  Call it when a disk goes away.
@@ -2681,7 +2681,7 @@ sub pool_fstype {
     return $self->{pool_fstype} //= $self->path_fstype( $self->pool_path );
 }
 
-=head2 $type = $hv->path_fstype($path)
+=head2 $hv->path_fstype($path)
 
 =over 4
 
@@ -3053,7 +3053,7 @@ sub disk_owner_says ( $self, @argv ) {
     return $self->is_session ? $self->capture_cmd(@argv) : $self->capture_sudo(@argv);
 }
 
-=head2 @words = $hv->guestfs_env()
+=head2 $hv->guestfs_env()
 
 The environment that a tool of libguestfs needs on the hypervisor, as the
 leading words of an argument list for C<disk_owner_says>.  On a session URI it
@@ -3423,7 +3423,7 @@ sub guest_network_xml ( $, $plan, $uuid = undef ) {
     return join "\n", '<network>', "  <name>$plan->{name}</name>", ( defined $uuid ? "  <uuid>$uuid</uuid>" : () ), "  <forward mode='nat'/>", "  <bridge name='$plan->{bridge}' stp='on' delay='0'/>", "  <ip address='$plan->{address}' prefix='$plan->{prefix}'/>", '</network>', q{};
 }
 
-=head2 @actions = $hv->guest_network_steps(\%plan)
+=head2 $hv->guest_network_steps(\%plan)
 
 =over 4
 
@@ -3504,7 +3504,7 @@ sub guest_network_steps ( $hv, $plan ) {
     );
 }
 
-=head2 %adapters = $hv->runner_adapters(\%block, $user)
+=head2 $hv->runner_adapters(\%block, $user)
 
 =over 4
 
@@ -3563,7 +3563,7 @@ sub runner_adapters ( $hv, $block, $user ) {
     return ( bridges => [ ( @dhcp ? @dhcp : $hv->lease_nic ), @static ], networks => \@networks );
 }
 
-=head2 @actions = $hv->runner_network_steps(\%plan)
+=head2 $hv->runner_network_steps(\%plan)
 
 =over 4
 
@@ -3599,7 +3599,7 @@ sub runner_network_steps ( $hv, $plan ) {
     return $hv->guest_network_steps($plan);
 }
 
-=head2 @actions = $hv->runner_network_removal_steps(\%plan, $user)
+=head2 $hv->runner_network_removal_steps(\%plan, $user)
 
 =over 4
 
@@ -4045,7 +4045,7 @@ sub guest_ssh_ip {
     die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n" . "routable address: set 'ips' in provision.conf, or run this from a guest of that hypervisor on its NAT network.\n" . "The libvirt NAT lease (" . ( $lease_ip // 'none' ) . ") is reachable only from the hypervisor and from its other guests.\n";
 }
 
-=head2 $bool = on_nat_network()
+=head2 on_nat_network()
 
 Whether this machine is on the NAT network of the hypervisor, so that it reaches
 the lease of a guest there directly.
@@ -4072,7 +4072,7 @@ sub on_nat_network {
     return $self->{on_nat_network};
 }
 
-=head2 $address = nat_address($domain)
+=head2 nat_address($domain)
 
 =over 4
 
@@ -4142,7 +4142,7 @@ sub inspection_address {
     return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) );
 }
 
-=head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
+=head2 $hv->preflight_checks(), $hv->preflight_notes()
 
 The names of the checks and notes that C<bin/preflight> runs on this backend, in
 order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
@@ -4157,7 +4157,7 @@ Returns the names, as a list of Str, from each.
 sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_guest_bridges check_guest_networks check_bridge_acl check_guest_pool check_pool_writable check_virtiofs check_config} }
 sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_stale_base_image note_plaintext_secrets} }
 
-=head2 $result = $hv->check_reachable()
+=head2 $hv->check_reachable()
 
 Passes on a local hypervisor, or when C<whoami> runs over ssh on a remote one.
 
@@ -4184,7 +4184,7 @@ key already trusted there; nothing here can answer a password prompt.
 FIX
 }
 
-=head2 $result = $hv->check_transfer_ip()
+=head2 $hv->check_transfer_ip()
 
 Passes when this machine has an address that a guest on the NAT bridge can
 fetch its payload from, over ssh.  Without one, the run fails at the first
@@ -4225,7 +4225,7 @@ of _base in recipes.yaml:
 FIX
 }
 
-=head2 $result = $hv->check_passwordless_sudo()
+=head2 $hv->check_passwordless_sudo()
 
 Passes when the ssh user has passwordless sudo, for everything or only for the
 lease helper.  Fails, with the commands that give the grant, when it has neither.
@@ -4305,7 +4305,7 @@ installs it on first use, which is the one step that wants the wider grant.
 FIX
 }
 
-=head2 $result = $hv->check_pool_writable()
+=head2 $hv->check_pool_writable()
 
 Passes when the ssh user can write a file to the storage pool directory.
 
@@ -4355,7 +4355,7 @@ from the filesystem, so set it there too or the next pool-build puts it back:
 FIX
 }
 
-=head2 $result = $hv->check_virtiofs()
+=head2 $hv->check_virtiofs()
 
 Passes when F</usr/libexec/virtiofs-better> runs a virtiofsd, by
 L</virtiofsd_version>, and libvirtd may run it, by
@@ -4406,7 +4406,7 @@ FIX
     return $self->verdict( 1, "$VIRTIOFS_SHIM runs $version, and libvirtd may run it", q{} );
 }
 
-=head2 $result = $hv->check_iso_builder()
+=head2 $hv->check_iso_builder()
 
 Passes when the hypervisor has a program that makes the seed ISO.  See
 L</iso_maker>.
@@ -4437,7 +4437,7 @@ my sub version_string ($packed) {
     return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
 }
 
-=head2 $result = $hv->check_libvirt()
+=head2 $hv->check_libvirt()
 
 Passes when libvirt answers on the connection URI.
 
@@ -4461,7 +4461,7 @@ see runner_account_steps in Trog::HV::Libvirt.
 FIX
 }
 
-=head2 $result = $hv->check_sys_virt_in_step()
+=head2 $hv->check_sys_virt_in_step()
 
 Passes when the major and minor version of the local L<Sys::Virt> are the same
 as those of libvirt on the hypervisor.
@@ -4545,7 +4545,7 @@ my sub bridges_or_verdict ($self) {
     return $self->verdict( 0, 'Could not work out the bridges of the guests', $@ );
 }
 
-=head2 $result = $hv->check_guest_bridges()
+=head2 $hv->check_guest_bridges()
 
 Passes when each bridge of L</nic_bridges> is a bridge on the hypervisor.  It
 asks for F</sys/class/net/BRIDGE/bridge>, which the kernel has for a bridge and
@@ -4571,7 +4571,7 @@ configuration of the host, and the bridge of the default network by libvirt.
 FIX
 }
 
-=head2 $result = $hv->check_guest_networks()
+=head2 $hv->check_guest_networks()
 
 Passes when L</lease_nic> is the bridge of the C<default> network, whose leases
 L</lease_ip($network, %opts)> reads, and each bridge of L</nic_bridges> that a
@@ -4619,7 +4619,7 @@ For the default network, or any other one, on the hypervisor:
 FIX
 }
 
-=head2 $result = $hv->check_bridge_acl()
+=head2 $hv->check_bridge_acl()
 
 Passes on the system URI, whose daemon joins its guests to a bridge itself.  On
 a session, passes when F</etc/qemu/bridge.conf>, and each file that it includes,
@@ -4665,7 +4665,7 @@ Each writes an allow line into $Trog::HV::Libvirt::BridgeHelper::CONF, or a file
 FIX
 }
 
-=head2 $result = $hv->check_guest_pool()
+=head2 $hv->check_guest_pool()
 
 Passes when each pool of L<Trog::HV/static_pools> fits the network of its
 bridge.  The network is the one of the libvirt network that owns the bridge, or
@@ -4749,7 +4749,7 @@ and prefix_$first in the block.
 FIX
 }
 
-=head2 $result = $hv->note_libguestfs()
+=head2 $hv->note_libguestfs()
 
 Passes when the hypervisor has C<virt-cat>, C<virt-ls> or C<virt-edit>, which
 can read the disk of a guest that does not boot.  On a session URI, the fixed
@@ -4787,7 +4787,7 @@ GRUB with timed keystrokes.
 FIX
 }
 
-=head2 $result = $hv->note_swtpm()
+=head2 $hv->note_swtpm()
 
 Fails when the hypervisor has a TPM and no C<swtpm>.  Passes on a hypervisor
 with no TPM, because L</has_tpm> gives its guests no TPM whether or not
@@ -4814,7 +4814,7 @@ vault key.  Without it they are built without one and do without.
 FIX
 }
 
-=head2 $result = $hv->note_pool_quota()
+=head2 $hv->note_pool_quota()
 
 Fails when nothing limits the storage pool to less than the storage under it.
 Passes when there is no pool yet, and when the hypervisor does not say enough
@@ -4857,7 +4857,7 @@ sub note_pool_quota {
     };
 }
 
-=head2 $result = $hv->note_stale_base_image()
+=head2 $hv->note_stale_base_image()
 
 Whether the copy of an image in the pool is the one that the distribution
 publishes now.  For each image that the configuration builds guests of, it
@@ -4912,7 +4912,7 @@ until no disk is backed by it, and then the next destroy or rebuild removes it.
 FIX
 }
 
-=head2 \%space = $hv->pool_space($fstype)
+=head2 $hv->pool_space($fstype)
 
 =over 4
 
@@ -4957,7 +4957,7 @@ sub pool_space {
     return { path => $path, avail => $avail, source => $source, mount => $mount, mount_avail => $mount_avail, zpool_avail => $zpool_avail };
 }
 
-=head2 $bool = pool_is_unlimited(\%space, $fstype)
+=head2 pool_is_unlimited(\%space, $fstype)
 
 =over 4
 
@@ -4992,7 +4992,7 @@ sub pool_is_unlimited {
     return $space->{avail} * 100 >= $enclosing * 99;
 }
 
-=head2 $zpool = zpool_of($dataset)
+=head2 zpool_of($dataset)
 
 =over 4
 
@@ -5014,7 +5014,7 @@ sub zpool_of {
     return ( split m{/}, $dataset )[0];
 }
 
-=head2 $text = pool_quota_advice($fstype, $name, \%space)
+=head2 pool_quota_advice($fstype, $name, \%space)
 
 =over 4
 
@@ -5108,7 +5108,7 @@ OTHER
     return "$why\n$how\nThis matters most on a hypervisor where an unattended runner can build.\nSee QUOTAS in Provisioner::Recipe::trogrunner.\n";
 }
 
-=head2 $result = $hv->note_log_destination()
+=head2 $hv->note_log_destination()
 
 Says whether anything keeps the logs of the guests.  It fails in two cases:
 
@@ -5266,7 +5266,7 @@ sub clear_guest {
     return 1;
 }
 
-=head2 $address = $hv->provision_guest($config, $seed, %opts)
+=head2 $hv->provision_guest($config, $seed, %opts)
 
 =over 4
 
@@ -5344,7 +5344,7 @@ sub provision_guest {
     return $address;
 }
 
-=head2 $text = address_report($domain, $lease, @ips)
+=head2 address_report($domain, $lease, @ips)
 
 =over 4
 
@@ -5590,7 +5590,7 @@ sub runner_account_plan {
     return { map { $_ => $args{$_} } qw{user pool_name pool_path quota cores io_weight bridges} };
 }
 
-=head2 @actions = $hv->runner_account_steps(\%plan)
+=head2 $hv->runner_account_steps(\%plan)
 
 =over 4
 
@@ -5799,7 +5799,7 @@ sub runner_account_steps {
     return @steps;
 }
 
-=head2 @actions = $hv->runner_removal_steps(\%plan)
+=head2 $hv->runner_removal_steps(\%plan)
 
 =over 4
 
@@ -5895,7 +5895,7 @@ my sub rewrite_keys ( $hv, $path, $material, @add ) {
     return $hv->rewrite_lines( $path, mode => '0600', keep => sub ($line) { index( $line, $material ) < 0 }, add => \@add );
 }
 
-=head2 @actions = $hv->runner_key_steps($user, $line)
+=head2 $hv->runner_key_steps($user, $line)
 
 =over 4
 
@@ -5945,7 +5945,7 @@ sub runner_key_steps {
     };
 }
 
-=head2 @actions = $hv->runner_key_removal_steps($user, $material)
+=head2 $hv->runner_key_removal_steps($user, $material)
 
 =over 4
 

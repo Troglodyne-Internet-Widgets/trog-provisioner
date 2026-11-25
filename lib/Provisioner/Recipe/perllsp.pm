@@ -172,7 +172,7 @@ sub tests {
     return qw{perllsp.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<codeload.github.com>, which serves the pinned tarballs of the vim plugins.
 
@@ -186,7 +186,7 @@ sub fetch_hosts {
     return ('codeload.github.com');
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 A tarball that codeload serves for a full commit SHA never changes.
 

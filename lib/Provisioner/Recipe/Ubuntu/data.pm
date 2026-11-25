@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::data - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<openssh-server>, C<openssh-client> and C<rsync>.
 

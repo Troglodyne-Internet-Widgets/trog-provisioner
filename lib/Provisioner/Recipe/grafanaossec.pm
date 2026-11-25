@@ -67,7 +67,7 @@ defaults agree.
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  There is one manager on the machine, one output of its alerts, and one
 dashboard.
@@ -80,7 +80,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -117,7 +117,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<ossec>, whose alerts this draws, and C<grafanasyslog>, which installs
 telegraf and grafana and puts the stream in the measurement that the alerts
@@ -137,7 +137,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 The input of telegraf on C<alerts_port>, on 127.0.0.1, over UDP.  The port is
 10516 when C<%opts> does not name one.
@@ -155,7 +155,7 @@ sub listens {
     return ( '127.0.0.1:' . ( $opts{alerts_port} // 10516 ) . '/udp' );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The fragment of F<ossec.conf>, the telegraf fragment, the Starlark processor and
 the dashboard.
@@ -176,7 +176,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the template for the test that runs on the guest:
 F<grafanaossec.tt>.

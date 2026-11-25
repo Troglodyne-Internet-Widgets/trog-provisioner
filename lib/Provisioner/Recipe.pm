@@ -252,7 +252,7 @@ like any other.  See C<bin/new_config> for the search path.
 
 =head2 STATIC METHODS
 
-=head3 $name = $recipe->recipe_name()
+=head3 $recipe->recipe_name()
 
 The name this recipe answers to, called on a class or an object.  It is the
 last component of the class name.  A distro specialization such as
@@ -274,7 +274,7 @@ sub recipe_name {
     return $name;
 }
 
-=head3 %cache = $class->xslate_cache(%opts)
+=head3 $class->xslate_cache(%opts)
 
 The renderer options that say where it keeps compiled templates, as a list to
 put into the arguments of C<< Text::Xslate->new >>.  C<bin/new_config> uses it
@@ -316,7 +316,7 @@ sub xslate_cache ( $, %opts ) {
     return ( cache => 1, cache_dir => $opts{cache_dir} // File::Spec->catdir( Cwd::abs_path($root), '.xslate_cache' ) );
 }
 
-=head3 $recipe = $class->new(%opts)
+=head3 $class->new(%opts)
 
 Creates a recipe instance.  C<template_dirs> in C<%opts> is the list of
 directories that the renderer searches for templates.  C<cache> and
@@ -365,7 +365,7 @@ sub new {
 
 =head2 METHODS you can override
 
-=head3 $bool = $recipe->is_module()
+=head3 $recipe->is_module()
 
 Returns true if this recipe is one of the modules that the makefile of the
 guest is built from.
@@ -398,7 +398,7 @@ Returns Bool.
 
 sub is_module { return 1 }
 
-=head3 $bool = $recipe->is_multi_tenant()
+=head3 $recipe->is_multi_tenant()
 
 Returns true if two domains on one guest can both be configured with this
 recipe.
@@ -426,7 +426,7 @@ Takes no arguments.  Returns Bool.
 
 sub is_multi_tenant { return 1 }
 
-=head3 @names = $recipe->exclusive_with()
+=head3 $recipe->exclusive_with()
 
 The recipes that cannot be on one domain with this one, because both write the
 same thing, such as the vhost of the domain.  One of them would silently
@@ -446,7 +446,7 @@ Returns a list of Str, the names of the recipes, such as C<nginx>.
 
 sub exclusive_with { return () }
 
-=head3 @names = $recipe->exclusive_on_machine_with()
+=head3 $recipe->exclusive_on_machine_with()
 
 The recipes that cannot be on one machine with this one, because both run a
 service that owns something of the machine, such as port 25.  So they cannot
@@ -468,7 +468,7 @@ Returns a list of Str, the names of the recipes.
 
 sub exclusive_on_machine_with { return () }
 
-=head3 %settings = $recipe->machine_wide(%opts)
+=head3 $recipe->machine_wide(%opts)
 
 The settings of this recipe that its global half applies to the whole
 machine, from C<%opts>, the configuration of the recipe for one domain, with
@@ -499,7 +499,7 @@ Returns a list of pairs, from the name of each setting to its value.
 
 sub machine_wide { return () }
 
-=head3 %args = $recipe->args()
+=head3 $recipe->args()
 
 Declares the arguments of the recipe as a hash for the schema() method of
 L<JSON::Validator>.  The schema must be openapiv3.
@@ -547,7 +547,7 @@ sub args {
     return ();
 }
 
-=head3 %args = $recipe->global_args()
+=head3 $recipe->global_args()
 
 The settings that every recipe receives, declared in one place.
 
@@ -696,7 +696,7 @@ sub global_args {
     );
 }
 
-=head3 %schema = $recipe->schema()
+=head3 $recipe->schema()
 
 Returns what C<validate> checks against.  That is the C<args()> of this recipe,
 with C<global_args> under its C<properties>.  The schema refuses every key that
@@ -739,7 +739,7 @@ sub schema {
     return ( %args, additionalProperties => 0, properties => { %{ $global{properties} // {} }, %{ $args{properties} // {} } } );
 }
 
-=head3 %mine = $recipe->takes(%offered)
+=head3 $recipe->takes(%offered)
 
 Returns the pairs of C<%offered> that the C<schema> of this recipe declares, and
 nothing else.
@@ -777,7 +777,7 @@ sub takes {
     return map { exists $offered{$_} ? ( $_ => $offered{$_} ) : () } keys %$props;
 }
 
-=head3 @fmts = $recipe->formatters()
+=head3 $recipe->formatters()
 
 Declares custom template formatters, for use in makefile fragments and in
 generated files.
@@ -795,7 +795,7 @@ sub formatters {
     return ();
 }
 
-=head3 @pkgs = $recipe->deps(%opts)
+=head3 $recipe->deps(%opts)
 
 The system packages that this recipe needs installed.
 
@@ -828,7 +828,7 @@ sub deps {
     return ();
 }
 
-=head3 @sources = $recipe->package_sources(%opts)
+=head3 $recipe->package_sources(%opts)
 
 The vendor archives that C<deps> installs from, in the terms of the packager of
 the distribution, which L<Provisioner::Packager> chooses.  For Ubuntu that is
@@ -859,7 +859,7 @@ sub package_sources {
     return ();
 }
 
-=head3 @answers = $recipe->package_answers(%opts)
+=head3 $recipe->package_answers(%opts)
 
 Answers for the questions that the packages of C<deps> ask when they install,
 in the form that the packager takes them.  For Ubuntu that is a line that
@@ -884,7 +884,7 @@ sub package_answers {
     return ();
 }
 
-=head3 @pkgs = $recipe->dep_conflicts(%opts)
+=head3 $recipe->dep_conflicts(%opts)
 
 Packages that conflict with this recipe.  They come from another recipe, or
 the distribution installs them by default, such as sendmail against postfix.
@@ -909,7 +909,7 @@ sub dep_conflicts {
     return ();
 }
 
-=head3 $packager = $recipe->distro_packager()
+=head3 $recipe->distro_packager()
 
 The name of the packager of the distribution, such as C<deb>, for a recipe
 that installs packages on the running guest, after first boot.  The subclass
@@ -930,7 +930,7 @@ sub distro_packager {
     die( ( ref $self || $self ) . " does not say which packager its distribution has, so it cannot install packages on the guest there.\n" );
 }
 
-=head3 @hosts = $recipe->fetch_hosts(%opts)
+=head3 $recipe->fetch_hosts(%opts)
 
 The hosts that this recipe downloads from on the guest, by name, such as
 C<www.cpan.org> or C<codeload.github.com>.
@@ -984,7 +984,7 @@ sub fetch_hosts {
     return ();
 }
 
-=head3 @hosts = $recipe->github_release_hosts()
+=head3 $recipe->github_release_hosts()
 
 Returns C<github.com> and the hosts that it redirects a release download to.  A
 recipe that downloads a GitHub release names these in C<fetch_hosts>.
@@ -1001,7 +1001,7 @@ sub github_release_hosts {
     return qw{github.com objects.githubusercontent.com release-assets.githubusercontent.com};
 }
 
-=head3 @classes = $recipe->cache_classes()
+=head3 $recipe->cache_classes()
 
 How long L<Provisioner::Recipe::fetchcache> can keep what this recipe
 downloads, as a list of C<{ class =E<gt> ..., pattern =E<gt> ... }>.  C<class>
@@ -1030,7 +1030,7 @@ sub cache_classes {
     return ();
 }
 
-=head3 @classes = $recipe->github_release_classes()
+=head3 $recipe->github_release_classes()
 
 The C<cache_classes> entries for a recipe that downloads a GitHub release.  A
 release asset and a source archive named by tag or commit never change.
@@ -1057,7 +1057,7 @@ sub github_release_classes {
     );
 }
 
-=head3 @classes = $recipe->apt_repo_classes($host)
+=head3 $recipe->apt_repo_classes($host)
 
 The C<cache_classes> entries for a third-party apt repository on C<$host>.  The
 indexes are under F<dists/>.  The packages are under F<pool/>, and because a
@@ -1093,7 +1093,7 @@ sub apt_repo_classes {
     );
 }
 
-=head3 %required = $recipe->required_recipes(%opts)
+=head3 $recipe->required_recipes(%opts)
 
 The recipes that this recipe depends on, as pairs of a recipe name and a sub.
 C<bin/new_config> builds each one as a synthetic recipe and adds it to the list
@@ -1186,7 +1186,7 @@ sub required_recipes {
     return @required;
 }
 
-=head3 $merged = $recipe->reconcile($merged, $incoming)
+=head3 $recipe->reconcile($merged, $incoming)
 
 Settles what two dependents disagree about.  Returns C<$merged>, changed in
 place.
@@ -1248,7 +1248,7 @@ sub reconcile {
     return $merged;
 }
 
-=head3 $value = $recipe->resolve_conflict($path, $mine, $theirs)
+=head3 $recipe->resolve_conflict($path, $mine, $theirs)
 
 Returns the value to use when two dependents ask this recipe for different
 values.
@@ -1295,7 +1295,7 @@ Nothing here can tell which you meant, so set $field explicitly under $recipe fo
 CONFLICT
 }
 
-=head3 %limits = $recipe->rate_limits(%opts)
+=head3 $recipe->rate_limits(%opts)
 
 The ports that this recipe listens on.  For each port, the number of new
 connections per second from one source that it accepts before it drops more.
@@ -1341,7 +1341,7 @@ sub rate_limits {
     return ();
 }
 
-=head3 @claims = $recipe->listens(%opts)
+=head3 $recipe->listens(%opts)
 
 The sockets that the services of this recipe bind.  Each claim is a port with
 an optional address before it, and an optional protocol after it:
@@ -1395,7 +1395,7 @@ sub listens {
     return ();
 }
 
-=head3 %listeners = $recipe->claims(%opts)
+=head3 $recipe->claims(%opts)
 
 The claims of C<listens> and the keys of C<rate_limits>, in the form of ufw's
 C<listeners>: port, address, and the name of this recipe.  Every address is
@@ -1450,7 +1450,7 @@ sub claims {
     return %listeners;
 }
 
-=head3 %jails = $recipe->jails(%opts)
+=head3 $recipe->jails(%opts)
 
 The fail2ban jails that the services of this recipe need, keyed by the name of
 the jail.  Each value is a hash of jail options, which the C<fail2ban> recipe
@@ -1501,7 +1501,7 @@ sub jails {
     return ();
 }
 
-=head3 @units = $recipe->oom_protect()
+=head3 $recipe->oom_protect()
 
 The systemd units of this recipe that the OOM killers pass over, by name with
 the type, such as C<mariadb.service>.  Empty by default.  It takes no
@@ -1527,7 +1527,7 @@ sub oom_protect {
     return ();
 }
 
-=head3 @units = $recipe->oomd_omit()
+=head3 $recipe->oomd_omit()
 
 The systemd units of this recipe that systemd-oomd skips, with no change to
 their kernel OOM score.  Empty by default, and it takes no configuration, as
@@ -1610,7 +1610,7 @@ sub forget_undefs {
     return $opts;
 }
 
-=head3 %opts = $recipe->enrich(%opts)
+=head3 $recipe->enrich(%opts)
 
 Sets more options, based on the options already given.  C<validate> calls it
 after the schema passes, and returns what it returns.  Put here what a schema
@@ -1641,7 +1641,7 @@ sub enrich {
     return %opts;
 }
 
-=head3 %paths = $recipe->fetch_sources(%opts)
+=head3 $recipe->fetch_sources(%opts)
 
 Directories on I<this machine> that the guest rsyncs from, each by the name of
 the rsync module that serves it.  C<bin/new_config> serves each one to the guest
@@ -1681,7 +1681,7 @@ sub fetch_sources {
     return ();
 }
 
-=head3 @patterns = $recipe->remote_skip()
+=head3 $recipe->remote_skip()
 
 rsync exclude patterns for paths under C<remote_files> that must not come down.
 
@@ -1717,7 +1717,7 @@ sub remote_skip {
     return ();
 }
 
-=head3 @mountpoints = $recipe->remote_mountpoints(%opts)
+=head3 $recipe->remote_mountpoints(%opts)
 
 The mount points on the guest whose files live somewhere other than the guest,
 such as a directory of the hypervisor or a bucket.  C<%opts> is as for
@@ -1744,7 +1744,7 @@ sub remote_mountpoints {
     return ();
 }
 
-=head3 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+=head3 $recipe->guest_secrets($install_dir, $domain, %opts)
 
 Files that the guest must have but that must not travel in the payload.
 Returns a map from the path on the guest to how the file gets there:
@@ -1813,7 +1813,7 @@ sub guest_secrets {
     return ();
 }
 
-=head3 @grants = $recipe->grants($domain, %opts)
+=head3 $recipe->grants($domain, %opts)
 
 A grant is something that a guest of one recipe issues to another domain, such
 as a token, a certificate or a registration, and takes back when that domain
@@ -1856,7 +1856,7 @@ sub grants {
     return ();
 }
 
-=head3 @domains = $recipe->joins_network_of(%opts)
+=head3 $recipe->joins_network_of(%opts)
 
 The guests whose network this recipe brings the guest onto, such as the VPN
 server of a VPN client.  The guest reaches every guest on the network of each
@@ -1880,7 +1880,7 @@ sub joins_network_of {
     return ();
 }
 
-=head3 %terms = $recipe->grant_terms($grant, %opts)
+=head3 $recipe->grant_terms($grant, %opts)
 
 What the issue of C<$grant> needs that the grant does not say, such as an
 address or a list of names, for C<issue_grant>.  C<%opts> is as for C<grants>.
@@ -1905,7 +1905,7 @@ sub grant_terms {
     return ();
 }
 
-=head3 %files = $recipe->issue_grant($grant, %terms)
+=head3 $recipe->issue_grant($grant, %terms)
 
 For the recipe that a grant names: the files that its guest issues for
 C<$grant>, with C<issue> in place of C<ref> and C<generate>, as
@@ -1934,7 +1934,7 @@ sub issue_grant {
     return ();
 }
 
-=head3 %revocation = $recipe->revoke_grant($grant)
+=head3 $recipe->revoke_grant($grant)
 
 For the recipe that a grant names: how C<bin/destroy> takes C<$grant> back from
 its guest.
@@ -1968,7 +1968,7 @@ sub revoke_grant {
     return ();
 }
 
-=head3 %files = $recipe->granted_secrets($domain, %opts)
+=head3 $recipe->granted_secrets($domain, %opts)
 
 The files that other guests issue for the C<grants> of this recipe on
 C<$domain>, from the C<issue_grant> of each recipe that issues one.
@@ -2000,7 +2000,7 @@ sub granted_secrets {
     } $self->grants( $domain, %opts );
 }
 
-=head3 @revocations = $recipe->revocations($domain)
+=head3 $recipe->revocations($domain)
 
 What C<bin/destroy> takes back from other guests when C<$domain> goes away: the
 C<revoke_grant> of each of the C<grants> of this recipe, as the configuration
@@ -2026,7 +2026,7 @@ sub revocations {
     return map { local ($_) = $_; +{ guest => $_->{guest}, Provisioner::Cookbook->load( $_->{recipe} )->revoke_grant($_) } } $self->grants( $domain, %opts );
 }
 
-=head3 @steps = $recipe->outside_steps($domain, %opts)
+=head3 $recipe->outside_steps($domain, %opts)
 
 What this recipe needs done on a machine that is not the guest of C<$domain>,
 such as an account on a hypervisor, or a key in an F<authorized_keys> there.
@@ -2100,7 +2100,7 @@ sub outside_steps {
     return ();
 }
 
-=head3 $hv = $recipe->hv()
+=head3 $recipe->hv()
 
 Returns the hypervisor that this guest is built for, as given to the
 constructor.  Dies if the constructor got none.
@@ -2129,7 +2129,7 @@ sub hv {
     return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
 }
 
-=head3 @dirs = $recipe->datadirs()
+=head3 $recipe->datadirs()
 
 Directories under the C<install_dir> of the domain that this recipe needs.
 
@@ -2149,7 +2149,7 @@ sub datadirs {
     return ();
 }
 
-=head3 @names = $recipe->subdomains()
+=head3 $recipe->subdomains()
 
 The names under the domain that this recipe serves, as labels rather than whole
 names: C<www>, not C<www.$domain>.
@@ -2169,7 +2169,7 @@ sub subdomains {
     return ();
 }
 
-=head3 $bool = $recipe->sends_mail
+=head3 $recipe->sends_mail
 
 True when this recipe runs a mail server that delivers mail to other servers.
 A receiver checks that the reverse DNS of the address of the sender gives the
@@ -2191,7 +2191,7 @@ sub sends_mail {
     return 0;
 }
 
-=head3 @names = $recipe->served_names(%opts)
+=head3 $recipe->served_names(%opts)
 
 The C<subdomains> of this recipe, qualified with C<$opts{domain}>.
 
@@ -2218,7 +2218,7 @@ sub served_names {
     return map { "$_.$opts{domain}" } $self->subdomains;
 }
 
-=head3 @names = $recipe->addressed_names(%opts)
+=head3 $recipe->addressed_names(%opts)
 
 The names of this recipe that a record of another type names as its target,
 such as an C<MX> or an C<SRV>.  RFC 2181 and RFC 2782 forbid such a target to
@@ -2243,7 +2243,7 @@ sub addressed_names {
     return;
 }
 
-=head3 $bool = $recipe->needs_address(%opts)
+=head3 $recipe->needs_address(%opts)
 
 True when this recipe writes the address of the guest into a record, so that
 it cannot work where the installation assigns the guest no address.  That is a
@@ -2270,7 +2270,7 @@ sub needs_address {
     return @names ? 1 : 0;
 }
 
-=head3 @records = $recipe->dns_records(%opts)
+=head3 $recipe->dns_records(%opts)
 
 The records of this recipe in the zone of the domain, other than its names.
 Each is a hashref with C<type>, C<name>, the whole name, and C<content>, the
@@ -2302,7 +2302,7 @@ sub dns_records {
     return;
 }
 
-=head3 @aliases = $recipe->domain_aliases(%opts)
+=head3 $recipe->domain_aliases(%opts)
 
 Every name that this recipe answers for besides the domain itself: the aliases
 that the operator configured for the domain, in their order, then the names of
@@ -2333,7 +2333,7 @@ sub domain_aliases {
     return grep { $_ ne $opts{domain} } uniq( @$configured, @served );
 }
 
-=head3 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head3 $recipe->remote_prepare($install_dir, $domain)
 
 Shell commands for the guest to run as root immediately before its
 C<remote_files> are fetched.
@@ -2370,7 +2370,7 @@ sub remote_prepare {
     return ();
 }
 
-=head3 %restores = $recipe->restores(%opts)
+=head3 $recipe->restores(%opts)
 
 Where the state that this recipe salvaged must go back.  Returns a map from the
 destination on the guest to how to get it there:
@@ -2421,7 +2421,7 @@ sub restores {
     return ();
 }
 
-=head3 %path_map = $recipe->remote_files($install_dir, $domain)
+=head3 $recipe->remote_files($install_dir, $domain)
 
 What to salvage off a guest that already runs this recipe.  Returns a map from
 the path on the guest to where it lands in the data directory.
@@ -2442,6 +2442,8 @@ L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisione
 
 That is also why C<remote_skip> exists.  A directory salvaged whole ends up in
 that archive, and some of its contents must stay on the machine that made them.
+
+    my %path_map = $recipe->remote_files($install_dir, $domain);
 
 =head4 Naming a path is not enough
 
@@ -2487,7 +2489,7 @@ sub remote_files {
     return ();
 }
 
-=head3 %files = $recipe->template_files(@recipes)
+=head3 $recipe->template_files(@recipes)
 
 Files that this recipe generates.  Returns a map from the template under
 C<templates/files/> to where it is installed, relative to the configuration
@@ -2520,7 +2522,7 @@ sub template_files {
     return ();
 }
 
-=head3 %files = $recipe->resolver_files(%opts)
+=head3 $recipe->resolver_files(%opts)
 
 The drop-ins of systemd-resolved that this recipe generates, as a map from a
 file of C<template_files>, as it is named in the configuration directory, to its
@@ -2550,7 +2552,7 @@ sub resolver_files {
     return ();
 }
 
-=head3 %vars = $recipe->makefile_vars()
+=head3 $recipe->makefile_vars()
 
 Variables set at the top of the generated makefile.  They apply to the whole
 run, not only to the fragment of this recipe.
@@ -2571,7 +2573,7 @@ sub makefile_vars {
     return ();
 }
 
-=head3 @tests = $recipe->tests()
+=head3 $recipe->tests()
 
 Templates under C<templates/tests/> to render and run on the guest after
 provisioning finishes.
@@ -2596,7 +2598,7 @@ sub tests {
     return ();
 }
 
-=head3 @pms = $recipe->testdeps(@modules)
+=head3 $recipe->testdeps(@modules)
 
 Perl modules that the tests of this recipe need.
 
@@ -2619,7 +2621,7 @@ sub testdeps {
 
 =head2 METHODS you usually do not override
 
-=head3 $output = $recipe->render(%template_vars)
+=head3 $recipe->render(%template_vars)
 
 Renders the makefile fragment of the recipe.  See C<render_file>.
 
@@ -2639,7 +2641,7 @@ sub render ( $self, %template_vars ) {
     return $self->render_file( $self->{template}, %template_vars );
 }
 
-=head3 $bool = $recipe->has_global_template()
+=head3 $recipe->has_global_template()
 
 Returns true if a C<$recipe.global.tt> exists in any configured template
 directory.
@@ -2658,7 +2660,7 @@ sub has_global_template {
     return !!any { -f "$_/$self->{global_template}" } @{ $self->{template_dirs} };
 }
 
-=head3 $bool = $recipe->has_template()
+=head3 $recipe->has_template()
 
 Returns true if a C<$recipe.tt> exists in any configured template directory.
 
@@ -2676,7 +2678,7 @@ sub has_template {
     return !!any { -f "$_/$self->{template}" } @{ $self->{template_dirs} };
 }
 
-=head3 $output = $recipe->render_global(%template_vars)
+=head3 $recipe->render_global(%template_vars)
 
 Renders the global makefile fragment of the recipe (C<$recipe.global.tt>).  Call
 this only after C<has_global_template> returns true.
@@ -2697,7 +2699,7 @@ sub render_global ( $self, %template_vars ) {
     return $self->render_file( $self->{global_template}, %template_vars );
 }
 
-=head3 $output = $recipe->render_file($file, %template_vars)
+=head3 $recipe->render_file($file, %template_vars)
 
 Renders the template C<$file> with the C<vars> of the recipe and
 C<%template_vars>, after C<validated> checks them.  Dies if they are not valid.
@@ -2720,7 +2722,7 @@ sub render_file ( $self, $file, %template_vars ) {
     return $self->render_raw( $file, $self->validated( $self->vars(), %template_vars ) );
 }
 
-=head3 @commands = $class->fragment_commands($fragment)
+=head3 $class->fragment_commands($fragment)
 
 The commands of a rendered fragment, one to each element.  A command that
 continues onto the next line, with a C<\> at the end, is one element with the
@@ -2749,7 +2751,7 @@ sub fragment_commands ( $, $fragment ) {
     return @commands;
 }
 
-=head3 $fragment = $class->quiet_secrets($fragment, @secrets)
+=head3 $class->quiet_secrets($fragment, @secrets)
 
 Returns the rendered C<$fragment> with an C<@> at the start of each command that
 holds one of C<@secrets>, so that make does not print it into the setup log.
@@ -2788,7 +2790,7 @@ sub quiet_secrets ( $class, $fragment, @secrets ) {
     return join( q{}, @commands );
 }
 
-=head3 @found = $recipe->secrets_in(\%config)
+=head3 $recipe->secrets_in(\%config)
 
 Returns a pair C<[ $path, $value ]> for each value in C<%config> that the
 C<schema> of this recipe marks C<'x-secret' =E<gt> 1>, and that is a string
@@ -2841,7 +2843,7 @@ sub secrets_in ( $self, $config ) {
     return @found;
 }
 
-=head3 $output = $recipe->render_raw($file, %vars)
+=head3 $recipe->render_raw($file, %vars)
 
 Renders a template with variables that already went through C<validate>.
 
@@ -2874,7 +2876,7 @@ sub render_raw {
     return $self->{tt}->render( $file, \%vars );
 }
 
-=head3 @written = $recipe->generate_files($output_dir, %vars)
+=head3 $recipe->generate_files($output_dir, %vars)
 
 Renders everything in C<template_files> into C<$output_dir>.  Returns the paths
 it wrote, relative to C<$output_dir>.  Dies if it cannot copy a static file.
@@ -2922,7 +2924,7 @@ sub generate_files {
     return @written;
 }
 
-=head3 $path = $recipe->template_path($file)
+=head3 $recipe->template_path($file)
 
 Returns the path of a template in C<template_dirs>.  Dies with the list of
 directories it searched if none of them has the file.
@@ -2955,7 +2957,7 @@ sub template_path {
     die "Could not find the template $file in " . join( ', ', @{ $self->{template_dirs} } ) . "\n";
 }
 
-=head3 %opts = $recipe->validate(%opts)
+=head3 $recipe->validate(%opts)
 
 Validates the configuration of the recipe, and returns it as C<enrich> returns
 it.  Dies with every schema error, and names the recipe and the domain.
@@ -3038,7 +3040,7 @@ sub validate {
     return $self->enrich(%opts);
 }
 
-=head3 %vars = $recipe->validated(%opts)
+=head3 $recipe->validated(%opts)
 
 C<validate>, memoized for the life of the recipe object.
 
@@ -3081,7 +3083,7 @@ sub validated {
     return %{ $self->{_validated} };
 }
 
-=head3 %vars = $recipe->vars()
+=head3 $recipe->vars()
 
 Default template variables for the recipe.  C<render_file> gives them to
 C<validated> before the variables of the caller.

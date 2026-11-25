@@ -391,7 +391,7 @@ L</run_sudo(@argv)> returns the exit code, and it can ask.
 
     my $shadow = $machine->capture_sudo(qw{cat /etc/shadow});
 
-=head2 ($out, $err) = capture_with_input($input, @argv)
+=head2 capture_with_input($input, @argv)
 
 =over 4
 

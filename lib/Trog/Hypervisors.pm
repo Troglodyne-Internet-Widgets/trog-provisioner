@@ -294,7 +294,7 @@ sub hypervisor {
     );
 }
 
-=head2 $class = $fleet->backend_of($name)
+=head2 $fleet->backend_of($name)
 
 =over 4
 

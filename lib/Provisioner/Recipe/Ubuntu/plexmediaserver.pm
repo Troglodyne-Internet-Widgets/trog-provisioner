@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::plexmediaserver - Ubuntu's C<deps> and archive for 
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<plexmediaserver>, from the archive that C<package_sources> names.
 
@@ -30,7 +30,7 @@ sub deps {
     return qw{plexmediaserver};
 }
 
-=head2 @sources = $recipe->package_sources()
+=head2 $recipe->package_sources()
 
 The archive of Plex at C<repo.plex.tv>, with the v2 signing key.  Plex retired
 C<downloads.plex.tv/repos/deb>, where every path answers 403.  The v2 key is a

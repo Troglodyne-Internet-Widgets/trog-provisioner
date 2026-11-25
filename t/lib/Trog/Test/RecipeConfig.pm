@@ -28,7 +28,7 @@ one place.
 
 =head1 FUNCTIONS
 
-=head2 %required = required_config($dir)
+=head2 required_config($dir)
 
 Returns a configuration for each recipe that needs one, keyed by the name of the
 recipe.  A recipe that is not in it renders with no configuration of its own.
@@ -53,6 +53,8 @@ that renders the recipe hands it to the template as C<modules>, and a test that
 generates the recipe's domain puts those recipes in the domain beside it, each
 with the configuration that it has here.  Each call builds the configuration
 anew, so a test can change what it gets.
+
+    my %required = required_config($dir);
 
 =cut
 

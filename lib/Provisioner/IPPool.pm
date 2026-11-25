@@ -311,7 +311,7 @@ Takes no arguments.
 
 sub db_path { return Trog::Config->path('ips.db') }
 
-=head2 $databases = databases($fleet)
+=head2 databases($fleet)
 
 Where the addresses of the L<Trog::Hypervisors> C<$fleet> are kept, by default
 the fleet of F<hypervisors.conf>.  A hash reference of:
@@ -383,7 +383,7 @@ sub databases ( $fleet = undef ) {
     return { configured => 1, list => \@list, of => \%of, network => \%network, pools => \%pools };
 }
 
-=head2 $result = call($database, $op, $args)
+=head2 call($database, $op, $args)
 
 Runs the operation C<$op> of L<Provisioner::IPPool::DB> with the hash
 reference C<$args> on C<$database>, one of the C<list> of C<databases>, and
@@ -414,7 +414,7 @@ sub call ( $database, $op, $args = {} ) {
     return Provisioner::IPPool::Remote::call( $hv, $database->{path}, $op, $args, create => $database->{create} );
 }
 
-=head2 $result = on_hypervisor($name, $op, $args)
+=head2 on_hypervisor($name, $op, $args)
 
 C<call> on the database of the hypervisor C<$name>, for F<bin/ippool>.  Dies
 when that hypervisor keeps none.
@@ -484,7 +484,7 @@ Takes no arguments.  Dies when two databases disagree about a domain.
 
 sub assignments { return merged('assignments') }
 
-=head2 ($guest, $address) = guest_address($domain)
+=head2 guest_address($domain)
 
 The guest that runs C<$domain>, which is C<host_of> it in
 L<Provisioner::Cookbook> or the domain itself, and the address of that guest in
@@ -668,7 +668,7 @@ sub reachable_address {
     return $address;
 }
 
-=head2 $guest = reached_through($domain, $pool)
+=head2 reached_through($domain, $pool)
 
 The guest that routes the address of C<reachable_address> to the other guests:
 the C<via> of the bin of that address in C<$pool>.  The other guests reach
@@ -729,7 +729,7 @@ sub release {
     return merged( 'release', { domain => $domain } );
 }
 
-=head2 @items = pool_items($said)
+=head2 pool_items($said)
 
 Returns the items of one key of an C<ip_pool>, such as C<addresses> or C<cidr>.
 C<$said> is a list, or one string with whitespace between the items, or undef.
@@ -749,7 +749,7 @@ sub pool_items {
     return grep { m/\S/ } map { split /\s+/ } @{ Provisioner::Utils::coerce_arrayref( $said // [] ) };
 }
 
-=head2 %bins = bins($pool)
+=head2 bins($pool)
 
 Returns each bin of C<$pool> by name, as a block that C<pool_ips> takes.  The
 C<addresses> and C<cidr> at the top of C<$pool> are the bin named C<guests>.
@@ -797,7 +797,7 @@ sub bins {
     return %bins;
 }
 
-=head2 %bins = bins_via($pool, $guest)
+=head2 bins_via($pool, $guest)
 
 Returns each bin of C<$pool> whose C<via> is C<$guest>, by name, as C<bins>
 does.  Such a bin holds addresses that C<$guest> routes to, such as the static
@@ -825,7 +825,7 @@ sub bins_via {
     return map { $_ => $bins{$_} } grep { defined $bins{$_}{via} && $bins{$_}{via} eq $guest } keys %bins;
 }
 
-=head2 $pool = pool_of($hv, $installation_pool)
+=head2 pool_of($hv, $installation_pool)
 
 Returns the pool that a guest of the hypervisor C<$hv> takes its addresses
 from: the pool of each of its C<static_nics> under C<nics>, by bridge, as
@@ -859,7 +859,7 @@ sub pool_of {
     return { %bins, nics => $nics, ( defined $first ? ( first_nic => $first, %{ $nics->{$first} } ) : () ) };
 }
 
-=head2 $network = network_of($pool)
+=head2 network_of($pool)
 
 The blocks of the bin C<$pool>, as C<blocks> gives them, sorted and joined
 into one string.  Two hypervisors on one network name the same blocks, so their
@@ -882,7 +882,7 @@ sub network_of {
     return join( q{ }, sort( blocks($pool) ) );
 }
 
-=head2 %pools = guest_pools($fleet)
+=head2 guest_pools($fleet)
 
 Returns the pools of the static adapters of each hypervisor of the
 L<Trog::Hypervisors> C<$fleet> that names any, by the name of its block, each a
@@ -935,7 +935,7 @@ sub guest_pools {
     return %pools;
 }
 
-=head2 @blocks = blocks($bin)
+=head2 blocks($bin)
 
 Returns the networks of C<$bin>, a block that C<pool_ips> takes, as CIDR
 blocks: each C<cidr> as it is, then each of its C<addresses> as a C</32>.
@@ -955,7 +955,7 @@ sub blocks {
     return ( pool_items( $bin->{cidr} ), map { "$_/32" } addresses_of($bin) );
 }
 
-=head2 @addresses = addresses_of($bin)
+=head2 addresses_of($bin)
 
 The C<addresses> of C<$bin>, without the length of a prefix that one is written
 with.
@@ -977,7 +977,7 @@ sub addresses_of {
     return map { s{/\d+\z}{}r } pool_items( $bin->{addresses} );
 }
 
-=head2 %clients = via_clients($via)
+=head2 via_clients($via)
 
 Asks the guest C<$via>, the openvpn server of a bin, which static address each
 of its clients has.  Returns each name of a client to its address.  It runs the
@@ -1024,7 +1024,7 @@ sub via_clients {
     return %clients;
 }
 
-=head2 $bool = offers($pool, $bin)
+=head2 offers($pool, $bin)
 
 Whether C<$bin> of C<$pool> has an address to give out, free or not.  C<$bin>
 defaults to C<guests>, which is the pool of the first static adapter.  False
@@ -1323,7 +1323,7 @@ sub seed {
     return $recorded;
 }
 
-=head2 $result = reseed(%opts)
+=head2 reseed(%opts)
 
 What F<bin/reseed_ips> does: asks each hypervisor what it uses, and then, in
 one transaction in each database, forgets which hypervisors were seeded,
@@ -1381,7 +1381,7 @@ sub reseed (%opts) {
     return \%out;
 }
 
-=head2 $result = migrate($name, $from, %opts)
+=head2 migrate($name, $from, %opts)
 
 Copies the rows that belong to the hypervisor C<$name> out of the database at
 C<$from> on this machine, the one F<ips.db> from before each hypervisor kept

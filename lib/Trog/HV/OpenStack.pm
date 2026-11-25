@@ -104,7 +104,7 @@ our $CONSOLE_MICROVERSION = '2.6';
 # it, so a larger number costs nothing and a smaller one loses the boot.
 our $CONSOLE_LINES = 5000;
 
-=head2 @actions = $hv->debug_actions()
+=head2 $hv->debug_actions()
 
 Returns a list of Str: C<console>, C<fetch> and C<vnc>.  Nova keeps the console of a server and hands
 out a console URL, so those three have an answer here.
@@ -130,7 +130,7 @@ my sub nova ( $self, $method, $path, $body, $microversion = undef ) {
     return $compute->client->call( $method, \%headers, $compute->root_uri($path), $body );
 }
 
-=head2 $restarted = $hv->console_capture($name, %opts)
+=head2 $hv->console_capture($name, %opts)
 
 =over 4
 
@@ -149,7 +149,7 @@ there is nothing to redirect and no reason to restart the server.
 
 sub console_capture { return 0 }
 
-=head2 $text = $hv->console_output($name)
+=head2 $hv->console_output($name)
 
 =over 4
 
@@ -178,7 +178,7 @@ sub console_output {
     return ( ref $answer eq 'HASH' ? $answer->{output} : undef ) || undef;
 }
 
-=head2 ($advice, $url) = $hv->vnc_access($name)
+=head2 $hv->vnc_access($name)
 
 =over 4
 
@@ -1243,7 +1243,7 @@ runs on this backend, in order.  See L<Trog::HV/PREFLIGHT>.
 sub preflight_checks { return qw{check_client check_reachable check_cloud_resources check_cloud_quota check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
-=head2 $result = $hv->check_reachable()
+=head2 $hv->check_reachable()
 
 Makes sure that the credential in F<clouds.yaml> gets a token, and that the
 catalog has compute, image and network.  The other checks need this to pass.
@@ -1277,7 +1277,7 @@ FIX
     return $self->verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
 }
 
-=head2 $result = $hv->check_cloud_resources()
+=head2 $hv->check_cloud_resources()
 
 Makes sure that the network in F<hypervisors.conf>, and the floating network if
 one is set, exist on this cloud, that it has every flavor the guests name in
@@ -1336,7 +1336,7 @@ FIX
     return $self->verdict( 1, 'Builds from ' . join( ', ', @images ) . " on $wanted{network}" . ( @flavors ? ', as ' . join( ', ', @flavors ) : ', and no guest names an openstack_flavor yet' ), q{} );
 }
 
-=head2 $result = $hv->check_cloud_quota()
+=head2 $hv->check_cloud_quota()
 
 Makes sure that the quota has room for one more guest: an instance, memory and
 cores.  On a cloud, the quota takes the place of hardware limits.  A quota that

@@ -310,7 +310,7 @@ sub host_of {
     return $host ? lc $host : ();
 }
 
-=head3 ($kind, $value) = fleet_address($name, %opts)
+=head3 fleet_address($name, %opts)
 
 Says what C<$name> is for the guest that uses it.  C<$name> names another
 machine of this installation, for example a package mirror, a log destination
@@ -393,7 +393,7 @@ sub tld_of {
     return $tld;
 }
 
-=head3 @tlds = reserved_tlds()
+=head3 reserved_tlds()
 
 Returns the top-level domains that RFC 2606 and RFC 6761 reserve.  No public
 registrar holds a zone under one of them, and no public CA issues a certificate
@@ -593,7 +593,7 @@ sub write_ssh_keypair {
     return $public;
 }
 
-=head3 $private = new_ssh_private_key($type, $bits, $comment)
+=head3 new_ssh_private_key($type, $bits, $comment)
 
 Makes an ssh keypair with C<write_ssh_keypair> in a temporary directory, and
 returns the private half as text.  The temporary files are gone when this

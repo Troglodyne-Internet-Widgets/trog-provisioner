@@ -106,7 +106,7 @@ sub required_recipes {
     );
 }
 
-=head2 @names = $recipe->subdomains()
+=head2 $recipe->subdomains()
 
 C<webmail>, which is the only name this is served at:
 F<roundcube.nginx.tt> answers for C<webmail.$domain> and nothing else.
@@ -121,7 +121,7 @@ sub subdomains {
     return qw{webmail};
 }
 
-=head2 @files = $recipe->template_files(@modules)
+=head2 $recipe->template_files(@modules)
 
 The configuration of roundcube, its php-fpm pool and its nginx vhost.  It
 ignores C<@modules>, the loaded recipes.
@@ -186,7 +186,7 @@ sub tests {
     return qw{roundcube.tt};
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 The C<roundcube-auth> jail that fail2ban ships, which bans a host whose logins
 to the webmail fail too often.  Roundcube logs a failed login to the journal
@@ -204,7 +204,7 @@ sub jails {
     return ( 'roundcube-auth' => { backend => 'systemd[journalflags=1]' } );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 GitHub, which serves roundcube's release tarballs: see C<github_release_hosts>
 in L<Provisioner::Recipe>.
@@ -220,7 +220,7 @@ sub fetch_hosts {
     return $class->github_release_hosts;
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes for GitHub.  C<Provisioner::Recipe> holds them, so that the three
 recipes that download a release do not each carry a copy.

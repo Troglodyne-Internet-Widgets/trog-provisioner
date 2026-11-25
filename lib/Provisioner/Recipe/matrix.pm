@@ -168,7 +168,7 @@ my sub relayed ($domain) {
 # PROXY protocol.
 our $PASSTHROUGH_PORT = 8449;
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<nginx>, with C<matrix.$domain>, C<admin.matrix.$domain> and
 C<element.matrix.$domain> in C<sites>, and the C<public_names> of
@@ -228,7 +228,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens()
+=head2 $recipe->listens()
 
 synapse on 8008, on 127.0.0.1 and on ::1, for clients and for federation both.
 
@@ -242,7 +242,7 @@ sub listens {
     return qw{127.0.0.1:8008 [::1]:8008};
 }
 
-=head2 %limits = $recipe->rate_limits(%opts)
+=head2 $recipe->rate_limits(%opts)
 
 8448, where the vhost of the homeserver serves federation, at the limit that
 C<nginx> gives 443.  Behind a relay, also the port where the relay passes 8448
@@ -267,7 +267,7 @@ sub rate_limits {
     return ( $FEDERATION_PORT => $limits{443}, relayed( $opts{domain} ) ? ( $PASSTHROUGH_PORT => $limits{443} ) : () );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  One synapse is one homeserver, and C<server_name> is the identity that
 it federates under.  It cannot hold two of them.  The public base URL, the
@@ -282,7 +282,7 @@ Returns Bool, always false.
 
 sub is_multi_tenant { return 0 }
 
-=head2 @names = $recipe->subdomains()
+=head2 $recipe->subdomains()
 
 C<matrix>, which synapse is reached at, and C<admin.matrix> and
 C<element.matrix>, which the admin interface and Element are reached at.
@@ -297,7 +297,7 @@ sub subdomains {
     return qw{matrix admin.matrix element.matrix};
 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 The configuration that this recipe takes.  C<bin/recipes> lists it.
 
@@ -362,7 +362,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<federation_port>, 8448, and C<relayed>, true when the domain has a
 relay.  Behind a relay, it also adds C<passthrough_port>, where the relay
@@ -404,7 +404,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 A map from each template to the name of the file that it renders.  It
 ignores the loaded recipes that the caller passes.
@@ -432,7 +432,7 @@ sub template_files {
     );
 }
 
-=head2 @dirs = $recipe->datadirs()
+=head2 $recipe->datadirs()
 
 C<matrix>, the directory in the data directory of the domain where the salvaged
 homeserver lands.  C<restores> puts it back from there.
@@ -447,7 +447,7 @@ sub datadirs {
     return qw{matrix};
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+=head2 $recipe->guest_secrets($install_dir, $domain)
 
 The signing key of the homeserver and the registration shared secret, each
 generated once and kept in the secret store.  The signing key is the identity
@@ -502,7 +502,7 @@ sub guest_secrets {
     );
 }
 
-=head2 @patterns = $recipe->remote_skip()
+=head2 $recipe->remote_skip()
 
 C<homeserver.signing.key>.  The key comes from the secret store, so it must not
 come back off a guest into the domain directory and its backups.
@@ -521,7 +521,7 @@ sub remote_skip {
     return ('homeserver.signing.key');
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 Puts the salvaged homeserver back at C<$install_dir/matrix.$domain>.  That is
 the database and the media store.
@@ -547,7 +547,7 @@ sub restores {
     return ( "$install_dir/matrix.$domain" => { from => "$install_dir/$domain/matrix" } );
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The homeserver directory, which is everything this server is.  C<homeserver.db>
 holds every room, message and account, and the media store is next to it.  A
@@ -580,7 +580,7 @@ sub remote_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 F<matrix.tt>, the test that runs on the guest.
 
@@ -594,7 +594,7 @@ sub tests {
     return qw{matrix.tt};
 }
 
-=head2 %jails = $recipe->jails()
+=head2 $recipe->jails()
 
 A jail that bans a host whose logins fail too often.  synapse answers a failed
 login with a 403, and its access log names the address that nginx forwarded:
@@ -623,7 +623,7 @@ sub jails {
     );
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<packages.matrix.org>, which serves the synapse package.  Also GitHub, which
 serves the ketesa admin interface as a release.  See C<github_release_hosts> in
@@ -640,7 +640,7 @@ sub fetch_hosts {
     return ( 'packages.matrix.org', $class->github_release_hosts );
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes for the apt repository at C<packages.matrix.org>, and the classes
 for GitHub.  L<Provisioner::Recipe> keeps both, so that each recipe does not

@@ -108,7 +108,7 @@ examples.
 
 =cut
 
-=head2 @names = $recipe->subdomains()
+=head2 $recipe->subdomains()
 
 C<www>, which the vhost of the domain answers for beside the domain itself.
 
@@ -175,7 +175,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns %opts ready for the templates.
 

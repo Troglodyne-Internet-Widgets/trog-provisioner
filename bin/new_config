@@ -286,7 +286,7 @@ our %MACHINE_WIDE;
 # own domain, in the form of ufw's listeners.  See handle_domain.
 our %MACHINE_LISTENERS;
 
-=head2 %gaps = salvage_gaps()
+=head2 salvage_gaps()
 
 Returns the salvages of the last C<main> that got nothing from a guest that
 still has state.  To salvage is to copy the state of a service off a guest
@@ -301,21 +301,25 @@ for why the refusal is its job.
 A path that is not on the guest at all is not a gap.  Every first build of a
 recipe looks like that.
 
+    my %gaps = salvage_gaps();
+
 =cut
 
 sub salvage_gaps { return %SALVAGE_GAPS }
 
-=head2 $dir = salvage_dir($global_config)
+=head2 salvage_dir($global_config)
 
 The C<install_dir> on the running guest, under which the salvage reads the
 state of each recipe.  That is the --salvage-from of the last C<main>, or the
 C<install_dir> of C<$global_config> when it named none.
 
+    my $dir = salvage_dir($global_config);
+
 =cut
 
 sub salvage_dir ($global_config) { return $salvage_from // $global_config->{install_dir} }
 
-=head2 ($holder, @exclude) = salvage_around_mounts($remote, @mountpoints)
+=head2 salvage_around_mounts($remote, @mountpoints)
 
 Where the salvage of C<$remote> meets the remote mount points of the guest, see
 L<Provisioner::Recipe/remote_mountpoints>.  C<$holder> is the mount point that
@@ -323,6 +327,8 @@ holds C<$remote>, and then the salvage skips it.  Otherwise C<$holder> is undef,
 and C<@exclude> holds a pattern for rsync for each mount point under
 C<$remote>, anchored where the fetch of C<$remote> starts, so that the fetch
 does not go down into it.
+
+    my ($holder, @exclude) = salvage_around_mounts($remote, @mountpoints);
 
 =cut
 
@@ -398,11 +404,13 @@ sub apply_global_defaults {
     return $global_config;
 }
 
-=head2 @keys = hv_settings()
+=head2 hv_settings()
 
 Returns the sorted keys that tell the hypervisor how to build the guest.  They
 go in provision.conf, not in a template.  They come from the schema of the
 C<vm> recipe, which C<bin/recipes vm> prints.
+
+    my @keys = hv_settings();
 
 =cut
 
@@ -415,7 +423,7 @@ sub hv_settings {
     return @settings;
 }
 
-=head2 $lines = hv_lines($global_config, $written)
+=head2 hv_lines($global_config, $written)
 
 Returns the C<hv_settings> lines for F<provision.conf>, one C<key=value> each,
 each starting with a newline.  It takes only the keys that C<$global_config>
@@ -425,6 +433,8 @@ absent key lets F<bin/provision> decide.
 An empty value counts as absent, because Config::Simple reads a bare C<key=> as
 an empty string.  A value of 0 is written: C<disk_iothreads=0> turns iothreads
 off.
+
+    my $lines = hv_lines($global_config, $written);
 
 =cut
 
@@ -438,7 +448,7 @@ sub hv_lines {
     return join( q{}, map { "\n$_=$global_config->{$_}" } @keys );
 }
 
-=head2 $lines = placement_lines($hv, $global_config)
+=head2 placement_lines($hv, $global_config)
 
 Returns the F<provision.conf> lines that say where this guest goes and what it
 is there: the hypervisor it was placed on, and the size it names for that kind
@@ -451,6 +461,8 @@ from the pool, and a hypervisor can name its own C<transfer_ip>.  So
 F<bin/provision> must build it where it was placed here, and not place it
 again, which can choose another hypervisor that the configuration does not
 fit.
+
+    my $lines = placement_lines($hv, $global_config);
 
 =cut
 
@@ -466,11 +478,13 @@ sub placement_lines {
     return @lines ? "\n" . join( "\n", @lines ) . "\n" : q{};
 }
 
-=head2 %how = joined_peers($domain, $rconf)
+=head2 joined_peers($domain, $rconf)
 
 Each guest whose network a recipe of C<$domain> joins, see
 L<Provisioner::Recipe/joins_network_of>, and the reason, as a phrase for a
 message.
+
+    my %how = joined_peers($domain, $rconf);
 
 =cut
 
@@ -487,13 +501,15 @@ sub joined_peers {
     return %how;
 }
 
-=head2 @peers = network_peers($domain, $rconf, $hvconf, $hv)
+=head2 network_peers($domain, $rconf, $hvconf, $hv)
 
 The guests of C<joined_peers> that are up on the network of C<$hv>, the
 hypervisor of C<$domain>, sorted.  The guest of C<$domain> reaches those
 guests and their network without the network that it joins.  A fleet that is
 not configured is one network, so there it is each of them that this
 installation configures, and this asks no hypervisor.
+
+    my @peers = network_peers($domain, $rconf, $hvconf, $hv);
 
 =cut
 
@@ -513,7 +529,7 @@ sub network_peers {
     return @peers;
 }
 
-=head2 %network = required_network($domain, $rconf, $hvconf)
+=head2 required_network($domain, $rconf, $hvconf)
 
 The network that the guest of C<$domain> must be on, as C<network> and
 C<network_why> for L<Trog::Hypervisors/choose>, or an empty list when it may go
@@ -538,6 +554,8 @@ hypervisor.
 
 Dies when two of those guests are on different networks, because no
 hypervisor reaches both.
+
+    my %network = required_network($domain, $rconf, $hvconf);
 
 =cut
 
@@ -592,12 +610,14 @@ sub required_network {
     return ( network => $network, network_why => "it needs " . join( ' and ', @{ $on{$network} } ) );
 }
 
-=head2 @recipes = recipes_needing_address($domain, $rconf, \%global_config)
+=head2 recipes_needing_address($domain, $rconf, \%global_config)
 
 The recipes that C<$domain> is built from, as C<recipes_with> in
 L<Provisioner::Cookbook> walks them, whose C<needs_address> is true.  See
 L<Provisioner::Recipe/needs_address>.  Sorted.  It writes nothing, so it can
 answer before the configuration of the domain is written.
+
+    my @recipes = recipes_needing_address($domain, $rconf, \%global_config);
 
 =cut
 
@@ -610,7 +630,7 @@ sub recipes_needing_address {
     return @needing;
 }
 
-=head2 %order_only = order_only(\@modules, \%targets_of, \%required_by, \@ordered)
+=head2 order_only(\@modules, \%targets_of, \%required_by, \@ordered)
 
 The order-only prerequisites of each recipe target in C<@ordered>, as a hash of
 target to an array reference of the targets that must finish before it.  A
@@ -623,6 +643,8 @@ run.
 A target outside C<@ordered>, such as that of C<data> or C<ufw>, has its place
 set by C<targets_in_order>, and is left out here.  Under C<make -j> these
 prerequisites are the order.
+
+    my %order_only = order_only(\@modules, \%targets_of, \%required_by, \@ordered);
 
 =cut
 
@@ -643,12 +665,14 @@ sub order_only {
     return %before;
 }
 
-=head2 $share = share_over($path, $mounts)
+=head2 share_over($path, $mounts)
 
 Returns the mount point of the first disk in C<$mounts>, the configuration of
 the mounts recipe, that is C<$path> or a directory above it.  Returns nothing
 when no disk is.  A FUSE mount does not count, because its mount point is in
 the directory of the domain, and the account mounts it after the build.
+
+    my $share = share_over($path, $mounts);
 
 =cut
 
@@ -665,7 +689,7 @@ sub share_over {
     return;
 }
 
-=head2 @targets = targets_in_order(%args)
+=head2 targets_in_order(%args)
 
 Every target that C<all> builds, in the order that a serial make runs them.
 Each is a hash reference with C<target>, the path of its state file, C<slot>,
@@ -695,6 +719,8 @@ F<mount_virtiofs> and F<add_to_fstab> from the directory that the C<scripts>
 target installs.  And the C<data> target runs C<chown -R> and C<chmod -R> over
 the directory of the domain, which would go into a share mounted inside it.
 
+    my @targets = targets_in_order(%args);
+
 =cut
 
 sub targets_in_order {
@@ -722,7 +748,7 @@ sub targets_in_order {
     return @targets;
 }
 
-=head2 ($ips, $port, $user) = transfer_to($hv, $this_machine, $global_config, $fqdn, @towards)
+=head2 transfer_to($hv, $this_machine, $global_config, $fqdn, @towards)
 
 Returns where a guest of C<$hv> fetches its payload from: every address of this
 machine that the guest's firewall must accept, the one it fetches from first,
@@ -739,6 +765,8 @@ could route to.
 Dies when there is nothing to route to and nothing configured, as on a cloud,
 which allocates the guest's address after this runs; or when none of this
 machine's addresses reaches the guest.
+
+    my ($ips, $port, $user) = transfer_to($hv, $this_machine, $global_config, $fqdn, @towards);
 
 =cut
 
@@ -788,7 +816,7 @@ my sub salvage_guest ( $address, $admin_user, $cfg_dir ) {
 
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
 
-=head2 @resolvers = guest_resolvers($hv)
+=head2 guest_resolvers($hv)
 
 The resolvers of a guest of C<$hv>: those that its block of F<hypervisors.conf>
 names, see L<Trog::HV/configured_resolvers>.  They are the hypervisor's to name,
@@ -797,6 +825,8 @@ because what a guest can reach depends on where it is.
 Dies when the block names none.  Dies on a loopback address.  A loopback resolver answers only on a guest that
 runs its own DNS server, and L<Provisioner::Recipe::nostubresolver> adds it for
 that guest.
+
+    my @resolvers = guest_resolvers($hv);
 
 =cut
 
@@ -1768,11 +1798,13 @@ sub write_guest_secrets {
     return \%held;
 }
 
-=head2 $dir = checkout()
+=head2 checkout()
 
 Returns the directory of the checkout that this program is in.  Files that
 this copies come from there, not from the working directory, so that this
 program runs from any directory.
+
+    my $dir = checkout();
 
 =cut
 
@@ -1874,7 +1906,7 @@ sub restore_sealed_key {
     return;
 }
 
-=head2 @packed = pack_scripts($checkout, $cfg_dir)
+=head2 pack_scripts($checkout, $cfg_dir)
 
 Copies the helper scripts from F<scripts/> in C<$checkout> into
 C<$cfg_dir/scripts>, with their modes, and returns their paths relative to
@@ -1882,6 +1914,8 @@ C<$cfg_dir>.  The modes are copied, because File::Copy does not promise to keep
 the executable bit.  A name that starts with a dot is not a script, and is not
 copied.  F<scripts/.perlcriticrc> is one: it is for the tools that lint the
 scripts.  Dies if there is no F<scripts/>.
+
+    my @packed = pack_scripts($checkout, $cfg_dir);
 
 =cut
 
@@ -1913,7 +1947,7 @@ sub pack_scripts {
     return @packed;
 }
 
-=head2 $gap = salvage_path(%args)
+=head2 salvage_path(%args)
 
 Fetches C<remote> from C<guest>, a L<Trog::Guest>, into C<destination>, as
 root, and says whether the salvage lost state.  C<exclude> lists what stays on
@@ -1944,6 +1978,8 @@ An empty destination has three causes.  The path is not on the guest, or it is
 empty, or it holds files that did not come down.  Only the last one is
 alarming.  The guest is asked as root, because only the service can open the
 path.
+
+    my $gap = salvage_path(%args);
 
 =cut
 

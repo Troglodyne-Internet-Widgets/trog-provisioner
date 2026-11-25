@@ -122,13 +122,15 @@ sub main {
     return 0;
 }
 
-=head2 $lines = exports($cloud, %override)
+=head2 exports($cloud, %override)
 
 Returns the C<export> lines for C<$cloud>, one per line.  A pair in
 C<%override> is written as it is given, which is how the resolved secret gets
 in.  A value the cloud does not set is left out rather than exported empty,
 because an empty C<OS_> variable is not the same as an unset one to every
 client that reads it.
+
+    my $lines = exports($cloud, %override);
 
 =cut
 

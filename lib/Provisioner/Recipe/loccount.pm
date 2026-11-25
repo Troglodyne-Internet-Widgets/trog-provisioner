@@ -76,7 +76,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<go>, which builds it, with no options.
 
@@ -103,7 +103,7 @@ sub tests {
     return qw{loccount.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<gitlab.com>, which the clone names, and C<proxy.golang.org>, which C<go
 build> fetches the modules of F<go.mod> from.  No template here names the

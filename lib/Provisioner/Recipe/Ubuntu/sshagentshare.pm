@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::sshagentshare - Ubuntu's C<deps> for L<Provisioner:
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<openssh-client>.
 

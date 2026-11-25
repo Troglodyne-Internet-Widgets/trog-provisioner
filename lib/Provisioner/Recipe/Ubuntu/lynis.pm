@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::lynis - Ubuntu's C<deps> for L<Provisioner::Recipe:
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<lynis>, from the archive that C<package_sources> names.
 
@@ -30,7 +30,7 @@ sub deps {
     return qw{lynis};
 }
 
-=head2 @sources = $recipe->package_sources()
+=head2 $recipe->package_sources()
 
 The archive of CISOfy.  It has a newer C<lynis> than Ubuntu, so apt takes the
 package from it with no pin.

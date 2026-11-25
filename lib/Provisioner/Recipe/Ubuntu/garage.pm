@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::garage};
 
 Provisioner::Recipe::Ubuntu::garage - Ubuntu's C<deps> for L<Provisioner::Recipe::garage>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<curl>, which downloads the garage binary, and C<liblmdb0>.
 

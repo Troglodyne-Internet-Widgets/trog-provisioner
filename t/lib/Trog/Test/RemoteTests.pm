@@ -66,11 +66,13 @@ my $TLD = 'test.test';
 
 =head1 FUNCTIONS
 
-=head2 @recipes = recipes()
+=head2 recipes()
 
 The recipes that have a test of their own: C<data>, and every recipe that
 L<Provisioner::Cookbook> names except C<registrar>.  registrar is the
 credentials for a zone that somebody else holds, and installs nothing to test.
+
+    my @recipes = recipes();
 
 =cut
 

@@ -45,7 +45,7 @@ L<Provisioner::Recipe>.
 
 =head1 METHODS
 
-=head2 %schema = $recipe->args()
+=head2 $recipe->args()
 
 The schema of the options: C<autorestart>, an absolute path, and
 C<reboot_window>, an object of the hours C<from> and C<to>, from 0 to 23.
@@ -82,7 +82,7 @@ sub args {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The cron entry of the update, the cron entry of the reboot and the reboot
 check, the same on every guest.
@@ -102,7 +102,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<cron>, which installs F<autoupdate_cron> as F</etc/cron.d/autoupdate>.  When
 C<autorestart> is set, it also installs F<autorestart_cron> as
@@ -126,7 +126,7 @@ sub required_recipes {
     return ( cron => sub { return ( files => \%files ) } );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<autoupdate.tt>.
 

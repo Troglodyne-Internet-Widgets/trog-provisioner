@@ -136,7 +136,7 @@ provision.  On a few million files, that adds hours to every build.
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  A machine holds one mirror: one F</etc/apt/mirror.list>, one unit and
 one cron entry, each at a fixed path.  The releases it carries are an argument
@@ -154,7 +154,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 C<bin/recipes aptmirror> shows each argument, its default and its description.
 Three of them have reasons that the descriptions do not give:
@@ -269,7 +269,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes()
+=head2 $recipe->required_recipes()
 
 C<nginx>, which serves the copy.  C<ufw> comes in through nginx, because nginx
 declares rate limits for ports 80 and 443.
@@ -294,7 +294,7 @@ sub required_recipes {
     );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The mirror list, the unit, the script that runs after a sync, the cron entry
 and the vhost, the same on every guest.
@@ -316,7 +316,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns a list of the test templates that run on the guest: F<aptmirror.tt>.
 
@@ -326,7 +326,7 @@ Returns a list of the test templates that run on the guest: F<aptmirror.tt>.
 
 sub tests { return ('aptmirror.tt') }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds C<upstream_host>, C<mirror_root> and C<suites> to C<%opts>, and returns
 them.  Dies when C<upstream> is not a URL with a path.

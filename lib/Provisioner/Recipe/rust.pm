@@ -66,7 +66,7 @@ sub tests {
     return qw{rust.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<static.rust-lang.org>, which rustup downloads a toolchain from.  No template
 here holds that URL: rustup knows it, and this is the only thing that says so.

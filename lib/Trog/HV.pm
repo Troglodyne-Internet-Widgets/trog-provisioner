@@ -362,7 +362,7 @@ sub marker_key {
     return $in_file{ $class->marker };
 }
 
-=head2 $module = $hv->require_client
+=head2 $hv->require_client
 
 Loads the API client of this backend.
 
@@ -643,7 +643,7 @@ sub setting {
     return $self->{_secrets}{$name} = $found{$name};
 }
 
-=head2 @items = $hv->setting_list($name)
+=head2 $hv->setting_list($name)
 
 =over 4
 
@@ -918,7 +918,7 @@ sub nic_prefix_length ( $self, $nic ) {
     die "The network of $nic for $who has no prefix that its block says.  ip_pool_$nic is not one block that holds gateway_$nic, so it is a part of a larger network, and a guest given the prefix of the pool could not reach its gateway.  Name the length of the prefix of the network of $nic: prefix_$nic = 24, for example.\n";
 }
 
-=head2 $cidr = Trog::HV::network_of($address, $prefix)
+=head2 Trog::HV::network_of($address, $prefix)
 
 =over 4
 
@@ -939,7 +939,7 @@ C<$address>, such as C<192.0.2.0/24> for C<192.0.2.1> and 24.
 # /0.
 sub network_of ( $address, $prefix ) { return ( Net::CIDR::addr2cidr($address) )[ 32 - $prefix ] }
 
-=head2 $bool = Trog::HV::is_prefix_length($prefix)
+=head2 Trog::HV::is_prefix_length($prefix)
 
 =over 4
 
@@ -1090,7 +1090,7 @@ with nothing on it to snapshot or to salvage.  0 here.
 sub reserve_guest  { return 0 }
 sub is_reservation { return 0 }
 
-=head2 @actions = $hv->debug_actions()
+=head2 $hv->debug_actions()
 
 The actions of F<bin/debug_boot> that this backend can do, named as the options
 are: C<console>, C<fetch>, C<hold>, C<shot>, C<vnc>, C<keys>, C<restore>,
@@ -1108,7 +1108,7 @@ Returns the names, as a list of Str.
 
 sub debug_actions { return () }
 
-=head2 $restarted = $hv->console_capture(@args)
+=head2 $hv->console_capture(@args)
 
 =over 4
 
@@ -1127,7 +1127,7 @@ backend does not implement it.
 
     my $restarted = $hv->console_capture( 'vm.example.test', wait => 60 );
 
-=head2 $text = $hv->console_output($domain)
+=head2 $hv->console_output($domain)
 
 =over 4
 
@@ -1141,7 +1141,7 @@ it.
 
     my $text = $hv->console_output('vm.example.test');
 
-=head2 ($advice, $value) = $hv->vnc_access($domain)
+=head2 $hv->vnc_access($domain)
 
 =over 4
 
@@ -1380,7 +1380,7 @@ guest is built on it.
 
     my @volumes = $hv->guest_volumes('vm.example.test');
 
-=head2 @removed = $hv->prune_base_images()
+=head2 $hv->prune_base_images()
 
 Removes the base images that nothing is built on any more.  Call it after a
 disk has gone.  A base image that is not the newest of its kind stays while any
@@ -1393,7 +1393,7 @@ no base image returns an empty list.
 
 =cut
 
-=head2 @globs = $hv->guest_disks()
+=head2 $hv->guest_disks()
 
 The names that a guest here gives its disks, as udev C<KERNEL> globs, such as
 C<vd*>.  The bus of a disk is a choice of the hypervisor, so the name is too.
@@ -1515,7 +1515,7 @@ Returns Bool, 1 here.
 
 sub check_user_data { return 1 }
 
-=head2 $name = $hv->snapshot_before_rebuild($domain, %opts)
+=head2 $hv->snapshot_before_rebuild($domain, %opts)
 
 =over 4
 
@@ -1612,7 +1612,7 @@ names themselves, so the name of a copy stays the business of the backend.
 
 sub backup_volumes { return () }
 
-=head2 $address = $hv->set_reverse_dns($domain, $name)
+=head2 $hv->set_reverse_dns($domain, $name)
 
 =over 4
 
@@ -1894,7 +1894,7 @@ Every check and note returns C<{ ok =E<gt> 1 }>, or C<{ ok =E<gt> 0, what
 =E<gt> ..., fix =E<gt> ... }>.  C<what> says what is wrong, and C<fix> says
 what to do about it.
 
-=head2 @names = $hv->preflight_checks()
+=head2 $hv->preflight_checks()
 
 Returns the names of the checks that this backend answers, in the order to ask
 them, as a list of Str.  Each name is a method on the backend.  A failed check
@@ -1903,7 +1903,7 @@ implement it.
 
     my @checks = $hv->preflight_checks();
 
-=head2 @names = $hv->preflight_notes()
+=head2 $hv->preflight_notes()
 
 The same, for things that are good to have but not required.
 
@@ -1912,7 +1912,7 @@ backend does not implement it.
 
     my @notes = $hv->preflight_notes();
 
-=head2 @names = $hv->preflight_block_checks()
+=head2 $hv->preflight_block_checks()
 
 The few of those that F<bin/preflight> asks of every I<other> block in
 F<hypervisors.conf>, rather than only of the hypervisor a run would build on.
@@ -1940,7 +1940,7 @@ sub preflight_notes  ( $self, @ ) { return abstract( $self, 'preflight_notes' ) 
 
 sub preflight_block_checks { return qw{check_client check_transfer_route} }
 
-=head2 $result = $hv->verdict($ok, $what, $fix)
+=head2 $hv->verdict($ok, $what, $fix)
 
 =over 4
 
@@ -1969,7 +1969,7 @@ sub verdict {
     return { ok => $ok, what => $what, fix => $fix };
 }
 
-=head2 $result = $hv->check_client()
+=head2 $hv->check_client()
 
 Checks that the API client of this backend is installed, which every other
 check of a hypervisor needs and none of them says.  This class answers it for
@@ -2016,7 +2016,7 @@ backend does not implement it.
 sub check_reachable   ( $self, @ ) { return abstract( $self, 'check_reachable' ) }
 sub check_transfer_ip ( $self, @ ) { return abstract( $self, 'check_transfer_ip' ) }
 
-=head2 $network = $hv->guest_network_of($address)
+=head2 $hv->guest_network_of($address)
 
 =over 4
 
@@ -2038,7 +2038,7 @@ the answer for a service on the internet.
 
 sub guest_network_of { return }
 
-=head2 $result = $hv->check_transfer_route()
+=head2 $hv->check_transfer_route()
 
 Works out where a guest built here fetches its payload from, and says whether
 that address can be one this machine answers on.
@@ -2135,7 +2135,7 @@ internet:
 FIX
 }
 
-=head2 $result = $hv->check_rsync()
+=head2 $hv->check_rsync()
 
 Checks that rsync is on this machine and, for a remote hypervisor, on the
 hypervisor too.  The data directory of a domain goes up to the hypervisor over
@@ -2174,7 +2174,7 @@ on $where.
 FIX
 }
 
-=head2 $result = $hv->check_sandbox()
+=head2 $hv->check_sandbox()
 
 Checks that the sandbox program that the fetches of a guest run in is
 installed on this machine, owned by root, that this account can write the
@@ -2229,7 +2229,7 @@ Elsewhere, see the user.max_user_namespaces sysctl.
 FIX
 }
 
-=head2 $result = $hv->check_gpg()
+=head2 $hv->check_gpg()
 
 Checks that this machine has a gpg that L<Provisioner::Packager::Deb> can read
 a signing key with.  C<bin/new_config> reads the fingerprint of the key of each
@@ -2257,7 +2257,7 @@ Install GnuPG 2.2.8 or later:
 FIX
 }
 
-=head2 $result = $hv->check_fetch_sources()
+=head2 $hv->check_fetch_sources()
 
 Checks that every directory that a recipe fetches from this machine exists here.
 
@@ -2320,7 +2320,7 @@ here:
 FIX
 }
 
-=head2 $result = $hv->check_config()
+=head2 $hv->check_config()
 
 Checks that the configuration directory from L<Trog::Config> has a readable
 F<recipes.yaml>, an F<admin_authorized_keys> that is not empty, and a
@@ -2385,7 +2385,7 @@ the guest boots, which delays every provision and fails when GitHub is down.
 FIX
 }
 
-=head2 $result = $hv->note_stale_image()
+=head2 $hv->note_stale_image()
 
 Whether the image that guests are built on is still the current one from the
 distribution.  It is a note and not a check.  A pin one release behind can be a
@@ -2435,7 +2435,7 @@ perldoc Provisioner::DistroRecipe.
 FIX
 }
 
-=head2 $result = $hv->note_apt_mirror()
+=head2 $hv->note_apt_mirror()
 
 Whether anything tells guests where to get their packages.  It reports two
 different conditions.  A mirror that is built but that nothing points at is the
@@ -2508,7 +2508,7 @@ as it does now -- only slower.
 FIX
 }
 
-=head2 $result = $hv->note_plaintext_secrets()
+=head2 $hv->note_plaintext_secrets()
 
 Whether the configuration holds any secret in clear text.
 

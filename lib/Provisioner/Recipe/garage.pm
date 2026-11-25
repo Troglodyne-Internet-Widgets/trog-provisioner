@@ -106,7 +106,7 @@ sub latest_version {
     return $LATEST = $FALLBACK_VERSION;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+=head2 $recipe->guest_secrets($install_dir, $domain)
 
 C</etc/garage.rpc_secret>, the 32-byte hex secret that the nodes of a cluster
 use to authenticate to each other.  C<bin/provision> puts it on the guest from
@@ -146,7 +146,7 @@ sub guest_secrets {
     );
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 Puts C<data_dir> and the F<snapshots> directory under C<metadata_dir> back from
 the salvage of the domain, under C<install_dir> and C<domain> of C<%opts>.  The
@@ -193,7 +193,7 @@ sub rate_limits {
     return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
 }
 
-=head2 %jails = $recipe->jails(%opts)
+=head2 $recipe->jails(%opts)
 
 A jail that bans a host that asks the S3 API or the admin API with a key or a
 token that garage does not know.  garage logs each refusal to the journal:
@@ -228,7 +228,7 @@ sub jails {
     );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  The endpoints this node answers on are one domain's: C<root_domain> is
 C<.s3.E<lt>domainE<gt>> and C<.web.E<lt>domainE<gt>> in the single
@@ -243,7 +243,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 The RPC secret is not configured here.  See C<guest_secrets>.
 
@@ -313,7 +313,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Changes a C<version> of C<latest> into the current release.  This is not in
 C<args>, so C<bin/recipes>, C<bin/new_guest> and the tests can ask what this
@@ -356,7 +356,7 @@ sub template_files {
     );
 }
 
-=head2 %required = $recipe->required_recipes()
+=head2 $recipe->required_recipes()
 
 C<cron>, which installs F<garage-snapshot.cron> as F</etc/cron.d/garage-snapshot>.
 
@@ -370,7 +370,7 @@ sub required_recipes {
     return ( cron => sub { return ( files => { 'garage-snapshot' => 'garage-snapshot.cron' } ) } );
 }
 
-=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+=head2 $recipe->remote_prepare($install_dir, $domain)
 
 Returns C<garage-snapshot.sh>, which the guest runs before the fetch.  The
 metadata says which object is which, so a rebuild needs a snapshot that matches
@@ -385,7 +385,7 @@ sub remote_prepare {
     return ('/usr/local/sbin/garage-snapshot.sh');
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The objects, F</var/lib/garage/data/>, and the metadata snapshots,
 F</var/lib/garage/meta/snapshots/>.  Always the default directories, because
@@ -434,7 +434,7 @@ sub tests {
     return qw{garage.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 C<garagehq.deuxfleurs.fr>, which serves garage's binaries.  Not
 C<api.github.com>: the version is looked up by C<bin/new_config>, not by the
@@ -450,7 +450,7 @@ sub fetch_hosts {
     return ('garagehq.deuxfleurs.fr');
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 A published release is that release for good.  The tag list is not: it is what
 says which release is current, and C<latest_version> reads it every build.

@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::letsencrypt - Ubuntu's C<deps> for L<Provisioner::R
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<certbot> and C<dehydrated>, and C<ssl-cert> for its group, which owns each
 private key.

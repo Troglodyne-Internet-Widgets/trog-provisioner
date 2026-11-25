@@ -109,7 +109,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<git>, for the host keys of C<github.com>.  A push to a host whose keys the
 account does not have waits on a prompt that nothing answers, and that is as
@@ -143,7 +143,7 @@ sub required_recipes {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Names the account when the configuration does not, which is the service user of
 the domain.
@@ -167,7 +167,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The login state of the account, which the fragment installs as
 F<.config/gh/hosts.yml>.
@@ -195,7 +195,7 @@ sub tests {
     return qw{github.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts(%opts)
+=head2 $recipe->fetch_hosts(%opts)
 
 C<cli.github.com>, for the archive the CLI comes from.
 
@@ -213,7 +213,7 @@ sub fetch_hosts {
     return ('cli.github.com');
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 The classes for the apt repository of the CLI.  See C<apt_repo_classes>.
 

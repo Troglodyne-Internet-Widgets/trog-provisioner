@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::deluged - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<deluged>, the daemon, and C<deluge-web>, its web interface.
 

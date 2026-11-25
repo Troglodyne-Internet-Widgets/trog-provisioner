@@ -59,7 +59,7 @@ sub args {
     );
 }
 
-=head2 @pkgs = $recipe->deps(%opts)
+=head2 $recipe->deps(%opts)
 
 Returns the C<pkgs> in C<%opts>, or nothing.  The operator names these
 packages, so this generic recipe answers and no distro variant does.  See
@@ -75,7 +75,7 @@ sub deps {
     return ();
 }
 
-=head2 %paths = $recipe->fetch_sources(%opts)
+=head2 $recipe->fetch_sources(%opts)
 
 The C<skel> directory of this machine, which the guest fetches as the rsync
 module C<skel>.  C<%opts> are the raw options of the recipe.

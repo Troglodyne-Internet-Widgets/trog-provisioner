@@ -105,7 +105,7 @@ defaults agree.
 
 =head1 METHODS
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  There is one processor in one telegraf, and one dashboard.
 
@@ -117,7 +117,7 @@ Returns 0.
 
 sub is_multi_tenant { return 0 }
 
-=head2 %args = $recipe->args()
+=head2 $recipe->args()
 
 =over 4
 
@@ -153,7 +153,7 @@ sub args {
     );
 }
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<grafanasyslog>, which installs telegraf and grafana and puts the stream in
 the measurement that this recipe reads.
@@ -168,7 +168,7 @@ sub required_recipes {
     return ( grafanasyslog => sub { () } );
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The telegraf fragment, the Starlark processor and the dashboard.
 
@@ -187,7 +187,7 @@ sub template_files {
     );
 }
 
-=head2 @tests = $recipe->tests()
+=head2 $recipe->tests()
 
 Returns the template for the test that runs on the guest:
 F<grafanalynis.tt>.

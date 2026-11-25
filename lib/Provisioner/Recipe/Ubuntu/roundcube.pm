@@ -16,7 +16,7 @@ Provisioner::Recipe::Ubuntu::roundcube - Ubuntu's C<deps> for L<Provisioner::Rec
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 PHP with C<php-fpm> and the extensions that Roundcube uses, C<sqlite3> with
 C<dbconfig-common>, and the libraries of spelling and of APR.

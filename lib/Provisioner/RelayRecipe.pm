@@ -107,7 +107,7 @@ listens on the same ports.
 
 =head1 METHODS
 
-=head2 $dir = $recipe->relay_dir()
+=head2 $recipe->relay_dir()
 
 The directory of the registrations, and of the keys that the relay issued.  A
 subclass must say.
@@ -126,7 +126,7 @@ sub relay_dir {
     die ref($self) || $self, " is a relay, so it must say where its registrations are\n";
 }
 
-=head2 @ports = $recipe->banned_ports(%opts)
+=head2 $recipe->banned_ports(%opts)
 
 The ports where the relay drops the packets of a banned address.  A subclass
 must say.
@@ -149,7 +149,7 @@ sub banned_ports {
     die ref($self) || $self, " is a relay, so it must say which ports a ban closes\n";
 }
 
-=head2 $hits = $recipe->port_rate_limit()
+=head2 $recipe->port_rate_limit()
 
 How many new connections an address may open each second on each port that a
 guest registered.  See L</Ports of the guests>.
@@ -166,7 +166,7 @@ sub port_rate_limit {
     return 1024;
 }
 
-=head2 @args = port_args($routes)
+=head2 port_args($routes)
 
 The arguments of the client script of a relay for C<%routes>, which maps each
 port of its own to each name that passes on it, mapped to the port of the
@@ -199,7 +199,7 @@ sub port_args {
     return @args;
 }
 
-=head2 $set = $recipe->ban_set()
+=head2 $recipe->ban_set()
 
 The name of the ipset of the bans of this relay: the name of the recipe, and
 C<-bans>.
@@ -217,7 +217,7 @@ sub ban_set {
     return $self->recipe_name . '-bans';
 }
 
-=head2 $dir = $recipe->ban_dir()
+=head2 $recipe->ban_dir()
 
 The directory where the hook of the bans saves C<ban_set>, with the time that
 each ban has left: F</var/lib/> and the name of the set.
@@ -235,7 +235,7 @@ sub ban_dir {
     return '/var/lib/' . $self->ban_set;
 }
 
-=head2 $path = $recipe->ban_hook()
+=head2 $recipe->ban_hook()
 
 The hook of the bans in F</etc/ufw/after.init.d>, which loads C<ban_set> into
 the firewall when ufw loads, and saves it to C<ban_dir> when ufw unloads, or
@@ -254,7 +254,7 @@ sub ban_hook {
     return '/etc/ufw/after.init.d/' . $self->ban_set;
 }
 
-=head2 %path_map = $recipe->remote_files()
+=head2 $recipe->remote_files()
 
 C<relay_dir>, which holds the registrations and the keys that the relay issued,
 and C<ban_dir>, which holds the bans in force.  Without the first, a rebuilt
@@ -280,7 +280,7 @@ sub remote_files {
     );
 }
 
-=head2 @commands = $recipe->remote_prepare()
+=head2 $recipe->remote_prepare()
 
 Runs C<ban_hook> with C<save>, so that the salvage holds the bans in force
 now, and not those of the last time that ufw unloaded.
@@ -299,7 +299,7 @@ sub remote_prepare {
     return ( $self->ban_hook . ' save' );
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 The salvage of C<relay_dir> and of C<ban_dir> goes back where it came from.
 
@@ -327,7 +327,7 @@ sub restores {
     );
 }
 
-=head2 $path = $recipe->key_path($domain)
+=head2 $recipe->key_path($domain)
 
 Where the ban key that this relay issues for C<$domain> is, on the guest of
 C<$domain>, in base64.
@@ -349,7 +349,7 @@ sub key_path {
     return '/etc/fail2ban/' . $self->recipe_name . "/$domain.key.b64";
 }
 
-=head2 $path = $recipe->host_key_path($domain)
+=head2 $recipe->host_key_path($domain)
 
 Where the public host key of the relay is, on the guest of C<$domain>, in
 base64.
@@ -371,7 +371,7 @@ sub host_key_path {
     return '/etc/fail2ban/' . $self->recipe_name . "/$domain.host.b64";
 }
 
-=head2 \%ban = $recipe->ban_client($domain, $address)
+=head2 $recipe->ban_client($domain, $address)
 
 What the guest of C<$domain> needs to send its bans to this relay, which it
 reaches at C<$address>.  F<templates/files/relay.action.tt> and
@@ -419,7 +419,7 @@ sub ban_client {
     };
 }
 
-=head2 %files = $recipe->registration_files($grant, %terms)
+=head2 $recipe->registration_files($grant, %terms)
 
 The files that the relay issues when it registers the client of C<$grant>, as
 C<issue_grant> in L<Provisioner::Recipe> says, one of which is the ban key at
@@ -445,7 +445,7 @@ sub registration_files {
     die ref($self) || $self, " is a relay, so it must say what it issues to a guest that registers\n";
 }
 
-=head2 %files = $recipe->issue_grant($grant, %terms)
+=head2 $recipe->issue_grant($grant, %terms)
 
 C<registration_files>, and the public host key of the relay at C<host_key_path>
 of the client, as C<issue_grant> in L<Provisioner::Recipe> says.  The client
@@ -479,7 +479,7 @@ sub issue_grant {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Adds what F<templates/files/relay.install.tt> renders: C<relay_name>, C<ban_set>,
 C<ban_dir>, C<ban_hook>, C<banned_ports>, C<relay_dir>, C<port_rate_limit>, and
@@ -516,7 +516,7 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->template_files()
+=head2 $recipe->template_files()
 
 The files that F<templates/files/relay.install.tt> installs.  A subclass adds
 its own to these.

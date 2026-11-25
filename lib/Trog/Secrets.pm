@@ -416,7 +416,7 @@ sub remember {
     );
 }
 
-=head2 $value = held($ref)
+=head2 held($ref)
 
 =over 4
 
@@ -496,7 +496,7 @@ sub replace {
     );
 }
 
-=head2 $outcome = put($file, $password, %opts)
+=head2 put($file, $password, %opts)
 
 =over 4
 

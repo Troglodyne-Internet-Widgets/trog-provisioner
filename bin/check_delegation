@@ -108,11 +108,13 @@ sub main {
 
 =head1 SUBROUTINES
 
-=head2 @nameservers = expected($zone, $conf)
+=head2 expected($zone, $conf)
 
 The nameservers that ZONE is delegated to, in lower case: C<ns1> of the
 authority of the account that lists it.  Dies when no account of C<_base>
 with an C<authority> lists it.
+
+    my @nameservers = expected($zone, $conf);
 
 =cut
 
@@ -125,10 +127,12 @@ sub expected {
     return Provisioner::Utils::dns_name("ns1.$authority");
 }
 
-=head2 @nameservers = ns_of($resolver, $zone)
+=head2 ns_of($resolver, $zone)
 
 The C<NS> records of C<$zone> that C<$resolver> answers with, sorted, in lower
 case, and none where it has none.
+
+    my @nameservers = ns_of($resolver, $zone);
 
 =cut
 
@@ -140,11 +144,13 @@ sub ns_of {
     return @found;
 }
 
-=head2 $why = answers_for($resolver, $ns, $zone)
+=head2 answers_for($resolver, $ns, $zone)
 
 Asks the nameserver C<$ns>, at the address that C<$resolver> gives its name,
 for the C<SOA> of C<$zone>, without recursion.  Returns undef when it answers
 with authority, and otherwise what went wrong.
+
+    my $why = answers_for($resolver, $ns, $zone);
 
 =cut
 

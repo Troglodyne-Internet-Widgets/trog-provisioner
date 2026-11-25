@@ -156,7 +156,7 @@ sub args {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 $recipe->enrich(%opts)
 
 Returns C<%opts> with C<cpan_steps> added.  For each step of C<cpan_deps>, that
 holds the words that go to F<scripts/cpan_install> after the optional
@@ -196,7 +196,7 @@ sub tests {
     return qw{perl.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 $recipe->fetch_hosts()
 
 CPAN.  This recipe reaches it three ways.  perlbrew gets the source of the perl
 that it builds.  The C<cpan> of that perl gets cpanm, and cpanm gets cpm.  cpm
@@ -214,7 +214,7 @@ sub fetch_hosts {
     return qw{www.cpan.org cpan.metacpan.org fastapi.metacpan.org};
 }
 
-=head2 @classes = $recipe->cache_classes()
+=head2 $recipe->cache_classes()
 
 CPAN.  The index and the MetaCPAN API say which release is current.  A
 distribution under F<authors/id> is named by its version and never changes.

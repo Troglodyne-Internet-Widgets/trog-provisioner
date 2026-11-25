@@ -14,7 +14,7 @@ use parent qw{Provisioner::Recipe::github};
 
 Provisioner::Recipe::Ubuntu::github - Ubuntu's C<deps> and archive for L<Provisioner::Recipe::github>.
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 C<gh> comes from the archive of GitHub, which C<package_sources> below names.  Noble
 ships gh 2.45.0, which is older than the removal of the Projects-classic
@@ -31,7 +31,7 @@ sub deps {
     return qw{gh curl ca-certificates};
 }
 
-=head2 @sources = $recipe->package_sources()
+=head2 $recipe->package_sources()
 
 The archive of the GitHub CLI.
 

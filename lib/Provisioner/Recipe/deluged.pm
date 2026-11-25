@@ -70,7 +70,7 @@ C<debian-deluged:debian-deluged>, and no other account gets access to it.
 
 =head1 METHODS
 
-=head2 %required = $recipe->required_recipes(%opts)
+=head2 $recipe->required_recipes(%opts)
 
 C<nginxproxy>, with a vhost on port 80 that redirects to SSL, and one on port
 443 that serves the directory C<torrents> and sends every other request to the
@@ -106,7 +106,7 @@ sub required_recipes {
     );
 }
 
-=head2 @claims = $recipe->listens(%opts)
+=head2 $recipe->listens(%opts)
 
 deluge-web on C<web_port>, on every address, and the daemon on 58846, on
 127.0.0.1.  The torrent port is not claimed, because deluged picks it at
@@ -127,7 +127,7 @@ sub listens {
     return ( $opts{web_port} // 8112, "127.0.0.1:58846" );
 }
 
-=head2 $bool = $recipe->is_multi_tenant()
+=head2 $recipe->is_multi_tenant()
 
 False.  There is one deluged and one F</var/lib/deluged/config/core.conf>, and
 its download location is the directory of this domain.  A second domain points
@@ -184,7 +184,7 @@ sub template_files {
     );
 }
 
-=head2 %restores = $recipe->restores(%opts)
+=head2 $recipe->restores(%opts)
 
 Puts F</var/lib/deluged/config/state> back from the salvage of the domain,
 under C<install_dir> and C<domain> of C<%opts>.  See L</What survives a
@@ -203,7 +203,7 @@ sub restores {
     return ( '/var/lib/deluged/config/state' => { from => "$install_dir/$domain/deluged/state" } );
 }
 
-=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+=head2 $recipe->remote_files($install_dir, $domain)
 
 The torrent state that a rebuild salvages, F</var/lib/deluged/config/state/>,
 which goes to F<deluged/state/>.  It is the same for every domain.

@@ -39,7 +39,7 @@ recipes write them, beside C<deps>.
 
 =head1 METHODS
 
-=head2 $class = $class->named($name)
+=head2 $class->named($name)
 
 The packager class for C<$name>, the answer of
 L<Provisioner::DistroRecipe/packager>, such as C<deb>.  Dies naming C<$name>
@@ -76,7 +76,7 @@ sub named {
 Each of these is a class method, and the base class dies for each, naming the
 packager that does not answer it.
 
-=head3 @sources = $packager->merge(@sources)
+=head3 $packager->merge(@sources)
 
 The sources that recipes named, validated in the terms of this packager, with
 one for each name.
@@ -92,7 +92,7 @@ and on two different sources under one name.
 
     my @merged = $packager->merge( map { $_->package_sources(%config) } @recipes );
 
-=head3 @files = $packager->first_boot_files(%args)
+=head3 $packager->first_boot_files(%args)
 
 The files that the guest must have before it installs its packages at first
 boot, for the C<sources> and the C<conflicts> in C<%args>, for C<domain>.
@@ -109,7 +109,7 @@ Dies when a source cannot be used, so the generation stops and not the guest.
 
     my @files = $packager->first_boot_files( domain => 'web.test.test', sources => \@sources, conflicts => ['sendmail'] );
 
-=head3 @answers = $packager->answers(@answers)
+=head3 $packager->answers(@answers)
 
 The answers that the packages ask for at install, in the form that this
 packager gives them.
@@ -125,7 +125,7 @@ returns none.
 
     my @answers = $packager->answers(@package_answers);
 
-=head3 @modules = $packager->cloud_init_modules()
+=head3 $packager->cloud_init_modules()
 
 The cloud-init modules that apply the sources and the answers, which a domain
 added to a guest that is up runs again before its packages install.  Takes no
@@ -135,7 +135,7 @@ Returns a list of Str, the names of the modules.
 
     my @modules = $packager->cloud_init_modules;
 
-=head3 $pattern = $packager->package_name()
+=head3 $packager->package_name()
 
 A regular expression, as a string, that matches a plain package name of this
 packager and nothing else: no version, no archive, no file, no option and no
@@ -148,7 +148,7 @@ Returns Str, the pattern.
     my $pattern = $packager->package_name;
     die "not a package: $name\n" unless $name =~ m/\A(?:$pattern)\z/;
 
-=head3 @argv = $packager->install_command()
+=head3 $packager->install_command()
 
 The command, as a list of words, that installs the package names that follow
 it from the archives that the guest trusts, with no prompt and no terminal.
@@ -159,7 +159,7 @@ Returns a list of Str, the words.
 
     my @argv = ( $packager->install_command, 'nginx' );
 
-=head3 @argv = $packager->update_command($file)
+=head3 $packager->update_command($file)
 
 The command, as a list of words, that refreshes the index of the one source
 in C<$file>, a file of sources of this packager, and of no other source.

@@ -1037,14 +1037,14 @@ sub annihilate_domain {
 
 =head1 PREFLIGHT
 
-=head2 @names = $hv->preflight_checks()
+=head2 $hv->preflight_checks()
 
 Returns a list of Str, the names of the checks that C<bin/preflight> runs on
 this backend, in order.  See L<Trog::HV/PREFLIGHT>.
 
     my @checks = $hv->preflight_checks();
 
-=head2 @names = $hv->preflight_notes()
+=head2 $hv->preflight_notes()
 
 Returns a list of Str, the names of the notes that C<bin/preflight> prints for
 this backend, in order.
@@ -1057,7 +1057,7 @@ this backend, in order.
 sub preflight_checks { return qw{check_client check_reachable check_solusvm_resources check_solusvm_quota check_rsync check_sandbox check_gpg check_transfer_ip check_transfer_route check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
-=head2 $result = $hv->check_reachable()
+=head2 $hv->check_reachable()
 
 Returns HashRef, the answer of C<verdict>: whether the token works, which
 account it belongs to and what that account may do.  Everything below needs this
@@ -1081,7 +1081,7 @@ FIX
     return $self->verdict( 1, "Authenticated as $account->{email} (" . join( ', ', $self->roles ) . ')', q{} );
 }
 
-=head2 $result = $hv->check_solusvm_resources()
+=head2 $hv->check_solusvm_resources()
 
 Returns HashRef, the answer of C<verdict>: whether the project and location this
 block names are things the node has.  One wrong fails a provision minutes in, with an error from the API rather
@@ -1109,7 +1109,7 @@ sub check_solusvm_resources {
     return $self->verdict( 1, "Builds in project $project at location $location, from $plans plans", q{} );
 }
 
-=head2 $result = $hv->check_solusvm_quota()
+=head2 $hv->check_solusvm_quota()
 
 Returns HashRef, the answer of C<verdict>: whether there is room for one more
 guest.  How many servers it may hold

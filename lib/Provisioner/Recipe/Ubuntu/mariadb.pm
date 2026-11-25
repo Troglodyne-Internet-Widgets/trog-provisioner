@@ -18,7 +18,7 @@ Provisioner::Recipe::Ubuntu::mariadb - Ubuntu's C<deps> and archive for L<Provis
 
 =cut
 
-=head2 @pkgs = $recipe->deps()
+=head2 $recipe->deps()
 
 The server, the client, C<mariadb-backup>, the client libraries for
 development, and C<pigz>, which the backup script uses.
@@ -35,7 +35,7 @@ sub deps {
     return qw{mariadb-server mariadb-client mariadb-backup libmariadb-dev libmariadb-dev-compat pigz};
 }
 
-=head2 @sources = $recipe->package_sources(%opts)
+=head2 $recipe->package_sources(%opts)
 
 The archive of MariaDB for C<version> and C<distro_release>, pinned above 1000.
 The pin lets apt install a version below the one in Ubuntu, which ships 10.11.14
